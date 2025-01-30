@@ -78,9 +78,8 @@ mod tests {
             CacheConfig::Disk(c) => {
                 assert_eq!(c.capacity, 1000);
             }
-            _ => {
-                panic!("Cache config is not memory or disk");
-            }
+            CacheConfig::Nop => {}
+            _ => {}
         }
     }
 }

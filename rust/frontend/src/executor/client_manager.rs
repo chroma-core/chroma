@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use chroma_memberlist::memberlist_provider::Memberlist;
 use chroma_system::{Component, ComponentContext, Handler};
 use chroma_types::chroma_proto::query_executor_client::QueryExecutorClient;
-use parking_lot::Mutex;
+use parking_lot::RwLock;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -23,7 +23,7 @@ use tower::discover::Change;
 pub(super) struct ClientManager {
     // The name of the node to the grpc client
     node_name_to_client:
-        Arc<Mutex<HashMap<String, QueryExecutorClient<tonic::transport::Channel>>>>,
+        Arc<RwLock<HashMap<String, QueryExecutorClient<tonic::transport::Channel>>>>,
     // The name of the node to the sender to the channel to add / remove the ip
     node_name_to_change_sender:
         HashMap<String, tokio::sync::mpsc::Sender<Change<String, Endpoint>>>,
@@ -36,7 +36,7 @@ pub(super) struct ClientManager {
 impl ClientManager {
     pub(super) fn new(
         node_name_to_client: Arc<
-            Mutex<HashMap<String, QueryExecutorClient<tonic::transport::Channel>>>,
+            RwLock<HashMap<String, QueryExecutorClient<tonic::transport::Channel>>>,
         >,
         connections_per_node: usize,
         connect_timeout_ms: u64,
@@ -95,7 +95,7 @@ impl ClientManager {
                     Channel::balance_channel::<String>(self.connections_per_node);
                 let client = QueryExecutorClient::new(chan);
 
-                let mut node_name_to_client_guard = self.node_name_to_client.lock();
+                let mut node_name_to_client_guard = self.node_name_to_client.write();
                 node_name_to_client_guard.insert(node.to_string(), client);
                 self.node_name_to_change_sender
                     .insert(node.to_string(), channel_change_sender.clone());
