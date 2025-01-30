@@ -164,7 +164,7 @@ fn no_clients_found_status() -> tonic::Status {
 }
 
 fn choose_client(
-    clients: &Vec<QueryExecutorClient<tonic::transport::Channel>>,
+    clients: &[QueryExecutorClient<tonic::transport::Channel>],
 ) -> Result<QueryExecutorClient<tonic::transport::Channel>, tonic::Status> {
     Ok(clients
         .choose(&mut rand::thread_rng())
