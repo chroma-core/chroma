@@ -151,28 +151,31 @@ impl ChromaError for AddToCollectionError {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum Include {
+    #[serde(rename = "distances")]
     Distance,
+    #[serde(rename = "documents")]
     Document,
+    #[serde(rename = "embeddings")]
     Embedding,
+    #[serde(rename = "metadatas")]
     Metadata,
+    #[serde(rename = "uris")]
     Uri,
 }
 
-#[derive(Debug, Clone)]
-pub struct IncludeList {
-    pub includes: Vec<Include>,
-}
+#[derive(Debug, Clone, Deserialize)]
+pub struct IncludeList(pub Vec<Include>);
 
 impl IncludeList {
     pub fn default_query() -> Self {
-        Self {
-            includes: vec![Include::Document, Include::Metadata, Include::Distance],
-        }
+        Self(vec![
+            Include::Document,
+            Include::Metadata,
+            Include::Distance,
+        ])
     }
     pub fn default_get() -> Self {
-        Self {
-            includes: vec![Include::Document, Include::Metadata],
-        }
+        Self(vec![Include::Document, Include::Metadata])
     }
 }
 
@@ -208,14 +211,7 @@ pub struct GetResponse {
 }
 
 impl From<(GetResult, IncludeList)> for GetResponse {
-    fn from(
-        (
-            result_vec,
-            IncludeList {
-                includes: include_vec,
-            },
-        ): (GetResult, IncludeList),
-    ) -> Self {
+    fn from((result_vec, IncludeList(include_vec)): (GetResult, IncludeList)) -> Self {
         let mut res = Self {
             ids: Vec::new(),
             embeddings: include_vec
@@ -297,14 +293,7 @@ pub const CHROMA_KEY: &str = "chroma:";
 pub const CHROMA_URI_KEY: &str = "chroma:uri";
 
 impl From<(KnnBatchResult, IncludeList)> for QueryResponse {
-    fn from(
-        (
-            result_vec,
-            IncludeList {
-                includes: include_vec,
-            },
-        ): (KnnBatchResult, IncludeList),
-    ) -> Self {
+    fn from((result_vec, IncludeList(include_vec)): (KnnBatchResult, IncludeList)) -> Self {
         let mut res = Self {
             ids: Vec::new(),
             embeddings: include_vec

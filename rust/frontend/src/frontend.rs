@@ -262,9 +262,9 @@ impl Frontend {
                     fetch: request.limit,
                 },
                 proj: Projection {
-                    document: request.include.includes.contains(&Include::Document),
-                    embedding: request.include.includes.contains(&Include::Embedding),
-                    metadata: request.include.includes.contains(&Include::Metadata),
+                    document: request.include.0.contains(&Include::Document),
+                    embedding: request.include.0.contains(&Include::Embedding),
+                    metadata: request.include.0.contains(&Include::Metadata),
                 },
             })
             .await?;
@@ -289,11 +289,11 @@ impl Frontend {
                 },
                 proj: KnnProjection {
                     projection: Projection {
-                        document: request.include.includes.contains(&Include::Document),
-                        embedding: request.include.includes.contains(&Include::Embedding),
-                        metadata: request.include.includes.contains(&Include::Metadata),
+                        document: request.include.0.contains(&Include::Document),
+                        embedding: request.include.0.contains(&Include::Embedding),
+                        metadata: request.include.0.contains(&Include::Metadata),
                     },
-                    distance: request.include.includes.contains(&Include::Distance),
+                    distance: request.include.0.contains(&Include::Distance),
                 },
             })
             .await?;

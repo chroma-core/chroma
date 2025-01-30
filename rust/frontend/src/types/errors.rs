@@ -10,33 +10,19 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum ValidationError {
     #[error("Collection ID is not a valid UUIDv4")]
-    InvalidCollectionId,
-    #[error("Error parsing embeddings")]
-    InvalidEmbeddings,
-    #[error("Error parsing include list")]
-    InvalidIncludeList,
-    #[error("Error parsing limit")]
-    InvalidLimit,
-    #[error("Error parsing user id")]
-    InvalidUserID,
+    CollectionId,
     #[error("Error parsing where clause")]
-    InvalidWhereClause,
+    WhereClause,
     #[error("Error parsing where document clause")]
-    InvalidWhereDocumentClause,
+    WhereDocumentClause,
 }
 
 impl ChromaError for ValidationError {
     fn code(&self) -> chroma_error::ErrorCodes {
         match self {
-            ValidationError::InvalidCollectionId => chroma_error::ErrorCodes::InvalidArgument,
-            ValidationError::InvalidEmbeddings => chroma_error::ErrorCodes::InvalidArgument,
-            ValidationError::InvalidIncludeList => chroma_error::ErrorCodes::InvalidArgument,
-            ValidationError::InvalidLimit => chroma_error::ErrorCodes::InvalidArgument,
-            ValidationError::InvalidUserID => chroma_error::ErrorCodes::InvalidArgument,
-            ValidationError::InvalidWhereClause => chroma_error::ErrorCodes::InvalidArgument,
-            ValidationError::InvalidWhereDocumentClause => {
-                chroma_error::ErrorCodes::InvalidArgument
-            }
+            ValidationError::CollectionId => chroma_error::ErrorCodes::InvalidArgument,
+            ValidationError::WhereClause => chroma_error::ErrorCodes::InvalidArgument,
+            ValidationError::WhereDocumentClause => chroma_error::ErrorCodes::InvalidArgument,
         }
     }
 }
