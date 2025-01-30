@@ -18,7 +18,8 @@ use chroma_types::{
     GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
     GetTenantError, GetTenantRequest, GetTenantResponse, Include, ListCollectionsRequest,
     ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
-    QueryError, QueryRequest, QueryResponse, ResetError,
+    QueryError, QueryRequest, QueryResponse, ResetError, UpdateCollectionError,
+    UpdateCollectionRequest, UpdateCollectionResponse,
 };
 use chroma_types::{
     Operation, OperationRecord, ScalarEncoding, UpdateMetadata, UpdateMetadataValue,
@@ -252,6 +253,22 @@ impl Frontend {
             .await
             .map_err(|err| GetCollectionError::SysDB(err.to_string()))?;
         collections.pop().ok_or(GetCollectionError::NotFound)
+    }
+
+    pub async fn update_collection(
+        &mut self,
+        request: UpdateCollectionRequest,
+    ) -> Result<UpdateCollectionResponse, UpdateCollectionError> {
+        self.sysdb_client
+            .update_collection(
+                request.collection_id,
+                request.new_name,
+                request.new_metadata,
+            )
+            .await
+            .map_err(|err| UpdateCollectionError::SysDB(err.to_string()))?;
+
+        Ok(UpdateCollectionResponse {})
     }
 
     pub async fn add(

@@ -6,13 +6,14 @@ use axum::{
     Json, Router, ServiceExt,
 };
 use chroma_types::{
-    AddToCollectionResponse, ChecklistResponse, Collection, CollectionUuid,
-    CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
+    AddToCollectionResponse, ChecklistResponse, Collection, CollectionMetadataUpdate,
+    CollectionUuid, CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
     CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
     DeleteDatabaseRequest, DeleteDatabaseResponse, GetCollectionRequest, GetDatabaseRequest,
     GetDatabaseResponse, GetRequest, GetResponse, GetTenantRequest, GetTenantResponse,
     GetUserIdentityResponse, IncludeList, ListCollectionsRequest, ListCollectionsResponse,
     ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
+    UpdateCollectionResponse, UpdateMetadata,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -65,8 +66,8 @@ impl FrontendServer {
                 get(count_collections),
             )
             .route(
-                "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_name",
-                get(get_collection),
+                "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_id",
+                get(get_collection).put(update_collection),
             )
             .route(
                 "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/add",
@@ -297,7 +298,35 @@ async fn get_collection(
     Ok(Json(collection))
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Deserialize, Debug, Clone)]
+pub struct UpdateCollectionPayload {
+    pub new_name: Option<String>,
+    pub new_metadata: Option<UpdateMetadata>,
+}
+
+async fn update_collection(
+    Path((_tenant_id, _database_name, collection_id)): Path<(String, String, String)>,
+    State(mut server): State<FrontendServer>,
+    Json(payload): Json<UpdateCollectionPayload>,
+) -> Result<Json<UpdateCollectionResponse>, ServerError> {
+    let collection_id =
+        CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
+
+    server
+        .frontend
+        .update_collection(chroma_types::UpdateCollectionRequest {
+            collection_id,
+            new_name: payload.new_name,
+            new_metadata: payload
+                .new_metadata
+                .map(CollectionMetadataUpdate::UpdateMetadata),
+        })
+        .await?;
+
+    Ok(Json(UpdateCollectionResponse {}))
+}
+
+#[derive(Deserialize, Debug, Clone)]
 pub struct QueryRequestPayload {
     ids: Option<Vec<String>>,
     #[serde(flatten)]

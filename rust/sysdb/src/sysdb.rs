@@ -6,10 +6,11 @@ use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
 use chroma_types::{
-    chroma_proto, CollectionAndSegments, CreateDatabaseError, CreateDatabaseResponse,
-    CreateTenantError, CreateTenantResponse, Database, DeleteDatabaseError, DeleteDatabaseResponse,
-    GetDatabaseError, GetDatabaseResponse, GetTenantError, GetTenantResponse, ListDatabasesError,
-    ListDatabasesResponse, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
+    chroma_proto, CollectionAndSegments, CollectionMetadataUpdate, CreateDatabaseError,
+    CreateDatabaseResponse, CreateTenantError, CreateTenantResponse, Database, DeleteDatabaseError,
+    DeleteDatabaseResponse, GetDatabaseError, GetDatabaseResponse, GetTenantError,
+    GetTenantResponse, ListDatabasesError, ListDatabasesResponse, SegmentFlushInfo,
+    SegmentFlushInfoConversionError, SegmentUuid,
 };
 use chroma_types::{
     Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
@@ -120,6 +121,20 @@ impl SysDb {
             SysDb::Test(test) => {
                 test.get_collections(collection_id, name, tenant, database)
                     .await
+            }
+        }
+    }
+
+    pub async fn update_collection(
+        &mut self,
+        collection_id: CollectionUuid,
+        name: Option<String>,
+        metadata: Option<CollectionMetadataUpdate>,
+    ) -> Result<(), UpdateCollectionError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.update_collection(collection_id, name, metadata).await,
+            SysDb::Test(_) => {
+                todo!()
             }
         }
     }
@@ -486,6 +501,39 @@ impl GrpcSysDb {
         }
     }
 
+    async fn update_collection(
+        &mut self,
+        collection_id: CollectionUuid,
+        name: Option<String>,
+        metadata: Option<CollectionMetadataUpdate>,
+    ) -> Result<(), UpdateCollectionError> {
+        let req = chroma_proto::UpdateCollectionRequest {
+            id: collection_id.0.to_string(),
+            name,
+            metadata_update: metadata.map(|metadata| match metadata {
+                CollectionMetadataUpdate::UpdateMetadata(metadata) => {
+                    chroma_proto::update_collection_request::MetadataUpdate::Metadata(
+                        metadata.into(),
+                    )
+                }
+                CollectionMetadataUpdate::ResetMetadata => {
+                    chroma_proto::update_collection_request::MetadataUpdate::ResetMetadata(true)
+                }
+            }),
+            dimension: None,
+        };
+
+        self.client.update_collection(req).await.map_err(|e| {
+            if e.code() == Code::NotFound {
+                UpdateCollectionError::CollectionNotFound
+            } else {
+                UpdateCollectionError::FailedToUpdateCollection(e)
+            }
+        })?;
+
+        Ok(())
+    }
+
     pub async fn get_collections_to_gc(
         &mut self,
     ) -> Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError> {
@@ -676,6 +724,23 @@ impl ChromaError for GetCollectionsError {
         match self {
             GetCollectionsError::FailedToGetCollections(_) => ErrorCodes::Internal,
             GetCollectionsError::ConversionError(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum UpdateCollectionError {
+    #[error("Collection not found")]
+    CollectionNotFound,
+    #[error("Failed to update")]
+    FailedToUpdateCollection(#[from] tonic::Status),
+}
+
+impl ChromaError for UpdateCollectionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            UpdateCollectionError::CollectionNotFound => ErrorCodes::NotFound,
+            UpdateCollectionError::FailedToUpdateCollection(_) => ErrorCodes::Internal,
         }
     }
 }
