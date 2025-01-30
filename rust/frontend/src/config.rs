@@ -17,7 +17,7 @@ pub struct FrontendConfig {
     pub sysdb: SysDbConfig,
     #[serde(default = "CircuitBreakerConfig::default")]
     pub circuit_breaker: CircuitBreakerConfig,
-    pub cache_config: CacheConfig,
+    pub cache: CacheConfig,
     pub service_name: String,
     pub otel_endpoint: String,
     pub log: LogConfig,
@@ -66,10 +66,16 @@ mod tests {
         assert_eq!(sysdb_config.connect_timeout_ms, 60000);
         assert_eq!(sysdb_config.request_timeout_ms, 60000);
         assert_eq!(sysdb_config.num_channels, 5);
-        if let CacheConfig::Memory(cache_config) = config.cache_config {
-            assert_eq!(cache_config.capacity, 1000);
-        } else {
-            panic!("Expected Memory cache config");
+        match config.cache {
+            CacheConfig::Memory(c) => {
+                assert_eq!(c.capacity, 1000);
+            }
+            CacheConfig::Disk(c) => {
+                assert_eq!(c.capacity, 1000);
+            }
+            _ => {
+                panic!("Cache config is not memory or disk");
+            }
         }
     }
 }
