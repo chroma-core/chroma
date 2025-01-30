@@ -6,6 +6,7 @@ use crate::operator::ProjectionRecord;
 use crate::Collection;
 use crate::CollectionUuid;
 use crate::Metadata;
+use crate::UpdateMetadata;
 use crate::Where;
 use chroma_config::assignment::rendezvous_hash::AssignmentError;
 use chroma_error::{ChromaError, ErrorCodes};
@@ -255,6 +256,36 @@ impl ChromaError for GetCollectionError {
         match self {
             GetCollectionError::NotFound => ErrorCodes::NotFound,
             _ => ErrorCodes::Internal,
+        }
+    }
+}
+
+#[derive(Clone, Deserialize)]
+pub enum CollectionMetadataUpdate {
+    ResetMetadata,
+    UpdateMetadata(UpdateMetadata),
+}
+
+#[derive(Clone)]
+pub struct UpdateCollectionRequest {
+    pub collection_id: CollectionUuid,
+    pub new_name: Option<String>,
+    pub new_metadata: Option<CollectionMetadataUpdate>,
+}
+
+#[derive(Serialize)]
+pub struct UpdateCollectionResponse {}
+
+#[derive(Error, Debug)]
+pub enum UpdateCollectionError {
+    #[error("Could not update collection: {0}")]
+    SysDB(String),
+}
+
+impl ChromaError for UpdateCollectionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            UpdateCollectionError::SysDB(_) => ErrorCodes::Internal,
         }
     }
 }
