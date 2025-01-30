@@ -29,11 +29,6 @@ use mdac::{Pattern, Rule, Scorecard, ScorecardTicket};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-#[allow(dead_code)]
-const DEFAULT_TENANT: &str = "default_tenant";
-#[allow(dead_code)]
-const DEFAULT_DATABASE: &str = "default_database";
-
 struct ScorecardGuard {
     scorecard: Arc<Scorecard<'static>>,
     ticket: Option<ScorecardTicket>,
