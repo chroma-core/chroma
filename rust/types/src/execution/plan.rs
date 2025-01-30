@@ -6,6 +6,7 @@ use super::{
 };
 
 /// The `Count` plan shoud ouutput the total number of records in the collection
+#[derive(Clone)]
 pub struct Count {
     pub scan: Scan,
 }
@@ -32,6 +33,7 @@ impl From<Count> for chroma_proto::CountPlan {
 }
 
 /// The `Get` plan should output records matching the specified filter and limit in the collection
+#[derive(Clone)]
 pub struct Get {
     pub scan: Scan,
     pub filter: Filter,
@@ -78,6 +80,7 @@ impl TryFrom<Get> for chroma_proto::GetPlan {
 }
 
 /// The `Knn` plan should output records nearest to the target embeddings that matches the specified filter
+#[derive(Clone)]
 pub struct Knn {
     pub scan: Scan,
     pub filter: Filter,
