@@ -21,4 +21,3 @@ tempfile = { workspace = true }
 
 chroma-error = { workspace = true }
 chroma-config = { workspace = true }
-serial_test = "3.2.0"
