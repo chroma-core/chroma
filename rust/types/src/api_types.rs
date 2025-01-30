@@ -12,7 +12,6 @@ use chroma_config::assignment::rendezvous_hash::AssignmentError;
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json::Value;
 use thiserror::Error;
 use tonic::Status;
 use uuid::Uuid;
@@ -381,7 +380,7 @@ pub struct GetResponse {
     embeddings: Option<Vec<Vec<f32>>>,
     documents: Option<Vec<String>>,
     uri: Option<Vec<String>>,
-    metadatas: Option<Vec<Value>>,
+    metadatas: Option<Vec<Metadata>>,
     include: Vec<Include>,
 }
 
@@ -425,12 +424,9 @@ impl From<(GetResult, IncludeList)> for GetResponse {
             }
             if let (Some(meta), Some(metadatas)) = (
                 metadata.map(|m| {
-                    Value::Object(
-                        m.into_iter()
-                            .filter(|(k, _)| !k.starts_with(CHROMA_KEY))
-                            .map(|(k, v)| (k, v.into()))
-                            .collect(),
-                    )
+                    m.into_iter()
+                        .filter(|(k, _)| !k.starts_with(CHROMA_KEY))
+                        .collect()
                 }),
                 res.metadatas.as_mut(),
             ) {
@@ -459,7 +455,7 @@ pub struct QueryResponse {
     embeddings: Option<Vec<Vec<Vec<f32>>>>,
     documents: Option<Vec<Vec<String>>>,
     uri: Option<Vec<Vec<String>>>,
-    metadatas: Option<Vec<Vec<Value>>>,
+    metadatas: Option<Vec<Vec<Metadata>>>,
     distances: Option<Vec<Vec<f32>>>,
     include: Vec<Include>,
 }
@@ -515,12 +511,9 @@ impl From<(KnnBatchResult, IncludeList)> for QueryResponse {
                     uris.push(uri);
                 }
                 if let Some(meta) = metadata.map(|m| {
-                    Value::Object(
-                        m.into_iter()
-                            .filter(|(k, _)| !k.starts_with(CHROMA_KEY))
-                            .map(|(k, v)| (k, v.into()))
-                            .collect(),
-                    )
+                    m.into_iter()
+                        .filter(|(k, _)| !k.starts_with(CHROMA_KEY))
+                        .collect()
                 }) {
                     metadatas.push(meta);
                 }

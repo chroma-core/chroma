@@ -145,7 +145,7 @@ async fn create_tenant(
     State(mut server): State<FrontendServer>,
     Json(request): Json<CreateTenantRequest>,
 ) -> Result<Json<CreateTenantResponse>, ServerError> {
-    tracing::info!("Creating tenant with name: {}", request.name);
+    tracing::info!("Creating tenant [{}]", request.name);
     Ok(Json(server.frontend.create_tenant(request).await?))
 }
 
@@ -153,7 +153,7 @@ async fn get_tenant(
     Path(name): Path<String>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<GetTenantResponse>, ServerError> {
-    tracing::info!("Getting tenant with name: {}", name);
+    tracing::info!("Getting tenant [{}]", name);
     Ok(Json(
         server
             .frontend
@@ -172,11 +172,7 @@ async fn create_database(
     State(mut server): State<FrontendServer>,
     Json(CreateDatabasePayload { name }): Json<CreateDatabasePayload>,
 ) -> Result<Json<CreateDatabaseResponse>, ServerError> {
-    tracing::info!(
-        "Creating database for tenant: {} and name: {}",
-        tenant_id,
-        name
-    );
+    tracing::info!("Creating database [{}] for tenant [{}]", name, tenant_id);
     let create_database_request = CreateDatabaseRequest {
         database_id: Uuid::new_v4(),
         tenant_id,
@@ -200,7 +196,7 @@ async fn list_databases(
     State(mut server): State<FrontendServer>,
     Json(ListDatabasesPayload { limit, offset }): Json<ListDatabasesPayload>,
 ) -> Result<Json<ListDatabasesResponse>, ServerError> {
-    tracing::info!("Listing database for tenant: {}", tenant_id);
+    tracing::info!("Listing database for tenant [{}]", tenant_id);
     Ok(Json(
         server
             .frontend
@@ -218,9 +214,9 @@ async fn get_database(
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<GetDatabaseResponse>, ServerError> {
     tracing::info!(
-        "Getting database for tenant: {} and name: {}",
-        tenant_id,
-        database_name
+        "Getting database [{}] for tenant [{}]",
+        database_name,
+        tenant_id
     );
     let res = server
         .frontend
@@ -237,9 +233,9 @@ async fn delete_database(
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<DeleteDatabaseResponse>, ServerError> {
     tracing::info!(
-        "Deleting database for tenant: {} and name: {}",
-        tenant_id,
-        database_name
+        "Deleting database [{}] for tenant [{}]",
+        database_name,
+        tenant_id
     );
     Ok(Json(
         server
@@ -256,6 +252,11 @@ async fn list_collections(
     Path((tenant_id, database_name)): Path<(String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<ListCollectionsResponse>, ServerError> {
+    tracing::info!(
+        "Listing collections in database [{}] for tenant [{}]",
+        database_name,
+        tenant_id
+    );
     Ok(Json(
         server
             .frontend
@@ -271,6 +272,11 @@ async fn count_collections(
     Path((tenant_id, database_name)): Path<(String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<CountCollectionsResponse>, ServerError> {
+    tracing::info!(
+        "Counting collections in database [{}] for tenant [{}]",
+        database_name,
+        tenant_id
+    );
     Ok(Json(
         server
             .frontend
@@ -286,7 +292,7 @@ async fn get_collection(
     Path((tenant_id, database_name, collection_name)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<Collection>, ServerError> {
-    tracing::info!("Getting collection for tenant [{tenant_id}], database [{database_name}], and collection name [{collection_name}]");
+    tracing::info!("Getting collection [{collection_name}] in database [{database_name}] for tenant [{tenant_id}]");
     let collection = server
         .frontend
         .get_collection(GetCollectionRequest {
@@ -305,35 +311,26 @@ pub struct UpdateCollectionPayload {
 }
 
 async fn update_collection(
-    Path((_tenant_id, _database_name, collection_id)): Path<(String, String, String)>,
+    Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
     Json(payload): Json<UpdateCollectionPayload>,
 ) -> Result<Json<UpdateCollectionResponse>, ServerError> {
+    tracing::info!("Updating collection [{collection_id}] in database [{database_name}] for tenant [{tenant_id}]");
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
 
-    server
-        .frontend
-        .update_collection(chroma_types::UpdateCollectionRequest {
-            collection_id,
-            new_name: payload.new_name,
-            new_metadata: payload
-                .new_metadata
-                .map(CollectionMetadataUpdate::UpdateMetadata),
-        })
-        .await?;
-
-    Ok(Json(UpdateCollectionResponse {}))
-}
-
-#[derive(Deserialize, Debug, Clone)]
-pub struct QueryRequestPayload {
-    ids: Option<Vec<String>>,
-    #[serde(flatten)]
-    where_fields: RawWhereFields,
-    query_embeddings: Vec<Vec<f32>>,
-    n_results: Option<u32>,
-    include: IncludeList,
+    Ok(Json(
+        server
+            .frontend
+            .update_collection(chroma_types::UpdateCollectionRequest {
+                collection_id,
+                new_name: payload.new_name,
+                new_metadata: payload
+                    .new_metadata
+                    .map(CollectionMetadataUpdate::UpdateMetadata),
+            })
+            .await?,
+    ))
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -350,6 +347,7 @@ async fn collection_add(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<AddToCollectionPayload>,
 ) -> Result<Json<AddToCollectionResponse>, ServerError> {
+    tracing::info!("Adding records to collection [{collection_id}] in database [{database_name}] for tenant [{tenant_id}]");
     let collection_id =
         Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
 
@@ -375,7 +373,7 @@ async fn collection_count(
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<CountResponse>, ServerError> {
     tracing::info!(
-        "Counting collection [{collection_id}] from tenant [{tenant_id}] and database [{database_name}]",
+        "Counting number of records in collection [{collection_id}] in database [{database_name}] for tenant [{tenant_id}]",
     );
 
     Ok(Json(
@@ -409,7 +407,7 @@ async fn collection_get(
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
     tracing::info!(
-        "Get collection [{collection_id}] from tenant [{tenant_id}] and database [{database_name}], with query parameters [{payload:?}]",
+        "Getting records from collection [{collection_id}] in database [{database_name}] for tenant [{tenant_id}], with query parameters [{payload:?}]",
     );
     let res = server
         .frontend
@@ -427,6 +425,16 @@ async fn collection_get(
     Ok(Json(res))
 }
 
+#[derive(Deserialize, Debug, Clone)]
+pub struct QueryRequestPayload {
+    ids: Option<Vec<String>>,
+    #[serde(flatten)]
+    where_fields: RawWhereFields,
+    query_embeddings: Vec<Vec<f32>>,
+    n_results: Option<u32>,
+    include: IncludeList,
+}
+
 async fn collection_query(
     Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
@@ -435,7 +443,7 @@ async fn collection_query(
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
     tracing::info!(
-        "Querying collection [{collection_id}] from tenant [{tenant_id}] and database [{database_name}], with query parameters [{payload:?}]",
+        "Querying records from collection [{collection_id}] in database [{database_name}] for tenant [{tenant_id}], with query parameters [{payload:?}]",
     );
 
     let res = server
