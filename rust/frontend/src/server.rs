@@ -128,7 +128,7 @@ async fn reset(State(mut _server): State<FrontendServer>) -> Result<(), ServerEr
 }
 
 async fn version() -> &'static str {
-    "0.7.0-dev"
+    env!("CARGO_PKG_VERSION")
 }
 
 // Dummy implementation for now
