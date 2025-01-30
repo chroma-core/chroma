@@ -39,6 +39,7 @@ pub struct DistributedExecutor {
         Arc<Mutex<HashMap<String, QueryExecutorClient<tonic::transport::Channel>>>>,
     assignment_policy: Box<dyn AssignmentPolicy>,
     replication_factor: usize,
+    backoff: ExponentialBuilder,
 }
 
 #[async_trait]
@@ -65,10 +66,13 @@ impl Configurable<(config::DistributedExecutorConfig, System)> for DistributedEx
         memberlist_provider.subscribe(client_manager_handle.receiver());
         let _memberlist_provider_handle = system.start_component(memberlist_provider);
 
+        let retry_config = &config.retry;
+        let backoff = retry_config.into();
         Ok(Self {
             node_name_to_client,
             assignment_policy,
             replication_factor: config.replication_factor,
+            backoff,
         })
     }
 }
@@ -78,14 +82,11 @@ impl DistributedExecutor {
     pub async fn count(&mut self, plan: Count) -> Result<CountResult, ExecutorError> {
         let clients = self.clients(plan.scan.collection_and_segments.collection.collection_id)?;
         let res = (|| async {
-            clients
-                .choose(&mut rand::thread_rng())
-                .ok_or(no_clients_found_status())?
-                .clone()
+            choose_client(&clients)?
                 .count(Request::new(plan.clone().into()))
                 .await
         })
-        .retry(ExponentialBuilder::default())
+        .retry(self.backoff)
         .when(is_retryable_error)
         .await?
         .into_inner();
@@ -95,14 +96,11 @@ impl DistributedExecutor {
     pub async fn get(&mut self, plan: Get) -> Result<GetResult, ExecutorError> {
         let clients = self.clients(plan.scan.collection_and_segments.collection.collection_id)?;
         let res = (|| async {
-            clients
-                .choose(&mut rand::thread_rng())
-                .ok_or(no_clients_found_status())?
-                .clone()
+            choose_client(&clients)?
                 .get(Request::new(plan.clone().try_into()?))
                 .await
         })
-        .retry(ExponentialBuilder::default())
+        .retry(self.backoff)
         .when(is_retryable_error)
         .await?;
         Ok(res.into_inner().try_into()?)
@@ -110,14 +108,11 @@ impl DistributedExecutor {
     pub async fn knn(&mut self, plan: Knn) -> Result<KnnBatchResult, ExecutorError> {
         let clients = self.clients(plan.scan.collection_and_segments.collection.collection_id)?;
         let res = (|| async {
-            clients
-                .choose(&mut rand::thread_rng())
-                .ok_or(no_clients_found_status())?
-                .clone()
+            choose_client(&clients)?
                 .knn(Request::new(plan.clone().try_into()?))
                 .await
         })
-        .retry(ExponentialBuilder::default())
+        .retry(self.backoff)
         .when(is_retryable_error)
         .await?;
         Ok(from_proto_knn_batch_result(res.into_inner())?)
@@ -166,4 +161,13 @@ fn is_retryable_error(e: &tonic::Status) -> bool {
 
 fn no_clients_found_status() -> tonic::Status {
     tonic::Status::internal("No clients found")
+}
+
+fn choose_client(
+    clients: &Vec<QueryExecutorClient<tonic::transport::Channel>>,
+) -> Result<QueryExecutorClient<tonic::transport::Channel>, tonic::Status> {
+    Ok(clients
+        .choose(&mut rand::thread_rng())
+        .ok_or(no_clients_found_status())?
+        .clone())
 }
