@@ -296,7 +296,7 @@ pub struct AddToCollectionRequest {
     pub ids: Vec<String>,
     pub embeddings: Option<Vec<Vec<f32>>>,
     pub documents: Option<Vec<String>>,
-    pub uri: Option<Vec<String>>,
+    pub uris: Option<Vec<String>>,
     pub metadatas: Option<Vec<Metadata>>,
 }
 
@@ -316,6 +316,68 @@ impl ChromaError for AddToCollectionError {
         match self {
             AddToCollectionError::InconsistentLength => ErrorCodes::InvalidArgument,
             AddToCollectionError::FailedToPushLogs(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
+pub struct UpdateCollectionRecordsRequest {
+    pub tenant_id: String,
+    pub database_name: String,
+    pub collection_id: Uuid,
+    pub ids: Vec<String>,
+    pub embeddings: Option<Vec<Vec<f32>>>,
+    pub documents: Option<Vec<String>>,
+    pub uris: Option<Vec<String>>,
+    pub metadatas: Option<Vec<UpdateMetadata>>,
+}
+
+#[derive(Serialize)]
+pub struct UpdateCollectionRecordsResponse {}
+
+#[derive(Error, Debug)]
+pub enum UpdateCollectionRecordsError {
+    #[error("Inconsistent number of IDs, embeddings, documents, URIs and metadatas")]
+    InconsistentLength,
+    #[error("Failed to push logs: {0}")]
+    FailedToPushLogs(#[from] Box<dyn ChromaError>),
+}
+
+impl ChromaError for UpdateCollectionRecordsError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            UpdateCollectionRecordsError::InconsistentLength => ErrorCodes::InvalidArgument,
+            UpdateCollectionRecordsError::FailedToPushLogs(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
+pub struct UpsertCollectionRequest {
+    pub tenant_id: String,
+    pub database_name: String,
+    pub collection_id: Uuid,
+    pub ids: Vec<String>,
+    pub embeddings: Option<Vec<Vec<f32>>>,
+    pub documents: Option<Vec<String>>,
+    pub uris: Option<Vec<String>>,
+    pub metadatas: Option<Vec<UpdateMetadata>>,
+}
+
+#[derive(Serialize)]
+pub struct UpsertCollectionResponse {}
+
+#[derive(Error, Debug)]
+pub enum UpsertCollectionError {
+    #[error("Inconsistent number of IDs, embeddings, documents, URIs and metadatas")]
+    InconsistentLength,
+    #[error("Failed to push logs: {0}")]
+    FailedToPushLogs(#[from] Box<dyn ChromaError>),
+}
+
+impl ChromaError for UpsertCollectionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            UpsertCollectionError::InconsistentLength => ErrorCodes::InvalidArgument,
+            UpsertCollectionError::FailedToPushLogs(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -360,6 +422,7 @@ pub struct CountRequest {
 pub type CountResponse = u32;
 
 pub const CHROMA_KEY: &str = "chroma:";
+pub const CHROMA_DOCUMENT_KEY: &str = "chroma:document";
 pub const CHROMA_URI_KEY: &str = "chroma:uri";
 
 #[derive(Clone)]

@@ -19,7 +19,7 @@ use chroma_types::{
     GetTenantError, GetTenantRequest, GetTenantResponse, Include, ListCollectionsRequest,
     ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
     QueryError, QueryRequest, QueryResponse, ResetError, UpdateCollectionError,
-    UpdateCollectionRequest, UpdateCollectionResponse,
+    UpdateCollectionRequest, UpdateCollectionResponse, CHROMA_DOCUMENT_KEY, CHROMA_URI_KEY,
 };
 use chroma_types::{
     Operation, OperationRecord, ScalarEncoding, UpdateMetadata, UpdateMetadataValue,
@@ -60,6 +60,73 @@ impl ChromaError for ScorecardRuleError {
     }
 }
 
+#[derive(thiserror::Error, Debug)]
+enum ToRecordsError {
+    #[error("Inconsistent number of IDs, embeddings, documents, URIs and metadatas")]
+    InconsistentLength,
+}
+
+fn to_records<
+    MetadataValue: Into<UpdateMetadataValue>,
+    M: IntoIterator<Item = (String, MetadataValue)>,
+>(
+    mut ids: Vec<String>,
+    mut embeddings: Option<Vec<Vec<f32>>>,
+    mut documents: Option<Vec<String>>,
+    mut uris: Option<Vec<String>>,
+    mut metadatas: Option<Vec<M>>,
+    operation: Operation,
+) -> Result<Vec<OperationRecord>, ToRecordsError> {
+    let mut records: Vec<OperationRecord> = vec![];
+    while let Some(id) = ids.pop() {
+        let embedding = embeddings
+            .as_mut()
+            .map(|v| v.pop().ok_or(ToRecordsError::InconsistentLength))
+            .transpose()?;
+        let document = documents
+            .as_mut()
+            .map(|v| v.pop().ok_or(ToRecordsError::InconsistentLength))
+            .transpose()?;
+        let uri = uris
+            .as_mut()
+            .map(|v| v.pop().ok_or(ToRecordsError::InconsistentLength))
+            .transpose()?;
+        let metadata = metadatas
+            .as_mut()
+            .map(|v| v.pop().ok_or(ToRecordsError::InconsistentLength))
+            .transpose()?;
+
+        let encoding = embedding.as_ref().map(|_| ScalarEncoding::FLOAT32);
+
+        let mut metadata = metadata
+            .map(|m| {
+                m.into_iter()
+                    .map(|(key, value)| (key, value.into()))
+                    .collect::<UpdateMetadata>()
+            })
+            .unwrap_or_default();
+        if let Some(document) = document.clone() {
+            metadata.insert(
+                CHROMA_DOCUMENT_KEY.to_string(),
+                UpdateMetadataValue::Str(document),
+            );
+        }
+        if let Some(uri) = uri {
+            metadata.insert(CHROMA_URI_KEY.to_string(), UpdateMetadataValue::Str(uri));
+        }
+
+        records.push(OperationRecord {
+            id,
+            embedding,
+            document,
+            encoding,
+            metadata: Some(metadata),
+            operation,
+        });
+    }
+
+    Ok(records)
+}
 #[derive(Clone, Debug)]
 pub struct Frontend {
     executor: Executor,
@@ -278,80 +345,103 @@ impl Frontend {
         let collection_id = CollectionUuid(request.collection_id);
 
         let chroma_types::AddToCollectionRequest {
-            mut ids,
-            mut embeddings,
-            mut documents,
-            mut uri,
-            mut metadatas,
+            ids,
+            embeddings,
+            documents,
+            uris,
+            metadatas,
             ..
         } = request;
 
-        let mut records: Vec<OperationRecord> = vec![];
-        while let Some(id) = ids.pop() {
-            let embedding = embeddings
-                .as_mut()
-                .map(|v| {
-                    v.pop()
-                        .ok_or(chroma_types::AddToCollectionError::InconsistentLength)
-                })
-                .transpose()?;
-            let document = documents
-                .as_mut()
-                .map(|v| {
-                    v.pop()
-                        .ok_or(chroma_types::AddToCollectionError::InconsistentLength)
-                })
-                .transpose()?;
-            let uri = uri
-                .as_mut()
-                .map(|v| {
-                    v.pop()
-                        .ok_or(chroma_types::AddToCollectionError::InconsistentLength)
-                })
-                .transpose()?;
-            let metadata = metadatas
-                .as_mut()
-                .map(|v| {
-                    v.pop()
-                        .ok_or(chroma_types::AddToCollectionError::InconsistentLength)
-                })
-                .transpose()?;
-
-            let encoding = embedding.as_ref().map(|_| ScalarEncoding::FLOAT32);
-
-            let mut metadata = metadata
-                .map(|m| {
-                    m.into_iter()
-                        .map(|(key, value)| (key, value.into()))
-                        .collect::<UpdateMetadata>()
-                })
-                .unwrap_or_default();
-            if let Some(document) = document.clone() {
-                metadata.insert(
-                    "chroma:document".to_string(),
-                    UpdateMetadataValue::Str(document),
-                );
-            }
-            if let Some(uri) = uri {
-                metadata.insert("chroma:uri".to_string(), UpdateMetadataValue::Str(uri));
-            }
-
-            records.push(OperationRecord {
-                id,
-                embedding,
-                document,
-                encoding,
-                metadata: Some(metadata),
-                operation: Operation::Add,
-            });
-        }
-
+        let records = to_records(ids, embeddings, documents, uris, metadatas, Operation::Add)
+            .map_err(|err| match err {
+                ToRecordsError::InconsistentLength => {
+                    chroma_types::AddToCollectionError::InconsistentLength
+                }
+            })?;
         self.log_client
             .push_logs(collection_id, records)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
         Ok(chroma_types::AddToCollectionResponse {})
+    }
+
+    pub async fn update(
+        &mut self,
+        request: chroma_types::UpdateCollectionRecordsRequest,
+    ) -> Result<
+        chroma_types::UpdateCollectionRecordsResponse,
+        chroma_types::UpdateCollectionRecordsError,
+    > {
+        let collection_id = CollectionUuid(request.collection_id);
+
+        let chroma_types::UpdateCollectionRecordsRequest {
+            ids,
+            embeddings,
+            documents,
+            uris,
+            metadatas,
+            ..
+        } = request;
+
+        let records = to_records(
+            ids,
+            embeddings,
+            documents,
+            uris,
+            metadatas,
+            Operation::Update,
+        )
+        .map_err(|err| match err {
+            ToRecordsError::InconsistentLength => {
+                chroma_types::UpdateCollectionRecordsError::InconsistentLength
+            }
+        })?;
+
+        self.log_client
+            .push_logs(collection_id, records)
+            .await
+            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+
+        Ok(chroma_types::UpdateCollectionRecordsResponse {})
+    }
+
+    pub async fn upsert(
+        &mut self,
+        request: chroma_types::UpsertCollectionRequest,
+    ) -> Result<chroma_types::UpsertCollectionResponse, chroma_types::UpsertCollectionError> {
+        let collection_id = CollectionUuid(request.collection_id);
+
+        let chroma_types::UpsertCollectionRequest {
+            ids,
+            embeddings,
+            documents,
+            uris,
+            metadatas,
+            ..
+        } = request;
+
+        let records = to_records(
+            ids,
+            embeddings,
+            documents,
+            uris,
+            metadatas,
+            Operation::Upsert,
+        )
+        .map_err(|err| match err {
+            ToRecordsError::InconsistentLength => {
+                chroma_types::UpsertCollectionError::InconsistentLength
+            }
+        })?;
+
+        self.log_client
+            .push_logs(collection_id, records)
+            .await
+            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+
+        Ok(chroma_types::UpsertCollectionResponse {})
     }
 
     pub async fn count(&mut self, request: CountRequest) -> Result<CountResponse, QueryError> {
