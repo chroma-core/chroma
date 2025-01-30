@@ -1486,6 +1486,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 1.0.69",
+ "tokio",
  "tonic",
  "tonic-build",
  "uuid",

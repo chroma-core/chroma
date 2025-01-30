@@ -530,6 +530,7 @@ mod test {
             storage.clone(),
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
+            16,
             rx,
         );
         let collection_id = CollectionUuid::new();
@@ -619,6 +620,7 @@ mod test {
             storage,
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
+            16,
             rx,
         );
         let spann_writer = SpannSegmentWriter::from_segment(
@@ -717,6 +719,7 @@ mod test {
             storage.clone(),
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
+            16,
             rx,
         );
         let collection_id = CollectionUuid::new();
@@ -806,6 +809,7 @@ mod test {
             storage,
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
+            16,
             rx,
         );
         let spann_reader = SpannSegmentReader::from_segment(
