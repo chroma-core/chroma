@@ -73,6 +73,14 @@ impl<Output, Error> TaskResult<Output, Error> {
     }
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum TaskState {
+    NotStarted,
+    Running,
+    Aborted,
+    // There is no finished; it transitions from not-running to something else
+}
+
 /// A task is a wrapper around an operator and its input.
 /// It is a description of a function to be run.
 #[derive(Debug)]
@@ -85,6 +93,7 @@ where
     input: Input,
     reply_channel: Box<dyn ReceiverForMessage<TaskResult<Output, Error>>>,
     task_id: Uuid,
+    task_state: TaskState,
 }
 
 /// A message type used by the dispatcher to send tasks to worker threads.
@@ -95,11 +104,11 @@ pub type TaskMessage = Box<dyn TaskWrapper>;
 #[async_trait]
 pub trait TaskWrapper: Send + Debug {
     fn get_name(&self) -> &'static str;
-    async fn run(&self);
+    async fn run(&mut self);
     #[allow(dead_code)]
     fn id(&self) -> Uuid;
     fn get_type(&self) -> OperatorType;
-    async fn abort(&self);
+    async fn abort(&mut self);
 }
 
 /// Implement the TaskWrapper trait for every Task. This allows us to
@@ -116,7 +125,11 @@ where
         self.operator.get_name()
     }
 
-    async fn run(&self) {
+    async fn run(&mut self) {
+        if self.task_state != TaskState::NotStarted {
+            return;
+        }
+        self.task_state = TaskState::Running;
         let result = AssertUnwindSafe(self.operator.run(&self.input))
             .catch_unwind()
             .await;
@@ -185,7 +198,11 @@ where
         self.operator.get_type()
     }
 
-    async fn abort(&self) {
+    async fn abort(&mut self) {
+        if self.task_state != TaskState::NotStarted {
+            return;
+        }
+        self.task_state = TaskState::Aborted;
         match self
             .reply_channel
             .send(
@@ -226,6 +243,7 @@ where
         input,
         reply_channel,
         task_id: id,
+        task_state: TaskState::NotStarted,
     })
 }
 
