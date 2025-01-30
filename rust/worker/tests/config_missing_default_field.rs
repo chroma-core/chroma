@@ -49,6 +49,7 @@ fn test_missing_default_field() {
                     dispatcher_queue_size: 100
                     worker_queue_size: 100
                     task_queue_limit: 100
+                    active_io_tasks: 1000
                 blockfile_provider:
                     Arrow:
                         block_manager_config:
@@ -109,6 +110,7 @@ fn test_missing_default_field() {
                     dispatcher_queue_size: 100
                     worker_queue_size: 100
                     task_queue_limit: 100
+                    active_io_tasks: 1000
                 compactor:
                     compaction_manager_queue_size: 1000
                     max_concurrent_jobs: 100
