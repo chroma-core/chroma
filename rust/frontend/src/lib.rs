@@ -1,11 +1,11 @@
 mod ac;
 mod config;
-mod errors;
 #[allow(dead_code)]
 mod executor;
 mod frontend;
 mod server;
 mod tower_tracing;
+mod types;
 
 use chroma_config::Configurable;
 use chroma_system::System;
