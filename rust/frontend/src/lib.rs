@@ -3,6 +3,7 @@ mod config;
 #[allow(dead_code)]
 mod executor;
 mod frontend;
+mod get_collection_with_segments_provider;
 mod server;
 mod tower_tracing;
 mod types;
@@ -10,6 +11,7 @@ mod types;
 use chroma_config::Configurable;
 use chroma_system::System;
 use frontend::Frontend;
+use get_collection_with_segments_provider::*;
 use server::FrontendServer;
 
 pub use config::{FrontendConfig, ScorecardRule};

@@ -6,9 +6,11 @@ sysdb:
     port: 50051
     connect_timeout_ms: 60000
     request_timeout_ms: 60000
-cache_config:
-  lru:
-    capacity: 1000
+collections_with_segments_provider:
+  cache:
+    lru:
+      capacity: 1000
+  permitted_parallelism: 180
 log:
   Grpc:
     host: "logservice.chroma"

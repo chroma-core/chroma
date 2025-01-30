@@ -6,7 +6,7 @@ use std::{
     sync::Arc,
 };
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct AysncPartitionedMutex<K, V = (), H = DefaultHasher>
 where
     K: Hash + Eq,
