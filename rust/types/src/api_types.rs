@@ -56,7 +56,7 @@ pub enum CreateTenantError {
     AlreadyExists,
     #[error("Rate limited")]
     RateLimited,
-    #[error("Failed to create tenant in SysDB: {0}")]
+    #[error("Failed to create tenant: {0}")]
     SysDB(String),
 }
 
@@ -85,7 +85,7 @@ pub enum GetTenantError {
     ResponseEmpty,
     #[error("Rate limited")]
     RateLimited,
-    #[error("Failed to get tenant from SysDB: {0}")]
+    #[error("Failed to get tenant: {0}")]
     SysDB(String),
 }
 
@@ -145,7 +145,7 @@ pub enum ListDatabasesError {
     ResponseEmpty,
     #[error("Failed to parse database id")]
     IdParsingError,
-    #[error("Failed to get database: {0}")]
+    #[error("Failed to list database: {0}")]
     SysDB(String),
     #[error("Rate limited")]
     RateLimited,
@@ -203,7 +203,7 @@ pub enum DeleteDatabaseError {
     ResponseEmpty,
     #[error("Failed to parse database id")]
     IdParsingError,
-    #[error("Failed to get database: {0}")]
+    #[error("Failed to delete database: {0}")]
     SysDB(String),
     #[error("Rate limited")]
     RateLimited,
@@ -218,7 +218,20 @@ impl ChromaError for DeleteDatabaseError {
     }
 }
 
-#[derive(Clone)]
+pub struct ListCollectionsRequest {
+    pub tenant_id: String,
+    pub database_name: String,
+}
+
+pub type ListCollectionsResponse = Vec<Collection>;
+
+pub struct CountCollectionsRequest {
+    pub tenant_id: String,
+    pub database_name: String,
+}
+
+pub type CountCollectionsResponse = u32;
+
 pub struct GetCollectionRequest {
     pub tenant_id: String,
     pub database_name: String,

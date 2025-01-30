@@ -5,18 +5,19 @@ use crate::{
 };
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
-use chroma_sysdb::sysdb;
+use chroma_sysdb::{sysdb, GetCollectionsError};
 use chroma_system::System;
 use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection},
     plan::{Count, Get, Knn},
     AddToCollectionError, AddToCollectionRequest, AddToCollectionResponse, CollectionUuid,
-    CountRequest, CountResponse, CreateDatabaseError, CreateDatabaseRequest,
-    CreateDatabaseResponse, CreateTenantError, CreateTenantRequest, CreateTenantResponse,
-    DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse, GetCollectionError,
-    GetCollectionRequest, GetCollectionResponse, GetDatabaseError, GetDatabaseRequest,
-    GetDatabaseResponse, GetRequest, GetResponse, GetTenantError, GetTenantRequest,
-    GetTenantResponse, Include, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
+    CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
+    CreateDatabaseError, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantError,
+    CreateTenantRequest, CreateTenantResponse, DeleteDatabaseError, DeleteDatabaseRequest,
+    DeleteDatabaseResponse, GetCollectionError, GetCollectionRequest, GetCollectionResponse,
+    GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
+    GetTenantError, GetTenantRequest, GetTenantResponse, Include, ListCollectionsRequest,
+    ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
     QueryError, QueryRequest, QueryResponse, ResetError,
 };
 use chroma_types::{
@@ -107,6 +108,7 @@ impl Frontend {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn reset(&mut self) -> Result<(), ResetError> {
         self.collections_with_segments_provider
             .collections_with_segments_cache
@@ -204,6 +206,35 @@ impl Frontend {
         self.sysdb_client
             .delete_database(request.database_name, request.tenant_id)
             .await
+    }
+
+    pub async fn list_collections(
+        &mut self,
+        request: ListCollectionsRequest,
+    ) -> Result<ListCollectionsResponse, GetCollectionsError> {
+        self.sysdb_client
+            .get_collections(
+                None,
+                None,
+                Some(request.tenant_id),
+                Some(request.database_name),
+            )
+            .await
+    }
+
+    pub async fn count_collections(
+        &mut self,
+        request: CountCollectionsRequest,
+    ) -> Result<CountCollectionsResponse, GetCollectionsError> {
+        self.sysdb_client
+            .get_collections(
+                None,
+                None,
+                Some(request.tenant_id),
+                Some(request.database_name),
+            )
+            .await
+            .map(|collections| collections.len() as u32)
     }
 
     pub async fn get_collection(

@@ -6,12 +6,13 @@ use axum::{
     Json, Router, ServiceExt,
 };
 use chroma_types::{
-    AddToCollectionResponse, ChecklistResponse, Collection, CollectionUuid, CountRequest,
-    CountResponse, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest,
-    CreateTenantResponse, DeleteDatabaseRequest, DeleteDatabaseResponse, GetCollectionRequest,
-    GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantRequest,
-    GetTenantResponse, GetUserIdentityResponse, IncludeList, ListDatabasesRequest,
-    ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
+    AddToCollectionResponse, ChecklistResponse, Collection, CollectionUuid,
+    CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
+    CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
+    DeleteDatabaseRequest, DeleteDatabaseResponse, GetCollectionRequest, GetDatabaseRequest,
+    GetDatabaseResponse, GetRequest, GetResponse, GetTenantRequest, GetTenantResponse,
+    GetUserIdentityResponse, IncludeList, ListCollectionsRequest, ListCollectionsResponse,
+    ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -55,6 +56,14 @@ impl FrontendServer {
             .route("/api/v2/tenants/:tenant_id/databases", get(list_databases))
             .route("/api/v2/tenants/:tenant_id/databases/:name", get(get_database))
             .route("/api/v2/tenants/:tenant_id/databases/:name", delete(delete_database))
+            .route(
+                "/api/v2/tenants/:tenant_id/databases/:database_name/collections",
+                get(list_collections),
+            )
+            .route(
+                "/api/v2/tenants/:tenant_id/databases/:database_name/collections_count",
+                get(count_collections),
+            )
             .route(
                 "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_name",
                 get(get_collection),
@@ -112,8 +121,9 @@ async fn pre_flight_checks() -> Result<Json<ChecklistResponse>, ServerError> {
     }))
 }
 
-async fn reset(State(mut server): State<FrontendServer>) -> Result<(), ServerError> {
-    server.frontend.reset().await?;
+async fn reset(State(mut _server): State<FrontendServer>) -> Result<(), ServerError> {
+    // TODO: Allow reset based on config
+    // server.frontend.reset().await?;
     Ok(())
 }
 
@@ -234,6 +244,36 @@ async fn delete_database(
         server
             .frontend
             .delete_database(DeleteDatabaseRequest {
+                tenant_id,
+                database_name,
+            })
+            .await?,
+    ))
+}
+
+async fn list_collections(
+    Path((tenant_id, database_name)): Path<(String, String)>,
+    State(mut server): State<FrontendServer>,
+) -> Result<Json<ListCollectionsResponse>, ServerError> {
+    Ok(Json(
+        server
+            .frontend
+            .list_collections(ListCollectionsRequest {
+                tenant_id,
+                database_name,
+            })
+            .await?,
+    ))
+}
+
+async fn count_collections(
+    Path((tenant_id, database_name)): Path<(String, String)>,
+    State(mut server): State<FrontendServer>,
+) -> Result<Json<CountCollectionsResponse>, ServerError> {
+    Ok(Json(
+        server
+            .frontend
+            .count_collections(CountCollectionsRequest {
                 tenant_id,
                 database_name,
             })
