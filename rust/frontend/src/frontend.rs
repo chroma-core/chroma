@@ -112,22 +112,29 @@ impl Frontend {
             .collections_with_segments_cache
             .clear()
             .await
-            .map_err(|_| ResetError::Cache)?;
-        Ok(())
+            .map_err(|_| ResetError::Cache)
     }
 
     pub async fn create_tenant(
         &mut self,
         request: CreateTenantRequest,
     ) -> Result<CreateTenantResponse, CreateTenantError> {
-        todo!()
+        let tags = &["op:create_tenant"];
+        let _guard = self
+            .scorecard_request(tags)
+            .ok_or(CreateTenantError::RateLimited)?;
+        self.sysdb_client.create_tenant(request.name).await
     }
 
     pub async fn get_tenant(
         &mut self,
         request: GetTenantRequest,
     ) -> Result<GetTenantResponse, GetTenantError> {
-        todo!()
+        let tags = &["op:get_tenant"];
+        let _guard = self
+            .scorecard_request(tags)
+            .ok_or(GetTenantError::RateLimited)?;
+        self.sysdb_client.get_tenant(request.name).await
     }
 
     pub async fn create_database(

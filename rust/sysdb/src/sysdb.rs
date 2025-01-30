@@ -6,8 +6,9 @@ use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
 use chroma_types::{
-    chroma_proto, CollectionAndSegments, CreateDatabaseError, GetDatabaseError,
-    GetDatabaseResponse, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
+    chroma_proto, CollectionAndSegments, CreateDatabaseError, CreateTenantError,
+    CreateTenantResponse, GetDatabaseError, GetDatabaseResponse, GetTenantError, GetTenantResponse,
+    SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
 };
 use chroma_types::{
     Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
@@ -32,6 +33,26 @@ pub enum SysDb {
 }
 
 impl SysDb {
+    pub async fn create_tenant(
+        &mut self,
+        tenant_name: String,
+    ) -> Result<CreateTenantResponse, CreateTenantError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.create_tenant(tenant_name).await,
+            SysDb::Test(_) => todo!(),
+        }
+    }
+
+    pub async fn get_tenant(
+        &mut self,
+        tenant_name: String,
+    ) -> Result<GetTenantResponse, GetTenantError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.get_tenant(tenant_name).await,
+            SysDb::Test(_) => todo!(),
+        }
+    }
+
     pub async fn get_database(
         &mut self,
         database_name: String,
@@ -263,6 +284,37 @@ impl TryFrom<chroma_proto::CollectionToGcInfo> for CollectionToGcInfo {
 }
 
 impl GrpcSysDb {
+    pub async fn create_tenant(
+        &mut self,
+        tenant_name: String,
+    ) -> Result<CreateTenantResponse, CreateTenantError> {
+        let req = chroma_proto::CreateTenantRequest { name: tenant_name };
+        match self.client.create_tenant(req).await {
+            Ok(_) => Ok(CreateTenantResponse {}),
+            Err(err) if matches!(err.code(), Code::AlreadyExists) => {
+                Err(CreateTenantError::AlreadyExists)
+            }
+            Err(err) => Err(CreateTenantError::SysDB(err.to_string())),
+        }
+    }
+
+    pub async fn get_tenant(
+        &mut self,
+        tenant_name: String,
+    ) -> Result<GetTenantResponse, GetTenantError> {
+        let req = chroma_proto::GetTenantRequest { name: tenant_name };
+        match self.client.get_tenant(req).await {
+            Ok(resp) => Ok(GetTenantResponse {
+                name: resp
+                    .into_inner()
+                    .tenant
+                    .ok_or(GetTenantError::ResponseEmpty)?
+                    .name,
+            }),
+            Err(err) => Err(GetTenantError::SysDB(err.to_string())),
+        }
+    }
+
     pub async fn get_database(
         &mut self,
         database_name: String,

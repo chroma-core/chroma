@@ -20,6 +20,8 @@ use uuid::Uuid;
 pub enum ResetError {
     #[error("Unable to reset cache")]
     Cache,
+    #[error("Rate limited")]
+    RateLimited,
 }
 
 impl ChromaError for ResetError {
@@ -78,7 +80,14 @@ pub struct GetTenantResponse {
 }
 
 #[derive(Debug, Error)]
-pub enum GetTenantError {}
+pub enum GetTenantError {
+    #[error("Server sent empty response")]
+    ResponseEmpty,
+    #[error("Rate limited")]
+    RateLimited,
+    #[error("Failed to get tenant from SysDB: {0}")]
+    SysDB(String),
+}
 
 impl ChromaError for GetTenantError {
     fn code(&self) -> ErrorCodes {
