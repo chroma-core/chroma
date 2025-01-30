@@ -21,6 +21,7 @@ thiserror = { workspace = true }
 tower-http = { workspace = true }
 parking_lot = { workspace = true }
 rand = { workspace = true }
+regex = { workspace = true }
 backon = { workspace = true }
 tower = { version = "0.4.13", features = ["discover"] }
 

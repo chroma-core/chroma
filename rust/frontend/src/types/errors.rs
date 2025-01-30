@@ -11,6 +11,8 @@ use thiserror::Error;
 pub enum ValidationError {
     #[error("Collection ID is not a valid UUIDv4")]
     CollectionId,
+    #[error("Invalid name: {0}")]
+    Name(String),
     #[error("Error parsing where clause")]
     WhereClause,
     #[error("Error parsing where document clause")]
@@ -21,6 +23,7 @@ impl ChromaError for ValidationError {
     fn code(&self) -> chroma_error::ErrorCodes {
         match self {
             ValidationError::CollectionId => chroma_error::ErrorCodes::InvalidArgument,
+            ValidationError::Name(_) => chroma_error::ErrorCodes::InvalidArgument,
             ValidationError::WhereClause => chroma_error::ErrorCodes::InvalidArgument,
             ValidationError::WhereDocumentClause => chroma_error::ErrorCodes::InvalidArgument,
         }
