@@ -1489,6 +1489,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 1.0.69",
+ "tokio",
  "tonic",
  "tonic-build",
  "uuid",
@@ -2452,6 +2453,7 @@ dependencies = [
  "tokio",
  "tonic",
  "tower 0.4.13",
+ "tower-http 0.6.2",
  "tracing",
  "uuid",
 ]

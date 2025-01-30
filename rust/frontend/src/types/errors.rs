@@ -10,30 +10,19 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum ValidationError {
     #[error("Collection ID is not a valid UUIDv4")]
-    InvalidCollectionId,
+    CollectionId,
     #[error("Error parsing where clause")]
-    InvalidWhereClause,
+    WhereClause,
     #[error("Error parsing where document clause")]
-    InvalidWhereDocumentClause,
-    #[error("Error parsing n results")]
-    InvalidnresultsClause,
-    #[error("Error parsing embeddings")]
-    InvalidEmbeddings,
-    #[error("Error parsing include list")]
-    InvalidIncludeList,
+    WhereDocumentClause,
 }
 
 impl ChromaError for ValidationError {
     fn code(&self) -> chroma_error::ErrorCodes {
         match self {
-            ValidationError::InvalidCollectionId => chroma_error::ErrorCodes::InvalidArgument,
-            ValidationError::InvalidWhereClause => chroma_error::ErrorCodes::InvalidArgument,
-            ValidationError::InvalidWhereDocumentClause => {
-                chroma_error::ErrorCodes::InvalidArgument
-            }
-            ValidationError::InvalidnresultsClause => chroma_error::ErrorCodes::InvalidArgument,
-            ValidationError::InvalidEmbeddings => chroma_error::ErrorCodes::InvalidArgument,
-            ValidationError::InvalidIncludeList => chroma_error::ErrorCodes::InvalidArgument,
+            ValidationError::CollectionId => chroma_error::ErrorCodes::InvalidArgument,
+            ValidationError::WhereClause => chroma_error::ErrorCodes::InvalidArgument,
+            ValidationError::WhereDocumentClause => chroma_error::ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -55,6 +44,7 @@ struct ErrorResponse {
 
 impl IntoResponse for ServerError {
     fn into_response(self) -> Response {
+        tracing::error!("Error: {:?}", self.0);
         let status_code = match self.0.code() {
             chroma_error::ErrorCodes::Success => StatusCode::OK,
             chroma_error::ErrorCodes::Cancelled => StatusCode::BAD_REQUEST,

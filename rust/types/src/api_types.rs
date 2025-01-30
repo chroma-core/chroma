@@ -1,38 +1,107 @@
 use crate::error::QueryConversionError;
+use crate::operator::GetResult;
 use crate::operator::KnnBatchResult;
 use crate::operator::KnnProjectionRecord;
 use crate::operator::ProjectionRecord;
 use crate::Collection;
+use crate::CollectionUuid;
 use crate::Metadata;
 use crate::Where;
 use chroma_config::assignment::rendezvous_hash::AssignmentError;
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json::Value;
 use thiserror::Error;
 use tonic::Status;
 use uuid::Uuid;
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Debug, Error)]
+pub enum ResetError {
+    #[error("Unable to reset cache")]
+    Cache,
+    #[error("Rate limited")]
+    RateLimited,
+}
+
+impl ChromaError for ResetError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::Internal
+    }
+}
+
+#[derive(Serialize)]
+pub struct ChecklistResponse {
+    pub max_batch_size: u32,
+}
+
+#[derive(Serialize)]
 pub struct GetUserIdentityResponse {
     pub user_id: String,
     pub tenant: String,
     pub databases: Vec<String>,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Deserialize)]
+pub struct CreateTenantRequest {
+    pub name: String,
+}
+
+#[derive(Serialize)]
+pub struct CreateTenantResponse {}
+
+#[derive(Debug, Error)]
+pub enum CreateTenantError {
+    #[error("Tenant already exists")]
+    AlreadyExists,
+    #[error("Rate limited")]
+    RateLimited,
+    #[error("Failed to create tenant: {0}")]
+    SysDB(String),
+}
+
+impl ChromaError for CreateTenantError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            CreateTenantError::AlreadyExists => ErrorCodes::AlreadyExists,
+            CreateTenantError::SysDB(_) => ErrorCodes::Internal,
+            CreateTenantError::RateLimited => ErrorCodes::ResourceExhausted,
+        }
+    }
+}
+
+pub struct GetTenantRequest {
+    pub name: String,
+}
+
+#[derive(Serialize)]
 pub struct GetTenantResponse {
     pub name: String,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Error)]
+pub enum GetTenantError {
+    #[error("Server sent empty response")]
+    ResponseEmpty,
+    #[error("Rate limited")]
+    RateLimited,
+    #[error("Failed to get tenant: {0}")]
+    SysDB(String),
+}
+
+impl ChromaError for GetTenantError {
+    fn code(&self) -> ErrorCodes {
+        todo!()
+    }
+}
+
 pub struct CreateDatabaseRequest {
     pub database_id: Uuid,
     pub tenant_id: String,
     pub database_name: String,
 }
 
-#[derive(Clone)]
+#[derive(Serialize)]
 pub struct CreateDatabaseResponse {}
 
 #[derive(Error, Debug)]
@@ -40,7 +109,7 @@ pub enum CreateDatabaseError {
     #[error("Database already exists")]
     AlreadyExists,
     #[error("Failed to create database: {0}")]
-    FailedToCreateDatabase(String),
+    SysDB(String),
     #[error("Rate limited")]
     RateLimited,
 }
@@ -49,24 +118,51 @@ impl ChromaError for CreateDatabaseError {
     fn code(&self) -> ErrorCodes {
         match self {
             CreateDatabaseError::AlreadyExists => ErrorCodes::AlreadyExists,
-            CreateDatabaseError::FailedToCreateDatabase(_) => ErrorCodes::Internal,
+            CreateDatabaseError::SysDB(_) => ErrorCodes::Internal,
             CreateDatabaseError::RateLimited => ErrorCodes::ResourceExhausted,
         }
     }
 }
 
-#[derive(Clone)]
+#[derive(Serialize)]
+pub struct Database {
+    pub id: Uuid,
+    pub name: String,
+    pub tenant: String,
+}
+
+pub struct ListDatabasesRequest {
+    pub tenant_id: String,
+    pub limit: Option<u32>,
+    pub offset: u32,
+}
+
+pub type ListDatabasesResponse = Vec<Database>;
+
+#[derive(Debug, Error)]
+pub enum ListDatabasesError {
+    #[error("Server sent empty response")]
+    ResponseEmpty,
+    #[error("Failed to parse database id")]
+    IdParsingError,
+    #[error("Failed to list database: {0}")]
+    SysDB(String),
+    #[error("Rate limited")]
+    RateLimited,
+}
+
+impl ChromaError for ListDatabasesError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::Internal
+    }
+}
+
 pub struct GetDatabaseRequest {
     pub tenant_id: String,
     pub database_name: String,
 }
 
-#[derive(Clone)]
-pub struct GetDatabaseResponse {
-    pub database_id: Uuid,
-    pub database_name: String,
-    pub tenant_id: String,
-}
+pub type GetDatabaseResponse = Database;
 
 #[derive(Error, Debug)]
 pub enum GetDatabaseError {
@@ -77,7 +173,9 @@ pub enum GetDatabaseError {
     #[error("Failed to parse database id")]
     IdParsingError,
     #[error("Failed to get database: {0}")]
-    FailedToGetDatabase(String),
+    SysDB(String),
+    #[error("Rate limited")]
+    RateLimited,
 }
 
 impl ChromaError for GetDatabaseError {
@@ -89,7 +187,51 @@ impl ChromaError for GetDatabaseError {
     }
 }
 
-#[derive(Clone)]
+pub struct DeleteDatabaseRequest {
+    pub tenant_id: String,
+    pub database_name: String,
+}
+
+#[derive(Serialize)]
+pub struct DeleteDatabaseResponse {}
+
+#[derive(Debug, Error)]
+pub enum DeleteDatabaseError {
+    #[error("Database not found")]
+    NotFound,
+    #[error("Server sent empty response")]
+    ResponseEmpty,
+    #[error("Failed to parse database id")]
+    IdParsingError,
+    #[error("Failed to delete database: {0}")]
+    SysDB(String),
+    #[error("Rate limited")]
+    RateLimited,
+}
+
+impl ChromaError for DeleteDatabaseError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            DeleteDatabaseError::NotFound => ErrorCodes::NotFound,
+            _ => ErrorCodes::Internal,
+        }
+    }
+}
+
+pub struct ListCollectionsRequest {
+    pub tenant_id: String,
+    pub database_name: String,
+}
+
+pub type ListCollectionsResponse = Vec<Collection>;
+
+pub struct CountCollectionsRequest {
+    pub tenant_id: String,
+    pub database_name: String,
+}
+
+pub type CountCollectionsResponse = u32;
+
 pub struct GetCollectionRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -104,37 +246,17 @@ pub enum GetCollectionError {
     NotFound,
     #[error("Error getting collection from sysdb {0}")]
     SysDB(String),
+    #[error("Rate limited")]
+    RateLimited,
 }
 
 impl ChromaError for GetCollectionError {
     fn code(&self) -> ErrorCodes {
         match self {
             GetCollectionError::NotFound => ErrorCodes::NotFound,
-            GetCollectionError::SysDB(_) => ErrorCodes::Internal,
+            _ => ErrorCodes::Internal,
         }
     }
-}
-
-#[derive(Clone)]
-pub struct QueryRequest {
-    pub tenant_id: String,
-    pub database_name: String,
-    pub collection_id: Uuid,
-    pub r#where: Option<Where>,
-    pub embeddings: Vec<Vec<f32>>,
-    pub n_results: u32,
-    pub include: IncludeList,
-}
-
-#[derive(Clone, Deserialize, Serialize)]
-pub struct QueryResponse {
-    ids: Vec<Vec<String>>,
-    embeddings: Option<Vec<Vec<Vec<f32>>>>,
-    documents: Option<Vec<Vec<String>>>,
-    uri: Option<Vec<Vec<String>>>,
-    metadatas: Option<Vec<Vec<Metadata>>>,
-    distances: Option<Vec<Vec<f32>>>,
-    include: Vec<Include>,
 }
 
 pub struct AddToCollectionRequest {
@@ -170,43 +292,149 @@ impl ChromaError for AddToCollectionError {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum Include {
+    #[serde(rename = "distances")]
     Distance,
+    #[serde(rename = "documents")]
     Document,
+    #[serde(rename = "embeddings")]
     Embedding,
+    #[serde(rename = "metadatas")]
     Metadata,
+    #[serde(rename = "uris")]
     Uri,
 }
 
-#[derive(Debug, Clone)]
-pub struct IncludeList {
-    pub includes: Vec<Include>,
-}
+#[derive(Debug, Clone, Deserialize)]
+pub struct IncludeList(pub Vec<Include>);
 
 impl IncludeList {
     pub fn default_query() -> Self {
-        Self {
-            includes: vec![Include::Document, Include::Metadata, Include::Distance],
-        }
+        Self(vec![
+            Include::Document,
+            Include::Metadata,
+            Include::Distance,
+        ])
     }
     pub fn default_get() -> Self {
-        Self {
-            includes: vec![Include::Document, Include::Metadata],
-        }
+        Self(vec![Include::Document, Include::Metadata])
     }
 }
+
+#[derive(Clone, Deserialize, Serialize)]
+pub struct CountRequest {
+    pub tenant_id: String,
+    pub database_name: String,
+    pub collection_id: CollectionUuid,
+}
+
+pub type CountResponse = u32;
 
 pub const CHROMA_KEY: &str = "chroma:";
 pub const CHROMA_URI_KEY: &str = "chroma:uri";
 
+#[derive(Clone)]
+pub struct GetRequest {
+    pub tenant_id: String,
+    pub database_name: String,
+    pub collection_id: CollectionUuid,
+    pub ids: Option<Vec<String>>,
+    pub r#where: Option<Where>,
+    pub limit: Option<u32>,
+    pub offset: u32,
+    pub include: IncludeList,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+pub struct GetResponse {
+    ids: Vec<String>,
+    embeddings: Option<Vec<Vec<f32>>>,
+    documents: Option<Vec<String>>,
+    uri: Option<Vec<String>>,
+    metadatas: Option<Vec<Value>>,
+    include: Vec<Include>,
+}
+
+impl From<(GetResult, IncludeList)> for GetResponse {
+    fn from((result_vec, IncludeList(include_vec)): (GetResult, IncludeList)) -> Self {
+        let mut res = Self {
+            ids: Vec::new(),
+            embeddings: include_vec
+                .contains(&Include::Embedding)
+                .then_some(Vec::new()),
+            documents: include_vec
+                .contains(&Include::Document)
+                .then_some(Vec::new()),
+            uri: include_vec.contains(&Include::Uri).then_some(Vec::new()),
+            metadatas: include_vec
+                .contains(&Include::Metadata)
+                .then_some(Vec::new()),
+            include: include_vec,
+        };
+        for ProjectionRecord {
+            id,
+            document,
+            embedding,
+            mut metadata,
+        } in result_vec.records
+        {
+            res.ids.push(id);
+            if let (Some(emb), Some(embeddings)) = (embedding, res.embeddings.as_mut()) {
+                embeddings.push(emb);
+            }
+            if let (Some(doc), Some(documents)) = (document, res.documents.as_mut()) {
+                documents.push(doc);
+            }
+            if let (Some(crate::MetadataValue::Str(uri)), Some(uris)) = (
+                metadata
+                    .as_mut()
+                    .and_then(|meta| meta.remove(CHROMA_URI_KEY)),
+                res.uri.as_mut(),
+            ) {
+                uris.push(uri);
+            }
+            if let (Some(meta), Some(metadatas)) = (
+                metadata.map(|m| {
+                    Value::Object(
+                        m.into_iter()
+                            .filter(|(k, _)| !k.starts_with(CHROMA_KEY))
+                            .map(|(k, v)| (k, v.into()))
+                            .collect(),
+                    )
+                }),
+                res.metadatas.as_mut(),
+            ) {
+                metadatas.push(meta);
+            }
+        }
+        res
+    }
+}
+
+#[derive(Clone)]
+pub struct QueryRequest {
+    pub tenant_id: String,
+    pub database_name: String,
+    pub collection_id: CollectionUuid,
+    pub ids: Option<Vec<String>>,
+    pub r#where: Option<Where>,
+    pub embeddings: Vec<Vec<f32>>,
+    pub n_results: u32,
+    pub include: IncludeList,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+pub struct QueryResponse {
+    ids: Vec<Vec<String>>,
+    embeddings: Option<Vec<Vec<Vec<f32>>>>,
+    documents: Option<Vec<Vec<String>>>,
+    uri: Option<Vec<Vec<String>>>,
+    metadatas: Option<Vec<Vec<Value>>>,
+    distances: Option<Vec<Vec<f32>>>,
+    include: Vec<Include>,
+}
+
 impl From<(KnnBatchResult, IncludeList)> for QueryResponse {
-    fn from(
-        (
-            result_vec,
-            IncludeList {
-                includes: include_vec,
-            },
-        ): (KnnBatchResult, IncludeList),
-    ) -> Self {
+    fn from((result_vec, IncludeList(include_vec)): (KnnBatchResult, IncludeList)) -> Self {
         let mut res = Self {
             ids: Vec::new(),
             embeddings: include_vec
@@ -256,9 +484,12 @@ impl From<(KnnBatchResult, IncludeList)> for QueryResponse {
                     uris.push(uri);
                 }
                 if let Some(meta) = metadata.map(|m| {
-                    m.into_iter()
-                        .filter_map(|(k, v)| (!k.starts_with(CHROMA_KEY)).then_some((k, v)))
-                        .collect()
+                    Value::Object(
+                        m.into_iter()
+                            .filter(|(k, _)| !k.starts_with(CHROMA_KEY))
+                            .map(|(k, v)| (k, v.into()))
+                            .collect(),
+                    )
                 }) {
                     metadatas.push(meta);
                 }

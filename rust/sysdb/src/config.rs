@@ -1,11 +1,11 @@
 use crate::{GrpcSysDb, SysDb};
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 //////////////////////// GRPC SYSDB CONFIG ////////////////////////
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, Serialize)]
 pub struct GrpcSysDbConfig {
     pub host: String,
     pub port: u16,
@@ -23,7 +23,7 @@ fn default_num_channels() -> usize {
 
 //////////////////////// SYSDB CONFIG ////////////////////////
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, Serialize)]
 pub enum SysDbConfig {
     Grpc(GrpcSysDbConfig),
 }
