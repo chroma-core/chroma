@@ -127,6 +127,10 @@ where
 
     async fn run(&mut self) {
         if self.task_state != TaskState::NotStarted {
+            tracing::error!(
+                "Task {} is already running or has already finished",
+                self.task_id
+            );
             return;
         }
         self.task_state = TaskState::Running;
@@ -200,6 +204,10 @@ where
 
     async fn abort(&mut self) {
         if self.task_state != TaskState::NotStarted {
+            tracing::error!(
+                "Task {} is already running or has already finished",
+                self.task_id
+            );
             return;
         }
         self.task_state = TaskState::Aborted;
