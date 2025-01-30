@@ -159,17 +159,17 @@ struct CreateDatabasePayload {
 async fn create_database(
     Path(tenant_id): Path<String>,
     State(mut server): State<FrontendServer>,
-    Json(payload): Json<CreateDatabasePayload>,
+    Json(CreateDatabasePayload { name }): Json<CreateDatabasePayload>,
 ) -> Result<Json<CreateDatabaseResponse>, ServerError> {
     tracing::info!(
         "Creating database for tenant: {} and name: {}",
         tenant_id,
-        payload.name
+        name
     );
     let create_database_request = CreateDatabaseRequest {
         database_id: Uuid::new_v4(),
         tenant_id,
-        database_name: payload.name,
+        database_name: name,
     };
     let res = server
         .frontend
@@ -178,15 +178,28 @@ async fn create_database(
     Ok(Json(res))
 }
 
+#[derive(Deserialize)]
+struct ListDatabasesPayload {
+    limit: Option<u32>,
+    offset: u32,
+}
+
 async fn list_databases(
     Path(tenant_id): Path<String>,
     State(mut server): State<FrontendServer>,
+    Json(ListDatabasesPayload { limit, offset }): Json<ListDatabasesPayload>,
 ) -> Result<Json<ListDatabasesResponse>, ServerError> {
     tracing::info!("Listing database for tenant: {}", tenant_id);
-    let list_databases = server
-        .frontend
-        .list_databases(ListDatabasesRequest { tenant_id });
-    Ok(Json(list_databases.await?))
+    Ok(Json(
+        server
+            .frontend
+            .list_databases(ListDatabasesRequest {
+                tenant_id,
+                limit,
+                offset,
+            })
+            .await?,
+    ))
 }
 
 async fn get_database(

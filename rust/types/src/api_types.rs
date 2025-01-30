@@ -109,7 +109,7 @@ pub enum CreateDatabaseError {
     #[error("Database already exists")]
     AlreadyExists,
     #[error("Failed to create database: {0}")]
-    FailedToCreateDatabase(String),
+    SysDB(String),
     #[error("Rate limited")]
     RateLimited,
 }
@@ -118,7 +118,7 @@ impl ChromaError for CreateDatabaseError {
     fn code(&self) -> ErrorCodes {
         match self {
             CreateDatabaseError::AlreadyExists => ErrorCodes::AlreadyExists,
-            CreateDatabaseError::FailedToCreateDatabase(_) => ErrorCodes::Internal,
+            CreateDatabaseError::SysDB(_) => ErrorCodes::Internal,
             CreateDatabaseError::RateLimited => ErrorCodes::ResourceExhausted,
         }
     }
@@ -133,32 +133,27 @@ pub struct Database {
 
 pub struct ListDatabasesRequest {
     pub tenant_id: String,
+    pub limit: Option<u32>,
+    pub offset: u32,
 }
 
 pub type ListDatabasesResponse = Vec<Database>;
 
 #[derive(Debug, Error)]
-pub enum ListDatabasesError {}
+pub enum ListDatabasesError {
+    #[error("Server sent empty response")]
+    ResponseEmpty,
+    #[error("Failed to parse database id")]
+    IdParsingError,
+    #[error("Failed to get database: {0}")]
+    SysDB(String),
+    #[error("Rate limited")]
+    RateLimited,
+}
+
 impl ChromaError for ListDatabasesError {
     fn code(&self) -> ErrorCodes {
-        todo!()
-    }
-}
-
-pub struct DeleteDatabaseRequest {
-    pub tenant_id: String,
-    pub database_name: String,
-}
-
-#[derive(Serialize)]
-pub struct DeleteDatabaseResponse {}
-
-#[derive(Debug, Error)]
-pub enum DeleteDatabaseError {}
-
-impl ChromaError for DeleteDatabaseError {
-    fn code(&self) -> ErrorCodes {
-        todo!()
+        ErrorCodes::Internal
     }
 }
 
@@ -178,13 +173,46 @@ pub enum GetDatabaseError {
     #[error("Failed to parse database id")]
     IdParsingError,
     #[error("Failed to get database: {0}")]
-    FailedToGetDatabase(String),
+    SysDB(String),
+    #[error("Rate limited")]
+    RateLimited,
 }
 
 impl ChromaError for GetDatabaseError {
     fn code(&self) -> ErrorCodes {
         match self {
             GetDatabaseError::NotFound => ErrorCodes::NotFound,
+            _ => ErrorCodes::Internal,
+        }
+    }
+}
+
+pub struct DeleteDatabaseRequest {
+    pub tenant_id: String,
+    pub database_name: String,
+}
+
+#[derive(Serialize)]
+pub struct DeleteDatabaseResponse {}
+
+#[derive(Debug, Error)]
+pub enum DeleteDatabaseError {
+    #[error("Database not found")]
+    NotFound,
+    #[error("Server sent empty response")]
+    ResponseEmpty,
+    #[error("Failed to parse database id")]
+    IdParsingError,
+    #[error("Failed to get database: {0}")]
+    SysDB(String),
+    #[error("Rate limited")]
+    RateLimited,
+}
+
+impl ChromaError for DeleteDatabaseError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            DeleteDatabaseError::NotFound => ErrorCodes::NotFound,
             _ => ErrorCodes::Internal,
         }
     }
@@ -205,13 +233,15 @@ pub enum GetCollectionError {
     NotFound,
     #[error("Error getting collection from sysdb {0}")]
     SysDB(String),
+    #[error("Rate limited")]
+    RateLimited,
 }
 
 impl ChromaError for GetCollectionError {
     fn code(&self) -> ErrorCodes {
         match self {
             GetCollectionError::NotFound => ErrorCodes::NotFound,
-            GetCollectionError::SysDB(_) => ErrorCodes::Internal,
+            _ => ErrorCodes::Internal,
         }
     }
 }

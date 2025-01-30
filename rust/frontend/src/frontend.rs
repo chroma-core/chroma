@@ -149,31 +149,42 @@ impl Frontend {
         let _guard = self
             .scorecard_request(tags)
             .ok_or(CreateDatabaseError::RateLimited)?;
-        let res = self
-            .sysdb_client
+        self.sysdb_client
             .create_database(
                 request.database_id,
                 request.database_name,
                 request.tenant_id,
             )
-            .await;
-        match res {
-            Ok(()) => Ok(CreateDatabaseResponse {}),
-            Err(e) => Err(e),
-        }
+            .await
     }
 
     pub async fn list_databases(
         &mut self,
         request: ListDatabasesRequest,
     ) -> Result<ListDatabasesResponse, ListDatabasesError> {
-        todo!()
+        let tags = &[
+            "op:list_database",
+            &format!("tenant_id:{}", request.tenant_id),
+        ];
+        let _guard = self
+            .scorecard_request(tags)
+            .ok_or(ListDatabasesError::RateLimited)?;
+        self.sysdb_client
+            .list_databases(request.tenant_id, request.limit, request.offset)
+            .await
     }
 
     pub async fn get_database(
         &mut self,
         request: GetDatabaseRequest,
     ) -> Result<GetDatabaseResponse, GetDatabaseError> {
+        let tags = &[
+            "op:get_database",
+            &format!("tenant_id:{}", request.tenant_id),
+        ];
+        let _guard = self
+            .scorecard_request(tags)
+            .ok_or(GetDatabaseError::RateLimited)?;
         self.sysdb_client
             .get_database(request.database_name, request.tenant_id)
             .await
@@ -183,7 +194,16 @@ impl Frontend {
         &mut self,
         request: DeleteDatabaseRequest,
     ) -> Result<DeleteDatabaseResponse, DeleteDatabaseError> {
-        todo!()
+        let tags = &[
+            "op:delete_database",
+            &format!("tenant_id:{}", request.tenant_id),
+        ];
+        let _guard = self
+            .scorecard_request(tags)
+            .ok_or(DeleteDatabaseError::RateLimited)?;
+        self.sysdb_client
+            .delete_database(request.database_name, request.tenant_id)
+            .await
     }
 
     pub async fn get_collection(
