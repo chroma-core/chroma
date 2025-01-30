@@ -48,6 +48,12 @@ pub struct ChecklistResponse {
 }
 
 #[derive(Serialize)]
+pub struct HealthCheckResponse {
+    #[serde(rename(serialize = "nanosecond heartbeat"))]
+    pub nanosecond_heartbeat: u128,
+}
+
+#[derive(Serialize)]
 pub struct GetUserIdentityResponse {
     pub user_id: String,
     pub tenant: String,

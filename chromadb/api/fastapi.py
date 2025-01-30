@@ -62,7 +62,9 @@ class FastAPI(BaseHTTPClient, ServerAPI):
 
         self._session = httpx.Client(timeout=None)
 
-        self._header = system.settings.chroma_server_headers
+        self._header = system.settings.chroma_server_headers or {}
+        self._header["Content-Type"] = "application/json"
+
         if self._header is not None:
             self._session.headers.update(self._header)
         if self._settings.chroma_server_ssl_verify is not None:

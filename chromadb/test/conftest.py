@@ -375,10 +375,17 @@ def fastapi_ssl() -> Generator[System, None, None]:
 
 
 def basic_http_client() -> Generator[System, None, None]:
+    port = 8000
+    host = "localhost"
+
+    if os.getenv("CHROMA_SERVER_HOST"):
+        host = os.getenv("CHROMA_SERVER_HOST", "").split(":")[0]
+        port = int(os.getenv("CHROMA_SERVER_HOST", "").split(":")[1])
+
     settings = Settings(
         chroma_api_impl="chromadb.api.fastapi.FastAPI",
-        chroma_server_http_port=8000,
-        chroma_server_host="localhost",
+        chroma_server_http_port=port,
+        chroma_server_host=host,
         allow_reset=True,
     )
     system = System(settings)
@@ -802,6 +809,7 @@ def client_factories(system: System) -> Generator[ClientFactories, None, None]:
 
 @pytest.fixture(scope="function")
 def client(system: System) -> Generator[ClientAPI, None, None]:
+    print("Resetting state")
     system.reset_state()
 
     if system.settings.chroma_api_impl == "chromadb.api.async_fastapi.AsyncFastAPI":

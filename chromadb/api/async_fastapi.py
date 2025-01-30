@@ -106,9 +106,12 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             loop_hash = 0
 
         if loop_hash not in self._clients:
+            headers = (self._settings.chroma_server_headers or {}).copy()
+            headers["Content-Type"] = "application/json"
+
             self._clients[loop_hash] = httpx.AsyncClient(
                 timeout=None,
-                headers=self._settings.chroma_server_headers,
+                headers=headers,
                 verify=self._settings.chroma_server_ssl_verify or False,
             )
 
