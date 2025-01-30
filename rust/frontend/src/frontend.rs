@@ -5,15 +5,20 @@ use crate::{
 };
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
-use chroma_sysdb::sysdb;
+use chroma_sysdb::{sysdb, GetCollectionsError};
 use chroma_system::System;
 use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection},
     plan::{Count, Get, Knn},
-    CollectionUuid, CountRequest, CountResponse, CreateDatabaseError, CreateDatabaseRequest,
-    CreateDatabaseResponse, GetCollectionError, GetCollectionRequest, GetCollectionResponse,
-    GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, Include,
-    QueryError, QueryRequest, QueryResponse,
+    AddToCollectionError, AddToCollectionRequest, AddToCollectionResponse, CollectionUuid,
+    CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
+    CreateDatabaseError, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantError,
+    CreateTenantRequest, CreateTenantResponse, DeleteDatabaseError, DeleteDatabaseRequest,
+    DeleteDatabaseResponse, GetCollectionError, GetCollectionRequest, GetCollectionResponse,
+    GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
+    GetTenantError, GetTenantRequest, GetTenantResponse, Include, ListCollectionsRequest,
+    ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
+    QueryError, QueryRequest, QueryResponse, ResetError,
 };
 use chroma_types::{
     Operation, OperationRecord, ScalarEncoding, UpdateMetadata, UpdateMetadataValue,
@@ -56,7 +61,6 @@ impl ChromaError for ScorecardRuleError {
 
 #[derive(Clone, Debug)]
 pub struct Frontend {
-    #[allow(dead_code)]
     executor: Executor,
     log_client: Box<chroma_log::Log>,
     scorecard_enabled: Arc<AtomicBool>,
@@ -104,6 +108,37 @@ impl Frontend {
         }
     }
 
+    #[allow(dead_code)]
+    pub async fn reset(&mut self) -> Result<(), ResetError> {
+        self.collections_with_segments_provider
+            .collections_with_segments_cache
+            .clear()
+            .await
+            .map_err(|_| ResetError::Cache)
+    }
+
+    pub async fn create_tenant(
+        &mut self,
+        request: CreateTenantRequest,
+    ) -> Result<CreateTenantResponse, CreateTenantError> {
+        let tags = &["op:create_tenant"];
+        let _guard = self
+            .scorecard_request(tags)
+            .ok_or(CreateTenantError::RateLimited)?;
+        self.sysdb_client.create_tenant(request.name).await
+    }
+
+    pub async fn get_tenant(
+        &mut self,
+        request: GetTenantRequest,
+    ) -> Result<GetTenantResponse, GetTenantError> {
+        let tags = &["op:get_tenant"];
+        let _guard = self
+            .scorecard_request(tags)
+            .ok_or(GetTenantError::RateLimited)?;
+        self.sysdb_client.get_tenant(request.name).await
+    }
+
     pub async fn create_database(
         &mut self,
         request: CreateDatabaseRequest,
@@ -116,27 +151,90 @@ impl Frontend {
         let _guard = self
             .scorecard_request(tags)
             .ok_or(CreateDatabaseError::RateLimited)?;
-        let res = self
-            .sysdb_client
+        self.sysdb_client
             .create_database(
                 request.database_id,
                 request.database_name,
                 request.tenant_id,
             )
-            .await;
-        match res {
-            Ok(()) => Ok(CreateDatabaseResponse {}),
-            Err(e) => Err(e),
-        }
+            .await
+    }
+
+    pub async fn list_databases(
+        &mut self,
+        request: ListDatabasesRequest,
+    ) -> Result<ListDatabasesResponse, ListDatabasesError> {
+        let tags = &[
+            "op:list_database",
+            &format!("tenant_id:{}", request.tenant_id),
+        ];
+        let _guard = self
+            .scorecard_request(tags)
+            .ok_or(ListDatabasesError::RateLimited)?;
+        self.sysdb_client
+            .list_databases(request.tenant_id, request.limit, request.offset)
+            .await
     }
 
     pub async fn get_database(
         &mut self,
         request: GetDatabaseRequest,
     ) -> Result<GetDatabaseResponse, GetDatabaseError> {
+        let tags = &[
+            "op:get_database",
+            &format!("tenant_id:{}", request.tenant_id),
+        ];
+        let _guard = self
+            .scorecard_request(tags)
+            .ok_or(GetDatabaseError::RateLimited)?;
         self.sysdb_client
             .get_database(request.database_name, request.tenant_id)
             .await
+    }
+
+    pub async fn delete_database(
+        &mut self,
+        request: DeleteDatabaseRequest,
+    ) -> Result<DeleteDatabaseResponse, DeleteDatabaseError> {
+        let tags = &[
+            "op:delete_database",
+            &format!("tenant_id:{}", request.tenant_id),
+        ];
+        let _guard = self
+            .scorecard_request(tags)
+            .ok_or(DeleteDatabaseError::RateLimited)?;
+        self.sysdb_client
+            .delete_database(request.database_name, request.tenant_id)
+            .await
+    }
+
+    pub async fn list_collections(
+        &mut self,
+        request: ListCollectionsRequest,
+    ) -> Result<ListCollectionsResponse, GetCollectionsError> {
+        self.sysdb_client
+            .get_collections(
+                None,
+                None,
+                Some(request.tenant_id),
+                Some(request.database_name),
+            )
+            .await
+    }
+
+    pub async fn count_collections(
+        &mut self,
+        request: CountCollectionsRequest,
+    ) -> Result<CountCollectionsResponse, GetCollectionsError> {
+        self.sysdb_client
+            .get_collections(
+                None,
+                None,
+                Some(request.tenant_id),
+                Some(request.database_name),
+            )
+            .await
+            .map(|collections| collections.len() as u32)
     }
 
     pub async fn get_collection(
@@ -158,8 +256,8 @@ impl Frontend {
 
     pub async fn add(
         &mut self,
-        request: chroma_types::AddToCollectionRequest,
-    ) -> Result<chroma_types::AddToCollectionResponse, chroma_types::AddToCollectionError> {
+        request: AddToCollectionRequest,
+    ) -> Result<AddToCollectionResponse, AddToCollectionError> {
         let collection_id = CollectionUuid(request.collection_id);
 
         let chroma_types::AddToCollectionRequest {

@@ -6,8 +6,10 @@ use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
 use chroma_types::{
-    chroma_proto, CollectionAndSegments, CreateDatabaseError, GetDatabaseError,
-    GetDatabaseResponse, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
+    chroma_proto, CollectionAndSegments, CreateDatabaseError, CreateDatabaseResponse,
+    CreateTenantError, CreateTenantResponse, Database, DeleteDatabaseError, DeleteDatabaseResponse,
+    GetDatabaseError, GetDatabaseResponse, GetTenantError, GetTenantResponse, ListDatabasesError,
+    ListDatabasesResponse, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
 };
 use chroma_types::{
     Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
@@ -32,6 +34,55 @@ pub enum SysDb {
 }
 
 impl SysDb {
+    pub async fn create_tenant(
+        &mut self,
+        tenant_name: String,
+    ) -> Result<CreateTenantResponse, CreateTenantError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.create_tenant(tenant_name).await,
+            SysDb::Test(_) => todo!(),
+        }
+    }
+
+    pub async fn get_tenant(
+        &mut self,
+        tenant_name: String,
+    ) -> Result<GetTenantResponse, GetTenantError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.get_tenant(tenant_name).await,
+            SysDb::Test(_) => todo!(),
+        }
+    }
+
+    pub async fn create_database(
+        &mut self,
+        database_id: Uuid,
+        database_name: String,
+        tenant: String,
+    ) -> Result<CreateDatabaseResponse, CreateDatabaseError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.create_database(database_id, database_name, tenant)
+                    .await
+            }
+            SysDb::Test(_) => {
+                todo!()
+            }
+        }
+    }
+
+    pub async fn list_databases(
+        &mut self,
+        tenant_id: String,
+        limit: Option<u32>,
+        offset: u32,
+    ) -> Result<ListDatabasesResponse, ListDatabasesError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.list_databases(tenant_id, limit, offset).await,
+            SysDb::Test(_) => todo!(),
+        }
+    }
+
     pub async fn get_database(
         &mut self,
         database_name: String,
@@ -43,20 +94,14 @@ impl SysDb {
         }
     }
 
-    pub async fn create_database(
+    pub async fn delete_database(
         &mut self,
-        database_id: Uuid,
         database_name: String,
         tenant: String,
-    ) -> Result<(), CreateDatabaseError> {
+    ) -> Result<DeleteDatabaseResponse, DeleteDatabaseError> {
         match self {
-            SysDb::Grpc(grpc) => {
-                grpc.create_database(database_id, database_name, tenant)
-                    .await
-            }
-            SysDb::Test(_) => {
-                todo!()
-            }
+            SysDb::Grpc(grpc) => grpc.delete_database(database_name, tenant).await,
+            SysDb::Test(_) => todo!(),
         }
     }
 
@@ -263,6 +308,92 @@ impl TryFrom<chroma_proto::CollectionToGcInfo> for CollectionToGcInfo {
 }
 
 impl GrpcSysDb {
+    pub async fn create_tenant(
+        &mut self,
+        tenant_name: String,
+    ) -> Result<CreateTenantResponse, CreateTenantError> {
+        let req = chroma_proto::CreateTenantRequest { name: tenant_name };
+        match self.client.create_tenant(req).await {
+            Ok(_) => Ok(CreateTenantResponse {}),
+            Err(err) if matches!(err.code(), Code::AlreadyExists) => {
+                Err(CreateTenantError::AlreadyExists)
+            }
+            Err(err) => Err(CreateTenantError::SysDB(err.to_string())),
+        }
+    }
+
+    pub async fn get_tenant(
+        &mut self,
+        tenant_name: String,
+    ) -> Result<GetTenantResponse, GetTenantError> {
+        let req = chroma_proto::GetTenantRequest { name: tenant_name };
+        match self.client.get_tenant(req).await {
+            Ok(resp) => Ok(GetTenantResponse {
+                name: resp
+                    .into_inner()
+                    .tenant
+                    .ok_or(GetTenantError::ResponseEmpty)?
+                    .name,
+            }),
+            Err(err) => Err(GetTenantError::SysDB(err.to_string())),
+        }
+    }
+
+    pub async fn create_database(
+        &mut self,
+        database_id: Uuid,
+        database_name: String,
+        tenant: String,
+    ) -> Result<CreateDatabaseResponse, CreateDatabaseError> {
+        let req = chroma_proto::CreateDatabaseRequest {
+            id: database_id.to_string(),
+            name: database_name,
+            tenant,
+        };
+        let res = self.client.create_database(req).await;
+        match res {
+            Ok(_) => Ok(CreateDatabaseResponse {}),
+            Err(e) => {
+                tracing::error!("Failed to create database {:?}", e);
+                let res = match e.code() {
+                    Code::AlreadyExists => CreateDatabaseError::AlreadyExists,
+                    _ => CreateDatabaseError::SysDB(e.to_string()),
+                };
+                Err(res)
+            }
+        }
+    }
+
+    pub async fn list_databases(
+        &mut self,
+        tenant: String,
+        limit: Option<u32>,
+        offset: u32,
+    ) -> Result<ListDatabasesResponse, ListDatabasesError> {
+        let req = chroma_proto::ListDatabasesRequest {
+            tenant,
+            limit: limit.map(|l| l as i32),
+            offset: Some(offset as i32),
+        };
+        match self.client.list_databases(req).await {
+            Ok(resp) => Ok(resp
+                .into_inner()
+                .databases
+                .into_iter()
+                .map(|db| {
+                    Uuid::parse_str(&db.id)
+                        .map_err(|_| ListDatabasesError::IdParsingError)
+                        .map(|id| Database {
+                            id,
+                            name: db.name,
+                            tenant: db.tenant,
+                        })
+                })
+                .collect::<Result<_, _>>())?,
+            Err(err) => Err(ListDatabasesError::SysDB(err.to_string())),
+        }
+    }
+
     pub async fn get_database(
         &mut self,
         database_name: String,
@@ -284,44 +415,35 @@ impl GrpcSysDb {
                     Err(_) => return Err(GetDatabaseError::IdParsingError),
                 };
                 Ok(GetDatabaseResponse {
-                    database_id: db_id,
-                    database_name: res.name,
-                    tenant_id: res.tenant,
+                    id: db_id,
+                    name: res.name,
+                    tenant: res.tenant,
                 })
             }
             Err(e) => {
                 tracing::error!("Failed to get database {:?}", e);
                 let res = match e.code() {
                     Code::NotFound => GetDatabaseError::NotFound,
-                    _ => GetDatabaseError::FailedToGetDatabase(e.to_string()),
+                    _ => GetDatabaseError::SysDB(e.to_string()),
                 };
                 Err(res)
             }
         }
     }
 
-    pub async fn create_database(
+    async fn delete_database(
         &mut self,
-        database_id: Uuid,
         database_name: String,
         tenant: String,
-    ) -> Result<(), CreateDatabaseError> {
-        let req = chroma_proto::CreateDatabaseRequest {
-            id: database_id.to_string(),
+    ) -> Result<DeleteDatabaseResponse, DeleteDatabaseError> {
+        let req = chroma_proto::DeleteDatabaseRequest {
             name: database_name,
             tenant,
         };
-        let res = self.client.create_database(req).await;
-        match res {
-            Ok(_) => Ok(()),
-            Err(e) => {
-                tracing::error!("Failed to create database {:?}", e);
-                let res = match e.code() {
-                    Code::AlreadyExists => CreateDatabaseError::AlreadyExists,
-                    _ => CreateDatabaseError::FailedToCreateDatabase(e.to_string()),
-                };
-                Err(res)
-            }
+        match self.client.delete_database(req).await {
+            Ok(_) => Ok(DeleteDatabaseResponse {}),
+            Err(err) if matches!(err.code(), Code::NotFound) => Err(DeleteDatabaseError::NotFound),
+            Err(err) => Err(DeleteDatabaseError::SysDB(err.to_string())),
         }
     }
 

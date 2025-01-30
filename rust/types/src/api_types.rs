@@ -16,26 +16,92 @@ use thiserror::Error;
 use tonic::Status;
 use uuid::Uuid;
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Debug, Error)]
+pub enum ResetError {
+    #[error("Unable to reset cache")]
+    Cache,
+    #[error("Rate limited")]
+    RateLimited,
+}
+
+impl ChromaError for ResetError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::Internal
+    }
+}
+
+#[derive(Serialize)]
+pub struct ChecklistResponse {
+    pub max_batch_size: u32,
+}
+
+#[derive(Serialize)]
 pub struct GetUserIdentityResponse {
     pub user_id: String,
     pub tenant: String,
     pub databases: Vec<String>,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Deserialize)]
+pub struct CreateTenantRequest {
+    pub name: String,
+}
+
+#[derive(Serialize)]
+pub struct CreateTenantResponse {}
+
+#[derive(Debug, Error)]
+pub enum CreateTenantError {
+    #[error("Tenant already exists")]
+    AlreadyExists,
+    #[error("Rate limited")]
+    RateLimited,
+    #[error("Failed to create tenant: {0}")]
+    SysDB(String),
+}
+
+impl ChromaError for CreateTenantError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            CreateTenantError::AlreadyExists => ErrorCodes::AlreadyExists,
+            CreateTenantError::SysDB(_) => ErrorCodes::Internal,
+            CreateTenantError::RateLimited => ErrorCodes::ResourceExhausted,
+        }
+    }
+}
+
+pub struct GetTenantRequest {
+    pub name: String,
+}
+
+#[derive(Serialize)]
 pub struct GetTenantResponse {
     pub name: String,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Error)]
+pub enum GetTenantError {
+    #[error("Server sent empty response")]
+    ResponseEmpty,
+    #[error("Rate limited")]
+    RateLimited,
+    #[error("Failed to get tenant: {0}")]
+    SysDB(String),
+}
+
+impl ChromaError for GetTenantError {
+    fn code(&self) -> ErrorCodes {
+        todo!()
+    }
+}
+
 pub struct CreateDatabaseRequest {
     pub database_id: Uuid,
     pub tenant_id: String,
     pub database_name: String,
 }
 
-#[derive(Clone)]
+#[derive(Serialize)]
 pub struct CreateDatabaseResponse {}
 
 #[derive(Error, Debug)]
@@ -43,7 +109,7 @@ pub enum CreateDatabaseError {
     #[error("Database already exists")]
     AlreadyExists,
     #[error("Failed to create database: {0}")]
-    FailedToCreateDatabase(String),
+    SysDB(String),
     #[error("Rate limited")]
     RateLimited,
 }
@@ -52,24 +118,51 @@ impl ChromaError for CreateDatabaseError {
     fn code(&self) -> ErrorCodes {
         match self {
             CreateDatabaseError::AlreadyExists => ErrorCodes::AlreadyExists,
-            CreateDatabaseError::FailedToCreateDatabase(_) => ErrorCodes::Internal,
+            CreateDatabaseError::SysDB(_) => ErrorCodes::Internal,
             CreateDatabaseError::RateLimited => ErrorCodes::ResourceExhausted,
         }
     }
 }
 
-#[derive(Clone)]
+#[derive(Serialize)]
+pub struct Database {
+    pub id: Uuid,
+    pub name: String,
+    pub tenant: String,
+}
+
+pub struct ListDatabasesRequest {
+    pub tenant_id: String,
+    pub limit: Option<u32>,
+    pub offset: u32,
+}
+
+pub type ListDatabasesResponse = Vec<Database>;
+
+#[derive(Debug, Error)]
+pub enum ListDatabasesError {
+    #[error("Server sent empty response")]
+    ResponseEmpty,
+    #[error("Failed to parse database id")]
+    IdParsingError,
+    #[error("Failed to list database: {0}")]
+    SysDB(String),
+    #[error("Rate limited")]
+    RateLimited,
+}
+
+impl ChromaError for ListDatabasesError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::Internal
+    }
+}
+
 pub struct GetDatabaseRequest {
     pub tenant_id: String,
     pub database_name: String,
 }
 
-#[derive(Clone)]
-pub struct GetDatabaseResponse {
-    pub database_id: Uuid,
-    pub database_name: String,
-    pub tenant_id: String,
-}
+pub type GetDatabaseResponse = Database;
 
 #[derive(Error, Debug)]
 pub enum GetDatabaseError {
@@ -80,7 +173,9 @@ pub enum GetDatabaseError {
     #[error("Failed to parse database id")]
     IdParsingError,
     #[error("Failed to get database: {0}")]
-    FailedToGetDatabase(String),
+    SysDB(String),
+    #[error("Rate limited")]
+    RateLimited,
 }
 
 impl ChromaError for GetDatabaseError {
@@ -92,7 +187,51 @@ impl ChromaError for GetDatabaseError {
     }
 }
 
-#[derive(Clone)]
+pub struct DeleteDatabaseRequest {
+    pub tenant_id: String,
+    pub database_name: String,
+}
+
+#[derive(Serialize)]
+pub struct DeleteDatabaseResponse {}
+
+#[derive(Debug, Error)]
+pub enum DeleteDatabaseError {
+    #[error("Database not found")]
+    NotFound,
+    #[error("Server sent empty response")]
+    ResponseEmpty,
+    #[error("Failed to parse database id")]
+    IdParsingError,
+    #[error("Failed to delete database: {0}")]
+    SysDB(String),
+    #[error("Rate limited")]
+    RateLimited,
+}
+
+impl ChromaError for DeleteDatabaseError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            DeleteDatabaseError::NotFound => ErrorCodes::NotFound,
+            _ => ErrorCodes::Internal,
+        }
+    }
+}
+
+pub struct ListCollectionsRequest {
+    pub tenant_id: String,
+    pub database_name: String,
+}
+
+pub type ListCollectionsResponse = Vec<Collection>;
+
+pub struct CountCollectionsRequest {
+    pub tenant_id: String,
+    pub database_name: String,
+}
+
+pub type CountCollectionsResponse = u32;
+
 pub struct GetCollectionRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -107,13 +246,15 @@ pub enum GetCollectionError {
     NotFound,
     #[error("Error getting collection from sysdb {0}")]
     SysDB(String),
+    #[error("Rate limited")]
+    RateLimited,
 }
 
 impl ChromaError for GetCollectionError {
     fn code(&self) -> ErrorCodes {
         match self {
             GetCollectionError::NotFound => ErrorCodes::NotFound,
-            GetCollectionError::SysDB(_) => ErrorCodes::Internal,
+            _ => ErrorCodes::Internal,
         }
     }
 }
@@ -187,6 +328,9 @@ pub struct CountRequest {
 }
 
 pub type CountResponse = u32;
+
+pub const CHROMA_KEY: &str = "chroma:";
+pub const CHROMA_URI_KEY: &str = "chroma:uri";
 
 #[derive(Clone)]
 pub struct GetRequest {
@@ -288,9 +432,6 @@ pub struct QueryResponse {
     distances: Option<Vec<Vec<f32>>>,
     include: Vec<Include>,
 }
-
-pub const CHROMA_KEY: &str = "chroma:";
-pub const CHROMA_URI_KEY: &str = "chroma:uri";
 
 impl From<(KnnBatchResult, IncludeList)> for QueryResponse {
     fn from((result_vec, IncludeList(include_vec)): (KnnBatchResult, IncludeList)) -> Self {

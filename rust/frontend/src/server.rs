@@ -1,23 +1,32 @@
-use crate::ac::AdmissionControlledService;
-use crate::config::FrontendConfig;
-use crate::frontend::Frontend;
-use crate::tower_tracing::add_tracing_middleware;
-use crate::types::errors::{ServerError, ValidationError};
-use crate::types::where_parsing::RawWhereFields;
-use axum::ServiceExt;
+use std::str::FromStr;
+
 use axum::{
     extract::{Path, State},
-    routing::{get, post},
-    Json, Router,
+    routing::{delete, get, post},
+    Json, Router, ServiceExt,
 };
 use chroma_types::{
-    AddToCollectionResponse, Collection, CollectionUuid, CountRequest, CountResponse,
-    CreateDatabaseRequest, GetCollectionRequest, GetDatabaseRequest, GetRequest, GetResponse,
-    GetTenantResponse, GetUserIdentityResponse, IncludeList, Metadata, QueryRequest, QueryResponse,
+    AddToCollectionResponse, ChecklistResponse, Collection, CollectionUuid,
+    CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
+    CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
+    DeleteDatabaseRequest, DeleteDatabaseResponse, GetCollectionRequest, GetDatabaseRequest,
+    GetDatabaseResponse, GetRequest, GetResponse, GetTenantRequest, GetTenantResponse,
+    GetUserIdentityResponse, IncludeList, ListCollectionsRequest, ListCollectionsResponse,
+    ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
 };
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
 use uuid::Uuid;
+
+use crate::{
+    ac::AdmissionControlledService,
+    frontend::Frontend,
+    tower_tracing::add_tracing_middleware,
+    types::{
+        errors::{ServerError, ValidationError},
+        where_parsing::RawWhereFields,
+    },
+    FrontendConfig,
+};
 
 #[derive(Clone)]
 pub(crate) struct FrontendServer {
@@ -35,22 +44,37 @@ impl FrontendServer {
         let circuit_breaker_config = server.config.circuit_breaker.clone();
         let app = Router::new()
             // `GET /` goes to `root`
-            .route("/", get(root))
+            .route("/api/v2", get(root))
+            .route("/api/v2/heartbeat", get(heartbeat))
+            .route("/api/v2/pre-flight-checks", get(pre_flight_checks))
+            .route("/api/v2/reset", post(reset))
+            .route("/api/v2/version", get(version))
             .route("/api/v2/auth/identity", get(get_user_identity))
-            .route("/api/v2/tenants/:tenant_id", get(get_tenant))
+            .route("/api/v2/tenants", post(create_tenant))
+            .route("/api/v2/tenants/:tenant_name", get(get_tenant))
             .route("/api/v2/tenants/:tenant_id/databases", post(create_database))
+            .route("/api/v2/tenants/:tenant_id/databases", get(list_databases))
             .route("/api/v2/tenants/:tenant_id/databases/:name", get(get_database))
+            .route("/api/v2/tenants/:tenant_id/databases/:name", delete(delete_database))
+            .route(
+                "/api/v2/tenants/:tenant_id/databases/:database_name/collections",
+                get(list_collections),
+            )
+            .route(
+                "/api/v2/tenants/:tenant_id/databases/:database_name/collections_count",
+                get(count_collections),
+            )
             .route(
                 "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_name",
                 get(get_collection),
             )
             .route(
                 "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/add",
-                post(add),
+                post(collection_add),
             )
             .route(
                 "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_id/count",
-                get(count),
+                get(collection_count),
             )
             .route(
                 "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_id/get",
@@ -58,7 +82,7 @@ impl FrontendServer {
             )
             .route(
                 "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_id/query",
-                post(query),
+                post(collection_query),
             )
             .with_state(server);
         let app = add_tracing_middleware(app);
@@ -75,12 +99,6 @@ impl FrontendServer {
             axum::serve(listener, app).await.unwrap();
         };
     }
-
-    ////////////////////////// Method Implementations //////////////////////
-
-    fn root(&self) -> &'static str {
-        "Hello, World!"
-    }
 }
 
 ////////////////////////// Method Handlers //////////////////////////
@@ -88,8 +106,29 @@ impl FrontendServer {
 // the appropriate method on the `FrontendServer` struct.
 
 // Dummy implementation for now
-async fn root(State(server): State<FrontendServer>) -> &'static str {
-    server.root()
+async fn root() -> &'static str {
+    "Chroma Rust Frontend"
+}
+
+async fn heartbeat() -> &'static str {
+    "<Heartbeat.wav>"
+}
+
+// Dummy implementation for now
+async fn pre_flight_checks() -> Result<Json<ChecklistResponse>, ServerError> {
+    Ok(Json(ChecklistResponse {
+        max_batch_size: 100,
+    }))
+}
+
+async fn reset(State(mut _server): State<FrontendServer>) -> Result<(), ServerError> {
+    // TODO: Allow reset based on config
+    // server.frontend.reset().await?;
+    Ok(())
+}
+
+async fn version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
 }
 
 // Dummy implementation for now
@@ -101,11 +140,25 @@ async fn get_user_identity() -> Json<GetUserIdentityResponse> {
     })
 }
 
-// Dummy implementation for now
-async fn get_tenant() -> Json<GetTenantResponse> {
-    Json(GetTenantResponse {
-        name: "default_tenant".to_string(),
-    })
+async fn create_tenant(
+    State(mut server): State<FrontendServer>,
+    Json(request): Json<CreateTenantRequest>,
+) -> Result<Json<CreateTenantResponse>, ServerError> {
+    tracing::info!("Creating tenant with name: {}", request.name);
+    Ok(Json(server.frontend.create_tenant(request).await?))
+}
+
+async fn get_tenant(
+    Path(name): Path<String>,
+    State(mut server): State<FrontendServer>,
+) -> Result<Json<GetTenantResponse>, ServerError> {
+    tracing::info!("Getting tenant with name: {}", name);
+    Ok(Json(
+        server
+            .frontend
+            .get_tenant(GetTenantRequest { name })
+            .await?,
+    ))
 }
 
 #[derive(Deserialize, Debug)]
@@ -116,36 +169,53 @@ struct CreateDatabasePayload {
 async fn create_database(
     Path(tenant_id): Path<String>,
     State(mut server): State<FrontendServer>,
-    Json(payload): Json<CreateDatabasePayload>,
-) -> Result<(), ServerError> {
+    Json(CreateDatabasePayload { name }): Json<CreateDatabasePayload>,
+) -> Result<Json<CreateDatabaseResponse>, ServerError> {
     tracing::info!(
-        "Creating database for tenant: {} and name: {:?}",
+        "Creating database for tenant: {} and name: {}",
         tenant_id,
-        payload
+        name
     );
     let create_database_request = CreateDatabaseRequest {
         database_id: Uuid::new_v4(),
         tenant_id,
-        database_name: payload.name,
+        database_name: name,
     };
-    server
+    let res = server
         .frontend
         .create_database(create_database_request)
         .await?;
-    Ok(())
+    Ok(Json(res))
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct GetDatabaseResponsePayload {
-    id: Uuid,
-    name: String,
-    tenant: String,
+#[derive(Deserialize)]
+struct ListDatabasesPayload {
+    limit: Option<u32>,
+    offset: u32,
+}
+
+async fn list_databases(
+    Path(tenant_id): Path<String>,
+    State(mut server): State<FrontendServer>,
+    Json(ListDatabasesPayload { limit, offset }): Json<ListDatabasesPayload>,
+) -> Result<Json<ListDatabasesResponse>, ServerError> {
+    tracing::info!("Listing database for tenant: {}", tenant_id);
+    Ok(Json(
+        server
+            .frontend
+            .list_databases(ListDatabasesRequest {
+                tenant_id,
+                limit,
+                offset,
+            })
+            .await?,
+    ))
 }
 
 async fn get_database(
     Path((tenant_id, database_name)): Path<(String, String)>,
     State(mut server): State<FrontendServer>,
-) -> Result<Json<GetDatabaseResponsePayload>, ServerError> {
+) -> Result<Json<GetDatabaseResponse>, ServerError> {
     tracing::info!(
         "Getting database for tenant: {} and name: {}",
         tenant_id,
@@ -158,11 +228,57 @@ async fn get_database(
             database_name,
         })
         .await?;
-    Ok(Json(GetDatabaseResponsePayload {
-        id: res.database_id,
-        name: res.database_name,
-        tenant: res.tenant_id,
-    }))
+    Ok(Json(res))
+}
+
+async fn delete_database(
+    Path((tenant_id, database_name)): Path<(String, String)>,
+    State(mut server): State<FrontendServer>,
+) -> Result<Json<DeleteDatabaseResponse>, ServerError> {
+    tracing::info!(
+        "Deleting database for tenant: {} and name: {}",
+        tenant_id,
+        database_name
+    );
+    Ok(Json(
+        server
+            .frontend
+            .delete_database(DeleteDatabaseRequest {
+                tenant_id,
+                database_name,
+            })
+            .await?,
+    ))
+}
+
+async fn list_collections(
+    Path((tenant_id, database_name)): Path<(String, String)>,
+    State(mut server): State<FrontendServer>,
+) -> Result<Json<ListCollectionsResponse>, ServerError> {
+    Ok(Json(
+        server
+            .frontend
+            .list_collections(ListCollectionsRequest {
+                tenant_id,
+                database_name,
+            })
+            .await?,
+    ))
+}
+
+async fn count_collections(
+    Path((tenant_id, database_name)): Path<(String, String)>,
+    State(mut server): State<FrontendServer>,
+) -> Result<Json<CountCollectionsResponse>, ServerError> {
+    Ok(Json(
+        server
+            .frontend
+            .count_collections(CountCollectionsRequest {
+                tenant_id,
+                database_name,
+            })
+            .await?,
+    ))
 }
 
 async fn get_collection(
@@ -200,7 +316,7 @@ pub struct AddToCollectionPayload {
     metadatas: Option<Vec<Metadata>>,
 }
 
-async fn add(
+async fn collection_add(
     Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
     Json(payload): Json<AddToCollectionPayload>,
@@ -208,7 +324,7 @@ async fn add(
     let collection_id =
         Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
 
-    server
+    let res = server
         .frontend
         .add(chroma_types::AddToCollectionRequest {
             tenant_id,
@@ -222,10 +338,10 @@ async fn add(
         })
         .await?;
 
-    Ok(Json(AddToCollectionResponse {}))
+    Ok(Json(res))
 }
 
-async fn count(
+async fn collection_count(
     Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<CountResponse>, ServerError> {
@@ -282,7 +398,7 @@ async fn collection_get(
     Ok(Json(res))
 }
 
-async fn query(
+async fn collection_query(
     Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
     Json(payload): Json<QueryRequestPayload>,
