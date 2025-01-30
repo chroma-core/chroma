@@ -78,11 +78,12 @@ impl DistributedExecutor {
     pub async fn count(&mut self, plan: Count) -> Result<CountResult, ExecutorError> {
         let clients = self.clients(plan.scan.collection_and_segments.collection.collection_id)?;
         let res = (|| async {
-            let mut curr_client = clients
+            clients
                 .choose(&mut rand::thread_rng())
-                .expect("Clients should not be empty")
-                .clone();
-            curr_client.count(Request::new(plan.clone().into())).await
+                .ok_or(no_clients_found_status())?
+                .clone()
+                .count(Request::new(plan.clone().into()))
+                .await
         })
         .retry(ExponentialBuilder::default())
         .when(is_retryable_error)
@@ -94,11 +95,10 @@ impl DistributedExecutor {
     pub async fn get(&mut self, plan: Get) -> Result<GetResult, ExecutorError> {
         let clients = self.clients(plan.scan.collection_and_segments.collection.collection_id)?;
         let res = (|| async {
-            let mut curr_client = clients
+            clients
                 .choose(&mut rand::thread_rng())
-                .expect("Clients should not be empty")
-                .clone();
-            curr_client
+                .ok_or(no_clients_found_status())?
+                .clone()
                 .get(Request::new(plan.clone().try_into()?))
                 .await
         })
@@ -110,11 +110,10 @@ impl DistributedExecutor {
     pub async fn knn(&mut self, plan: Knn) -> Result<KnnBatchResult, ExecutorError> {
         let clients = self.clients(plan.scan.collection_and_segments.collection.collection_id)?;
         let res = (|| async {
-            let mut curr_client = clients
+            clients
                 .choose(&mut rand::thread_rng())
-                .expect("Clients should not be empty")
-                .clone();
-            curr_client
+                .ok_or(no_clients_found_status())?
+                .clone()
                 .knn(Request::new(plan.clone().try_into()?))
                 .await
         })
@@ -126,24 +125,15 @@ impl DistributedExecutor {
 
     ///////////////////////// Helpers /////////////////////////
 
-    /// Get the gRPC client for the given collection id by performing the assignment policy
+    /// Get the gRPC clients for the given collection id by performing the assignment policy
     /// # Arguments
     /// - `collection_id` - The collection id for which the client is to be fetched
     /// # Returns
-    /// - The gRPC client for the given collection id
+    /// - The gRPC clients for the given collection id in the order of the assignment policy
     /// # Errors
     /// - If no client is found for the given collection id
     /// - If the assignment policy fails to assign the collection id
     fn clients(
-        &mut self,
-        collection_id: CollectionUuid,
-    ) -> Result<Vec<QueryExecutorClient<tonic::transport::Channel>>, ExecutorError> {
-        let assigned = self.get_assignment(collection_id)?;
-        // let random_index = rand::thread_rng().gen_range(0..assigned.len());
-        Ok(assigned)
-    }
-
-    fn get_assignment(
         &mut self,
         collection_id: CollectionUuid,
     ) -> Result<Vec<QueryExecutorClient<tonic::transport::Channel>>, ExecutorError> {
@@ -172,4 +162,8 @@ fn is_retryable_error(e: &tonic::Status) -> bool {
         || e.code() == tonic::Code::DeadlineExceeded
         || e.code() == tonic::Code::Aborted
         || e.code() == tonic::Code::ResourceExhausted
+}
+
+fn no_clients_found_status() -> tonic::Status {
+    tonic::Status::internal("No clients found")
 }
