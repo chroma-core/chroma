@@ -316,6 +316,33 @@ impl ChromaError for UpdateCollectionError {
     }
 }
 
+#[derive(Clone)]
+pub struct DeleteCollectionRequest {
+    pub tenant_id: String,
+    pub database_name: String,
+    pub collection_name: String,
+}
+
+#[derive(Serialize)]
+pub struct DeleteCollectionResponse {}
+
+#[derive(Error, Debug)]
+pub enum DeleteCollectionError {
+    #[error("Could not delete collection: {0}")]
+    SysDB(String),
+    #[error("Collection not found")]
+    NotFound,
+}
+
+impl ChromaError for DeleteCollectionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            DeleteCollectionError::SysDB(_) => ErrorCodes::Internal,
+            DeleteCollectionError::NotFound => ErrorCodes::NotFound,
+        }
+    }
+}
+
 pub struct AddToCollectionRequest {
     pub tenant_id: String,
     pub database_name: String,

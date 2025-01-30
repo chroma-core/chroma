@@ -68,7 +68,7 @@ impl FrontendServer {
             )
             .route(
                 "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_id",
-                get(get_collection).put(update_collection),
+                get(get_collection).put(update_collection).delete(delete_collection),
             )
             .route(
                 "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/add",
@@ -356,18 +356,34 @@ async fn update_collection(
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
 
-    Ok(Json(
-        server
-            .frontend
-            .update_collection(chroma_types::UpdateCollectionRequest {
-                collection_id,
-                new_name: payload.new_name,
-                new_metadata: payload
-                    .new_metadata
-                    .map(CollectionMetadataUpdate::UpdateMetadata),
-            })
-            .await?,
-    ))
+    server
+        .frontend
+        .update_collection(chroma_types::UpdateCollectionRequest {
+            collection_id,
+            new_name: payload.new_name,
+            new_metadata: payload
+                .new_metadata
+                .map(CollectionMetadataUpdate::UpdateMetadata),
+        })
+        .await?;
+
+    Ok(Json(UpdateCollectionResponse {}))
+}
+
+async fn delete_collection(
+    Path((tenant_id, database_name, collection_name)): Path<(String, String, String)>,
+    State(mut server): State<FrontendServer>,
+) -> Result<Json<UpdateCollectionResponse>, ServerError> {
+    server
+        .frontend
+        .delete_collection(chroma_types::DeleteCollectionRequest {
+            tenant_id,
+            database_name,
+            collection_name,
+        })
+        .await?;
+
+    Ok(Json(UpdateCollectionResponse {}))
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

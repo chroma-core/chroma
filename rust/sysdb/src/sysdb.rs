@@ -171,6 +171,24 @@ impl SysDb {
         }
     }
 
+    pub async fn delete_collection(
+        &mut self,
+        tenant: String,
+        database: String,
+        collection_id: CollectionUuid,
+        segment_ids: Vec<SegmentUuid>,
+    ) -> Result<(), DeleteCollectionError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.delete_collection(tenant, database, collection_id, segment_ids)
+                    .await
+            }
+            SysDb::Test(_) => {
+                todo!()
+            }
+        }
+    }
+
     pub async fn get_collections_to_gc(
         &mut self,
     ) -> Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError> {
@@ -605,6 +623,24 @@ impl GrpcSysDb {
         Ok(())
     }
 
+    async fn delete_collection(
+        &mut self,
+        tenant: String,
+        database: String,
+        collection_id: CollectionUuid,
+        segment_ids: Vec<SegmentUuid>,
+    ) -> Result<(), DeleteCollectionError> {
+        self.client
+            .delete_collection(chroma_proto::DeleteCollectionRequest {
+                tenant,
+                database,
+                id: collection_id.0.to_string(),
+                segment_ids: segment_ids.into_iter().map(|id| id.0.to_string()).collect(),
+            })
+            .await?;
+        Ok(())
+    }
+
     pub async fn get_collections_to_gc(
         &mut self,
     ) -> Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError> {
@@ -832,6 +868,20 @@ impl ChromaError for UpdateCollectionError {
         match self {
             UpdateCollectionError::CollectionNotFound => ErrorCodes::NotFound,
             UpdateCollectionError::FailedToUpdateCollection(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum DeleteCollectionError {
+    #[error("Failed to delete collection")]
+    FailedToDeleteCollection(#[from] tonic::Status),
+}
+
+impl ChromaError for DeleteCollectionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            DeleteCollectionError::FailedToDeleteCollection(_) => ErrorCodes::Internal,
         }
     }
 }

@@ -14,13 +14,14 @@ use chroma_types::{
     CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
     CreateCollectionError, CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseError,
     CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantError, CreateTenantRequest,
-    CreateTenantResponse, DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse,
-    GetCollectionError, GetCollectionRequest, GetCollectionResponse, GetDatabaseError,
-    GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantError,
-    GetTenantRequest, GetTenantResponse, Include, ListCollectionsRequest, ListCollectionsResponse,
-    ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse, QueryError, QueryRequest,
-    QueryResponse, ResetError, UpdateCollectionError, UpdateCollectionRequest,
-    UpdateCollectionResponse, CHROMA_DOCUMENT_KEY, CHROMA_URI_KEY,
+    CreateTenantResponse, DeleteCollectionError, DeleteCollectionRequest, DeleteDatabaseError,
+    DeleteDatabaseRequest, DeleteDatabaseResponse, GetCollectionError, GetCollectionRequest,
+    GetCollectionResponse, GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest,
+    GetResponse, GetTenantError, GetTenantRequest, GetTenantResponse, Include,
+    ListCollectionsRequest, ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest,
+    ListDatabasesResponse, QueryError, QueryRequest, QueryResponse, ResetError,
+    UpdateCollectionError, UpdateCollectionRequest, UpdateCollectionResponse, CHROMA_DOCUMENT_KEY,
+    CHROMA_URI_KEY,
 };
 use chroma_types::{
     Operation, OperationRecord, ScalarEncoding, UpdateMetadata, UpdateMetadataValue,
@@ -387,6 +388,43 @@ impl Frontend {
             .map_err(|err| UpdateCollectionError::SysDB(err.to_string()))?;
 
         Ok(UpdateCollectionResponse {})
+    }
+
+    pub async fn delete_collection(
+        &mut self,
+        request: DeleteCollectionRequest,
+    ) -> Result<(), DeleteCollectionError> {
+        let collection = self
+            .sysdb_client
+            .get_collections(
+                None,
+                Some(request.collection_name),
+                Some(request.tenant_id.clone()),
+                Some(request.database_name.clone()),
+            )
+            .await
+            .map_err(|err| DeleteCollectionError::SysDB(err.to_string()))?
+            .into_iter()
+            .next()
+            .ok_or(DeleteCollectionError::NotFound)?;
+
+        let segments = self
+            .sysdb_client
+            .get_segments(None, None, None, collection.collection_id)
+            .await
+            .map_err(|err| DeleteCollectionError::SysDB(err.to_string()))?;
+
+        self.sysdb_client
+            .delete_collection(
+                request.tenant_id,
+                request.database_name,
+                collection.collection_id,
+                segments.into_iter().map(|s| s.id).collect(),
+            )
+            .await
+            .map_err(|err| DeleteCollectionError::SysDB(err.to_string()))?;
+
+        Ok(())
     }
 
     pub async fn add(
