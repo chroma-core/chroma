@@ -33,6 +33,8 @@ pub enum GetError {
     Projection(#[from] ProjectionError),
     #[error("Error receiving final result: {0}")]
     Result(#[from] RecvError),
+    #[error("Operation aborted because resources exhausted")]
+    Aborted,
 }
 
 impl ChromaError for GetError {
@@ -45,6 +47,7 @@ impl ChromaError for GetError {
             GetError::Panic(_) => ErrorCodes::Aborted,
             GetError::Projection(e) => e.code(),
             GetError::Result(_) => ErrorCodes::Internal,
+            GetError::Aborted => ErrorCodes::ResourceExhausted,
         }
     }
 }
@@ -57,6 +60,7 @@ where
         match value {
             TaskError::Panic(e) => e.into(),
             TaskError::TaskFailed(e) => e.into(),
+            TaskError::Aborted => GetError::Aborted,
         }
     }
 }

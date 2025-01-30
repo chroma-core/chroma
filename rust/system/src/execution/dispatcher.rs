@@ -55,6 +55,7 @@ use tracing::{trace_span, Instrument, Span};
 #[derive(Debug)]
 pub struct Dispatcher {
     task_queue: VecDeque<(TaskMessage, Span)>,
+    task_queue_limit: usize,
     waiters: Vec<TaskRequestMessage>,
     n_worker_threads: usize,
     queue_size: usize,
@@ -67,13 +68,14 @@ impl Dispatcher {
     /// - n_worker_threads: The number of worker threads to use
     /// - queue_size: The size of the components message queue
     /// - worker_queue_size: The size of the worker components queue
-    pub fn new(n_worker_threads: usize, queue_size: usize, worker_queue_size: usize) -> Self {
+    pub fn new(config: DispatcherConfig) -> Self {
         Dispatcher {
             task_queue: VecDeque::new(),
+            task_queue_limit: config.task_queue_limit,
             waiters: Vec::new(),
-            n_worker_threads,
-            queue_size,
-            worker_queue_size,
+            n_worker_threads: config.num_worker_threads,
+            queue_size: config.dispatcher_queue_size,
+            worker_queue_size: config.worker_queue_size,
         }
     }
 
@@ -95,7 +97,7 @@ impl Dispatcher {
     /// Enqueue a task to be processed
     /// # Parameters
     /// - task: The task to enqueue
-    async fn enqueue_task(&mut self, task: TaskMessage) {
+    async fn enqueue_task(&mut self, mut task: TaskMessage) {
         match task.get_type() {
             OperatorType::IO => {
                 let child_span = trace_span!(parent: Span::current(), "IO task execution", name = task.get_name());
@@ -115,7 +117,11 @@ impl Dispatcher {
                         }
                     },
                     None => {
-                        self.task_queue.push_back((task, Span::current()));
+                        if self.task_queue.len() >= self.task_queue_limit {
+                            task.abort().await;
+                        } else {
+                            self.task_queue.push_back((task, Span::current()));
+                        }
                     }
                 }
             }
@@ -145,11 +151,7 @@ impl Dispatcher {
 #[async_trait]
 impl Configurable<DispatcherConfig> for Dispatcher {
     async fn try_from_config(config: &DispatcherConfig) -> Result<Self, Box<dyn ChromaError>> {
-        Ok(Dispatcher::new(
-            config.num_worker_threads,
-            config.dispatcher_queue_size,
-            config.worker_queue_size,
-        ))
+        Ok(Dispatcher::new(config.clone()))
     }
 }
 
@@ -411,7 +413,12 @@ mod tests {
     #[tokio::test]
     async fn test_dispatcher_io_tasks() {
         let system = System::new();
-        let dispatcher = Dispatcher::new(THREAD_COUNT, 1000, 1000);
+        let dispatcher = Dispatcher::new(DispatcherConfig {
+            num_worker_threads: THREAD_COUNT,
+            task_queue_limit: 1000,
+            dispatcher_queue_size: 1000,
+            worker_queue_size: 1000,
+        });
         let dispatcher_handle = system.start_component(dispatcher);
         let counter = Arc::new(AtomicUsize::new(0));
         let sent_tasks = Arc::new(Mutex::new(HashSet::new()));
@@ -439,7 +446,12 @@ mod tests {
     #[tokio::test]
     async fn test_dispatcher_non_io_tasks() {
         let system = System::new();
-        let dispatcher = Dispatcher::new(THREAD_COUNT, 1000, 1000);
+        let dispatcher = Dispatcher::new(DispatcherConfig {
+            num_worker_threads: THREAD_COUNT,
+            task_queue_limit: 1000,
+            dispatcher_queue_size: 1000,
+            worker_queue_size: 1000,
+        });
         let dispatcher_handle = system.start_component(dispatcher);
         let counter = Arc::new(AtomicUsize::new(0));
         let sent_tasks = Arc::new(Mutex::new(HashSet::new()));
@@ -462,5 +474,35 @@ mod tests {
         // The length of the sent/recieved tasks should be equal to the number of dispatched tasks
         assert_eq!(sent_tasks.lock().len(), DISPATCH_COUNT);
         assert_eq!(received_tasks.lock().len(), DISPATCH_COUNT);
+    }
+
+    #[tokio::test]
+    async fn test_dispatcher_non_io_tasks_reject() {
+        let system = System::new();
+        let dispatcher = Dispatcher::new(DispatcherConfig {
+            num_worker_threads: THREAD_COUNT,
+            // Must be zero to fail things.
+            task_queue_limit: 0,
+            dispatcher_queue_size: 1,
+            worker_queue_size: 1,
+        });
+        let dispatcher_handle = system.start_component(dispatcher);
+        let counter = Arc::new(AtomicUsize::new(0));
+        let sent_tasks = Arc::new(Mutex::new(HashSet::new()));
+        let received_tasks = Arc::new(Mutex::new(HashSet::new()));
+        let dispatch_user = MockDispatchUser {
+            dispatcher: dispatcher_handle,
+            counter: counter.clone(),
+            sent_tasks: sent_tasks.clone(),
+            received_tasks: received_tasks.clone(),
+        };
+        let dispatch_user_handle = system.start_component(dispatch_user);
+        // This is the changed line in the test.
+        // yield to allow the component to process the messages
+        let mut is_err = false;
+        for _ in 0..1000 {
+            is_err |= dispatch_user_handle.request((), None).await.is_err();
+        }
+        assert!(is_err);
     }
 }

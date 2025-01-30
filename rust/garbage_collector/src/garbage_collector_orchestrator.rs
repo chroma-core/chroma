@@ -74,6 +74,8 @@ pub enum GarbageCollectorError {
     Result(#[from] RecvError),
     #[error("{0}")]
     Generic(#[from] Box<dyn ChromaError>),
+    #[error("The task was aborted because resources were exhausted")]
+    Aborted,
 }
 
 impl ChromaError for GarbageCollectorError {
@@ -90,6 +92,7 @@ where
         match value {
             TaskError::Panic(e) => GarbageCollectorError::Panic(e),
             TaskError::TaskFailed(e) => e.into(),
+            TaskError::Aborted => GarbageCollectorError::Aborted,
         }
     }
 }

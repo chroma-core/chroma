@@ -198,6 +198,7 @@ mod tests {
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
                         worker_queue_size: 100
+                        task_queue_limit: 100
                     blockfile_provider:
                         Arrow:
                             block_manager_config:
@@ -257,6 +258,7 @@ mod tests {
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
                         worker_queue_size: 100
+                        task_queue_limit: 100
                     compactor:
                         compaction_manager_queue_size: 1000
                         max_concurrent_jobs: 100
@@ -363,6 +365,7 @@ mod tests {
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
                         worker_queue_size: 100
+                        task_queue_limit: 100
                     blockfile_provider:
                         Arrow:
                             block_manager_config:
@@ -422,6 +425,7 @@ mod tests {
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
                         worker_queue_size: 100
+                        task_queue_limit: 100
                     compactor:
                         compaction_manager_queue_size: 1000
                         max_concurrent_jobs: 100
@@ -528,6 +532,7 @@ mod tests {
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
                         worker_queue_size: 100
+                        task_queue_limit: 100
                     blockfile_provider:
                         Arrow:
                             block_manager_config:
@@ -587,6 +592,7 @@ mod tests {
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
                         worker_queue_size: 100
+                        task_queue_limit: 100
                     compactor:
                         compaction_manager_queue_size: 1000
                         max_concurrent_jobs: 100
@@ -699,6 +705,7 @@ mod tests {
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
                         worker_queue_size: 100
+                        task_queue_limit: 100
                     blockfile_provider:
                         Arrow:
                             block_manager_config:
@@ -743,6 +750,7 @@ mod tests {
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
                         worker_queue_size: 100
+                        task_queue_limit: 100
                     compactor:
                         compaction_manager_queue_size: 1000
                         max_concurrent_jobs: 100
@@ -869,6 +877,7 @@ mod tests {
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
                         worker_queue_size: 100
+                        task_queue_limit: 100
                     blockfile_provider:
                         Arrow:
                             block_manager_config:
@@ -924,6 +933,7 @@ mod tests {
                         num_worker_threads: 4
                         dispatcher_queue_size: 100
                         worker_queue_size: 100
+                        task_queue_limit: 100
                     compactor:
                         compaction_manager_queue_size: 1000
                         max_concurrent_jobs: 100
