@@ -85,7 +85,7 @@ impl FrontendServer {
                 post(collection_query),
             )
             .with_state(server);
-        let app = add_tracing_middleware(app);
+        // let app = add_tracing_middleware(app);
 
         // TODO: configuration for this
         // TODO: tracing
