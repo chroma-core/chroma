@@ -6,4 +6,5 @@ pub struct DispatcherConfig {
     pub task_queue_limit: usize,
     pub dispatcher_queue_size: usize,
     pub worker_queue_size: usize,
+    pub active_io_tasks: usize,
 }

@@ -199,6 +199,7 @@ mod tests {
                         dispatcher_queue_size: 100
                         worker_queue_size: 100
                         task_queue_limit: 100
+                        active_io_tasks: 100
                     blockfile_provider:
                         Arrow:
                             block_manager_config:
@@ -259,6 +260,7 @@ mod tests {
                         dispatcher_queue_size: 100
                         worker_queue_size: 100
                         task_queue_limit: 100
+                        active_io_tasks: 100
                     compactor:
                         compaction_manager_queue_size: 1000
                         max_concurrent_jobs: 100
@@ -295,6 +297,14 @@ mod tests {
                 "compaction-service-0"
             );
             assert_eq!(config.compaction_service.my_port, 50051);
+            assert_eq!(config.compaction_service.dispatcher.num_worker_threads, 4);
+            assert_eq!(config.compaction_service.dispatcher.task_queue_limit, 100);
+            assert_eq!(
+                config.compaction_service.dispatcher.dispatcher_queue_size,
+                100
+            );
+            assert_eq!(config.compaction_service.dispatcher.worker_queue_size, 100);
+            assert_eq!(config.compaction_service.dispatcher.active_io_tasks, 100);
             assert_eq!(
                 config
                     .compaction_service
@@ -366,6 +376,7 @@ mod tests {
                         dispatcher_queue_size: 100
                         worker_queue_size: 100
                         task_queue_limit: 100
+                        active_io_tasks: 100
                     blockfile_provider:
                         Arrow:
                             block_manager_config:
@@ -426,6 +437,7 @@ mod tests {
                         dispatcher_queue_size: 100
                         worker_queue_size: 100
                         task_queue_limit: 100
+                        active_io_tasks: 100
                     compactor:
                         compaction_manager_queue_size: 1000
                         max_concurrent_jobs: 100
@@ -486,6 +498,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_missing_default_field() {
         Jail::expect_with(|jail| {
             let _ = jail.create_file(
@@ -533,6 +546,7 @@ mod tests {
                         dispatcher_queue_size: 100
                         worker_queue_size: 100
                         task_queue_limit: 100
+                        active_io_tasks: 100
                     blockfile_provider:
                         Arrow:
                             block_manager_config:
@@ -593,6 +607,7 @@ mod tests {
                         dispatcher_queue_size: 100
                         worker_queue_size: 100
                         task_queue_limit: 100
+                        active_io_tasks: 100
                     compactor:
                         compaction_manager_queue_size: 1000
                         max_concurrent_jobs: 100
@@ -706,6 +721,7 @@ mod tests {
                         dispatcher_queue_size: 100
                         worker_queue_size: 100
                         task_queue_limit: 100
+                        active_io_tasks: 100
                     blockfile_provider:
                         Arrow:
                             block_manager_config:
@@ -751,6 +767,7 @@ mod tests {
                         dispatcher_queue_size: 100
                         worker_queue_size: 100
                         task_queue_limit: 100
+                        active_io_tasks: 100
                     compactor:
                         compaction_manager_queue_size: 1000
                         max_concurrent_jobs: 100
@@ -800,6 +817,14 @@ mod tests {
                 }
                 _ => panic!("Invalid storage config"),
             }
+            assert_eq!(config.compaction_service.dispatcher.num_worker_threads, 4);
+            assert_eq!(config.compaction_service.dispatcher.task_queue_limit, 100);
+            assert_eq!(
+                config.compaction_service.dispatcher.dispatcher_queue_size,
+                100
+            );
+            assert_eq!(config.compaction_service.dispatcher.worker_queue_size, 100);
+            assert_eq!(config.compaction_service.dispatcher.active_io_tasks, 100);
             assert_eq!(
                 config
                     .compaction_service
@@ -878,6 +903,7 @@ mod tests {
                         dispatcher_queue_size: 100
                         worker_queue_size: 100
                         task_queue_limit: 100
+                        active_io_tasks: 100
                     blockfile_provider:
                         Arrow:
                             block_manager_config:
@@ -934,6 +960,7 @@ mod tests {
                         dispatcher_queue_size: 100
                         worker_queue_size: 100
                         task_queue_limit: 100
+                        active_io_tasks: 100
                     compactor:
                         compaction_manager_queue_size: 1000
                         max_concurrent_jobs: 100

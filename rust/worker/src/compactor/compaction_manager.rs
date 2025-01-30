@@ -366,11 +366,13 @@ mod tests {
     use chroma_types::SegmentUuid;
     use chroma_types::{Collection, LogRecord, Operation, OperationRecord, Segment};
     use serde_json::Value;
+    use serial_test::serial;
     use std::collections::HashMap;
     use std::path::PathBuf;
     use std::str::FromStr;
 
     #[tokio::test]
+    #[serial]
     async fn test_compaction_manager() {
         let mut log = Box::new(Log::InMemory(InMemoryLog::new()));
         let in_memory_log = match *log {
@@ -595,6 +597,7 @@ mod tests {
             task_queue_limit: 10,
             dispatcher_queue_size: 10,
             worker_queue_size: 10,
+            active_io_tasks: 10,
         });
         let dispatcher_handle = system.start_component(dispatcher);
         manager.set_dispatcher(dispatcher_handle);

@@ -221,6 +221,7 @@ mod tests {
 
     use super::*;
     use crate::{operator::*, ComponentHandle};
+    use serial_test::serial;
     use std::{
         collections::HashSet,
         sync::{
@@ -411,6 +412,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_dispatcher_io_tasks() {
         let system = System::new();
         let dispatcher = Dispatcher::new(DispatcherConfig {
@@ -418,6 +420,7 @@ mod tests {
             task_queue_limit: 1000,
             dispatcher_queue_size: 1000,
             worker_queue_size: 1000,
+            active_io_tasks: 1000,
         });
         let dispatcher_handle = system.start_component(dispatcher);
         let counter = Arc::new(AtomicUsize::new(0));
@@ -444,6 +447,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_dispatcher_non_io_tasks() {
         let system = System::new();
         let dispatcher = Dispatcher::new(DispatcherConfig {
@@ -451,6 +455,7 @@ mod tests {
             task_queue_limit: 1000,
             dispatcher_queue_size: 1000,
             worker_queue_size: 1000,
+            active_io_tasks: 1000,
         });
         let dispatcher_handle = system.start_component(dispatcher);
         let counter = Arc::new(AtomicUsize::new(0));
@@ -477,6 +482,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_dispatcher_non_io_tasks_reject() {
         let system = System::new();
         let dispatcher = Dispatcher::new(DispatcherConfig {
@@ -485,6 +491,7 @@ mod tests {
             task_queue_limit: 0,
             dispatcher_queue_size: 1,
             worker_queue_size: 1,
+            active_io_tasks: 1,
         });
         let dispatcher_handle = system.start_component(dispatcher);
         let counter = Arc::new(AtomicUsize::new(0));

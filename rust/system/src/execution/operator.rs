@@ -329,6 +329,7 @@ mod tests {
             task_queue_limit: 1000,
             dispatcher_queue_size: 1000,
             worker_queue_size: 1000,
+            active_io_tasks: 1000,
         });
         let dispatcher_handle = system.start_component(dispatcher);
 
