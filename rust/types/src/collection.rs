@@ -40,6 +40,7 @@ pub struct Collection {
     #[serde(rename(serialize = "id"))]
     pub collection_id: CollectionUuid,
     pub name: String,
+    #[serde(rename(deserialize = "configuration_json_str"))]
     pub configuration_json: Value,
     pub metadata: Option<Metadata>,
     pub dimension: Option<i32>,

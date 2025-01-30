@@ -12,6 +12,7 @@ use chroma_config::assignment::rendezvous_hash::AssignmentError;
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json::Value;
 use thiserror::Error;
 use tonic::Status;
 use uuid::Uuid;
@@ -255,6 +256,32 @@ impl ChromaError for GetCollectionError {
         match self {
             GetCollectionError::NotFound => ErrorCodes::NotFound,
             _ => ErrorCodes::Internal,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct CreateCollectionRequest {
+    pub tenant_id: String,
+    pub database_name: String,
+    pub name: String,
+    pub metadata: Option<Metadata>,
+    pub configuration_json: Option<Value>,
+    pub get_or_create: bool,
+}
+
+pub type CreateCollectionResponse = Collection;
+
+#[derive(Debug, Error)]
+pub enum CreateCollectionError {
+    #[error("Failed to create collection: {0}")]
+    SysDB(String),
+}
+
+impl ChromaError for CreateCollectionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            CreateCollectionError::SysDB(_) => ErrorCodes::Internal,
         }
     }
 }

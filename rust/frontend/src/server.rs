@@ -8,12 +8,12 @@ use axum::{
 use chroma_types::{
     AddToCollectionResponse, ChecklistResponse, Collection, CollectionMetadataUpdate,
     CollectionUuid, CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
-    CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
-    DeleteDatabaseRequest, DeleteDatabaseResponse, GetCollectionRequest, GetDatabaseRequest,
-    GetDatabaseResponse, GetRequest, GetResponse, GetTenantRequest, GetTenantResponse,
-    GetUserIdentityResponse, IncludeList, ListCollectionsRequest, ListCollectionsResponse,
-    ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
-    UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateMetadata,
+    CreateCollectionRequest, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest,
+    CreateTenantResponse, DeleteDatabaseRequest, DeleteDatabaseResponse, GetCollectionRequest,
+    GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantRequest,
+    GetTenantResponse, GetUserIdentityResponse, IncludeList, ListCollectionsRequest,
+    ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest,
+    QueryResponse, UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateMetadata,
     UpsertCollectionResponse,
 };
 use serde::{Deserialize, Serialize};
@@ -60,7 +60,7 @@ impl FrontendServer {
             .route("/api/v2/tenants/:tenant_id/databases/:name", delete(delete_database))
             .route(
                 "/api/v2/tenants/:tenant_id/databases/:database_name/collections",
-                get(list_collections),
+               post(create_collection).get(list_collections),
             )
             .route(
                 "/api/v2/tenants/:tenant_id/databases/:database_name/collections_count",
@@ -295,6 +295,34 @@ async fn count_collections(
             })
             .await?,
     ))
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct CreateCollectionPayload {
+    pub name: String,
+    pub configuration: Option<serde_json::Value>,
+    pub metadata: Option<Metadata>,
+    pub get_or_create: bool,
+}
+
+async fn create_collection(
+    Path((tenant_id, database_name)): Path<(String, String)>,
+    State(mut server): State<FrontendServer>,
+    Json(payload): Json<CreateCollectionPayload>,
+) -> Result<Json<Collection>, ServerError> {
+    let collection = server
+        .frontend
+        .create_collection(CreateCollectionRequest {
+            name: payload.name,
+            tenant_id,
+            database_name,
+            metadata: payload.metadata,
+            configuration_json: payload.configuration,
+            get_or_create: payload.get_or_create,
+        })
+        .await?;
+
+    Ok(Json(collection))
 }
 
 async fn get_collection(
