@@ -128,6 +128,50 @@ jobs:
         ENV_FILE: ${{ matrix.env-file }}
         PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
 
+  test-cluster-rust-frontend:
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ${{fromJson(inputs.python_versions)}}
+        platform: ["depot-ubuntu-22.04-4"]
+        test-globs: ["chromadb/test/db/test_system.py",
+                   "chromadb/test/api/test_collection.py",
+                   "chromadb/test/api/test_limit_offset.py",
+                   "chromadb/test/property/test_collections.py",
+                   "chromadb/test/property/test_add.py",
+                   "chromadb/test/property/test_filtering.py",
+                   "chromadb/test/property/test_embeddings.py",
+                   "chromadb/test/property/test_collections_with_database_tenant.py",
+                   "chromadb/test/property/test_collections_with_database_tenant_overwrite.py",
+                   "chromadb/test/property/test_sysdb.py",
+                   "chromadb/test/ingest/test_producer_consumer.py",
+                   "chromadb/test/segment/distributed/test_memberlist_provider.py",
+                   "chromadb/test/test_logservice.py",
+                   "chromadb/test/distributed/test_sanity.py"]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/python
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: ./.github/actions/tilt
+      - name: Test
+        run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.test-globs }}"'
+        shell: bash
+        env:
+          PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
+          CHROMA_RUST_FRONTEND_TEST_ONLY: "1"
+          CHROMA_SERVER_HOST: "localhost:3000"
+      - name: Compute artifact name
+        if: always()
+        id: compute-artifact-name
+        run: echo "artifact_name=cluster_logs_rust_frontend_$(basename "${{ matrix.test-globs }}" .py)_${{ matrix.python }}" >> $GITHUB_OUTPUT
+      - name: Save service logs to artifact
+        if: always()
+        uses: ./.github/actions/export-tilt-logs
+        with:
+          artifact-name: ${{ steps.compute-artifact-name.outputs.artifact_name }}
+
   test-cluster-integration:
     strategy:
       fail-fast: false
