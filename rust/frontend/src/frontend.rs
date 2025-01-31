@@ -213,6 +213,11 @@ impl Frontend {
             .update_collection(collection_id, None, None, Some(dimension))
             .await
             .map_err(|err| UpdateCollectionError::SysDB(err.to_string()))?;
+        // Invalidate the cache.
+        self.collections_with_segments_provider
+            .collections_with_segments_cache
+            .remove(&collection_id)
+            .await;
         Ok(UpdateCollectionResponse {})
     }
 
@@ -456,6 +461,11 @@ impl Frontend {
                 }
                 _ => CreateCollectionError::SysDB(err.to_string()),
             })?;
+        // This is purely defensive and should never happen.
+        self.collections_with_segments_provider
+            .collections_with_segments_cache
+            .remove(&collection_id)
+            .await;
 
         Ok(collection)
     }
@@ -477,6 +487,11 @@ impl Frontend {
             )
             .await
             .map_err(|err| UpdateCollectionError::SysDB(err.to_string()))?;
+        // Invalidate the cache.
+        self.collections_with_segments_provider
+            .collections_with_segments_cache
+            .remove(&request.collection_id)
+            .await;
 
         Ok(UpdateCollectionResponse {})
     }
@@ -514,6 +529,11 @@ impl Frontend {
             )
             .await
             .map_err(|err| DeleteCollectionError::SysDB(err.to_string()))?;
+        // Invalidate the cache.
+        self.collections_with_segments_provider
+            .collections_with_segments_cache
+            .remove(&collection.collection_id)
+            .await;
 
         Ok(())
     }
@@ -685,7 +705,7 @@ impl Frontend {
         Ok(DeleteCollectionRecordsResponse {})
     }
 
-    pub async fn count_to_retry(
+    pub async fn retryable_count(
         &mut self,
         request: CountRequest,
     ) -> Result<CountResponse, QueryError> {
@@ -709,7 +729,7 @@ impl Frontend {
                 .collections_with_segments_cache
                 .clone();
             async move {
-                let res = self_clone.count_to_retry(request_clone).await;
+                let res = self_clone.retryable_count(request_clone).await;
                 match res {
                     Ok(res) => Ok(res),
                     Err(e) => {
@@ -731,7 +751,7 @@ impl Frontend {
             .await
     }
 
-    async fn get_to_retry(&mut self, request: GetRequest) -> Result<GetResponse, QueryError> {
+    async fn retryable_get(&mut self, request: GetRequest) -> Result<GetResponse, QueryError> {
         tracing::info!(
             "Retrying get() request for collection {}",
             request.collection_id
@@ -771,7 +791,7 @@ impl Frontend {
                 .collections_with_segments_cache
                 .clone();
             async move {
-                let res = self_clone.get_to_retry(request_clone).await;
+                let res = self_clone.retryable_get(request_clone).await;
                 match res {
                     Ok(res) => Ok(res),
                     Err(e) => {
@@ -793,7 +813,10 @@ impl Frontend {
             .await
     }
 
-    async fn query_to_retry(&mut self, request: QueryRequest) -> Result<QueryResponse, QueryError> {
+    async fn retryable_query(
+        &mut self,
+        request: QueryRequest,
+    ) -> Result<QueryResponse, QueryError> {
         tracing::info!(
             "Retrying query() request for collection {}",
             request.collection_id
@@ -841,7 +864,7 @@ impl Frontend {
                 .collections_with_segments_cache
                 .clone();
             async move {
-                let res = self_clone.query_to_retry(request_clone).await;
+                let res = self_clone.retryable_query(request_clone).await;
                 match res {
                     Ok(res) => Ok(res),
                     Err(e) => {
