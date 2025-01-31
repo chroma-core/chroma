@@ -550,7 +550,8 @@ pub struct GetRequestPayload {
     #[serde(flatten)]
     where_fields: RawWhereFields,
     limit: Option<u32>,
-    offset: Option<u32>,
+    #[serde(default)]
+    offset: u32,
     #[serde(default = "IncludeList::default_get")]
     include: IncludeList,
 }

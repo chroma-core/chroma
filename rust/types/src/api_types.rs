@@ -572,7 +572,7 @@ pub struct GetRequest {
     pub ids: Option<Vec<String>>,
     pub r#where: Option<Where>,
     pub limit: Option<u32>,
-    pub offset: Option<u32>,
+    pub offset: u32,
     pub include: IncludeList,
 }
 
