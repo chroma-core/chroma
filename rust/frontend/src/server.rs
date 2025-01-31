@@ -416,10 +416,10 @@ async fn delete_collection(
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AddCollectionRecordsPayload {
     ids: Vec<String>,
-    embeddings: Option<Vec<Vec<f32>>>,
-    documents: Option<Vec<String>>,
-    uris: Option<Vec<String>>,
-    metadatas: Option<Vec<Metadata>>,
+    embeddings: Option<Vec<Option<Vec<f32>>>>,
+    documents: Option<Vec<Option<String>>>,
+    uris: Option<Vec<Option<String>>>,
+    metadatas: Option<Vec<Option<Metadata>>>,
 }
 
 async fn collection_add(
@@ -450,10 +450,10 @@ async fn collection_add(
 #[derive(Deserialize, Debug, Clone)]
 pub struct UpdateCollectionRecordsPayload {
     ids: Vec<String>,
-    embeddings: Option<Vec<Vec<f32>>>,
-    documents: Option<Vec<String>>,
-    uris: Option<Vec<String>>,
-    metadatas: Option<Vec<UpdateMetadata>>,
+    embeddings: Option<Vec<Option<Vec<f32>>>>,
+    documents: Option<Vec<Option<String>>>,
+    uris: Option<Vec<Option<String>>>,
+    metadatas: Option<Vec<Option<UpdateMetadata>>>,
 }
 
 async fn collection_update(
@@ -484,10 +484,10 @@ async fn collection_update(
 #[derive(Deserialize, Debug, Clone)]
 pub struct UpsertCollectionRecordsPayload {
     ids: Vec<String>,
-    embeddings: Option<Vec<Vec<f32>>>,
-    documents: Option<Vec<String>>,
-    uris: Option<Vec<String>>,
-    metadatas: Option<Vec<UpdateMetadata>>,
+    embeddings: Option<Vec<Option<Vec<f32>>>>,
+    documents: Option<Vec<Option<String>>>,
+    uris: Option<Vec<Option<String>>>,
+    metadatas: Option<Vec<Option<UpdateMetadata>>>,
 }
 
 async fn collection_upsert(

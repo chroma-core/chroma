@@ -72,31 +72,36 @@ fn to_records<
     MetadataValue: Into<UpdateMetadataValue>,
     M: IntoIterator<Item = (String, MetadataValue)>,
 >(
-    mut ids: Vec<String>,
-    mut embeddings: Option<Vec<Vec<f32>>>,
-    mut documents: Option<Vec<String>>,
-    mut uris: Option<Vec<String>>,
-    mut metadatas: Option<Vec<M>>,
+    ids: Vec<String>,
+    embeddings: Option<Vec<Option<Vec<f32>>>>,
+    documents: Option<Vec<Option<String>>>,
+    uris: Option<Vec<Option<String>>>,
+    metadatas: Option<Vec<Option<M>>>,
     operation: Operation,
 ) -> Result<Vec<OperationRecord>, ToRecordsError> {
-    let mut records: Vec<OperationRecord> = vec![];
-    while let Some(id) = ids.pop() {
-        let embedding = embeddings
-            .as_mut()
-            .map(|v| v.pop().ok_or(ToRecordsError::InconsistentLength))
-            .transpose()?;
-        let document = documents
-            .as_mut()
-            .map(|v| v.pop().ok_or(ToRecordsError::InconsistentLength))
-            .transpose()?;
-        let uri = uris
-            .as_mut()
-            .map(|v| v.pop().ok_or(ToRecordsError::InconsistentLength))
-            .transpose()?;
-        let metadata = metadatas
-            .as_mut()
-            .map(|v| v.pop().ok_or(ToRecordsError::InconsistentLength))
-            .transpose()?;
+    let len = ids.len();
+
+    // Check that every present vector has the same length as `ids`.
+    if embeddings.as_ref().is_some_and(|v| v.len() != len)
+        || documents.as_ref().is_some_and(|v| v.len() != len)
+        || uris.as_ref().is_some_and(|v| v.len() != len)
+        || metadatas.as_ref().is_some_and(|v| v.len() != len)
+    {
+        return Err(ToRecordsError::InconsistentLength);
+    }
+
+    let mut embeddings_iter = embeddings.into_iter().flat_map(|v| v.into_iter());
+    let mut documents_iter = documents.into_iter().flat_map(|v| v.into_iter());
+    let mut uris_iter = uris.into_iter().flat_map(|v| v.into_iter());
+    let mut metadatas_iter = metadatas.into_iter().flat_map(|v| v.into_iter());
+
+    let mut records = Vec::with_capacity(len);
+
+    for id in ids {
+        let embedding = embeddings_iter.next().flatten();
+        let document = documents_iter.next().flatten();
+        let uri = uris_iter.next().flatten();
+        let metadata = metadatas_iter.next().flatten();
 
         let encoding = embedding.as_ref().map(|_| ScalarEncoding::FLOAT32);
 
@@ -221,16 +226,23 @@ impl Frontend {
         Ok(UpdateCollectionResponse {})
     }
 
-    async fn validate_embedding(
+    async fn validate_embedding<Embedding, F>(
         &mut self,
         collection_id: CollectionUuid,
-        option_embeddings: Option<&Vec<Vec<f32>>>,
+        option_embeddings: Option<&Vec<Embedding>>,
         update_if_not_present: bool,
-    ) -> Result<(), ValidationError> {
+        read_length: F,
+    ) -> Result<(), ValidationError>
+    where
+        F: Fn(&Embedding) -> Option<usize>,
+    {
         if let Some(embeddings) = option_embeddings {
-            let emb_dims = embeddings.iter().map(|emb| emb.len());
-            let min_dim = emb_dims.clone().min();
-            let max_dim = emb_dims.max();
+            let emb_dims = embeddings
+                .iter()
+                .map(|emb| read_length(emb))
+                .collect::<Vec<_>>();
+            let min_dim = emb_dims.clone().into_iter().min().flatten();
+            let max_dim = emb_dims.into_iter().max().flatten();
             let emb_dim = if let (Some(low), Some(high)) = (min_dim, max_dim) {
                 if low != high {
                     return Err(ValidationError::DimensionInconsistent);
@@ -575,9 +587,11 @@ impl Frontend {
             ..
         } = request;
 
-        self.validate_embedding(collection_id, embeddings.as_ref(), true)
-            .await
-            .map_err(|err| AddCollectionRecordsError::Validation(err.to_string()))?;
+        self.validate_embedding(collection_id, embeddings.as_ref(), true, |emb| {
+            emb.as_ref().map(|e| e.len())
+        })
+        .await
+        .map_err(|err| AddCollectionRecordsError::Validation(err.to_string()))?;
 
         let records = to_records(ids, embeddings, documents, uris, metadatas, Operation::Add)
             .map_err(|err| match err {
@@ -606,9 +620,11 @@ impl Frontend {
             ..
         }: UpdateCollectionRecordsRequest = request;
 
-        self.validate_embedding(collection_id, embeddings.as_ref(), true)
-            .await
-            .map_err(|err| UpdateCollectionRecordsError::Validation(err.to_string()))?;
+        self.validate_embedding(collection_id, embeddings.as_ref(), true, |emb| {
+            emb.as_ref().map(|e| e.len())
+        })
+        .await
+        .map_err(|err| UpdateCollectionRecordsError::Validation(err.to_string()))?;
 
         let records = to_records(
             ids,
@@ -644,9 +660,11 @@ impl Frontend {
             ..
         } = request;
 
-        self.validate_embedding(collection_id, embeddings.as_ref(), true)
-            .await
-            .map_err(|err| UpsertCollectionRecordsError::Validation(err.to_string()))?;
+        self.validate_embedding(collection_id, embeddings.as_ref(), true, |emb| {
+            emb.as_ref().map(|e| e.len())
+        })
+        .await
+        .map_err(|err| UpsertCollectionRecordsError::Validation(err.to_string()))?;
 
         let records = to_records(
             ids,
@@ -849,9 +867,14 @@ impl Frontend {
             .get_collection_with_segments(request.collection_id)
             .await?;
 
-        self.validate_embedding(request.collection_id, Some(&request.embeddings), false)
-            .await
-            .map_err(|err| QueryError::Validation(err.to_string()))?;
+        self.validate_embedding(
+            request.collection_id,
+            Some(&request.embeddings),
+            false,
+            |emb| Some(emb.len()),
+        )
+        .await
+        .map_err(|err| QueryError::Validation(err.to_string()))?;
 
         let query_result = self
             .executor
