@@ -129,7 +129,6 @@ pub async fn client_for_url(url: String) -> ChromaClient {
                 header: ChromaTokenHeader::XChromaToken,
             },
             database: "hf-tiny-stories".to_string(),
-            connections: 32,
         })
         .await
         .unwrap()
@@ -138,7 +137,6 @@ pub async fn client_for_url(url: String) -> ChromaClient {
             url: Some(url),
             auth: ChromaAuthMethod::None,
             database: "hf-tiny-stories".to_string(),
-            connections: 32,
         })
         .await
         .unwrap()
