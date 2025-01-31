@@ -106,9 +106,12 @@ impl CollectionsWithSegmentsProvider {
                             .get_collection_with_segments(collection_id)
                             .await
                             .map_err(|_| QueryError::CollectionSegments)?;
-                        self.collections_with_segments_cache
-                            .insert(collection_id, collection_and_segments_sysdb.clone())
-                            .await;
+                        // Insert only if the collection dimension is set.
+                        if collection_and_segments_sysdb.collection.dimension.is_some() {
+                            self.collections_with_segments_cache
+                                .insert(collection_id, collection_and_segments_sysdb.clone())
+                                .await;
+                        }
                         collection_and_segments_sysdb
                     }
                 }
