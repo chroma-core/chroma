@@ -79,3 +79,27 @@ impl From<ErrorCodes> for tonic::Code {
         }
     }
 }
+
+impl From<tonic::Code> for ErrorCodes {
+    fn from(code: tonic::Code) -> ErrorCodes {
+        match code {
+            tonic::Code::Ok => ErrorCodes::Success,
+            tonic::Code::Cancelled => ErrorCodes::Cancelled,
+            tonic::Code::Unknown => ErrorCodes::Unknown,
+            tonic::Code::InvalidArgument => ErrorCodes::InvalidArgument,
+            tonic::Code::DeadlineExceeded => ErrorCodes::DeadlineExceeded,
+            tonic::Code::NotFound => ErrorCodes::NotFound,
+            tonic::Code::AlreadyExists => ErrorCodes::AlreadyExists,
+            tonic::Code::PermissionDenied => ErrorCodes::PermissionDenied,
+            tonic::Code::ResourceExhausted => ErrorCodes::ResourceExhausted,
+            tonic::Code::FailedPrecondition => ErrorCodes::FailedPrecondition,
+            tonic::Code::Aborted => ErrorCodes::Aborted,
+            tonic::Code::OutOfRange => ErrorCodes::OutOfRange,
+            tonic::Code::Unimplemented => ErrorCodes::Unimplemented,
+            tonic::Code::Internal => ErrorCodes::Internal,
+            tonic::Code::Unavailable => ErrorCodes::Unavailable,
+            tonic::Code::DataLoss => ErrorCodes::DataLoss,
+            tonic::Code::Unauthenticated => ErrorCodes::Unauthenticated,
+        }
+    }
+}

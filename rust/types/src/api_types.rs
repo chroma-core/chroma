@@ -757,7 +757,8 @@ impl ChromaError for QueryError {
     fn code(&self) -> ErrorCodes {
         match self {
             QueryError::Validation(_) => ErrorCodes::InvalidArgument,
-            _ => ErrorCodes::Internal,
+            QueryError::CollectionSegments => ErrorCodes::Internal,
+            QueryError::Executor(e) => e.code(),
         }
     }
 }
@@ -780,7 +781,7 @@ impl ChromaError for ExecutorError {
     fn code(&self) -> ErrorCodes {
         match self {
             ExecutorError::Conversion(_) => ErrorCodes::InvalidArgument,
-            ExecutorError::Grpc(_) => ErrorCodes::Internal,
+            ExecutorError::Grpc(e) => e.code().into(),
             ExecutorError::EmptyMemberlist => ErrorCodes::Internal,
             ExecutorError::AssignmentError(_) => ErrorCodes::Internal,
             ExecutorError::NoClientFound(_) => ErrorCodes::Internal,

@@ -9,8 +9,12 @@ sysdb:
     request_timeout_ms: 60000
 collections_with_segments_provider:
   cache:
-    nop:
+    lru:
+      capacity: 1000 
   permitted_parallelism: 180
+  cache_invalidation_retry_policy:
+    delay_ms: 0
+    max_retries: 3
 log:
   Grpc:
     host: "logservice.chroma"
