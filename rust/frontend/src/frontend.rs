@@ -130,6 +130,7 @@ fn to_records<
 }
 #[derive(Clone, Debug)]
 pub struct Frontend {
+    allow_reset: bool,
     executor: Executor,
     log_client: Box<chroma_log::Log>,
     scorecard_enabled: Arc<AtomicBool>,
@@ -140,6 +141,7 @@ pub struct Frontend {
 
 impl Frontend {
     pub fn new(
+        allow_reset: bool,
         sysdb_client: Box<sysdb::SysDb>,
         collections_with_segments_provider: CollectionsWithSegmentsProvider,
         log_client: Box<chroma_log::Log>,
@@ -154,6 +156,7 @@ impl Frontend {
         let scorecard = Arc::new(Scorecard::new(&(), rules, 128.try_into().unwrap()));
 
         Frontend {
+            allow_reset,
             executor,
             log_client,
             scorecard_enabled,
@@ -177,13 +180,16 @@ impl Frontend {
         }
     }
 
-    #[allow(dead_code)]
     pub async fn reset(&mut self) -> Result<(), ResetError> {
+        if !self.allow_reset {
+            return Err(ResetError::NotAllowed);
+        }
         self.collections_with_segments_provider
             .collections_with_segments_cache
             .clear()
             .await
-            .map_err(|_| ResetError::Cache)
+            .map_err(|_| ResetError::Cache)?;
+        self.sysdb_client.reset().await
     }
 
     pub async fn create_tenant(
@@ -690,6 +696,7 @@ impl Configurable<(FrontendConfig, System)> for Frontend {
             .collect::<Result<Vec<_>, ScorecardRuleError>>()
             .map_err(|x| Box::new(x) as _)?;
         Ok(Frontend::new(
+            config.allow_reset,
             sysdb_client,
             collections_with_segments_provider,
             log_client,

@@ -135,10 +135,9 @@ async fn pre_flight_checks() -> Result<Json<ChecklistResponse>, ServerError> {
     }))
 }
 
-async fn reset(State(mut _server): State<FrontendServer>) -> Result<(), ServerError> {
-    // TODO: Allow reset based on config
-    // server.frontend.reset().await?;
-    Ok(())
+async fn reset(State(mut server): State<FrontendServer>) -> Result<Json<bool>, ServerError> {
+    server.frontend.reset().await?;
+    Ok(Json(true))
 }
 
 async fn version() -> &'static str {
