@@ -107,6 +107,36 @@ pub struct Metrics {
     query: Counter<u64>,
     /// The number of times a workload issued an upsert against a data set.
     upsert: Counter<u64>,
+    /// The number of times a workload failed.
+    failed: Counter<u64>,
+    /// The number of times a workload was rate-limited.
+    limited: Counter<u64>,
+    /// The latency of get operations.
+    get_latency: opentelemetry::metrics::Histogram<f64>,
+    /// The latency of query operations.
+    query_latency: opentelemetry::metrics::Histogram<f64>,
+}
+
+struct Stopwatch<'a>(
+    &'a opentelemetry::metrics::Histogram<f64>,
+    std::time::Instant,
+    Vec<KeyValue>,
+);
+
+impl<'a> Stopwatch<'a> {
+    fn new(
+        histogram: &'a opentelemetry::metrics::Histogram<f64>,
+        attributes: Vec<KeyValue>,
+    ) -> Self {
+        Self(histogram, std::time::Instant::now(), attributes)
+    }
+}
+
+impl Drop for Stopwatch<'_> {
+    fn drop(&mut self) {
+        let elapsed = self.1.elapsed().as_micros() as f64;
+        self.0.record(elapsed, &self.2);
+    }
 }
 
 ////////////////////////////////////////////// client //////////////////////////////////////////////
@@ -535,6 +565,13 @@ impl Workload {
                 )))
             }
             Workload::Get(get) => {
+                let _guard = Stopwatch::new(
+                    &metrics.get_latency,
+                    vec![KeyValue::new(
+                        Key::from_static_str("data_set"),
+                        Value::from(data_set.name()),
+                    )],
+                );
                 metrics.get.add(
                     1,
                     &[KeyValue::new(
@@ -548,6 +585,13 @@ impl Workload {
                     .await
             }
             Workload::Query(query) => {
+                let _guard = Stopwatch::new(
+                    &metrics.query_latency,
+                    vec![KeyValue::new(
+                        Key::from_static_str("data_set"),
+                        Value::from(data_set.name()),
+                    )],
+                );
                 metrics.query.add(
                     1,
                     &[KeyValue::new(
@@ -940,6 +984,10 @@ impl LoadService {
         let get = meter.u64_counter("get").build();
         let query = meter.u64_counter("query").build();
         let upsert = meter.u64_counter("upsert").build();
+        let failed = meter.u64_counter("failed").build();
+        let limited = meter.u64_counter("limited").build();
+        let get_latency = meter.f64_histogram("get_latency").build();
+        let query_latency = meter.f64_histogram("query_latency").build();
         let metrics = Metrics {
             inhibited,
             inactive,
@@ -947,6 +995,10 @@ impl LoadService {
             get,
             query,
             upsert,
+            failed,
+            limited,
+            get_latency,
+            query_latency,
         };
         LoadService {
             metrics,
@@ -1118,11 +1170,28 @@ impl LoadService {
         let _ = tx
             .send(tokio::spawn(async move { Ok::<(), Error>(()) }))
             .await;
+        let this = Arc::clone(&self);
+        let data_set = Arc::clone(&spec.data_set);
         let reaper = tokio::spawn(async move {
             while let Some(task) = rx.recv().await {
                 if let Err(err) = task.await.unwrap() {
                     if !format!("{err:?}").contains("429") {
+                        this.metrics.failed.add(
+                            1,
+                            &[KeyValue::new(
+                                Key::from_static_str("data_set"),
+                                Value::from(data_set.name()),
+                            )],
+                        );
                         tracing::error!("workload task failed: {err:?}");
+                    } else {
+                        this.metrics.limited.add(
+                            1,
+                            &[KeyValue::new(
+                                Key::from_static_str("data_set"),
+                                Value::from(data_set.name()),
+                            )],
+                        );
                     }
                 }
             }
