@@ -21,14 +21,14 @@ use chroma_types::{
     DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse, GetCollectionError,
     GetCollectionRequest, GetCollectionResponse, GetDatabaseError, GetDatabaseRequest,
     GetDatabaseResponse, GetRequest, GetResponse, GetTenantError, GetTenantRequest,
-    GetTenantResponse, Include, ListCollectionsRequest, ListCollectionsResponse,
-    ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse, Operation, OperationRecord,
-    QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse, ScalarEncoding, Segment,
-    SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError, UpdateCollectionRecordsError,
-    UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateCollectionRequest,
-    UpdateCollectionResponse, UpdateMetadata, UpdateMetadataValue, UpsertCollectionRecordsError,
-    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, CHROMA_DOCUMENT_KEY,
-    CHROMA_URI_KEY,
+    GetTenantResponse, HeartbeatError, HeartbeatResponse, Include, ListCollectionsRequest,
+    ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
+    Operation, OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
+    ScalarEncoding, Segment, SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError,
+    UpdateCollectionRecordsError, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
+    UpdateCollectionRequest, UpdateCollectionResponse, UpdateMetadata, UpdateMetadataValue,
+    UpsertCollectionRecordsError, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse,
+    CHROMA_DOCUMENT_KEY, CHROMA_URI_KEY,
 };
 use mdac::{Pattern, Rule, Scorecard, ScorecardTicket};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -178,6 +178,14 @@ impl Frontend {
                 ticket: None,
             })
         }
+    }
+
+    pub async fn heartbeat(&self) -> Result<HeartbeatResponse, HeartbeatError> {
+        Ok(HeartbeatResponse {
+            nanosecond_heartbeat: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_nanos(),
+        })
     }
 
     async fn get_collection_dimension(

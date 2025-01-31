@@ -12,9 +12,10 @@ use chroma_types::{
     CreateTenantResponse, DeleteCollectionRecordsResponse, DeleteDatabaseRequest,
     DeleteDatabaseResponse, GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse,
     GetRequest, GetResponse, GetTenantRequest, GetTenantResponse, GetUserIdentityResponse,
-    IncludeList, ListCollectionsRequest, ListCollectionsResponse, ListDatabasesRequest,
-    ListDatabasesResponse, Metadata, QueryRequest, QueryResponse, UpdateCollectionRecordsResponse,
-    UpdateCollectionResponse, UpdateMetadata, UpsertCollectionRecordsResponse,
+    HeartbeatResponse, IncludeList, ListCollectionsRequest, ListCollectionsResponse,
+    ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
+    UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateMetadata,
+    UpsertCollectionRecordsResponse,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -124,8 +125,10 @@ async fn root() -> &'static str {
     "Chroma Rust Frontend"
 }
 
-async fn heartbeat() -> &'static str {
-    "<Heartbeat.wav>"
+async fn heartbeat(
+    State(server): State<FrontendServer>,
+) -> Result<Json<HeartbeatResponse>, ServerError> {
+    Ok(Json(server.frontend.heartbeat().await?))
 }
 
 // Dummy implementation for now
