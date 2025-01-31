@@ -383,6 +383,7 @@ impl ChromaError for DeleteCollectionError {
     }
 }
 
+#[derive(Debug)]
 pub struct AddCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -655,11 +656,11 @@ pub struct QueryRequest {
 #[derive(Clone, Deserialize, Serialize)]
 pub struct QueryResponse {
     ids: Vec<Vec<String>>,
-    embeddings: Option<Vec<Vec<Vec<f32>>>>,
-    documents: Option<Vec<Vec<String>>>,
-    uri: Option<Vec<Vec<String>>>,
-    metadatas: Option<Vec<Vec<Metadata>>>,
-    distances: Option<Vec<Vec<f32>>>,
+    embeddings: Option<Vec<Vec<Option<Vec<f32>>>>>,
+    documents: Option<Vec<Vec<Option<String>>>>,
+    uri: Option<Vec<Vec<Option<String>>>>,
+    metadatas: Option<Vec<Vec<Option<Metadata>>>>,
+    distances: Option<Vec<Vec<Option<f32>>>>,
     include: Vec<Include>,
 }
 
@@ -701,30 +702,31 @@ impl From<(KnnBatchResult, IncludeList)> for QueryResponse {
             } in query_result.records
             {
                 ids.push(id);
-                if let Some(emb) = embedding {
-                    embeddings.push(emb);
-                }
-                if let Some(doc) = document {
-                    documents.push(doc);
-                }
-                if let Some(crate::MetadataValue::Str(uri)) = metadata
-                    .as_mut()
-                    .and_then(|meta| meta.remove(CHROMA_URI_KEY))
-                {
-                    uris.push(uri);
-                }
-                if let Some(meta) = metadata.map(|m| {
+                embeddings.push(embedding);
+                documents.push(document);
+
+                let uri = metadata.as_mut().and_then(|meta| {
+                    meta.remove(CHROMA_URI_KEY).and_then(|v| {
+                        if let crate::MetadataValue::Str(uri) = v {
+                            Some(uri)
+                        } else {
+                            None
+                        }
+                    })
+                });
+                uris.push(uri);
+
+                let metadata = metadata.map(|m| {
                     m.into_iter()
                         .filter(|(k, _)| !k.starts_with(CHROMA_KEY))
                         .collect()
-                }) {
-                    metadatas.push(meta);
-                }
-                if let Some(dist) = distance {
-                    distances.push(dist);
-                }
+                });
+                metadatas.push(metadata);
+
+                distances.push(distance);
             }
             res.ids.push(ids);
+
             if let Some(res_embs) = res.embeddings.as_mut() {
                 res_embs.push(embeddings);
             }
