@@ -450,7 +450,12 @@ impl Frontend {
                 request.get_or_create,
             )
             .await
-            .map_err(|err| CreateCollectionError::SysDB(err.to_string()))?;
+            .map_err(|err| match err {
+                sysdb::CreateCollectionError::CollectionNameExists => {
+                    CreateCollectionError::CollectionNameExists
+                }
+                _ => CreateCollectionError::SysDB(err.to_string()),
+            })?;
 
         Ok(collection)
     }
