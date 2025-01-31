@@ -192,14 +192,13 @@ impl Frontend {
         &mut self,
         collection_id: CollectionUuid,
     ) -> Result<Option<u32>, GetCollectionError> {
-        let mut collections = self
-            .sysdb_client
-            .get_collections(Some(collection_id), None, None, None)
+        Ok(self
+            .collections_with_segments_provider
+            .get_collection_with_segments(collection_id)
             .await
-            .map_err(|err| GetCollectionError::SysDB(err.to_string()))?;
-        Ok(collections
-            .pop()
-            .ok_or(GetCollectionError::NotFound)?
+            .map_err(|err| GetCollectionError::SysDB(err.to_string()))?
+            .collection_and_segments
+            .collection
             .dimension
             .map(|dim| dim as u32))
     }
