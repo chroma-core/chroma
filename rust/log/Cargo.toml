@@ -15,6 +15,7 @@ tracing = { workspace = true }
 # Used by tracing
 tracing-opentelemetry = { workspace = true }
 uuid = { workspace = true }
+tower = { workspace = true }
 
 chroma-config = { workspace = true }
 chroma-error = { workspace = true }

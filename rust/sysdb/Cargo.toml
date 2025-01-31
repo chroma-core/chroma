@@ -23,6 +23,7 @@ tokio-util = { workspace = true }
 tonic = { workspace = true }
 uuid = { workspace = true }
 parking_lot = { workspace = true }
+tower = { workspace = true }
 
 chroma-config = { workspace = true }
 chroma-error = { workspace = true }
