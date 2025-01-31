@@ -4,6 +4,7 @@ use axum::{
     Json,
 };
 use chroma_error::ChromaError;
+use chroma_types::{GetCollectionError, UpdateCollectionError};
 use serde::Serialize;
 use thiserror::Error;
 
@@ -11,12 +12,20 @@ use thiserror::Error;
 pub enum ValidationError {
     #[error("Collection ID is not a valid UUIDv4")]
     CollectionId,
+    #[error("Collection is not initialized")]
+    CollectionUninitialized,
+    #[error("Inconsistent dimensions in provided embeddings")]
+    DimensionInconsistent,
     #[error("Collection expecting embedding with dimension of {0}, got {1}")]
     DimensionMismatch(u32, u32),
     #[error("Deleting with empty filter.")]
     EmptyDelete,
+    #[error("Error getting collection: {0}")]
+    GetCollection(#[from] GetCollectionError),
     #[error("Invalid name: {0}")]
     Name(String),
+    #[error("Error updatding collection: {0}")]
+    UpdateCollection(#[from] UpdateCollectionError),
     #[error("Error parsing where clause")]
     WhereClause,
     #[error("Error parsing where document clause")]
@@ -27,11 +36,15 @@ impl ChromaError for ValidationError {
     fn code(&self) -> chroma_error::ErrorCodes {
         match self {
             ValidationError::CollectionId => chroma_error::ErrorCodes::InvalidArgument,
+            ValidationError::CollectionUninitialized => todo!(),
+            ValidationError::DimensionInconsistent => chroma_error::ErrorCodes::InvalidArgument,
             ValidationError::DimensionMismatch(_, _) => chroma_error::ErrorCodes::InvalidArgument,
             ValidationError::EmptyDelete => chroma_error::ErrorCodes::InvalidArgument,
+            ValidationError::GetCollection(err) => err.code(),
             ValidationError::Name(_) => chroma_error::ErrorCodes::InvalidArgument,
             ValidationError::WhereClause => chroma_error::ErrorCodes::InvalidArgument,
             ValidationError::WhereDocumentClause => chroma_error::ErrorCodes::InvalidArgument,
+            ValidationError::UpdateCollection(err) => err.code(),
         }
     }
 }

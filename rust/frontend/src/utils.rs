@@ -1,6 +1,6 @@
 use std::{net::IpAddr, str::FromStr, sync::LazyLock};
 
-use chroma_types::{operator::Filter, UpdateMetadata};
+use chroma_types::operator::Filter;
 use regex::Regex;
 
 use crate::types::errors::ValidationError;
@@ -13,22 +13,7 @@ static ALNUM_RE: LazyLock<Regex> = LazyLock::new(|| {
 static DP_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\.\.").expect("The double period regex should be valid"));
 
-pub fn validate_dimension(
-    dimension: u32,
-    embeddings: &Vec<Vec<f32>>,
-) -> Result<(), ValidationError> {
-    for emb in embeddings {
-        if emb.len() as u32 != dimension {
-            return Err(ValidationError::DimensionMismatch(
-                dimension,
-                emb.len() as u32,
-            ));
-        }
-    }
-    Ok(())
-}
-
-pub fn validate_non_empty_filter(filter: Filter) -> Result<(), ValidationError> {
+pub fn validate_non_empty_filter(filter: &Filter) -> Result<(), ValidationError> {
     if let Filter {
         query_ids: None,
         where_clause: None,

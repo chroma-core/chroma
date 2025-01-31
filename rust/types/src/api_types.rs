@@ -287,12 +287,15 @@ pub type CreateCollectionResponse = Collection;
 pub enum CreateCollectionError {
     #[error("Failed to create collection: {0}")]
     SysDB(String),
+    #[error("Validation failure: {0}")]
+    Validation(String),
 }
 
 impl ChromaError for CreateCollectionError {
     fn code(&self) -> ErrorCodes {
         match self {
             CreateCollectionError::SysDB(_) => ErrorCodes::Internal,
+            CreateCollectionError::Validation(_) => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -317,12 +320,15 @@ pub struct UpdateCollectionResponse {}
 pub enum UpdateCollectionError {
     #[error("Could not update collection: {0}")]
     SysDB(String),
+    #[error("Validation failure: {0}")]
+    Validation(String),
 }
 
 impl ChromaError for UpdateCollectionError {
     fn code(&self) -> ErrorCodes {
         match self {
             UpdateCollectionError::SysDB(_) => ErrorCodes::Internal,
+            UpdateCollectionError::Validation(_) => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -376,6 +382,8 @@ pub enum AddCollectionRecordsError {
     InconsistentLength,
     #[error("Failed to push logs: {0}")]
     FailedToPushLogs(#[from] Box<dyn ChromaError>),
+    #[error("Validation failure: {0}")]
+    Validation(String),
 }
 
 impl ChromaError for AddCollectionRecordsError {
@@ -384,6 +392,7 @@ impl ChromaError for AddCollectionRecordsError {
             AddCollectionRecordsError::Collection(err) => err.code(),
             AddCollectionRecordsError::InconsistentLength => ErrorCodes::InvalidArgument,
             AddCollectionRecordsError::FailedToPushLogs(_) => ErrorCodes::Internal,
+            AddCollectionRecordsError::Validation(_) => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -408,6 +417,8 @@ pub enum UpdateCollectionRecordsError {
     InconsistentLength,
     #[error("Failed to push logs: {0}")]
     FailedToPushLogs(#[from] Box<dyn ChromaError>),
+    #[error("Validation failure: {0}")]
+    Validation(String),
 }
 
 impl ChromaError for UpdateCollectionRecordsError {
@@ -415,6 +426,7 @@ impl ChromaError for UpdateCollectionRecordsError {
         match self {
             UpdateCollectionRecordsError::InconsistentLength => ErrorCodes::InvalidArgument,
             UpdateCollectionRecordsError::FailedToPushLogs(_) => ErrorCodes::Internal,
+            UpdateCollectionRecordsError::Validation(_) => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -439,6 +451,8 @@ pub enum UpsertCollectionRecordsError {
     InconsistentLength,
     #[error("Failed to push logs: {0}")]
     FailedToPushLogs(#[from] Box<dyn ChromaError>),
+    #[error("Validation failure: {0}")]
+    Validation(String),
 }
 
 impl ChromaError for UpsertCollectionRecordsError {
@@ -446,6 +460,7 @@ impl ChromaError for UpsertCollectionRecordsError {
         match self {
             UpsertCollectionRecordsError::InconsistentLength => ErrorCodes::InvalidArgument,
             UpsertCollectionRecordsError::FailedToPushLogs(_) => ErrorCodes::Internal,
+            UpsertCollectionRecordsError::Validation(_) => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -469,6 +484,8 @@ pub enum DeleteCollectionRecordsError {
     GetFailed(#[from] ExecutorError),
     #[error("Failed to push logs: {0}")]
     FailedToPushLogs(#[from] Box<dyn ChromaError>),
+    #[error("Validation failure: {0}")]
+    Validation(String),
 }
 
 impl ChromaError for DeleteCollectionRecordsError {
@@ -477,6 +494,7 @@ impl ChromaError for DeleteCollectionRecordsError {
             DeleteCollectionRecordsError::FetchCollectionSnapshot(err) => err.code(),
             DeleteCollectionRecordsError::GetFailed(err) => err.code(),
             DeleteCollectionRecordsError::FailedToPushLogs(_) => ErrorCodes::Internal,
+            DeleteCollectionRecordsError::Validation(_) => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -710,11 +728,16 @@ pub enum QueryError {
     CollectionSegments,
     #[error("Error executing plan: {0}")]
     Executor(#[from] ExecutorError),
+    #[error("Validation failure: {0}")]
+    Validation(String),
 }
 
 impl ChromaError for QueryError {
     fn code(&self) -> ErrorCodes {
-        ErrorCodes::Internal
+        match self {
+            QueryError::Validation(_) => ErrorCodes::InvalidArgument,
+            _ => ErrorCodes::Internal,
+        }
     }
 }
 
