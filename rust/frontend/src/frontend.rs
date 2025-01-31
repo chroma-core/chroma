@@ -5,8 +5,10 @@ use crate::{
     utils::{validate_name, validate_non_empty_filter},
     CollectionsWithSegmentsProvider,
 };
+use backon::ExponentialBuilder;
+use backon::Retryable;
 use chroma_config::Configurable;
-use chroma_error::ChromaError;
+use chroma_error::{ChromaError, ErrorCodes};
 use chroma_sysdb::{sysdb, GetCollectionsError};
 use chroma_system::System;
 use chroma_types::{
@@ -719,7 +721,8 @@ impl Frontend {
         Ok((get_result, request.include).into())
     }
 
-    pub async fn query(&mut self, request: QueryRequest) -> Result<QueryResponse, QueryError> {
+    async fn query_to_retry(&mut self, request: QueryRequest) -> Result<QueryResponse, QueryError> {
+        println!("Retrying query");
         let scan = self
             .collections_with_segments_provider
             .get_collection_with_segments(request.collection_id)
@@ -752,6 +755,28 @@ impl Frontend {
             })
             .await?;
         Ok((query_result, request.include).into())
+    }
+
+    pub async fn query(&mut self, request: QueryRequest) -> Result<QueryResponse, QueryError> {
+        let self_clone = self.clone();
+        let cache_clone = self
+            .collections_with_segments_provider
+            .collections_with_segments_cache
+            .clone();
+        let query_to_retry = move || async move {
+            let self_clone = self_clone.clone();
+            self_clone.query_to_retry(request.clone()).await
+        };
+        query_to_retry
+            .retry(ExponentialBuilder::default())
+            .when(|e| e.code() == ErrorCodes::NotFound)
+            .notify(move |err, _duration| {
+                if err.code() == ErrorCodes::NotFound {
+                    // Remove entry from map
+                    cache_clone.remove(&request.collection_id);
+                }
+            })
+            .await
     }
 }
 

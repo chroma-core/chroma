@@ -26,7 +26,7 @@ pub enum PullLogsError {
 impl ChromaError for PullLogsError {
     fn code(&self) -> ErrorCodes {
         match self {
-            PullLogsError::FailedToPullLogs(_) => ErrorCodes::Internal,
+            PullLogsError::FailedToPullLogs(e) => e.code().into(),
             PullLogsError::ConversionError(_) => ErrorCodes::Internal,
         }
     }
