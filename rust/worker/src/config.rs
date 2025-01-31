@@ -1,11 +1,11 @@
 use chroma_config::assignment;
 use chroma_sysdb::SysDbConfig;
 use figment::providers::{Env, Format, Yaml};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 const DEFAULT_CONFIG_PATH: &str = "./chroma_config.yaml";
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 /// # Description
 /// The RootConfig for all chroma services this is a YAML file that
 /// is shared between all services, and secondarily, fields can be
@@ -17,7 +17,9 @@ const DEFAULT_CONFIG_PATH: &str = "./chroma_config.yaml";
 pub struct RootConfig {
     // The root config object wraps the worker config object so that
     // we can share the same config file between multiple services.
+    #[serde(default)]
     pub query_service: QueryServiceConfig,
+    #[serde(default)]
     pub compaction_service: CompactionServiceConfig,
 }
 
@@ -86,7 +88,7 @@ impl Default for RootConfig {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize, Serialize)]
 /// # Description
 /// The primary config for the worker service.
 /// ## Description of parameters
@@ -98,24 +100,54 @@ impl Default for RootConfig {
 /// Each submodule that needs to be configured from the config object should implement the Configurable trait and
 /// have its own field in this struct for its Config struct.
 pub struct QueryServiceConfig {
+    #[serde(default = "QueryServiceConfig::default_service_name")]
     pub service_name: String,
+    #[serde(default = "QueryServiceConfig::default_otel_endpoint")]
     pub otel_endpoint: String,
     #[allow(dead_code)]
+    #[serde(default = "QueryServiceConfig::default_my_member_id")]
     pub my_member_id: String,
+    #[serde(default = "QueryServiceConfig::default_my_port")]
     pub my_port: u16,
     #[allow(dead_code)]
+    #[serde(default)]
     pub assignment_policy: assignment::config::AssignmentPolicyConfig,
     #[allow(dead_code)]
+    #[serde(default)]
     pub memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig,
+    #[serde(default)]
     pub sysdb: SysDbConfig,
+    #[serde(default)]
     pub storage: chroma_storage::config::StorageConfig,
+    #[serde(default)]
     pub log: chroma_log::config::LogConfig,
+    #[serde(default)]
     pub dispatcher: chroma_system::DispatcherConfig,
+    #[serde(default)]
     pub blockfile_provider: chroma_blockstore::config::BlockfileProviderConfig,
+    #[serde(default)]
     pub hnsw_provider: chroma_index::config::HnswProviderConfig,
 }
 
-#[derive(Deserialize)]
+impl QueryServiceConfig {
+    fn default_service_name() -> String {
+        "query-service".to_string()
+    }
+
+    fn default_otel_endpoint() -> String {
+        "http://otel-collector:4317".to_string()
+    }
+
+    fn default_my_member_id() -> String {
+        "query-service-0".to_string()
+    }
+
+    fn default_my_port() -> u16 {
+        50051
+    }
+}
+
+#[derive(Default, Deserialize, Serialize)]
 /// # Description
 /// The primary config for the compaction service.
 /// ## Description of parameters
@@ -127,18 +159,49 @@ pub struct QueryServiceConfig {
 /// Each submodule that needs to be configured from the config object should implement the Configurable trait and
 /// have its own field in this struct for its Config struct.
 pub struct CompactionServiceConfig {
+    #[serde(default = "CompactionServiceConfig::default_service_name")]
     pub service_name: String,
+    #[serde(default = "CompactionServiceConfig::default_otel_endpoint")]
     pub otel_endpoint: String,
+    #[serde(default = "CompactionServiceConfig::default_my_member_id")]
     pub my_member_id: String,
     #[allow(dead_code)]
+    #[serde(default = "CompactionServiceConfig::default_my_port")]
     pub my_port: u16,
+    #[serde(default)]
     pub assignment_policy: assignment::config::AssignmentPolicyConfig,
+    #[serde(default)]
     pub memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig,
+    #[serde(default)]
     pub sysdb: SysDbConfig,
+    #[serde(default)]
     pub storage: chroma_storage::config::StorageConfig,
+    #[serde(default)]
     pub log: chroma_log::config::LogConfig,
+    #[serde(default)]
     pub dispatcher: chroma_system::DispatcherConfig,
+    #[serde(default)]
     pub compactor: crate::compactor::config::CompactorConfig,
+    #[serde(default)]
     pub blockfile_provider: chroma_blockstore::config::BlockfileProviderConfig,
+    #[serde(default)]
     pub hnsw_provider: chroma_index::config::HnswProviderConfig,
+}
+
+impl CompactionServiceConfig {
+    fn default_service_name() -> String {
+        "compaction-service".to_string()
+    }
+
+    fn default_otel_endpoint() -> String {
+        "http://otel-collector:4317".to_string()
+    }
+
+    fn default_my_member_id() -> String {
+        "compaction-service-0".to_string()
+    }
+
+    fn default_my_port() -> u16 {
+        50051
+    }
 }

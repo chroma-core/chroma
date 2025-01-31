@@ -225,6 +225,31 @@ impl FoyerCacheConfig {
     }
 }
 
+impl Default for FoyerCacheConfig {
+    fn default() -> Self {
+        FoyerCacheConfig {
+            dir: None,
+            capacity: default_capacity(),
+            mem: default_mem(),
+            disk: default_disk(),
+            file_size: default_file_size(),
+            flushers: default_flushers(),
+            flush: default_flush(),
+            reclaimers: default_reclaimers(),
+            recover_concurrency: default_recover_concurrency(),
+            admission_rate_limit: default_admission_rate_limit(),
+            shards: default_shards(),
+            eviction: default_eviction(),
+            invalid_ratio: default_invalid_ratio(),
+            trace_insert_us: default_trace_insert_us(),
+            trace_get_us: default_trace_get_us(),
+            trace_obtain_us: default_trace_obtain_us(),
+            trace_remove_us: default_trace_remove_us(),
+            trace_fetch_us: default_trace_fetch_us(),
+        }
+    }
+}
+
 struct Stopwatch<'a>(
     &'a opentelemetry::metrics::Histogram<u64>,
     std::time::Instant,

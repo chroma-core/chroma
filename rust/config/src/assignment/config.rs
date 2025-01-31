@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize, Clone, Serialize)]
+#[derive(Default, Deserialize, Clone, Serialize)]
 /// The type of hasher to use.
 /// # Options
 /// - Murmur3: The murmur3 hasher.
-pub(crate) enum HasherType {
+pub enum HasherType {
+    #[default]
     Murmur3,
 }
 
@@ -19,10 +20,16 @@ pub enum AssignmentPolicyConfig {
     RendezvousHashing(RendezvousHashingAssignmentPolicyConfig),
 }
 
-#[derive(Deserialize, Clone, Serialize)]
+impl Default for AssignmentPolicyConfig {
+    fn default() -> Self {
+        AssignmentPolicyConfig::RendezvousHashing(RendezvousHashingAssignmentPolicyConfig::default())
+    }
+}
+
+#[derive(Default, Deserialize, Clone, Serialize)]
 /// The configuration for the rendezvous hashing assignment policy.
 /// # Fields
 /// - hasher: The type of hasher to use.
 pub struct RendezvousHashingAssignmentPolicyConfig {
-    pub(crate) hasher: HasherType,
+    pub hasher: HasherType,
 }
