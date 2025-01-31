@@ -20,10 +20,9 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
-use tonic::service::interceptor;
 use tonic::transport::{Channel, Endpoint};
-use tonic::Status;
-use tonic::{Code, Request};
+use tonic::Code;
+use tower::ServiceBuilder;
 use uuid::{Error, Uuid};
 
 #[derive(Debug, Clone)]
@@ -286,12 +285,7 @@ impl SysDb {
 // one inflight request at a time, so we need to clone the client for each requester.
 pub struct GrpcSysDb {
     #[allow(clippy::type_complexity)]
-    client: SysDbClient<
-        interceptor::InterceptedService<
-            tonic::transport::Channel,
-            fn(Request<()>) -> Result<Request<()>, Status>,
-        >,
-    >,
+    client: SysDbClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>,
 }
 
 #[derive(Error, Debug)]
@@ -327,14 +321,12 @@ impl Configurable<SysDbConfig> for GrpcSysDb {
                     .connect_timeout(Duration::from_millis(my_config.connect_timeout_ms))
                     .timeout(Duration::from_millis(my_config.request_timeout_ms));
 
-                let chans =
+                let channel =
                     Channel::balance_list((0..my_config.num_channels).map(|_| endpoint.clone()));
-                let client: SysDbClient<
-                    interceptor::InterceptedService<
-                        Channel,
-                        fn(Request<()>) -> Result<Request<()>, Status>,
-                    >,
-                > = SysDbClient::with_interceptor(chans, chroma_tracing::grpc_client_interceptor);
+                let channel = ServiceBuilder::new()
+                    .layer(chroma_tracing::GrpcTraceLayer)
+                    .service(channel);
+                let client = SysDbClient::new(channel);
                 Ok(GrpcSysDb { client })
             }
         }

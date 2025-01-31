@@ -7,22 +7,14 @@ use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
 };
-use tonic::{
-    service::interceptor::InterceptedService,
-    transport::{Channel, Endpoint},
-};
-use tower::discover::Change;
+use tonic::transport::{Channel, Endpoint};
+use tower::{discover::Change, ServiceBuilder};
 
 pub(super) type NodeNameToClient = Arc<
     RwLock<
         HashMap<
             String,
-            QueryExecutorClient<
-                InterceptedService<
-                    tonic::transport::Channel,
-                    chroma_tracing::GrpcClientInterceptor,
-                >,
-            >,
+            QueryExecutorClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>,
         >,
     >,
 >;
@@ -105,17 +97,13 @@ impl ClientManager {
         let sender = match self.node_name_to_change_sender.get(node) {
             Some(sender) => sender.clone(),
             None => {
-                let (chan, channel_change_sender) =
+                let (channel, channel_change_sender) =
                     Channel::balance_channel::<String>(self.connections_per_node);
-                let client: QueryExecutorClient<
-                    InterceptedService<
-                        tonic::transport::Channel,
-                        chroma_tracing::GrpcClientInterceptor,
-                    >,
-                > = QueryExecutorClient::with_interceptor(
-                    chan,
-                    chroma_tracing::grpc_client_interceptor,
-                );
+
+                let channel = ServiceBuilder::new()
+                    .layer(chroma_tracing::GrpcTraceLayer)
+                    .service(channel);
+                let client = QueryExecutorClient::new(channel);
 
                 let mut node_name_to_client_guard = self.node_name_to_client.write();
                 node_name_to_client_guard.insert(node.to_string(), client);

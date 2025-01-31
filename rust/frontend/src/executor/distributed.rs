@@ -21,12 +21,9 @@ use chroma_types::{
 };
 use rand::seq::SliceRandom;
 use std::cmp::min;
-use tonic::service::interceptor::InterceptedService;
 use tonic::Request;
 
-type Client = QueryExecutorClient<
-    InterceptedService<tonic::transport::Channel, chroma_tracing::GrpcClientInterceptor>,
->;
+type Client = QueryExecutorClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>;
 
 /// A distributed executor that routes requests to the appropriate node based on the assignment policy
 /// # Fields

@@ -12,31 +12,20 @@ use chroma_types::{CollectionUuid, LogRecord, OperationRecord, RecordConversionE
 use std::fmt::Debug;
 use std::time::Duration;
 use thiserror::Error;
-use tonic::service::interceptor;
 use tonic::transport::Endpoint;
-use tonic::{Request, Status};
+use tower::ServiceBuilder;
 use uuid::Uuid;
 
 #[derive(Clone, Debug)]
 pub struct GrpcLog {
     #[allow(clippy::type_complexity)]
-    client: LogServiceClient<
-        interceptor::InterceptedService<
-            tonic::transport::Channel,
-            fn(Request<()>) -> Result<Request<()>, Status>,
-        >,
-    >,
+    client: LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>,
 }
 
 impl GrpcLog {
     #[allow(clippy::type_complexity)]
     pub(crate) fn new(
-        client: LogServiceClient<
-            interceptor::InterceptedService<
-                tonic::transport::Channel,
-                fn(Request<()>) -> Result<Request<()>, Status>,
-            >,
-        >,
+        client: LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>,
     ) -> Self {
         Self { client }
     }
@@ -75,16 +64,11 @@ impl Configurable<LogConfig> for GrpcLog {
                 let client = endpoint_res.connect().await;
                 match client {
                     Ok(client) => {
-                        let channel: LogServiceClient<
-                            interceptor::InterceptedService<
-                                tonic::transport::Channel,
-                                fn(Request<()>) -> Result<Request<()>, Status>,
-                            >,
-                        > = LogServiceClient::with_interceptor(
-                            client,
-                            chroma_tracing::grpc_client_interceptor,
-                        );
-                        return Ok(GrpcLog::new(channel));
+                        let channel = ServiceBuilder::new()
+                            .layer(chroma_tracing::GrpcTraceLayer)
+                            .service(client);
+
+                        return Ok(GrpcLog::new(LogServiceClient::new(channel)));
                     }
                     Err(e) => {
                         return Err(Box::new(GrpcLogError::FailedToConnect(e)));
