@@ -1,9 +1,12 @@
 name: PR checks
 on:
   pull_request:
+    types:
+      - edited
     branches:
       - main
       - '**'
+    
 
 jobs:
   # GitHub only provides a way to do path filtering at the workflow level rather than the job level.
@@ -146,25 +149,30 @@ jobs:
     uses: ./.github/workflows/_go-tests.yml
 
   check-title:
-    name: Check PR Title
-    runs-on: ubuntu-latest
-    steps:
-        - name: Check PR Title
-          uses: Slashgear/action-check-pr-title@v4.3.0
-          with:
-            regexp: '\[(ENH|BUG|DOC|TST|BLD|PERF|TYP|CLN|CHORE|RELEASE|HOTFIX)\].*'
-            helpMessage: "Please tag your PR title. See https://docs.trychroma.com/contributing#contributing-code-and-ideas. You must push new code to this PR for this check to run again."
-        - name: Comment explaining failure
-          if: failure()
-          uses: actions/github-script@v6
-          with:
-            script: |
-              github.rest.issues.createComment({
-                issue_number: context.issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: 'Please tag your PR title with one of: \\[ENH | BUG | DOC | TST | BLD | PERF | TYP | CLN | CHORE\\]. See https://docs.trychroma.com/contributing#contributing-code-and-ideas'
-              })
+  name: Check PR Title
+  runs-on: ubuntu-latest
+  steps:
+    - name: Check PR Title
+      uses: Slashgear/action-check-pr-title@v4.3.0
+      with:
+        regexp: '\[(ENH|BUG|DOC|TST|BLD|PERF|TYP|CLN|CHORE|RELEASE|HOTFIX)\].*'
+        helpMessage: "Please tag your PR title. See https://docs.trychroma.com/contributing#contributing-code-and-ideas. You must push new code to this PR for this check to run again."
+
+    - name: Comment explaining failure
+      if: failure()
+      uses: marocchino/sticky-pull-request-comment@v2
+      with:
+        header: pr-title-check
+        message: |
+          :x: Please tag your PR title with one of: `[ENH | BUG | DOC | TST | BLD | PERF | TYP | CLN | CHORE]`.
+          See [Contributing Guidelines](https://docs.trychroma.com/contributing#contributing-code-and-ideas).
+
+    - name: Delete comment on success
+      if: success()
+      uses: marocchino/sticky-pull-request-comment@v2
+      with:
+        header: pr-title-check
+        delete: true
 
   lint:
     name: Lint
