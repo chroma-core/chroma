@@ -7,6 +7,8 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 const TRACE_ID_HEADER_KEY: &str = "chroma-traceid";
 const SPAN_ID_HEADER_KEY: &str = "chroma-spanid";
 
+pub type GrpcClientInterceptor = fn(Request<()>) -> Result<Request<()>, Status>;
+
 pub fn grpc_client_interceptor(request: Request<()>) -> Result<Request<()>, Status> {
     // If span is disabled then nothing to append in the header.
     if Span::current().is_disabled() {

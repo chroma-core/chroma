@@ -7,8 +7,25 @@ use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
 };
-use tonic::transport::{Channel, Endpoint};
+use tonic::{
+    service::interceptor::InterceptedService,
+    transport::{Channel, Endpoint},
+};
 use tower::discover::Change;
+
+pub(super) type NodeNameToClient = Arc<
+    RwLock<
+        HashMap<
+            String,
+            QueryExecutorClient<
+                InterceptedService<
+                    tonic::transport::Channel,
+                    chroma_tracing::GrpcClientInterceptor,
+                >,
+            >,
+        >,
+    >,
+>;
 
 /// A component that manages the gRPC clients for the query executors
 /// # Fields
@@ -22,8 +39,7 @@ use tower::discover::Change;
 #[derive(Debug)]
 pub(super) struct ClientManager {
     // The name of the node to the grpc client
-    node_name_to_client:
-        Arc<RwLock<HashMap<String, QueryExecutorClient<tonic::transport::Channel>>>>,
+    node_name_to_client: NodeNameToClient,
     // The name of the node to the sender to the channel to add / remove the ip
     node_name_to_change_sender:
         HashMap<String, tokio::sync::mpsc::Sender<Change<String, Endpoint>>>,
@@ -35,9 +51,7 @@ pub(super) struct ClientManager {
 
 impl ClientManager {
     pub(super) fn new(
-        node_name_to_client: Arc<
-            RwLock<HashMap<String, QueryExecutorClient<tonic::transport::Channel>>>,
-        >,
+        node_name_to_client: NodeNameToClient,
         connections_per_node: usize,
         connect_timeout_ms: u64,
         request_timeout_ms: u64,
@@ -93,7 +107,15 @@ impl ClientManager {
             None => {
                 let (chan, channel_change_sender) =
                     Channel::balance_channel::<String>(self.connections_per_node);
-                let client = QueryExecutorClient::new(chan);
+                let client: QueryExecutorClient<
+                    InterceptedService<
+                        tonic::transport::Channel,
+                        chroma_tracing::GrpcClientInterceptor,
+                    >,
+                > = QueryExecutorClient::with_interceptor(
+                    chan,
+                    chroma_tracing::grpc_client_interceptor,
+                );
 
                 let mut node_name_to_client_guard = self.node_name_to_client.write();
                 node_name_to_client_guard.insert(node.to_string(), client);

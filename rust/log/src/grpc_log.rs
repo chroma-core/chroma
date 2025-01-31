@@ -6,7 +6,6 @@ use crate::PushLogsError;
 use async_trait::async_trait;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_tracing::grpc_client_interceptor;
 use chroma_types::chroma_proto::log_service_client::LogServiceClient;
 use chroma_types::chroma_proto::{self};
 use chroma_types::{CollectionUuid, LogRecord, OperationRecord, RecordConversionError};
@@ -81,7 +80,10 @@ impl Configurable<LogConfig> for GrpcLog {
                                 tonic::transport::Channel,
                                 fn(Request<()>) -> Result<Request<()>, Status>,
                             >,
-                        > = LogServiceClient::with_interceptor(client, grpc_client_interceptor);
+                        > = LogServiceClient::with_interceptor(
+                            client,
+                            chroma_tracing::grpc_client_interceptor,
+                        );
                         return Ok(GrpcLog::new(channel));
                     }
                     Err(e) => {

@@ -3,7 +3,6 @@ use super::test_sysdb::TestSysDb;
 use async_trait::async_trait;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_tracing::grpc_client_interceptor;
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
 use chroma_types::{
     chroma_proto, CollectionAndSegments, CollectionMetadataUpdate, CreateDatabaseError,
@@ -331,7 +330,7 @@ impl Configurable<SysDbConfig> for GrpcSysDb {
                         Channel,
                         fn(Request<()>) -> Result<Request<()>, Status>,
                     >,
-                > = SysDbClient::with_interceptor(chans, grpc_client_interceptor);
+                > = SysDbClient::with_interceptor(chans, chroma_tracing::grpc_client_interceptor);
                 Ok(GrpcSysDb { client })
             }
         }
