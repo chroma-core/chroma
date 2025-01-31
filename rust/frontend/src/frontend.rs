@@ -749,7 +749,7 @@ impl Frontend {
                     where_clause: request.r#where,
                 },
                 limit: Limit {
-                    skip: request.offset,
+                    skip: request.offset.unwrap_or(0),
                     fetch: request.limit,
                 },
                 proj: Projection {

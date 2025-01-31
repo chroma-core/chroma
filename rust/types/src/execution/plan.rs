@@ -80,7 +80,7 @@ impl TryFrom<Get> for chroma_proto::GetPlan {
 }
 
 /// The `Knn` plan should output records nearest to the target embeddings that matches the specified filter
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Knn {
     pub scan: Scan,
     pub filter: Filter,
