@@ -1,6 +1,7 @@
 use crate::{
     config::{FrontendConfig, ScorecardRule},
     executor::Executor,
+    types::errors::ValidationError,
     CollectionsWithSegmentsProvider,
 };
 use chroma_config::Configurable;
@@ -18,7 +19,7 @@ use chroma_types::{
     GetCollectionResponse, GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest,
     GetResponse, GetTenantError, GetTenantRequest, GetTenantResponse, Include,
     ListCollectionsRequest, ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest,
-    ListDatabasesResponse, QueryError, QueryRequest, QueryResponse, ResetError,
+    ListDatabasesResponse, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
     UpdateCollectionError, UpdateCollectionRequest, UpdateCollectionResponse, CHROMA_DOCUMENT_KEY,
     CHROMA_URI_KEY,
 };
@@ -175,7 +176,35 @@ impl Frontend {
         }
     }
 
-    pub async fn reset(&mut self) -> Result<(), ResetError> {
+    async fn get_collection_dimension(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<Option<u32>, GetCollectionError> {
+        let mut collections = self
+            .sysdb_client
+            .get_collections(Some(collection_id), None, None, None)
+            .await
+            .map_err(|err| GetCollectionError::SysDB(err.to_string()))?;
+        Ok(collections
+            .pop()
+            .ok_or(GetCollectionError::NotFound)?
+            .dimension
+            .map(|dim| dim as u32))
+    }
+
+    async fn set_collection_dimension(
+        &mut self,
+        collection_id: CollectionUuid,
+        dimension: u32,
+    ) -> Result<UpdateCollectionResponse, UpdateCollectionError> {
+        self.sysdb_client
+            .update_collection(collection_id, None, None, Some(dimension))
+            .await
+            .map_err(|err| UpdateCollectionError::SysDB(err.to_string()))?;
+        Ok(UpdateCollectionResponse {})
+    }
+
+    pub async fn reset(&mut self) -> Result<ResetResponse, ResetError> {
         if !self.allow_reset {
             return Err(ResetError::NotAllowed);
         }
@@ -383,6 +412,7 @@ impl Frontend {
                 request.collection_id,
                 request.new_name,
                 request.new_metadata,
+                None,
             )
             .await
             .map_err(|err| UpdateCollectionError::SysDB(err.to_string()))?;
@@ -447,6 +477,14 @@ impl Frontend {
                     chroma_types::AddCollectionRecordsError::InconsistentLength
                 }
             })?;
+
+        // let expected_dimension = self.get_collection_dimension(request.collection_id).await?;
+        // match (expected_dimension, records.first()) {
+        //     (Some(dim), Some(rec)) => {
+
+        //     }
+        // }
+
         self.log_client
             .push_logs(request.collection_id, records)
             .await

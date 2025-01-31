@@ -17,6 +17,8 @@ use thiserror::Error;
 use tonic::Status;
 use uuid::Uuid;
 
+pub struct ResetResponse {}
+
 #[derive(Debug, Error)]
 pub enum ResetError {
     #[error("Error resetting cache")]
@@ -368,6 +370,8 @@ pub struct AddCollectionRecordsResponse {}
 
 #[derive(Error, Debug)]
 pub enum AddCollectionRecordsError {
+    #[error("Failed to get collection: {0}")]
+    Collection(#[from] GetCollectionError),
     #[error("Inconsistent number of IDs, embeddings, documents, URIs and metadatas")]
     InconsistentLength,
     #[error("Failed to push logs: {0}")]
@@ -377,6 +381,7 @@ pub enum AddCollectionRecordsError {
 impl ChromaError for AddCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
+            AddCollectionRecordsError::Collection(err) => err.code(),
             AddCollectionRecordsError::InconsistentLength => ErrorCodes::InvalidArgument,
             AddCollectionRecordsError::FailedToPushLogs(_) => ErrorCodes::Internal,
         }

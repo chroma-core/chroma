@@ -10,7 +10,7 @@ use chroma_types::{
     CreateDatabaseResponse, CreateTenantError, CreateTenantResponse, Database, DeleteDatabaseError,
     DeleteDatabaseResponse, GetDatabaseError, GetDatabaseResponse, GetTenantError,
     GetTenantResponse, ListDatabasesError, ListDatabasesResponse, Metadata, ResetError,
-    SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
+    ResetResponse, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
 };
 use chroma_types::{
     Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
@@ -162,9 +162,13 @@ impl SysDb {
         collection_id: CollectionUuid,
         name: Option<String>,
         metadata: Option<CollectionMetadataUpdate>,
+        dimension: Option<u32>,
     ) -> Result<(), UpdateCollectionError> {
         match self {
-            SysDb::Grpc(grpc) => grpc.update_collection(collection_id, name, metadata).await,
+            SysDb::Grpc(grpc) => {
+                grpc.update_collection(collection_id, name, metadata, dimension)
+                    .await
+            }
             SysDb::Test(_) => {
                 todo!()
             }
@@ -270,7 +274,7 @@ impl SysDb {
         }
     }
 
-    pub async fn reset(&mut self) -> Result<(), ResetError> {
+    pub async fn reset(&mut self) -> Result<ResetResponse, ResetError> {
         match self {
             SysDb::Grpc(grpc) => grpc.reset().await,
             SysDb::Test(_) => todo!(),
@@ -602,6 +606,7 @@ impl GrpcSysDb {
         collection_id: CollectionUuid,
         name: Option<String>,
         metadata: Option<CollectionMetadataUpdate>,
+        dimension: Option<u32>,
     ) -> Result<(), UpdateCollectionError> {
         let req = chroma_proto::UpdateCollectionRequest {
             id: collection_id.0.to_string(),
@@ -616,7 +621,7 @@ impl GrpcSysDb {
                     chroma_proto::update_collection_request::MetadataUpdate::ResetMetadata(true)
                 }
             }),
-            dimension: None,
+            dimension: dimension.map(|dim| dim as i32),
         };
 
         self.client.update_collection(req).await.map_err(|e| {
@@ -822,9 +827,9 @@ impl GrpcSysDb {
         }
     }
 
-    async fn reset(&mut self) -> Result<(), ResetError> {
+    async fn reset(&mut self) -> Result<ResetResponse, ResetError> {
         self.client.reset_state(()).await?;
-        Ok(())
+        Ok(ResetResponse {})
     }
 }
 
