@@ -548,6 +548,7 @@ pub struct GetRequestPayload {
     where_fields: RawWhereFields,
     limit: Option<u32>,
     offset: u32,
+    #[serde(default = "IncludeList::default_get")]
     include: IncludeList,
 }
 
@@ -584,6 +585,7 @@ pub struct QueryRequestPayload {
     where_fields: RawWhereFields,
     query_embeddings: Vec<Vec<f32>>,
     n_results: Option<u32>,
+    #[serde(default = "IncludeList::default_query")]
     include: IncludeList,
 }
 
