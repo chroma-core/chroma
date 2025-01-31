@@ -1,4 +1,4 @@
-use std::{net::IpAddr, str::FromStr, sync::LazyLock};
+use std::{collections::HashMap, net::IpAddr, str::FromStr, sync::LazyLock};
 
 use chroma_types::operator::Filter;
 use regex::Regex;
@@ -12,6 +12,16 @@ static ALNUM_RE: LazyLock<Regex> = LazyLock::new(|| {
 
 static DP_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\.\.").expect("The double period regex should be valid"));
+
+pub fn validate_non_empty_metadata<V>(
+    metadata: &HashMap<String, V>,
+) -> Result<(), ValidationError> {
+    if metadata.is_empty() {
+        Err(ValidationError::EmptyMetadata)
+    } else {
+        Ok(())
+    }
+}
 
 pub fn validate_non_empty_filter(filter: &Filter) -> Result<(), ValidationError> {
     if let Filter {

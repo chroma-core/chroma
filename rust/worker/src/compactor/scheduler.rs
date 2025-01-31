@@ -103,7 +103,7 @@ impl Scheduler {
             // TODO: add a cache to avoid fetching the same collection multiple times
             let result = self
                 .sysdb
-                .get_collections(collection_id, None, None, None)
+                .get_collections(collection_id, None, None, None, None, 0)
                 .await;
 
             match result {
