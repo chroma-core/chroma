@@ -1,6 +1,8 @@
 use crate::{
     config::{FrontendConfig, ScorecardRule},
     executor::Executor,
+    types::errors::ValidationError,
+    utils::{validate_name, validate_non_empty_filter},
     CollectionsWithSegmentsProvider,
 };
 use chroma_config::Configurable;
@@ -10,29 +12,27 @@ use chroma_system::System;
 use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection},
     plan::{Count, Get, Knn},
+    AddCollectionRecordsError, AddCollectionRecordsRequest, AddCollectionRecordsResponse,
     CollectionUuid, CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
     CreateCollectionError, CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseError,
     CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantError, CreateTenantRequest,
-    CreateTenantResponse, DeleteCollectionError, DeleteCollectionRequest, DeleteDatabaseError,
-    DeleteDatabaseRequest, DeleteDatabaseResponse, GetCollectionError, GetCollectionRequest,
-    GetCollectionResponse, GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest,
-    GetResponse, GetTenantError, GetTenantRequest, GetTenantResponse, Include,
-    ListCollectionsRequest, ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest,
-    ListDatabasesResponse, QueryError, QueryRequest, QueryResponse, ResetError,
-    UpdateCollectionError, UpdateCollectionRequest, UpdateCollectionResponse, CHROMA_DOCUMENT_KEY,
+    CreateTenantResponse, DeleteCollectionError, DeleteCollectionRecordsError,
+    DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, DeleteCollectionRequest,
+    DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse, GetCollectionError,
+    GetCollectionRequest, GetCollectionResponse, GetDatabaseError, GetDatabaseRequest,
+    GetDatabaseResponse, GetRequest, GetResponse, GetTenantError, GetTenantRequest,
+    GetTenantResponse, Include, ListCollectionsRequest, ListCollectionsResponse,
+    ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse, Operation, OperationRecord,
+    QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse, ScalarEncoding, Segment,
+    SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError, UpdateCollectionRecordsError,
+    UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateCollectionRequest,
+    UpdateCollectionResponse, UpdateMetadata, UpdateMetadataValue, UpsertCollectionRecordsError,
+    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, CHROMA_DOCUMENT_KEY,
     CHROMA_URI_KEY,
-};
-use chroma_types::{
-    Operation, OperationRecord, ScalarEncoding, UpdateMetadata, UpdateMetadataValue,
 };
 use mdac::{Pattern, Rule, Scorecard, ScorecardTicket};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-
-#[allow(dead_code)]
-const DEFAULT_TENANT: &str = "default_tenant";
-#[allow(dead_code)]
-const DEFAULT_DATABASE: &str = "default_database";
 
 struct ScorecardGuard {
     scorecard: Arc<Scorecard<'static>>,
@@ -180,7 +180,72 @@ impl Frontend {
         }
     }
 
-    pub async fn reset(&mut self) -> Result<(), ResetError> {
+    async fn get_collection_dimension(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<Option<u32>, GetCollectionError> {
+        let mut collections = self
+            .sysdb_client
+            .get_collections(Some(collection_id), None, None, None)
+            .await
+            .map_err(|err| GetCollectionError::SysDB(err.to_string()))?;
+        Ok(collections
+            .pop()
+            .ok_or(GetCollectionError::NotFound)?
+            .dimension
+            .map(|dim| dim as u32))
+    }
+
+    async fn set_collection_dimension(
+        &mut self,
+        collection_id: CollectionUuid,
+        dimension: u32,
+    ) -> Result<UpdateCollectionResponse, UpdateCollectionError> {
+        self.sysdb_client
+            .update_collection(collection_id, None, None, Some(dimension))
+            .await
+            .map_err(|err| UpdateCollectionError::SysDB(err.to_string()))?;
+        Ok(UpdateCollectionResponse {})
+    }
+
+    async fn validate_embedding(
+        &mut self,
+        collection_id: CollectionUuid,
+        option_embeddings: Option<&Vec<Vec<f32>>>,
+        update_if_not_present: bool,
+    ) -> Result<(), ValidationError> {
+        if let Some(embeddings) = option_embeddings {
+            let emb_dims = embeddings.iter().map(|emb| emb.len());
+            let min_dim = emb_dims.clone().min();
+            let max_dim = emb_dims.max();
+            let emb_dim = if let (Some(low), Some(high)) = (min_dim, max_dim) {
+                if low != high {
+                    return Err(ValidationError::DimensionInconsistent);
+                }
+                low as u32
+            } else {
+                // No embedding to check, return
+                return Ok(());
+            };
+            match self.get_collection_dimension(collection_id).await {
+                Ok(Some(expected_dim)) if expected_dim != emb_dim => {
+                    Err(ValidationError::DimensionMismatch(expected_dim, emb_dim))
+                }
+                Ok(None) if update_if_not_present => {
+                    self.set_collection_dimension(collection_id, emb_dim)
+                        .await?;
+                    Ok(())
+                }
+                Ok(None) => Err(ValidationError::CollectionUninitialized),
+                Ok(_) => Ok(()),
+                Err(err) => Err(err.into()),
+            }
+        } else {
+            Ok(())
+        }
+    }
+
+    pub async fn reset(&mut self) -> Result<ResetResponse, ResetError> {
         if !self.allow_reset {
             return Err(ResetError::NotAllowed);
         }
@@ -333,28 +398,31 @@ impl Frontend {
         &mut self,
         request: CreateCollectionRequest,
     ) -> Result<CreateCollectionResponse, CreateCollectionError> {
+        validate_name(&request.name)
+            .map_err(|err| CreateCollectionError::Validation(err.to_string()))?;
+
         let collection_id = CollectionUuid::new();
         let segments = vec![
-            chroma_types::Segment {
-                id: chroma_types::SegmentUuid::new(),
-                r#type: chroma_types::SegmentType::HnswDistributed,
-                scope: chroma_types::SegmentScope::VECTOR,
+            Segment {
+                id: SegmentUuid::new(),
+                r#type: SegmentType::HnswDistributed,
+                scope: SegmentScope::VECTOR,
                 collection: collection_id,
                 metadata: None,
                 file_path: Default::default(),
             },
-            chroma_types::Segment {
-                id: chroma_types::SegmentUuid::new(),
-                r#type: chroma_types::SegmentType::BlockfileMetadata,
-                scope: chroma_types::SegmentScope::METADATA,
+            Segment {
+                id: SegmentUuid::new(),
+                r#type: SegmentType::BlockfileMetadata,
+                scope: SegmentScope::METADATA,
                 collection: collection_id,
                 metadata: None,
                 file_path: Default::default(),
             },
-            chroma_types::Segment {
-                id: chroma_types::SegmentUuid::new(),
-                r#type: chroma_types::SegmentType::BlockfileRecord,
-                scope: chroma_types::SegmentScope::RECORD,
+            Segment {
+                id: SegmentUuid::new(),
+                r#type: SegmentType::BlockfileRecord,
+                scope: SegmentScope::RECORD,
                 collection: collection_id,
                 metadata: None,
                 file_path: Default::default(),
@@ -383,11 +451,16 @@ impl Frontend {
         &mut self,
         request: UpdateCollectionRequest,
     ) -> Result<UpdateCollectionResponse, UpdateCollectionError> {
+        if let Some(name) = request.new_name.as_ref() {
+            validate_name(name)
+                .map_err(|err| UpdateCollectionError::Validation(err.to_string()))?;
+        }
         self.sysdb_client
             .update_collection(
                 request.collection_id,
                 request.new_name,
                 request.new_metadata,
+                None,
             )
             .await
             .map_err(|err| UpdateCollectionError::SysDB(err.to_string()))?;
@@ -434,10 +507,10 @@ impl Frontend {
 
     pub async fn add(
         &mut self,
-        request: chroma_types::AddCollectionRecordsRequest,
-    ) -> Result<chroma_types::AddCollectionRecordsResponse, chroma_types::AddCollectionRecordsError>
-    {
-        let chroma_types::AddCollectionRecordsRequest {
+        request: AddCollectionRecordsRequest,
+    ) -> Result<AddCollectionRecordsResponse, AddCollectionRecordsError> {
+        let AddCollectionRecordsRequest {
+            collection_id,
             ids,
             embeddings,
             documents,
@@ -446,35 +519,40 @@ impl Frontend {
             ..
         } = request;
 
+        self.validate_embedding(collection_id, embeddings.as_ref(), true)
+            .await
+            .map_err(|err| AddCollectionRecordsError::Validation(err.to_string()))?;
+
         let records = to_records(ids, embeddings, documents, uris, metadatas, Operation::Add)
             .map_err(|err| match err {
-                ToRecordsError::InconsistentLength => {
-                    chroma_types::AddCollectionRecordsError::InconsistentLength
-                }
+                ToRecordsError::InconsistentLength => AddCollectionRecordsError::InconsistentLength,
             })?;
+
         self.log_client
             .push_logs(request.collection_id, records)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
-        Ok(chroma_types::AddCollectionRecordsResponse {})
+        Ok(AddCollectionRecordsResponse {})
     }
 
     pub async fn update(
         &mut self,
-        request: chroma_types::UpdateCollectionRecordsRequest,
-    ) -> Result<
-        chroma_types::UpdateCollectionRecordsResponse,
-        chroma_types::UpdateCollectionRecordsError,
-    > {
-        let chroma_types::UpdateCollectionRecordsRequest {
+        request: UpdateCollectionRecordsRequest,
+    ) -> Result<UpdateCollectionRecordsResponse, UpdateCollectionRecordsError> {
+        let UpdateCollectionRecordsRequest {
+            collection_id,
             ids,
             embeddings,
             documents,
             uris,
             metadatas,
             ..
-        } = request;
+        }: UpdateCollectionRecordsRequest = request;
+
+        self.validate_embedding(collection_id, embeddings.as_ref(), true)
+            .await
+            .map_err(|err| UpdateCollectionRecordsError::Validation(err.to_string()))?;
 
         let records = to_records(
             ids,
@@ -485,9 +563,7 @@ impl Frontend {
             Operation::Update,
         )
         .map_err(|err| match err {
-            ToRecordsError::InconsistentLength => {
-                chroma_types::UpdateCollectionRecordsError::InconsistentLength
-            }
+            ToRecordsError::InconsistentLength => UpdateCollectionRecordsError::InconsistentLength,
         })?;
 
         self.log_client
@@ -495,17 +571,15 @@ impl Frontend {
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
-        Ok(chroma_types::UpdateCollectionRecordsResponse {})
+        Ok(UpdateCollectionRecordsResponse {})
     }
 
     pub async fn upsert(
         &mut self,
-        request: chroma_types::UpsertCollectionRecordsRequest,
-    ) -> Result<
-        chroma_types::UpsertCollectionRecordsResponse,
-        chroma_types::UpsertCollectionRecordsError,
-    > {
-        let chroma_types::UpsertCollectionRecordsRequest {
+        request: UpsertCollectionRecordsRequest,
+    ) -> Result<UpsertCollectionRecordsResponse, UpsertCollectionRecordsError> {
+        let UpsertCollectionRecordsRequest {
+            collection_id,
             ids,
             embeddings,
             documents,
@@ -513,6 +587,10 @@ impl Frontend {
             metadatas,
             ..
         } = request;
+
+        self.validate_embedding(collection_id, embeddings.as_ref(), true)
+            .await
+            .map_err(|err| UpsertCollectionRecordsError::Validation(err.to_string()))?;
 
         let records = to_records(
             ids,
@@ -523,9 +601,7 @@ impl Frontend {
             Operation::Upsert,
         )
         .map_err(|err| match err {
-            ToRecordsError::InconsistentLength => {
-                chroma_types::UpsertCollectionRecordsError::InconsistentLength
-            }
+            ToRecordsError::InconsistentLength => UpsertCollectionRecordsError::InconsistentLength,
         })?;
 
         self.log_client
@@ -533,28 +609,31 @@ impl Frontend {
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
-        Ok(chroma_types::UpsertCollectionRecordsResponse {})
+        Ok(UpsertCollectionRecordsResponse {})
     }
 
     pub async fn delete(
         &mut self,
-        request: chroma_types::DeleteCollectionRecordsRequest,
-    ) -> Result<
-        chroma_types::DeleteCollectionRecordsResponse,
-        chroma_types::DeleteCollectionRecordsError,
-    > {
+        request: DeleteCollectionRecordsRequest,
+    ) -> Result<DeleteCollectionRecordsResponse, DeleteCollectionRecordsError> {
         let scan = self
             .collections_with_segments_provider
             .get_collection_with_segments(request.collection_id)
             .await?;
+
+        let filter = Filter {
+            query_ids: request.ids,
+            where_clause: request.r#where,
+        };
+
+        validate_non_empty_filter(&filter)
+            .map_err(|err| DeleteCollectionRecordsError::Validation(err.to_string()))?;
+
         let get_result = self
             .executor
             .get(Get {
                 scan,
-                filter: Filter {
-                    query_ids: request.ids,
-                    where_clause: request.r#where,
-                },
+                filter,
                 limit: Limit {
                     skip: 0,
                     fetch: None,
@@ -569,7 +648,7 @@ impl Frontend {
 
         if get_result.records.is_empty() {
             tracing::debug!("Bailing because no records were found");
-            return Ok(chroma_types::DeleteCollectionRecordsResponse {});
+            return Ok(DeleteCollectionRecordsResponse {});
         }
 
         let records = get_result
@@ -590,7 +669,7 @@ impl Frontend {
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
-        Ok(chroma_types::DeleteCollectionRecordsResponse {})
+        Ok(DeleteCollectionRecordsResponse {})
     }
 
     pub async fn count(&mut self, request: CountRequest) -> Result<CountResponse, QueryError> {
@@ -633,6 +712,11 @@ impl Frontend {
             .collections_with_segments_provider
             .get_collection_with_segments(request.collection_id)
             .await?;
+
+        self.validate_embedding(request.collection_id, Some(&request.embeddings), false)
+            .await
+            .map_err(|err| QueryError::Validation(err.to_string()))?;
+
         let query_result = self
             .executor
             .knn(Knn {
