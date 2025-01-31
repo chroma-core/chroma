@@ -809,7 +809,6 @@ def client_factories(system: System) -> Generator[ClientFactories, None, None]:
 
 @pytest.fixture(scope="function")
 def client(system: System) -> Generator[ClientAPI, None, None]:
-    print("Resetting state")
     system.reset_state()
 
     if system.settings.chroma_api_impl == "chromadb.api.async_fastapi.AsyncFastAPI":

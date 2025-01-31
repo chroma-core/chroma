@@ -12,7 +12,7 @@ use chroma_types::{
     CreateTenantResponse, DeleteCollectionRecordsResponse, DeleteDatabaseRequest,
     DeleteDatabaseResponse, GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse,
     GetRequest, GetResponse, GetTenantRequest, GetTenantResponse, GetUserIdentityResponse,
-    HealthCheckResponse, IncludeList, ListCollectionsRequest, ListCollectionsResponse,
+    HeartbeatResponse, IncludeList, ListCollectionsRequest, ListCollectionsResponse,
     ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
     UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateMetadata,
     UpsertCollectionRecordsResponse,
@@ -125,13 +125,10 @@ async fn root() -> &'static str {
     "Chroma Rust Frontend"
 }
 
-async fn heartbeat() -> Json<HealthCheckResponse> {
-    Json(HealthCheckResponse {
-        nanosecond_heartbeat: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos(),
-    })
+async fn heartbeat(
+    State(server): State<FrontendServer>,
+) -> Result<Json<HeartbeatResponse>, ServerError> {
+    Ok(Json(server.frontend.heartbeat().await?))
 }
 
 // Dummy implementation for now

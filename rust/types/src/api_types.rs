@@ -48,9 +48,21 @@ pub struct ChecklistResponse {
 }
 
 #[derive(Serialize)]
-pub struct HealthCheckResponse {
+pub struct HeartbeatResponse {
     #[serde(rename(serialize = "nanosecond heartbeat"))]
     pub nanosecond_heartbeat: u128,
+}
+
+#[derive(Debug, Error)]
+pub enum HeartbeatError {
+    #[error("Could not get time: {0}")]
+    CouldNotGetTime(#[from] std::time::SystemTimeError),
+}
+
+impl ChromaError for HeartbeatError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::Internal
+    }
 }
 
 #[derive(Serialize)]
