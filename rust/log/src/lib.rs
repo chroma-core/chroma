@@ -4,7 +4,6 @@ pub mod in_memory_log;
 #[allow(clippy::module_inception)]
 mod log;
 pub mod test;
-pub mod tracing;
 pub mod types;
 
 use chroma_config::Configurable;

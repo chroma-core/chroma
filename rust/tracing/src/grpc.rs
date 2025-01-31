@@ -1,6 +1,5 @@
-use std::str::FromStr;
-
 use opentelemetry::trace::TraceContextExt;
+use std::str::FromStr;
 use tonic::{metadata::MetadataValue, Request, Status};
 use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
@@ -8,7 +7,7 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 const TRACE_ID_HEADER_KEY: &str = "chroma-traceid";
 const SPAN_ID_HEADER_KEY: &str = "chroma-spanid";
 
-pub(crate) fn client_interceptor(request: Request<()>) -> Result<Request<()>, Status> {
+pub fn grpc_client_interceptor(request: Request<()>) -> Result<Request<()>, Status> {
     // If span is disabled then nothing to append in the header.
     if Span::current().is_disabled() {
         return Ok(request);

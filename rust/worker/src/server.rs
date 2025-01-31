@@ -217,6 +217,7 @@ impl WorkerServer {
         &self,
         knn: Request<KnnPlan>,
     ) -> Result<Response<KnnBatchResult>, Status> {
+        println!("got request: {:?}", knn);
         let dispatcher = self.clone_dispatcher()?;
         let system = self.clone_system()?;
 
