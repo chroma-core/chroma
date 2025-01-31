@@ -589,7 +589,7 @@ impl CompactOrchestrator {
 
                 // Create a hnsw segment writer
                 let collection_res = sysdb
-                    .get_collections(Some(self.collection_id), None, None, None)
+                    .get_collections(Some(self.collection_id), None, None, None, None, 0)
                     .await;
 
                 let collection_res = match collection_res {

@@ -111,10 +111,12 @@ impl SysDb {
         name: Option<String>,
         tenant: Option<String>,
         database: Option<String>,
+        limit: Option<u32>,
+        offset: u32,
     ) -> Result<Vec<Collection>, GetCollectionsError> {
         match self {
             SysDb::Grpc(grpc) => {
-                grpc.get_collections(collection_id, name, tenant, database)
+                grpc.get_collections(collection_id, name, tenant, database, limit, offset)
                     .await
             }
             SysDb::Test(test) => {
@@ -528,6 +530,8 @@ impl GrpcSysDb {
         name: Option<String>,
         tenant: Option<String>,
         database: Option<String>,
+        limit: Option<u32>,
+        offset: u32,
     ) -> Result<Vec<Collection>, GetCollectionsError> {
         // TODO: move off of status into our own error type
         let collection_id_str = collection_id.map(|id| String::from(id.0));
@@ -536,8 +540,8 @@ impl GrpcSysDb {
             .get_collections(chroma_proto::GetCollectionsRequest {
                 id: collection_id_str,
                 name,
-                limit: None,
-                offset: None,
+                limit: limit.map(|l| l as i32),
+                offset: Some(offset as i32),
                 tenant: tenant.unwrap_or("".to_string()),
                 database: database.unwrap_or("".to_string()),
             })

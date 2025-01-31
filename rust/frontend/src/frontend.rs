@@ -365,6 +365,8 @@ impl Frontend {
                 None,
                 Some(request.tenant_id),
                 Some(request.database_name),
+                request.limit,
+                request.offset,
             )
             .await
     }
@@ -379,6 +381,8 @@ impl Frontend {
                 None,
                 Some(request.tenant_id),
                 Some(request.database_name),
+                None,
+                0,
             )
             .await
             .map(|collections| collections.len() as u32)
@@ -395,6 +399,8 @@ impl Frontend {
                 Some(request.collection_name),
                 Some(request.tenant_id),
                 Some(request.database_name),
+                None,
+                0,
             )
             .await
             .map_err(|err| GetCollectionError::SysDB(err.to_string()))?;
@@ -491,6 +497,8 @@ impl Frontend {
                 Some(request.collection_name),
                 Some(request.tenant_id.clone()),
                 Some(request.database_name.clone()),
+                None,
+                0,
             )
             .await
             .map_err(|err| DeleteCollectionError::SysDB(err.to_string()))?

@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     routing::{delete, get, post},
     Json, Router, ServiceExt,
 };
@@ -263,14 +263,24 @@ async fn delete_database(
     ))
 }
 
+#[derive(Deserialize)]
+struct ListCollectionsParams {
+    limit: Option<u32>,
+    #[serde(default)]
+    offset: u32,
+}
+
 async fn list_collections(
     Path((tenant_id, database_name)): Path<(String, String)>,
+    Query(ListCollectionsParams { limit, offset }): Query<ListCollectionsParams>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<ListCollectionsResponse>, ServerError> {
     tracing::info!(
-        "Listing collections in database [{}] for tenant [{}]",
+        "Listing collections in database [{}] for tenant [{}] with limit [{:?}] and offset [{:?}]",
         database_name,
-        tenant_id
+        tenant_id,
+        limit,
+        offset
     );
     Ok(Json(
         server
@@ -278,6 +288,8 @@ async fn list_collections(
             .list_collections(ListCollectionsRequest {
                 tenant_id,
                 database_name,
+                limit,
+                offset,
             })
             .await?,
     ))

@@ -251,6 +251,8 @@ impl ChromaError for DeleteDatabaseError {
 pub struct ListCollectionsRequest {
     pub tenant_id: String,
     pub database_name: String,
+    pub limit: Option<u32>,
+    pub offset: u32,
 }
 
 pub type ListCollectionsResponse = Vec<Collection>;
