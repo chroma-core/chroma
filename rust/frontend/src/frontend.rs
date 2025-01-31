@@ -473,6 +473,9 @@ impl Frontend {
             .is_some()
         {
             tracing::error!("Collection was just created. It should not be in the cache.");
+            return Err(CreateCollectionError::Validation(
+                "Collection found in cache when it shouldn't be".to_string(),
+            ));
         }
         self.collections_with_segments_provider
             .collections_with_segments_cache
