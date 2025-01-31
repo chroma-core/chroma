@@ -584,7 +584,7 @@ async fn collection_get(
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
     tracing::info!(
-        "Getting records from collection [{collection_id}] in database [{database_name}] for tenant [{tenant_id}], with query parameters [{payload:?}]",
+        "Getting records from collection [{collection_id}] in database [{database_name}] for tenant [{tenant_id}]",
     );
     let res = server
         .frontend
@@ -621,7 +621,7 @@ async fn collection_query(
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
     tracing::info!(
-        "Querying records from collection [{collection_id}] in database [{database_name}] for tenant [{tenant_id}], with query parameters [{payload:?}]",
+        "Querying records from collection [{collection_id}] in database [{database_name}] for tenant [{tenant_id}]",
     );
 
     let res = server
