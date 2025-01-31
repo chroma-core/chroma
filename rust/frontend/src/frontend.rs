@@ -84,10 +84,10 @@ fn to_records<
     M: IntoIterator<Item = (String, MetadataValue)>,
 >(
     ids: Vec<String>,
-    embeddings: Option<Vec<Vec<f32>>>,
-    documents: Option<Vec<String>>,
-    uris: Option<Vec<String>>,
-    metadatas: Option<Vec<M>>,
+    embeddings: Option<Vec<Option<Vec<f32>>>>,
+    documents: Option<Vec<Option<String>>>,
+    uris: Option<Vec<Option<String>>>,
+    metadatas: Option<Vec<Option<M>>>,
     operation: Operation,
 ) -> Result<Vec<OperationRecord>, ToRecordsError> {
     let len = ids.len();
@@ -109,10 +109,10 @@ fn to_records<
     let mut records = Vec::with_capacity(len);
 
     for id in ids {
-        let embedding = embeddings_iter.next();
-        let document = documents_iter.next();
-        let uri = uris_iter.next();
-        let metadata = metadatas_iter.next();
+        let embedding = embeddings_iter.next().flatten();
+        let document = documents_iter.next().flatten();
+        let uri = uris_iter.next().flatten();
+        let metadata = metadatas_iter.next().flatten();
 
         let encoding = embedding.as_ref().map(|_| ScalarEncoding::FLOAT32);
 
@@ -237,16 +237,23 @@ impl Frontend {
         Ok(UpdateCollectionResponse {})
     }
 
-    pub async fn validate_embedding(
+    pub async fn validate_embedding<Embedding, F>(
         &mut self,
         collection_id: CollectionUuid,
-        option_embeddings: Option<&Vec<Vec<f32>>>,
+        option_embeddings: Option<&Vec<Embedding>>,
         update_if_not_present: bool,
-    ) -> Result<(), ValidationError> {
+        read_length: F,
+    ) -> Result<(), ValidationError>
+    where
+        F: Fn(&Embedding) -> Option<usize>,
+    {
         if let Some(embeddings) = option_embeddings {
-            let emb_dims = embeddings.iter().map(|emb| emb.len());
-            let min_dim = emb_dims.clone().min();
-            let max_dim = emb_dims.max();
+            let emb_dims = embeddings
+                .iter()
+                .filter_map(read_length)
+                .collect::<Vec<_>>();
+            let min_dim = emb_dims.iter().min().cloned();
+            let max_dim = emb_dims.iter().max().cloned();
             let emb_dim = if let (Some(low), Some(high)) = (min_dim, max_dim) {
                 if low != high {
                     return Err(ValidationError::DimensionInconsistent);
@@ -520,6 +527,8 @@ impl Frontend {
             ..
         } = request;
 
+        let embeddings = embeddings.map(|embeddings| embeddings.into_iter().map(Some).collect());
+
         let records = to_records(ids, embeddings, documents, uris, metadatas, Operation::Add)
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
@@ -576,6 +585,8 @@ impl Frontend {
             metadatas,
             ..
         } = request;
+
+        let embeddings = embeddings.map(|embeddings| embeddings.into_iter().map(Some).collect());
 
         let records = to_records(
             ids,

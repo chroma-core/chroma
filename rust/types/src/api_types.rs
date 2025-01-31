@@ -385,9 +385,9 @@ pub struct AddCollectionRecordsRequest {
     pub collection_id: CollectionUuid,
     pub ids: Vec<String>,
     pub embeddings: Option<Vec<Vec<f32>>>,
-    pub documents: Option<Vec<String>>,
-    pub uris: Option<Vec<String>>,
-    pub metadatas: Option<Vec<Metadata>>,
+    pub documents: Option<Vec<Option<String>>>,
+    pub uris: Option<Vec<Option<String>>>,
+    pub metadatas: Option<Vec<Option<Metadata>>>,
 }
 
 #[derive(Serialize)]
@@ -415,10 +415,10 @@ pub struct UpdateCollectionRecordsRequest {
     pub database_name: String,
     pub collection_id: CollectionUuid,
     pub ids: Vec<String>,
-    pub embeddings: Option<Vec<Vec<f32>>>,
-    pub documents: Option<Vec<String>>,
-    pub uris: Option<Vec<String>>,
-    pub metadatas: Option<Vec<UpdateMetadata>>,
+    pub embeddings: Option<Vec<Option<Vec<f32>>>>,
+    pub documents: Option<Vec<Option<String>>>,
+    pub uris: Option<Vec<Option<String>>>,
+    pub metadatas: Option<Vec<Option<UpdateMetadata>>>,
 }
 
 #[derive(Serialize)]
@@ -444,9 +444,9 @@ pub struct UpsertCollectionRecordsRequest {
     pub collection_id: CollectionUuid,
     pub ids: Vec<String>,
     pub embeddings: Option<Vec<Vec<f32>>>,
-    pub documents: Option<Vec<String>>,
-    pub uris: Option<Vec<String>>,
-    pub metadatas: Option<Vec<UpdateMetadata>>,
+    pub documents: Option<Vec<Option<String>>>,
+    pub uris: Option<Vec<Option<String>>>,
+    pub metadatas: Option<Vec<Option<UpdateMetadata>>>,
 }
 
 #[derive(Serialize)]
