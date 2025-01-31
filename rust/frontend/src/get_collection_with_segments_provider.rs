@@ -85,7 +85,7 @@ impl CollectionsWithSegmentsProvider {
         {
             Some(collection_and_segments) => collection_and_segments,
             None => {
-                println!("Cache miss for collection {}", collection_id);
+                tracing::info!("Cache miss for collection {}", collection_id);
                 // We acquire a lock to prevent the sysdb from experiencing a thundering herd.
                 // This can happen when a large number of threads try to get the same collection
                 // at the same time.
@@ -100,7 +100,7 @@ impl CollectionsWithSegmentsProvider {
                 {
                     Some(collection_and_segments) => collection_and_segments,
                     None => {
-                        println!("Cache miss again for collection {}", collection_id);
+                        tracing::info!("Cache miss again for collection {}", collection_id);
                         let collection_and_segments_sysdb = self
                             .sysdb_client
                             .get_collection_with_segments(collection_id)
