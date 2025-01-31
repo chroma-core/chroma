@@ -303,6 +303,8 @@ pub type CreateCollectionResponse = Collection;
 
 #[derive(Debug, Error)]
 pub enum CreateCollectionError {
+    #[error("Collection name already exists")]
+    CollectionNameExists,
     #[error("Failed to create collection: {0}")]
     SysDB(String),
     #[error("Validation failure: {0}")]
@@ -312,6 +314,7 @@ pub enum CreateCollectionError {
 impl ChromaError for CreateCollectionError {
     fn code(&self) -> ErrorCodes {
         match self {
+            CreateCollectionError::CollectionNameExists => ErrorCodes::AlreadyExists,
             CreateCollectionError::SysDB(_) => ErrorCodes::Internal,
             CreateCollectionError::Validation(_) => ErrorCodes::InvalidArgument,
         }
@@ -365,7 +368,7 @@ pub struct DeleteCollectionResponse {}
 pub enum DeleteCollectionError {
     #[error("Could not delete collection: {0}")]
     SysDB(String),
-    #[error("Collection not found")]
+    #[error("Collection does not exist")]
     NotFound,
 }
 

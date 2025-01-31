@@ -585,12 +585,16 @@ impl GrpcSysDb {
                     .into_iter()
                     .map(chroma_proto::Segment::from)
                     .collect(),
-                configuration_json_str: "{}".to_string(), // Configuration is currently unused by distributed Chroma
+                configuration_json_str: r#"{"hnsw_configuration": {"space": "l2", "ef_construction": 100, "ef_search": 100, "num_threads": 16, "M": 16, "resize_factor": 1.2, "batch_size": 100, "sync_threshold": 1000, "_type": "HNSWConfigurationInternal"}, "_type": "CollectionConfigurationInternal"}"#.to_string(), // Configuration is currently unused by distributed Chroma
                 metadata: metadata.map(|metadata| metadata.into()),
                 dimension,
                 get_or_create: Some(get_or_create),
             })
-            .await?;
+            .await
+            .map_err(|err| match err.code() {
+                Code::AlreadyExists => CreateCollectionError::CollectionNameExists,
+                _ => CreateCollectionError::FailedToCreateCollection(err),
+            })?;
 
         let collection = res
             .into_inner()
@@ -854,6 +858,8 @@ impl ChromaError for GetCollectionsError {
 
 #[derive(Error, Debug)]
 pub enum CreateCollectionError {
+    #[error("Collection name already exists")]
+    CollectionNameExists,
     #[error("Failed to create collection: {0}")]
     FailedToCreateCollection(#[from] tonic::Status),
     #[error("Collection field missing from proto response")]
@@ -865,6 +871,7 @@ pub enum CreateCollectionError {
 impl ChromaError for CreateCollectionError {
     fn code(&self) -> ErrorCodes {
         match self {
+            CreateCollectionError::CollectionNameExists => ErrorCodes::AlreadyExists,
             CreateCollectionError::FailedToCreateCollection(_) => ErrorCodes::Internal,
             CreateCollectionError::CollectionFieldMissing => ErrorCodes::Internal,
             CreateCollectionError::ConversionError(_) => ErrorCodes::Internal,
