@@ -758,24 +758,21 @@ impl Frontend {
     }
 
     pub async fn query(&mut self, request: QueryRequest) -> Result<QueryResponse, QueryError> {
-        let self_clone = self.clone();
-        let cache_clone = self
-            .collections_with_segments_provider
-            .collections_with_segments_cache
-            .clone();
-        let query_to_retry = move || async move {
-            let self_clone = self_clone.clone();
-            self_clone.query_to_retry(request.clone()).await
-        };
+        // let self_clone = self.clone();
+        // let cache_clone = self
+        //     .collections_with_segments_provider
+        //     .collections_with_segments_cache
+        //     .clone();
+        let query_to_retry = || async { self.query_to_retry(request.clone()).await };
         query_to_retry
             .retry(ExponentialBuilder::default())
             .when(|e| e.code() == ErrorCodes::NotFound)
-            .notify(move |err, _duration| {
-                if err.code() == ErrorCodes::NotFound {
-                    // Remove entry from map
-                    cache_clone.remove(&request.collection_id);
-                }
-            })
+            // .notify(move |err, _duration| {
+            //     if err.code() == ErrorCodes::NotFound {
+            //         // Remove entry from map
+            //         cache_clone.remove(&request.collection_id);
+            //     }
+            // })
             .await
     }
 }
