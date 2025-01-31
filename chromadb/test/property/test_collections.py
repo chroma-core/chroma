@@ -26,7 +26,7 @@ def check_metadata(expected: Optional[dict], got: Optional[dict]):
         for key, val in expected.items():
             assert key in got
             if isinstance(expected[key], float):
-                assert abs(expected[key] - got[key]) < 1e6
+                assert abs(expected[key] - got[key]) < 1e-6
             else:
                 assert expected[key] == got[key]
             
