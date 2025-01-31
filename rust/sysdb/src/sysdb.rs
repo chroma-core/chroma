@@ -9,8 +9,8 @@ use chroma_types::{
     chroma_proto, CollectionAndSegments, CollectionMetadataUpdate, CreateDatabaseError,
     CreateDatabaseResponse, CreateTenantError, CreateTenantResponse, Database, DeleteDatabaseError,
     DeleteDatabaseResponse, GetDatabaseError, GetDatabaseResponse, GetTenantError,
-    GetTenantResponse, ListDatabasesError, ListDatabasesResponse, Metadata, SegmentFlushInfo,
-    SegmentFlushInfoConversionError, SegmentUuid,
+    GetTenantResponse, ListDatabasesError, ListDatabasesResponse, Metadata, ResetError,
+    SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
 };
 use chroma_types::{
     Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
@@ -267,6 +267,13 @@ impl SysDb {
                 )
                 .await
             }
+        }
+    }
+
+    pub async fn reset(&mut self) -> Result<(), ResetError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.reset().await,
+            SysDb::Test(_) => todo!(),
         }
     }
 }
@@ -813,6 +820,11 @@ impl GrpcSysDb {
             }
             Err(e) => Err(FlushCompactionError::FailedToFlushCompaction(e)),
         }
+    }
+
+    async fn reset(&mut self) -> Result<(), ResetError> {
+        self.client.reset_state(()).await?;
+        Ok(())
     }
 }
 

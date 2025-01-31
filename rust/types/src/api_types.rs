@@ -19,15 +19,24 @@ use uuid::Uuid;
 
 #[derive(Debug, Error)]
 pub enum ResetError {
-    #[error("Unable to reset cache")]
+    #[error("Error resetting cache")]
     Cache,
+    #[error("Reset is not allowed")]
+    NotAllowed,
     #[error("Rate limited")]
     RateLimited,
+    #[error("Error resetting SysDB: {0}")]
+    SysDB(#[from] Status),
 }
 
 impl ChromaError for ResetError {
     fn code(&self) -> ErrorCodes {
-        ErrorCodes::Internal
+        match self {
+            ResetError::Cache => ErrorCodes::Internal,
+            ResetError::NotAllowed => ErrorCodes::PermissionDenied,
+            ResetError::RateLimited => ErrorCodes::ResourceExhausted,
+            ResetError::SysDB(_) => ErrorCodes::Internal,
+        }
     }
 }
 
