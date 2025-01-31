@@ -462,6 +462,18 @@ impl Frontend {
                 _ => CreateCollectionError::SysDB(err.to_string()),
             })?;
         // This is purely defensive and should never happen.
+        if self
+            .collections_with_segments_provider
+            .collections_with_segments_cache
+            .get(&collection_id)
+            .await
+            .map_err(|_| {
+                CreateCollectionError::Validation("collection found in cache".to_string())
+            })?
+            .is_some()
+        {
+            tracing::error!("Collection was just created. It should not be in the cache.");
+        }
         self.collections_with_segments_provider
             .collections_with_segments_cache
             .remove(&collection_id)
