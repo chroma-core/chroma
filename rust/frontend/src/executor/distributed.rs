@@ -1,3 +1,4 @@
+use super::client_manager::NodeNameToClient;
 use super::{client_manager::ClientManager, config};
 use async_trait::async_trait;
 use backon::ExponentialBuilder;
@@ -18,10 +19,14 @@ use chroma_types::{
     plan::{Count, Get, Knn},
     CollectionUuid, ExecutorError,
 };
-use parking_lot::RwLock;
 use rand::seq::SliceRandom;
-use std::{cmp::min, collections::HashMap, sync::Arc};
+use std::cmp::min;
+use tonic::service::interceptor::InterceptedService;
 use tonic::Request;
+
+type Client = QueryExecutorClient<
+    InterceptedService<tonic::transport::Channel, chroma_tracing::GrpcClientInterceptor>,
+>;
 
 /// A distributed executor that routes requests to the appropriate node based on the assignment policy
 /// # Fields
@@ -35,8 +40,7 @@ use tonic::Request;
 /// outside.
 #[derive(Clone, Debug)]
 pub struct DistributedExecutor {
-    node_name_to_client:
-        Arc<RwLock<HashMap<String, QueryExecutorClient<tonic::transport::Channel>>>>,
+    node_name_to_client: NodeNameToClient,
     assignment_policy: Box<dyn AssignmentPolicy>,
     replication_factor: usize,
     backoff: ExponentialBuilder,
@@ -48,7 +52,7 @@ impl Configurable<(config::DistributedExecutorConfig, System)> for DistributedEx
         (config, system): &(config::DistributedExecutorConfig, System),
     ) -> Result<Self, Box<dyn ChromaError>> {
         let assignment_policy = assignment::from_config(&config.assignment).await?;
-        let node_name_to_client = Arc::new(RwLock::new(HashMap::new()));
+        let node_name_to_client = NodeNameToClient::default();
         let client_manager = ClientManager::new(
             node_name_to_client.clone(),
             config.connections_per_node,
@@ -128,10 +132,7 @@ impl DistributedExecutor {
     /// # Errors
     /// - If no client is found for the given collection id
     /// - If the assignment policy fails to assign the collection id
-    fn clients(
-        &mut self,
-        collection_id: CollectionUuid,
-    ) -> Result<Vec<QueryExecutorClient<tonic::transport::Channel>>, ExecutorError> {
+    fn clients(&mut self, collection_id: CollectionUuid) -> Result<Vec<Client>, ExecutorError> {
         let node_name_to_client_guard = self.node_name_to_client.read();
         let members: Vec<String> = node_name_to_client_guard.keys().cloned().collect();
         let target_replication_factor = min(self.replication_factor, members.len());
@@ -163,9 +164,7 @@ fn no_clients_found_status() -> tonic::Status {
     tonic::Status::internal("No clients found")
 }
 
-fn choose_client(
-    clients: &[QueryExecutorClient<tonic::transport::Channel>],
-) -> Result<QueryExecutorClient<tonic::transport::Channel>, tonic::Status> {
+fn choose_client(clients: &[Client]) -> Result<Client, tonic::Status> {
     Ok(clients
         .choose(&mut rand::thread_rng())
         .ok_or(no_clients_found_status())?

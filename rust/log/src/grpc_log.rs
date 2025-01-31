@@ -1,5 +1,4 @@
 use super::config::LogConfig;
-use crate::tracing::client_interceptor;
 use crate::types::{
     CollectionInfo, GetCollectionsWithNewDataError, PullLogsError, UpdateCollectionLogOffsetError,
 };
@@ -81,7 +80,10 @@ impl Configurable<LogConfig> for GrpcLog {
                                 tonic::transport::Channel,
                                 fn(Request<()>) -> Result<Request<()>, Status>,
                             >,
-                        > = LogServiceClient::with_interceptor(client, client_interceptor);
+                        > = LogServiceClient::with_interceptor(
+                            client,
+                            chroma_tracing::grpc_client_interceptor,
+                        );
                         return Ok(GrpcLog::new(channel));
                     }
                     Err(e) => {
