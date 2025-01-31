@@ -28,6 +28,7 @@ use crate::{
         errors::{ServerError, ValidationError},
         where_parsing::RawWhereFields,
     },
+    utils::validate_non_empty_metadata,
     FrontendConfig,
 };
 
@@ -328,6 +329,10 @@ async fn create_collection(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<CreateCollectionPayload>,
 ) -> Result<Json<Collection>, ServerError> {
+    tracing::info!("Creating collection in database [{database_name}] for tenant [{tenant_id}]");
+    if let Some(metadata) = payload.metadata.as_ref() {
+        validate_non_empty_metadata(metadata)?;
+    }
     let collection = server
         .frontend
         .create_collection(CreateCollectionRequest {
@@ -373,6 +378,10 @@ async fn update_collection(
     tracing::info!("Updating collection [{collection_id}] in database [{database_name}] for tenant [{tenant_id}]");
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
+
+    if let Some(metadata) = payload.new_metadata.as_ref() {
+        validate_non_empty_metadata(metadata)?;
+    }
 
     server
         .frontend
