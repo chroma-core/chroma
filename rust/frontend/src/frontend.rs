@@ -5,7 +5,6 @@ use crate::{
     utils::{validate_name, validate_non_empty_filter},
     CollectionsWithSegmentsProvider,
 };
-use backon::ExponentialBuilder;
 use backon::Retryable;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
@@ -686,7 +685,14 @@ impl Frontend {
         Ok(DeleteCollectionRecordsResponse {})
     }
 
-    pub async fn count(&mut self, request: CountRequest) -> Result<CountResponse, QueryError> {
+    pub async fn count_to_retry(
+        &mut self,
+        request: CountRequest,
+    ) -> Result<CountResponse, QueryError> {
+        tracing::info!(
+            "Retrying count() request for collection {}",
+            request.collection_id
+        );
         let scan = self
             .collections_with_segments_provider
             .get_collection_with_segments(request.collection_id)
@@ -694,7 +700,42 @@ impl Frontend {
         Ok(self.executor.count(Count { scan }).await?)
     }
 
-    pub async fn get(&mut self, request: GetRequest) -> Result<GetResponse, QueryError> {
+    pub async fn count(&mut self, request: CountRequest) -> Result<CountResponse, QueryError> {
+        let count_to_retry = || {
+            let mut self_clone = self.clone();
+            let request_clone = request.clone();
+            let cache_clone = self
+                .collections_with_segments_provider
+                .collections_with_segments_cache
+                .clone();
+            async move {
+                let res = self_clone.count_to_retry(request_clone).await;
+                match res {
+                    Ok(res) => Ok(res),
+                    Err(e) => {
+                        if e.code() == ErrorCodes::NotFound {
+                            tracing::info!(
+                                "Invalidating cache for collection {}",
+                                request.collection_id
+                            );
+                            cache_clone.remove(&request.collection_id).await;
+                        }
+                        Err(e)
+                    }
+                }
+            }
+        };
+        count_to_retry
+            .retry(self.collections_with_segments_provider.get_retry_backoff())
+            .when(|e| e.code() == ErrorCodes::NotFound)
+            .await
+    }
+
+    async fn get_to_retry(&mut self, request: GetRequest) -> Result<GetResponse, QueryError> {
+        tracing::info!(
+            "Retrying get() request for collection {}",
+            request.collection_id
+        );
         let scan = self
             .collections_with_segments_provider
             .get_collection_with_segments(request.collection_id)
@@ -721,8 +762,42 @@ impl Frontend {
         Ok((get_result, request.include).into())
     }
 
+    pub async fn get(&mut self, request: GetRequest) -> Result<GetResponse, QueryError> {
+        let get_to_retry = || {
+            let mut self_clone = self.clone();
+            let request_clone = request.clone();
+            let cache_clone = self
+                .collections_with_segments_provider
+                .collections_with_segments_cache
+                .clone();
+            async move {
+                let res = self_clone.get_to_retry(request_clone).await;
+                match res {
+                    Ok(res) => Ok(res),
+                    Err(e) => {
+                        if e.code() == ErrorCodes::NotFound {
+                            tracing::info!(
+                                "Invalidating cache for collection {}",
+                                request.collection_id
+                            );
+                            cache_clone.remove(&request.collection_id).await;
+                        }
+                        Err(e)
+                    }
+                }
+            }
+        };
+        get_to_retry
+            .retry(self.collections_with_segments_provider.get_retry_backoff())
+            .when(|e| e.code() == ErrorCodes::NotFound)
+            .await
+    }
+
     async fn query_to_retry(&mut self, request: QueryRequest) -> Result<QueryResponse, QueryError> {
-        println!("Retrying query");
+        tracing::info!(
+            "Retrying query() request for collection {}",
+            request.collection_id
+        );
         let scan = self
             .collections_with_segments_provider
             .get_collection_with_segments(request.collection_id)
@@ -758,21 +833,33 @@ impl Frontend {
     }
 
     pub async fn query(&mut self, request: QueryRequest) -> Result<QueryResponse, QueryError> {
-        // let self_clone = self.clone();
-        // let cache_clone = self
-        //     .collections_with_segments_provider
-        //     .collections_with_segments_cache
-        //     .clone();
-        let query_to_retry = || async { self.query_to_retry(request.clone()).await };
+        let query_to_retry = || {
+            let mut self_clone = self.clone();
+            let request_clone = request.clone();
+            let cache_clone = self
+                .collections_with_segments_provider
+                .collections_with_segments_cache
+                .clone();
+            async move {
+                let res = self_clone.query_to_retry(request_clone).await;
+                match res {
+                    Ok(res) => Ok(res),
+                    Err(e) => {
+                        if e.code() == ErrorCodes::NotFound {
+                            tracing::info!(
+                                "Invalidating cache for collection {}",
+                                request.collection_id
+                            );
+                            cache_clone.remove(&request.collection_id).await;
+                        }
+                        Err(e)
+                    }
+                }
+            }
+        };
         query_to_retry
-            .retry(ExponentialBuilder::default())
+            .retry(self.collections_with_segments_provider.get_retry_backoff())
             .when(|e| e.code() == ErrorCodes::NotFound)
-            // .notify(move |err, _duration| {
-            //     if err.code() == ErrorCodes::NotFound {
-            //         // Remove entry from map
-            //         cache_clone.remove(&request.collection_id);
-            //     }
-            // })
             .await
     }
 }
