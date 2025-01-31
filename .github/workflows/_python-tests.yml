@@ -12,6 +12,11 @@ on:
         description: 'Property testing preset'
         required: true
         type: string
+      run_rust_frontend_tests:
+        description: 'Whether to run the rust frontend tests'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   test:
@@ -149,6 +154,7 @@ jobs:
                    "chromadb/test/test_logservice.py",
                    "chromadb/test/distributed/test_sanity.py"]
     runs-on: ${{ matrix.platform }}
+    if: ${{ inputs.run_rust_frontend_tests }}
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/python
