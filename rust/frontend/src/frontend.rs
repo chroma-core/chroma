@@ -23,11 +23,11 @@ use chroma_types::{
     GetDatabaseResponse, GetRequest, GetResponse, GetTenantError, GetTenantRequest,
     GetTenantResponse, HealthCheckResponse, HeartbeatError, HeartbeatResponse, Include,
     ListCollectionsRequest, ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest,
-    ListDatabasesResponse, Operation, OperationRecord, QueryError, QueryRequest, QueryResponse,
-    ResetError, ResetResponse, ScalarEncoding, Segment, SegmentScope, SegmentType, SegmentUuid,
-    UpdateCollectionError, UpdateCollectionRecordsError, UpdateCollectionRecordsRequest,
-    UpdateCollectionRecordsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
-    UpdateMetadata, UpdateMetadataValue, UpsertCollectionRecordsError,
+    ListDatabasesResponse, Metadata, Operation, OperationRecord, QueryError, QueryRequest,
+    QueryResponse, ResetError, ResetResponse, ScalarEncoding, Segment, SegmentScope, SegmentType,
+    SegmentUuid, UpdateCollectionError, UpdateCollectionRecordsError,
+    UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateCollectionRequest,
+    UpdateCollectionResponse, UpdateMetadata, UpdateMetadataValue, UpsertCollectionRecordsError,
     UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, CHROMA_DOCUMENT_KEY,
     CHROMA_URI_KEY,
 };
@@ -265,16 +265,20 @@ impl Frontend {
                 return Ok(());
             };
             match self.get_collection_dimension(collection_id).await {
-                Ok(Some(expected_dim)) if expected_dim != emb_dim => {
-                    Err(ValidationError::DimensionMismatch(expected_dim, emb_dim))
-                }
-                Ok(None) if update_if_not_present => {
-                    self.set_collection_dimension(collection_id, emb_dim)
-                        .await?;
+                Ok(Some(expected_dim)) => {
+                    if expected_dim != emb_dim {
+                        return Err(ValidationError::DimensionMismatch(expected_dim, emb_dim));
+                    }
+
                     Ok(())
                 }
-                Ok(None) => Err(ValidationError::CollectionUninitialized),
-                Ok(_) => Ok(()),
+                Ok(None) => {
+                    if update_if_not_present {
+                        self.set_collection_dimension(collection_id, emb_dim)
+                            .await?;
+                    }
+                    Ok(())
+                }
                 Err(err) => Err(err.into()),
             }
         } else {
@@ -406,6 +410,13 @@ impl Frontend {
         &mut self,
         request: CreateCollectionRequest,
     ) -> Result<CreateCollectionResponse, CreateCollectionError> {
+        let hnsw_metadata = request.metadata.as_ref().map(|m| {
+            m.iter()
+                .filter(|(k, _)| k.starts_with("hnsw:"))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect::<Metadata>()
+        });
+
         let collection_id = CollectionUuid::new();
         let segments = vec![
             Segment {
@@ -413,7 +424,7 @@ impl Frontend {
                 r#type: SegmentType::HnswDistributed,
                 scope: SegmentScope::VECTOR,
                 collection: collection_id,
-                metadata: None,
+                metadata: hnsw_metadata,
                 file_path: Default::default(),
             },
             Segment {

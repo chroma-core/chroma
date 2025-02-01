@@ -1,6 +1,7 @@
 import pytest
 import logging
 import hypothesis.strategies as st
+from chromadb.test.property.invariants import check_metadata
 import chromadb.test.property.strategies as strategies
 from chromadb.api import ClientAPI
 import chromadb.api.types as types
@@ -18,18 +19,6 @@ from typing import Any, Dict, Mapping, Optional
 import numpy
 from chromadb.test.property.strategies import hashing_embedding_function
 
-
-def check_metadata(expected: Optional[dict], got: Optional[dict]):
-    assert (expected is None and got is None) or (expected is not None and got is not None)
-    if expected is not None and got is not None:
-        assert len(expected) == len(got)
-        for key, val in expected.items():
-            assert key in got
-            if isinstance(expected[key], float):
-                assert abs(expected[key] - got[key]) < 1e-6
-            else:
-                assert expected[key] == got[key]
-            
 
 class CollectionStateMachine(RuleBasedStateMachine):
     collections: Bundle[strategies.ExternalCollection]
