@@ -1,11 +1,15 @@
+use std::time::SystemTimeError;
+
 use crate::error::QueryConversionError;
 use crate::operator::GetResult;
 use crate::operator::KnnBatchResult;
 use crate::operator::KnnProjectionRecord;
 use crate::operator::ProjectionRecord;
 use crate::Collection;
+use crate::CollectionConversionError;
 use crate::CollectionUuid;
 use crate::Metadata;
+use crate::SegmentConversionError;
 use crate::UpdateMetadata;
 use crate::Where;
 use chroma_config::assignment::rendezvous_hash::AssignmentError;
@@ -17,27 +21,38 @@ use thiserror::Error;
 use tonic::Status;
 use uuid::Uuid;
 
+#[derive(Debug, Error)]
+pub enum GetCollectionWithSegmentsError {
+    #[error("Failed to convert proto collection")]
+    CollectionConversionError(#[from] CollectionConversionError),
+    #[error("Duplicate segment")]
+    DuplicateSegment,
+    #[error("Missing field: [{0}]")]
+    Field(String),
+    #[error("Failed to convert proto segment")]
+    SegmentConversionError(#[from] SegmentConversionError),
+    #[error("Failed to fetch")]
+    FailedToGetSegments(#[from] tonic::Status),
+}
+
 pub struct ResetResponse {}
 
 #[derive(Debug, Error)]
 pub enum ResetError {
-    #[error("Error resetting cache")]
-    Cache,
-    #[error("Reset is not allowed")]
+    #[error(transparent)]
+    Cache(Box<dyn ChromaError>),
+    #[error(transparent)]
+    Internal(#[from] Status),
+    #[error("Reset is disabled by config")]
     NotAllowed,
-    #[error("Rate limited")]
-    RateLimited,
-    #[error("Error resetting SysDB: {0}")]
-    SysDB(#[from] Status),
 }
 
 impl ChromaError for ResetError {
     fn code(&self) -> ErrorCodes {
         match self {
-            ResetError::Cache => ErrorCodes::Internal,
+            ResetError::Cache(err) => err.code(),
+            ResetError::Internal(status) => status.code().into(),
             ResetError::NotAllowed => ErrorCodes::PermissionDenied,
-            ResetError::RateLimited => ErrorCodes::ResourceExhausted,
-            ResetError::SysDB(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -55,8 +70,8 @@ pub struct HeartbeatResponse {
 
 #[derive(Debug, Error)]
 pub enum HeartbeatError {
-    #[error("Could not get time: {0}")]
-    CouldNotGetTime(#[from] std::time::SystemTimeError),
+    #[error(transparent)]
+    CouldNotGetTime(#[from] SystemTimeError),
 }
 
 impl ChromaError for HeartbeatError {
@@ -82,20 +97,17 @@ pub struct CreateTenantResponse {}
 
 #[derive(Debug, Error)]
 pub enum CreateTenantError {
-    #[error("Tenant already exists")]
-    AlreadyExists,
-    #[error("Rate limited")]
-    RateLimited,
-    #[error("Failed to create tenant: {0}")]
-    SysDB(String),
+    #[error("Tenant [{0}] already exists")]
+    AlreadyExists(String),
+    #[error(transparent)]
+    Internal(#[from] Status),
 }
 
 impl ChromaError for CreateTenantError {
     fn code(&self) -> ErrorCodes {
         match self {
-            CreateTenantError::AlreadyExists => ErrorCodes::AlreadyExists,
-            CreateTenantError::SysDB(_) => ErrorCodes::Internal,
-            CreateTenantError::RateLimited => ErrorCodes::ResourceExhausted,
+            CreateTenantError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
+            CreateTenantError::Internal(status) => status.code().into(),
         }
     }
 }
@@ -111,17 +123,18 @@ pub struct GetTenantResponse {
 
 #[derive(Debug, Error)]
 pub enum GetTenantError {
-    #[error("Server sent empty response")]
-    ResponseEmpty,
-    #[error("Rate limited")]
-    RateLimited,
-    #[error("Failed to get tenant: {0}")]
-    SysDB(String),
+    #[error(transparent)]
+    Internal(#[from] Status),
+    #[error("Tenant [{0}] not found")]
+    NotFound(String),
 }
 
 impl ChromaError for GetTenantError {
     fn code(&self) -> ErrorCodes {
-        todo!()
+        match self {
+            GetTenantError::Internal(status) => status.code().into(),
+            GetTenantError::NotFound(_) => ErrorCodes::NotFound,
+        }
     }
 }
 
@@ -136,20 +149,17 @@ pub struct CreateDatabaseResponse {}
 
 #[derive(Error, Debug)]
 pub enum CreateDatabaseError {
-    #[error("Database already exists")]
-    AlreadyExists,
-    #[error("Failed to create database: {0}")]
-    SysDB(String),
-    #[error("Rate limited")]
-    RateLimited,
+    #[error("Database [{0}] already exists")]
+    AlreadyExists(String),
+    #[error(transparent)]
+    Internal(#[from] Status),
 }
 
 impl ChromaError for CreateDatabaseError {
     fn code(&self) -> ErrorCodes {
         match self {
-            CreateDatabaseError::AlreadyExists => ErrorCodes::AlreadyExists,
-            CreateDatabaseError::SysDB(_) => ErrorCodes::Internal,
-            CreateDatabaseError::RateLimited => ErrorCodes::ResourceExhausted,
+            CreateDatabaseError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
+            CreateDatabaseError::Internal(status) => status.code().into(),
         }
     }
 }
@@ -171,19 +181,18 @@ pub type ListDatabasesResponse = Vec<Database>;
 
 #[derive(Debug, Error)]
 pub enum ListDatabasesError {
-    #[error("Server sent empty response")]
-    ResponseEmpty,
-    #[error("Failed to parse database id")]
-    IdParsingError,
-    #[error("Failed to list database: {0}")]
-    SysDB(String),
-    #[error("Rate limited")]
-    RateLimited,
+    #[error(transparent)]
+    Internal(#[from] Status),
+    #[error("Invalid database id [{0}]")]
+    InvalidID(String),
 }
 
 impl ChromaError for ListDatabasesError {
     fn code(&self) -> ErrorCodes {
-        ErrorCodes::Internal
+        match self {
+            ListDatabasesError::Internal(status) => status.code().into(),
+            ListDatabasesError::InvalidID(_) => ErrorCodes::InvalidArgument,
+        }
     }
 }
 
@@ -196,23 +205,20 @@ pub type GetDatabaseResponse = Database;
 
 #[derive(Error, Debug)]
 pub enum GetDatabaseError {
-    #[error("Database not found")]
-    NotFound,
-    #[error("Server sent empty response")]
-    ResponseEmpty,
-    #[error("Failed to parse database id")]
-    IdParsingError,
-    #[error("Failed to get database: {0}")]
-    SysDB(String),
-    #[error("Rate limited")]
-    RateLimited,
+    #[error(transparent)]
+    Internal(#[from] Status),
+    #[error("Invalid database id [{0}]")]
+    InvalidID(String),
+    #[error("Database [{0}] not found")]
+    NotFound(String),
 }
 
 impl ChromaError for GetDatabaseError {
     fn code(&self) -> ErrorCodes {
         match self {
-            GetDatabaseError::NotFound => ErrorCodes::NotFound,
-            _ => ErrorCodes::Internal,
+            GetDatabaseError::Internal(status) => status.code().into(),
+            GetDatabaseError::InvalidID(_) => ErrorCodes::InvalidArgument,
+            GetDatabaseError::NotFound(_) => ErrorCodes::NotFound,
         }
     }
 }
@@ -227,23 +233,20 @@ pub struct DeleteDatabaseResponse {}
 
 #[derive(Debug, Error)]
 pub enum DeleteDatabaseError {
-    #[error("Database not found")]
-    NotFound,
-    #[error("Server sent empty response")]
-    ResponseEmpty,
-    #[error("Failed to parse database id")]
-    IdParsingError,
-    #[error("Failed to delete database: {0}")]
-    SysDB(String),
-    #[error("Rate limited")]
-    RateLimited,
+    #[error(transparent)]
+    Internal(#[from] Status),
+    #[error("Invalid database id [{0}]")]
+    InvalidID(String),
+    #[error("Database [{0}] not found")]
+    NotFound(String),
 }
 
 impl ChromaError for DeleteDatabaseError {
     fn code(&self) -> ErrorCodes {
         match self {
-            DeleteDatabaseError::NotFound => ErrorCodes::NotFound,
-            _ => ErrorCodes::Internal,
+            DeleteDatabaseError::Internal(status) => status.code().into(),
+            DeleteDatabaseError::InvalidID(_) => ErrorCodes::InvalidArgument,
+            DeleteDatabaseError::NotFound(_) => ErrorCodes::NotFound,
         }
     }
 }
@@ -274,19 +277,17 @@ pub type GetCollectionResponse = Collection;
 
 #[derive(Debug, Error)]
 pub enum GetCollectionError {
-    #[error("Collection not found")]
-    NotFound,
-    #[error("Error getting collection from sysdb {0}")]
-    SysDB(String),
-    #[error("Rate limited")]
-    RateLimited,
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+    #[error("Collection [{0}] not found")]
+    NotFound(String),
 }
 
 impl ChromaError for GetCollectionError {
     fn code(&self) -> ErrorCodes {
         match self {
-            GetCollectionError::NotFound => ErrorCodes::NotFound,
-            _ => ErrorCodes::Internal,
+            GetCollectionError::Internal(err) => err.code(),
+            GetCollectionError::NotFound(_) => ErrorCodes::NotFound,
         }
     }
 }
@@ -305,20 +306,17 @@ pub type CreateCollectionResponse = Collection;
 
 #[derive(Debug, Error)]
 pub enum CreateCollectionError {
-    #[error("Collection name already exists")]
-    CollectionNameExists,
-    #[error("Failed to create collection: {0}")]
-    SysDB(String),
-    #[error("Validation failure: {0}")]
-    Validation(String),
+    #[error("Collection [{0}] already exists")]
+    AlreadyExists(String),
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for CreateCollectionError {
     fn code(&self) -> ErrorCodes {
         match self {
-            CreateCollectionError::CollectionNameExists => ErrorCodes::AlreadyExists,
-            CreateCollectionError::SysDB(_) => ErrorCodes::Internal,
-            CreateCollectionError::Validation(_) => ErrorCodes::InvalidArgument,
+            CreateCollectionError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
+            CreateCollectionError::Internal(err) => err.code(),
         }
     }
 }
@@ -341,17 +339,14 @@ pub struct UpdateCollectionResponse {}
 
 #[derive(Error, Debug)]
 pub enum UpdateCollectionError {
-    #[error("Could not update collection: {0}")]
-    SysDB(String),
-    #[error("Validation failure: {0}")]
-    Validation(String),
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for UpdateCollectionError {
     fn code(&self) -> ErrorCodes {
         match self {
-            UpdateCollectionError::SysDB(_) => ErrorCodes::Internal,
-            UpdateCollectionError::Validation(_) => ErrorCodes::InvalidArgument,
+            UpdateCollectionError::Internal(err) => err.code(),
         }
     }
 }
@@ -368,17 +363,17 @@ pub struct DeleteCollectionResponse {}
 
 #[derive(Error, Debug)]
 pub enum DeleteCollectionError {
-    #[error("Could not delete collection: {0}")]
-    SysDB(String),
-    #[error("Collection does not exist")]
-    NotFound,
+    #[error(transparent)]
+    Get(#[from] GetCollectionError),
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for DeleteCollectionError {
     fn code(&self) -> ErrorCodes {
         match self {
-            DeleteCollectionError::SysDB(_) => ErrorCodes::Internal,
-            DeleteCollectionError::NotFound => ErrorCodes::NotFound,
+            DeleteCollectionError::Get(err) => err.code(),
+            DeleteCollectionError::Internal(err) => err.code(),
         }
     }
 }
@@ -402,21 +397,15 @@ pub struct AddCollectionRecordsResponse {}
 pub enum AddCollectionRecordsError {
     #[error("Failed to get collection: {0}")]
     Collection(#[from] GetCollectionError),
-    #[error("Inconsistent number of IDs, embeddings, documents, URIs and metadatas")]
-    InconsistentLength,
-    #[error("Failed to push logs: {0}")]
-    FailedToPushLogs(#[from] Box<dyn ChromaError>),
-    #[error("Validation failure: {0}")]
-    Validation(String),
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for AddCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
             AddCollectionRecordsError::Collection(err) => err.code(),
-            AddCollectionRecordsError::InconsistentLength => ErrorCodes::InvalidArgument,
-            AddCollectionRecordsError::FailedToPushLogs(_) => ErrorCodes::Internal,
-            AddCollectionRecordsError::Validation(_) => ErrorCodes::InvalidArgument,
+            AddCollectionRecordsError::Internal(err) => err.code(),
         }
     }
 }
@@ -437,20 +426,14 @@ pub struct UpdateCollectionRecordsResponse {}
 
 #[derive(Error, Debug)]
 pub enum UpdateCollectionRecordsError {
-    #[error("Inconsistent number of IDs, embeddings, documents, URIs and metadatas")]
-    InconsistentLength,
-    #[error("Failed to push logs: {0}")]
-    FailedToPushLogs(#[from] Box<dyn ChromaError>),
-    #[error("Validation failure: {0}")]
-    Validation(String),
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for UpdateCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
-            UpdateCollectionRecordsError::InconsistentLength => ErrorCodes::InvalidArgument,
-            UpdateCollectionRecordsError::FailedToPushLogs(_) => ErrorCodes::Internal,
-            UpdateCollectionRecordsError::Validation(_) => ErrorCodes::InvalidArgument,
+            UpdateCollectionRecordsError::Internal(err) => err.code(),
         }
     }
 }
@@ -471,20 +454,14 @@ pub struct UpsertCollectionRecordsResponse {}
 
 #[derive(Error, Debug)]
 pub enum UpsertCollectionRecordsError {
-    #[error("Inconsistent number of IDs, embeddings, documents, URIs and metadatas")]
-    InconsistentLength,
-    #[error("Failed to push logs: {0}")]
-    FailedToPushLogs(#[from] Box<dyn ChromaError>),
-    #[error("Validation failure: {0}")]
-    Validation(String),
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for UpsertCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
-            UpsertCollectionRecordsError::InconsistentLength => ErrorCodes::InvalidArgument,
-            UpsertCollectionRecordsError::FailedToPushLogs(_) => ErrorCodes::Internal,
-            UpsertCollectionRecordsError::Validation(_) => ErrorCodes::InvalidArgument,
+            UpsertCollectionRecordsError::Internal(err) => err.code(),
         }
     }
 }
@@ -502,23 +479,17 @@ pub struct DeleteCollectionRecordsResponse {}
 
 #[derive(Error, Debug)]
 pub enum DeleteCollectionRecordsError {
-    #[error("Failed to get collection snapshot")]
-    FetchCollectionSnapshot(#[from] QueryError),
-    #[error("Failed to resolve IDs: {0}")]
-    GetFailed(#[from] ExecutorError),
-    #[error("Failed to push logs: {0}")]
-    FailedToPushLogs(#[from] Box<dyn ChromaError>),
-    #[error("Validation failure: {0}")]
-    Validation(String),
+    #[error("Failed to resolve records for deletion: {0}")]
+    Get(#[from] ExecutorError),
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for DeleteCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
-            DeleteCollectionRecordsError::FetchCollectionSnapshot(err) => err.code(),
-            DeleteCollectionRecordsError::GetFailed(err) => err.code(),
-            DeleteCollectionRecordsError::FailedToPushLogs(_) => ErrorCodes::Internal,
-            DeleteCollectionRecordsError::Validation(_) => ErrorCodes::InvalidArgument,
+            DeleteCollectionRecordsError::Get(err) => err.code(),
+            DeleteCollectionRecordsError::Internal(err) => err.code(),
         }
     }
 }
@@ -749,20 +720,17 @@ impl From<(KnnBatchResult, IncludeList)> for QueryResponse {
 
 #[derive(Error, Debug)]
 pub enum QueryError {
-    #[error("Error getting collection and segments info from sysdb")]
-    CollectionSegments,
     #[error("Error executing plan: {0}")]
     Executor(#[from] ExecutorError),
-    #[error("Validation failure: {0}")]
-    Validation(String),
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for QueryError {
     fn code(&self) -> ErrorCodes {
         match self {
-            QueryError::Validation(_) => ErrorCodes::InvalidArgument,
-            QueryError::CollectionSegments => ErrorCodes::Internal,
             QueryError::Executor(e) => e.code(),
+            QueryError::Internal(err) => err.code(),
         }
     }
 }
