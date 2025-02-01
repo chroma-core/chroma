@@ -70,13 +70,22 @@ impl ClientManager {
 
         for i in 0..self.connections_per_node {
             let indexed_connection_id = Self::indexed_connection_id(node, i);
-            match sender.send(Change::Remove(indexed_connection_id)).await {
-                Ok(_) => {}
-                Err(e) => {
-                    // There is no one to return the error to, so just log it
-                    tracing::error!("Failed to remove ip from client manager: {:?}", e);
+            let sender_clone = sender.clone();
+            tokio::spawn(async move {
+                match sender_clone
+                    .send(Change::Remove(indexed_connection_id))
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(e) => {
+                        // There is no one to return the error to, so just log it
+                        tracing::info!(
+                            "Failed to remove ip from client manager: {:?}",
+                            e.to_string()
+                        );
+                    }
                 }
-            }
+            });
         }
 
         let mut node_name_to_client_guard = self.node_name_to_client.write();
@@ -128,7 +137,7 @@ impl ClientManager {
                 Ok(_) => {}
                 Err(e) => {
                     // There is no one to return the error to, so just log it
-                    tracing::error!("Failed to add ip to client manager: {:?}", e);
+                    tracing::info!("Failed to add ip to client manager: {:?}", e);
                 }
             }
         }
@@ -178,7 +187,6 @@ impl ClientManager {
                 old_member.member_node_name.to_string(),
                 old_member.member_ip.to_string(),
             );
-            println!("Old member: {:?}", old_member);
         }
 
         let mut seen_nodes = HashSet::new();
@@ -205,7 +213,6 @@ impl ClientManager {
         for (node, _) in old_node_to_ip.iter() {
             if !seen_nodes.contains(node) {
                 // This node has been removed
-                println!("Removing node: {:?}", node);
                 self.remove_node(node).await;
             }
         }
@@ -303,34 +310,34 @@ mod test {
         let memberlist_shrunk_by_one = get_memberlist_of_size(4);
         // TODO: make this test work - right now the channel send hangs when
         // there is not connection in test environment
-        // client_manager
-        //     .process_new_members(memberlist_shrunk_by_one.clone())
-        //     .await;
+        client_manager
+            .process_new_members(memberlist_shrunk_by_one.clone())
+            .await;
 
-        // let node_name_to_client_guard = node_name_to_client.read();
-        // for member in memberlist_shrunk_by_one.iter() {
-        //     let node = member.member_node_name.as_str();
-        //     node_name_to_client_guard
-        //         .get(node)
-        //         .expect("Client to exist");
-        // }
+        let node_name_to_client_guard = node_name_to_client.read();
+        for member in memberlist_shrunk_by_one.iter() {
+            let node = member.member_node_name.as_str();
+            node_name_to_client_guard
+                .get(node)
+                .expect("Client to exist");
+        }
 
-        // let removed_node = memberlist.get(4).unwrap();
-        // let removed_node_name = removed_node.member_node_name.as_str();
-        // assert!(node_name_to_client_guard.get(removed_node_name).is_none());
-        // drop(node_name_to_client_guard);
+        let removed_node = memberlist.get(4).unwrap();
+        let removed_node_name = removed_node.member_node_name.as_str();
+        assert!(node_name_to_client_guard.get(removed_node_name).is_none());
+        drop(node_name_to_client_guard);
 
-        // let memberlist_grown_by_one = get_memberlist_of_size(5);
-        // client_manager
-        //     .process_new_members(memberlist_grown_by_one.clone())
-        //     .await;
+        let memberlist_grown_by_one = get_memberlist_of_size(5);
+        client_manager
+            .process_new_members(memberlist_grown_by_one.clone())
+            .await;
 
-        // let node_name_to_client_guard = node_name_to_client.read();
-        // for member in memberlist_grown_by_one.iter() {
-        //     let node = member.member_node_name.as_str();
-        //     node_name_to_client_guard
-        //         .get(node)
-        //         .expect("Client to exist");
-        // }
+        let node_name_to_client_guard = node_name_to_client.read();
+        for member in memberlist_grown_by_one.iter() {
+            let node = member.member_node_name.as_str();
+            node_name_to_client_guard
+                .get(node)
+                .expect("Client to exist");
+        }
     }
 }
