@@ -618,7 +618,7 @@ impl Frontend {
         Ok(UpsertCollectionRecordsResponse {})
     }
 
-    pub async fn delete(
+    pub async fn retryable_delete(
         &mut self,
         request: DeleteCollectionRecordsRequest,
     ) -> Result<DeleteCollectionRecordsResponse, DeleteCollectionRecordsError> {
@@ -674,6 +674,40 @@ impl Frontend {
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
         Ok(DeleteCollectionRecordsResponse {})
+    }
+
+    pub async fn delete(
+        &mut self,
+        request: DeleteCollectionRecordsRequest,
+    ) -> Result<DeleteCollectionRecordsResponse, DeleteCollectionRecordsError> {
+        let delete_to_retry = || {
+            let mut self_clone = self.clone();
+            let request_clone = request.clone();
+            let cache_clone = self
+                .collections_with_segments_provider
+                .collections_with_segments_cache
+                .clone();
+            async move {
+                let res = self_clone.retryable_delete(request_clone).await;
+                match res {
+                    Ok(res) => Ok(res),
+                    Err(e) => {
+                        if e.code() == ErrorCodes::NotFound {
+                            tracing::info!(
+                                "Invalidating cache for collection {}",
+                                request.collection_id
+                            );
+                            cache_clone.remove(&request.collection_id).await;
+                        }
+                        Err(e)
+                    }
+                }
+            }
+        };
+        delete_to_retry
+            .retry(self.collections_with_segments_provider.get_retry_backoff())
+            .when(|e| e.code() == ErrorCodes::NotFound)
+            .await
     }
 
     pub async fn retryable_count(

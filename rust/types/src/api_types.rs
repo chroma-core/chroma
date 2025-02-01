@@ -466,6 +466,7 @@ impl ChromaError for UpsertCollectionRecordsError {
     }
 }
 
+#[derive(Clone)]
 pub struct DeleteCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
