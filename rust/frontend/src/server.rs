@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use axum::{
     extract::{Path, Query, State},
-    routing::{delete, get, post},
+    routing::{get, post},
     Json, Router, ServiceExt,
 };
 use chroma_types::{
@@ -56,10 +56,8 @@ impl FrontendServer {
             .route("/api/v2/auth/identity", get(get_user_identity))
             .route("/api/v2/tenants", post(create_tenant))
             .route("/api/v2/tenants/:tenant_name", get(get_tenant))
-            .route("/api/v2/tenants/:tenant_id/databases", post(create_database))
-            .route("/api/v2/tenants/:tenant_id/databases", get(list_databases))
-            .route("/api/v2/tenants/:tenant_id/databases/:name", get(get_database))
-            .route("/api/v2/tenants/:tenant_id/databases/:name", delete(delete_database))
+            .route("/api/v2/tenants/:tenant_id/databases", get(list_databases).post(create_database))
+            .route("/api/v2/tenants/:tenant_id/databases/:name", get(get_database).delete(delete_database))
             .route(
                 "/api/v2/tenants/:tenant_id/databases/:database_name/collections",
                post(create_collection).get(list_collections),
