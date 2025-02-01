@@ -3,7 +3,7 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use chroma_error::ChromaError;
+use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{GetCollectionError, UpdateCollectionError};
 use serde::Serialize;
 use thiserror::Error;
@@ -71,28 +71,37 @@ impl IntoResponse for ServerError {
     fn into_response(self) -> Response {
         tracing::error!("Error: {:?}", self.0);
         let status_code = match self.0.code() {
-            chroma_error::ErrorCodes::Success => StatusCode::OK,
-            chroma_error::ErrorCodes::Cancelled => StatusCode::BAD_REQUEST,
-            chroma_error::ErrorCodes::Unknown => StatusCode::INTERNAL_SERVER_ERROR,
-            chroma_error::ErrorCodes::InvalidArgument => StatusCode::BAD_REQUEST,
-            chroma_error::ErrorCodes::DeadlineExceeded => StatusCode::GATEWAY_TIMEOUT,
-            chroma_error::ErrorCodes::NotFound => StatusCode::NOT_FOUND,
-            chroma_error::ErrorCodes::AlreadyExists => StatusCode::CONFLICT,
-            chroma_error::ErrorCodes::PermissionDenied => StatusCode::FORBIDDEN,
-            chroma_error::ErrorCodes::ResourceExhausted => StatusCode::TOO_MANY_REQUESTS,
-            chroma_error::ErrorCodes::FailedPrecondition => StatusCode::PRECONDITION_FAILED,
-            chroma_error::ErrorCodes::Aborted => StatusCode::BAD_REQUEST,
-            chroma_error::ErrorCodes::OutOfRange => StatusCode::BAD_REQUEST,
-            chroma_error::ErrorCodes::Unimplemented => StatusCode::NOT_IMPLEMENTED,
-            chroma_error::ErrorCodes::Internal => StatusCode::INTERNAL_SERVER_ERROR,
-            chroma_error::ErrorCodes::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
-            chroma_error::ErrorCodes::DataLoss => StatusCode::INTERNAL_SERVER_ERROR,
-            chroma_error::ErrorCodes::Unauthenticated => StatusCode::UNAUTHORIZED,
-            chroma_error::ErrorCodes::VersionMismatch => StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorCodes::Success => StatusCode::OK,
+            ErrorCodes::Cancelled => StatusCode::BAD_REQUEST,
+            ErrorCodes::Unknown => StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorCodes::InvalidArgument => StatusCode::BAD_REQUEST,
+            ErrorCodes::DeadlineExceeded => StatusCode::GATEWAY_TIMEOUT,
+            ErrorCodes::NotFound => StatusCode::NOT_FOUND,
+            ErrorCodes::AlreadyExists => StatusCode::CONFLICT,
+            ErrorCodes::PermissionDenied => StatusCode::FORBIDDEN,
+            ErrorCodes::ResourceExhausted => StatusCode::TOO_MANY_REQUESTS,
+            ErrorCodes::FailedPrecondition => StatusCode::PRECONDITION_FAILED,
+            ErrorCodes::Aborted => StatusCode::BAD_REQUEST,
+            ErrorCodes::OutOfRange => StatusCode::BAD_REQUEST,
+            ErrorCodes::Unimplemented => StatusCode::NOT_IMPLEMENTED,
+            ErrorCodes::Internal => StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorCodes::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
+            ErrorCodes::DataLoss => StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorCodes::Unauthenticated => StatusCode::UNAUTHORIZED,
+            ErrorCodes::VersionMismatch => StatusCode::INTERNAL_SERVER_ERROR,
         };
 
+        let error = match self.0.code() {
+            ErrorCodes::InvalidArgument => "InvalidArgumentError",
+            ErrorCodes::NotFound => "NotFoundError",
+            ErrorCodes::Internal => "InternalError",
+            ErrorCodes::VersionMismatch => "VersionMismatchError",
+            _ => "ChromaError",
+        }
+        .to_string();
+
         let error = ErrorResponse {
-            error: status_code.to_string(),
+            error,
             message: self.0.to_string(),
         };
 
