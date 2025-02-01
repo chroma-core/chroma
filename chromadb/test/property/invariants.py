@@ -148,7 +148,16 @@ def _field_matches(
     if field_name == "embeddings":
         assert np.allclose(np.array(field_values), np.array(expected_field))
     else:
-        assert field_values == expected_field
+        assert len(field_values) == len(expected_field)
+
+        for field_value, expected_field in zip(field_values, expected_field):
+            if isinstance(expected_field, dict):
+                check_metadata(
+                    cast(types.Metadata, field_value),
+                    cast(types.Metadata, expected_field),
+                )
+            else:
+                assert field_value == expected_field
 
 
 def ids_match(collection: Collection, record_set: RecordSet) -> None:
