@@ -571,8 +571,7 @@ pub struct GetRequestPayload {
     #[serde(flatten)]
     where_fields: RawWhereFields,
     limit: Option<u32>,
-    #[serde(default)]
-    offset: u32,
+    offset: Option<u32>,
     #[serde(default = "IncludeList::default_get")]
     include: IncludeList,
 }
@@ -596,7 +595,7 @@ async fn collection_get(
             ids: payload.ids,
             r#where: payload.where_fields.parse()?,
             limit: payload.limit,
-            offset: payload.offset,
+            offset: payload.offset.unwrap_or(0),
             include: payload.include,
         })
         .await?;
