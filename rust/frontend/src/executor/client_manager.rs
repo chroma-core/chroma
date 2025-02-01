@@ -314,18 +314,19 @@ mod test {
             .process_new_members(memberlist_shrunk_by_one.clone())
             .await;
 
-        let node_name_to_client_guard = node_name_to_client.read();
-        for member in memberlist_shrunk_by_one.iter() {
-            let node = member.member_node_name.as_str();
-            node_name_to_client_guard
-                .get(node)
-                .expect("Client to exist");
-        }
+        {
+            let node_name_to_client_guard = node_name_to_client.read();
+            for member in memberlist_shrunk_by_one.iter() {
+                let node = member.member_node_name.as_str();
+                node_name_to_client_guard
+                    .get(node)
+                    .expect("Client to exist");
+            }
 
-        let removed_node = memberlist.get(4).unwrap();
-        let removed_node_name = removed_node.member_node_name.as_str();
-        assert!(node_name_to_client_guard.get(removed_node_name).is_none());
-        drop(node_name_to_client_guard);
+            let removed_node = memberlist.get(4).unwrap();
+            let removed_node_name = removed_node.member_node_name.as_str();
+            assert!(node_name_to_client_guard.get(removed_node_name).is_none());
+        };
 
         let memberlist_grown_by_one = get_memberlist_of_size(5);
         client_manager
