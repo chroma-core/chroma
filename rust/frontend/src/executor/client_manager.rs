@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use chroma_memberlist::memberlist_provider::{Member, Memberlist};
+use chroma_memberlist::memberlist_provider::Memberlist;
 use chroma_system::{Component, ComponentContext, Handler};
 use chroma_types::chroma_proto::query_executor_client::QueryExecutorClient;
 use parking_lot::RwLock;
