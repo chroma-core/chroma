@@ -622,51 +622,66 @@ impl Frontend {
         &mut self,
         request: DeleteCollectionRecordsRequest,
     ) -> Result<DeleteCollectionRecordsResponse, DeleteCollectionRecordsError> {
-        let collection_and_segments = self
-            .collections_with_segments_provider
-            .get_collection_with_segments(request.collection_id)
-            .await
-            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        let mut records = Vec::new();
 
-        let get_result = self
-            .executor
-            .get(Get {
-                scan: Scan {
-                    collection_and_segments,
-                },
-                filter: Filter {
-                    query_ids: request.ids,
-                    where_clause: request.r#where,
-                },
-                limit: Limit {
-                    skip: 0,
-                    fetch: None,
-                },
-                proj: Projection {
-                    document: false,
-                    embedding: false,
-                    metadata: false,
-                },
-            })
-            .await?;
-
-        if get_result.records.is_empty() {
-            tracing::debug!("Bailing because no records were found");
-            return Ok(DeleteCollectionRecordsResponse {});
-        }
-
-        let records = get_result
-            .records
-            .into_iter()
-            .map(|record| OperationRecord {
-                id: record.id,
+        if let Some(ids) = request.ids {
+            records.extend(ids.into_iter().map(|id| OperationRecord {
+                id,
                 operation: Operation::Delete,
                 document: None,
                 embedding: None,
                 encoding: None,
                 metadata: None,
-            })
-            .collect::<Vec<_>>();
+            }));
+        }
+
+        if let Some(where_clause) = request.r#where {
+            let scan = self
+                .collections_with_segments_provider
+                .get_collection_with_segments(request.collection_id)
+                .await
+                .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+
+            let filter = Filter {
+                query_ids: None,
+                where_clause: Some(where_clause),
+            };
+
+            let get_result = self
+                .executor
+                .get(Get {
+                    scan: Scan {
+                        collection_and_segments: scan,
+                    },
+                    filter,
+                    limit: Limit {
+                        skip: 0,
+                        fetch: None,
+                    },
+                    proj: Projection {
+                        document: false,
+                        embedding: false,
+                        metadata: false,
+                    },
+                })
+                .await?;
+
+            for record in get_result.records {
+                records.push(OperationRecord {
+                    id: record.id,
+                    operation: Operation::Delete,
+                    document: None,
+                    embedding: None,
+                    encoding: None,
+                    metadata: None,
+                });
+            }
+        }
+
+        if records.is_empty() {
+            tracing::debug!("Bailing because no records were found");
+            return Ok(DeleteCollectionRecordsResponse {});
+        }
 
         self.log_client
             .push_logs(request.collection_id, records)
