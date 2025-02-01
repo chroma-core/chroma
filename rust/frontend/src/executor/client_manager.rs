@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use chroma_memberlist::memberlist_provider::Memberlist;
+use chroma_memberlist::memberlist_provider::{Member, Memberlist};
 use chroma_system::{Component, ComponentContext, Handler};
 use chroma_types::chroma_proto::query_executor_client::QueryExecutorClient;
 use parking_lot::RwLock;
@@ -133,25 +133,8 @@ impl ClientManager {
     fn indexed_connection_id(node: &str, index: usize) -> String {
         format!("{}-{}", node, index)
     }
-}
 
-///////////////////////// Component Impl /////////////////////////
-
-impl Component for ClientManager {
-    fn get_name() -> &'static str {
-        "ClientManger"
-    }
-
-    fn queue_size(&self) -> usize {
-        1000
-    }
-}
-
-#[async_trait]
-impl Handler<Memberlist> for ClientManager {
-    type Result = ();
-
-    async fn handle(&mut self, new_members: Memberlist, _ctx: &ComponentContext<ClientManager>) {
+    async fn process_new_members(&mut self, new_members: Memberlist) {
         // NOTE(hammadb) In production, we assume that each query service is 1:1 with a node. I.e that no
         // two query services are running on the same node. However, in local
         // development, we may have multiple query services running on the same node.
@@ -220,5 +203,28 @@ impl Handler<Memberlist> for ClientManager {
                 self.remove_ip_for_node(ip.to_string(), node).await;
             }
         }
+
+        self.old_memberlist = new_members;
+    }
+}
+
+///////////////////////// Component Impl /////////////////////////
+
+impl Component for ClientManager {
+    fn get_name() -> &'static str {
+        "ClientManger"
+    }
+
+    fn queue_size(&self) -> usize {
+        1000
+    }
+}
+
+#[async_trait]
+impl Handler<Memberlist> for ClientManager {
+    type Result = ();
+
+    async fn handle(&mut self, new_members: Memberlist, _ctx: &ComponentContext<ClientManager>) {
+        self.process_new_members(new_members).await;
     }
 }
