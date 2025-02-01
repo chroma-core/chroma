@@ -199,7 +199,7 @@ impl Handler<Option<MemberListKubeResource>> for CustomResourceMemberlistProvide
     ) {
         match event {
             Some(memberlist) => {
-                // tracing::info!("Memberlist event in CustomResourceMemberlistProvider. Name: {:?}. Members: {:?}", memberlist.metadata.name, memberlist.spec.members);
+                tracing::info!("Memberlist event in CustomResourceMemberlistProvider. Name: {:?}. Members: {:?}", memberlist.metadata.name, memberlist.spec.members);
                 let name = match &memberlist.metadata.name {
                     Some(name) => name,
                     None => {
