@@ -2,6 +2,8 @@ use std::str::FromStr;
 
 use axum::{
     extract::{Path, Query, State},
+    http::StatusCode,
+    response::IntoResponse,
     routing::{delete, get, post},
     Json, Router, ServiceExt,
 };
@@ -49,6 +51,7 @@ impl FrontendServer {
         let app = Router::new()
             // `GET /` goes to `root`
             .route("/api/v2", get(root))
+            .route("/api/v2/healthcheck", get(healthcheck))
             .route("/api/v2/heartbeat", get(heartbeat))
             .route("/api/v2/pre-flight-checks", get(pre_flight_checks))
             .route("/api/v2/reset", post(reset))
@@ -124,6 +127,16 @@ impl FrontendServer {
 // Dummy implementation for now
 async fn root() -> &'static str {
     "Chroma Rust Frontend"
+}
+
+async fn healthcheck(State(server): State<FrontendServer>) -> impl IntoResponse {
+    let res = server.frontend.healthcheck().await;
+    let code = match res.get_status_code() {
+        tonic::Code::Ok => StatusCode::OK,
+        _ => StatusCode::SERVICE_UNAVAILABLE,
+    };
+
+    (code, Json(res))
 }
 
 async fn heartbeat(

@@ -767,6 +767,21 @@ impl ChromaError for QueryError {
     }
 }
 
+#[derive(Serialize)]
+pub struct HealthCheckResponse {
+    pub is_executor_ready: bool,
+}
+
+impl HealthCheckResponse {
+    pub fn get_status_code(&self) -> tonic::Code {
+        if self.is_executor_ready {
+            tonic::Code::Ok
+        } else {
+            tonic::Code::Unavailable
+        }
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum ExecutorError {
     #[error("Error converting: {0}")]
