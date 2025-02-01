@@ -6,16 +6,16 @@ use axum::{
     Json, Router, ServiceExt,
 };
 use chroma_types::{
-    AddCollectionRecordsResponse, ChecklistResponse, Collection, CollectionMetadataUpdate,
-    CollectionUuid, CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
-    CreateCollectionRequest, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest,
-    CreateTenantResponse, DeleteCollectionRecordsResponse, DeleteDatabaseRequest,
-    DeleteDatabaseResponse, GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse,
-    GetRequest, GetResponse, GetTenantRequest, GetTenantResponse, GetUserIdentityResponse,
-    HeartbeatResponse, IncludeList, ListCollectionsRequest, ListCollectionsResponse,
-    ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
-    UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateMetadata,
-    UpsertCollectionRecordsResponse,
+    operator::Filter, AddCollectionRecordsResponse, ChecklistResponse, Collection,
+    CollectionMetadataUpdate, CollectionUuid, CountCollectionsRequest, CountCollectionsResponse,
+    CountRequest, CountResponse, CreateCollectionRequest, CreateDatabaseRequest,
+    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
+    DeleteCollectionRecordsResponse, DeleteDatabaseRequest, DeleteDatabaseResponse,
+    GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
+    GetTenantRequest, GetTenantResponse, GetUserIdentityResponse, HeartbeatResponse, IncludeList,
+    ListCollectionsRequest, ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse,
+    Metadata, QueryRequest, QueryResponse, UpdateCollectionRecordsResponse,
+    UpdateCollectionResponse, UpdateMetadata, UpsertCollectionRecordsResponse,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -28,7 +28,7 @@ use crate::{
         errors::{ServerError, ValidationError},
         where_parsing::RawWhereFields,
     },
-    utils::validate_non_empty_metadata,
+    utils::{validate_name, validate_non_empty_filter, validate_non_empty_metadata},
     FrontendConfig,
 };
 
@@ -328,6 +328,7 @@ async fn create_collection(
     Json(payload): Json<CreateCollectionPayload>,
 ) -> Result<Json<Collection>, ServerError> {
     tracing::info!("Creating collection in database [{database_name}] for tenant [{tenant_id}]");
+    validate_name(&payload.name)?;
     if let Some(metadata) = payload.metadata.as_ref() {
         validate_non_empty_metadata(metadata)?;
     }
@@ -374,6 +375,9 @@ async fn update_collection(
     Json(payload): Json<UpdateCollectionPayload>,
 ) -> Result<Json<UpdateCollectionResponse>, ServerError> {
     tracing::info!("Updating collection [{collection_id}] in database [{database_name}] for tenant [{tenant_id}]");
+    if let Some(name) = payload.new_name.as_ref() {
+        validate_name(name)?;
+    }
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
 
@@ -428,6 +432,11 @@ async fn collection_add(
     let collection_id =
         CollectionUuid(Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?);
 
+    server
+        .frontend
+        .validate_embedding(collection_id, payload.embeddings.as_ref(), true)
+        .await?;
+
     let res = server
         .frontend
         .add(chroma_types::AddCollectionRecordsRequest {
@@ -461,6 +470,11 @@ async fn collection_update(
 ) -> Result<Json<UpdateCollectionRecordsResponse>, ServerError> {
     let collection_id =
         CollectionUuid(Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?);
+
+    server
+        .frontend
+        .validate_embedding(collection_id, payload.embeddings.as_ref(), true)
+        .await?;
 
     Ok(Json(
         server
@@ -496,6 +510,11 @@ async fn collection_upsert(
     let collection_id =
         CollectionUuid(Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?);
 
+    server
+        .frontend
+        .validate_embedding(collection_id, payload.embeddings.as_ref(), true)
+        .await?;
+
     Ok(Json(
         server
             .frontend
@@ -528,6 +547,13 @@ async fn collection_delete(
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
 
+    let r#where = payload.where_fields.parse()?;
+
+    validate_non_empty_filter(&Filter {
+        query_ids: payload.ids.clone(),
+        where_clause: r#where.clone(),
+    })?;
+
     server
         .frontend
         .delete(chroma_types::DeleteCollectionRecordsRequest {
@@ -535,7 +561,7 @@ async fn collection_delete(
             database_name,
             collection_id,
             ids: payload.ids,
-            r#where: payload.where_fields.parse()?,
+            r#where,
         })
         .await?;
 
@@ -621,6 +647,11 @@ async fn collection_query(
     tracing::info!(
         "Querying records from collection [{collection_id}] in database [{database_name}] for tenant [{tenant_id}]",
     );
+
+    server
+        .frontend
+        .validate_embedding(collection_id, Some(&payload.query_embeddings), true)
+        .await?;
 
     let res = server
         .frontend

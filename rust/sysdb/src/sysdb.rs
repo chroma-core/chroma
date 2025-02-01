@@ -7,9 +7,9 @@ use chroma_types::chroma_proto::sys_db_client::SysDbClient;
 use chroma_types::{
     chroma_proto, CollectionAndSegments, CollectionMetadataUpdate, CreateDatabaseError,
     CreateDatabaseResponse, CreateTenantError, CreateTenantResponse, Database, DeleteDatabaseError,
-    DeleteDatabaseResponse, GetDatabaseError, GetDatabaseResponse, GetTenantError,
-    GetTenantResponse, ListDatabasesError, ListDatabasesResponse, Metadata, ResetError,
-    ResetResponse, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
+    DeleteDatabaseResponse, GetCollectionWithSegmentsError, GetDatabaseError, GetDatabaseResponse,
+    GetTenantError, GetTenantResponse, ListDatabasesError, ListDatabasesResponse, Metadata,
+    ResetError, ResetResponse, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
 };
 use chroma_types::{
     Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
@@ -381,13 +381,15 @@ impl GrpcSysDb {
         &mut self,
         tenant_name: String,
     ) -> Result<CreateTenantResponse, CreateTenantError> {
-        let req = chroma_proto::CreateTenantRequest { name: tenant_name };
+        let req = chroma_proto::CreateTenantRequest {
+            name: tenant_name.clone(),
+        };
         match self.client.create_tenant(req).await {
             Ok(_) => Ok(CreateTenantResponse {}),
             Err(err) if matches!(err.code(), Code::AlreadyExists) => {
-                Err(CreateTenantError::AlreadyExists)
+                Err(CreateTenantError::AlreadyExists(tenant_name))
             }
-            Err(err) => Err(CreateTenantError::SysDB(err.to_string())),
+            Err(err) => Err(err.into()),
         }
     }
 
@@ -395,16 +397,18 @@ impl GrpcSysDb {
         &mut self,
         tenant_name: String,
     ) -> Result<GetTenantResponse, GetTenantError> {
-        let req = chroma_proto::GetTenantRequest { name: tenant_name };
+        let req = chroma_proto::GetTenantRequest {
+            name: tenant_name.clone(),
+        };
         match self.client.get_tenant(req).await {
             Ok(resp) => Ok(GetTenantResponse {
                 name: resp
                     .into_inner()
                     .tenant
-                    .ok_or(GetTenantError::ResponseEmpty)?
+                    .ok_or(GetTenantError::NotFound(tenant_name))?
                     .name,
             }),
-            Err(err) => Err(GetTenantError::SysDB(err.to_string())),
+            Err(err) => Err(err.into()),
         }
     }
 
@@ -416,7 +420,7 @@ impl GrpcSysDb {
     ) -> Result<CreateDatabaseResponse, CreateDatabaseError> {
         let req = chroma_proto::CreateDatabaseRequest {
             id: database_id.to_string(),
-            name: database_name,
+            name: database_name.clone(),
             tenant,
         };
         let res = self.client.create_database(req).await;
@@ -425,8 +429,8 @@ impl GrpcSysDb {
             Err(e) => {
                 tracing::error!("Failed to create database {:?}", e);
                 let res = match e.code() {
-                    Code::AlreadyExists => CreateDatabaseError::AlreadyExists,
-                    _ => CreateDatabaseError::SysDB(e.to_string()),
+                    Code::AlreadyExists => CreateDatabaseError::AlreadyExists(database_name),
+                    _ => CreateDatabaseError::Internal(e),
                 };
                 Err(res)
             }
@@ -445,21 +449,21 @@ impl GrpcSysDb {
             offset: Some(offset as i32),
         };
         match self.client.list_databases(req).await {
-            Ok(resp) => Ok(resp
+            Ok(resp) => resp
                 .into_inner()
                 .databases
                 .into_iter()
                 .map(|db| {
                     Uuid::parse_str(&db.id)
-                        .map_err(|_| ListDatabasesError::IdParsingError)
+                        .map_err(|err| ListDatabasesError::InvalidID(err.to_string()))
                         .map(|id| Database {
                             id,
                             name: db.name,
                             tenant: db.tenant,
                         })
                 })
-                .collect::<Result<_, _>>())?,
-            Err(err) => Err(ListDatabasesError::SysDB(err.to_string())),
+                .collect(),
+            Err(err) => Err(ListDatabasesError::Internal(err)),
         }
     }
 
@@ -469,7 +473,7 @@ impl GrpcSysDb {
         tenant: String,
     ) -> Result<GetDatabaseResponse, GetDatabaseError> {
         let req = chroma_proto::GetDatabaseRequest {
-            name: database_name,
+            name: database_name.clone(),
             tenant,
         };
         let res = self.client.get_database(req).await;
@@ -477,11 +481,11 @@ impl GrpcSysDb {
             Ok(res) => {
                 let res = match res.into_inner().database {
                     Some(res) => res,
-                    None => return Err(GetDatabaseError::ResponseEmpty),
+                    None => return Err(GetDatabaseError::NotFound(database_name)),
                 };
                 let db_id = match Uuid::parse_str(res.id.as_str()) {
                     Ok(uuid) => uuid,
-                    Err(_) => return Err(GetDatabaseError::IdParsingError),
+                    Err(err) => return Err(GetDatabaseError::InvalidID(err.to_string())),
                 };
                 Ok(GetDatabaseResponse {
                     id: db_id,
@@ -492,8 +496,8 @@ impl GrpcSysDb {
             Err(e) => {
                 tracing::error!("Failed to get database {:?}", e);
                 let res = match e.code() {
-                    Code::NotFound => GetDatabaseError::NotFound,
-                    _ => GetDatabaseError::SysDB(e.to_string()),
+                    Code::NotFound => GetDatabaseError::NotFound(database_name),
+                    _ => GetDatabaseError::Internal(e),
                 };
                 Err(res)
             }
@@ -506,13 +510,15 @@ impl GrpcSysDb {
         tenant: String,
     ) -> Result<DeleteDatabaseResponse, DeleteDatabaseError> {
         let req = chroma_proto::DeleteDatabaseRequest {
-            name: database_name,
+            name: database_name.clone(),
             tenant,
         };
         match self.client.delete_database(req).await {
             Ok(_) => Ok(DeleteDatabaseResponse {}),
-            Err(err) if matches!(err.code(), Code::NotFound) => Err(DeleteDatabaseError::NotFound),
-            Err(err) => Err(DeleteDatabaseError::SysDB(err.to_string())),
+            Err(err) if matches!(err.code(), Code::NotFound) => {
+                Err(DeleteDatabaseError::NotFound(database_name))
+            }
+            Err(err) => Err(err.into()),
         }
     }
 
@@ -922,20 +928,6 @@ impl ChromaError for GetSegmentsError {
             GetSegmentsError::ConversionError(_) => ErrorCodes::Internal,
         }
     }
-}
-
-#[derive(Debug, Error)]
-pub enum GetCollectionWithSegmentsError {
-    #[error("Failed to convert proto collection")]
-    CollectionConversionError(#[from] CollectionConversionError),
-    #[error("Duplicate segment")]
-    DuplicateSegment,
-    #[error("Missing field: {0}")]
-    Field(String),
-    #[error("Failed to convert proto segment")]
-    SegmentConversionError(#[from] SegmentConversionError),
-    #[error("Failed to fetch")]
-    FailedToGetSegments(#[from] tonic::Status),
 }
 
 #[derive(Error, Debug)]
