@@ -1,13 +1,65 @@
 use async_trait::async_trait;
+use chroma_blockstore::RootManager;
+use chroma_cache::nop::NopCache;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_storage::Storage;
 use chroma_sysdb::SysDb;
 use chroma_system::{Operator, OperatorType};
 use chroma_types::chroma_proto::{CollectionVersionFile, VersionListForCollection};
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
+use uuid::Uuid;
 
-#[derive(Clone, Debug)]
-pub struct ComputeUnusedBetweenVersionsOperator {}
+#[derive(Clone)]
+pub struct ComputeUnusedBetweenVersionsOperator {
+    storage: Storage,
+}
+
+impl ComputeUnusedBetweenVersionsOperator {
+    pub fn new(storage: Storage) -> Self {
+        Self { storage }
+    }
+
+    /// Extract S3 file references from a sparse index file content
+    async fn extract_s3_files(&self, content: &[u8]) -> Result<HashSet<String>, String> {
+        let root_manager = RootManager::new(self.storage.clone(), Box::new(NopCache));
+
+        // Parse the content as a UUID since sparse index files are stored as sparse_index/<uuid>
+        let id = Uuid::from_slice(content).map_err(|e| format!("Failed to parse UUID: {}", e))?;
+
+        // Get all block IDs from the root
+        let block_ids = root_manager
+            .get_all_block_ids(&id)
+            .await
+            .map_err(|e| format!("Failed to get block IDs: {}", e))?;
+
+        // Convert block IDs to S3 paths
+        let s3_files = block_ids
+            .into_iter()
+            .map(|id| format!("sparse_index/{}", id))
+            .collect();
+
+        Ok(s3_files)
+    }
+
+    /// Compare two versions and return files that are in older_version but not in newer_version
+    fn compute_unused_files(
+        older_files: &HashSet<String>,
+        newer_files: &HashSet<String>,
+    ) -> HashSet<String> {
+        older_files
+            .difference(newer_files)
+            .cloned()
+            .collect::<HashSet<_>>()
+    }
+}
+
+impl std::fmt::Debug for ComputeUnusedBetweenVersionsOperator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ComputeUnusedBetweenVersionsOperator")
+            .finish_non_exhaustive()
+    }
+}
 
 #[derive(Debug)]
 pub struct ComputeUnusedBetweenVersionsInput {
@@ -41,26 +93,6 @@ impl ChromaError for ComputeUnusedBetweenVersionsError {
             ComputeUnusedBetweenVersionsError::ParseError(_, _) => ErrorCodes::Internal,
             ComputeUnusedBetweenVersionsError::MissingContent(_) => ErrorCodes::Internal,
         }
-    }
-}
-
-impl ComputeUnusedBetweenVersionsOperator {
-    /// Extract S3 file references from a sparse index file content
-    fn extract_s3_files(content: &[u8]) -> Result<HashSet<String>, String> {
-        // TODO: Implement parsing of sparse index file to extract S3 file references
-        // This will depend on the format of your sparse index files
-        Ok(HashSet::new())
-    }
-
-    /// Compare two versions and return files that are in older_version but not in newer_version
-    fn compute_unused_files(
-        older_files: &HashSet<String>,
-        newer_files: &HashSet<String>,
-    ) -> HashSet<String> {
-        older_files
-            .difference(newer_files)
-            .cloned()
-            .collect::<HashSet<_>>()
     }
 }
 
@@ -98,9 +130,13 @@ impl Operator<ComputeUnusedBetweenVersionsInput, ComputeUnusedBetweenVersionsOut
                 .ok_or_else(|| ComputeUnusedBetweenVersionsError::MissingContent(newer_version))?;
 
             // Extract S3 files from both versions
-            let older_files = Self::extract_s3_files(older_content)
+            let older_files = self
+                .extract_s3_files(older_content)
+                .await
                 .map_err(|e| ComputeUnusedBetweenVersionsError::ParseError(older_version, e))?;
-            let newer_files = Self::extract_s3_files(newer_content)
+            let newer_files = self
+                .extract_s3_files(newer_content)
+                .await
                 .map_err(|e| ComputeUnusedBetweenVersionsError::ParseError(newer_version, e))?;
 
             // Find files that are in older version but not in newer version
@@ -121,7 +157,128 @@ impl Operator<ComputeUnusedBetweenVersionsInput, ComputeUnusedBetweenVersionsOut
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chroma_blockstore::{
+        arrow::{provider::ArrowBlockfileProvider, types::ArrowWriteableValue},
+        BlockfileWriterOptions,
+    };
+    use chroma_cache::UnboundedCacheConfig;
+    use chroma_storage::{local::LocalStorage, Storage};
+    use tempfile::TempDir;
 
+    async fn create_sparse_index(storage: &Storage, keys: Vec<String>) -> Uuid {
+        let block_cache = Box::new(UnboundedCacheConfig {}.build());
+        let sparse_index_cache = Box::new(UnboundedCacheConfig {}.build());
+        let provider = ArrowBlockfileProvider::new(
+            storage.clone(),
+            1024 * 1024,
+            block_cache,
+            sparse_index_cache,
+        );
+
+        // Create a new blockfile
+        let writer = provider
+            .write::<u32, u32>(BlockfileWriterOptions::new().ordered_mutations())
+            .await
+            .unwrap();
+
+        // Write some test data
+        for (i, key) in keys.iter().enumerate() {
+            writer.set(key, i as u32, 1).await.unwrap();
+        }
+
+        let writer_id = writer.id();
+        let flusher = writer.commit::<u32, u32>().await.unwrap();
+        flusher.flush::<u32, u32>().await.unwrap();
+        writer_id
+    }
+
+    #[tokio::test]
+    async fn test_run_with_multiple_versions() {
+        // Create temporary directory for test storage
+        let tmp_dir = TempDir::new().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let operator = ComputeUnusedBetweenVersionsOperator::new(storage.clone());
+
+        // Create three versions with different content
+        let version1_id = create_sparse_index(
+            &storage,
+            vec!["key1".to_string(), "key2".to_string(), "key3".to_string()],
+        )
+        .await;
+        let version2_id = create_sparse_index(
+            &storage,
+            vec!["key2".to_string(), "key3".to_string(), "key4".to_string()],
+        )
+        .await;
+        let version3_id = create_sparse_index(
+            &storage,
+            vec!["key3".to_string(), "key4".to_string(), "key5".to_string()],
+        )
+        .await;
+
+        // Create input for the operator
+        let mut version_to_content = HashMap::new();
+        version_to_content.insert(1, version1_id.as_bytes().to_vec());
+        version_to_content.insert(2, version2_id.as_bytes().to_vec());
+        version_to_content.insert(3, version3_id.as_bytes().to_vec());
+
+        let input = ComputeUnusedBetweenVersionsInput {
+            version_file: CollectionVersionFile::default(),
+            epoch_id: 1,
+            sysdb_client: Box::new(MockSysDb {}),
+            versions_to_delete: VersionListForCollection {
+                versions: vec![1, 2, 3],
+            },
+            version_to_content,
+        };
+
+        // Run the operator
+        let result = operator.run(&input).await.unwrap();
+
+        // Verify results
+        // Version 1->2: key1 is unused
+        // Version 2->3: key2 is unused
+        let expected_unused: HashSet<String> = vec![
+            "sparse_index/key1".to_string(),
+            "sparse_index/key2".to_string(),
+        ]
+        .into_iter()
+        .collect();
+
+        assert_eq!(result.unused_s3_files, expected_unused);
+    }
+
+    #[tokio::test]
+    async fn test_run_with_missing_content() {
+        let storage = Storage::Local(LocalStorage::new("/tmp")); // Path doesn't matter for this test
+        let operator = ComputeUnusedBetweenVersionsOperator::new(storage);
+
+        let input = ComputeUnusedBetweenVersionsInput {
+            version_file: CollectionVersionFile::default(),
+            epoch_id: 1,
+            sysdb_client: Box::new(MockSysDb {}),
+            versions_to_delete: VersionListForCollection {
+                versions: vec![1, 2],
+            },
+            version_to_content: HashMap::new(), // Empty content map
+        };
+
+        let result = operator.run(&input).await;
+        assert!(matches!(
+            result,
+            Err(ComputeUnusedBetweenVersionsError::MissingContent(1))
+        ));
+    }
+
+    // Mock SysDb implementation for testing
+    struct MockSysDb;
+    #[async_trait]
+    impl SysDb for MockSysDb {
+        // Implement required methods with mock behavior
+        // Add necessary implementations based on your needs
+    }
+
+    // Keep the existing test_compute_unused_files test
     #[test]
     fn test_compute_unused_files() {
         let older_files: HashSet<String> = vec![
@@ -145,16 +302,5 @@ mod tests {
 
         assert_eq!(unused.len(), 1);
         assert!(unused.contains("file1.bin"));
-    }
-
-    #[tokio::test]
-    async fn test_run_with_multiple_versions() {
-        // TODO: Implement test with multiple versions
-        // This will require creating mock sparse index file contents
-    }
-
-    #[tokio::test]
-    async fn test_run_with_missing_content() {
-        // TODO: Implement test for missing content error case
     }
 }

@@ -336,7 +336,9 @@ impl Handler<TaskResult<FetchSparseIndexFilesOutput, FetchSparseIndexFilesError>
         };
 
         let compute_task = wrap(
-            Box::new(ComputeUnusedBetweenVersionsOperator {}),
+            Box::new(ComputeUnusedBetweenVersionsOperator::new(
+                self.storage.clone(),
+            )),
             ComputeUnusedBetweenVersionsInput {
                 version_file: output.version_file,
                 epoch_id: output.epoch_id,
@@ -402,7 +404,7 @@ impl Handler<TaskResult<DeleteVersionsAtSysDbOutput, DeleteVersionsAtSysDbError>
         ctx: &ComponentContext<GarbageCollectorOrchestrator>,
     ) {
         // Stage 6: Final stage - versions deleted, complete the garbage collection process
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let _output = match self.ok_or_terminate(message.into_inner(), ctx) {
             Some(output) => output,
             None => return,
         };

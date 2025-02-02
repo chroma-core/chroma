@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 mod foyer;
-mod nop;
+pub mod nop;
 mod unbounded;
 
 use crate::nop::NopCache;
