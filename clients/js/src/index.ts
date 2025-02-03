@@ -2,7 +2,7 @@ export { ChromaClient } from "./ChromaClient";
 export { AdminClient } from "./AdminClient";
 export { CloudClient } from "./CloudClient";
 export { Collection } from "./Collection";
-export type { IEmbeddingFunction } from "./embeddings/IEmbeddingFunction";
+export { IEmbeddingFunction } from "./embeddings/IEmbeddingFunction";
 export { OpenAIEmbeddingFunction } from "./embeddings/OpenAIEmbeddingFunction";
 export { CohereEmbeddingFunction } from "./embeddings/CohereEmbeddingFunction";
 export { TransformersEmbeddingFunction } from "./embeddings/TransformersEmbeddingFunction";
