@@ -260,7 +260,7 @@ mod tests {
     #[tokio::test]
     async fn test_sqlite_db() {
         let config = SqliteDBConfig {
-            url: "sqlite::memory:".to_string(),
+            url: new_test_db_path(),
             hash_type: MigrationHash::MD5,
             migration_mode: MigrationMode::Apply,
         };
