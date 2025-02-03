@@ -1,4 +1,8 @@
 use std::str::FromStr;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
 use axum::{
     extract::{Path, Query, State},
@@ -17,6 +21,7 @@ use chroma_types::{
     Metadata, QueryRequest, QueryResponse, UpdateCollectionRecordsResponse,
     UpdateCollectionResponse, UpdateMetadata, UpsertCollectionRecordsResponse,
 };
+use mdac::{Rule, Scorecard, ScorecardTicket};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -32,15 +37,40 @@ use crate::{
     FrontendConfig,
 };
 
+struct ScorecardGuard {
+    scorecard: Arc<Scorecard<'static>>,
+    ticket: Option<ScorecardTicket>,
+}
+
+impl Drop for ScorecardGuard {
+    fn drop(&mut self) {
+        if let Some(ticket) = self.ticket.take() {
+            self.scorecard.untrack(ticket);
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct FrontendServer {
     config: FrontendConfig,
     frontend: Frontend,
+    scorecard_enabled: Arc<AtomicBool>,
+    scorecard: Arc<Scorecard<'static>>,
 }
 
 impl FrontendServer {
-    pub fn new(config: FrontendConfig, frontend: Frontend) -> FrontendServer {
-        FrontendServer { config, frontend }
+    pub fn new(config: FrontendConfig, frontend: Frontend, rules: Vec<Rule>) -> FrontendServer {
+        // NOTE(rescrv):  Assume statically no more than 128 threads because we won't deploy on
+        // hardware with that many threads anytime soon for frontends, if ever.
+        let scorecard_enabled = Arc::new(AtomicBool::new(config.scorecard_enabled));
+        // SAFETY(rescrv):  This is safe because 128 is non-zero.
+        let scorecard = Arc::new(Scorecard::new(&(), rules, 128.try_into().unwrap()));
+        FrontendServer {
+            config,
+            frontend,
+            scorecard_enabled,
+            scorecard,
+        }
     }
 
     #[allow(dead_code)]
@@ -112,6 +142,20 @@ impl FrontendServer {
         } else {
             axum::serve(listener, app).await.unwrap();
         };
+    }
+
+    fn scorecard_request(&self, tags: &[&str]) -> Option<ScorecardGuard> {
+        if self.scorecard_enabled.load(Ordering::Relaxed) {
+            self.scorecard.track(tags).map(|ticket| ScorecardGuard {
+                scorecard: Arc::clone(&self.scorecard),
+                ticket: Some(ticket),
+            })
+        } else {
+            Some(ScorecardGuard {
+                scorecard: Arc::clone(&self.scorecard),
+                ticket: None,
+            })
+        }
     }
 }
 
@@ -187,6 +231,10 @@ async fn create_database(
     Json(CreateDatabasePayload { name }): Json<CreateDatabasePayload>,
 ) -> Result<Json<CreateDatabaseResponse>, ServerError> {
     tracing::info!("Creating database [{}] for tenant [{}]", name, tenant_id);
+    let _guard = server.scorecard_request(&[
+        "op:create_database",
+        format!("tenant:{}", tenant_id).as_str(),
+    ]);
     let create_database_request = CreateDatabaseRequest {
         database_id: Uuid::new_v4(),
         tenant_id,
@@ -211,6 +259,10 @@ async fn list_databases(
     Json(ListDatabasesPayload { limit, offset }): Json<ListDatabasesPayload>,
 ) -> Result<Json<ListDatabasesResponse>, ServerError> {
     tracing::info!("Listing database for tenant [{}]", tenant_id);
+    let _guard = server.scorecard_request(&[
+        "op:list_databases",
+        format!("tenant:{}", tenant_id).as_str(),
+    ]);
     Ok(Json(
         server
             .frontend
@@ -232,6 +284,8 @@ async fn get_database(
         database_name,
         tenant_id
     );
+    let _guard =
+        server.scorecard_request(&["op:get_database", format!("tenant:{}", tenant_id).as_str()]);
     let res = server
         .frontend
         .get_database(GetDatabaseRequest {
@@ -251,6 +305,10 @@ async fn delete_database(
         database_name,
         tenant_id
     );
+    let _guard = server.scorecard_request(&[
+        "op:delete_database",
+        format!("tenant:{}", tenant_id).as_str(),
+    ]);
     Ok(Json(
         server
             .frontend
@@ -281,6 +339,10 @@ async fn list_collections(
         limit,
         offset
     );
+    let _guard = server.scorecard_request(&[
+        "op:list_collections",
+        format!("tenant:{}", tenant_id).as_str(),
+    ]);
     Ok(Json(
         server
             .frontend
@@ -303,6 +365,10 @@ async fn count_collections(
         database_name,
         tenant_id
     );
+    let _guard = server.scorecard_request(&[
+        "op:count_collections",
+        format!("tenant:{}", tenant_id).as_str(),
+    ]);
     Ok(Json(
         server
             .frontend
@@ -328,6 +394,10 @@ async fn create_collection(
     Json(payload): Json<CreateCollectionPayload>,
 ) -> Result<Json<Collection>, ServerError> {
     tracing::info!("Creating collection in database [{database_name}] for tenant [{tenant_id}]");
+    let _guard = server.scorecard_request(&[
+        "op:create_collection",
+        format!("tenant:{}", tenant_id).as_str(),
+    ]);
     validate_name(&payload.name)?;
     if let Some(metadata) = payload.metadata.as_ref() {
         validate_non_empty_metadata(metadata)?;
@@ -352,6 +422,10 @@ async fn get_collection(
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<Collection>, ServerError> {
     tracing::info!("Getting collection [{collection_name}] in database [{database_name}] for tenant [{tenant_id}]");
+    let _guard = server.scorecard_request(&[
+        "op:get_collection",
+        format!("tenant:{}", tenant_id).as_str(),
+    ]);
     let collection = server
         .frontend
         .get_collection(GetCollectionRequest {
@@ -375,6 +449,10 @@ async fn update_collection(
     Json(payload): Json<UpdateCollectionPayload>,
 ) -> Result<Json<UpdateCollectionResponse>, ServerError> {
     tracing::info!("Updating collection [{collection_id}] in database [{database_name}] for tenant [{tenant_id}]");
+    let _guard = server.scorecard_request(&[
+        "op:update_collection",
+        format!("tenant:{}", tenant_id).as_str(),
+    ]);
     if let Some(name) = payload.new_name.as_ref() {
         validate_name(name)?;
     }
@@ -403,6 +481,10 @@ async fn delete_collection(
     Path((tenant_id, database_name, collection_name)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<UpdateCollectionResponse>, ServerError> {
+    let _guard = server.scorecard_request(&[
+        "op:delete_collection",
+        format!("tenant:{}", tenant_id).as_str(),
+    ]);
     server
         .frontend
         .delete_collection(chroma_types::DeleteCollectionRequest {
@@ -429,6 +511,11 @@ async fn collection_add(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<AddCollectionRecordsPayload>,
 ) -> Result<Json<AddCollectionRecordsResponse>, ServerError> {
+    let _guard = server.scorecard_request(&[
+        "op:write",
+        format!("tenant:{}", tenant_id).as_str(),
+        format!("collection:{}", collection_id).as_str(),
+    ]);
     let collection_id =
         CollectionUuid(Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?);
 
@@ -470,6 +557,11 @@ async fn collection_update(
 ) -> Result<Json<UpdateCollectionRecordsResponse>, ServerError> {
     let collection_id =
         CollectionUuid(Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?);
+    let _guard = server.scorecard_request(&[
+        "op:write",
+        format!("tenant:{}", tenant_id).as_str(),
+        format!("collection:{}", collection_id).as_str(),
+    ]);
 
     server
         .frontend
@@ -509,6 +601,11 @@ async fn collection_upsert(
 ) -> Result<Json<UpsertCollectionRecordsResponse>, ServerError> {
     let collection_id =
         CollectionUuid(Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?);
+    let _guard = server.scorecard_request(&[
+        "op:write",
+        format!("tenant:{}", tenant_id).as_str(),
+        format!("collection:{}", collection_id).as_str(),
+    ]);
 
     server
         .frontend
@@ -546,6 +643,11 @@ async fn collection_delete(
 ) -> Result<Json<DeleteCollectionRecordsResponse>, ServerError> {
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
+    let _guard = server.scorecard_request(&[
+        "op:write",
+        format!("tenant:{}", tenant_id).as_str(),
+        format!("collection:{}", collection_id).as_str(),
+    ]);
 
     let r#where = payload.where_fields.parse()?;
 
@@ -575,6 +677,11 @@ async fn collection_count(
     tracing::info!(
         "Counting number of records in collection [{collection_id}] in database [{database_name}] for tenant [{tenant_id}]",
     );
+    let _guard = server.scorecard_request(&[
+        "op:read",
+        format!("tenant:{}", tenant_id).as_str(),
+        format!("collection:{}", collection_id).as_str(),
+    ]);
 
     Ok(Json(
         server
@@ -610,6 +717,11 @@ async fn collection_get(
     tracing::info!(
         "Getting records from collection [{collection_id}] in database [{database_name}] for tenant [{tenant_id}]",
     );
+    let _guard = server.scorecard_request(&[
+        "op:read",
+        format!("tenant:{}", tenant_id).as_str(),
+        format!("collection:{}", collection_id).as_str(),
+    ]);
     let res = server
         .frontend
         .get(GetRequest {
@@ -648,6 +760,11 @@ async fn collection_query(
         "Querying records from collection [{collection_id}] in database [{database_name}] for tenant [{tenant_id}]",
     );
 
+    let _guard = server.scorecard_request(&[
+        "op:read",
+        format!("tenant:{}", tenant_id).as_str(),
+        format!("collection:{}", collection_id).as_str(),
+    ]);
     server
         .frontend
         .validate_embedding(collection_id, Some(&payload.query_embeddings), true)
