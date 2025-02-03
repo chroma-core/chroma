@@ -279,7 +279,7 @@ pub type GetCollectionResponse = Collection;
 pub enum GetCollectionError {
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
-    #[error("Collection [{0}] not found")]
+    #[error("Collection [{0}] does not exist")]
     NotFound(String),
 }
 
