@@ -12,8 +12,6 @@ use thiserror::Error;
 pub enum ValidationError {
     #[error("Collection ID is not a valid UUIDv4")]
     CollectionId,
-    #[error("Collection is not initialized")]
-    CollectionUninitialized,
     #[error("Inconsistent dimensions in provided embeddings")]
     DimensionInconsistent,
     #[error("Collection expecting embedding with dimension of {0}, got {1}")]
@@ -38,7 +36,6 @@ impl ChromaError for ValidationError {
     fn code(&self) -> chroma_error::ErrorCodes {
         match self {
             ValidationError::CollectionId => chroma_error::ErrorCodes::InvalidArgument,
-            ValidationError::CollectionUninitialized => todo!(),
             ValidationError::DimensionInconsistent => chroma_error::ErrorCodes::InvalidArgument,
             ValidationError::DimensionMismatch(_, _) => chroma_error::ErrorCodes::InvalidArgument,
             ValidationError::EmptyDelete => chroma_error::ErrorCodes::InvalidArgument,

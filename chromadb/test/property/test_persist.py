@@ -453,7 +453,7 @@ def test_batch_size_less_than_sync_with_duplicate_adds_results_in_skipped_seq_id
     state = PersistEmbeddingsStateMachine(settings=settings, client=client)
     state.initialize(
         collection=strategies.Collection(
-            name="JqzMs4pPm14c\n",
+            name="JqzMs4pPm14c",
             metadata={
                 "hnsw:construction_ef": 128,
                 "hnsw:search_ef": 128,

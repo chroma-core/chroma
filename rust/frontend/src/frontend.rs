@@ -23,11 +23,11 @@ use chroma_types::{
     GetDatabaseResponse, GetRequest, GetResponse, GetTenantError, GetTenantRequest,
     GetTenantResponse, HealthCheckResponse, HeartbeatError, HeartbeatResponse, Include,
     ListCollectionsRequest, ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest,
-    ListDatabasesResponse, Operation, OperationRecord, QueryError, QueryRequest, QueryResponse,
-    ResetError, ResetResponse, ScalarEncoding, Segment, SegmentScope, SegmentType, SegmentUuid,
-    UpdateCollectionError, UpdateCollectionRecordsError, UpdateCollectionRecordsRequest,
-    UpdateCollectionRecordsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
-    UpdateMetadata, UpdateMetadataValue, UpsertCollectionRecordsError,
+    ListDatabasesResponse, Metadata, Operation, OperationRecord, QueryError, QueryRequest,
+    QueryResponse, ResetError, ResetResponse, ScalarEncoding, Segment, SegmentScope, SegmentType,
+    SegmentUuid, UpdateCollectionError, UpdateCollectionRecordsError,
+    UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateCollectionRequest,
+    UpdateCollectionResponse, UpdateMetadata, UpdateMetadataValue, UpsertCollectionRecordsError,
     UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, CHROMA_DOCUMENT_KEY,
     CHROMA_URI_KEY,
 };
@@ -265,16 +265,20 @@ impl Frontend {
                 return Ok(());
             };
             match self.get_collection_dimension(collection_id).await {
-                Ok(Some(expected_dim)) if expected_dim != emb_dim => {
-                    Err(ValidationError::DimensionMismatch(expected_dim, emb_dim))
-                }
-                Ok(None) if update_if_not_present => {
-                    self.set_collection_dimension(collection_id, emb_dim)
-                        .await?;
+                Ok(Some(expected_dim)) => {
+                    if expected_dim != emb_dim {
+                        return Err(ValidationError::DimensionMismatch(expected_dim, emb_dim));
+                    }
+
                     Ok(())
                 }
-                Ok(None) => Err(ValidationError::CollectionUninitialized),
-                Ok(_) => Ok(()),
+                Ok(None) => {
+                    if update_if_not_present {
+                        self.set_collection_dimension(collection_id, emb_dim)
+                            .await?;
+                    }
+                    Ok(())
+                }
                 Err(err) => Err(err.into()),
             }
         } else {
@@ -406,6 +410,13 @@ impl Frontend {
         &mut self,
         request: CreateCollectionRequest,
     ) -> Result<CreateCollectionResponse, CreateCollectionError> {
+        let hnsw_metadata = request.metadata.as_ref().map(|m| {
+            m.iter()
+                .filter(|(k, _)| k.starts_with("hnsw:"))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect::<Metadata>()
+        });
+
         let collection_id = CollectionUuid::new();
         let segments = vec![
             Segment {
@@ -413,7 +424,7 @@ impl Frontend {
                 r#type: SegmentType::HnswDistributed,
                 scope: SegmentScope::VECTOR,
                 collection: collection_id,
-                metadata: None,
+                metadata: hnsw_metadata,
                 file_path: Default::default(),
             },
             Segment {
@@ -607,55 +618,70 @@ impl Frontend {
         Ok(UpsertCollectionRecordsResponse {})
     }
 
-    pub async fn delete(
+    pub async fn retryable_delete(
         &mut self,
         request: DeleteCollectionRecordsRequest,
     ) -> Result<DeleteCollectionRecordsResponse, DeleteCollectionRecordsError> {
-        let collection_and_segments = self
-            .collections_with_segments_provider
-            .get_collection_with_segments(request.collection_id)
-            .await
-            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        let mut records = Vec::new();
 
-        let get_result = self
-            .executor
-            .get(Get {
-                scan: Scan {
-                    collection_and_segments,
-                },
-                filter: Filter {
-                    query_ids: request.ids,
-                    where_clause: request.r#where,
-                },
-                limit: Limit {
-                    skip: 0,
-                    fetch: None,
-                },
-                proj: Projection {
-                    document: false,
-                    embedding: false,
-                    metadata: false,
-                },
-            })
-            .await?;
-
-        if get_result.records.is_empty() {
-            tracing::debug!("Bailing because no records were found");
-            return Ok(DeleteCollectionRecordsResponse {});
-        }
-
-        let records = get_result
-            .records
-            .into_iter()
-            .map(|record| OperationRecord {
-                id: record.id,
+        if let Some(ids) = request.ids {
+            records.extend(ids.into_iter().map(|id| OperationRecord {
+                id,
                 operation: Operation::Delete,
                 document: None,
                 embedding: None,
                 encoding: None,
                 metadata: None,
-            })
-            .collect::<Vec<_>>();
+            }));
+        }
+
+        if let Some(where_clause) = request.r#where {
+            let scan = self
+                .collections_with_segments_provider
+                .get_collection_with_segments(request.collection_id)
+                .await
+                .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+
+            let filter = Filter {
+                query_ids: None,
+                where_clause: Some(where_clause),
+            };
+
+            let get_result = self
+                .executor
+                .get(Get {
+                    scan: Scan {
+                        collection_and_segments: scan,
+                    },
+                    filter,
+                    limit: Limit {
+                        skip: 0,
+                        fetch: None,
+                    },
+                    proj: Projection {
+                        document: false,
+                        embedding: false,
+                        metadata: false,
+                    },
+                })
+                .await?;
+
+            for record in get_result.records {
+                records.push(OperationRecord {
+                    id: record.id,
+                    operation: Operation::Delete,
+                    document: None,
+                    embedding: None,
+                    encoding: None,
+                    metadata: None,
+                });
+            }
+        }
+
+        if records.is_empty() {
+            tracing::debug!("Bailing because no records were found");
+            return Ok(DeleteCollectionRecordsResponse {});
+        }
 
         self.log_client
             .push_logs(request.collection_id, records)
@@ -663,6 +689,40 @@ impl Frontend {
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
         Ok(DeleteCollectionRecordsResponse {})
+    }
+
+    pub async fn delete(
+        &mut self,
+        request: DeleteCollectionRecordsRequest,
+    ) -> Result<DeleteCollectionRecordsResponse, DeleteCollectionRecordsError> {
+        let delete_to_retry = || {
+            let mut self_clone = self.clone();
+            let request_clone = request.clone();
+            let cache_clone = self
+                .collections_with_segments_provider
+                .collections_with_segments_cache
+                .clone();
+            async move {
+                let res = self_clone.retryable_delete(request_clone).await;
+                match res {
+                    Ok(res) => Ok(res),
+                    Err(e) => {
+                        if e.code() == ErrorCodes::NotFound {
+                            tracing::info!(
+                                "Invalidating cache for collection {}",
+                                request.collection_id
+                            );
+                            cache_clone.remove(&request.collection_id).await;
+                        }
+                        Err(e)
+                    }
+                }
+            }
+        };
+        delete_to_retry
+            .retry(self.collections_with_segments_provider.get_retry_backoff())
+            .when(|e| e.code() == ErrorCodes::NotFound)
+            .await
     }
 
     pub async fn retryable_count(

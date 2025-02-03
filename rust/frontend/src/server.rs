@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{DefaultBodyLimit, Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
@@ -101,7 +101,8 @@ impl FrontendServer {
                 "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_id/query",
                 post(collection_query),
             )
-            .with_state(server);
+            .with_state(server)
+            .layer(DefaultBodyLimit::max(6000000)); // TODO: add to server configuration
         let app = add_tracing_middleware(app);
 
         // TODO: configuration for this

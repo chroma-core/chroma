@@ -279,7 +279,7 @@ pub type GetCollectionResponse = Collection;
 pub enum GetCollectionError {
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
-    #[error("Collection [{0}] not found")]
+    #[error("Collection [{0}] does not exist")]
     NotFound(String),
 }
 
@@ -466,6 +466,7 @@ impl ChromaError for UpsertCollectionRecordsError {
     }
 }
 
+#[derive(Clone)]
 pub struct DeleteCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -553,9 +554,9 @@ pub struct GetRequest {
 pub struct GetResponse {
     ids: Vec<String>,
     embeddings: Option<Vec<Vec<f32>>>,
-    documents: Option<Vec<String>>,
-    uri: Option<Vec<String>>,
-    metadatas: Option<Vec<Metadata>>,
+    documents: Option<Vec<Option<String>>>,
+    uri: Option<Vec<Option<String>>>,
+    metadatas: Option<Vec<Option<Metadata>>>,
     include: Vec<Include>,
 }
 
@@ -586,26 +587,30 @@ impl From<(GetResult, IncludeList)> for GetResponse {
             if let (Some(emb), Some(embeddings)) = (embedding, res.embeddings.as_mut()) {
                 embeddings.push(emb);
             }
-            if let (Some(doc), Some(documents)) = (document, res.documents.as_mut()) {
-                documents.push(doc);
+            if let Some(documents) = res.documents.as_mut() {
+                documents.push(document);
             }
-            if let (Some(crate::MetadataValue::Str(uri)), Some(uris)) = (
-                metadata
-                    .as_mut()
-                    .and_then(|meta| meta.remove(CHROMA_URI_KEY)),
-                res.uri.as_mut(),
-            ) {
+
+            let uri = metadata.as_mut().and_then(|meta| {
+                meta.remove(CHROMA_URI_KEY).and_then(|v| {
+                    if let crate::MetadataValue::Str(uri) = v {
+                        Some(uri)
+                    } else {
+                        None
+                    }
+                })
+            });
+            if let Some(uris) = res.uri.as_mut() {
                 uris.push(uri);
             }
-            if let (Some(meta), Some(metadatas)) = (
-                metadata.map(|m| {
-                    m.into_iter()
-                        .filter(|(k, _)| !k.starts_with(CHROMA_KEY))
-                        .collect()
-                }),
-                res.metadatas.as_mut(),
-            ) {
-                metadatas.push(meta);
+
+            let metadata = metadata.map(|m| {
+                m.into_iter()
+                    .filter(|(k, _)| !k.starts_with(CHROMA_KEY))
+                    .collect()
+            });
+            if let Some(metadatas) = res.metadatas.as_mut() {
+                metadatas.push(metadata);
             }
         }
         res
