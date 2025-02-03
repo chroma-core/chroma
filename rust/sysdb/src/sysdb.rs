@@ -1,3 +1,5 @@
+use crate::sqlite::SqliteSysDb;
+
 use super::config::SysDbConfig;
 use super::test_sysdb::TestSysDb;
 use async_trait::async_trait;
@@ -28,6 +30,7 @@ use uuid::{Error, Uuid};
 #[derive(Debug, Clone)]
 pub enum SysDb {
     Grpc(GrpcSysDb),
+    Sqlite(SqliteSysDb),
     #[allow(dead_code)]
     Test(TestSysDb),
 }
@@ -39,6 +42,7 @@ impl SysDb {
     ) -> Result<CreateTenantResponse, CreateTenantError> {
         match self {
             SysDb::Grpc(grpc) => grpc.create_tenant(tenant_name).await,
+            SysDb::Sqlite(_) => todo!(),
             SysDb::Test(_) => todo!(),
         }
     }
@@ -49,6 +53,7 @@ impl SysDb {
     ) -> Result<GetTenantResponse, GetTenantError> {
         match self {
             SysDb::Grpc(grpc) => grpc.get_tenant(tenant_name).await,
+            SysDb::Sqlite(_) => todo!(),
             SysDb::Test(_) => todo!(),
         }
     }
@@ -64,6 +69,9 @@ impl SysDb {
                 grpc.create_database(database_id, database_name, tenant)
                     .await
             }
+            SysDb::Sqlite(_) => {
+                todo!()
+            }
             SysDb::Test(_) => {
                 todo!()
             }
@@ -78,6 +86,7 @@ impl SysDb {
     ) -> Result<ListDatabasesResponse, ListDatabasesError> {
         match self {
             SysDb::Grpc(grpc) => grpc.list_databases(tenant_id, limit, offset).await,
+            SysDb::Sqlite(_) => todo!(),
             SysDb::Test(_) => todo!(),
         }
     }
@@ -89,6 +98,7 @@ impl SysDb {
     ) -> Result<GetDatabaseResponse, GetDatabaseError> {
         match self {
             SysDb::Grpc(grpc) => grpc.get_database(database_name, tenant).await,
+            SysDb::Sqlite(_) => todo!(),
             SysDb::Test(_) => todo!(),
         }
     }
@@ -100,6 +110,7 @@ impl SysDb {
     ) -> Result<DeleteDatabaseResponse, DeleteDatabaseError> {
         match self {
             SysDb::Grpc(grpc) => grpc.delete_database(database_name, tenant).await,
+            SysDb::Sqlite(_) => todo!(),
             SysDb::Test(_) => todo!(),
         }
     }
@@ -118,6 +129,7 @@ impl SysDb {
                 grpc.get_collections(collection_id, name, tenant, database, limit, offset)
                     .await
             }
+            SysDb::Sqlite(_) => todo!(),
             SysDb::Test(test) => {
                 test.get_collections(collection_id, name, tenant, database)
                     .await
@@ -151,6 +163,9 @@ impl SysDb {
                 )
                 .await
             }
+            SysDb::Sqlite(_) => {
+                todo!()
+            }
             SysDb::Test(_) => {
                 todo!()
             }
@@ -168,6 +183,9 @@ impl SysDb {
             SysDb::Grpc(grpc) => {
                 grpc.update_collection(collection_id, name, metadata, dimension)
                     .await
+            }
+            SysDb::Sqlite(_) => {
+                todo!()
             }
             SysDb::Test(_) => {
                 todo!()
@@ -187,6 +205,9 @@ impl SysDb {
                 grpc.delete_collection(tenant, database, collection_id, segment_ids)
                     .await
             }
+            SysDb::Sqlite(_) => {
+                todo!()
+            }
             SysDb::Test(_) => {
                 todo!()
             }
@@ -198,6 +219,7 @@ impl SysDb {
     ) -> Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError> {
         match self {
             SysDb::Grpc(grpc) => grpc.get_collections_to_gc().await,
+            SysDb::Sqlite(_) => todo!(),
             SysDb::Test(_) => todo!(),
         }
     }
@@ -211,6 +233,7 @@ impl SysDb {
     ) -> Result<Vec<Segment>, GetSegmentsError> {
         match self {
             SysDb::Grpc(grpc) => grpc.get_segments(id, r#type, scope, collection).await,
+            SysDb::Sqlite(_) => todo!(),
             SysDb::Test(test) => test.get_segments(id, r#type, scope, collection).await,
         }
     }
@@ -225,6 +248,7 @@ impl SysDb {
                     .get_collection_with_segments(collection_id)
                     .await
             }
+            SysDb::Sqlite(_) => todo!(),
             SysDb::Test(_test_sys_db) => todo!(),
         }
     }
@@ -235,6 +259,7 @@ impl SysDb {
     ) -> Result<Vec<Tenant>, GetLastCompactionTimeError> {
         match self {
             SysDb::Grpc(grpc) => grpc.get_last_compaction_time(tanant_ids).await,
+            SysDb::Sqlite(_) => todo!(),
             SysDb::Test(test) => test.get_last_compaction_time(tanant_ids).await,
         }
     }
@@ -260,6 +285,7 @@ impl SysDb {
                 )
                 .await
             }
+            SysDb::Sqlite(_) => todo!(),
             SysDb::Test(test) => {
                 test.flush_compaction(
                     tenant_id,
@@ -277,6 +303,7 @@ impl SysDb {
     pub async fn reset(&mut self) -> Result<ResetResponse, ResetError> {
         match self {
             SysDb::Grpc(grpc) => grpc.reset().await,
+            SysDb::Sqlite(_) => todo!(),
             SysDb::Test(_) => todo!(),
         }
     }

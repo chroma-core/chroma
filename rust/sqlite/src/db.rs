@@ -6,6 +6,7 @@ use thiserror::Error;
 
 // // TODO:
 // // - support memory mode, add concurrency tests
+#[derive(Debug, Clone)]
 pub struct SqliteDb {
     conn: SqlitePool,
 }
@@ -70,6 +71,10 @@ impl SqliteDb {
             }
         }
         Ok(db)
+    }
+
+    pub fn get_conn(&self) -> &SqlitePool {
+        &self.conn
     }
 
     //////////////////////// Migrations ////////////////////////
@@ -234,26 +239,44 @@ pub enum MigrationValidationError {
     InconsistentHash(String, String),
 }
 
+//////////////////////// Test Helpers ////////////////////////
+
+pub mod test_utils {
+    use super::*;
+    use crate::config::MigrationHash;
+    use std::path::PathBuf;
+    use tempfile::tempdir;
+
+    #[allow(dead_code)]
+    pub(crate) fn test_migration_dir() -> PathBuf {
+        let migration_dir = "migrations/".to_string();
+        PathBuf::from(migration_dir)
+    }
+
+    pub fn new_test_db_path() -> String {
+        let path = tempdir().unwrap().into_path().join("test.db");
+        path.to_str().unwrap().to_string()
+    }
+
+    pub async fn get_new_sqlite_db() -> SqliteDb {
+        let config = SqliteDBConfig {
+            url: new_test_db_path(),
+            hash_type: MigrationHash::MD5,
+            migration_mode: MigrationMode::Apply,
+        };
+        SqliteDb::try_from_config(&config)
+            .await
+            .expect("Expect it to be created")
+    }
+}
+
 //////////////////////// Tests ////////////////////////
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::MigrationHash;
+    use crate::db::test_utils::{new_test_db_path, test_migration_dir};
     use sqlx::Row;
-    use std::path::PathBuf;
-    use tempfile::tempdir;
-
-    //////////////////////// Test Helpers ////////////////////////
-
-    fn test_migration_dir() -> PathBuf {
-        let migration_dir = "migrations/".to_string();
-        PathBuf::from(migration_dir)
-    }
-
-    fn new_test_db_path() -> String {
-        let path = tempdir().unwrap().into_path().join("test.db");
-        path.to_str().unwrap().to_string()
-    }
 
     //////////////////////// SqliteDb ////////////////////////
 
