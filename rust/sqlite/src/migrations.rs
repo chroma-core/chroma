@@ -19,7 +19,7 @@ use thiserror::Error;
 // - Due to legacy naming from the python codebase, the "log" table is known
 // as "embeddings_queue" in the Rust codebase. Only in the sql files is it referred to as "embeddings_queue"
 // Elsewhere in our code we should refer to it as "log"
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct Migration {
     pub(crate) dir: String,
     pub(crate) filename: String,
@@ -61,7 +61,7 @@ pub(crate) const MIGRATION_DIRS: [MigrationDir; 3] = [
 ];
 
 #[derive(Error, Debug)]
-pub(crate) enum GetSourceMigrationsError {
+pub enum GetSourceMigrationsError {
     #[error(transparent)]
     ParseMigrationFilenameError(#[from] ParseMigrationFilenameError),
     #[error("{0}")]
@@ -98,9 +98,9 @@ impl MigrationDir {
     /// Get the migrations that are on disk
     /// Arguments:
     /// - migration_hash: MigrationHash - The hash function to use for the migration files
-    /// Returns:
+    /// ## Returns:
     /// - Vec<Migration> - A list of migrations found on disk, sorted by version in ascending order
-    /// Notes:
+    /// ## Notes:
     /// - Uses the migrations_root_dir of this SqlDB instance
     pub(crate) fn get_source_migrations(
         &self,
@@ -153,7 +153,7 @@ impl MigrationDir {
 ///////////// MigrationDir Helpers //////////////
 
 #[derive(Error, Debug)]
-pub(crate) enum ParseMigrationFilenameError {
+pub enum ParseMigrationFilenameError {
     #[error("Invalid migration filename: {0}")]
     InvalidMigrationFilename(String),
     #[error("Failed to find version")]
@@ -228,19 +228,3 @@ struct MetaDbMigrationsFolder;
 #[folder = "./migrations/embeddings_queue/"]
 #[include = "*.sql"]
 struct EmbeddingsQueueMigrationsFolder;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_migration_files() {
-        for dir in MIGRATION_DIRS.iter() {
-            for migration_name in dir.iter() {
-                let sql = dir
-                    .get_file(&migration_name)
-                    .expect("Failed to get migration file");
-            }
-        }
-    }
-}

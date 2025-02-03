@@ -1,5 +1,8 @@
+use super::client_manager::NodeNameToClient;
 use super::{client_manager::ClientManager, config};
 use async_trait::async_trait;
+use backon::ExponentialBuilder;
+use backon::Retryable;
 use chroma_config::{
     assignment::{self, assignment_policy::AssignmentPolicy},
     Configurable,
@@ -16,10 +19,11 @@ use chroma_types::{
     plan::{Count, Get, Knn},
     CollectionUuid, ExecutorError,
 };
-use parking_lot::Mutex;
-use rand::Rng;
-use std::{cmp::min, collections::HashMap, sync::Arc};
+use rand::seq::SliceRandom;
+use std::cmp::min;
 use tonic::Request;
+
+type Client = QueryExecutorClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>;
 
 /// A distributed executor that routes requests to the appropriate node based on the assignment policy
 /// # Fields
@@ -33,10 +37,10 @@ use tonic::Request;
 /// outside.
 #[derive(Clone, Debug)]
 pub struct DistributedExecutor {
-    node_name_to_client:
-        Arc<Mutex<HashMap<String, QueryExecutorClient<tonic::transport::Channel>>>>,
+    node_name_to_client: NodeNameToClient,
     assignment_policy: Box<dyn AssignmentPolicy>,
     replication_factor: usize,
+    backoff: ExponentialBuilder,
 }
 
 #[async_trait]
@@ -45,7 +49,7 @@ impl Configurable<(config::DistributedExecutorConfig, System)> for DistributedEx
         (config, system): &(config::DistributedExecutorConfig, System),
     ) -> Result<Self, Box<dyn ChromaError>> {
         let assignment_policy = assignment::from_config(&config.assignment).await?;
-        let node_name_to_client = Arc::new(Mutex::new(HashMap::new()));
+        let node_name_to_client = NodeNameToClient::default();
         let client_manager = ClientManager::new(
             node_name_to_client.clone(),
             config.connections_per_node,
@@ -63,10 +67,13 @@ impl Configurable<(config::DistributedExecutorConfig, System)> for DistributedEx
         memberlist_provider.subscribe(client_manager_handle.receiver());
         let _memberlist_provider_handle = system.start_component(memberlist_provider);
 
+        let retry_config = &config.retry;
+        let backoff = retry_config.into();
         Ok(Self {
             node_name_to_client,
             assignment_policy,
             replication_factor: config.replication_factor,
+            backoff,
         })
     }
 }
@@ -74,63 +81,89 @@ impl Configurable<(config::DistributedExecutorConfig, System)> for DistributedEx
 impl DistributedExecutor {
     ///////////////////////// Plan Operations /////////////////////////
     pub async fn count(&mut self, plan: Count) -> Result<CountResult, ExecutorError> {
-        let mut client = self.client(plan.scan.collection_and_segments.collection.collection_id)?;
-        Ok(client
-            .count(Request::new(plan.into()))
-            .await?
-            .into_inner()
-            .count)
+        let clients = self.clients(plan.scan.collection_and_segments.collection.collection_id)?;
+        let res = (|| async {
+            choose_client(clients.as_slice())?
+                .count(Request::new(plan.clone().into()))
+                .await
+        })
+        .retry(self.backoff)
+        .when(is_retryable_error)
+        .await?
+        .into_inner();
+        Ok(res.count)
     }
 
     pub async fn get(&mut self, plan: Get) -> Result<GetResult, ExecutorError> {
-        let mut client = self.client(plan.scan.collection_and_segments.collection.collection_id)?;
-        Ok(client
-            .get(Request::new(plan.try_into()?))
-            .await?
-            .into_inner()
-            .try_into()?)
+        let clients = self.clients(plan.scan.collection_and_segments.collection.collection_id)?;
+        let res = (|| async {
+            choose_client(clients.as_slice())?
+                .get(Request::new(plan.clone().try_into()?))
+                .await
+        })
+        .retry(self.backoff)
+        .when(is_retryable_error)
+        .await?;
+        Ok(res.into_inner().try_into()?)
     }
     pub async fn knn(&mut self, plan: Knn) -> Result<KnnBatchResult, ExecutorError> {
-        let mut client = self.client(plan.scan.collection_and_segments.collection.collection_id)?;
-        Ok(from_proto_knn_batch_result(
-            client
-                .knn(Request::new(plan.try_into()?))
-                .await?
-                .into_inner(),
-        )?)
+        let clients = self.clients(plan.scan.collection_and_segments.collection.collection_id)?;
+        let res = (|| async {
+            choose_client(clients.as_slice())?
+                .knn(Request::new(plan.clone().try_into()?))
+                .await
+        })
+        .retry(self.backoff)
+        .when(is_retryable_error)
+        .await?;
+        Ok(from_proto_knn_batch_result(res.into_inner())?)
     }
 
     ///////////////////////// Helpers /////////////////////////
 
-    /// Get the gRPC client for the given collection id by performing the assignment policy
+    /// Get the gRPC clients for the given collection id by performing the assignment policy
     /// # Arguments
     /// - `collection_id` - The collection id for which the client is to be fetched
     /// # Returns
-    /// - The gRPC client for the given collection id
+    /// - The gRPC clients for the given collection id in the order of the assignment policy
     /// # Errors
     /// - If no client is found for the given collection id
     /// - If the assignment policy fails to assign the collection id
-    fn client(
-        &mut self,
-        collection_id: CollectionUuid,
-    ) -> Result<QueryExecutorClient<tonic::transport::Channel>, ExecutorError> {
-        // NOTE(hammadb): We hold the lock for the entire duration of the function
-        // we could potentially hold the lock for a shorter duration
-        let node_name_to_client_guard = self.node_name_to_client.lock();
+    fn clients(&mut self, collection_id: CollectionUuid) -> Result<Vec<Client>, ExecutorError> {
+        let node_name_to_client_guard = self.node_name_to_client.read();
         let members: Vec<String> = node_name_to_client_guard.keys().cloned().collect();
-
-        // Ensure that the target replication factor is not greater than the number of members
-        // since the assignment policy errors if the target replication factor is greater than the number of members.
-        // We would prefer that we still send the request to a node rather than erroring.
         let target_replication_factor = min(self.replication_factor, members.len());
         self.assignment_policy.set_members(members);
         let assigned = self
             .assignment_policy
             .assign(&collection_id.to_string(), target_replication_factor)?;
-        let random_index = rand::thread_rng().gen_range(0..assigned.len());
-        let client = node_name_to_client_guard
-            .get(&assigned[random_index])
-            .ok_or_else(|| ExecutorError::NoClientFound(assigned[random_index].clone()))?;
-        Ok(client.clone())
+        let clients = assigned
+            .iter()
+            .map(|node_name| {
+                node_name_to_client_guard
+                    .get(node_name)
+                    .ok_or_else(|| ExecutorError::NoClientFound(node_name.clone()))
+                    .cloned()
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(clients)
     }
+}
+
+fn is_retryable_error(e: &tonic::Status) -> bool {
+    e.code() == tonic::Code::Unavailable
+        || e.code() == tonic::Code::DeadlineExceeded
+        || e.code() == tonic::Code::Aborted
+        || e.code() == tonic::Code::ResourceExhausted
+}
+
+fn no_clients_found_status() -> tonic::Status {
+    tonic::Status::internal("No clients found")
+}
+
+fn choose_client(clients: &[Client]) -> Result<Client, tonic::Status> {
+    Ok(clients
+        .choose(&mut rand::thread_rng())
+        .ok_or(no_clients_found_status())?
+        .clone())
 }

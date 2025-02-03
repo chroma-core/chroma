@@ -1,3 +1,4 @@
+allow_reset: true
 service_name: "rust-frontend-service"
 otel_endpoint: "http://otel-collector:4317"
 sysdb:
@@ -9,8 +10,11 @@ sysdb:
 collections_with_segments_provider:
   cache:
     lru:
-      capacity: 1000
+      capacity: 1000 
   permitted_parallelism: 180
+  cache_invalidation_retry_policy:
+    delay_ms: 0
+    max_retries: 3
 log:
   Grpc:
     host: "logservice.chroma"
@@ -28,12 +32,12 @@ executor:
         hasher: Murmur3
     memberlist_provider:
       CustomResource:
-          kube_namespace: "chroma"
-          memberlist_name: "query-service-memberlist"
-          queue_size: 100
+        kube_namespace: "chroma"
+        memberlist_name: "query-service-memberlist"
+        queue_size: 100
 scorecard_enabled: true
 scorecard:
-- patterns:
-  - 'op:*'
-  - 'collection_id:*'
-  score: 100
+  - patterns:
+      - "op:*"
+      - "collection_id:*"
+    score: 100

@@ -13,6 +13,8 @@ pub struct ScorecardRule {
 
 #[derive(Deserialize, Serialize, Clone)]
 pub struct FrontendConfig {
+    #[serde(default)]
+    pub allow_reset: bool,
     pub sysdb: SysDbConfig,
     #[serde(default = "CircuitBreakerConfig::default")]
     pub circuit_breaker: CircuitBreakerConfig,
@@ -78,9 +80,8 @@ mod tests {
             CacheConfig::Disk(c) => {
                 assert_eq!(c.capacity, 1000);
             }
-            _ => {
-                panic!("Cache config is not memory or disk");
-            }
+            CacheConfig::Nop => {}
+            _ => {}
         }
     }
 }

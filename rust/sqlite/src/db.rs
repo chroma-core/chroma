@@ -6,9 +6,8 @@ use thiserror::Error;
 
 // // TODO:
 // // - support memory mode, add concurrency tests
-struct SqliteDb {
+pub struct SqliteDb {
     conn: SqlitePool,
-    config: SqliteDBConfig,
 }
 
 impl SqliteDb {
@@ -26,12 +25,9 @@ impl SqliteDb {
             .create_if_missing(true);
         let conn = SqlitePool::connect_with(options)
             .await
-            .map_err(|e| SqliteCreationError::SqlxError(e))?;
+            .map_err(SqliteCreationError::SqlxError)?;
 
-        let db = Self {
-            conn,
-            config: config.clone(),
-        };
+        let db = Self { conn };
 
         db.initialize_migrations_table().await?;
         match config.migration_mode {
@@ -53,7 +49,8 @@ impl SqliteDb {
                 db.apply_migrations(all_unapplied_migrations).await?;
             }
             MigrationMode::Validate => {
-                // TODO: Test this
+                // This should realistically never happen, since we just initialized the migrations table
+                // above in an idempotent way. This is defensive.
                 if !db.has_initialized_migrations().await {
                     return Err(SqliteCreationError::MigrationsTableNotInitialized);
                 }
@@ -108,10 +105,10 @@ impl SqliteDb {
     }
 
     /// Validate migration sequence and get the migrations that need to be applied
-    /// Arguments:
+    /// ## Arguments:
     /// - applied_migrations: Vec<Migration> - The migrations that have been applied, in ascending version order
     /// - source_migrations: Vec<Migration> - The migrations that are on disk, in ascending version order
-    /// Returns:
+    /// ## Returns:
     /// - Vec<Migration> - The migrations that need to be applied
     fn validate_migrations_and_get_unapplied(
         &self,
@@ -128,6 +125,12 @@ impl SqliteDb {
                 ));
             }
             if db_migration.hash != source_migration.hash {
+                return Err(MigrationValidationError::InconsistentHash(
+                    db_migration.hash.clone(),
+                    source_migration.hash.clone(),
+                ));
+            }
+            if db_migration.sql != source_migration.sql {
                 return Err(MigrationValidationError::InconsistentHash(
                     db_migration.hash.clone(),
                     source_migration.hash.clone(),
@@ -175,9 +178,9 @@ impl SqliteDb {
     /// Get existing migrations for a given directory
     /// Arguments:
     /// - dir_name: str - The name of the directory that contains the migrations
-    /// Returns:
+    /// ## Returns:
     /// - Vec<Migration> - A list of migrations
-    /// Notes
+    /// ## Notes
     /// - dir_name has to be held constant for a given migration directory
     /// - The migrations are sorted by version in ascending order
     /// - The dir_name is consistent with the python implementation
@@ -219,7 +222,7 @@ pub enum SqliteCreationError {
     MigrationValidationError(#[from] MigrationValidationError),
     #[error("Migrations table not initialized")]
     MigrationsTableNotInitialized,
-    #[error("Unappliued migrations found")]
+    #[error("Unapplied migrations found")]
     UnappliedMigrationsFound,
 }
 
@@ -242,7 +245,7 @@ mod tests {
     //////////////////////// Test Helpers ////////////////////////
 
     fn test_migration_dir() -> PathBuf {
-        let migration_dir = "/../migrations".to_string();
+        let migration_dir = "migrations/".to_string();
         PathBuf::from(migration_dir)
     }
 
@@ -281,33 +284,9 @@ mod tests {
         assert_eq!(name, "migrations");
     }
 
-    // #[tokio::test]
-    // async fn test_migrations_validate_on_existing_db() {
-    //     let config: SqliteDBConfig = SqliteDBConfig {
-    //         url: existing_test_db_path(),
-    //         migrations_root_dir: test_migration_dir(),
-    //         hash_type: MigrationHash::MD5,
-    //         migration_mode: MigrationMode::Validate,
-    //     };
-    //     let db = SqliteDb::try_from_config(&config)
-    //         .await
-    //         .expect("Expect it to be created");
-
-    //     // Check if migrations table exists
-    //     let query = r#"
-    //         SELECT name FROM sqlite_master WHERE type='table' AND name='migrations'
-    //     "#;
-    //     let row = sqlx::query(query)
-    //         .fetch_one(&db.conn)
-    //         .await
-    //         .expect("Expect it to be fetched");
-    //     let name: String = row.get("name");
-    //     assert_eq!(name, "migrations");
-    // }
-
     #[tokio::test]
-    async fn test_migrations_get_applied_on_new_db() {
-        let config = SqliteDBConfig {
+    async fn test_it_initializes_and_validates() {
+        let config: SqliteDBConfig = SqliteDBConfig {
             url: new_test_db_path(),
             hash_type: MigrationHash::MD5,
             migration_mode: MigrationMode::Apply,
@@ -315,19 +294,149 @@ mod tests {
         let db = SqliteDb::try_from_config(&config)
             .await
             .expect("Expect it to be created");
+
+        // Check if migrations table exists
+        let query = r#"
+            SELECT name FROM sqlite_master WHERE type='table' AND name='migrations'
+        "#;
+        let row = sqlx::query(query)
+            .fetch_one(&db.conn)
+            .await
+            .expect("Expect it to be fetched");
+        let name: String = row.get("name");
+        assert_eq!(name, "migrations");
+    }
+
+    #[tokio::test]
+    async fn test_migrations_get_applied_on_new_db() {
+        let test_db_path = new_test_db_path();
+        let config = SqliteDBConfig {
+            url: test_db_path.clone(),
+            hash_type: MigrationHash::MD5,
+            migration_mode: MigrationMode::Apply,
+        };
+        let db = SqliteDb::try_from_config(&config)
+            .await
+            .expect("Expect it to be created");
+
+        // Ensure the migrations were applied by checking the count of migrations we see
+        // after creating the db
         for dir in MIGRATION_DIRS.iter() {
-            let migrations = db.get_existing_migrations(&dir).await;
+            let migrations = db.get_existing_migrations(dir).await;
             let on_disk_path = test_migration_dir().join(dir.as_str());
             // See how many files are in the directory
-            let files = std::fs::read_dir(on_disk_path).unwrap();
+            let files = std::fs::read_dir(on_disk_path).expect("Expect it to be read");
             let num_files = files.count();
             assert_eq!(migrations.len(), num_files);
         }
+
+        // Ensure validate mode works
+        let config = SqliteDBConfig {
+            url: test_db_path,
+            hash_type: MigrationHash::MD5,
+            migration_mode: MigrationMode::Validate,
+        };
+
+        let _ = SqliteDb::try_from_config(&config)
+            .await
+            .expect("Expect it to be created & validated");
     }
 
-    // TODO: more tests
-    // - add test migrations
-    // - tamper with one and test
-    // - add new migration and test
-    // - reorder migrations
+    #[tokio::test]
+    async fn test_migrations_tampered() {
+        let test_db_path = new_test_db_path();
+        let config = SqliteDBConfig {
+            url: test_db_path.clone(),
+            hash_type: MigrationHash::MD5,
+            migration_mode: MigrationMode::Apply,
+        };
+        let db = SqliteDb::try_from_config(&config)
+            .await
+            .expect("Expect it to be created");
+
+        // Tamper with a migration file in the db
+        let dir = &MIGRATION_DIRS[0];
+        let migrations = db.get_existing_migrations(dir).await;
+        let mut tampered_migration = migrations[0].clone();
+        tampered_migration.sql = "SELECT 1".to_string();
+        let query = r#"
+            UPDATE migrations
+            SET sql = $1
+            WHERE dir = $2 AND version = $3
+        "#;
+        let query = sqlx::query(query)
+            .bind(&tampered_migration.sql)
+            .bind(&tampered_migration.dir)
+            .bind(tampered_migration.version);
+        db.conn
+            .execute(query)
+            .await
+            .expect("Expect it to be executed");
+
+        // Ensure validate mode fails
+        let config = SqliteDBConfig {
+            url: test_db_path,
+            hash_type: MigrationHash::MD5,
+            migration_mode: MigrationMode::Validate,
+        };
+
+        let result = SqliteDb::try_from_config(&config).await;
+        match result {
+            Ok(_) => panic!("Expect it to fail"),
+            Err(SqliteCreationError::MigrationValidationError(
+                MigrationValidationError::InconsistentHash(_, _),
+            )) => {}
+            Err(_) => panic!("Expect it to be a MigrationValidationError"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_migrations_reorder() {
+        let test_db_path = new_test_db_path();
+        let config = SqliteDBConfig {
+            url: test_db_path.clone(),
+            hash_type: MigrationHash::MD5,
+            migration_mode: MigrationMode::Apply,
+        };
+        let db = SqliteDb::try_from_config(&config)
+            .await
+            .expect("Expect it to be created");
+
+        // Reorder the migrations in the db
+        let dir = &MIGRATION_DIRS[0];
+        let migrations = db.get_existing_migrations(dir).await;
+        let mut reordered_migrations = migrations.clone();
+        reordered_migrations.reverse();
+        for (i, migration) in reordered_migrations.iter().enumerate() {
+            let query = r#"
+                UPDATE migrations
+                SET version = $1
+                WHERE dir = $2 AND version = $3
+            "#;
+            let query = sqlx::query(query)
+                .bind((i + reordered_migrations.len()) as u32)
+                .bind(&migration.dir)
+                .bind(migration.version);
+            db.conn
+                .execute(query)
+                .await
+                .expect("Expect it to be executed");
+        }
+
+        // Ensure validate mode fails
+        let config = SqliteDBConfig {
+            url: test_db_path,
+            hash_type: MigrationHash::MD5,
+            migration_mode: MigrationMode::Validate,
+        };
+
+        let result = SqliteDb::try_from_config(&config).await;
+        match result {
+            Ok(_) => panic!("Expect it to fail"),
+            Err(SqliteCreationError::MigrationValidationError(
+                MigrationValidationError::InconsistentVersion(_, _),
+            )) => {}
+            Err(_) => panic!("Expect it to be a MigrationValidationError"),
+        }
+    }
 }

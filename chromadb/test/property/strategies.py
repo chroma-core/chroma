@@ -158,7 +158,7 @@ def collection_name(draw: st.DrawFn) -> str:
     _ipv4_address_re = re.compile(r"^([0-9]{1,3}\.){3}[0-9]{1,3}$")
     _two_periods_re = re.compile(r"\.\.")
 
-    name: str = draw(st.from_regex(_collection_name_re))
+    name: str = draw(st.from_regex(_collection_name_re)).strip()
     hypothesis.assume(not _ipv4_address_re.match(name))
     hypothesis.assume(not _two_periods_re.search(name))
 

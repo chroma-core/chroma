@@ -272,7 +272,7 @@ mod tests {
         );
 
         let collections = sysdb
-            .get_collections(Some(collection_uuid_1), None, None, None)
+            .get_collections(Some(collection_uuid_1), None, None, None, None, 0)
             .await;
 
         assert!(collections.is_ok());

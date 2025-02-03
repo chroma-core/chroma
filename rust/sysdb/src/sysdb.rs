@@ -1,15 +1,15 @@
 use super::config::SysDbConfig;
 use super::test_sysdb::TestSysDb;
-use crate::util::client_interceptor;
 use async_trait::async_trait;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
 use chroma_types::{
-    chroma_proto, CollectionAndSegments, CreateDatabaseError, CreateDatabaseResponse,
-    CreateTenantError, CreateTenantResponse, Database, DeleteDatabaseError, DeleteDatabaseResponse,
-    GetDatabaseError, GetDatabaseResponse, GetTenantError, GetTenantResponse, ListDatabasesError,
-    ListDatabasesResponse, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
+    chroma_proto, CollectionAndSegments, CollectionMetadataUpdate, CreateDatabaseError,
+    CreateDatabaseResponse, CreateTenantError, CreateTenantResponse, Database, DeleteDatabaseError,
+    DeleteDatabaseResponse, GetCollectionWithSegmentsError, GetDatabaseError, GetDatabaseResponse,
+    GetTenantError, GetTenantResponse, ListDatabasesError, ListDatabasesResponse, Metadata,
+    ResetError, ResetResponse, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
 };
 use chroma_types::{
     Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
@@ -20,10 +20,9 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
-use tonic::service::interceptor;
 use tonic::transport::{Channel, Endpoint};
-use tonic::Status;
-use tonic::{Code, Request};
+use tonic::Code;
+use tower::ServiceBuilder;
 use uuid::{Error, Uuid};
 
 #[derive(Debug, Clone)]
@@ -111,15 +110,85 @@ impl SysDb {
         name: Option<String>,
         tenant: Option<String>,
         database: Option<String>,
+        limit: Option<u32>,
+        offset: u32,
     ) -> Result<Vec<Collection>, GetCollectionsError> {
         match self {
             SysDb::Grpc(grpc) => {
-                grpc.get_collections(collection_id, name, tenant, database)
+                grpc.get_collections(collection_id, name, tenant, database, limit, offset)
                     .await
             }
             SysDb::Test(test) => {
                 test.get_collections(collection_id, name, tenant, database)
                     .await
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_collection(
+        &mut self,
+        tenant: String,
+        database: String,
+        collection_id: CollectionUuid,
+        name: String,
+        segments: Vec<Segment>,
+        metadata: Option<Metadata>,
+        dimension: Option<i32>,
+        get_or_create: bool,
+    ) -> Result<Collection, CreateCollectionError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.create_collection(
+                    tenant,
+                    database,
+                    collection_id,
+                    name,
+                    segments,
+                    metadata,
+                    dimension,
+                    get_or_create,
+                )
+                .await
+            }
+            SysDb::Test(_) => {
+                todo!()
+            }
+        }
+    }
+
+    pub async fn update_collection(
+        &mut self,
+        collection_id: CollectionUuid,
+        name: Option<String>,
+        metadata: Option<CollectionMetadataUpdate>,
+        dimension: Option<u32>,
+    ) -> Result<(), UpdateCollectionError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.update_collection(collection_id, name, metadata, dimension)
+                    .await
+            }
+            SysDb::Test(_) => {
+                todo!()
+            }
+        }
+    }
+
+    pub async fn delete_collection(
+        &mut self,
+        tenant: String,
+        database: String,
+        collection_id: CollectionUuid,
+        segment_ids: Vec<SegmentUuid>,
+    ) -> Result<(), DeleteCollectionError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.delete_collection(tenant, database, collection_id, segment_ids)
+                    .await
+            }
+            SysDb::Test(_) => {
+                todo!()
             }
         }
     }
@@ -204,6 +273,13 @@ impl SysDb {
             }
         }
     }
+
+    pub async fn reset(&mut self) -> Result<ResetResponse, ResetError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.reset().await,
+            SysDb::Test(_) => todo!(),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -211,12 +287,7 @@ impl SysDb {
 // one inflight request at a time, so we need to clone the client for each requester.
 pub struct GrpcSysDb {
     #[allow(clippy::type_complexity)]
-    client: SysDbClient<
-        interceptor::InterceptedService<
-            tonic::transport::Channel,
-            fn(Request<()>) -> Result<Request<()>, Status>,
-        >,
-    >,
+    client: SysDbClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>,
 }
 
 #[derive(Error, Debug)]
@@ -252,14 +323,12 @@ impl Configurable<SysDbConfig> for GrpcSysDb {
                     .connect_timeout(Duration::from_millis(my_config.connect_timeout_ms))
                     .timeout(Duration::from_millis(my_config.request_timeout_ms));
 
-                let chans =
+                let channel =
                     Channel::balance_list((0..my_config.num_channels).map(|_| endpoint.clone()));
-                let client: SysDbClient<
-                    interceptor::InterceptedService<
-                        Channel,
-                        fn(Request<()>) -> Result<Request<()>, Status>,
-                    >,
-                > = SysDbClient::with_interceptor(chans, client_interceptor);
+                let channel = ServiceBuilder::new()
+                    .layer(chroma_tracing::GrpcTraceLayer)
+                    .service(channel);
+                let client = SysDbClient::new(channel);
                 Ok(GrpcSysDb { client })
             }
         }
@@ -312,13 +381,15 @@ impl GrpcSysDb {
         &mut self,
         tenant_name: String,
     ) -> Result<CreateTenantResponse, CreateTenantError> {
-        let req = chroma_proto::CreateTenantRequest { name: tenant_name };
+        let req = chroma_proto::CreateTenantRequest {
+            name: tenant_name.clone(),
+        };
         match self.client.create_tenant(req).await {
             Ok(_) => Ok(CreateTenantResponse {}),
             Err(err) if matches!(err.code(), Code::AlreadyExists) => {
-                Err(CreateTenantError::AlreadyExists)
+                Err(CreateTenantError::AlreadyExists(tenant_name))
             }
-            Err(err) => Err(CreateTenantError::SysDB(err.to_string())),
+            Err(err) => Err(err.into()),
         }
     }
 
@@ -326,16 +397,18 @@ impl GrpcSysDb {
         &mut self,
         tenant_name: String,
     ) -> Result<GetTenantResponse, GetTenantError> {
-        let req = chroma_proto::GetTenantRequest { name: tenant_name };
+        let req = chroma_proto::GetTenantRequest {
+            name: tenant_name.clone(),
+        };
         match self.client.get_tenant(req).await {
             Ok(resp) => Ok(GetTenantResponse {
                 name: resp
                     .into_inner()
                     .tenant
-                    .ok_or(GetTenantError::ResponseEmpty)?
+                    .ok_or(GetTenantError::NotFound(tenant_name))?
                     .name,
             }),
-            Err(err) => Err(GetTenantError::SysDB(err.to_string())),
+            Err(err) => Err(err.into()),
         }
     }
 
@@ -347,7 +420,7 @@ impl GrpcSysDb {
     ) -> Result<CreateDatabaseResponse, CreateDatabaseError> {
         let req = chroma_proto::CreateDatabaseRequest {
             id: database_id.to_string(),
-            name: database_name,
+            name: database_name.clone(),
             tenant,
         };
         let res = self.client.create_database(req).await;
@@ -356,8 +429,8 @@ impl GrpcSysDb {
             Err(e) => {
                 tracing::error!("Failed to create database {:?}", e);
                 let res = match e.code() {
-                    Code::AlreadyExists => CreateDatabaseError::AlreadyExists,
-                    _ => CreateDatabaseError::SysDB(e.to_string()),
+                    Code::AlreadyExists => CreateDatabaseError::AlreadyExists(database_name),
+                    _ => CreateDatabaseError::Internal(e),
                 };
                 Err(res)
             }
@@ -376,21 +449,21 @@ impl GrpcSysDb {
             offset: Some(offset as i32),
         };
         match self.client.list_databases(req).await {
-            Ok(resp) => Ok(resp
+            Ok(resp) => resp
                 .into_inner()
                 .databases
                 .into_iter()
                 .map(|db| {
                     Uuid::parse_str(&db.id)
-                        .map_err(|_| ListDatabasesError::IdParsingError)
+                        .map_err(|err| ListDatabasesError::InvalidID(err.to_string()))
                         .map(|id| Database {
                             id,
                             name: db.name,
                             tenant: db.tenant,
                         })
                 })
-                .collect::<Result<_, _>>())?,
-            Err(err) => Err(ListDatabasesError::SysDB(err.to_string())),
+                .collect(),
+            Err(err) => Err(ListDatabasesError::Internal(err)),
         }
     }
 
@@ -400,7 +473,7 @@ impl GrpcSysDb {
         tenant: String,
     ) -> Result<GetDatabaseResponse, GetDatabaseError> {
         let req = chroma_proto::GetDatabaseRequest {
-            name: database_name,
+            name: database_name.clone(),
             tenant,
         };
         let res = self.client.get_database(req).await;
@@ -408,11 +481,11 @@ impl GrpcSysDb {
             Ok(res) => {
                 let res = match res.into_inner().database {
                     Some(res) => res,
-                    None => return Err(GetDatabaseError::ResponseEmpty),
+                    None => return Err(GetDatabaseError::NotFound(database_name)),
                 };
                 let db_id = match Uuid::parse_str(res.id.as_str()) {
                     Ok(uuid) => uuid,
-                    Err(_) => return Err(GetDatabaseError::IdParsingError),
+                    Err(err) => return Err(GetDatabaseError::InvalidID(err.to_string())),
                 };
                 Ok(GetDatabaseResponse {
                     id: db_id,
@@ -423,8 +496,8 @@ impl GrpcSysDb {
             Err(e) => {
                 tracing::error!("Failed to get database {:?}", e);
                 let res = match e.code() {
-                    Code::NotFound => GetDatabaseError::NotFound,
-                    _ => GetDatabaseError::SysDB(e.to_string()),
+                    Code::NotFound => GetDatabaseError::NotFound(database_name),
+                    _ => GetDatabaseError::Internal(e),
                 };
                 Err(res)
             }
@@ -437,13 +510,15 @@ impl GrpcSysDb {
         tenant: String,
     ) -> Result<DeleteDatabaseResponse, DeleteDatabaseError> {
         let req = chroma_proto::DeleteDatabaseRequest {
-            name: database_name,
+            name: database_name.clone(),
             tenant,
         };
         match self.client.delete_database(req).await {
             Ok(_) => Ok(DeleteDatabaseResponse {}),
-            Err(err) if matches!(err.code(), Code::NotFound) => Err(DeleteDatabaseError::NotFound),
-            Err(err) => Err(DeleteDatabaseError::SysDB(err.to_string())),
+            Err(err) if matches!(err.code(), Code::NotFound) => {
+                Err(DeleteDatabaseError::NotFound(database_name))
+            }
+            Err(err) => Err(err.into()),
         }
     }
 
@@ -453,6 +528,8 @@ impl GrpcSysDb {
         name: Option<String>,
         tenant: Option<String>,
         database: Option<String>,
+        limit: Option<u32>,
+        offset: u32,
     ) -> Result<Vec<Collection>, GetCollectionsError> {
         // TODO: move off of status into our own error type
         let collection_id_str = collection_id.map(|id| String::from(id.0));
@@ -461,8 +538,8 @@ impl GrpcSysDb {
             .get_collections(chroma_proto::GetCollectionsRequest {
                 id: collection_id_str,
                 name,
-                limit: None,
-                offset: None,
+                limit: limit.map(|l| l as i32),
+                offset: Some(offset as i32),
                 tenant: tenant.unwrap_or("".to_string()),
                 database: database.unwrap_or("".to_string()),
             })
@@ -484,6 +561,101 @@ impl GrpcSysDb {
             }
             Err(e) => Err(GetCollectionsError::FailedToGetCollections(e)),
         }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn create_collection(
+        &mut self,
+        tenant: String,
+        database: String,
+        collection_id: CollectionUuid,
+        name: String,
+        segments: Vec<Segment>,
+        metadata: Option<Metadata>,
+        dimension: Option<i32>,
+        get_or_create: bool,
+    ) -> Result<Collection, CreateCollectionError> {
+        let res = self
+            .client
+            .create_collection(chroma_proto::CreateCollectionRequest {
+                id: collection_id.0.to_string(),
+                tenant,
+                database,
+                name,
+                segments: segments
+                    .into_iter()
+                    .map(chroma_proto::Segment::from)
+                    .collect(),
+                configuration_json_str: r#"{"hnsw_configuration": {"space": "l2", "ef_construction": 100, "ef_search": 100, "num_threads": 16, "M": 16, "resize_factor": 1.2, "batch_size": 100, "sync_threshold": 1000, "_type": "HNSWConfigurationInternal"}, "_type": "CollectionConfigurationInternal"}"#.to_string(), // Configuration is currently unused by distributed Chroma
+                metadata: metadata.map(|metadata| metadata.into()),
+                dimension,
+                get_or_create: Some(get_or_create),
+            })
+            .await
+            .map_err(|err| match err.code() {
+                Code::AlreadyExists => CreateCollectionError::CollectionNameExists,
+                _ => CreateCollectionError::FailedToCreateCollection(err),
+            })?;
+
+        let collection = res
+            .into_inner()
+            .collection
+            .ok_or(CreateCollectionError::CollectionFieldMissing)?
+            .try_into()?;
+
+        Ok(collection)
+    }
+
+    async fn update_collection(
+        &mut self,
+        collection_id: CollectionUuid,
+        name: Option<String>,
+        metadata: Option<CollectionMetadataUpdate>,
+        dimension: Option<u32>,
+    ) -> Result<(), UpdateCollectionError> {
+        let req = chroma_proto::UpdateCollectionRequest {
+            id: collection_id.0.to_string(),
+            name,
+            metadata_update: metadata.map(|metadata| match metadata {
+                CollectionMetadataUpdate::UpdateMetadata(metadata) => {
+                    chroma_proto::update_collection_request::MetadataUpdate::Metadata(
+                        metadata.into(),
+                    )
+                }
+                CollectionMetadataUpdate::ResetMetadata => {
+                    chroma_proto::update_collection_request::MetadataUpdate::ResetMetadata(true)
+                }
+            }),
+            dimension: dimension.map(|dim| dim as i32),
+        };
+
+        self.client.update_collection(req).await.map_err(|e| {
+            if e.code() == Code::NotFound {
+                UpdateCollectionError::CollectionNotFound
+            } else {
+                UpdateCollectionError::FailedToUpdateCollection(e)
+            }
+        })?;
+
+        Ok(())
+    }
+
+    async fn delete_collection(
+        &mut self,
+        tenant: String,
+        database: String,
+        collection_id: CollectionUuid,
+        segment_ids: Vec<SegmentUuid>,
+    ) -> Result<(), DeleteCollectionError> {
+        self.client
+            .delete_collection(chroma_proto::DeleteCollectionRequest {
+                tenant,
+                database,
+                id: collection_id.0.to_string(),
+                segment_ids: segment_ids.into_iter().map(|id| id.0.to_string()).collect(),
+            })
+            .await?;
+        Ok(())
     }
 
     pub async fn get_collections_to_gc(
@@ -659,6 +831,11 @@ impl GrpcSysDb {
             Err(e) => Err(FlushCompactionError::FailedToFlushCompaction(e)),
         }
     }
+
+    async fn reset(&mut self) -> Result<ResetResponse, ResetError> {
+        self.client.reset_state(()).await?;
+        Ok(ResetResponse {})
+    }
 }
 
 #[derive(Error, Debug)]
@@ -681,6 +858,60 @@ impl ChromaError for GetCollectionsError {
 }
 
 #[derive(Error, Debug)]
+pub enum CreateCollectionError {
+    #[error("Collection name already exists")]
+    CollectionNameExists,
+    #[error("Failed to create collection: {0}")]
+    FailedToCreateCollection(#[from] tonic::Status),
+    #[error("Collection field missing from proto response")]
+    CollectionFieldMissing,
+    #[error("Failed to convert proto collection: {0}")]
+    ConversionError(#[from] CollectionConversionError),
+}
+
+impl ChromaError for CreateCollectionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            CreateCollectionError::CollectionNameExists => ErrorCodes::AlreadyExists,
+            CreateCollectionError::FailedToCreateCollection(_) => ErrorCodes::Internal,
+            CreateCollectionError::CollectionFieldMissing => ErrorCodes::Internal,
+            CreateCollectionError::ConversionError(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum UpdateCollectionError {
+    #[error("Collection not found")]
+    CollectionNotFound,
+    #[error("Failed to update")]
+    FailedToUpdateCollection(#[from] tonic::Status),
+}
+
+impl ChromaError for UpdateCollectionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            UpdateCollectionError::CollectionNotFound => ErrorCodes::NotFound,
+            UpdateCollectionError::FailedToUpdateCollection(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum DeleteCollectionError {
+    #[error("Failed to delete collection")]
+    FailedToDeleteCollection(#[from] tonic::Status),
+}
+
+impl ChromaError for DeleteCollectionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            DeleteCollectionError::FailedToDeleteCollection(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
+#[derive(Error, Debug)]
 // TODO: This should use our sysdb errors from the proto definition
 // We will have to do an error uniformization pass at some point
 pub enum GetSegmentsError {
@@ -697,20 +928,6 @@ impl ChromaError for GetSegmentsError {
             GetSegmentsError::ConversionError(_) => ErrorCodes::Internal,
         }
     }
-}
-
-#[derive(Debug, Error)]
-pub enum GetCollectionWithSegmentsError {
-    #[error("Failed to convert proto collection")]
-    CollectionConversionError(#[from] CollectionConversionError),
-    #[error("Duplicate segment")]
-    DuplicateSegment,
-    #[error("Missing field: {0}")]
-    Field(String),
-    #[error("Failed to convert proto segment")]
-    SegmentConversionError(#[from] SegmentConversionError),
-    #[error("Failed to fetch")]
-    FailedToGetSegments(#[from] tonic::Status),
 }
 
 #[derive(Error, Debug)]

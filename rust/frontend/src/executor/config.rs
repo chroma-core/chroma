@@ -1,5 +1,8 @@
+use std::time::Duration;
+
 use super::{distributed::DistributedExecutor, Executor};
 use async_trait::async_trait;
+use backon::ExponentialBuilder;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_system::System;
@@ -19,6 +22,8 @@ pub struct DistributedExecutorConfig {
     pub replication_factor: usize,
     pub connect_timeout_ms: u64,
     pub request_timeout_ms: u64,
+    #[serde(default = "RetryConfig::default")]
+    pub retry: RetryConfig,
     pub assignment: chroma_config::assignment::config::AssignmentPolicyConfig,
     pub memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig,
 }
@@ -42,6 +47,49 @@ impl Configurable<(ExecutorConfig, System)> for Executor {
                 .await?;
                 Ok(Executor::Distributed(distributed_executor))
             }
+        }
+    }
+}
+
+//////////////////////// Retry Config ////////////////////////
+/// Configuration for the retry policy.
+/// # Fields
+/// - `factor` - The factor to multiply the delay by
+/// - `min_delay_ms` - The minimum delay in milliseconds
+/// - `max_delay_ms` - The maximum delay in milliseconds
+/// - `max_attempts` - The maximum number of attempts
+#[derive(Deserialize, Clone, Serialize)]
+pub struct RetryConfig {
+    pub factor: f32,
+    pub min_delay_ms: u64,
+    pub max_delay_ms: u64,
+    pub max_attempts: usize,
+    pub jitter: bool,
+}
+
+impl Default for RetryConfig {
+    fn default() -> Self {
+        RetryConfig {
+            factor: 2.0,
+            min_delay_ms: 100,
+            max_delay_ms: 5000,
+            max_attempts: 5,
+            jitter: true,
+        }
+    }
+}
+
+impl From<&RetryConfig> for ExponentialBuilder {
+    fn from(config: &RetryConfig) -> Self {
+        let b = ExponentialBuilder::default()
+            .with_factor(config.factor)
+            .with_min_delay(Duration::from_millis(config.min_delay_ms))
+            .with_max_delay(Duration::from_millis(config.max_delay_ms))
+            .with_max_times(config.max_attempts);
+        if config.jitter {
+            b.with_jitter()
+        } else {
+            b
         }
     }
 }

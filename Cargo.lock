@@ -927,6 +927,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "backon"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba5289ec98f68f28dd809fd601059e6aa908bb8f6108620930828283d4ee23d7"
+dependencies = [
+ "fastrand",
+ "gloo-timers",
+ "tokio",
+]
+
+[[package]]
 name = "backtrace"
 version = "0.3.71"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1061,9 +1072,9 @@ dependencies = [
 
 [[package]]
 name = "bstr"
-version = "1.9.1"
+version = "1.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05efc5cfd9110c8416e471df0e96702d58690178e206e61b7173706673c93706"
+checksum = "531a9155a481e2ee699d4f98f43c0ca4ff8ee1bfd55c31e9e98fb29d2b176fe0"
 dependencies = [
  "memchr",
  "serde",
@@ -1348,12 +1359,14 @@ dependencies = [
  "chroma-config",
  "chroma-error",
  "chroma-segment",
+ "chroma-tracing",
  "chroma-types",
  "opentelemetry",
  "rand",
  "serde",
  "thiserror 1.0.69",
  "tonic",
+ "tower 0.5.2",
  "tracing",
  "tracing-opentelemetry",
  "uuid",
@@ -1434,6 +1447,7 @@ dependencies = [
  "async-trait",
  "chroma-config",
  "chroma-error",
+ "chroma-tracing",
  "chroma-types",
  "futures",
  "opentelemetry",
@@ -1445,6 +1459,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tonic",
+ "tower 0.5.2",
  "tracing",
  "tracing-bunyan-formatter",
  "tracing-opentelemetry",
@@ -1477,10 +1492,12 @@ version = "0.1.0"
 dependencies = [
  "fastrace",
  "fastrace-opentelemetry",
+ "http 1.1.0",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
  "tonic",
+ "tower 0.5.2",
  "tracing",
  "tracing-bunyan-formatter",
  "tracing-opentelemetry",
@@ -1508,7 +1525,7 @@ dependencies = [
 [[package]]
 name = "chromadb"
 version = "2.0.0"
-source = "git+https://github.com/rescrv/chromadb-rs?rev=7b46aab7366f009388f014929a92785c94134d61#7b46aab7366f009388f014929a92785c94134d61"
+source = "git+https://github.com/rescrv/chromadb-rs?rev=540c3e225e92ecea05039b73b69adf5875385c0e#540c3e225e92ecea05039b73b69adf5875385c0e"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2444,6 +2461,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "axum",
+ "backon",
  "chroma-cache",
  "chroma-config",
  "chroma-error",
@@ -2457,6 +2475,7 @@ dependencies = [
  "mdac",
  "parking_lot",
  "rand",
+ "regex",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -2707,6 +2726,18 @@ dependencies = [
  "log",
  "regex-automata 0.4.9",
  "regex-syntax 0.8.5",
+]
+
+[[package]]
+name = "gloo-timers"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbb143cf96099802033e0d4f4963b19fd2e0b728bcf076cd9cf7f6634f092994"
+dependencies = [
+ "futures-channel",
+ "futures-core",
+ "js-sys",
+ "wasm-bindgen",
 ]
 
 [[package]]

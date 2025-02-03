@@ -1,18 +1,21 @@
 use std::str::FromStr;
 
 use axum::{
-    extract::{Path, State},
-    routing::{delete, get, post},
+    extract::{Path, Query, State},
+    routing::{get, post},
     Json, Router, ServiceExt,
 };
 use chroma_types::{
-    AddToCollectionResponse, ChecklistResponse, Collection, CollectionUuid,
-    CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
-    CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
-    DeleteDatabaseRequest, DeleteDatabaseResponse, GetCollectionRequest, GetDatabaseRequest,
-    GetDatabaseResponse, GetRequest, GetResponse, GetTenantRequest, GetTenantResponse,
-    GetUserIdentityResponse, IncludeList, ListCollectionsRequest, ListCollectionsResponse,
-    ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
+    operator::Filter, AddCollectionRecordsResponse, ChecklistResponse, Collection,
+    CollectionMetadataUpdate, CollectionUuid, CountCollectionsRequest, CountCollectionsResponse,
+    CountRequest, CountResponse, CreateCollectionRequest, CreateDatabaseRequest,
+    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
+    DeleteCollectionRecordsResponse, DeleteDatabaseRequest, DeleteDatabaseResponse,
+    GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
+    GetTenantRequest, GetTenantResponse, GetUserIdentityResponse, HeartbeatResponse, IncludeList,
+    ListCollectionsRequest, ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse,
+    Metadata, QueryRequest, QueryResponse, UpdateCollectionRecordsResponse,
+    UpdateCollectionResponse, UpdateMetadata, UpsertCollectionRecordsResponse,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -25,6 +28,7 @@ use crate::{
         errors::{ServerError, ValidationError},
         where_parsing::RawWhereFields,
     },
+    utils::{validate_name, validate_non_empty_filter, validate_non_empty_metadata},
     FrontendConfig,
 };
 
@@ -52,25 +56,35 @@ impl FrontendServer {
             .route("/api/v2/auth/identity", get(get_user_identity))
             .route("/api/v2/tenants", post(create_tenant))
             .route("/api/v2/tenants/:tenant_name", get(get_tenant))
-            .route("/api/v2/tenants/:tenant_id/databases", post(create_database))
-            .route("/api/v2/tenants/:tenant_id/databases", get(list_databases))
-            .route("/api/v2/tenants/:tenant_id/databases/:name", get(get_database))
-            .route("/api/v2/tenants/:tenant_id/databases/:name", delete(delete_database))
+            .route("/api/v2/tenants/:tenant_id/databases", get(list_databases).post(create_database))
+            .route("/api/v2/tenants/:tenant_id/databases/:name", get(get_database).delete(delete_database))
             .route(
                 "/api/v2/tenants/:tenant_id/databases/:database_name/collections",
-                get(list_collections),
+               post(create_collection).get(list_collections),
             )
             .route(
                 "/api/v2/tenants/:tenant_id/databases/:database_name/collections_count",
                 get(count_collections),
             )
             .route(
-                "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_name",
-                get(get_collection),
+                "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_id",
+                get(get_collection).put(update_collection).delete(delete_collection),
             )
             .route(
                 "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/add",
                 post(collection_add),
+            )
+            .route(
+                "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/update",
+                post(collection_update),
+            )
+            .route(
+                "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/upsert",
+                post(collection_upsert),
+            )
+            .route(
+                "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/delete",
+                post(collection_delete),
             )
             .route(
                 "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_id/count",
@@ -110,8 +124,10 @@ async fn root() -> &'static str {
     "Chroma Rust Frontend"
 }
 
-async fn heartbeat() -> &'static str {
-    "<Heartbeat.wav>"
+async fn heartbeat(
+    State(server): State<FrontendServer>,
+) -> Result<Json<HeartbeatResponse>, ServerError> {
+    Ok(Json(server.frontend.heartbeat().await?))
 }
 
 // Dummy implementation for now
@@ -121,10 +137,9 @@ async fn pre_flight_checks() -> Result<Json<ChecklistResponse>, ServerError> {
     }))
 }
 
-async fn reset(State(mut _server): State<FrontendServer>) -> Result<(), ServerError> {
-    // TODO: Allow reset based on config
-    // server.frontend.reset().await?;
-    Ok(())
+async fn reset(State(mut server): State<FrontendServer>) -> Result<Json<bool>, ServerError> {
+    server.frontend.reset().await?;
+    Ok(Json(true))
 }
 
 async fn version() -> &'static str {
@@ -144,7 +159,7 @@ async fn create_tenant(
     State(mut server): State<FrontendServer>,
     Json(request): Json<CreateTenantRequest>,
 ) -> Result<Json<CreateTenantResponse>, ServerError> {
-    tracing::info!("Creating tenant with name: {}", request.name);
+    tracing::info!("Creating tenant [{}]", request.name);
     Ok(Json(server.frontend.create_tenant(request).await?))
 }
 
@@ -152,7 +167,7 @@ async fn get_tenant(
     Path(name): Path<String>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<GetTenantResponse>, ServerError> {
-    tracing::info!("Getting tenant with name: {}", name);
+    tracing::info!("Getting tenant [{}]", name);
     Ok(Json(
         server
             .frontend
@@ -171,11 +186,7 @@ async fn create_database(
     State(mut server): State<FrontendServer>,
     Json(CreateDatabasePayload { name }): Json<CreateDatabasePayload>,
 ) -> Result<Json<CreateDatabaseResponse>, ServerError> {
-    tracing::info!(
-        "Creating database for tenant: {} and name: {}",
-        tenant_id,
-        name
-    );
+    tracing::info!("Creating database [{}] for tenant [{}]", name, tenant_id);
     let create_database_request = CreateDatabaseRequest {
         database_id: Uuid::new_v4(),
         tenant_id,
@@ -199,7 +210,7 @@ async fn list_databases(
     State(mut server): State<FrontendServer>,
     Json(ListDatabasesPayload { limit, offset }): Json<ListDatabasesPayload>,
 ) -> Result<Json<ListDatabasesResponse>, ServerError> {
-    tracing::info!("Listing database for tenant: {}", tenant_id);
+    tracing::info!("Listing database for tenant [{}]", tenant_id);
     Ok(Json(
         server
             .frontend
@@ -217,9 +228,9 @@ async fn get_database(
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<GetDatabaseResponse>, ServerError> {
     tracing::info!(
-        "Getting database for tenant: {} and name: {}",
-        tenant_id,
-        database_name
+        "Getting database [{}] for tenant [{}]",
+        database_name,
+        tenant_id
     );
     let res = server
         .frontend
@@ -236,9 +247,9 @@ async fn delete_database(
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<DeleteDatabaseResponse>, ServerError> {
     tracing::info!(
-        "Deleting database for tenant: {} and name: {}",
-        tenant_id,
-        database_name
+        "Deleting database [{}] for tenant [{}]",
+        database_name,
+        tenant_id
     );
     Ok(Json(
         server
@@ -251,16 +262,33 @@ async fn delete_database(
     ))
 }
 
+#[derive(Deserialize)]
+struct ListCollectionsParams {
+    limit: Option<u32>,
+    #[serde(default)]
+    offset: u32,
+}
+
 async fn list_collections(
     Path((tenant_id, database_name)): Path<(String, String)>,
+    Query(ListCollectionsParams { limit, offset }): Query<ListCollectionsParams>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<ListCollectionsResponse>, ServerError> {
+    tracing::info!(
+        "Listing collections in database [{}] for tenant [{}] with limit [{:?}] and offset [{:?}]",
+        database_name,
+        tenant_id,
+        limit,
+        offset
+    );
     Ok(Json(
         server
             .frontend
             .list_collections(ListCollectionsRequest {
                 tenant_id,
                 database_name,
+                limit,
+                offset,
             })
             .await?,
     ))
@@ -270,6 +298,11 @@ async fn count_collections(
     Path((tenant_id, database_name)): Path<(String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<CountCollectionsResponse>, ServerError> {
+    tracing::info!(
+        "Counting collections in database [{}] for tenant [{}]",
+        database_name,
+        tenant_id
+    );
     Ok(Json(
         server
             .frontend
@@ -281,11 +314,44 @@ async fn count_collections(
     ))
 }
 
+#[derive(Deserialize, Debug, Clone)]
+pub struct CreateCollectionPayload {
+    pub name: String,
+    pub configuration: Option<serde_json::Value>,
+    pub metadata: Option<Metadata>,
+    pub get_or_create: bool,
+}
+
+async fn create_collection(
+    Path((tenant_id, database_name)): Path<(String, String)>,
+    State(mut server): State<FrontendServer>,
+    Json(payload): Json<CreateCollectionPayload>,
+) -> Result<Json<Collection>, ServerError> {
+    tracing::info!("Creating collection in database [{database_name}] for tenant [{tenant_id}]");
+    validate_name(&payload.name)?;
+    if let Some(metadata) = payload.metadata.as_ref() {
+        validate_non_empty_metadata(metadata)?;
+    }
+    let collection = server
+        .frontend
+        .create_collection(CreateCollectionRequest {
+            name: payload.name,
+            tenant_id,
+            database_name,
+            metadata: payload.metadata,
+            configuration_json: payload.configuration,
+            get_or_create: payload.get_or_create,
+        })
+        .await?;
+
+    Ok(Json(collection))
+}
+
 async fn get_collection(
     Path((tenant_id, database_name, collection_name)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<Collection>, ServerError> {
-    tracing::info!("Getting collection for tenant [{tenant_id}], database [{database_name}], and collection name [{collection_name}]");
+    tracing::info!("Getting collection [{collection_name}] in database [{database_name}] for tenant [{tenant_id}]");
     let collection = server
         .frontend
         .get_collection(GetCollectionRequest {
@@ -297,43 +363,90 @@ async fn get_collection(
     Ok(Json(collection))
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct QueryRequestPayload {
-    ids: Option<Vec<String>>,
-    #[serde(flatten)]
-    where_fields: RawWhereFields,
-    query_embeddings: Vec<Vec<f32>>,
-    n_results: Option<u32>,
-    include: IncludeList,
+#[derive(Deserialize, Debug, Clone)]
+pub struct UpdateCollectionPayload {
+    pub new_name: Option<String>,
+    pub new_metadata: Option<UpdateMetadata>,
+}
+
+async fn update_collection(
+    Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
+    State(mut server): State<FrontendServer>,
+    Json(payload): Json<UpdateCollectionPayload>,
+) -> Result<Json<UpdateCollectionResponse>, ServerError> {
+    tracing::info!("Updating collection [{collection_id}] in database [{database_name}] for tenant [{tenant_id}]");
+    if let Some(name) = payload.new_name.as_ref() {
+        validate_name(name)?;
+    }
+    let collection_id =
+        CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
+
+    if let Some(metadata) = payload.new_metadata.as_ref() {
+        validate_non_empty_metadata(metadata)?;
+    }
+
+    server
+        .frontend
+        .update_collection(chroma_types::UpdateCollectionRequest {
+            collection_id,
+            new_name: payload.new_name,
+            new_metadata: payload
+                .new_metadata
+                .map(CollectionMetadataUpdate::UpdateMetadata),
+        })
+        .await?;
+
+    Ok(Json(UpdateCollectionResponse {}))
+}
+
+async fn delete_collection(
+    Path((tenant_id, database_name, collection_name)): Path<(String, String, String)>,
+    State(mut server): State<FrontendServer>,
+) -> Result<Json<UpdateCollectionResponse>, ServerError> {
+    server
+        .frontend
+        .delete_collection(chroma_types::DeleteCollectionRequest {
+            tenant_id,
+            database_name,
+            collection_name,
+        })
+        .await?;
+
+    Ok(Json(UpdateCollectionResponse {}))
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct AddToCollectionPayload {
+pub struct AddCollectionRecordsPayload {
     ids: Vec<String>,
     embeddings: Option<Vec<Vec<f32>>>,
     documents: Option<Vec<String>>,
-    uri: Option<Vec<String>>,
+    uris: Option<Vec<String>>,
     metadatas: Option<Vec<Metadata>>,
 }
 
 async fn collection_add(
     Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
-    Json(payload): Json<AddToCollectionPayload>,
-) -> Result<Json<AddToCollectionResponse>, ServerError> {
+    Json(payload): Json<AddCollectionRecordsPayload>,
+) -> Result<Json<AddCollectionRecordsResponse>, ServerError> {
     let collection_id =
-        Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
+        CollectionUuid(Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?);
+
+    server
+        .frontend
+        .validate_embedding(collection_id, payload.embeddings.as_ref(), true)
+        .await?;
 
     let res = server
         .frontend
-        .add(chroma_types::AddToCollectionRequest {
+        .add(chroma_types::AddCollectionRecordsRequest {
             tenant_id,
             database_name,
             collection_id,
             ids: payload.ids,
             embeddings: payload.embeddings,
             documents: payload.documents,
-            uri: payload.uri,
+            uris: payload.uris,
             metadatas: payload.metadatas,
         })
         .await?;
@@ -341,12 +454,126 @@ async fn collection_add(
     Ok(Json(res))
 }
 
+#[derive(Deserialize, Debug, Clone)]
+pub struct UpdateCollectionRecordsPayload {
+    ids: Vec<String>,
+    embeddings: Option<Vec<Vec<f32>>>,
+    documents: Option<Vec<String>>,
+    uris: Option<Vec<String>>,
+    metadatas: Option<Vec<UpdateMetadata>>,
+}
+
+async fn collection_update(
+    Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
+    State(mut server): State<FrontendServer>,
+    Json(payload): Json<UpdateCollectionRecordsPayload>,
+) -> Result<Json<UpdateCollectionRecordsResponse>, ServerError> {
+    let collection_id =
+        CollectionUuid(Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?);
+
+    server
+        .frontend
+        .validate_embedding(collection_id, payload.embeddings.as_ref(), true)
+        .await?;
+
+    Ok(Json(
+        server
+            .frontend
+            .update(chroma_types::UpdateCollectionRecordsRequest {
+                tenant_id,
+                database_name,
+                collection_id,
+                ids: payload.ids,
+                embeddings: payload.embeddings,
+                documents: payload.documents,
+                uris: payload.uris,
+                metadatas: payload.metadatas,
+            })
+            .await?,
+    ))
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct UpsertCollectionRecordsPayload {
+    ids: Vec<String>,
+    embeddings: Option<Vec<Vec<f32>>>,
+    documents: Option<Vec<String>>,
+    uris: Option<Vec<String>>,
+    metadatas: Option<Vec<UpdateMetadata>>,
+}
+
+async fn collection_upsert(
+    Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
+    State(mut server): State<FrontendServer>,
+    Json(payload): Json<UpsertCollectionRecordsPayload>,
+) -> Result<Json<UpsertCollectionRecordsResponse>, ServerError> {
+    let collection_id =
+        CollectionUuid(Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?);
+
+    server
+        .frontend
+        .validate_embedding(collection_id, payload.embeddings.as_ref(), true)
+        .await?;
+
+    Ok(Json(
+        server
+            .frontend
+            .upsert(chroma_types::UpsertCollectionRecordsRequest {
+                tenant_id,
+                database_name,
+                collection_id,
+                ids: payload.ids,
+                embeddings: payload.embeddings,
+                documents: payload.documents,
+                uris: payload.uris,
+                metadatas: payload.metadatas,
+            })
+            .await?,
+    ))
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct DeleteCollectionRecordsPayload {
+    ids: Option<Vec<String>>,
+    #[serde(flatten)]
+    where_fields: RawWhereFields,
+}
+
+async fn collection_delete(
+    Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
+    State(mut server): State<FrontendServer>,
+    Json(payload): Json<DeleteCollectionRecordsPayload>,
+) -> Result<Json<DeleteCollectionRecordsResponse>, ServerError> {
+    let collection_id =
+        CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
+
+    let r#where = payload.where_fields.parse()?;
+
+    validate_non_empty_filter(&Filter {
+        query_ids: payload.ids.clone(),
+        where_clause: r#where.clone(),
+    })?;
+
+    server
+        .frontend
+        .delete(chroma_types::DeleteCollectionRecordsRequest {
+            tenant_id,
+            database_name,
+            collection_id,
+            ids: payload.ids,
+            r#where,
+        })
+        .await?;
+
+    Ok(Json(DeleteCollectionRecordsResponse {}))
+}
+
 async fn collection_count(
     Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<CountResponse>, ServerError> {
     tracing::info!(
-        "Counting collection [{collection_id}] from tenant [{tenant_id}] and database [{database_name}]",
+        "Counting number of records in collection [{collection_id}] in database [{database_name}] for tenant [{tenant_id}]",
     );
 
     Ok(Json(
@@ -368,7 +595,8 @@ pub struct GetRequestPayload {
     #[serde(flatten)]
     where_fields: RawWhereFields,
     limit: Option<u32>,
-    offset: u32,
+    offset: Option<u32>,
+    #[serde(default = "IncludeList::default_get")]
     include: IncludeList,
 }
 
@@ -380,7 +608,7 @@ async fn collection_get(
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
     tracing::info!(
-        "Get collection [{collection_id}] from tenant [{tenant_id}] and database [{database_name}], with query parameters [{payload:?}]",
+        "Getting records from collection [{collection_id}] in database [{database_name}] for tenant [{tenant_id}]",
     );
     let res = server
         .frontend
@@ -391,11 +619,22 @@ async fn collection_get(
             ids: payload.ids,
             r#where: payload.where_fields.parse()?,
             limit: payload.limit,
-            offset: payload.offset,
+            offset: payload.offset.unwrap_or(0),
             include: payload.include,
         })
         .await?;
     Ok(Json(res))
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct QueryRequestPayload {
+    ids: Option<Vec<String>>,
+    #[serde(flatten)]
+    where_fields: RawWhereFields,
+    query_embeddings: Vec<Vec<f32>>,
+    n_results: Option<u32>,
+    #[serde(default = "IncludeList::default_query")]
+    include: IncludeList,
 }
 
 async fn collection_query(
@@ -406,8 +645,13 @@ async fn collection_query(
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
     tracing::info!(
-        "Querying collection [{collection_id}] from tenant [{tenant_id}] and database [{database_name}], with query parameters [{payload:?}]",
+        "Querying records from collection [{collection_id}] in database [{database_name}] for tenant [{tenant_id}]",
     );
+
+    server
+        .frontend
+        .validate_embedding(collection_id, Some(&payload.query_embeddings), true)
+        .await?;
 
     let res = server
         .frontend
