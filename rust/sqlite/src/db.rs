@@ -241,6 +241,7 @@ mod tests {
     use crate::config::MigrationHash;
     use sqlx::Row;
     use std::path::PathBuf;
+    use tempfile::tempdir;
 
     //////////////////////// Test Helpers ////////////////////////
 
@@ -250,13 +251,8 @@ mod tests {
     }
 
     fn new_test_db_path() -> String {
-        // TODO: Make tmpfile work
-        // let dir = tempdir().expect("Expect it to be created");
-        // let path = dir.path().join("chroma.sqlite3");
-        let path = "/Users/hammad/Documents/chroma/chroma/chromaTEST.sqlite3".to_string();
-        // remove the file if it exists
-        std::fs::remove_file(&path).unwrap_or_default();
-        path
+        let path = tempdir().unwrap().into_path().join("test.db");
+        path.to_str().unwrap().to_string()
     }
 
     //////////////////////// SqliteDb ////////////////////////
