@@ -89,4 +89,9 @@ impl Operator<PrefetchRecordInput, PrefetchRecordOutput> for PrefetchRecordOpera
 
         Ok(())
     }
+
+    // We don't care if the sender is dropped since this is a prefetch
+    fn errors_when_sender_dropped(&self) -> bool {
+        false
+    }
 }
