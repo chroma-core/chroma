@@ -119,7 +119,6 @@ jobs:
     uses: ./.github/workflows/_python-tests.yml
     with:
       property_testing_preset: 'fast'
-      run_rust_frontend_tests: ${{ contains(join(github.event.pull_request.labels.*.name, ','), 'rust-frontend') }}
 
   python-vulnerability-scan:
     name: Python vulnerability scan
