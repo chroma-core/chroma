@@ -9,7 +9,8 @@ sha2 = { workspace = true}
 regex = { workspace = true }
 tokio = { workspace = true}
 md5 = { workspace = true}
-rust-embed = "8.5.0"
+rust-embed = {version = "8.5.0", features = ["include-exclude"]}
+thiserror = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
