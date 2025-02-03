@@ -1,11 +1,11 @@
 use crate::{CollectionInfo, WrappedSqlxError};
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_sqlite::db::SqliteDb;
 use chroma_types::{
     CollectionUuid, LogRecord, Operation, OperationRecord, ScalarEncoding,
     ScalarEncodingConversionError, UpdateMetadata, UpdateMetadataValue,
 };
 use futures::TryStreamExt;
-use sqlx::sqlite::SqlitePool;
 use sqlx::{QueryBuilder, Row};
 use std::str::FromStr;
 use thiserror::Error;
@@ -80,7 +80,7 @@ impl ChromaError for SqliteUpdateCollectionLogOffsetError {
 
 #[derive(Clone, Debug)]
 pub struct SqliteLog {
-    pool: SqlitePool,
+    db: SqliteDb,
     tenant_id: String,
     topic_namespace: String,
 }
@@ -118,7 +118,7 @@ impl SqliteLog {
         .bind(offset)
         .bind(end_timestamp_ns)
         .bind(batch_size)
-        .fetch(&self.pool);
+        .fetch(self.db.get_conn());
 
         let mut records = Vec::new();
         while let Some(row) = logs.try_next().await.map_err(WrappedSqlxError)? {
@@ -233,7 +233,10 @@ impl SqliteLog {
             },
         );
         let query = query_builder.build();
-        query.execute(&self.pool).await.map_err(WrappedSqlxError)?;
+        query
+            .execute(self.db.get_conn())
+            .await
+            .map_err(WrappedSqlxError)?;
 
         Ok(())
     }
@@ -263,7 +266,7 @@ impl SqliteLog {
         .bind(&self.tenant_id)
         .bind(&self.topic_namespace)
         .bind(min_compaction_size as i64) // (SQLite doesn't support u64)
-        .fetch(&self.pool);
+        .fetch(self.db.get_conn());
 
         let mut infos = Vec::new();
         while let Some(row) = results.try_next().await.map_err(WrappedSqlxError)? {
@@ -294,7 +297,7 @@ impl SqliteLog {
         )
         .bind(new_offset)
         .bind(collection_id.0.to_string())
-        .execute(&self.pool)
+        .execute(self.db.get_conn())
         .await
         .map_err(WrappedSqlxError)?;
 
@@ -328,56 +331,28 @@ fn operation_to_code(operation: Operation) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
     use super::*;
+    use chroma_sqlite::config::SqliteDBConfig;
     use chroma_types::CollectionUuid;
-    use sqlx::sqlite::SqlitePoolOptions;
 
     #[tokio::test]
-    async fn test_pull_logs() {
-        let pool = SqlitePoolOptions::new()
-            .connect("sqlite:///Users/maxisom/git/chroma/chroma_data/chroma.sqlite3")
-            .await
-            .unwrap();
+    async fn test_push_pull_logs() {
+        let db_file = tempfile::NamedTempFile::new().unwrap();
+        let db = SqliteDb::try_from_config(&SqliteDBConfig {
+            url: db_file.path().to_str().unwrap().to_string(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
 
         let mut log = SqliteLog {
-            pool,
+            db,
             tenant_id: "default".to_string(),
             topic_namespace: "default".to_string(),
         };
 
-        let collection_id =
-            CollectionUuid::from_str("f54138fd-4f8a-4fb1-afec-830f0684c3fb").unwrap();
-        let offset = 0;
-        let batch_size = 10;
-        let end_timestamp_ns = None;
+        let collection_id = CollectionUuid::new();
 
-        let logs = log
-            .read(collection_id, offset, batch_size, end_timestamp_ns)
-            .await
-            .unwrap();
-
-        for log in logs {
-            println!("{:?}", log);
-        }
-    }
-
-    #[tokio::test]
-    async fn test_push_logs() {
-        let pool = SqlitePoolOptions::new()
-            .connect("sqlite:///Users/maxisom/git/chroma/chroma_data/chroma_mut.sqlite3")
-            .await
-            .unwrap();
-
-        let mut log = SqliteLog {
-            pool,
-            tenant_id: "default".to_string(),
-            topic_namespace: "default".to_string(),
-        };
-
-        let collection_id =
-            CollectionUuid::from_str("f54138fd-4f8a-4fb1-afec-830f0684c3fb").unwrap();
         let mut metadata = UpdateMetadata::new();
         metadata.insert(
             "foo".to_string(),
@@ -406,43 +381,5 @@ mod tests {
         assert_eq!(added_log.record.metadata, record_to_add.metadata);
         assert_eq!(added_log.record.document, record_to_add.document);
         assert_eq!(added_log.record.operation, record_to_add.operation);
-    }
-
-    #[tokio::test]
-    async fn test_foo() {
-        let pool = SqlitePoolOptions::new()
-            .connect("sqlite:///Users/maxisom/git/chroma/chroma_data/chroma.sqlite3")
-            .await
-            .unwrap();
-
-        let mut log = SqliteLog {
-            pool,
-            tenant_id: "default".to_string(),
-            topic_namespace: "default".to_string(),
-        };
-
-        println!("{:?}", log.get_collections_with_new_data(0).await.unwrap());
-    }
-
-    #[tokio::test]
-    async fn test_bar() {
-        let pool = SqlitePoolOptions::new()
-            .connect("sqlite:///Users/maxisom/git/chroma/chroma_data/chroma_mut.sqlite3")
-            .await
-            .unwrap();
-
-        let mut log = SqliteLog {
-            pool,
-            tenant_id: "default".to_string(),
-            topic_namespace: "default".to_string(),
-        };
-        let collection_id =
-            CollectionUuid::from_str("f54138fd-4f8a-4fb1-afec-830f0684c3fb").unwrap();
-
-        log.update_collection_log_offset(collection_id, 10)
-            .await
-            .unwrap();
-
-        // println!("{:?}", log.get_collections_with_new_data(100).await);
     }
 }
