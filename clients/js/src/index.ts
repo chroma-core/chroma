@@ -12,7 +12,7 @@ export { JinaEmbeddingFunction } from "./embeddings/JinaEmbeddingFunction";
 export { GoogleGenerativeAiEmbeddingFunction } from "./embeddings/GoogleGeminiEmbeddingFunction";
 export { OllamaEmbeddingFunction } from "./embeddings/OllamaEmbeddingFunction";
 
-export type {
+export {
   IncludeEnum,
   GetParams,
   CollectionMetadata,
