@@ -1,0 +1,16 @@
+[package]
+name = "sqlite"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sqlx = { workspace = true }
+sha2 = { workspace = true}
+regex = { workspace = true }
+tokio = { workspace = true}
+md5 = { workspace = true}
+rust-embed = {version = "8.5.0", features = ["include-exclude"]}
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
