@@ -106,6 +106,11 @@ impl Operator<PrefetchSegmentInput, PrefetchSegmentOutput> for PrefetchSegmentOp
     fn get_type(&self) -> OperatorType {
         OperatorType::IO
     }
+
+    // We don't care if the sender is dropped since this is a prefetch
+    fn errors_when_sender_dropped(&self) -> bool {
+        false
+    }
 }
 
 #[cfg(test)]

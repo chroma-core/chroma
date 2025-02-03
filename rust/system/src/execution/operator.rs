@@ -29,6 +29,9 @@ where
     fn get_type(&self) -> OperatorType {
         OperatorType::Other
     }
+    fn errors_when_sender_dropped(&self) -> bool {
+        true
+    }
 }
 
 #[derive(Debug, Error)]
@@ -163,15 +166,25 @@ where
                 {
                     Ok(_) => {}
                     Err(err) => {
-                        tracing::error!(
-                            "Failed to send task result for task {} to reply channel: {}",
-                            self.task_id,
-                            err
-                        );
+                        if self.operator.errors_when_sender_dropped() {
+                            tracing::error!(
+                                "Failed to send task result for task {} to reply channel: {}",
+                                self.task_id,
+                                err
+                            );
+                        } else {
+                            tracing::debug!(
+                                "Failed to send task result for task {} to reply channel: {}",
+                                self.task_id,
+                                err
+                            );
+                        }
                     }
                 }
             }
             Err(panic_value) => {
+                tracing::error!("Task {} panicked: {:?}", self.task_id, panic_value);
+
                 match self
                     .reply_channel
                     .send(
@@ -185,11 +198,13 @@ where
                 {
                     Ok(_) => {}
                     Err(err) => {
-                        tracing::error!(
-                            "Failed to send task result for task {} to reply channel: {}",
-                            self.task_id,
-                            err
-                        );
+                        if self.operator.errors_when_sender_dropped() {
+                            tracing::error!(
+                                "Failed to send task result for task {} to reply channel: {}",
+                                self.task_id,
+                                err
+                            );
+                        }
                     }
                 };
             }
@@ -226,11 +241,19 @@ where
         {
             Ok(_) => {}
             Err(err) => {
-                tracing::error!(
-                    "Failed to send task error for task {} to reply channel: {}",
-                    self.task_id,
-                    err
-                );
+                if self.operator.errors_when_sender_dropped() {
+                    tracing::error!(
+                        "Failed to send task result for task {} to reply channel: {}",
+                        self.task_id,
+                        err
+                    );
+                } else {
+                    tracing::debug!(
+                        "Failed to send task result for task {} to reply channel: {}",
+                        self.task_id,
+                        err
+                    );
+                }
             }
         }
     }
