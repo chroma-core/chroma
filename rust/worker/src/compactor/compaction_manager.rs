@@ -372,7 +372,6 @@ mod tests {
     use std::str::FromStr;
 
     #[tokio::test]
-    #[serial]
     async fn test_compaction_manager() {
         let mut log = Box::new(Log::InMemory(InMemoryLog::new()));
         let in_memory_log = match *log {
