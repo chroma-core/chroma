@@ -366,7 +366,6 @@ mod tests {
     use chroma_types::SegmentUuid;
     use chroma_types::{Collection, LogRecord, Operation, OperationRecord, Segment};
     use serde_json::Value;
-    use serial_test::serial;
     use std::collections::HashMap;
     use std::path::PathBuf;
     use std::str::FromStr;
