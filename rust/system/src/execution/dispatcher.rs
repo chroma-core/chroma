@@ -115,12 +115,6 @@ impl Dispatcher {
                     }
                 }
                 let counter = Arc::clone(&self.active_io_tasks);
-                struct DecrementOnDrop(Arc<AtomicU64>);
-                impl Drop for DecrementOnDrop {
-                    fn drop(&mut self) {
-                        self.0.fetch_add(1, Ordering::Relaxed);
-                    }
-                }
                 let counter = DecrementOnDrop(counter);
                 tokio::spawn(async move {
                     task.run().instrument(child_span).await;
@@ -231,6 +225,14 @@ impl Handler<TaskRequestMessage> for Dispatcher {
     }
 }
 
+struct DecrementOnDrop(Arc<AtomicU64>);
+
+impl Drop for DecrementOnDrop {
+    fn drop(&mut self) {
+        self.0.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use parking_lot::Mutex;
@@ -243,7 +245,6 @@ mod tests {
 
     use super::*;
     use crate::{operator::*, ComponentHandle};
-    use serial_test::serial;
     use std::{
         collections::HashSet,
         sync::{
@@ -434,7 +435,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[serial]
     async fn test_dispatcher_io_tasks() {
         let system = System::new();
         let dispatcher = Dispatcher::new(DispatcherConfig {
@@ -469,7 +469,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[serial]
     async fn test_dispatcher_non_io_tasks() {
         let system = System::new();
         let dispatcher = Dispatcher::new(DispatcherConfig {
@@ -504,7 +503,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[serial]
     async fn test_dispatcher_non_io_tasks_reject() {
         let system = System::new();
         let dispatcher = Dispatcher::new(DispatcherConfig {
