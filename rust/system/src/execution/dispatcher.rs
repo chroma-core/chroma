@@ -524,8 +524,37 @@ mod tests {
             received_tasks: received_tasks.clone(),
         };
         let dispatch_user_handle = system.start_component(dispatch_user);
-        // This is the changed line in the test.
+        let mut is_err = false;
+        for _ in 0..1000 {
+            is_err |= dispatch_user_handle.request((), None).await.is_err();
+        }
+        assert!(is_err);
+    }
+
+    #[tokio::test]
+    async fn test_dispatcher_io_tasks_reject() {
+        let system = System::new();
+        let dispatcher = Dispatcher::new(DispatcherConfig {
+            num_worker_threads: THREAD_COUNT,
+            // Must be zero to fail things.
+            task_queue_limit: 0,
+            dispatcher_queue_size: 1,
+            worker_queue_size: 1,
+            active_io_tasks: 1,
+        });
+        let dispatcher_handle = system.start_component(dispatcher);
+        let counter = Arc::new(AtomicUsize::new(0));
+        let sent_tasks = Arc::new(Mutex::new(HashSet::new()));
+        let received_tasks = Arc::new(Mutex::new(HashSet::new()));
+        let dispatch_user = MockIoDispatchUser {
+            dispatcher: dispatcher_handle,
+            counter: counter.clone(),
+            sent_tasks: sent_tasks.clone(),
+            received_tasks: received_tasks.clone(),
+        };
+        let dispatch_user_handle = system.start_component(dispatch_user);
         // yield to allow the component to process the messages
+        tokio::task::yield_now().await;
         let mut is_err = false;
         for _ in 0..1000 {
             is_err |= dispatch_user_handle.request((), None).await.is_err();
