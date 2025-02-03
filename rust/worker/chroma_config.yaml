@@ -45,6 +45,7 @@ query_service:
         dispatcher_queue_size: 100
         worker_queue_size: 100
         task_queue_limit: 1000
+        active_io_tasks: 100
     blockfile_provider:
         Arrow:
             block_manager_config:
@@ -105,6 +106,7 @@ compaction_service:
         dispatcher_queue_size: 100
         worker_queue_size: 100
         task_queue_limit: 1000
+        active_io_tasks: 100
     compactor:
         compaction_manager_queue_size: 1000
         max_concurrent_jobs: 100

@@ -73,6 +73,7 @@ rayon = "1.10.0"
 shuttle = "0.7.1"
 tempfile = "3.14.0"
 itertools = "0.13.0"
+serial_test = "3.2.0"
 
 [profile.release]
 debug = 2

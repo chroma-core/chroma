@@ -592,9 +592,10 @@ mod tests {
         let system = System::new();
         let dispatcher = Dispatcher::new(DispatcherConfig {
             num_worker_threads: 10,
-            task_queue_limit: 10,
-            dispatcher_queue_size: 10,
-            worker_queue_size: 10,
+            task_queue_limit: 100,
+            dispatcher_queue_size: 100,
+            worker_queue_size: 100,
+            active_io_tasks: 100,
         });
         let dispatcher_handle = system.start_component(dispatcher);
         manager.set_dispatcher(dispatcher_handle);
