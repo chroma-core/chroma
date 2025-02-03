@@ -1,3 +1,5 @@
+use crate::sqlite::SqliteSysDb;
+
 use super::config::SysDbConfig;
 use super::test_sysdb::TestSysDb;
 use async_trait::async_trait;

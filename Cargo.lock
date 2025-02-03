@@ -1417,6 +1417,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "chroma-sqlite"
+version = "0.1.0"
+dependencies = [
+ "md5",
+ "regex",
+ "rust-embed",
+ "sha2",
+ "sqlx",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
 name = "chroma-storage"
 version = "0.1.0"
 dependencies = [
@@ -1447,6 +1461,7 @@ dependencies = [
  "async-trait",
  "chroma-config",
  "chroma-error",
+ "chroma-sqlite",
  "chroma-tracing",
  "chroma-types",
  "futures",
@@ -1455,6 +1470,7 @@ dependencies = [
  "opentelemetry_sdk",
  "parking_lot",
  "serde",
+ "sqlx",
  "thiserror 1.0.69",
  "tokio",
  "tokio-util",
@@ -5961,20 +5977,6 @@ checksum = "d91ed6c858b01f942cd56b37a94b3e0a1798290327d1236e4d9cf4eaca44d29d"
 dependencies = [
  "base64ct",
  "der 0.7.9",
-]
-
-[[package]]
-name = "sqlite"
-version = "0.1.0"
-dependencies = [
- "md5",
- "regex",
- "rust-embed",
- "sha2",
- "sqlx",
- "tempfile",
- "thiserror 1.0.69",
- "tokio",
 ]
 
 [[package]]
