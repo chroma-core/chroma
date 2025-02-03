@@ -29,6 +29,8 @@ where
     fn get_type(&self) -> OperatorType {
         OperatorType::Other
     }
+    /// By default operators will log an error event if their sender is dropped when sending the result.
+    /// This is not always desired, e.g. when creating a "fire-and-forget" operator (data prefetching); so this method can be overridden to return false.
     fn errors_when_sender_dropped(&self) -> bool {
         true
     }
