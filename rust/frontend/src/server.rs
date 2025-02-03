@@ -432,9 +432,9 @@ async fn delete_collection(
 pub struct AddCollectionRecordsPayload {
     ids: Vec<String>,
     embeddings: Option<Vec<Vec<f32>>>,
-    documents: Option<Vec<String>>,
-    uris: Option<Vec<String>>,
-    metadatas: Option<Vec<Metadata>>,
+    documents: Option<Vec<Option<String>>>,
+    uris: Option<Vec<Option<String>>>,
+    metadatas: Option<Vec<Option<Metadata>>>,
 }
 
 async fn collection_add(
@@ -447,7 +447,12 @@ async fn collection_add(
 
     server
         .frontend
-        .validate_embedding(collection_id, payload.embeddings.as_ref(), true)
+        .validate_embedding(
+            collection_id,
+            payload.embeddings.as_ref(),
+            true,
+            |embedding| Some(embedding.len()),
+        )
         .await?;
 
     let res = server
@@ -470,10 +475,10 @@ async fn collection_add(
 #[derive(Deserialize, Debug, Clone)]
 pub struct UpdateCollectionRecordsPayload {
     ids: Vec<String>,
-    embeddings: Option<Vec<Vec<f32>>>,
-    documents: Option<Vec<String>>,
-    uris: Option<Vec<String>>,
-    metadatas: Option<Vec<UpdateMetadata>>,
+    embeddings: Option<Vec<Option<Vec<f32>>>>,
+    documents: Option<Vec<Option<String>>>,
+    uris: Option<Vec<Option<String>>>,
+    metadatas: Option<Vec<Option<UpdateMetadata>>>,
 }
 
 async fn collection_update(
@@ -486,7 +491,12 @@ async fn collection_update(
 
     server
         .frontend
-        .validate_embedding(collection_id, payload.embeddings.as_ref(), true)
+        .validate_embedding(
+            collection_id,
+            payload.embeddings.as_ref(),
+            true,
+            |embedding| embedding.as_ref().map(|e| e.len()),
+        )
         .await?;
 
     Ok(Json(
@@ -510,9 +520,9 @@ async fn collection_update(
 pub struct UpsertCollectionRecordsPayload {
     ids: Vec<String>,
     embeddings: Option<Vec<Vec<f32>>>,
-    documents: Option<Vec<String>>,
-    uris: Option<Vec<String>>,
-    metadatas: Option<Vec<UpdateMetadata>>,
+    documents: Option<Vec<Option<String>>>,
+    uris: Option<Vec<Option<String>>>,
+    metadatas: Option<Vec<Option<UpdateMetadata>>>,
 }
 
 async fn collection_upsert(
@@ -525,7 +535,12 @@ async fn collection_upsert(
 
     server
         .frontend
-        .validate_embedding(collection_id, payload.embeddings.as_ref(), true)
+        .validate_embedding(
+            collection_id,
+            payload.embeddings.as_ref(),
+            true,
+            |embedding| Some(embedding.len()),
+        )
         .await?;
 
     Ok(Json(
@@ -663,7 +678,12 @@ async fn collection_query(
 
     server
         .frontend
-        .validate_embedding(collection_id, Some(&payload.query_embeddings), true)
+        .validate_embedding(
+            collection_id,
+            Some(&payload.query_embeddings),
+            true,
+            |embedding| Some(embedding.len()),
+        )
         .await?;
 
     let res = server
