@@ -21,14 +21,15 @@ use chroma_types::{
     DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse, GetCollectionError,
     GetCollectionRequest, GetCollectionResponse, GetDatabaseError, GetDatabaseRequest,
     GetDatabaseResponse, GetRequest, GetResponse, GetTenantError, GetTenantRequest,
-    GetTenantResponse, HeartbeatError, HeartbeatResponse, Include, ListCollectionsRequest,
-    ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
-    Operation, OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
-    ScalarEncoding, Segment, SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError,
-    UpdateCollectionRecordsError, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
-    UpdateCollectionRequest, UpdateCollectionResponse, UpdateMetadata, UpdateMetadataValue,
-    UpsertCollectionRecordsError, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse,
-    CHROMA_DOCUMENT_KEY, CHROMA_URI_KEY,
+    GetTenantResponse, HealthCheckResponse, HeartbeatError, HeartbeatResponse, Include,
+    ListCollectionsRequest, ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest,
+    ListDatabasesResponse, Operation, OperationRecord, QueryError, QueryRequest, QueryResponse,
+    ResetError, ResetResponse, ScalarEncoding, Segment, SegmentScope, SegmentType, SegmentUuid,
+    UpdateCollectionError, UpdateCollectionRecordsError, UpdateCollectionRecordsRequest,
+    UpdateCollectionRecordsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
+    UpdateMetadata, UpdateMetadataValue, UpsertCollectionRecordsError,
+    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, CHROMA_DOCUMENT_KEY,
+    CHROMA_URI_KEY,
 };
 use mdac::{Pattern, Rule, Scorecard, ScorecardTicket};
 use std::{
@@ -842,6 +843,12 @@ impl Frontend {
             .retry(self.collections_with_segments_provider.get_retry_backoff())
             .when(|e| e.code() == ErrorCodes::NotFound)
             .await
+    }
+
+    pub async fn healthcheck(&self) -> HealthCheckResponse {
+        HealthCheckResponse {
+            is_executor_ready: self.executor.is_ready().await,
+        }
     }
 }
 

@@ -119,6 +119,10 @@ impl DistributedExecutor {
         Ok(from_proto_knn_batch_result(res.into_inner())?)
     }
 
+    pub async fn is_ready(&self) -> bool {
+        !self.node_name_to_client.read().is_empty()
+    }
+
     ///////////////////////// Helpers /////////////////////////
 
     /// Get the gRPC clients for the given collection id by performing the assignment policy

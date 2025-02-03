@@ -32,4 +32,9 @@ impl Executor {
             Executor::Distributed(distributed_executor) => distributed_executor.knn(plan).await,
         }
     }
+    pub async fn is_ready(&self) -> bool {
+        match self {
+            Executor::Distributed(distributed_executor) => distributed_executor.is_ready().await,
+        }
+    }
 }
