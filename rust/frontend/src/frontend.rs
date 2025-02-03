@@ -2,7 +2,6 @@ use crate::{
     config::{FrontendConfig, ScorecardRule},
     executor::Executor,
     types::errors::ValidationError,
-    utils::{validate_name, validate_non_empty_filter},
     CollectionsWithSegmentsProvider,
 };
 use backon::Retryable;
@@ -11,7 +10,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_sysdb::{sysdb, GetCollectionsError};
 use chroma_system::System;
 use chroma_types::{
-    operator::{Filter, KnnBatch, KnnProjection, Limit, Projection},
+    operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
     plan::{Count, Get, Knn},
     AddCollectionRecordsError, AddCollectionRecordsRequest, AddCollectionRecordsResponse,
     CollectionUuid, CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
@@ -33,9 +32,15 @@ use chroma_types::{
     CHROMA_URI_KEY,
 };
 use mdac::{Pattern, Rule, Scorecard, ScorecardTicket};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::{SystemTime, UNIX_EPOCH},
+};
 
+#[allow(dead_code)]
 struct ScorecardGuard {
     scorecard: Arc<Scorecard<'static>>,
     ticket: Option<ScorecardTicket>,
@@ -67,6 +72,12 @@ impl ChromaError for ScorecardRuleError {
 enum ToRecordsError {
     #[error("Inconsistent number of IDs, embeddings, documents, URIs and metadatas")]
     InconsistentLength,
+}
+
+impl ChromaError for ToRecordsError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::InvalidArgument
+    }
 }
 
 fn to_records<
@@ -140,7 +151,9 @@ pub struct Frontend {
     allow_reset: bool,
     executor: Executor,
     log_client: Box<chroma_log::Log>,
+    #[allow(dead_code)]
     scorecard_enabled: Arc<AtomicBool>,
+    #[allow(dead_code)]
     scorecard: Arc<Scorecard<'static>>,
     sysdb_client: Box<sysdb::SysDb>,
     collections_with_segments_provider: CollectionsWithSegmentsProvider,
@@ -173,6 +186,7 @@ impl Frontend {
         }
     }
 
+    #[allow(dead_code)]
     fn scorecard_request(&self, tags: &[&str]) -> Option<ScorecardGuard> {
         if self.scorecard_enabled.load(Ordering::Relaxed) {
             self.scorecard.track(tags).map(|ticket| ScorecardGuard {
@@ -189,9 +203,7 @@ impl Frontend {
 
     pub async fn heartbeat(&self) -> Result<HeartbeatResponse, HeartbeatError> {
         Ok(HeartbeatResponse {
-            nanosecond_heartbeat: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
-                .as_nanos(),
+            nanosecond_heartbeat: SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos(),
         })
     }
 
@@ -203,8 +215,7 @@ impl Frontend {
             .collections_with_segments_provider
             .get_collection_with_segments(collection_id)
             .await
-            .map_err(|err| GetCollectionError::SysDB(err.to_string()))?
-            .collection_and_segments
+            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?
             .collection
             .dimension
             .map(|dim| dim as u32))
@@ -218,7 +229,7 @@ impl Frontend {
         self.sysdb_client
             .update_collection(collection_id, None, None, Some(dimension))
             .await
-            .map_err(|err| UpdateCollectionError::SysDB(err.to_string()))?;
+            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         // Invalidate the cache.
         self.collections_with_segments_provider
             .collections_with_segments_cache
@@ -227,7 +238,7 @@ impl Frontend {
         Ok(UpdateCollectionResponse {})
     }
 
-    async fn validate_embedding(
+    pub async fn validate_embedding(
         &mut self,
         collection_id: CollectionUuid,
         option_embeddings: Option<&Vec<Vec<f32>>>,
@@ -272,7 +283,7 @@ impl Frontend {
             .collections_with_segments_cache
             .clear()
             .await
-            .map_err(|_| ResetError::Cache)?;
+            .map_err(|err| ResetError::Cache(Box::new(err)))?;
         self.sysdb_client.reset().await
     }
 
@@ -280,10 +291,6 @@ impl Frontend {
         &mut self,
         request: CreateTenantRequest,
     ) -> Result<CreateTenantResponse, CreateTenantError> {
-        let tags = &["op:create_tenant"];
-        let _guard = self
-            .scorecard_request(tags)
-            .ok_or(CreateTenantError::RateLimited)?;
         self.sysdb_client.create_tenant(request.name).await
     }
 
@@ -291,10 +298,6 @@ impl Frontend {
         &mut self,
         request: GetTenantRequest,
     ) -> Result<GetTenantResponse, GetTenantError> {
-        let tags = &["op:get_tenant"];
-        let _guard = self
-            .scorecard_request(tags)
-            .ok_or(GetTenantError::RateLimited)?;
         self.sysdb_client.get_tenant(request.name).await
     }
 
@@ -302,14 +305,6 @@ impl Frontend {
         &mut self,
         request: CreateDatabaseRequest,
     ) -> Result<CreateDatabaseResponse, CreateDatabaseError> {
-        let tags = &[
-            "op:create_database",
-            &format!("tenant_id:{}", request.tenant_id),
-            &format!("database_id:{}", request.database_id),
-        ];
-        let _guard = self
-            .scorecard_request(tags)
-            .ok_or(CreateDatabaseError::RateLimited)?;
         self.sysdb_client
             .create_database(
                 request.database_id,
@@ -323,13 +318,6 @@ impl Frontend {
         &mut self,
         request: ListDatabasesRequest,
     ) -> Result<ListDatabasesResponse, ListDatabasesError> {
-        let tags = &[
-            "op:list_database",
-            &format!("tenant_id:{}", request.tenant_id),
-        ];
-        let _guard = self
-            .scorecard_request(tags)
-            .ok_or(ListDatabasesError::RateLimited)?;
         self.sysdb_client
             .list_databases(request.tenant_id, request.limit, request.offset)
             .await
@@ -339,13 +327,6 @@ impl Frontend {
         &mut self,
         request: GetDatabaseRequest,
     ) -> Result<GetDatabaseResponse, GetDatabaseError> {
-        let tags = &[
-            "op:get_database",
-            &format!("tenant_id:{}", request.tenant_id),
-        ];
-        let _guard = self
-            .scorecard_request(tags)
-            .ok_or(GetDatabaseError::RateLimited)?;
         self.sysdb_client
             .get_database(request.database_name, request.tenant_id)
             .await
@@ -355,13 +336,6 @@ impl Frontend {
         &mut self,
         request: DeleteDatabaseRequest,
     ) -> Result<DeleteDatabaseResponse, DeleteDatabaseError> {
-        let tags = &[
-            "op:delete_database",
-            &format!("tenant_id:{}", request.tenant_id),
-        ];
-        let _guard = self
-            .scorecard_request(tags)
-            .ok_or(DeleteDatabaseError::RateLimited)?;
         self.sysdb_client
             .delete_database(request.database_name, request.tenant_id)
             .await
@@ -408,24 +382,23 @@ impl Frontend {
             .sysdb_client
             .get_collections(
                 None,
-                Some(request.collection_name),
+                Some(request.collection_name.clone()),
                 Some(request.tenant_id),
                 Some(request.database_name),
                 None,
                 0,
             )
             .await
-            .map_err(|err| GetCollectionError::SysDB(err.to_string()))?;
-        collections.pop().ok_or(GetCollectionError::NotFound)
+            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        collections
+            .pop()
+            .ok_or(GetCollectionError::NotFound(request.collection_name))
     }
 
     pub async fn create_collection(
         &mut self,
         request: CreateCollectionRequest,
     ) -> Result<CreateCollectionResponse, CreateCollectionError> {
-        validate_name(&request.name)
-            .map_err(|err| CreateCollectionError::Validation(err.to_string()))?;
-
         let collection_id = CollectionUuid::new();
         let segments = vec![
             Segment {
@@ -467,28 +440,7 @@ impl Frontend {
                 request.get_or_create,
             )
             .await
-            .map_err(|err| match err {
-                sysdb::CreateCollectionError::CollectionNameExists => {
-                    CreateCollectionError::CollectionNameExists
-                }
-                _ => CreateCollectionError::SysDB(err.to_string()),
-            })?;
-        // This is purely defensive and should never happen.
-        if self
-            .collections_with_segments_provider
-            .collections_with_segments_cache
-            .get(&collection_id)
-            .await
-            .map_err(|_| {
-                CreateCollectionError::Validation("collection found in cache".to_string())
-            })?
-            .is_some()
-        {
-            tracing::error!("Collection was just created. It should not be in the cache.");
-            return Err(CreateCollectionError::Validation(
-                "Collection found in cache when it shouldn't be".to_string(),
-            ));
-        }
+            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         self.collections_with_segments_provider
             .collections_with_segments_cache
             .remove(&collection_id)
@@ -501,10 +453,6 @@ impl Frontend {
         &mut self,
         request: UpdateCollectionRequest,
     ) -> Result<UpdateCollectionResponse, UpdateCollectionError> {
-        if let Some(name) = request.new_name.as_ref() {
-            validate_name(name)
-                .map_err(|err| UpdateCollectionError::Validation(err.to_string()))?;
-        }
         self.sysdb_client
             .update_collection(
                 request.collection_id,
@@ -513,7 +461,7 @@ impl Frontend {
                 None,
             )
             .await
-            .map_err(|err| UpdateCollectionError::SysDB(err.to_string()))?;
+            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         // Invalidate the cache.
         self.collections_with_segments_provider
             .collections_with_segments_cache
@@ -526,28 +474,20 @@ impl Frontend {
     pub async fn delete_collection(
         &mut self,
         request: DeleteCollectionRequest,
-    ) -> Result<(), DeleteCollectionError> {
+    ) -> Result<DeleteCollectionRecordsResponse, DeleteCollectionError> {
         let collection = self
-            .sysdb_client
-            .get_collections(
-                None,
-                Some(request.collection_name),
-                Some(request.tenant_id.clone()),
-                Some(request.database_name.clone()),
-                None,
-                0,
-            )
-            .await
-            .map_err(|err| DeleteCollectionError::SysDB(err.to_string()))?
-            .into_iter()
-            .next()
-            .ok_or(DeleteCollectionError::NotFound)?;
+            .get_collection(GetCollectionRequest {
+                tenant_id: request.tenant_id.clone(),
+                database_name: request.database_name.clone(),
+                collection_name: request.collection_name.clone(),
+            })
+            .await?;
 
         let segments = self
             .sysdb_client
             .get_segments(None, None, None, collection.collection_id)
             .await
-            .map_err(|err| DeleteCollectionError::SysDB(err.to_string()))?;
+            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
         self.sysdb_client
             .delete_collection(
@@ -557,14 +497,14 @@ impl Frontend {
                 segments.into_iter().map(|s| s.id).collect(),
             )
             .await
-            .map_err(|err| DeleteCollectionError::SysDB(err.to_string()))?;
+            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         // Invalidate the cache.
         self.collections_with_segments_provider
             .collections_with_segments_cache
             .remove(&collection.collection_id)
             .await;
 
-        Ok(())
+        Ok(DeleteCollectionRecordsResponse {})
     }
 
     pub async fn add(
@@ -581,17 +521,11 @@ impl Frontend {
             ..
         } = request;
 
-        self.validate_embedding(collection_id, embeddings.as_ref(), true)
-            .await
-            .map_err(|err| AddCollectionRecordsError::Validation(err.to_string()))?;
-
         let records = to_records(ids, embeddings, documents, uris, metadatas, Operation::Add)
-            .map_err(|err| match err {
-                ToRecordsError::InconsistentLength => AddCollectionRecordsError::InconsistentLength,
-            })?;
+            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
         self.log_client
-            .push_logs(request.collection_id, records)
+            .push_logs(collection_id, records)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
@@ -612,10 +546,6 @@ impl Frontend {
             ..
         }: UpdateCollectionRecordsRequest = request;
 
-        self.validate_embedding(collection_id, embeddings.as_ref(), true)
-            .await
-            .map_err(|err| UpdateCollectionRecordsError::Validation(err.to_string()))?;
-
         let records = to_records(
             ids,
             embeddings,
@@ -624,12 +554,10 @@ impl Frontend {
             metadatas,
             Operation::Update,
         )
-        .map_err(|err| match err {
-            ToRecordsError::InconsistentLength => UpdateCollectionRecordsError::InconsistentLength,
-        })?;
+        .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
         self.log_client
-            .push_logs(request.collection_id, records)
+            .push_logs(collection_id, records)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
@@ -650,10 +578,6 @@ impl Frontend {
             ..
         } = request;
 
-        self.validate_embedding(collection_id, embeddings.as_ref(), true)
-            .await
-            .map_err(|err| UpsertCollectionRecordsError::Validation(err.to_string()))?;
-
         let records = to_records(
             ids,
             embeddings,
@@ -662,12 +586,10 @@ impl Frontend {
             metadatas,
             Operation::Upsert,
         )
-        .map_err(|err| match err {
-            ToRecordsError::InconsistentLength => UpsertCollectionRecordsError::InconsistentLength,
-        })?;
+        .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
         self.log_client
-            .push_logs(request.collection_id, records)
+            .push_logs(collection_id, records)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
@@ -678,24 +600,22 @@ impl Frontend {
         &mut self,
         request: DeleteCollectionRecordsRequest,
     ) -> Result<DeleteCollectionRecordsResponse, DeleteCollectionRecordsError> {
-        let scan = self
+        let collection_and_segments = self
             .collections_with_segments_provider
             .get_collection_with_segments(request.collection_id)
-            .await?;
-
-        let filter = Filter {
-            query_ids: request.ids,
-            where_clause: request.r#where,
-        };
-
-        validate_non_empty_filter(&filter)
-            .map_err(|err| DeleteCollectionRecordsError::Validation(err.to_string()))?;
+            .await
+            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
         let get_result = self
             .executor
             .get(Get {
-                scan,
-                filter,
+                scan: Scan {
+                    collection_and_segments,
+                },
+                filter: Filter {
+                    query_ids: request.ids,
+                    where_clause: request.r#where,
+                },
                 limit: Limit {
                     skip: 0,
                     fetch: None,
@@ -742,11 +662,19 @@ impl Frontend {
             "Retrying count() request for collection {}",
             request.collection_id
         );
-        let scan = self
+        let collection_and_segments = self
             .collections_with_segments_provider
             .get_collection_with_segments(request.collection_id)
-            .await?;
-        Ok(self.executor.count(Count { scan }).await?)
+            .await
+            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        Ok(self
+            .executor
+            .count(Count {
+                scan: Scan {
+                    collection_and_segments,
+                },
+            })
+            .await?)
     }
 
     pub async fn count(&mut self, request: CountRequest) -> Result<CountResponse, QueryError> {
@@ -785,14 +713,17 @@ impl Frontend {
             "Retrying get() request for collection {}",
             request.collection_id
         );
-        let scan = self
+        let collection_and_segments = self
             .collections_with_segments_provider
             .get_collection_with_segments(request.collection_id)
-            .await?;
+            .await
+            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         let get_result = self
             .executor
             .get(Get {
-                scan,
+                scan: Scan {
+                    collection_and_segments,
+                },
                 filter: Filter {
                     query_ids: request.ids,
                     where_clause: request.r#where,
@@ -850,19 +781,18 @@ impl Frontend {
             "Retrying query() request for collection {}",
             request.collection_id
         );
-        let scan = self
+        let collection_and_segments = self
             .collections_with_segments_provider
             .get_collection_with_segments(request.collection_id)
-            .await?;
-
-        self.validate_embedding(request.collection_id, Some(&request.embeddings), false)
             .await
-            .map_err(|err| QueryError::Validation(err.to_string()))?;
+            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
         let query_result = self
             .executor
             .knn(Knn {
-                scan,
+                scan: Scan {
+                    collection_and_segments,
+                },
                 filter: Filter {
                     query_ids: request.ids,
                     where_clause: request.r#where,

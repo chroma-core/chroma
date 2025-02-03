@@ -154,10 +154,7 @@ impl CustomResourceMemberlistProvider {
             .applied_objects();
         let stream = stream.then(|event| async move {
             match event {
-                Ok(event) => {
-                    tracing::info!("Kube stream event: {:?}", event);
-                    Some(event)
-                }
+                Ok(event) => Some(event),
                 Err(err) => {
                     tracing::error!("Error acquiring memberlist: {}", err);
                     None

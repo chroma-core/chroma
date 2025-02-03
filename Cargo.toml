@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 
-members = ["rust/benchmark", "rust/blockstore", "rust/cache", "rust/chroma", "rust/config", "rust/distance", "rust/error", "rust/frontend", "rust/garbage_collector", "rust/index", "rust/load", "rust/log", "rust/memberlist", "rust/storage", "rust/system", "rust/sysdb", "rust/types", "rust/worker", "rust/segment", "rust/python_bindings", "rust/mdac", "rust/tracing"]
+members = ["rust/benchmark", "rust/blockstore", "rust/cache", "rust/chroma", "rust/config", "rust/distance", "rust/error", "rust/frontend", "rust/garbage_collector", "rust/index", "rust/load", "rust/log", "rust/memberlist", "rust/storage", "rust/system", "rust/sysdb", "rust/types", "rust/worker", "rust/segment", "rust/python_bindings", "rust/mdac", "rust/tracing", "rust/sqlite"]
 
 [workspace.dependencies]
 arrow = "52.2.0"
@@ -21,7 +21,6 @@ opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
 parking_lot = { version = "0.12.3", features = ["serde"] }
 prost = "0.13"
 prost-types = "0.12"
-regex = "1.11"
 roaring = "0.10.6"
 serde = { version = "1.0.215", features = ["derive"] }
 serde_json = "1.0.133"
@@ -37,6 +36,10 @@ tracing-bunyan-formatter = "0.3"
 tracing-opentelemetry = "0.28.0"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1.11.0", features = ["v4", "fast-rng", "macro-diagnostics", "serde"] }
+sqlx = { version = "0.8.3", features = [ "runtime-tokio",  "sqlite"] }
+sha2 = "0.10.8"
+md5 = "0.7.0"
+regex = "1.11.1"
 tower-http = { version = "0.6.2", features = ["trace"] }
 
 chroma-benchmark = { path = "rust/benchmark" }
@@ -55,6 +58,7 @@ chroma-system = { path = "rust/system" }
 chroma-sysdb = { path = "rust/sysdb" }
 chroma-tracing = { path = "rust/tracing" }
 chroma-types = { path = "rust/types" }
+chroma-sqlite = { path = "rust/sqlite" }
 mdac = { path = "rust/mdac" }
 worker = { path = "rust/worker" }
 

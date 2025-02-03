@@ -1,3 +1,5 @@
+use crate::sqlite::SqliteSysDb;
+
 use super::config::SysDbConfig;
 use super::test_sysdb::TestSysDb;
 use async_trait::async_trait;
@@ -7,9 +9,9 @@ use chroma_types::chroma_proto::sys_db_client::SysDbClient;
 use chroma_types::{
     chroma_proto, CollectionAndSegments, CollectionMetadataUpdate, CreateDatabaseError,
     CreateDatabaseResponse, CreateTenantError, CreateTenantResponse, Database, DeleteDatabaseError,
-    DeleteDatabaseResponse, GetDatabaseError, GetDatabaseResponse, GetTenantError,
-    GetTenantResponse, ListDatabasesError, ListDatabasesResponse, Metadata, ResetError,
-    ResetResponse, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
+    DeleteDatabaseResponse, GetCollectionWithSegmentsError, GetDatabaseError, GetDatabaseResponse,
+    GetTenantError, GetTenantResponse, ListDatabasesError, ListDatabasesResponse, Metadata,
+    ResetError, ResetResponse, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
 };
 use chroma_types::{
     Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
@@ -28,6 +30,7 @@ use uuid::{Error, Uuid};
 #[derive(Debug, Clone)]
 pub enum SysDb {
     Grpc(GrpcSysDb),
+    Sqlite(SqliteSysDb),
     #[allow(dead_code)]
     Test(TestSysDb),
 }
@@ -39,6 +42,7 @@ impl SysDb {
     ) -> Result<CreateTenantResponse, CreateTenantError> {
         match self {
             SysDb::Grpc(grpc) => grpc.create_tenant(tenant_name).await,
+            SysDb::Sqlite(_) => todo!(),
             SysDb::Test(_) => todo!(),
         }
     }
@@ -49,6 +53,7 @@ impl SysDb {
     ) -> Result<GetTenantResponse, GetTenantError> {
         match self {
             SysDb::Grpc(grpc) => grpc.get_tenant(tenant_name).await,
+            SysDb::Sqlite(_) => todo!(),
             SysDb::Test(_) => todo!(),
         }
     }
@@ -64,6 +69,9 @@ impl SysDb {
                 grpc.create_database(database_id, database_name, tenant)
                     .await
             }
+            SysDb::Sqlite(_) => {
+                todo!()
+            }
             SysDb::Test(_) => {
                 todo!()
             }
@@ -78,6 +86,7 @@ impl SysDb {
     ) -> Result<ListDatabasesResponse, ListDatabasesError> {
         match self {
             SysDb::Grpc(grpc) => grpc.list_databases(tenant_id, limit, offset).await,
+            SysDb::Sqlite(_) => todo!(),
             SysDb::Test(_) => todo!(),
         }
     }
@@ -89,6 +98,7 @@ impl SysDb {
     ) -> Result<GetDatabaseResponse, GetDatabaseError> {
         match self {
             SysDb::Grpc(grpc) => grpc.get_database(database_name, tenant).await,
+            SysDb::Sqlite(_) => todo!(),
             SysDb::Test(_) => todo!(),
         }
     }
@@ -100,6 +110,7 @@ impl SysDb {
     ) -> Result<DeleteDatabaseResponse, DeleteDatabaseError> {
         match self {
             SysDb::Grpc(grpc) => grpc.delete_database(database_name, tenant).await,
+            SysDb::Sqlite(_) => todo!(),
             SysDb::Test(_) => todo!(),
         }
     }
@@ -118,6 +129,7 @@ impl SysDb {
                 grpc.get_collections(collection_id, name, tenant, database, limit, offset)
                     .await
             }
+            SysDb::Sqlite(_) => todo!(),
             SysDb::Test(test) => {
                 test.get_collections(collection_id, name, tenant, database)
                     .await
@@ -151,6 +163,9 @@ impl SysDb {
                 )
                 .await
             }
+            SysDb::Sqlite(_) => {
+                todo!()
+            }
             SysDb::Test(_) => {
                 todo!()
             }
@@ -168,6 +183,9 @@ impl SysDb {
             SysDb::Grpc(grpc) => {
                 grpc.update_collection(collection_id, name, metadata, dimension)
                     .await
+            }
+            SysDb::Sqlite(_) => {
+                todo!()
             }
             SysDb::Test(_) => {
                 todo!()
@@ -187,6 +205,9 @@ impl SysDb {
                 grpc.delete_collection(tenant, database, collection_id, segment_ids)
                     .await
             }
+            SysDb::Sqlite(_) => {
+                todo!()
+            }
             SysDb::Test(_) => {
                 todo!()
             }
@@ -198,6 +219,7 @@ impl SysDb {
     ) -> Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError> {
         match self {
             SysDb::Grpc(grpc) => grpc.get_collections_to_gc().await,
+            SysDb::Sqlite(_) => todo!(),
             SysDb::Test(_) => todo!(),
         }
     }
@@ -211,6 +233,7 @@ impl SysDb {
     ) -> Result<Vec<Segment>, GetSegmentsError> {
         match self {
             SysDb::Grpc(grpc) => grpc.get_segments(id, r#type, scope, collection).await,
+            SysDb::Sqlite(_) => todo!(),
             SysDb::Test(test) => test.get_segments(id, r#type, scope, collection).await,
         }
     }
@@ -225,6 +248,7 @@ impl SysDb {
                     .get_collection_with_segments(collection_id)
                     .await
             }
+            SysDb::Sqlite(_) => todo!(),
             SysDb::Test(_test_sys_db) => todo!(),
         }
     }
@@ -235,6 +259,7 @@ impl SysDb {
     ) -> Result<Vec<Tenant>, GetLastCompactionTimeError> {
         match self {
             SysDb::Grpc(grpc) => grpc.get_last_compaction_time(tanant_ids).await,
+            SysDb::Sqlite(_) => todo!(),
             SysDb::Test(test) => test.get_last_compaction_time(tanant_ids).await,
         }
     }
@@ -260,6 +285,7 @@ impl SysDb {
                 )
                 .await
             }
+            SysDb::Sqlite(_) => todo!(),
             SysDb::Test(test) => {
                 test.flush_compaction(
                     tenant_id,
@@ -277,6 +303,7 @@ impl SysDb {
     pub async fn reset(&mut self) -> Result<ResetResponse, ResetError> {
         match self {
             SysDb::Grpc(grpc) => grpc.reset().await,
+            SysDb::Sqlite(_) => todo!(),
             SysDb::Test(_) => todo!(),
         }
     }
@@ -381,13 +408,15 @@ impl GrpcSysDb {
         &mut self,
         tenant_name: String,
     ) -> Result<CreateTenantResponse, CreateTenantError> {
-        let req = chroma_proto::CreateTenantRequest { name: tenant_name };
+        let req = chroma_proto::CreateTenantRequest {
+            name: tenant_name.clone(),
+        };
         match self.client.create_tenant(req).await {
             Ok(_) => Ok(CreateTenantResponse {}),
             Err(err) if matches!(err.code(), Code::AlreadyExists) => {
-                Err(CreateTenantError::AlreadyExists)
+                Err(CreateTenantError::AlreadyExists(tenant_name))
             }
-            Err(err) => Err(CreateTenantError::SysDB(err.to_string())),
+            Err(err) => Err(err.into()),
         }
     }
 
@@ -395,16 +424,18 @@ impl GrpcSysDb {
         &mut self,
         tenant_name: String,
     ) -> Result<GetTenantResponse, GetTenantError> {
-        let req = chroma_proto::GetTenantRequest { name: tenant_name };
+        let req = chroma_proto::GetTenantRequest {
+            name: tenant_name.clone(),
+        };
         match self.client.get_tenant(req).await {
             Ok(resp) => Ok(GetTenantResponse {
                 name: resp
                     .into_inner()
                     .tenant
-                    .ok_or(GetTenantError::ResponseEmpty)?
+                    .ok_or(GetTenantError::NotFound(tenant_name))?
                     .name,
             }),
-            Err(err) => Err(GetTenantError::SysDB(err.to_string())),
+            Err(err) => Err(err.into()),
         }
     }
 
@@ -416,7 +447,7 @@ impl GrpcSysDb {
     ) -> Result<CreateDatabaseResponse, CreateDatabaseError> {
         let req = chroma_proto::CreateDatabaseRequest {
             id: database_id.to_string(),
-            name: database_name,
+            name: database_name.clone(),
             tenant,
         };
         let res = self.client.create_database(req).await;
@@ -425,8 +456,8 @@ impl GrpcSysDb {
             Err(e) => {
                 tracing::error!("Failed to create database {:?}", e);
                 let res = match e.code() {
-                    Code::AlreadyExists => CreateDatabaseError::AlreadyExists,
-                    _ => CreateDatabaseError::SysDB(e.to_string()),
+                    Code::AlreadyExists => CreateDatabaseError::AlreadyExists(database_name),
+                    _ => CreateDatabaseError::Internal(e),
                 };
                 Err(res)
             }
@@ -445,21 +476,21 @@ impl GrpcSysDb {
             offset: Some(offset as i32),
         };
         match self.client.list_databases(req).await {
-            Ok(resp) => Ok(resp
+            Ok(resp) => resp
                 .into_inner()
                 .databases
                 .into_iter()
                 .map(|db| {
                     Uuid::parse_str(&db.id)
-                        .map_err(|_| ListDatabasesError::IdParsingError)
+                        .map_err(|err| ListDatabasesError::InvalidID(err.to_string()))
                         .map(|id| Database {
                             id,
                             name: db.name,
                             tenant: db.tenant,
                         })
                 })
-                .collect::<Result<_, _>>())?,
-            Err(err) => Err(ListDatabasesError::SysDB(err.to_string())),
+                .collect(),
+            Err(err) => Err(ListDatabasesError::Internal(err)),
         }
     }
 
@@ -469,7 +500,7 @@ impl GrpcSysDb {
         tenant: String,
     ) -> Result<GetDatabaseResponse, GetDatabaseError> {
         let req = chroma_proto::GetDatabaseRequest {
-            name: database_name,
+            name: database_name.clone(),
             tenant,
         };
         let res = self.client.get_database(req).await;
@@ -477,11 +508,11 @@ impl GrpcSysDb {
             Ok(res) => {
                 let res = match res.into_inner().database {
                     Some(res) => res,
-                    None => return Err(GetDatabaseError::ResponseEmpty),
+                    None => return Err(GetDatabaseError::NotFound(database_name)),
                 };
                 let db_id = match Uuid::parse_str(res.id.as_str()) {
                     Ok(uuid) => uuid,
-                    Err(_) => return Err(GetDatabaseError::IdParsingError),
+                    Err(err) => return Err(GetDatabaseError::InvalidID(err.to_string())),
                 };
                 Ok(GetDatabaseResponse {
                     id: db_id,
@@ -492,8 +523,8 @@ impl GrpcSysDb {
             Err(e) => {
                 tracing::error!("Failed to get database {:?}", e);
                 let res = match e.code() {
-                    Code::NotFound => GetDatabaseError::NotFound,
-                    _ => GetDatabaseError::SysDB(e.to_string()),
+                    Code::NotFound => GetDatabaseError::NotFound(database_name),
+                    _ => GetDatabaseError::Internal(e),
                 };
                 Err(res)
             }
@@ -506,13 +537,15 @@ impl GrpcSysDb {
         tenant: String,
     ) -> Result<DeleteDatabaseResponse, DeleteDatabaseError> {
         let req = chroma_proto::DeleteDatabaseRequest {
-            name: database_name,
+            name: database_name.clone(),
             tenant,
         };
         match self.client.delete_database(req).await {
             Ok(_) => Ok(DeleteDatabaseResponse {}),
-            Err(err) if matches!(err.code(), Code::NotFound) => Err(DeleteDatabaseError::NotFound),
-            Err(err) => Err(DeleteDatabaseError::SysDB(err.to_string())),
+            Err(err) if matches!(err.code(), Code::NotFound) => {
+                Err(DeleteDatabaseError::NotFound(database_name))
+            }
+            Err(err) => Err(err.into()),
         }
     }
 
@@ -922,20 +955,6 @@ impl ChromaError for GetSegmentsError {
             GetSegmentsError::ConversionError(_) => ErrorCodes::Internal,
         }
     }
-}
-
-#[derive(Debug, Error)]
-pub enum GetCollectionWithSegmentsError {
-    #[error("Failed to convert proto collection")]
-    CollectionConversionError(#[from] CollectionConversionError),
-    #[error("Duplicate segment")]
-    DuplicateSegment,
-    #[error("Missing field: {0}")]
-    Field(String),
-    #[error("Failed to convert proto segment")]
-    SegmentConversionError(#[from] SegmentConversionError),
-    #[error("Failed to fetch")]
-    FailedToGetSegments(#[from] tonic::Status),
 }
 
 #[derive(Error, Debug)]
