@@ -163,6 +163,7 @@ mod tests {
     };
     use chroma_cache::UnboundedCacheConfig;
     use chroma_storage::{local::LocalStorage, Storage};
+    use chroma_sysdb::{SysDb, TestSysDb};
     use tempfile::TempDir;
 
     async fn create_sparse_index(storage: &Storage, keys: Vec<String>) -> Uuid {
@@ -225,9 +226,12 @@ mod tests {
         let input = ComputeUnusedBetweenVersionsInput {
             version_file: CollectionVersionFile::default(),
             epoch_id: 1,
-            sysdb_client: Box::new(MockSysDb {}),
+            sysdb_client: Box::new(SysDb::Test(TestSysDb::new())),
             versions_to_delete: VersionListForCollection {
                 versions: vec![1, 2, 3],
+                collection_id: "test_collection".to_string(),
+                database_id: "test_database".to_string(),
+                tenant_id: "test_tenant".to_string(),
             },
             version_to_content,
         };
@@ -256,9 +260,12 @@ mod tests {
         let input = ComputeUnusedBetweenVersionsInput {
             version_file: CollectionVersionFile::default(),
             epoch_id: 1,
-            sysdb_client: Box::new(MockSysDb {}),
+            sysdb_client: Box::new(SysDb::Test(TestSysDb::new())),
             versions_to_delete: VersionListForCollection {
                 versions: vec![1, 2],
+                collection_id: "test_collection".to_string(),
+                database_id: "test_database".to_string(),
+                tenant_id: "test_tenant".to_string(),
             },
             version_to_content: HashMap::new(), // Empty content map
         };
@@ -268,14 +275,6 @@ mod tests {
             result,
             Err(ComputeUnusedBetweenVersionsError::MissingContent(1))
         ));
-    }
-
-    // Mock SysDb implementation for testing
-    struct MockSysDb;
-    #[async_trait]
-    impl SysDb for MockSysDb {
-        // Implement required methods with mock behavior
-        // Add necessary implementations based on your needs
     }
 
     // Keep the existing test_compute_unused_files test

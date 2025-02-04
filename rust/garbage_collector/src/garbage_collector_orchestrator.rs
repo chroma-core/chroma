@@ -73,16 +73,15 @@ use crate::operators::mark_versions_at_sysdb::{
 };
 
 use prost::Message;
-#[allow(dead_code)]
+
 pub struct GarbageCollectorOrchestrator {
     collection_id: CollectionUuid,
     version_file_path: String,
     cutoff_time_hours: u32,
     sysdb_client: Box<SysDb>,
     dispatcher: ComponentHandle<Dispatcher>,
-    // Result Channel
-    result_channel: Option<Sender<Result<GarbageCollectorResponse, GarbageCollectorError>>>,
     storage: Storage,
+    result_channel: Option<Sender<Result<GarbageCollectorResponse, GarbageCollectorError>>>,
 }
 
 impl Debug for GarbageCollectorOrchestrator {
@@ -113,8 +112,8 @@ impl GarbageCollectorOrchestrator {
             cutoff_time_hours,
             sysdb_client,
             dispatcher,
-            result_channel: None,
             storage,
+            result_channel: None,
         }
     }
 }
@@ -335,17 +334,19 @@ impl Handler<TaskResult<FetchSparseIndexFilesOutput, FetchSparseIndexFilesError>
             None => return,
         };
 
+        let input = ComputeUnusedBetweenVersionsInput {
+            version_file: output.version_file,
+            epoch_id: output.epoch_id,
+            sysdb_client: self.sysdb_client.clone(),
+            versions_to_delete: output.versions_to_delete,
+            version_to_content: output.version_to_content,
+        };
+
         let compute_task = wrap(
             Box::new(ComputeUnusedBetweenVersionsOperator::new(
                 self.storage.clone(),
             )),
-            ComputeUnusedBetweenVersionsInput {
-                version_file: output.version_file,
-                epoch_id: output.epoch_id,
-                sysdb_client: output.sysdb_client,
-                versions_to_delete: output.versions_to_delete,
-                version_to_content: output.version_to_content,
-            },
+            input,
             ctx.receiver(),
         );
 
@@ -378,7 +379,7 @@ impl Handler<TaskResult<ComputeUnusedBetweenVersionsOutput, ComputeUnusedBetween
             DeleteVersionsAtSysDbInput {
                 version_file: output.version_file,
                 epoch_id: output.epoch_id,
-                sysdb_client: output.sysdb_client,
+                sysdb_client: self.sysdb_client.clone(),
                 versions_to_delete: output.versions_to_delete,
                 unused_s3_files: output.unused_s3_files,
             },
@@ -415,5 +416,133 @@ impl Handler<TaskResult<DeleteVersionsAtSysDbOutput, DeleteVersionsAtSysDbError>
         };
 
         self.terminate_with_result(Ok(response), ctx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::helper::ChromaGrpcClients;
+    use chromadb::client::{
+        ChromaAuthMethod, ChromaClient, ChromaClientOptions, ChromaTokenHeader,
+    };
+
+    async fn get_test_client() -> ChromaClient {
+        let client = if let Ok(auth) = std::env::var("CHROMA_TOKEN") {
+            println!("Creating ChromaClient with auth token");
+            ChromaClient::new(ChromaClientOptions {
+                url: Some("http://localhost:8000".to_string()),
+                auth: ChromaAuthMethod::TokenAuth {
+                    token: auth,
+                    header: ChromaTokenHeader::Authorization,
+                },
+                database: "test".into(),
+                connections: 32,
+            })
+            .await
+        } else {
+            println!("Creating ChromaClient with default settings");
+            ChromaClient::new(Default::default()).await
+        };
+
+        match client {
+            Ok(client) => client,
+            Err(e) => {
+                println!("Failed to create ChromaClient: {}", e);
+                println!("Make sure ChromaDB is running at http://localhost:8000");
+                panic!("ChromaDB connection failed");
+            }
+        }
+    }
+
+    // #[tokio::test]
+    // async fn test_collection_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
+    //     println!("Starting collection lifecycle test");
+    //     let client = get_test_client().await;
+    //     let collection_name = format!("test_collection_{}", uuid::Uuid::new_v4());
+    //     println!("Using collection name: {}", collection_name);
+
+    //     // Get or create collection
+    //     let collection: ChromaCollection = client
+    //         .get_or_create_collection(&collection_name, None)
+    //         .await
+    //         .map_err(|e| {
+    //             println!("Failed to create collection: {}", e);
+    //             e
+    //         })?;
+
+    //     println!("Created collection with UUID: {}", collection.id());
+
+    //     // Insert records with fixed embeddings
+    //     let collection_entries = CollectionEntries {
+    //         ids: vec!["id1".into(), "id2".into()],
+    //         embeddings: Some(vec![
+    //             vec![1.0_f32, 0.0_f32, 0.0_f32], // First document embedding
+    //             vec![0.0_f32, 1.0_f32, 0.0_f32], // Second document embedding
+    //         ]),
+    //         metadatas: Some(vec![json!({"source": "test1"}), json!({"source": "test2"})]),
+    //         documents: Some(vec![
+    //             "This is document 1".into(),
+    //             "This is document 2".into(),
+    //         ]),
+    //     };
+
+    //     collection.upsert(collection_entries, None).await?;
+
+    //     // Query the collection using vector search
+    //     let query = QueryOptions {
+    //         query_texts: None,
+    //         query_embeddings: Some(vec![vec![1.0_f32, 0.0_f32, 0.0_f32]]), // Should match first document better
+    //         where_metadata: None,
+    //         where_document: None,
+    //         n_results: Some(2),
+    //         include: None,
+    //     };
+
+    //     let query_result = collection.query(query, None).await?;
+
+    //     // Verify results
+    //     let ids = query_result.ids.expect("Query should return IDs");
+    //     assert_eq!(ids.len(), 2);
+    //     assert_eq!(ids[0], "id1"); // First result should be id1 since it has the same embedding
+    //     assert_eq!(ids[1], "id2");
+
+    //     // Clean up - delete the collection
+    //     client.delete_collection(&collection_name).await?;
+
+    //     Ok(())
+    // }
+
+    #[tokio::test]
+    async fn test_direct_service_calls() -> Result<(), Box<dyn std::error::Error>> {
+        let mut clients = ChromaGrpcClients::new().await?;
+
+        // Create database and collection
+        let tenant_id = "test_tenant";
+        let database_name = "test_db";
+        let collection_name = format!("test_collection_{}", uuid::Uuid::new_v4());
+
+        let collection_id = clients
+            .create_database_and_collection(tenant_id, database_name, &collection_name)
+            .await?;
+
+        // Add embeddings
+        let embeddings = vec![vec![1.0, 0.0, 0.0], vec![0.0, 1.0, 0.0]];
+        let ids = vec!["id1".to_string(), "id2".to_string()];
+        clients
+            .add_embeddings(&collection_id, embeddings, ids)
+            .await?;
+
+        // Query the collection
+        let query_embedding = vec![1.0, 0.0, 0.0];
+        let results = clients
+            .query_collection(&collection_id, query_embedding)
+            .await?;
+
+        // Verify results
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].0, "id1"); // First result should be id1
+        assert!(results[0].1 < results[1].1); // First result should have smaller distance
+
+        Ok(())
     }
 }

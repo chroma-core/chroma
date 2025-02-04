@@ -116,9 +116,6 @@ impl Operator<FetchSparseIndexFilesInput, FetchSparseIndexFilesOutput>
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use chroma_sysdb::TestSysDb;
-
     // Add tests here
     #[tokio::test]
     async fn test_fetch_files_success() {
