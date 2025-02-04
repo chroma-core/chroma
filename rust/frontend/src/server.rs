@@ -3,6 +3,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
+use std::time::SystemTime;
 
 use axum::{
     extract::{DefaultBodyLimit, Path, Query, State},
@@ -11,6 +12,8 @@ use axum::{
     routing::{get, post},
     Json, Router, ServiceExt,
 };
+use biometrics::Collector;
+use biometrics_prometheus::SlashMetrics;
 use chroma_types::{
     operator::Filter, AddCollectionRecordsResponse, ChecklistResponse, Collection,
     CollectionMetadataUpdate, CollectionUuid, CountCollectionsRequest, CountCollectionsResponse,
@@ -52,6 +55,72 @@ impl Drop for ScorecardGuard {
     }
 }
 
+///////////////////////////////////////////// counters /////////////////////////////////////////////
+
+static ROOT: biometrics::Counter = biometrics::Counter::new("chroma__frontend__root");
+static HEARTBEAT: biometrics::Counter = biometrics::Counter::new("chroma__frontend__heartbeat");
+static PRE_FLIGHT_CHECKS: biometrics::Counter =
+    biometrics::Counter::new("chroma__frontend__pre_flight_checks");
+static RESET: biometrics::Counter = biometrics::Counter::new("chroma__frontend__reset");
+static VERSION: biometrics::Counter = biometrics::Counter::new("chroma__frontend__version");
+static GET_USER_IDENTITY: biometrics::Counter =
+    biometrics::Counter::new("chroma__frontend__get_user_identity");
+static CREATE_TENANT: biometrics::Counter =
+    biometrics::Counter::new("chroma__frontend__create_tenant");
+static GET_TENANT: biometrics::Counter = biometrics::Counter::new("chroma__frontend__get_tenant");
+static LIST_DATABASES: biometrics::Counter =
+    biometrics::Counter::new("chroma__frontend__list_databases");
+static GET_DATABASE: biometrics::Counter =
+    biometrics::Counter::new("chroma__frontend__get_database");
+static CREATE_COLLECTION: biometrics::Counter =
+    biometrics::Counter::new("chroma__frontend__create_collection");
+static LIST_COLLECTIONS: biometrics::Counter =
+    biometrics::Counter::new("chroma__frontend__list_collections");
+static COUNT_COLLECTIONS: biometrics::Counter =
+    biometrics::Counter::new("chroma__frontend__count_collections");
+static GET_COLLECTION: biometrics::Counter =
+    biometrics::Counter::new("chroma__frontend__get_collection");
+static COLLECTION_ADD: biometrics::Counter =
+    biometrics::Counter::new("chroma__frontend__collection_add");
+static COLLECTION_UPDATE: biometrics::Counter =
+    biometrics::Counter::new("chroma__frontend__collection_update");
+static COLLECTION_UPSERT: biometrics::Counter =
+    biometrics::Counter::new("chroma__frontend__collection_upsert");
+static COLLECTION_DELETE: biometrics::Counter =
+    biometrics::Counter::new("chroma__frontend__collection_delete");
+static COLLECTION_COUNT: biometrics::Counter =
+    biometrics::Counter::new("chroma__frontend__collection_count");
+static COLLECTION_GET: biometrics::Counter =
+    biometrics::Counter::new("chroma__frontend__collection_get");
+static COLLECTION_QUERY: biometrics::Counter =
+    biometrics::Counter::new("chroma__frontend__collection_query");
+
+pub fn register_biometrics(collector: &Collector) {
+    collector.register_counter(&ROOT);
+    collector.register_counter(&HEARTBEAT);
+    collector.register_counter(&PRE_FLIGHT_CHECKS);
+    collector.register_counter(&RESET);
+    collector.register_counter(&VERSION);
+    collector.register_counter(&GET_USER_IDENTITY);
+    collector.register_counter(&CREATE_TENANT);
+    collector.register_counter(&GET_TENANT);
+    collector.register_counter(&LIST_DATABASES);
+    collector.register_counter(&GET_DATABASE);
+    collector.register_counter(&CREATE_COLLECTION);
+    collector.register_counter(&LIST_COLLECTIONS);
+    collector.register_counter(&COUNT_COLLECTIONS);
+    collector.register_counter(&GET_COLLECTION);
+    collector.register_counter(&COLLECTION_ADD);
+    collector.register_counter(&COLLECTION_UPDATE);
+    collector.register_counter(&COLLECTION_UPSERT);
+    collector.register_counter(&COLLECTION_DELETE);
+    collector.register_counter(&COLLECTION_COUNT);
+    collector.register_counter(&COLLECTION_GET);
+    collector.register_counter(&COLLECTION_QUERY);
+}
+
+////////////////////////////////////////// FrontendServer //////////////////////////////////////////
+
 #[derive(Clone)]
 pub(crate) struct FrontendServer {
     config: FrontendConfig,
@@ -80,6 +149,7 @@ impl FrontendServer {
         let circuit_breaker_config = server.config.circuit_breaker.clone();
         let app = Router::new()
             // `GET /` goes to `root`
+            .route("/metrics", get(metrics))
             .route("/api/v2", get(root))
             .route("/api/v2/healthcheck", get(healthcheck))
             .route("/api/v2/heartbeat", get(heartbeat))
@@ -167,8 +237,23 @@ impl FrontendServer {
 // These handlers simply proxy the call and the relevant inputs into
 // the appropriate method on the `FrontendServer` struct.
 
+async fn metrics() -> String {
+    let mut metrics = SlashMetrics::new();
+    let collector = Collector::new();
+    register_biometrics(&collector);
+    let _ = collector.emit(
+        &mut metrics,
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64,
+    );
+    metrics.take()
+}
+
 // Dummy implementation for now
 async fn root() -> &'static str {
+    ROOT.click();
     "Chroma Rust Frontend"
 }
 
@@ -185,27 +270,32 @@ async fn healthcheck(State(server): State<FrontendServer>) -> impl IntoResponse 
 async fn heartbeat(
     State(server): State<FrontendServer>,
 ) -> Result<Json<HeartbeatResponse>, ServerError> {
+    HEARTBEAT.click();
     Ok(Json(server.frontend.heartbeat().await?))
 }
 
 // Dummy implementation for now
 async fn pre_flight_checks() -> Result<Json<ChecklistResponse>, ServerError> {
+    PRE_FLIGHT_CHECKS.click();
     Ok(Json(ChecklistResponse {
         max_batch_size: 100,
     }))
 }
 
 async fn reset(State(mut server): State<FrontendServer>) -> Result<Json<bool>, ServerError> {
+    RESET.click();
     server.frontend.reset().await?;
     Ok(Json(true))
 }
 
 async fn version() -> &'static str {
+    VERSION.click();
     env!("CARGO_PKG_VERSION")
 }
 
 // Dummy implementation for now
 async fn get_user_identity() -> Json<GetUserIdentityResponse> {
+    GET_USER_IDENTITY.click();
     Json(GetUserIdentityResponse {
         user_id: String::new(),
         tenant: "default_tenant".to_string(),
@@ -217,6 +307,7 @@ async fn create_tenant(
     State(mut server): State<FrontendServer>,
     Json(request): Json<CreateTenantRequest>,
 ) -> Result<Json<CreateTenantResponse>, ServerError> {
+    CREATE_TENANT.click();
     tracing::info!("Creating tenant [{}]", request.name);
     Ok(Json(server.frontend.create_tenant(request).await?))
 }
@@ -225,6 +316,7 @@ async fn get_tenant(
     Path(name): Path<String>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<GetTenantResponse>, ServerError> {
+    GET_TENANT.click();
     tracing::info!("Getting tenant [{}]", name);
     Ok(Json(
         server
@@ -293,6 +385,7 @@ async fn get_database(
     Path((tenant_id, database_name)): Path<(String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<GetDatabaseResponse>, ServerError> {
+    GET_DATABASE.click();
     tracing::info!(
         "Getting database [{}] for tenant [{}]",
         database_name,
@@ -346,6 +439,7 @@ async fn list_collections(
     Query(ListCollectionsParams { limit, offset }): Query<ListCollectionsParams>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<ListCollectionsResponse>, ServerError> {
+    LIST_COLLECTIONS.click();
     tracing::info!(
         "Listing collections in database [{}] for tenant [{}] with limit [{:?}] and offset [{:?}]",
         database_name,
@@ -374,6 +468,7 @@ async fn count_collections(
     Path((tenant_id, database_name)): Path<(String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<CountCollectionsResponse>, ServerError> {
+    COUNT_COLLECTIONS.click();
     tracing::info!(
         "Counting collections in database [{}] for tenant [{}]",
         database_name,
@@ -407,6 +502,7 @@ async fn create_collection(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<CreateCollectionPayload>,
 ) -> Result<Json<Collection>, ServerError> {
+    CREATE_COLLECTION.click();
     tracing::info!("Creating collection in database [{database_name}] for tenant [{tenant_id}]");
     let _guard = server.scorecard_request(&[
         "op:create_collection",
@@ -435,6 +531,7 @@ async fn get_collection(
     Path((tenant_id, database_name, collection_name)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<Collection>, ServerError> {
+    GET_COLLECTION.click();
     tracing::info!("Getting collection [{collection_name}] in database [{database_name}] for tenant [{tenant_id}]");
     let _guard = server.scorecard_request(&[
         "op:get_collection",
@@ -530,6 +627,7 @@ async fn collection_add(
         format!("tenant:{}", tenant_id).as_str(),
         format!("collection:{}", collection_id).as_str(),
     ]);
+    COLLECTION_ADD.click();
     let collection_id =
         CollectionUuid(Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?);
 
@@ -574,6 +672,7 @@ async fn collection_update(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<UpdateCollectionRecordsPayload>,
 ) -> Result<Json<UpdateCollectionRecordsResponse>, ServerError> {
+    COLLECTION_UPDATE.click();
     let collection_id =
         CollectionUuid(Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?);
     let _guard = server.scorecard_request(&[
@@ -623,6 +722,7 @@ async fn collection_upsert(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<UpsertCollectionRecordsPayload>,
 ) -> Result<Json<UpsertCollectionRecordsResponse>, ServerError> {
+    COLLECTION_UPSERT.click();
     let collection_id =
         CollectionUuid(Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?);
     let _guard = server.scorecard_request(&[
@@ -670,6 +770,7 @@ async fn collection_delete(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<DeleteCollectionRecordsPayload>,
 ) -> Result<Json<DeleteCollectionRecordsResponse>, ServerError> {
+    COLLECTION_DELETE.click();
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
     let _guard = server.scorecard_request(&[
@@ -741,6 +842,7 @@ async fn collection_get(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<GetRequestPayload>,
 ) -> Result<Json<GetResponse>, ServerError> {
+    COLLECTION_GET.click();
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
     tracing::info!(
@@ -783,6 +885,7 @@ async fn collection_query(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<QueryRequestPayload>,
 ) -> Result<Json<QueryResponse>, ServerError> {
+    COLLECTION_QUERY.click();
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
     tracing::info!(

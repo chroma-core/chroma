@@ -16,7 +16,7 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Instant, SystemTime};
 
 use axum::extract::{MatchedPath, Request, State};
 use axum::http::header::{HeaderMap, ACCEPT};
@@ -24,6 +24,8 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use biometrics::Collector;
+use biometrics_prometheus::SlashMetrics;
 use chromadb::client::{ChromaAuthMethod, ChromaClientOptions, ChromaTokenHeader};
 use chromadb::ChromaClient;
 use guacamole::combinators::*;
@@ -44,6 +46,31 @@ pub mod words;
 pub mod workloads;
 
 const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
+
+//////////////////////////////////////////// biometrics ////////////////////////////////////////////
+
+static NEW_CLIENT: biometrics::Counter = biometrics::Counter::new("chroma_load__new_client");
+static STEP_COUNT: biometrics::Counter = biometrics::Counter::new("chroma_load__step_count");
+static GET_COUNT: biometrics::Counter = biometrics::Counter::new("chroma_load__get_count");
+static QUERY_COUNT: biometrics::Counter = biometrics::Counter::new("chroma_load__query_count");
+static RATE_LIMITED_COUNT: biometrics::Counter =
+    biometrics::Counter::new("chroma_load__rate_limited_count");
+static LOAD_COUNT: biometrics::Counter = biometrics::Counter::new("chroma_load__load_count");
+static UPSERT_COUNT: biometrics::Counter = biometrics::Counter::new("chroma_load__upsert_count");
+static FAILED_COUNT: biometrics::Counter = biometrics::Counter::new("chroma_load__failed_count");
+static SLEEP_COUNT: biometrics::Counter = biometrics::Counter::new("chroma_load__sleep_count");
+
+pub fn register_biometrics(collector: &Collector) {
+    collector.register_counter(&NEW_CLIENT);
+    collector.register_counter(&STEP_COUNT);
+    collector.register_counter(&GET_COUNT);
+    collector.register_counter(&QUERY_COUNT);
+    collector.register_counter(&RATE_LIMITED_COUNT);
+    collector.register_counter(&LOAD_COUNT);
+    collector.register_counter(&UPSERT_COUNT);
+    collector.register_counter(&FAILED_COUNT);
+    collector.register_counter(&SLEEP_COUNT);
+}
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
@@ -151,6 +178,7 @@ pub async fn client() -> ChromaClient {
 /// Create a new Chroma client for the given URL.  This will use the CHROMA_TOKEN environment
 /// variable if set, or no authentication if unset.
 pub async fn client_for_url(url: String) -> ChromaClient {
+    NEW_CLIENT.click();
     if let Ok(auth) = std::env::var("CHROMA_TOKEN") {
         ChromaClient::new(ChromaClientOptions {
             url: Some(url),
@@ -577,6 +605,7 @@ impl Workload {
                         Value::from(data_set.name()),
                     )],
                 );
+                GET_COUNT.click();
                 data_set
                     .get(client, get.clone(), &mut state.guac)
                     .instrument(tracing::info_span!("get"))
@@ -590,6 +619,7 @@ impl Workload {
                         Value::from(data_set.name()),
                     )],
                 );
+                QUERY_COUNT.click();
                 metrics.query.add(
                     1,
                     &[KeyValue::new(
@@ -637,6 +667,7 @@ impl Workload {
                         Value::from(data_set.name()),
                     )],
                 );
+                LOAD_COUNT.click();
                 data_set
                     .upsert(
                         client,
@@ -653,6 +684,7 @@ impl Workload {
                     .await
             }
             Workload::RandomUpsert(key) => {
+                UPSERT_COUNT.click();
                 metrics.upsert.add(
                     1,
                     &[KeyValue::new(
@@ -1174,6 +1206,7 @@ impl LoadService {
             while let Some(task) = rx.recv().await {
                 if let Err(err) = task.await.unwrap() {
                     if !format!("{err:?}").contains("429") {
+                        FAILED_COUNT.click();
                         this.metrics.failed.add(
                             1,
                             &[KeyValue::new(
@@ -1183,6 +1216,7 @@ impl LoadService {
                         );
                         tracing::error!("workload task failed: {err:?}");
                     } else {
+                        RATE_LIMITED_COUNT.click();
                         this.metrics.limited.add(
                             1,
                             &[KeyValue::new(
@@ -1225,6 +1259,7 @@ impl LoadService {
             next_op += delay;
             let now = Instant::now();
             if next_op > now {
+                SLEEP_COUNT.click();
                 tokio::time::sleep(next_op - now).await;
             }
             if inhibit.load(std::sync::atomic::Ordering::Relaxed) {
@@ -1253,6 +1288,7 @@ impl LoadService {
                 let guac = Guacamole::new(any(&mut guac));
                 let mut state = WorkloadState { seq_no, guac };
                 let fut = async move {
+                    STEP_COUNT.click();
                     this.metrics.step.add(
                         1,
                         &[KeyValue::new(
@@ -1427,6 +1463,20 @@ POST /uninhibit stop inhibiting load generation.
     }
 }
 
+async fn metrics() -> String {
+    let mut metrics = SlashMetrics::new();
+    let collector = Collector::new();
+    register_biometrics(&collector);
+    let _ = collector.emit(
+        &mut metrics,
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64,
+    );
+    metrics.take()
+}
+
 async fn start(
     State(state): State<AppState>,
     Json(req): Json<rest::StartRequest>,
@@ -1480,6 +1530,7 @@ pub async fn entrypoint() {
     };
     let app = Router::new()
         .route("/", get(readme))
+        .route("/metrics", get(metrics))
         .route("/start", post(start))
         .route("/stop", post(stop))
         .route("/inhibit", post(inhibit))

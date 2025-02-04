@@ -29,3 +29,5 @@ guacamole = { version = "0.9", default-features = false }
 tower-http = { workspace = true }
 reqwest = { version = "0.12", features = ["json"] }
 siphasher = "1.0.1"
+biometrics = "0.11.0"
+biometrics_prometheus = "0.7.0"

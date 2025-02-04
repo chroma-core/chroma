@@ -996,6 +996,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "biometrics"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a57ccb987381ca5b26969c7fd54582060e51b6582b3450b433307ae14fc4ab0"
+dependencies = [
+ "sig_fig_histogram",
+]
+
+[[package]]
+name = "biometrics_prometheus"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "26dd4a6ef489639a410ccd4ab786484b6a8f1a49567ed70174aa73eb3ac30870"
+dependencies = [
+ "biometrics",
+ "libc",
+ "utf8path",
+]
+
+[[package]]
+name = "biometrics_prometheus"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "46c150a8ff15ec7a7dc5d79893d545da4709e841c0ba3565374b9154d1ff26d4"
+dependencies = [
+ "biometrics",
+ "libc",
+ "utf8path",
+]
+
+[[package]]
 name = "bit-set"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1329,6 +1360,8 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "axum",
+ "biometrics",
+ "biometrics_prometheus 0.7.0",
  "chromadb",
  "chrono",
  "clap",
@@ -2478,6 +2511,8 @@ dependencies = [
  "async-trait",
  "axum",
  "backon",
+ "biometrics",
+ "biometrics_prometheus 0.8.0",
  "chroma-cache",
  "chroma-config",
  "chroma-error",
@@ -5858,6 +5893,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "sig_fig_histogram"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d24c02bfc98e643a117cb6d1f436b6642359241c99ada47ff83a0ee351b3c531"
+
+[[package]]
 name = "signal-hook-registry"
 version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7113,6 +7154,12 @@ name = "utf8parse"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
+
+[[package]]
+name = "utf8path"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "116f50178d1c25e91babfe61fff3c1a8b76c0fa6cca5f12ca51ae106e6c7830e"
 
 [[package]]
 name = "uuid"
