@@ -263,7 +263,7 @@ impl SqliteLog {
             GROUP BY
                 collections.id
             HAVING
-                COUNT(*) >= ?
+                COUNT(*) > ?
             ORDER BY first_log_ts ASC
             "#,
         )
@@ -276,7 +276,7 @@ impl SqliteLog {
         while let Some(row) = results.try_next().await.map_err(WrappedSqlxError)? {
             infos.push(CollectionInfo {
                 collection_id: CollectionUuid::from_str(row.get::<&str, _>("collection_id"))
-                    .unwrap(),
+                    .unwrap(), // todo
                 first_log_offset: row.get("first_log_offset"),
                 first_log_ts: row.get("first_log_ts"),
             });
@@ -339,7 +339,77 @@ mod tests {
     use chroma_sqlite::config::SqliteDBConfig;
     use chroma_types::{are_metadatas_close_to_equal, CollectionUuid};
     use proptest::prelude::*;
+    use tempfile::tempdir;
     use tokio::runtime::Runtime;
+
+    async fn setup_sqlite_log() -> SqliteLog {
+        let path = tempdir().unwrap().into_path().join("test.db");
+        let db = SqliteDb::try_from_config(&SqliteDBConfig {
+            url: path.to_str().unwrap().to_string(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+        SqliteLog {
+            db,
+            tenant_id: "default".to_string(),
+            topic_namespace: "default".to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_log_offset() {
+        let mut log = setup_sqlite_log().await;
+
+        let collection_id = CollectionUuid::new();
+
+        // TODO: remove this when there's a sysdb implementation in Rust
+        sqlx::query(
+            r#"
+            INSERT INTO segments (id, type, scope, collection) VALUES ('foo', 'foo', 'foo', ?);
+            INSERT INTO collections (id, name, database_id) VALUES (?, 'foo', 0);
+        "#,
+        )
+        .bind(collection_id.0.to_string())
+        .bind(collection_id.0.to_string())
+        .execute(log.db.get_conn())
+        .await
+        .unwrap();
+
+        let collections_with_data = log.get_collections_with_new_data(0).await.unwrap();
+        assert_eq!(collections_with_data.len(), 0);
+
+        // Push a log
+        let operations = vec![OperationRecord {
+            id: "id".to_string(),
+            embedding: Some(vec![1.0, 2.0, 3.0]),
+            encoding: Some(ScalarEncoding::FLOAT32),
+            metadata: None,
+            document: None,
+            operation: Operation::Add,
+        }];
+        log.push_logs(collection_id, operations).await.unwrap();
+
+        let collections_with_data = log.get_collections_with_new_data(0).await.unwrap();
+        assert_eq!(collections_with_data.len(), 1);
+
+        let collections_with_data = log.get_collections_with_new_data(1).await.unwrap();
+        assert_eq!(collections_with_data.len(), 0);
+
+        // Update log offset
+        log.update_collection_log_offset(collection_id, 0)
+            .await
+            .unwrap();
+        let collections_with_data = log.get_collections_with_new_data(0).await.unwrap();
+        assert_eq!(collections_with_data.len(), 1);
+
+        log.update_collection_log_offset(collection_id, 1)
+            .await
+            .unwrap();
+        let collections_with_data = log.get_collections_with_new_data(0).await.unwrap();
+        assert_eq!(collections_with_data.len(), 0);
+    }
 
     proptest! {
         #[test]
@@ -351,19 +421,7 @@ mod tests {
             let runtime = Runtime::new().unwrap();
 
             runtime.block_on(async {
-                let db_file = tempfile::NamedTempFile::new().unwrap();
-                let db = SqliteDb::try_from_config(&SqliteDBConfig {
-                    url: db_file.path().to_str().unwrap().to_string(),
-                    ..Default::default()
-                })
-                .await
-                .unwrap();
-
-                let mut log = SqliteLog {
-                    db,
-                    tenant_id: "default".to_string(),
-                    topic_namespace: "default".to_string(),
-                };
+                let mut log = setup_sqlite_log().await;
 
                 let collection_id = CollectionUuid::new();
                 log.push_logs(collection_id, operations.clone()).await.unwrap();
