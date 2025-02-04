@@ -1,4 +1,5 @@
 mod bindings;
+mod compaction_manager;
 
 use bindings::Bindings;
 use pyo3::prelude::*;

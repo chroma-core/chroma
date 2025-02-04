@@ -5,7 +5,8 @@ use std::time::SystemTime;
 pub(crate) struct Bindings {
     // TODO(sanketkedia, hammadb): Add ServerAPI handle here
     // server_api_handle: ComponentHandle<ServerAPI>,
-    // runtime: tokio::runtime::Runtime,
+    #[allow(dead_code)]
+    runtime: tokio::runtime::Runtime,
     // TODO(hammadb): In order to make CI green, we proxy all
     // calls back into python.
     // We should slowly start moving the logic from python to rust
@@ -18,7 +19,18 @@ impl Bindings {
     #[new]
     #[allow(dead_code)]
     pub fn py_new(proxy_frontend: Py<PyAny>) -> Self {
-        Bindings { proxy_frontend }
+        let runtime = tokio::runtime::Runtime::new().expect("Failed to create a runtime");
+        // TODO(Sanket): Construct an instance of local compaction manager and spawn it
+        // like this.
+        // let _guard = runtime.enter();
+        // let _system = System::new();
+        // let local_compaction_manager =
+        //     compaction_manager::LocalCompactionManager::new(Box::new(server_api.get_log()));
+        // let compaction_handler = system.start_component(local_compaction_manager);
+        Bindings {
+            proxy_frontend,
+            runtime,
+        }
     }
 
     /// Returns the current eopch time in ns

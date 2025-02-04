@@ -9,4 +9,8 @@ name = "rust_bindings"
 crate-type = ["cdylib"]
 
 [dependencies]
+async-trait = { workspace = true }
 pyo3 = "0.23.3"
+tokio = { workspace = true }
+chroma-log = { workspace = true }
+chroma-system = { workspace = true }
