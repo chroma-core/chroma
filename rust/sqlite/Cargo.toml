@@ -4,11 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-sqlx = { workspace = true }
-sha2 = { workspace = true}
+md5 = { workspace = true }
 regex = { workspace = true }
-tokio = { workspace = true}
-md5 = { workspace = true}
 rust-embed = {version = "8.5.0", features = ["include-exclude"]}
-thiserror = { workspace = true }
+sea-query = { workspace = true, features = ["derive"] }
+sha2 = { workspace = true}
+sqlx = { workspace = true }
 tempfile = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true}
