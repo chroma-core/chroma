@@ -1,12 +1,15 @@
+use std::collections::{BTreeMap, HashMap};
+
 use chroma_sqlite::{
     db::SqliteDb,
     table::{EmbeddingFulltextSearch, EmbeddingMetadata, Embeddings},
 };
 use chroma_types::{
-    operator::{CountResult, Filter, GetResult, Limit, Projection, Scan},
+    operator::{CountResult, Filter, GetResult, Limit, Projection, ProjectionRecord, Scan},
     plan::{Count, Get},
     BooleanOperator, CompositeExpression, DocumentExpression, DocumentOperator, MetadataComparison,
     MetadataExpression, MetadataSetValue, MetadataValue, PrimitiveOperator, SetOperator, Where,
+    CHROMA_DOCUMENT_KEY,
 };
 use sea_query::{Cond, Expr, Func, IntoCondition, Query, SqliteQueryBuilder};
 use sea_query_binder::SqlxBinder;
@@ -175,24 +178,26 @@ impl SqliteMetadataReader {
             );
         }
 
-        query
-            .from(Embeddings::Table)
-            .and_where(
-                Expr::col((Embeddings::Table, Embeddings::SegmentId))
-                    .eq(collection_and_segments.metadata_segment.id.to_string()),
-            )
-            .left_join(
-                EmbeddingMetadata::Table,
-                Expr::col((Embeddings::Table, Embeddings::Id))
-                    .eq(Expr::col((EmbeddingMetadata::Table, EmbeddingMetadata::Id))),
-            )
-            .left_join(
-                EmbeddingFulltextSearch::Table,
-                Expr::col((Embeddings::Table, Embeddings::Id)).eq(Expr::col((
+        query.from(Embeddings::Table).and_where(
+            Expr::col((Embeddings::Table, Embeddings::SegmentId))
+                .eq(collection_and_segments.metadata_segment.id.to_string()),
+        );
+
+        if document || metadata || where_clause.is_some() {
+            query
+                .left_join(
+                    EmbeddingMetadata::Table,
+                    Expr::col((Embeddings::Table, Embeddings::Id))
+                        .eq(Expr::col((EmbeddingMetadata::Table, EmbeddingMetadata::Id))),
+                )
+                .left_join(
                     EmbeddingFulltextSearch::Table,
-                    EmbeddingFulltextSearch::Rowid,
-                ))),
-            );
+                    Expr::col((Embeddings::Table, Embeddings::Id)).eq(Expr::col((
+                        EmbeddingFulltextSearch::Table,
+                        EmbeddingFulltextSearch::Rowid,
+                    ))),
+                );
+        }
 
         if let Some(ids) = &query_ids {
             query.cond_where(Expr::col((Embeddings::Table, Embeddings::EmbeddingId)).is_in(ids));
@@ -211,10 +216,51 @@ impl SqliteMetadataReader {
         }
 
         let (sql, values) = query.build_sqlx(SqliteQueryBuilder);
-        let results = sqlx::query_with(&sql, values)
+        let rows = sqlx::query_with(&sql, values)
             .fetch_all(self.db.get_conn())
             .await?;
-        todo!()
+
+        let mut records = BTreeMap::new();
+
+        for row in rows {
+            let id: String = row.try_get(0)?;
+            let record = records.entry(id.clone()).or_insert(ProjectionRecord {
+                id,
+                document: None,
+                embedding: None,
+                metadata: metadata.then_some(HashMap::new()),
+            });
+
+            if document || metadata {
+                if let Ok(key) = row.try_get::<String, _>(1) {
+                    if let (true, Ok(doc)) = (
+                        document && key.starts_with(CHROMA_DOCUMENT_KEY),
+                        row.try_get(2),
+                    ) {
+                        record.document = Some(doc);
+                    }
+
+                    if let Some(metadata) = record.metadata.as_mut() {
+                        if let Ok(s) = row.try_get(2) {
+                            metadata.insert(key.clone(), MetadataValue::Str(s));
+                        }
+                        if let Ok(i) = row.try_get(3) {
+                            metadata.insert(key.clone(), MetadataValue::Int(i));
+                        }
+                        if let Ok(f) = row.try_get(4) {
+                            metadata.insert(key.clone(), MetadataValue::Float(f));
+                        }
+                        if let Ok(b) = row.try_get(5) {
+                            metadata.insert(key, MetadataValue::Bool(b));
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(GetResult {
+            records: records.into_values().collect(),
+        })
     }
 }
 
