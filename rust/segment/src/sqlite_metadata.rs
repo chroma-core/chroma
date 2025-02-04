@@ -11,10 +11,12 @@ use chroma_types::{
     MetadataExpression, MetadataSetValue, MetadataValue, PrimitiveOperator, SetOperator, Where,
     CHROMA_DOCUMENT_KEY,
 };
-use sea_query::{Expr, Func, Query, SimpleExpr, SqliteQueryBuilder};
+use sea_query::{Alias, Expr, Func, Query, SimpleExpr, SqliteQueryBuilder};
 use sea_query_binder::SqlxBinder;
 use sqlx::Row;
 use thiserror::Error;
+
+const SUBQ_ALIAS: &str = "filter_limit_subq";
 
 #[derive(Debug, Error)]
 pub enum SqliteMetadataError {
@@ -179,7 +181,10 @@ impl SqliteMetadataReader {
         }: Get,
     ) -> Result<GetResult, SqliteMetadataError> {
         let mut filter_limit_query = Query::select();
-        filter_limit_query.column((Embeddings::Table, Embeddings::Id));
+        filter_limit_query.columns([
+            (Embeddings::Table, Embeddings::Id),
+            (Embeddings::Table, Embeddings::EmbeddingId),
+        ]);
         filter_limit_query.from(Embeddings::Table).and_where(
             Expr::col((Embeddings::Table, Embeddings::SegmentId))
                 .eq(collection_and_segments.metadata_segment.id.to_string()),
@@ -220,27 +225,18 @@ impl SqliteMetadataReader {
             .offset(skip as u64)
             .limit(fetch.unwrap_or(u32::MAX) as u64);
 
+        let alias = Alias::new(SUBQ_ALIAS);
         let mut projection_query = Query::select();
         projection_query
-            .column((Embeddings::Table, Embeddings::EmbeddingId))
-            .from(Embeddings::Table)
-            .and_where(
-                Expr::col((Embeddings::Table, Embeddings::Id)).in_subquery(filter_limit_query),
-            );
+            .column((alias.clone(), Embeddings::EmbeddingId))
+            .from_subquery(filter_limit_query, alias.clone());
 
         if document || metadata {
             projection_query
                 .left_join(
                     EmbeddingMetadata::Table,
-                    Expr::col((Embeddings::Table, Embeddings::Id))
-                        .eq(Expr::col((EmbeddingMetadata::Table, EmbeddingMetadata::Id))),
-                )
-                .left_join(
-                    EmbeddingFulltextSearch::Table,
-                    Expr::col((Embeddings::Table, Embeddings::Id)).eq(Expr::col((
-                        EmbeddingFulltextSearch::Table,
-                        EmbeddingFulltextSearch::Rowid,
-                    ))),
+                    Expr::col((alias.clone(), Embeddings::Id))
+                        .equals((EmbeddingMetadata::Table, EmbeddingMetadata::Id)),
                 )
                 .columns(
                     [
@@ -255,8 +251,6 @@ impl SqliteMetadataReader {
         }
 
         let (sql, values) = projection_query.build_sqlx(SqliteQueryBuilder);
-        println!("{sql}");
-        println!("{values:?}");
 
         let rows = sqlx::query_with(&sql, values)
             .fetch_all(self.db.get_conn())
@@ -305,18 +299,12 @@ impl SqliteMetadataReader {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
-    use chroma_sqlite::{
-        config::{MigrationHash, MigrationMode, SqliteDBConfig},
-        db::{test_utils::get_new_sqlite_db, SqliteDb},
-    };
+    use chroma_sqlite::db::test_utils::get_new_sqlite_db;
     use chroma_types::{
         operator::{Filter, Limit, Projection, Scan},
         plan::{Count, Get},
-        BooleanOperator, CollectionAndSegments, CompositeExpression, DocumentExpression,
-        MetadataComparison, MetadataExpression, MetadataValue, PrimitiveOperator, SegmentUuid,
-        Where,
+        BooleanOperator, CompositeExpression, DocumentExpression, MetadataComparison,
+        MetadataExpression, MetadataValue, PrimitiveOperator, Where,
     };
 
     use crate::test::TestSegment;
@@ -344,10 +332,10 @@ mod tests {
             db: get_new_sqlite_db().await,
         };
 
-        let result = metadata_reader
+        let _result = metadata_reader
             .get(Get {
                 scan: Scan {
-                    collection_and_segments,
+                    collection_and_segments: TestSegment::default().into(),
                 },
                 filter: Filter {
                     query_ids: None,
