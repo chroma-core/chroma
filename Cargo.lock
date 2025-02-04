@@ -2489,6 +2489,7 @@ dependencies = [
  "chroma-types",
  "figment",
  "mdac",
+ "opentelemetry",
  "parking_lot",
  "rand",
  "regex",
