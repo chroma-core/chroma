@@ -83,6 +83,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         if "json" in kwargs:
             data = orjson.dumps(kwargs.pop("json"))
             kwargs["content"] = data
+            kwargs["headers"] = {"Content-Type": "application/json"}
 
         # Unlike requests, httpx does not automatically escape the path
         escaped_path = urllib.parse.quote(path, safe="/", encoding=None, errors=None)
