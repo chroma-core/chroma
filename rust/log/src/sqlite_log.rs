@@ -2,8 +2,8 @@ use crate::{CollectionInfo, WrappedSqlxError};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_sqlite::db::SqliteDb;
 use chroma_types::{
-    CollectionUuid, LogRecord, Operation, OperationRecord, ScalarEncoding,
-    ScalarEncodingConversionError, UpdateMetadata, UpdateMetadataValue,
+    CollectionConversionError, CollectionUuid, LogRecord, Operation, OperationRecord,
+    ScalarEncoding, ScalarEncodingConversionError, UpdateMetadata, UpdateMetadataValue,
 };
 use futures::TryStreamExt;
 use sqlx::{QueryBuilder, Row};
@@ -54,12 +54,15 @@ impl ChromaError for SqlitePushLogsError {
 pub enum SqliteGetCollectionsWithNewDataError {
     #[error("Query error: {0}")]
     QueryError(#[from] WrappedSqlxError),
+    #[error("Invalid collection ID: {0}")]
+    InvalidCollectionId(#[from] CollectionConversionError),
 }
 
 impl ChromaError for SqliteGetCollectionsWithNewDataError {
     fn code(&self) -> ErrorCodes {
         match self {
             SqliteGetCollectionsWithNewDataError::QueryError(err) => err.code(),
+            SqliteGetCollectionsWithNewDataError::InvalidCollectionId(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -275,8 +278,7 @@ impl SqliteLog {
         let mut infos = Vec::new();
         while let Some(row) = results.try_next().await.map_err(WrappedSqlxError)? {
             infos.push(CollectionInfo {
-                collection_id: CollectionUuid::from_str(row.get::<&str, _>("collection_id"))
-                    .unwrap(), // todo
+                collection_id: CollectionUuid::from_str(row.get::<&str, _>("collection_id"))?,
                 first_log_offset: row.get("first_log_offset"),
                 first_log_ts: row.get("first_log_ts"),
             });
