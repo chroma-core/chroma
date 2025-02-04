@@ -256,6 +256,35 @@ UpdateMetadata
 */
 pub type UpdateMetadata = HashMap<String, UpdateMetadataValue>;
 
+/**
+ * Check if two metadata are close to equal. Ignores small differences in float values.
+ */
+pub fn are_metadatas_close_to_equal(
+    metadata1: &UpdateMetadata,
+    metadata2: &UpdateMetadata,
+) -> bool {
+    assert_eq!(metadata1.len(), metadata2.len());
+
+    for (key, value) in metadata1.iter() {
+        if !metadata2.contains_key(key) {
+            return false;
+        }
+        let other_value = metadata2.get(key).unwrap();
+
+        if let (UpdateMetadataValue::Float(value), UpdateMetadataValue::Float(other_value)) =
+            (value, other_value)
+        {
+            if (value - other_value).abs() > 1e-6 {
+                return false;
+            }
+        } else if value != other_value {
+            return false;
+        }
+    }
+
+    true
+}
+
 impl TryFrom<chroma_proto::UpdateMetadata> for UpdateMetadata {
     type Error = UpdateMetadataValueConversionError;
 
