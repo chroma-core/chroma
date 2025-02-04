@@ -32,3 +32,5 @@ chroma-sqlite = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+proptest = { workspace = true }
+chroma-types = { workspace = true, features = ["testing"] }
