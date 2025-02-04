@@ -757,26 +757,29 @@ impl HealthCheckResponse {
 
 #[derive(Debug, Error)]
 pub enum ExecutorError {
-    #[error("Error converting: {0}")]
-    Conversion(#[from] QueryConversionError),
-    #[error("Error from grpc: {0}")]
-    Grpc(#[from] Status),
-    #[error("Memberlist is empty")]
-    EmptyMemberlist,
     #[error("Assignment error: {0}")]
     AssignmentError(#[from] AssignmentError),
+    #[error("Error converting: {0}")]
+    Conversion(#[from] QueryConversionError),
+    #[error("Memberlist is empty")]
+    EmptyMemberlist,
+    #[error(transparent)]
+    Grpc(#[from] Status),
     #[error("No client found for node: {0}")]
     NoClientFound(String),
+    #[error("Sqlite error: {0}")]
+    Sqlite(Box<dyn ChromaError>),
 }
 
 impl ChromaError for ExecutorError {
     fn code(&self) -> ErrorCodes {
         match self {
-            ExecutorError::Conversion(_) => ErrorCodes::InvalidArgument,
-            ExecutorError::Grpc(e) => e.code().into(),
-            ExecutorError::EmptyMemberlist => ErrorCodes::Internal,
             ExecutorError::AssignmentError(_) => ErrorCodes::Internal,
+            ExecutorError::Conversion(_) => ErrorCodes::InvalidArgument,
+            ExecutorError::EmptyMemberlist => ErrorCodes::Internal,
+            ExecutorError::Grpc(e) => e.code().into(),
             ExecutorError::NoClientFound(_) => ErrorCodes::Internal,
+            ExecutorError::Sqlite(e) => e.code(),
         }
     }
 }

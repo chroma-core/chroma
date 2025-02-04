@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 
+use chroma_error::{ChromaError, ErrorCodes};
 use chroma_sqlite::{
     db::SqliteDb,
     table::{EmbeddingFulltextSearch, EmbeddingMetadata, Embeddings},
@@ -22,6 +23,12 @@ const SUBQ_ALIAS: &str = "filter_limit_subq";
 pub enum SqliteMetadataError {
     #[error(transparent)]
     Sqlite(#[from] sqlx::Error),
+}
+
+impl ChromaError for SqliteMetadataError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::Internal
+    }
 }
 
 trait IntoSqliteExpr {
@@ -135,6 +142,7 @@ impl IntoSqliteExpr for MetadataExpression {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct SqliteMetadataReader {
     pub db: SqliteDb,
 }
