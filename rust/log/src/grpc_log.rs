@@ -24,7 +24,7 @@ pub enum GrpcPullLogsError {
 impl ChromaError for GrpcPullLogsError {
     fn code(&self) -> ErrorCodes {
         match self {
-            GrpcPullLogsError::FailedToPullLogs(_) => ErrorCodes::Internal,
+            GrpcPullLogsError::FailedToPullLogs(err) => err.code().into(),
             GrpcPullLogsError::ConversionError(_) => ErrorCodes::Internal,
         }
     }
