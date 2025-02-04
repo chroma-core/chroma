@@ -2488,6 +2488,7 @@ dependencies = [
  "chroma-error",
  "chroma-log",
  "chroma-memberlist",
+ "chroma-segment",
  "chroma-sysdb",
  "chroma-system",
  "chroma-tracing",
