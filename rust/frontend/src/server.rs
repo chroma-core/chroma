@@ -841,7 +841,6 @@ async fn collection_get(
         1,
         &[
             KeyValue::new("tenant_id", tenant_id.clone()),
-            KeyValue::new("database_name", database_name.clone()),
             KeyValue::new("collection_id", collection_id.clone()),
         ],
     );
@@ -891,7 +890,6 @@ async fn collection_query(
         1,
         &[
             KeyValue::new("tenant_id", tenant_id.clone()),
-            KeyValue::new("database_name", database_name.clone()),
             KeyValue::new("collection_id", collection_id.clone()),
         ],
     );
