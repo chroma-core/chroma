@@ -108,7 +108,7 @@ impl SqliteLog {
               metadata
             FROM embeddings_queue
             WHERE topic = ?
-            AND seq_id >= ?
+            AND seq_id > ?
             AND CAST(strftime('%s', created_at) AS INTEGER) <= (? / 1000000000)
             ORDER BY seq_id ASC
             LIMIT ?
@@ -194,6 +194,10 @@ impl SqliteLog {
         collection_id: CollectionUuid,
         records: Vec<OperationRecord>,
     ) -> Result<(), SqlitePushLogsError> {
+        if records.is_empty() {
+            return Ok(());
+        }
+
         let topic = get_topic_name(&self.tenant_id, &self.topic_namespace, collection_id);
 
         let records_and_serialized_metadatas = records
@@ -333,53 +337,68 @@ fn operation_to_code(operation: Operation) -> u32 {
 mod tests {
     use super::*;
     use chroma_sqlite::config::SqliteDBConfig;
-    use chroma_types::CollectionUuid;
+    use chroma_types::{are_metadatas_close_to_equal, CollectionUuid};
+    use proptest::prelude::*;
+    use tokio::runtime::Runtime;
 
-    #[tokio::test]
-    async fn test_push_pull_logs() {
-        let db_file = tempfile::NamedTempFile::new().unwrap();
-        let db = SqliteDb::try_from_config(&SqliteDBConfig {
-            url: db_file.path().to_str().unwrap().to_string(),
-            ..Default::default()
-        })
-        .await
-        .unwrap();
+    proptest! {
+        #[test]
+         fn test_push_pull_logs(
+            read_offset in 0usize..=100,
+            batch_size in 0usize..=100,
+            operations in proptest::collection::vec(any::<OperationRecord>(), 0..100)
+        ) {
+            let runtime = Runtime::new().unwrap();
 
-        let mut log = SqliteLog {
-            db,
-            tenant_id: "default".to_string(),
-            topic_namespace: "default".to_string(),
-        };
+            runtime.block_on(async {
+                let db_file = tempfile::NamedTempFile::new().unwrap();
+                let db = SqliteDb::try_from_config(&SqliteDBConfig {
+                    url: db_file.path().to_str().unwrap().to_string(),
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
 
-        let collection_id = CollectionUuid::new();
+                let mut log = SqliteLog {
+                    db,
+                    tenant_id: "default".to_string(),
+                    topic_namespace: "default".to_string(),
+                };
 
-        let mut metadata = UpdateMetadata::new();
-        metadata.insert(
-            "foo".to_string(),
-            UpdateMetadataValue::Str("bar".to_string()),
-        );
+                let collection_id = CollectionUuid::new();
+                log.push_logs(collection_id, operations.clone()).await.unwrap();
 
-        let record_to_add = OperationRecord {
-            id: "foo".to_string(),
-            embedding: Some(vec![1.0, 2.0, 3.0]),
-            encoding: Some(ScalarEncoding::FLOAT32),
-            metadata: Some(metadata),
-            document: Some("bar".to_string()),
-            operation: Operation::Add,
-        };
+                let read_logs = log.read(collection_id, read_offset as i64, batch_size as i32, None)
+                    .await
+                    .unwrap();
 
-        log.push_logs(collection_id, vec![record_to_add.clone()])
-            .await
-            .unwrap();
+                let expected_length = batch_size.min(operations.len().saturating_sub(read_offset));
 
-        let logs = log.read(collection_id, 0, 100, None).await.unwrap();
-        let added_log = logs.iter().find(|log| log.record.id == "foo").unwrap();
+                assert_eq!(read_logs.len(), expected_length);
 
-        assert_eq!(added_log.record.id, record_to_add.id);
-        assert_eq!(added_log.record.embedding, record_to_add.embedding);
-        assert_eq!(added_log.record.encoding, record_to_add.encoding);
-        assert_eq!(added_log.record.metadata, record_to_add.metadata);
-        assert_eq!(added_log.record.document, record_to_add.document);
-        assert_eq!(added_log.record.operation, record_to_add.operation);
+                for i in 0..expected_length {
+                    let operation = &operations[i + read_offset];
+                    let log = &read_logs[i];
+
+                    let expected_metadata = operation.metadata.clone().unwrap_or_default();
+                    let received_metadata = log.record.metadata.clone().unwrap();
+
+                    assert!(log.record.id == operation.id);
+                    assert!(log.record.embedding == operation.embedding);
+                    assert!(log.record.encoding == operation.encoding);
+                    assert!(
+                        are_metadatas_close_to_equal(
+                            &received_metadata,
+                            &expected_metadata
+                        ),
+                        "{:?} != {:?}",
+                        received_metadata,
+                        expected_metadata
+                    );
+                    assert!(log.record.document == operation.document);
+                    assert!(log.record.operation == operation.operation);
+                }
+            });
+        }
     }
 }
