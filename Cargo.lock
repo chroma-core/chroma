@@ -1365,6 +1365,7 @@ dependencies = [
  "chroma-types",
  "futures",
  "opentelemetry",
+ "proptest",
  "rand",
  "serde",
  "serde_json",
