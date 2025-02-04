@@ -235,6 +235,6 @@ func (s *Coordinator) ListCollectionsToGc(ctx context.Context) ([]*model.Collect
 	return s.catalog.ListCollectionsToGc(ctx)
 }
 
-func (s *Coordinator) ListCollectionVersions(ctx context.Context, collectionID types.UniqueID, tenantID string, maxCount *int64, versionsBefore int64, versionsAtOrAfter int64) ([]*coordinatorpb.CollectionVersionInfo, error) {
+func (s *Coordinator) ListCollectionVersions(ctx context.Context, collectionID types.UniqueID, tenantID string, maxCount *int64, versionsBefore *int64, versionsAtOrAfter *int64) ([]*coordinatorpb.CollectionVersionInfo, error) {
 	return s.catalog.ListCollectionVersions(ctx, collectionID, tenantID, maxCount, versionsBefore, versionsAtOrAfter)
 }
