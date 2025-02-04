@@ -25,6 +25,7 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chromadb::client::{ChromaAuthMethod, ChromaClientOptions, ChromaTokenHeader};
+use chromadb::collection::GetResult;
 use chromadb::ChromaClient;
 use guacamole::combinators::*;
 use guacamole::{Guacamole, Zipf};
@@ -194,6 +195,19 @@ pub trait DataSet: std::fmt::Debug + Send + Sync {
     /// requesting JSON.
     fn json(&self) -> serde_json::Value;
 
+    /// The number of documents in the data set.
+    fn cardinality(&self) -> usize;
+
+    /// Get documents by key.  This is used when one workload references another.  Return None to
+    /// indicate the data set does not support referencing by index.
+    async fn get_by_key(
+        &self,
+        _: &ChromaClient,
+        _: &[&str],
+    ) -> Result<Option<GetResult>, Box<dyn std::error::Error + Send>> {
+        Ok(None)
+    }
+
     /// Get documents from the data set.
     ///
     /// The semantics of this call is that it should loosely translate to a non-vector query,
@@ -203,7 +217,7 @@ pub trait DataSet: std::fmt::Debug + Send + Sync {
         client: &ChromaClient,
         gq: GetQuery,
         guac: &mut Guacamole,
-    ) -> Result<(), Box<dyn std::error::Error>>;
+    ) -> Result<(), Box<dyn std::error::Error + Send>>;
 
     /// Query documents from the data set.
     ///
@@ -214,7 +228,7 @@ pub trait DataSet: std::fmt::Debug + Send + Sync {
         client: &ChromaClient,
         vq: QueryQuery,
         guac: &mut Guacamole,
-    ) -> Result<(), Box<dyn std::error::Error>>;
+    ) -> Result<(), Box<dyn std::error::Error + Send>>;
 
     /// Upsert documents into the data set.
     ///
@@ -225,7 +239,7 @@ pub trait DataSet: std::fmt::Debug + Send + Sync {
         client: &ChromaClient,
         uq: UpsertQuery,
         guac: &mut Guacamole,
-    ) -> Result<(), Box<dyn std::error::Error>>;
+    ) -> Result<(), Box<dyn std::error::Error + Send>>;
 }
 
 /////////////////////////////////////////// Distribution ///////////////////////////////////////////
@@ -286,6 +300,18 @@ pub enum Skew {
     /// skewed.  Try 0.9 and add nines for skew.
     #[serde(rename = "zipf")]
     Zipf { theta: f64 },
+}
+
+impl Skew {
+    pub fn sample(&self, guac: &mut Guacamole, cardinality: usize) -> usize {
+        match self {
+            Skew::Uniform => uniform(0, cardinality)(guac),
+            Skew::Zipf { theta } => {
+                let z = Zipf::from_theta(cardinality as u64, *theta);
+                z.next(guac) as usize
+            }
+        }
+    }
 }
 
 impl Eq for Skew {}
@@ -453,6 +479,17 @@ pub enum KeySelector {
     Random(Skew),
 }
 
+impl KeySelector {
+    /// Select a key from the distribution.
+    pub fn select(&self, guac: &mut Guacamole, data_set: &dyn DataSet) -> String {
+        let index = match self {
+            KeySelector::Index(i) => *i,
+            KeySelector::Random(skew) => skew.sample(guac, data_set.cardinality()),
+        };
+        format!("{:0>16}", index)
+    }
+}
+
 //////////////////////////////////////////// UpsertQuery ///////////////////////////////////////////
 
 /// An upsert query specifies an upsert operation in Chroma.
@@ -552,7 +589,7 @@ impl Workload {
         metrics: &Metrics,
         data_set: &dyn DataSet,
         state: &mut WorkloadState,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn std::error::Error + Send>> {
         match self {
             Workload::Nop => {
                 tracing::info!("nop");
@@ -1674,5 +1711,22 @@ mod tests {
             assert_eq!(expected, harness.running[0]);
         }
         std::fs::remove_file(TEST_PATH).ok();
+    }
+
+    #[test]
+    fn key_selector() {
+        let key = KeySelector::Index(42);
+        let mut guac = Guacamole::new(0);
+        let data_set = data_sets::from_json(&serde_json::json!({
+            "tiny_stories": {
+                "name": "stories1",
+                "model": data_sets::ALL_MINILM_L6_V2,
+                "size": 100_000,
+            }
+        }));
+        assert_eq!(
+            "0000000000000042",
+            key.select(&mut guac, &*data_set.unwrap())
+        );
     }
 }
