@@ -348,7 +348,8 @@ mod tests {
         let path = tempdir().unwrap().into_path().join("test.db");
         let db = SqliteDb::try_from_config(&SqliteDBConfig {
             url: path.to_str().unwrap().to_string(),
-            ..Default::default()
+            migration_mode: chroma_sqlite::config::MigrationMode::Apply,
+            hash_type: chroma_sqlite::config::MigrationHash::SHA256,
         })
         .await
         .unwrap();
