@@ -3,6 +3,7 @@ pub mod grpc_log;
 pub mod in_memory_log;
 #[allow(clippy::module_inception)]
 mod log;
+pub mod sqlite_log;
 pub mod test;
 pub mod types;
 

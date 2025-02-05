@@ -9,7 +9,7 @@ use thiserror::Error;
 
 use crate::chroma_proto;
 
-#[derive(Clone, Debug, PartialEq, PartialOrd, Deserialize)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum UpdateMetadataValue {
     Bool(bool),

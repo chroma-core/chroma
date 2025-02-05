@@ -1,6 +1,4 @@
-use crate::types::{
-    CollectionInfo, GetCollectionsWithNewDataError, PullLogsError, UpdateCollectionLogOffsetError,
-};
+use crate::types::CollectionInfo;
 use chroma_types::{CollectionUuid, LogRecord};
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -63,7 +61,7 @@ impl InMemoryLog {
         offset: i64,
         batch_size: i32,
         end_timestamp: Option<i64>,
-    ) -> Result<Vec<LogRecord>, PullLogsError> {
+    ) -> Vec<LogRecord> {
         let end_timestamp = match end_timestamp {
             Some(end_timestamp) => end_timestamp,
             None => i64::MAX,
@@ -71,7 +69,7 @@ impl InMemoryLog {
 
         let logs = match self.collection_to_log.get(&collection_id) {
             Some(logs) => logs,
-            None => return Ok(Vec::new()),
+            None => return Vec::new(),
         };
         let mut result = Vec::new();
         for i in offset..(offset + batch_size as i64) {
@@ -79,13 +77,13 @@ impl InMemoryLog {
                 result.push(logs[i as usize].record.clone());
             }
         }
-        Ok(result)
+        result
     }
 
     pub(super) async fn get_collections_with_new_data(
         &mut self,
         min_compaction_size: u64,
-    ) -> Result<Vec<CollectionInfo>, GetCollectionsWithNewDataError> {
+    ) -> Vec<CollectionInfo> {
         let mut collections = Vec::new();
         for (collection_id, log_records) in self.collection_to_log.iter() {
             if log_records.is_empty() {
@@ -115,16 +113,15 @@ impl InMemoryLog {
                 first_log_ts: logs[0].log_ts,
             });
         }
-        Ok(collections)
+        collections
     }
 
     pub(super) async fn update_collection_log_offset(
         &mut self,
         collection_id: CollectionUuid,
         new_offset: i64,
-    ) -> Result<(), UpdateCollectionLogOffsetError> {
+    ) {
         self.offsets.insert(collection_id, new_offset);
-        Ok(())
     }
 }
 
