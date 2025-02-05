@@ -1289,6 +1289,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "chroma-frontend"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "backon",
+ "chroma-cache",
+ "chroma-config",
+ "chroma-error",
+ "chroma-log",
+ "chroma-memberlist",
+ "chroma-segment",
+ "chroma-sqlite",
+ "chroma-sysdb",
+ "chroma-system",
+ "chroma-tracing",
+ "chroma-types",
+ "figment",
+ "mdac",
+ "opentelemetry",
+ "parking_lot",
+ "rand",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tonic",
+ "tower 0.4.13",
+ "tower-http 0.6.2",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "chroma-index"
 version = "0.1.0"
 dependencies = [
@@ -1433,6 +1468,7 @@ name = "chroma-sqlite"
 version = "0.1.0"
 dependencies = [
  "md5",
+ "pyo3",
  "regex",
  "rust-embed",
  "sea-query",
@@ -2484,40 +2520,6 @@ dependencies = [
  "tracing",
  "twox-hash",
  "zstd 0.13.0",
-]
-
-[[package]]
-name = "frontend"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "axum",
- "backon",
- "chroma-cache",
- "chroma-config",
- "chroma-error",
- "chroma-log",
- "chroma-memberlist",
- "chroma-segment",
- "chroma-sysdb",
- "chroma-system",
- "chroma-tracing",
- "chroma-types",
- "figment",
- "mdac",
- "opentelemetry",
- "parking_lot",
- "rand",
- "regex",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "tonic",
- "tower 0.4.13",
- "tower-http 0.6.2",
- "tracing",
- "uuid",
 ]
 
 [[package]]
@@ -5408,7 +5410,15 @@ dependencies = [
 name = "rust_bindings"
 version = "0.1.0"
 dependencies = [
+ "chroma-cache",
+ "chroma-config",
+ "chroma-frontend",
+ "chroma-log",
+ "chroma-sqlite",
+ "chroma-sysdb",
+ "chroma-system",
  "pyo3",
+ "tokio",
 ]
 
 [[package]]

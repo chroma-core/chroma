@@ -1,5 +1,3 @@
-use std::{sync::Arc, time::Duration};
-
 use backon::ConstantBuilder;
 use chroma_cache::{AysncPartitionedMutex, Cache, CacheError};
 use chroma_config::Configurable;
@@ -7,12 +5,22 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_sysdb::{sysdb, SysDb};
 use chroma_types::{CollectionAndSegments, CollectionUuid, GetCollectionWithSegmentsError};
 use serde::{Deserialize, Serialize};
+use std::{sync::Arc, time::Duration};
 use thiserror::Error;
 
 #[derive(Deserialize, Serialize, Clone)]
 pub struct CacheInvalidationRetryConfig {
     pub delay_ms: u32,
     pub max_retries: u32,
+}
+
+impl CacheInvalidationRetryConfig {
+    pub fn new(delay_ms: u32, max_retries: u32) -> Self {
+        Self {
+            delay_ms,
+            max_retries,
+        }
+    }
 }
 
 impl Default for CacheInvalidationRetryConfig {
@@ -61,7 +69,7 @@ impl Configurable<(CollectionsWithSegmentsProviderConfig, Box<SysDb>)>
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct CollectionsWithSegmentsProvider {
+pub struct CollectionsWithSegmentsProvider {
     pub(crate) sysdb_client: Box<sysdb::SysDb>,
     pub(crate) collections_with_segments_cache:
         Arc<dyn Cache<CollectionUuid, CollectionAndSegments>>,

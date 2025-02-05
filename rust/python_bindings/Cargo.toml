@@ -9,4 +9,13 @@ name = "rust_bindings"
 crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = "0.23.3"
+pyo3 = { workspace = true }
+tokio = { workspace = true }
+
+chroma-sqlite = { workspace = true }
+chroma-frontend = { workspace = true }
+chroma-sysdb = { workspace = true }
+chroma-log = { workspace = true }
+chroma-config = { workspace = true }
+chroma-cache = { workspace = true }
+chroma-system = { workspace = true }

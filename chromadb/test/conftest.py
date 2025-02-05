@@ -611,6 +611,7 @@ def sqlite_persistent() -> Generator[System, None, None]:
 
 
 def rust_system() -> Generator[System, None, None]:
+    save_path = tempfile.TemporaryDirectory()
     """Fixture generator for system using Rust bindings"""
     settings = Settings(
         chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
@@ -618,8 +619,9 @@ def rust_system() -> Generator[System, None, None]:
         chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
         chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
         chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
-        is_persistent=False,
+        is_persistent=True,
         allow_reset=True,
+        persist_directory=save_path.name,
     )
     system = System(settings)
     system.start()

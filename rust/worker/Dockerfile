@@ -21,6 +21,9 @@ COPY Cargo.lock Cargo.lock
 COPY idl/ idl/
 COPY rust/ rust/
 
+# Install python for pyo3
+RUN apt-get update && apt-get install -y python3 python3-pip && rm -rf /var/lib/apt/lists/*
+
 FROM builder AS query_service_builder
 # sharing=locked is necessary to prevent cargo build from running concurrently on the same mounted directory
 RUN --mount=type=cache,sharing=locked,target=/chroma/target/ \
@@ -38,6 +41,10 @@ RUN --mount=type=cache,sharing=locked,target=/chroma/target/ \
 FROM debian:bookworm-slim AS runner
 RUN apt-get update && apt-get install -y libssl-dev ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /chroma/rust/worker/chroma_config.yaml .
+
+# Install python for pyo3
+RUN apt-get update && apt-get install -y python3 python3-pip && rm -rf /var/lib/apt/lists/*
+
 
 FROM runner AS query_service
 COPY --from=query_service_builder /chroma/query_service .

@@ -1,4 +1,7 @@
+use pyo3::{pyclass, pymethods};
+
 #[derive(Clone)]
+#[pyclass]
 pub struct SqliteDBConfig {
     // The SQLite database URL
     pub url: String,
@@ -10,6 +13,7 @@ pub struct SqliteDBConfig {
 /// - Apply: Apply the migrations
 /// - Validate: Validate the applied migrations and ensure none are unappliued
 #[derive(Clone, PartialEq)]
+#[pyclass(eq, eq_int)]
 pub enum MigrationMode {
     Apply,
     Validate,
@@ -18,8 +22,23 @@ pub enum MigrationMode {
 /// The hash function to use for the migration files
 /// - SHA256: Use SHA256 hash
 /// - MD5: Use MD5 hash
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
+#[pyclass(eq, eq_int)]
 pub enum MigrationHash {
     SHA256,
     MD5,
+}
+
+//////////////////////// PyMethods Implementation ////////////////////////
+
+#[pymethods]
+impl SqliteDBConfig {
+    #[new]
+    pub fn py_new(url: String, hash_type: MigrationHash, migration_mode: MigrationMode) -> Self {
+        SqliteDBConfig {
+            url,
+            hash_type,
+            migration_mode,
+        }
+    }
 }

@@ -11,5 +11,6 @@ sea-query = { workspace = true, features = ["derive"] }
 sha2 = { workspace = true}
 sqlx = { workspace = true }
 tempfile = { workspace = true }
+pyo3 = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true}

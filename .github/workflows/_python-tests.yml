@@ -72,10 +72,12 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
-      - name: Setup
+      - name: Setup Python
         uses: ./.github/actions/python
         with:
           python-version: ${{ matrix.python }}
+      - name: Setup Rust
+        uses: ./.github/actions/rust
       - name: Build Rust bindings
         uses: PyO3/maturin-action@v1
         with:

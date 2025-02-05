@@ -31,6 +31,7 @@ pub struct DistributedExecutorConfig {
 #[derive(Deserialize, Clone, Serialize)]
 pub enum ExecutorConfig {
     Distributed(DistributedExecutorConfig),
+    Local,
 }
 
 #[async_trait]
@@ -47,6 +48,9 @@ impl Configurable<(ExecutorConfig, System)> for Executor {
                 .await?;
                 Ok(Executor::Distributed(distributed_executor))
             }
+            // TODO(hammadb): WE cannot use this since we cannot inject the sysdb into the local executor
+            // use ::new() instead for now
+            ExecutorConfig::Local => unimplemented!(),
         }
     }
 }
