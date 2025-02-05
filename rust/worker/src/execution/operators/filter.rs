@@ -499,7 +499,7 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
 #[cfg(test)]
 mod tests {
     use chroma_log::test::{add_delete_generator, int_as_id, LoadFromGenerator, LogGenerator};
-    use chroma_segment::test::TestSegment;
+    use chroma_segment::test::TestDistributedSegment;
     use chroma_system::Operator;
     use chroma_types::{
         BooleanOperator, CompositeExpression, DocumentExpression, MetadataComparison,
@@ -516,7 +516,7 @@ mod tests {
     /// - Log: Delete [11..=20], add [51..=100]
     /// - Compacted: Delete [1..=10] deletion, add [11..=50]
     async fn setup_filter_input() -> FilterInput {
-        let mut test_segment = TestSegment::default();
+        let mut test_segment = TestDistributedSegment::default();
         test_segment
             .populate_with_generator(60, add_delete_generator)
             .await;

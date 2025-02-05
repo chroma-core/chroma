@@ -389,7 +389,7 @@ impl SqliteMetadataWriter {
         Ok(())
     }
 
-    pub async fn apply_materialized_logs(
+    pub async fn apply_logs(
         &self,
         logs: Vec<LogRecord>,
         segment_id: SegmentUuid,
@@ -754,7 +754,7 @@ mod tests {
         MetadataExpression, MetadataValue, PrimitiveOperator, Where,
     };
 
-    use crate::test::TestSegment;
+    use crate::test::TestDistributedSegment;
 
     use super::SqliteMetadataReader;
 
@@ -767,7 +767,7 @@ mod tests {
         metadata_reader
             .count(Count {
                 scan: Scan {
-                    collection_and_segments: TestSegment::default().into(),
+                    collection_and_segments: TestDistributedSegment::default().into(),
                 },
             })
             .await
@@ -782,7 +782,7 @@ mod tests {
         let _result = metadata_reader
             .get(Get {
                 scan: Scan {
-                    collection_and_segments: TestSegment::default().into(),
+                    collection_and_segments: TestDistributedSegment::default().into(),
                 },
                 filter: Filter {
                     query_ids: None,

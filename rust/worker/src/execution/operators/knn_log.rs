@@ -130,7 +130,7 @@ mod tests {
     use chroma_log::test::{
         random_embedding, upsert_generator, LogGenerator, TEST_EMBEDDING_DIMENSION,
     };
-    use chroma_segment::test::TestSegment;
+    use chroma_segment::test::TestDistributedSegment;
     use chroma_system::Operator;
     use chroma_types::SignedRoaringBitmap;
 
@@ -144,7 +144,7 @@ mod tests {
         metric: DistanceFunction,
         log_offset_ids: SignedRoaringBitmap,
     ) -> KnnLogInput {
-        let test_segment = TestSegment::default();
+        let test_segment = TestDistributedSegment::default();
         KnnLogInput {
             logs: upsert_generator.generate_chunk(1..=100),
             blockfile_provider: test_segment.blockfile_provider,

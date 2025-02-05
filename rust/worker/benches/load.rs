@@ -1,6 +1,6 @@
 use chroma_benchmark::datasets::sift::Sift1MData;
 use chroma_log::{in_memory_log::InMemoryLog, test::modulo_metadata, Log};
-use chroma_segment::test::TestSegment;
+use chroma_segment::test::TestDistributedSegment;
 use chroma_types::{
     Chunk, CollectionUuid, LogRecord, MetadataComparison, MetadataExpression, MetadataSetValue,
     Operation, OperationRecord, SetOperator, Where,
@@ -13,8 +13,8 @@ use worker::execution::operators::{
 
 const DATA_CHUNK_SIZE: usize = 10000;
 
-pub async fn sift1m_segments() -> TestSegment {
-    let mut segments = TestSegment::default();
+pub async fn sift1m_segments() -> TestDistributedSegment {
+    let mut segments = TestDistributedSegment::default();
     let mut sift1m = Sift1MData::init()
         .await
         .expect("Should be able to download Sift1M data");

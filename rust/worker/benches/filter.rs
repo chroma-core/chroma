@@ -2,7 +2,7 @@ use std::iter::once;
 
 use chroma_benchmark::benchmark::{bench_run, tokio_multi_thread};
 use chroma_log::test::{upsert_generator, LoadFromGenerator};
-use chroma_segment::test::TestSegment;
+use chroma_segment::test::TestDistributedSegment;
 use chroma_system::Operator;
 use chroma_types::{
     BooleanOperator, Chunk, CompositeExpression, MetadataComparison, MetadataExpression,
@@ -74,7 +74,7 @@ fn bench_filter(criterion: &mut Criterion) {
 
     for record_count in [1000, 10000, 100000] {
         let test_segment = runtime.block_on(async {
-            let mut segment = TestSegment::default();
+            let mut segment = TestDistributedSegment::default();
             segment
                 .populate_with_generator(record_count, upsert_generator)
                 .await;

@@ -121,7 +121,7 @@ impl Operator<KnnProjectionInput, KnnProjectionOutput> for KnnProjectionOperator
 #[cfg(test)]
 mod tests {
     use chroma_log::test::{int_as_id, upsert_generator, LoadFromGenerator, LogGenerator};
-    use chroma_segment::test::TestSegment;
+    use chroma_segment::test::TestDistributedSegment;
     use chroma_system::Operator;
 
     use crate::execution::operators::{
@@ -140,7 +140,7 @@ mod tests {
     async fn setup_knn_projection_input(
         record_distances: Vec<RecordDistance>,
     ) -> KnnProjectionInput {
-        let mut test_segment = TestSegment::default();
+        let mut test_segment = TestDistributedSegment::default();
         test_segment
             .populate_with_generator(100, upsert_generator)
             .await;

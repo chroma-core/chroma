@@ -176,7 +176,7 @@ impl Operator<ProjectionInput, ProjectionOutput> for ProjectionOperator {
 #[cfg(test)]
 mod tests {
     use chroma_log::test::{int_as_id, upsert_generator, LoadFromGenerator, LogGenerator};
-    use chroma_segment::test::TestSegment;
+    use chroma_segment::test::TestDistributedSegment;
     use chroma_system::Operator;
 
     use crate::execution::operators::projection::ProjectionOperator;
@@ -191,7 +191,7 @@ mod tests {
     /// - Log: Upsert [81..=120]
     /// - Compacted: Upsert [1..=100]
     async fn setup_projection_input(offset_ids: Vec<u32>) -> ProjectionInput {
-        let mut test_segment = TestSegment::default();
+        let mut test_segment = TestDistributedSegment::default();
         test_segment
             .populate_with_generator(100, upsert_generator)
             .await;

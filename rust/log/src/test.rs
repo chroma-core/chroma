@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
-use chroma_segment::test::TestSegment;
+use chroma_segment::test::TestDistributedSegment;
 use chroma_types::{Chunk, LogRecord, Operation, OperationRecord, UpdateMetadataValue};
 use rand::{
     distributions::{Alphanumeric, Open01},
@@ -121,7 +121,7 @@ pub trait LoadFromGenerator<L: LogGenerator> {
 }
 
 #[async_trait]
-impl<L: LogGenerator + Send + 'static> LoadFromGenerator<L> for TestSegment {
+impl<L: LogGenerator + Send + 'static> LoadFromGenerator<L> for TestDistributedSegment {
     async fn populate_with_generator(&mut self, log_count: usize, generator: L) {
         let ids: Vec<_> = (1..=log_count).collect();
         for chunk in ids.chunks(100) {

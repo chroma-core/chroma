@@ -280,7 +280,7 @@ impl Operator<LimitInput, LimitOutput> for LimitOperator {
 #[cfg(test)]
 mod tests {
     use chroma_log::test::{upsert_generator, LoadFromGenerator, LogGenerator};
-    use chroma_segment::test::TestSegment;
+    use chroma_segment::test::TestDistributedSegment;
     use chroma_system::Operator;
     use chroma_types::SignedRoaringBitmap;
     use roaring::RoaringBitmap;
@@ -298,7 +298,7 @@ mod tests {
         log_offset_ids: SignedRoaringBitmap,
         compact_offset_ids: SignedRoaringBitmap,
     ) -> LimitInput {
-        let mut test_segment = TestSegment::default();
+        let mut test_segment = TestDistributedSegment::default();
         test_segment
             .populate_with_generator(100, upsert_generator)
             .await;
