@@ -96,6 +96,14 @@ impl Dispatcher {
         match task.get_type() {
             OperatorType::IO => {
                 let child_span = trace_span!(parent: Span::current(), "IO task execution", name = task.get_name());
+                // This spin loop:
+                // - reads a witness from active_io_tasks.
+                // - aborts the task if witness is zero.
+                // - tries to decrement the value to one less than the witness.
+                // - if the decrement fails, it retries;  this loads a new witness and tries again.
+                // - if the decrement succeeds, it spawns the task.
+                // This is conceptually what a semaphore is doing, except that it bails if
+                // acquisition fails rather than blocking.
                 let mut witness = self.active_io_tasks.load(Ordering::Relaxed);
                 loop {
                     if witness == 0 {
