@@ -42,7 +42,7 @@ sqlx = { version = "0.8.3", features = [ "runtime-tokio",  "sqlite"] }
 sha2 = "0.10.8"
 md5 = "0.7.0"
 regex = "1.11.1"
-pyo3 = "0.23.3"
+pyo3 = {version = "0.23.3", features = ["abi3-py39"] }
 tower-http = { version = "0.6.2", features = ["trace"] }
 
 chroma-benchmark = { path = "rust/benchmark" }
