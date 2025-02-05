@@ -3,7 +3,7 @@ use std::str::FromStr;
 use chroma_sqlite::db::SqliteDb;
 use chroma_types::{
     Collection, CollectionUuid, CreateDatabaseError, CreateDatabaseResponse, Database,
-    GetDatabaseError, Metadata, Segment, Tenant,
+    DeleteDatabaseError, DeleteDatabaseResponse, GetDatabaseError, Metadata, Segment, Tenant,
 };
 use sqlx::error::ErrorKind;
 use sqlx::Row;
@@ -81,6 +81,24 @@ impl SqliteSysDb {
             })
     }
 
+    pub(crate) async fn delete_database(
+        &self,
+        database_name: String,
+        tenant: String,
+    ) -> Result<DeleteDatabaseResponse, DeleteDatabaseError> {
+        sqlx::query("DELETE FROM databases WHERE name = $1 AND tenant_id = $2")
+            .bind(&database_name)
+            .bind(tenant)
+            .execute(self.db.get_conn())
+            .await
+            .map_err(|e| match e {
+                sqlx::Error::RowNotFound => DeleteDatabaseError::NotFound(database_name),
+                _ => DeleteDatabaseError::Internal(e.into()),
+            })?;
+
+        Ok(DeleteDatabaseResponse {})
+    }
+
     ////////////////////////// Tenant Methods ////////////////////////
 
     pub(crate) async fn _create_tenant(&self, _name: &str) -> Result<Tenant, String> {
@@ -134,6 +152,18 @@ mod tests {
 
         let database = sysdb.get_database("test", "default_tenant").await.unwrap();
         assert_eq!(database.name, "test");
+
+        // Delete database
+        sysdb
+            .delete_database("test".to_string(), "default_tenant".to_string())
+            .await
+            .unwrap();
+
+        // Second call should fail
+        let result = sysdb
+            .delete_database("test".to_string(), "default_tenant".to_string())
+            .await;
+        matches!(result, Err(DeleteDatabaseError::NotFound(_)));
 
         // TODO: Add tests
         // test same id or name

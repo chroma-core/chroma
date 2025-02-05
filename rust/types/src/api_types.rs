@@ -234,7 +234,7 @@ pub struct DeleteDatabaseResponse {}
 #[derive(Debug, Error)]
 pub enum DeleteDatabaseError {
     #[error(transparent)]
-    Internal(#[from] Status),
+    Internal(#[from] Box<dyn ChromaError>),
     #[error("Invalid database id [{0}]")]
     InvalidID(String),
     #[error("Database [{0}] not found")]

@@ -113,7 +113,7 @@ impl SysDb {
     ) -> Result<DeleteDatabaseResponse, DeleteDatabaseError> {
         match self {
             SysDb::Grpc(grpc) => grpc.delete_database(database_name, tenant).await,
-            SysDb::Sqlite(_) => todo!(),
+            SysDb::Sqlite(sqlite) => sqlite.delete_database(database_name, tenant).await,
             SysDb::Test(_) => todo!(),
         }
     }
@@ -588,7 +588,7 @@ impl GrpcSysDb {
             Err(err) if matches!(err.code(), Code::NotFound) => {
                 Err(DeleteDatabaseError::NotFound(database_name))
             }
-            Err(err) => Err(err.into()),
+            Err(err) => Err(DeleteDatabaseError::Internal(err.into())),
         }
     }
 
