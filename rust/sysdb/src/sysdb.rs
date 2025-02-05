@@ -313,7 +313,7 @@ impl SysDb {
                 test.mark_version_for_deletion(epoch_id, versions_clone)
                     .await
                     .map_err(|e| {
-                        MarkVersionForDeletionError::FailedToMarkVersion(Status::internal(e))
+                        MarkVersionForDeletionError::FailedToMarkVersion(tonic::Status::internal(e))
                     })
                     .map(|_| {
                         let mut result = HashMap::new();
@@ -323,6 +323,7 @@ impl SysDb {
                         result
                     })
             }
+            SysDb::Sqlite(_) => todo!(),
         }
     }
 
@@ -336,6 +337,7 @@ impl SysDb {
                 Ok(response)
             }
             SysDb::Test(client) => Ok(client.delete_collection_version(versions).await),
+            SysDb::Sqlite(_) => todo!(),
         }
     }
 
