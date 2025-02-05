@@ -109,6 +109,7 @@ fn to_records<
 
     Ok(records)
 }
+
 #[derive(Clone, Debug)]
 pub struct Frontend {
     allow_reset: bool,

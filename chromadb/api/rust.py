@@ -42,7 +42,35 @@ class RustBindingsAPI(ServerAPI):
     def __init__(self, system: System):
         super().__init__(system)
         self.proxy_segment_api = system.require(SegmentAPI)
-        self.bindings = rust_bindings.Bindings(proxy_frontend=self.proxy_segment_api)
+
+        # Construct the SqliteConfig
+        # TOOD: We should add a "config converter"
+        persist_path = system.settings.require("persist_directory")
+        # TODO: How to name this file?
+        # TODO: proper path handling
+        sqlite_persist_path = persist_path + "/chroma.sqlite3"
+        hash_type = system.settings.require("migrations_hash_algorithm")
+        hash_type_bindings = (
+            rust_bindings.MigrationHash.MD5
+            if hash_type == "md5"
+            else rust_bindings.MigrationHash.SHA256
+        )
+        migration_mode = system.settings.require("migrations")
+        migration_mode_bindings = (
+            rust_bindings.MigrationMode.Apply
+            if migration_mode == "apply"
+            else rust_bindings.MigrationMode.Validate
+        )
+        sqlite_config = rust_bindings.SqliteDBConfig(
+            url=sqlite_persist_path,
+            hash_type=hash_type_bindings,
+            migration_mode=migration_mode_bindings,
+        )
+
+        # Construct the Rust bindings
+        self.bindings = rust_bindings.Bindings(
+            proxy_frontend=self.proxy_segment_api, sqlite_db_config=sqlite_config
+        )
 
     # ////////////////////////////// Admin API //////////////////////////////
 

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use super::{distributed::DistributedExecutor, Executor};
+use super::{distributed::DistributedExecutor, local::LocalExecutor, Executor};
 use async_trait::async_trait;
 use backon::ExponentialBuilder;
 use chroma_config::Configurable;
@@ -31,6 +31,7 @@ pub struct DistributedExecutorConfig {
 #[derive(Deserialize, Clone, Serialize)]
 pub enum ExecutorConfig {
     Distributed(DistributedExecutorConfig),
+    Local,
 }
 
 #[async_trait]
@@ -46,6 +47,9 @@ impl Configurable<(ExecutorConfig, System)> for Executor {
                 ))
                 .await?;
                 Ok(Executor::Distributed(distributed_executor))
+            }
+            ExecutorConfig::Local => {
+                Ok(Executor::Local(LocalExecutor::try_from_config(&()).await?))
             }
         }
     }

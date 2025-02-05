@@ -13,7 +13,7 @@ pub struct SqliteSysDb {
 
 impl SqliteSysDb {
     #[allow(dead_code)]
-    fn new(db: SqliteDb) -> Self {
+    pub fn new(db: SqliteDb) -> Self {
         Self { db }
     }
 

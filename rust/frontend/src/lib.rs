@@ -1,9 +1,9 @@
 mod ac;
-mod config;
+pub mod config;
 #[allow(dead_code)]
-mod executor;
-mod frontend;
-mod get_collection_with_segments_provider;
+pub mod executor;
+pub mod frontend;
+pub mod get_collection_with_segments_provider;
 mod server;
 mod tower_tracing;
 mod types;

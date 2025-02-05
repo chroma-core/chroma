@@ -12,3 +12,4 @@ md5 = { workspace = true}
 rust-embed = {version = "8.5.0", features = ["include-exclude"]}
 thiserror = { workspace = true }
 tempfile = { workspace = true }
+pyo3 = { workspace = true }
