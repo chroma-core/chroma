@@ -13,7 +13,7 @@ use thiserror::Error;
 /// - conn: SqlitePool - The connection to the SQLite database
 /// ## Notes:
 /// - Clone safety: The SqlitePool is cloneable and all clones share the same connection
-/// pool. The pool is Send/Sync.
+///     pool. The pool is Send/Sync.
 pub struct SqliteDb {
     conn: SqlitePool,
 }
