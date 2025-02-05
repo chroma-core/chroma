@@ -28,3 +28,10 @@ pub enum EmbeddingFulltextSearch {
     Rowid,
     StringValue,
 }
+
+#[derive(Iden)]
+pub enum MaxSeqId {
+    Table,
+    SegmentId,
+    SeqId,
+}

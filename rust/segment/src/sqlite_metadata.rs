@@ -6,7 +6,7 @@ use std::{
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_sqlite::{
     db::SqliteDb,
-    table::{EmbeddingFulltextSearch, EmbeddingMetadata, Embeddings},
+    table::{EmbeddingFulltextSearch, EmbeddingMetadata, Embeddings, MaxSeqId},
 };
 use chroma_types::{
     operator::{CountResult, Filter, GetResult, Limit, Projection, ProjectionRecord, Scan},
@@ -355,6 +355,35 @@ impl SqliteMetadataWriter {
         Ok(())
     }
 
+    fn upsert_max_seq_id_stmt(
+        segment_id: SegmentUuid,
+        seq_id: u64,
+    ) -> Result<InsertStatement, SqliteMetadataError> {
+        Ok(Query::insert()
+            .into_table(MaxSeqId::Table)
+            .columns([MaxSeqId::SegmentId, MaxSeqId::SeqId])
+            .values([segment_id.to_string().into(), seq_id.into()])?
+            .on_conflict(
+                OnConflict::column(MaxSeqId::SegmentId)
+                    .update_column(MaxSeqId::SeqId)
+                    .to_owned(),
+            )
+            .to_owned())
+    }
+
+    async fn upsert_max_seq_id(
+        tx: &mut Transaction<'static, Sqlite>,
+        segment_id: SegmentUuid,
+        seq_id: u64,
+    ) -> Result<(), SqliteMetadataError> {
+        let (upsert_max_seq_id_stmt, values) =
+            Self::upsert_max_seq_id_stmt(segment_id, seq_id)?.build_sqlx(SqliteQueryBuilder);
+        sqlx::query_with(&upsert_max_seq_id_stmt, values)
+            .execute(&mut **tx)
+            .await?;
+        Ok(())
+    }
+
     pub async fn apply_materialized_logs(
         &self,
         logs: Vec<LogRecord>,
@@ -364,7 +393,7 @@ impl SqliteMetadataWriter {
             return Ok(());
         }
         let mut tx = self.db.get_conn().begin().await?;
-        let mut max_log_id = u64::MIN;
+        let mut max_seq_id = u64::MIN;
         for LogRecord {
             log_offset,
             record:
@@ -378,7 +407,7 @@ impl SqliteMetadataWriter {
         } in logs
         {
             let log_offset_unsigned = log_offset.try_into()?;
-            max_log_id = max_log_id.max(log_offset_unsigned);
+            max_seq_id = max_seq_id.max(log_offset_unsigned);
             match operation {
                 Operation::Add => {
                     let offset_id =
@@ -427,6 +456,8 @@ impl SqliteMetadataWriter {
                 }
             }
         }
+
+        Self::upsert_max_seq_id(&mut tx, segment_id, max_seq_id).await?;
 
         Ok(tx.commit().await?)
     }
