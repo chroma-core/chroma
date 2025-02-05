@@ -9,6 +9,7 @@ name = "rust_bindings"
 crate-type = ["cdylib"]
 
 [dependencies]
+async-trait = { workspace = true }
 pyo3 = { workspace = true }
 tokio = { workspace = true }
 

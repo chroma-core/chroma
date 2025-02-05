@@ -5420,6 +5420,7 @@ dependencies = [
 name = "rust_bindings"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "chroma-cache",
  "chroma-config",
  "chroma-frontend",
