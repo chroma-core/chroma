@@ -390,15 +390,19 @@ impl SqliteMetadataWriter {
         Ok(())
     }
 
+    pub async fn begin(&self) -> Result<Transaction<'static, Sqlite>, SqliteMetadataError> {
+        Ok(self.db.get_conn().begin().await?)
+    }
+
     pub async fn apply_logs(
         &self,
         logs: Vec<LogRecord>,
         segment_id: SegmentUuid,
+        tx: &mut Transaction<'static, Sqlite>,
     ) -> Result<(), SqliteMetadataError> {
         if logs.is_empty() {
             return Ok(());
         }
-        let mut tx = self.db.get_conn().begin().await?;
         let mut max_seq_id = u64::MIN;
         for LogRecord {
             log_offset,
@@ -417,56 +421,56 @@ impl SqliteMetadataWriter {
             match operation {
                 Operation::Add => {
                     if let Some(offset_id) =
-                        Self::add_record(&mut tx, segment_id, log_offset_unsigned, id).await?
+                        Self::add_record(tx, segment_id, log_offset_unsigned, id).await?
                     {
                         if let Some(meta) = metadata {
-                            Self::update_metadata(&mut tx, offset_id, meta).await?;
+                            Self::update_metadata(tx, offset_id, meta).await?;
                         }
 
                         if let Some(doc) = document {
-                            Self::add_document(&mut tx, offset_id, doc).await?;
+                            Self::add_document(tx, offset_id, doc).await?;
                         }
                     }
                 }
                 Operation::Update => {
                     if let Some(offset_id) =
-                        Self::update_record(&mut tx, segment_id, log_offset_unsigned, id).await?
+                        Self::update_record(tx, segment_id, log_offset_unsigned, id).await?
                     {
                         if let Some(meta) = metadata {
-                            Self::update_metadata(&mut tx, offset_id, meta).await?;
+                            Self::update_metadata(tx, offset_id, meta).await?;
                         }
 
                         if let Some(doc) = document {
-                            Self::delete_document(&mut tx, offset_id).await?;
-                            Self::add_document(&mut tx, offset_id, doc).await?;
+                            Self::delete_document(tx, offset_id).await?;
+                            Self::add_document(tx, offset_id, doc).await?;
                         }
                     }
                 }
                 Operation::Upsert => {
                     let offset_id =
-                        Self::upsert_record(&mut tx, segment_id, log_offset_unsigned, id).await?;
+                        Self::upsert_record(tx, segment_id, log_offset_unsigned, id).await?;
 
                     if let Some(meta) = metadata {
-                        Self::update_metadata(&mut tx, offset_id, meta).await?;
+                        Self::update_metadata(tx, offset_id, meta).await?;
                     }
 
                     if let Some(doc) = document {
-                        Self::delete_document(&mut tx, offset_id).await?;
-                        Self::add_document(&mut tx, offset_id, doc).await?;
+                        Self::delete_document(tx, offset_id).await?;
+                        Self::add_document(tx, offset_id, doc).await?;
                     }
                 }
                 Operation::Delete => {
-                    if let Some(offset_id) = Self::delete_record(&mut tx, segment_id, id).await? {
-                        Self::delete_metadata(&mut tx, offset_id).await?;
-                        Self::delete_document(&mut tx, offset_id).await?;
+                    if let Some(offset_id) = Self::delete_record(tx, segment_id, id).await? {
+                        Self::delete_metadata(tx, offset_id).await?;
+                        Self::delete_document(tx, offset_id).await?;
                     }
                 }
             }
         }
 
-        Self::upsert_max_seq_id(&mut tx, segment_id, max_seq_id).await?;
+        Self::upsert_max_seq_id(tx, segment_id, max_seq_id).await?;
 
-        Ok(tx.commit().await?)
+        Ok(())
     }
 }
 
@@ -782,7 +786,9 @@ mod tests {
             let logs = operations.into_iter().enumerate().map(|(i, record)| LogRecord { log_offset: (i + 1) as i64, record }).collect::<Vec<_>>();
 
             ref_seg.apply_logs(logs.clone(), seg_id);
-            runtime.block_on(sqlite_seg_writer.apply_logs(logs, seg_id)).expect("Should be able to apply logs");
+            let mut tx = runtime.block_on(sqlite_seg_writer.begin()).expect("Should be able to start transaction");
+            runtime.block_on(sqlite_seg_writer.apply_logs(logs, seg_id, &mut tx)).expect("Should be able to apply logs");
+            runtime.block_on(tx.commit()).expect("Should be able to commit log");
 
             let sqlite_seg_reader = SqliteMetadataReader {
                 db: sqlite_seg_writer.db
