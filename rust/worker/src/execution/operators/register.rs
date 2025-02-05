@@ -1,7 +1,6 @@
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_log::log::Log;
-use chroma_log::log::UpdateCollectionLogOffsetError;
+use chroma_log::Log;
 use chroma_sysdb::FlushCompactionError;
 use chroma_sysdb::SysDb;
 use chroma_system::Operator;
@@ -87,7 +86,7 @@ pub enum RegisterError {
     #[error("Flush compaction error: {0}")]
     FlushCompactionError(#[from] FlushCompactionError),
     #[error("Update log offset error: {0}")]
-    UpdateLogOffsetError(#[from] UpdateCollectionLogOffsetError),
+    UpdateLogOffsetError(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for RegisterError {
@@ -145,9 +144,10 @@ impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chroma_log::log::InMemoryLog;
+    use chroma_log::in_memory_log::InMemoryLog;
     use chroma_sysdb::TestSysDb;
     use chroma_types::{Collection, Segment, SegmentScope, SegmentType, SegmentUuid};
+    use serde_json::Value;
     use std::collections::HashMap;
     use std::str::FromStr;
 
@@ -163,6 +163,7 @@ mod tests {
         let collection_1 = Collection {
             collection_id: collection_uuid_1,
             name: "collection_1".to_string(),
+            configuration_json: Value::Null,
             metadata: None,
             dimension: Some(1),
             tenant: tenant_1.clone(),
@@ -178,6 +179,7 @@ mod tests {
         let collection_2 = Collection {
             collection_id: collection_uuid_2,
             name: "collection_2".to_string(),
+            configuration_json: Value::Null,
             metadata: None,
             dimension: Some(1),
             tenant: tenant_2.clone(),
@@ -270,7 +272,7 @@ mod tests {
         );
 
         let collections = sysdb
-            .get_collections(Some(collection_uuid_1), None, None, None)
+            .get_collections(Some(collection_uuid_1), None, None, None, None, 0)
             .await;
 
         assert!(collections.is_ok());

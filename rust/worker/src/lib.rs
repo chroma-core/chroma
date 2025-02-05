@@ -1,6 +1,5 @@
 mod compactor;
 mod server;
-mod tracing;
 mod utils;
 
 use chroma_config::Configurable;
@@ -10,7 +9,6 @@ use chroma_memberlist::memberlist_provider::{
 use clap::Parser;
 use compactor::compaction_client::CompactionClient;
 use compactor::compaction_server::CompactionServer;
-
 use tokio::select;
 use tokio::signal::unix::{signal, SignalKind};
 
@@ -29,10 +27,7 @@ pub async fn query_service_entrypoint() {
 
     let config = config.query_service;
 
-    crate::tracing::opentelemetry_config::init_otel_tracing(
-        &config.service_name,
-        &config.otel_endpoint,
-    );
+    chroma_tracing::init_otel_tracing(&config.service_name, &config.otel_endpoint);
 
     let system = chroma_system::System::new();
     let dispatcher = match chroma_system::Dispatcher::try_from_config(&config.dispatcher).await {
@@ -89,10 +84,7 @@ pub async fn compaction_service_entrypoint() {
 
     let config = config.compaction_service;
 
-    crate::tracing::opentelemetry_config::init_otel_tracing(
-        &config.service_name,
-        &config.otel_endpoint,
-    );
+    chroma_tracing::init_otel_tracing(&config.service_name, &config.otel_endpoint);
 
     let system = chroma_system::System::new();
 

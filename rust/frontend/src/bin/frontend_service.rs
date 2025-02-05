@@ -1,4 +1,4 @@
-use frontend::frontend_service_entrypoint;
+use chroma_frontend::frontend_service_entrypoint;
 
 #[tokio::main]
 async fn main() {

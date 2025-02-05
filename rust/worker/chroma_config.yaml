@@ -44,6 +44,8 @@ query_service:
         num_worker_threads: 4
         dispatcher_queue_size: 100
         worker_queue_size: 100
+        task_queue_limit: 1000
+        active_io_tasks: 100
     blockfile_provider:
         Arrow:
             block_manager_config:
@@ -60,6 +62,7 @@ query_service:
         hnsw_cache_config:
             weighted_lru:
                 capacity: 8589934592 # 8GB
+        permitted_parallelism: 180
 
 compaction_service:
     service_name: "compaction-service"
@@ -102,6 +105,8 @@ compaction_service:
         num_worker_threads: 4
         dispatcher_queue_size: 100
         worker_queue_size: 100
+        task_queue_limit: 1000
+        active_io_tasks: 100
     compactor:
         compaction_manager_queue_size: 1000
         max_concurrent_jobs: 100
@@ -126,3 +131,4 @@ compaction_service:
         hnsw_cache_config:
             weighted_lru:
                 capacity: 8192 # 8192 MiB = 8GB
+        permitted_parallelism: 180

@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::str::FromStr;
 
 use chroma_config::assignment::assignment_policy::AssignmentPolicy;
-use chroma_log::log::{CollectionInfo, CollectionRecord, Log};
+use chroma_log::{CollectionInfo, CollectionRecord, Log};
 use chroma_memberlist::memberlist_provider::Memberlist;
 use chroma_sysdb::SysDb;
 use chroma_types::CollectionUuid;
@@ -103,7 +103,7 @@ impl Scheduler {
             // TODO: add a cache to avoid fetching the same collection multiple times
             let result = self
                 .sysdb
-                .get_collections(collection_id, None, None, None)
+                .get_collections(collection_id, None, None, None, None, 0)
                 .await;
 
             match result {
@@ -177,7 +177,7 @@ impl Scheduler {
             let result = self
                 .assignment_policy
                 // NOTE(rescrv):  Need to use the untyped uuid here.
-                .assign(collection.collection_id.0.to_string().as_str());
+                .assign_one(collection.collection_id.0.to_string().as_str());
             match result {
                 Ok(member) => {
                     if member == self.my_member_id {
@@ -282,10 +282,11 @@ mod tests {
     use super::*;
     use crate::compactor::scheduler_policy::LasCompactionTimeSchedulerPolicy;
     use chroma_config::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
-    use chroma_log::log::{InMemoryLog, InternalLogRecord};
+    use chroma_log::in_memory_log::{InMemoryLog, InternalLogRecord};
     use chroma_memberlist::memberlist_provider::Member;
     use chroma_sysdb::TestSysDb;
     use chroma_types::{Collection, CollectionUuid, LogRecord, Operation, OperationRecord};
+    use serde_json::Value;
 
     #[tokio::test]
     async fn test_scheduler() {
@@ -345,6 +346,7 @@ mod tests {
         let collection_1 = Collection {
             collection_id: collection_uuid_1,
             name: "collection_1".to_string(),
+            configuration_json: Value::Null,
             metadata: None,
             dimension: Some(1),
             tenant: tenant_1.clone(),
@@ -358,6 +360,7 @@ mod tests {
         let collection_2 = Collection {
             collection_id: collection_uuid_2,
             name: "collection_2".to_string(),
+            configuration_json: Value::Null,
             metadata: None,
             dimension: Some(1),
             tenant: tenant_2.clone(),
@@ -583,6 +586,7 @@ mod tests {
         let collection_1 = Collection {
             collection_id: collection_uuid_1,
             name: "collection_1".to_string(),
+            configuration_json: Value::Null,
             metadata: None,
             dimension: Some(1),
             tenant: tenant_1.clone(),

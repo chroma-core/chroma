@@ -1,5 +1,6 @@
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
+use serde_json::{Number, Value};
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
@@ -8,7 +9,8 @@ use thiserror::Error;
 
 use crate::chroma_proto;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Deserialize, Serialize)]
+#[serde(untagged)]
 pub enum UpdateMetadataValue {
     Bool(bool),
     Int(i64),
@@ -99,6 +101,7 @@ MetadataValue
 */
 
 #[derive(Clone, Debug, Deserialize, PartialEq, PartialOrd, Serialize)]
+#[serde(untagged)]
 pub enum MetadataValue {
     Bool(bool),
     Int(i64),
@@ -157,6 +160,32 @@ impl TryFrom<&MetadataValue> for String {
         match value {
             MetadataValue::Str(value) => Ok(value.clone()),
             _ => Err(MetadataValueConversionError::InvalidValue),
+        }
+    }
+}
+
+impl From<MetadataValue> for UpdateMetadataValue {
+    fn from(value: MetadataValue) -> Self {
+        match value {
+            MetadataValue::Bool(v) => UpdateMetadataValue::Bool(v),
+            MetadataValue::Int(v) => UpdateMetadataValue::Int(v),
+            MetadataValue::Float(v) => UpdateMetadataValue::Float(v),
+            MetadataValue::Str(v) => UpdateMetadataValue::Str(v),
+        }
+    }
+}
+
+impl From<MetadataValue> for Value {
+    fn from(value: MetadataValue) -> Self {
+        match value {
+            MetadataValue::Bool(val) => Self::Bool(val),
+            MetadataValue::Int(val) => Self::Number(
+                Number::from_i128(val as i128).expect("i64 should be representable in JSON"),
+            ),
+            MetadataValue::Float(val) => Self::Number(
+                Number::from_f64(val).expect("Inf and NaN should not be present in MetadataValue"),
+            ),
+            MetadataValue::Str(val) => Self::String(val),
         }
     }
 }
@@ -226,6 +255,35 @@ UpdateMetadata
 ===========================================
 */
 pub type UpdateMetadata = HashMap<String, UpdateMetadataValue>;
+
+/**
+ * Check if two metadata are close to equal. Ignores small differences in float values.
+ */
+pub fn are_metadatas_close_to_equal(
+    metadata1: &UpdateMetadata,
+    metadata2: &UpdateMetadata,
+) -> bool {
+    assert_eq!(metadata1.len(), metadata2.len());
+
+    for (key, value) in metadata1.iter() {
+        if !metadata2.contains_key(key) {
+            return false;
+        }
+        let other_value = metadata2.get(key).unwrap();
+
+        if let (UpdateMetadataValue::Float(value), UpdateMetadataValue::Float(other_value)) =
+            (value, other_value)
+        {
+            if (value - other_value).abs() > 1e-6 {
+                return false;
+            }
+        } else if value != other_value {
+            return false;
+        }
+    }
+
+    true
+}
 
 impl TryFrom<chroma_proto::UpdateMetadata> for UpdateMetadata {
     type Error = UpdateMetadataValueConversionError;

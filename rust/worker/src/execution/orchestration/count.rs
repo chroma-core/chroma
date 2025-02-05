@@ -1,7 +1,10 @@
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_system::{wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator, PanicError, TaskError, TaskMessage, TaskResult};
+use chroma_system::{
+    wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
+    PanicError, TaskError, TaskMessage, TaskResult,
+};
 use chroma_types::CollectionAndSegments;
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
@@ -25,6 +28,8 @@ pub enum CountError {
     Panic(#[from] PanicError),
     #[error("Error receiving final result: {0}")]
     Result(#[from] RecvError),
+    #[error("Operation aborted because resources exhausted")]
+    Aborted,
 }
 
 impl ChromaError for CountError {
@@ -35,6 +40,7 @@ impl ChromaError for CountError {
             CountError::CountRecord(e) => e.code(),
             CountError::Panic(_) => ErrorCodes::Aborted,
             CountError::Result(_) => ErrorCodes::Internal,
+            CountError::Aborted => ErrorCodes::ResourceExhausted,
         }
     }
 }
@@ -47,6 +53,7 @@ where
         match value {
             TaskError::Panic(e) => CountError::Panic(e),
             TaskError::TaskFailed(e) => e.into(),
+            TaskError::Aborted => CountError::Aborted,
         }
     }
 }

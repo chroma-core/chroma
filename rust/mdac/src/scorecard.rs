@@ -206,10 +206,10 @@ impl<'a> Scorecard<'a> {
 /////////////////////////////////////////////// Rule ///////////////////////////////////////////////
 
 /// A rule specifies a set of patterns and a limit.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Rule {
-    patterns: Vec<Pattern>,
-    limit: usize,
+    pub patterns: Vec<Pattern>,
+    pub limit: usize,
 }
 
 impl Rule {
@@ -563,15 +563,45 @@ mod tests {
     }
 
     #[test]
-    fn rule_precedence() {
+    fn rule_precedence1() {
+        // Test a specific override.
         let metrics = TestMetrics::default();
         let sc = Scorecard::new(
             &metrics,
             vec![
                 Rule::new(
-                    vec![Pattern::must("op:read"), Pattern::must("client:*")],
+                    vec![Pattern::must("op:read"), Pattern::must("client:robert")],
                     20,
                 ),
+                Rule::new(vec![Pattern::must("op:*"), Pattern::must("client:*")], 10),
+            ],
+            1.try_into().unwrap(),
+        );
+        let mut saved_tickets = vec![];
+        // Fill to the limit specified in the first rule.
+        for _ in 0..20 {
+            let t = sc.track(&["op:read", "client:robert"]);
+            assert!(t.is_some());
+            saved_tickets.push(t);
+        }
+        // Reject
+        let t = sc.track(&["op:read", "client:robert"]);
+        assert!(t.is_none());
+
+        assert_eq!(metrics.new_scorecard.load(Ordering::SeqCst), 1);
+        assert_eq!(metrics.successful_track.load(Ordering::SeqCst), 20);
+        assert_eq!(metrics.successful_untrack.load(Ordering::SeqCst), 0);
+        assert_eq!(metrics.failed_track.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn rule_precedence2() {
+        // Test an exact pattern-based override.
+        let metrics = TestMetrics::default();
+        let sc = Scorecard::new(
+            &metrics,
+            vec![
+                Rule::new(vec![Pattern::must("op:*"), Pattern::must("client:*")], 20),
                 Rule::new(vec![Pattern::must("op:*"), Pattern::must("client:*")], 10),
             ],
             1.try_into().unwrap(),

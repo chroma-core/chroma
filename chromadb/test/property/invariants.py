@@ -82,6 +82,22 @@ def wrap_all(record_set: RecordSet) -> NormalizedRecordSet:
     }
 
 
+def check_metadata(
+    expected: Optional[types.Metadata], got: Optional[types.Metadata]
+) -> None:
+    assert (expected is None and got is None) or (
+        expected is not None and got is not None
+    )
+    if expected is not None and got is not None:
+        assert len(expected) == len(got)
+        for key, val in expected.items():
+            assert key in got
+            if isinstance(expected[key], float) and isinstance(got[key], float):
+                assert abs(cast(float, expected[key]) - cast(float, got[key])) < 1e-6
+            else:
+                assert expected[key] == got[key]
+
+
 def count(collection: Collection, record_set: RecordSet) -> None:
     """The given collection count is equal to the number of embeddings"""
     count = collection.count()
@@ -132,7 +148,16 @@ def _field_matches(
     if field_name == "embeddings":
         assert np.allclose(np.array(field_values), np.array(expected_field))
     else:
-        assert field_values == expected_field
+        assert len(field_values) == len(expected_field)
+
+        for field_value, expected_field in zip(field_values, expected_field):
+            if isinstance(expected_field, dict):
+                check_metadata(
+                    cast(types.Metadata, field_value),
+                    cast(types.Metadata, expected_field),
+                )
+            else:
+                assert field_value == expected_field
 
 
 def ids_match(collection: Collection, record_set: RecordSet) -> None:
@@ -324,9 +349,9 @@ def ann_accuracy(
                     == query_results["documents"][i][j]
                 )
             if normalized_record_set["metadatas"] is not None:
-                assert (
-                    normalized_record_set["metadatas"][index]
-                    == query_results["metadatas"][i][j]
+                check_metadata(
+                    normalized_record_set["metadatas"][index],
+                    query_results["metadatas"][i][j],
                 )
 
     size = len(normalized_record_set["ids"])

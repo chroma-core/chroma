@@ -1,5 +1,5 @@
 [package]
-name = "frontend"
+name = "chroma-frontend"
 version = "0.1.0"
 edition = "2021"
 
@@ -11,16 +11,30 @@ path = "src/bin/frontend_service.rs"
 tokio = { workspace = true }
 axum = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 async-trait = { workspace = true }
 figment = { workspace = true }
 uuid = { workspace = true }
 tonic = { workspace = true }
 tracing = { workspace = true }
-tower = { workspace = true }
 thiserror = { workspace = true }
-
-chroma-config = { workspace = true }
-chroma-types = { workspace = true }
-chroma-sysdb = { workspace = true }
-chroma-error = { workspace = true }
+tower-http = { workspace = true }
+parking_lot = { workspace = true }
+rand = { workspace = true }
+regex = { workspace = true }
+backon = { workspace = true }
+tower = { version = "0.4.13", features = ["discover"] }
 mdac = { workspace = true }
+opentelemetry.workspace = true
+
+chroma-cache = { workspace = true }
+chroma-config = { workspace = true }
+chroma-error = { workspace = true }
+chroma-log = { workspace = true }
+chroma-memberlist = { workspace = true }
+chroma-segment = { workspace = true }
+chroma-sysdb = { workspace = true }
+chroma-system = { workspace = true }
+chroma-tracing = { workspace = true }
+chroma-types = { workspace = true }
+chroma-sqlite = { workspace = true }

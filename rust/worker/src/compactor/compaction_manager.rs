@@ -12,7 +12,7 @@ use chroma_config::assignment;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;
-use chroma_log::log::Log;
+use chroma_log::Log;
 use chroma_memberlist::memberlist_provider::Memberlist;
 use chroma_storage::Storage;
 use chroma_sysdb::SysDb;
@@ -358,14 +358,14 @@ mod tests {
     use assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
     use chroma_blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES;
     use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
-    use chroma_log::log::InMemoryLog;
-    use chroma_log::log::InternalLogRecord;
+    use chroma_log::in_memory_log::{InMemoryLog, InternalLogRecord};
     use chroma_memberlist::memberlist_provider::Member;
     use chroma_storage::local::LocalStorage;
     use chroma_sysdb::TestSysDb;
-    use chroma_system::Dispatcher;
+    use chroma_system::{Dispatcher, DispatcherConfig};
     use chroma_types::SegmentUuid;
     use chroma_types::{Collection, LogRecord, Operation, OperationRecord, Segment};
+    use serde_json::Value;
     use std::collections::HashMap;
     use std::path::PathBuf;
     use std::str::FromStr;
@@ -430,6 +430,7 @@ mod tests {
         let collection_1 = Collection {
             collection_id: collection_uuid_1,
             name: "collection_1".to_string(),
+            configuration_json: Value::Null,
             metadata: None,
             dimension: Some(1),
             tenant: tenant_1.clone(),
@@ -443,6 +444,7 @@ mod tests {
         let collection_2 = Collection {
             collection_id: collection_uuid_2,
             name: "collection_2".to_string(),
+            configuration_json: Value::Null,
             metadata: None,
             dimension: Some(1),
             tenant: tenant_2.clone(),
@@ -577,6 +579,7 @@ mod tests {
                 storage,
                 PathBuf::from(tmpdir.path().to_str().unwrap()),
                 hnsw_cache,
+                16,
                 rx,
             ),
             compaction_manager_queue_size,
@@ -587,8 +590,13 @@ mod tests {
         );
 
         let system = System::new();
-
-        let dispatcher = Dispatcher::new(10, 10, 10);
+        let dispatcher = Dispatcher::new(DispatcherConfig {
+            num_worker_threads: 10,
+            task_queue_limit: 100,
+            dispatcher_queue_size: 100,
+            worker_queue_size: 100,
+            active_io_tasks: 100,
+        });
         let dispatcher_handle = system.start_component(dispatcher);
         manager.set_dispatcher(dispatcher_handle);
         manager.set_system(system);

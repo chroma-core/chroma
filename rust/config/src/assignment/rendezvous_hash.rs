@@ -95,6 +95,7 @@ fn merge_hashes(x: u64, y: u64) -> u64 {
     acc
 }
 
+#[derive(Clone, Debug)]
 pub(crate) struct Murmur3Hasher {}
 
 impl Hasher for Murmur3Hasher {

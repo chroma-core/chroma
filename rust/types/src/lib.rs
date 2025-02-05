@@ -14,6 +14,8 @@ mod segment;
 mod segment_scope;
 mod signed_rbm;
 mod spann_posting_list;
+#[cfg(feature = "testing")]
+pub mod strategies;
 mod tenant;
 
 // Re-export the types module, so that we can use it as a single import in other modules.

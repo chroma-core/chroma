@@ -525,7 +525,7 @@ def test_embeddings_flake1(client: ClientAPI) -> None:
     state = EmbeddingStateMachine(client)
     state.initialize(
         collection=strategies.Collection(
-            name="fOIBy\n",
+            name="fOIBy",
             metadata={
                 "-7n": False,
                 "92WhVE_": "HtmY",

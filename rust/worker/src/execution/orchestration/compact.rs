@@ -34,7 +34,7 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use chroma_index::hnsw_provider::HnswIndexProvider;
-use chroma_log::log::Log;
+use chroma_log::Log;
 use chroma_segment::blockfile_metadata::MetadataSegmentWriter;
 use chroma_segment::blockfile_record::RecordSegmentReader;
 use chroma_segment::blockfile_record::RecordSegmentReaderCreationError;
@@ -197,6 +197,8 @@ pub enum CompactionError {
     Generic(#[from] Box<dyn ChromaError>),
     #[error("Invariant violation: {}", .0)]
     InvariantViolation(&'static str),
+    #[error("Operation aborted because resources exhausted")]
+    Aborted,
 }
 
 impl<E> From<TaskError<E>> for CompactionError
@@ -207,13 +209,18 @@ where
         match value {
             TaskError::Panic(e) => CompactionError::Panic(e),
             TaskError::TaskFailed(e) => e.into(),
+            TaskError::Aborted => CompactionError::Aborted,
         }
     }
 }
 
 impl ChromaError for CompactionError {
     fn code(&self) -> ErrorCodes {
-        ErrorCodes::Internal
+        if matches!(self, CompactionError::Aborted) {
+            ErrorCodes::ResourceExhausted
+        } else {
+            ErrorCodes::Internal
+        }
     }
 }
 
@@ -582,7 +589,7 @@ impl CompactOrchestrator {
 
                 // Create a hnsw segment writer
                 let collection_res = sysdb
-                    .get_collections(Some(self.collection_id), None, None, None)
+                    .get_collections(Some(self.collection_id), None, None, None, None, 0)
                     .await;
 
                 let collection_res = match collection_res {
@@ -726,7 +733,10 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
     ) {
         let records = match self.ok_or_terminate(message.into_inner(), ctx) {
             Some(recs) => recs,
-            None => todo!(),
+            None => {
+                tracing::info!("cancelled fetch log task");
+                return;
+            }
         };
         tracing::info!("Pulled Records: {:?}", records.len());
         let final_record_pulled = records.get(records.len() - 1);

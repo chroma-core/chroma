@@ -5,9 +5,10 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_index::hnsw_provider::HnswIndexProvider;
-use chroma_log::log::Log;
+use chroma_log::Log;
 use chroma_sysdb::SysDb;
 use chroma_system::{ComponentHandle, Dispatcher, Orchestrator, System};
+use chroma_tracing::util::wrap_span_with_parent_context;
 use chroma_types::{
     chroma_proto::{
         self, query_executor_server::QueryExecutor, CountPlan, CountResult, GetPlan, GetResult,
@@ -30,7 +31,6 @@ use crate::{
             CountOrchestrator,
         },
     },
-    tracing::util::wrap_span_with_parent_context,
     utils::convert::{from_proto_knn, to_proto_knn_batch_result},
 };
 
@@ -399,14 +399,14 @@ mod tests {
 
     use super::*;
     use chroma_index::test_hnsw_index_provider;
-    use chroma_log::log::InMemoryLog;
+    use chroma_log::in_memory_log::InMemoryLog;
     #[cfg(debug_assertions)]
     use chroma_proto::debug_client::DebugClient;
     use chroma_proto::query_executor_client::QueryExecutorClient;
     use chroma_segment::test::TestSegment;
     use chroma_sysdb::TestSysDb;
-    use chroma_system::dispatcher;
     use chroma_system::system;
+    use chroma_system::DispatcherConfig;
     use uuid::Uuid;
 
     fn run_server() -> String {
@@ -426,7 +426,13 @@ mod tests {
         };
 
         let system: system::System = system::System::new();
-        let dispatcher = dispatcher::Dispatcher::new(4, 10, 10);
+        let dispatcher = Dispatcher::new(DispatcherConfig {
+            num_worker_threads: 4,
+            task_queue_limit: 10,
+            dispatcher_queue_size: 10,
+            worker_queue_size: 10,
+            active_io_tasks: 10,
+        });
         let dispatcher_handle = system.start_component(dispatcher);
 
         server.set_system(system);
@@ -445,7 +451,7 @@ mod tests {
             collection: Some(chroma_proto::Collection {
                 id: collection_id.clone(),
                 name: "test-collection".to_string(),
-                configuration_json_str: String::new(),
+                configuration_json_str: "{}".to_string(),
                 metadata: None,
                 dimension: None,
                 tenant: "test-tenant".to_string(),
@@ -548,7 +554,7 @@ mod tests {
         scan_operator.collection = Some(chroma_proto::Collection {
             id: "invalid-collection-iD".to_string(),
             name: "broken-collection".to_string(),
-            configuration_json_str: String::new(),
+            configuration_json_str: "{}".to_string(),
             metadata: None,
             dimension: None,
             tenant: "test-tenant".to_string(),

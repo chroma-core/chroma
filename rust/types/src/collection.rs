@@ -1,11 +1,15 @@
 use super::{Metadata, MetadataValueConversionError};
 use crate::{chroma_proto, Segment};
 use chroma_error::{ChromaError, ErrorCodes};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use thiserror::Error;
 use uuid::Uuid;
 
 /// CollectionUuid is a wrapper around Uuid to provide a type for the collection id.
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(
+    Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize,
+)]
 pub struct CollectionUuid(pub Uuid);
 
 impl CollectionUuid {
@@ -31,21 +35,44 @@ impl std::fmt::Display for CollectionUuid {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Collection {
+    #[serde(rename(serialize = "id"))]
     pub collection_id: CollectionUuid,
     pub name: String,
+    #[serde(rename(deserialize = "configuration_json_str"))]
+    pub configuration_json: Value,
     pub metadata: Option<Metadata>,
     pub dimension: Option<i32>,
     pub tenant: String,
     pub database: String,
     pub log_position: i64,
     pub version: i32,
+    #[serde(skip)]
     pub total_records_post_compaction: u64,
+}
+
+impl Collection {
+    pub fn test_collection(dim: i32) -> Self {
+        Self {
+            collection_id: CollectionUuid::new(),
+            name: "test_collection".to_string(),
+            configuration_json: Value::Null,
+            metadata: None,
+            dimension: Some(dim),
+            tenant: "default_tenant".to_string(),
+            database: "default_database".to_string(),
+            log_position: 0,
+            version: 0,
+            total_records_post_compaction: 0,
+        }
+    }
 }
 
 #[derive(Error, Debug)]
 pub enum CollectionConversionError {
+    #[error("Invalid config")]
+    InvalidConfig(#[from] serde_json::Error),
     #[error("Invalid UUID")]
     InvalidUuid,
     #[error(transparent)]
@@ -55,6 +82,7 @@ pub enum CollectionConversionError {
 impl ChromaError for CollectionConversionError {
     fn code(&self) -> ErrorCodes {
         match self {
+            CollectionConversionError::InvalidConfig(_) => ErrorCodes::InvalidArgument,
             CollectionConversionError::InvalidUuid => ErrorCodes::InvalidArgument,
             CollectionConversionError::MetadataValueConversionError(e) => e.code(),
         }
@@ -80,6 +108,7 @@ impl TryFrom<chroma_proto::Collection> for Collection {
         Ok(Collection {
             collection_id,
             name: proto_collection.name,
+            configuration_json: serde_json::from_str(&proto_collection.configuration_json_str)?,
             metadata: collection_metadata,
             dimension: proto_collection.dimension,
             tenant: proto_collection.tenant,
@@ -96,7 +125,8 @@ impl From<Collection> for chroma_proto::Collection {
         Self {
             id: value.collection_id.0.to_string(),
             name: value.name,
-            configuration_json_str: String::new(),
+            configuration_json_str: serde_json::to_string(&value.configuration_json)
+                .unwrap_or("{}".to_string()),
             metadata: value.metadata.map(Into::into),
             dimension: value.dimension,
             tenant: value.tenant,

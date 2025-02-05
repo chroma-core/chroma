@@ -30,5 +30,6 @@ runs:
         kubectl -n chroma port-forward svc/logservice 50052:50051 &
         kubectl -n chroma port-forward svc/query-service 50053:50051 &
         kubectl -n chroma port-forward svc/frontend-service 8000:8000 &
+        kubectl -n chroma port-forward svc/rust-frontend-service 3000:3000 &
         kubectl -n chroma port-forward svc/minio 9000:9000 &
         kubectl -n chroma port-forward svc/jaeger 16686:16686 &

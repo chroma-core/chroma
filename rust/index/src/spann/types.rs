@@ -1587,6 +1587,7 @@ mod tests {
             storage.clone(),
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
+            16,
             rx,
         );
         let m = 16;
@@ -1782,6 +1783,7 @@ mod tests {
             storage.clone(),
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
+            16,
             rx,
         );
         let m = 16;
@@ -1967,6 +1969,7 @@ mod tests {
             storage.clone(),
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
+            16,
             rx,
         );
         let m = 16;
@@ -2156,6 +2159,7 @@ mod tests {
             storage.clone(),
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
+            16,
             rx,
         );
         let m = 16;
@@ -2397,6 +2401,7 @@ mod tests {
             storage.clone(),
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
+            16,
             rx,
         );
         let m = 16;

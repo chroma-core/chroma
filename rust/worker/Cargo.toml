@@ -22,6 +22,8 @@ tracing-subscriber = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry-otlp = { workspace = true }
 opentelemetry_sdk = { workspace = true }
+chroma-tracing = { workspace = true }
+
 regex = "1.11.1"
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
@@ -67,8 +69,7 @@ fastrace-opentelemetry = "0.8"
 
 [dev-dependencies]
 random-port = "0.1.1"
-serial_test = "3.2.0"
-
+serial_test = { workspace = true }
 criterion = { workspace = true }
 indicatif = { workspace = true }
 proptest = { workspace = true }

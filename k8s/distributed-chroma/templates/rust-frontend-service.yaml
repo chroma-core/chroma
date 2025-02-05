@@ -17,6 +17,10 @@ spec:
         - name: rust-frontend-service
           image: "{{ .Values.rustFrontendService.image.repository }}:{{ .Values.rustFrontendService.image.tag }}"
           imagePullPolicy: IfNotPresent
+          readinessProbe:
+            httpGet:
+              port: 3000
+              path: /api/v2/healthcheck
           ports:
             - containerPort: 3000
           {{ if .Values.rustFrontendService.resources }}

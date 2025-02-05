@@ -1,4 +1,6 @@
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use super::operator::OperatorType;
 use super::{operator::TaskMessage, worker_thread::WorkerThread};
@@ -54,26 +56,21 @@ use tracing::{trace_span, Instrument, Span};
 */
 #[derive(Debug)]
 pub struct Dispatcher {
+    config: DispatcherConfig,
     task_queue: VecDeque<(TaskMessage, Span)>,
     waiters: Vec<TaskRequestMessage>,
-    n_worker_threads: usize,
-    queue_size: usize,
-    worker_queue_size: usize,
+    active_io_tasks: Arc<AtomicU64>,
 }
 
 impl Dispatcher {
-    /// Create a new dispatcher
-    /// # Parameters
-    /// - n_worker_threads: The number of worker threads to use
-    /// - queue_size: The size of the components message queue
-    /// - worker_queue_size: The size of the worker components queue
-    pub fn new(n_worker_threads: usize, queue_size: usize, worker_queue_size: usize) -> Self {
+    /// Create a new dispatcher from a configuration.
+    pub fn new(config: DispatcherConfig) -> Self {
+        let active_io_tasks = config.active_io_tasks;
         Dispatcher {
+            config,
             task_queue: VecDeque::new(),
             waiters: Vec::new(),
-            n_worker_threads,
-            queue_size,
-            worker_queue_size,
+            active_io_tasks: Arc::new(AtomicU64::new(active_io_tasks as u64)),
         }
     }
 
@@ -86,8 +83,8 @@ impl Dispatcher {
         system: &mut System,
         self_receiver: Box<dyn ReceiverForMessage<TaskRequestMessage>>,
     ) {
-        for _ in 0..self.n_worker_threads {
-            let worker = WorkerThread::new(self_receiver.clone(), self.worker_queue_size);
+        for _ in 0..self.config.num_worker_threads {
+            let worker = WorkerThread::new(self_receiver.clone(), self.config.worker_queue_size);
             system.start_component(worker);
         }
     }
@@ -95,12 +92,41 @@ impl Dispatcher {
     /// Enqueue a task to be processed
     /// # Parameters
     /// - task: The task to enqueue
-    async fn enqueue_task(&mut self, task: TaskMessage) {
+    async fn enqueue_task(&mut self, mut task: TaskMessage) {
         match task.get_type() {
             OperatorType::IO => {
                 let child_span = trace_span!(parent: Span::current(), "IO task execution", name = task.get_name());
+                // This spin loop:
+                // - reads a witness from active_io_tasks.
+                // - aborts the task if witness is zero.
+                // - tries to decrement the value to one less than the witness.
+                // - if the decrement fails, it retries;  this loads a new witness and tries again.
+                // - if the decrement succeeds, it spawns the task.
+                // This is conceptually what a semaphore is doing, except that it bails if
+                // acquisition fails rather than blocking.
+                let mut witness = self.active_io_tasks.load(Ordering::Relaxed);
+                loop {
+                    if witness == 0 {
+                        task.abort().await;
+                        return;
+                    }
+                    match self.active_io_tasks.compare_exchange(
+                        witness,
+                        witness - 1,
+                        Ordering::Relaxed,
+                        Ordering::Relaxed,
+                    ) {
+                        Ok(_) => break,
+                        Err(new_witness) => {
+                            witness = new_witness;
+                        }
+                    }
+                }
+                let counter = Arc::clone(&self.active_io_tasks);
+                let counter = DecrementOnDrop(counter);
                 tokio::spawn(async move {
                     task.run().instrument(child_span).await;
+                    drop(counter);
                 });
             }
             OperatorType::Other => {
@@ -115,7 +141,11 @@ impl Dispatcher {
                         }
                     },
                     None => {
-                        self.task_queue.push_back((task, Span::current()));
+                        if self.task_queue.len() >= self.config.task_queue_limit {
+                            task.abort().await;
+                        } else {
+                            self.task_queue.push_back((task, Span::current()));
+                        }
                     }
                 }
             }
@@ -145,11 +175,7 @@ impl Dispatcher {
 #[async_trait]
 impl Configurable<DispatcherConfig> for Dispatcher {
     async fn try_from_config(config: &DispatcherConfig) -> Result<Self, Box<dyn ChromaError>> {
-        Ok(Dispatcher::new(
-            config.num_worker_threads,
-            config.dispatcher_queue_size,
-            config.worker_queue_size,
-        ))
+        Ok(Dispatcher::new(config.clone()))
     }
 }
 
@@ -180,7 +206,7 @@ impl Component for Dispatcher {
     }
 
     fn queue_size(&self) -> usize {
-        self.queue_size
+        self.config.dispatcher_queue_size
     }
 
     async fn start(&mut self, ctx: &ComponentContext<Self>) {
@@ -204,6 +230,14 @@ impl Handler<TaskRequestMessage> for Dispatcher {
 
     async fn handle(&mut self, message: TaskRequestMessage, _ctx: &ComponentContext<Dispatcher>) {
         self.handle_work_request(message).await;
+    }
+}
+
+struct DecrementOnDrop(Arc<AtomicU64>);
+
+impl Drop for DecrementOnDrop {
+    fn drop(&mut self) {
+        self.0.fetch_add(1, Ordering::Relaxed);
     }
 }
 
@@ -411,7 +445,13 @@ mod tests {
     #[tokio::test]
     async fn test_dispatcher_io_tasks() {
         let system = System::new();
-        let dispatcher = Dispatcher::new(THREAD_COUNT, 1000, 1000);
+        let dispatcher = Dispatcher::new(DispatcherConfig {
+            num_worker_threads: THREAD_COUNT,
+            task_queue_limit: 1000,
+            dispatcher_queue_size: 1000,
+            worker_queue_size: 1000,
+            active_io_tasks: 1000,
+        });
         let dispatcher_handle = system.start_component(dispatcher);
         let counter = Arc::new(AtomicUsize::new(0));
         let sent_tasks = Arc::new(Mutex::new(HashSet::new()));
@@ -439,7 +479,13 @@ mod tests {
     #[tokio::test]
     async fn test_dispatcher_non_io_tasks() {
         let system = System::new();
-        let dispatcher = Dispatcher::new(THREAD_COUNT, 1000, 1000);
+        let dispatcher = Dispatcher::new(DispatcherConfig {
+            num_worker_threads: THREAD_COUNT,
+            task_queue_limit: 1000,
+            dispatcher_queue_size: 1000,
+            worker_queue_size: 1000,
+            active_io_tasks: 1000,
+        });
         let dispatcher_handle = system.start_component(dispatcher);
         let counter = Arc::new(AtomicUsize::new(0));
         let sent_tasks = Arc::new(Mutex::new(HashSet::new()));
@@ -462,5 +508,65 @@ mod tests {
         // The length of the sent/recieved tasks should be equal to the number of dispatched tasks
         assert_eq!(sent_tasks.lock().len(), DISPATCH_COUNT);
         assert_eq!(received_tasks.lock().len(), DISPATCH_COUNT);
+    }
+
+    #[tokio::test]
+    async fn test_dispatcher_non_io_tasks_reject() {
+        let system = System::new();
+        let dispatcher = Dispatcher::new(DispatcherConfig {
+            num_worker_threads: THREAD_COUNT,
+            // Must be zero to fail things.
+            task_queue_limit: 0,
+            dispatcher_queue_size: 1,
+            worker_queue_size: 1,
+            active_io_tasks: 1,
+        });
+        let dispatcher_handle = system.start_component(dispatcher);
+        let counter = Arc::new(AtomicUsize::new(0));
+        let sent_tasks = Arc::new(Mutex::new(HashSet::new()));
+        let received_tasks = Arc::new(Mutex::new(HashSet::new()));
+        let dispatch_user = MockDispatchUser {
+            dispatcher: dispatcher_handle,
+            counter: counter.clone(),
+            sent_tasks: sent_tasks.clone(),
+            received_tasks: received_tasks.clone(),
+        };
+        let dispatch_user_handle = system.start_component(dispatch_user);
+        let mut is_err = false;
+        for _ in 0..1000 {
+            is_err |= dispatch_user_handle.request((), None).await.is_err();
+        }
+        assert!(is_err);
+    }
+
+    #[tokio::test]
+    async fn test_dispatcher_io_tasks_reject() {
+        let system = System::new();
+        let dispatcher = Dispatcher::new(DispatcherConfig {
+            num_worker_threads: THREAD_COUNT,
+            // Must be zero to fail things.
+            task_queue_limit: 0,
+            dispatcher_queue_size: 1,
+            worker_queue_size: 1,
+            active_io_tasks: 1,
+        });
+        let dispatcher_handle = system.start_component(dispatcher);
+        let counter = Arc::new(AtomicUsize::new(0));
+        let sent_tasks = Arc::new(Mutex::new(HashSet::new()));
+        let received_tasks = Arc::new(Mutex::new(HashSet::new()));
+        let dispatch_user = MockIoDispatchUser {
+            dispatcher: dispatcher_handle,
+            counter: counter.clone(),
+            sent_tasks: sent_tasks.clone(),
+            received_tasks: received_tasks.clone(),
+        };
+        let dispatch_user_handle = system.start_component(dispatch_user);
+        // yield to allow the component to process the messages
+        tokio::task::yield_now().await;
+        let mut is_err = false;
+        for _ in 0..1000 {
+            is_err |= dispatch_user_handle.request((), None).await.is_err();
+        }
+        assert!(is_err);
     }
 }

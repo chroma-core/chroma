@@ -141,6 +141,8 @@ pub enum GarbageCollectorError {
     ComputeUnusedBetweenVersions(#[from] ComputeUnusedBetweenVersionsError),
     #[error("DeleteVersionsAtSysDb error: {0}")]
     DeleteVersionsAtSysDb(#[from] DeleteVersionsAtSysDbError),
+    #[error("The task was aborted because resources were exhausted")]
+    Aborted,
 }
 
 impl ChromaError for GarbageCollectorError {
@@ -157,6 +159,7 @@ where
         match value {
             TaskError::Panic(e) => GarbageCollectorError::Panic(e),
             TaskError::TaskFailed(e) => e.into(),
+            TaskError::Aborted => GarbageCollectorError::Aborted,
         }
     }
 }
