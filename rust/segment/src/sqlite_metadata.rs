@@ -62,7 +62,12 @@ impl SqliteMetadataWriter {
                 Embeddings::SeqId,
             ])
             .values([segment_id.to_string().into(), user_id.into(), seq_id.into()])?
-            .returning_col(Embeddings::Id)
+            .on_conflict(
+                OnConflict::columns([Embeddings::SegmentId, Embeddings::EmbeddingId])
+                    .do_nothing()
+                    .to_owned(),
+            )
+            .returning(Query::returning().columns([Embeddings::Id, Embeddings::SeqId]))
             .to_owned())
     }
 
@@ -71,13 +76,13 @@ impl SqliteMetadataWriter {
         segment_id: SegmentUuid,
         seq_id: u64,
         user_id: String,
-    ) -> Result<u32, SqliteMetadataError> {
+    ) -> Result<Option<u32>, SqliteMetadataError> {
         let (add_emb_stmt, values) =
             Self::add_embedding_stmt(segment_id, seq_id, user_id)?.build_sqlx(SqliteQueryBuilder);
-        Ok(sqlx::query_with(&add_emb_stmt, values)
+        let result = sqlx::query_with(&add_emb_stmt, values)
             .fetch_one(&mut **tx)
-            .await?
-            .try_get(0)?)
+            .await?;
+        Ok((result.try_get::<u64, _>(1)? == seq_id).then_some(result.try_get(0)?))
     }
 
     fn update_embedding_stmt(
@@ -410,15 +415,16 @@ impl SqliteMetadataWriter {
             max_seq_id = max_seq_id.max(log_offset_unsigned);
             match operation {
                 Operation::Add => {
-                    let offset_id =
-                        Self::add_embedding(&mut tx, segment_id, log_offset_unsigned, id).await?;
+                    if let Some(offset_id) =
+                        Self::add_embedding(&mut tx, segment_id, log_offset_unsigned, id).await?
+                    {
+                        if let Some(meta) = metadata {
+                            Self::update_metadata(&mut tx, offset_id, meta).await?;
+                        }
 
-                    if let Some(meta) = metadata {
-                        Self::update_metadata(&mut tx, offset_id, meta).await?;
-                    }
-
-                    if let Some(doc) = document {
-                        Self::upsert_document(&mut tx, offset_id, doc).await?;
+                        if let Some(doc) = document {
+                            Self::upsert_document(&mut tx, offset_id, doc).await?;
+                        }
                     }
                 }
                 Operation::Update => {
