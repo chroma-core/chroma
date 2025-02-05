@@ -244,7 +244,7 @@ pub enum DeleteDatabaseError {
 impl ChromaError for DeleteDatabaseError {
     fn code(&self) -> ErrorCodes {
         match self {
-            DeleteDatabaseError::Internal(status) => status.code().into(),
+            DeleteDatabaseError::Internal(err) => err.code(),
             DeleteDatabaseError::InvalidID(_) => ErrorCodes::InvalidArgument,
             DeleteDatabaseError::NotFound(_) => ErrorCodes::NotFound,
         }
