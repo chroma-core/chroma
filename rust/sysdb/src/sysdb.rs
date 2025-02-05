@@ -69,8 +69,10 @@ impl SysDb {
                 grpc.create_database(database_id, database_name, tenant)
                     .await
             }
-            SysDb::Sqlite(_) => {
-                todo!()
+            SysDb::Sqlite(sqlite) => {
+                sqlite
+                    .create_database(database_id, &database_name, &tenant)
+                    .await
             }
             SysDb::Test(_) => {
                 todo!()
@@ -439,7 +441,7 @@ impl GrpcSysDb {
         }
     }
 
-    pub async fn create_database(
+    pub(crate) async fn create_database(
         &mut self,
         database_id: Uuid,
         database_name: String,
@@ -457,7 +459,7 @@ impl GrpcSysDb {
                 tracing::error!("Failed to create database {:?}", e);
                 let res = match e.code() {
                     Code::AlreadyExists => CreateDatabaseError::AlreadyExists(database_name),
-                    _ => CreateDatabaseError::Internal(e),
+                    _ => CreateDatabaseError::Internal(e.into()),
                 };
                 Err(res)
             }

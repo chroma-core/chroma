@@ -361,10 +361,7 @@ where
             )));
         }
         let cache = builder.build().await.map_err(|e| {
-            Box::new(CacheError::InvalidCacheConfig(format!(
-                "builder failed: {:?}",
-                e
-            ))) as _
+            CacheError::InvalidCacheConfig(format!("builder failed: {:?}", e)).boxed()
         })?;
         cache.enable_tracing();
         cache.update_tracing_options(

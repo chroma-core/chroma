@@ -1285,6 +1285,8 @@ dependencies = [
 name = "chroma-error"
 version = "0.1.0"
 dependencies = [
+ "sqlx",
+ "thiserror 1.0.69",
  "tonic",
 ]
 
@@ -1459,6 +1461,7 @@ dependencies = [
 name = "chroma-sqlite"
 version = "0.1.0"
 dependencies = [
+ "chroma-error",
  "md5",
  "pyo3",
  "regex",
