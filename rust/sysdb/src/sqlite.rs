@@ -5,7 +5,7 @@ use chroma_sqlite::db::SqliteDb;
 use chroma_types::{
     Collection, CollectionUuid, CreateDatabaseError, CreateDatabaseResponse, CreateTenantError,
     CreateTenantResponse, Database, DeleteDatabaseError, DeleteDatabaseResponse, GetDatabaseError,
-    ListDatabasesError, Metadata, Segment, Tenant,
+    GetTenantError, GetTenantResponse, ListDatabasesError, Metadata, Segment,
 };
 use futures::TryStreamExt;
 use sqlx::error::ErrorKind;
@@ -162,8 +162,16 @@ impl SqliteSysDb {
         Ok(CreateTenantResponse {})
     }
 
-    pub(crate) async fn _get_tenant(&self, _name: &str) -> Result<Tenant, String> {
-        unimplemented!();
+    pub(crate) async fn get_tenant(&self, name: &str) -> Result<GetTenantResponse, GetTenantError> {
+        sqlx::query("SELECT id FROM tenants WHERE id = $1")
+            .bind(name)
+            .fetch_one(self.db.get_conn())
+            .await
+            .map_err(|e| match e {
+                sqlx::Error::RowNotFound => GetTenantError::NotFound(name.to_string()),
+                _ => GetTenantError::Internal(e.into()),
+            })
+            .and_then(|row| Ok(GetTenantResponse { name: row.get(0) }))
     }
 
     ////////////////////////// Collection Methods ////////////////////////
@@ -234,6 +242,10 @@ mod tests {
         // Second call should fail
         let result = sysdb.create_tenant("new_tenant".to_string()).await;
         matches!(result, Err(CreateTenantError::AlreadyExists(_)));
+
+        // Get tenant
+        let tenant = sysdb.get_tenant("new_tenant").await.unwrap();
+        assert_eq!(tenant.name, "new_tenant");
 
         // TODO: Add tests
         // test same id or name

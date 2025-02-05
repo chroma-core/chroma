@@ -54,7 +54,7 @@ impl SysDb {
     ) -> Result<GetTenantResponse, GetTenantError> {
         match self {
             SysDb::Grpc(grpc) => grpc.get_tenant(tenant_name).await,
-            SysDb::Sqlite(_) => todo!(),
+            SysDb::Sqlite(sqlite) => sqlite.get_tenant(&tenant_name).await,
             SysDb::Test(_) => todo!(),
         }
     }
@@ -478,7 +478,7 @@ impl GrpcSysDb {
                     .ok_or(GetTenantError::NotFound(tenant_name))?
                     .name,
             }),
-            Err(err) => Err(err.into()),
+            Err(err) => Err(GetTenantError::Internal(err.into())),
         }
     }
 

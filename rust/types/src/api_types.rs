@@ -124,7 +124,7 @@ pub struct GetTenantResponse {
 #[derive(Debug, Error)]
 pub enum GetTenantError {
     #[error(transparent)]
-    Internal(#[from] Status),
+    Internal(#[from] Box<dyn ChromaError>),
     #[error("Tenant [{0}] not found")]
     NotFound(String),
 }
@@ -132,7 +132,7 @@ pub enum GetTenantError {
 impl ChromaError for GetTenantError {
     fn code(&self) -> ErrorCodes {
         match self {
-            GetTenantError::Internal(status) => status.code().into(),
+            GetTenantError::Internal(err) => err.code(),
             GetTenantError::NotFound(_) => ErrorCodes::NotFound,
         }
     }
