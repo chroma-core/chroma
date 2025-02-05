@@ -89,7 +89,7 @@ impl SysDb {
     ) -> Result<ListDatabasesResponse, ListDatabasesError> {
         match self {
             SysDb::Grpc(grpc) => grpc.list_databases(tenant_id, limit, offset).await,
-            SysDb::Sqlite(_) => todo!(),
+            SysDb::Sqlite(sqlite) => sqlite.list_databases(tenant_id, limit, offset).await,
             SysDb::Test(_) => todo!(),
         }
     }
@@ -533,7 +533,7 @@ impl GrpcSysDb {
                         })
                 })
                 .collect(),
-            Err(err) => Err(ListDatabasesError::Internal(err)),
+            Err(err) => Err(ListDatabasesError::Internal(err.into())),
         }
     }
 

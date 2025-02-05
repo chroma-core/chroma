@@ -164,7 +164,7 @@ impl ChromaError for CreateDatabaseError {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct Database {
     pub id: Uuid,
     pub name: String,
@@ -182,7 +182,7 @@ pub type ListDatabasesResponse = Vec<Database>;
 #[derive(Debug, Error)]
 pub enum ListDatabasesError {
     #[error(transparent)]
-    Internal(#[from] Status),
+    Internal(#[from] Box<dyn ChromaError>),
     #[error("Invalid database id [{0}]")]
     InvalidID(String),
 }
@@ -190,7 +190,7 @@ pub enum ListDatabasesError {
 impl ChromaError for ListDatabasesError {
     fn code(&self) -> ErrorCodes {
         match self {
-            ListDatabasesError::Internal(status) => status.code().into(),
+            ListDatabasesError::Internal(status) => status.code(),
             ListDatabasesError::InvalidID(_) => ErrorCodes::InvalidArgument,
         }
     }

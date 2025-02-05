@@ -1,10 +1,13 @@
 use std::str::FromStr;
+use std::u32;
 
 use chroma_sqlite::db::SqliteDb;
 use chroma_types::{
     Collection, CollectionUuid, CreateDatabaseError, CreateDatabaseResponse, Database,
-    DeleteDatabaseError, DeleteDatabaseResponse, GetDatabaseError, Metadata, Segment, Tenant,
+    DeleteDatabaseError, DeleteDatabaseResponse, GetDatabaseError, ListDatabasesError, Metadata,
+    Segment, Tenant,
 };
+use futures::TryStreamExt;
 use sqlx::error::ErrorKind;
 use sqlx::Row;
 use uuid::Uuid;
@@ -99,6 +102,44 @@ impl SqliteSysDb {
         Ok(DeleteDatabaseResponse {})
     }
 
+    pub(crate) async fn list_databases(
+        &self,
+        tenant_id: String,
+        limit: Option<u32>,
+        offset: u32,
+    ) -> Result<Vec<Database>, ListDatabasesError> {
+        let mut rows = sqlx::query(
+            r#"
+                SELECT id, name, tenant_id
+                FROM databases
+                WHERE tenant_id = $1
+                ORDER BY name
+                LIMIT $2 OFFSET $3
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(limit.unwrap_or(u32::MAX))
+        .bind(offset)
+        .fetch(self.db.get_conn());
+
+        let mut databases = Vec::new();
+        while let Some(row) = rows
+            .try_next()
+            .await
+            .map_err(|e| ListDatabasesError::Internal(e.into()))?
+        {
+            let id = Uuid::from_str(row.get::<&str, _>(0))
+                .map_err(|e| ListDatabasesError::InvalidID(e.to_string()))?;
+            databases.push(Database {
+                id,
+                name: row.get(1),
+                tenant: row.get(2),
+            });
+        }
+
+        Ok(databases)
+    }
+
     ////////////////////////// Tenant Methods ////////////////////////
 
     pub(crate) async fn _create_tenant(&self, _name: &str) -> Result<Tenant, String> {
@@ -152,6 +193,12 @@ mod tests {
 
         let database = sysdb.get_database("test", "default_tenant").await.unwrap();
         assert_eq!(database.name, "test");
+
+        let listed_databases = sysdb
+            .list_databases("default_tenant".to_string(), None, 0)
+            .await
+            .unwrap();
+        assert_eq!(listed_databases.len(), 2);
 
         // Delete database
         sysdb
