@@ -1,4 +1,5 @@
 import json
+import os
 import uuid
 
 import pytest
@@ -33,6 +34,8 @@ def mock_server(httpserver: HTTPServer):
 
 
 def test_http_client_cardinality_with_same_settings(mock_server: HTTPServer):
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
+        pytest.skip("Skipping test for integration test")
     SharedSystemClient._identifier_to_system.clear()
     for _ in range(10):
         chromadb.HttpClient(host=f"http://{mock_server.host}:{mock_server.port}")
@@ -40,10 +43,15 @@ def test_http_client_cardinality_with_same_settings(mock_server: HTTPServer):
 
 
 def test_http_client_cardinality_with_different_settings(mock_server: HTTPServer):
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
+        pytest.skip("Skipping test for integration test")
     SharedSystemClient._identifier_to_system.clear()
     expected_clients_count = 10
     for i in range(expected_clients_count):
         chromadb.HttpClient(
-            host=f"http://{mock_server.host}:{mock_server.port}", headers={"header": str(i)}
+            host=f"http://{mock_server.host}:{mock_server.port}",
+            headers={"header": str(i)},
         )
-    assert len(SharedSystemClient._identifier_to_system.keys()) == expected_clients_count
+    assert (
+        len(SharedSystemClient._identifier_to_system.keys()) == expected_clients_count
+    )
