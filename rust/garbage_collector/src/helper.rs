@@ -6,7 +6,7 @@ use chroma_types::chroma_proto::{
     FilterOperator, GetCollectionWithSegmentsRequest, GetPlan, KnnOperator, KnnPlan,
     KnnProjectionOperator, LimitOperator, ListCollectionVersionsRequest,
     ListCollectionVersionsResponse, OperationRecord, ProjectionOperator, PushLogsRequest,
-    ScanOperator, Segment, SegmentScope, UserIds, Vector,
+    ScanOperator, Segment, SegmentScope, Vector,
 };
 use std::collections::HashMap;
 use tonic::transport::Channel;
@@ -214,7 +214,7 @@ impl ChromaGrpcClients {
     pub async fn get_records(
         &mut self,
         collection_id: &str,
-        ids: Option<Vec<String>>,
+        _ids: Option<Vec<String>>,
         include_embeddings: bool,
         include_metadatas: bool,
         include_documents: bool,

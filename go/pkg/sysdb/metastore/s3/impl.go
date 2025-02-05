@@ -22,7 +22,7 @@ import (
 // s3://<bucket-name>/<sysdbPathPrefix>/<tenant_id>/collections/<collection_id>/versionfiles/file_name
 const (
 	versionFilesPathFormat = "%s/%s/collections/%s/versionfiles/%s"
-	minioEndpoint          = "192.168.194.114:9000"
+	minioEndpoint          = "minio:9000"
 	minioAccessKeyID       = "minio"
 	minioSecretAccessKey   = "minio123"
 )
