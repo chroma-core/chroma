@@ -24,14 +24,16 @@ rand = { workspace = true }
 regex = { workspace = true }
 backon = { workspace = true }
 tower = { version = "0.4.13", features = ["discover"] }
-
-chroma-config = { workspace = true }
-chroma-types = { workspace = true }
-chroma-sysdb = { workspace = true }
-chroma-error = { workspace = true }
-chroma-tracing = { workspace = true }
 mdac = { workspace = true }
+opentelemetry.workspace = true
+
 chroma-cache = { workspace = true }
+chroma-config = { workspace = true }
+chroma-error = { workspace = true }
 chroma-log = { workspace = true }
 chroma-memberlist = { workspace = true }
+chroma-segment = { workspace = true }
+chroma-sysdb = { workspace = true }
 chroma-system = { workspace = true }
+chroma-tracing = { workspace = true }
+chroma-types = { workspace = true }

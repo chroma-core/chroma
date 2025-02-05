@@ -24,6 +24,9 @@ use chroma_types::{
     UpdateCollectionResponse, UpdateMetadata, UpsertCollectionRecordsResponse,
 };
 use mdac::{Rule, Scorecard, ScorecardTicket};
+use opentelemetry::global;
+use opentelemetry::metrics::{Counter, Meter};
+use opentelemetry::KeyValue;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -52,12 +55,71 @@ impl Drop for ScorecardGuard {
     }
 }
 
+pub struct Metrics {
+    healthcheck: Counter<u64>,
+    heartbeat: Counter<u64>,
+    pre_flight_checks: Counter<u64>,
+    reset: Counter<u64>,
+    version: Counter<u64>,
+    create_tenant: Counter<u64>,
+    get_tenant: Counter<u64>,
+    list_databases: Counter<u64>,
+    create_database: Counter<u64>,
+    get_database: Counter<u64>,
+    delete_database: Counter<u64>,
+    create_collection: Counter<u64>,
+    list_collections: Counter<u64>,
+    count_collections: Counter<u64>,
+    get_collection: Counter<u64>,
+    update_collection: Counter<u64>,
+    delete_collection: Counter<u64>,
+    collection_add: Counter<u64>,
+    collection_update: Counter<u64>,
+    collection_upsert: Counter<u64>,
+    collection_delete: Counter<u64>,
+    collection_count: Counter<u64>,
+    collection_get: Counter<u64>,
+    collection_query: Counter<u64>,
+}
+
+impl Metrics {
+    pub fn new(meter: Meter) -> Metrics {
+        Metrics {
+            healthcheck: meter.u64_counter("healthcheck").build(),
+            heartbeat: meter.u64_counter("heartbeat").build(),
+            pre_flight_checks: meter.u64_counter("pre_flight_checks").build(),
+            reset: meter.u64_counter("reset").build(),
+            version: meter.u64_counter("version").build(),
+            create_tenant: meter.u64_counter("create_tenant").build(),
+            get_tenant: meter.u64_counter("get_tenant").build(),
+            list_databases: meter.u64_counter("list_databases").build(),
+            create_database: meter.u64_counter("create_database").build(),
+            get_database: meter.u64_counter("get_database").build(),
+            delete_database: meter.u64_counter("delete_database").build(),
+            create_collection: meter.u64_counter("create_collection").build(),
+            list_collections: meter.u64_counter("list_collections").build(),
+            count_collections: meter.u64_counter("count_collections").build(),
+            get_collection: meter.u64_counter("get_collection").build(),
+            update_collection: meter.u64_counter("update_collection").build(),
+            delete_collection: meter.u64_counter("delete_collection").build(),
+            collection_add: meter.u64_counter("collection_add").build(),
+            collection_update: meter.u64_counter("collection_update").build(),
+            collection_upsert: meter.u64_counter("collection_upsert").build(),
+            collection_delete: meter.u64_counter("collection_delete").build(),
+            collection_count: meter.u64_counter("collection_count").build(),
+            collection_get: meter.u64_counter("collection_get").build(),
+            collection_query: meter.u64_counter("collection_query").build(),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct FrontendServer {
     config: FrontendConfig,
     frontend: Frontend,
     scorecard_enabled: Arc<AtomicBool>,
     scorecard: Arc<Scorecard<'static>>,
+    metrics: Arc<Metrics>,
 }
 
 impl FrontendServer {
@@ -67,11 +129,13 @@ impl FrontendServer {
         let scorecard_enabled = Arc::new(AtomicBool::new(config.scorecard_enabled));
         // SAFETY(rescrv):  This is safe because 128 is non-zero.
         let scorecard = Arc::new(Scorecard::new(&(), rules, 128.try_into().unwrap()));
+        let metrics = Arc::new(Metrics::new(global::meter("chroma")));
         FrontendServer {
             config,
             frontend,
             scorecard_enabled,
             scorecard,
+            metrics,
         }
     }
 
@@ -173,6 +237,7 @@ async fn root() -> &'static str {
 }
 
 async fn healthcheck(State(server): State<FrontendServer>) -> impl IntoResponse {
+    server.metrics.healthcheck.add(1, &[]);
     let res = server.frontend.healthcheck().await;
     let code = match res.get_status_code() {
         tonic::Code::Ok => StatusCode::OK,
@@ -185,27 +250,34 @@ async fn healthcheck(State(server): State<FrontendServer>) -> impl IntoResponse 
 async fn heartbeat(
     State(server): State<FrontendServer>,
 ) -> Result<Json<HeartbeatResponse>, ServerError> {
+    server.metrics.heartbeat.add(1, &[]);
     Ok(Json(server.frontend.heartbeat().await?))
 }
 
 // Dummy implementation for now
-async fn pre_flight_checks() -> Result<Json<ChecklistResponse>, ServerError> {
+async fn pre_flight_checks(
+    State(server): State<FrontendServer>,
+) -> Result<Json<ChecklistResponse>, ServerError> {
+    server.metrics.pre_flight_checks.add(1, &[]);
     Ok(Json(ChecklistResponse {
         max_batch_size: 100,
     }))
 }
 
 async fn reset(State(mut server): State<FrontendServer>) -> Result<Json<bool>, ServerError> {
+    server.metrics.reset.add(1, &[]);
     server.frontend.reset().await?;
     Ok(Json(true))
 }
 
-async fn version() -> &'static str {
+async fn version(State(server): State<FrontendServer>) -> &'static str {
+    server.metrics.version.add(1, &[]);
     env!("CARGO_PKG_VERSION")
 }
 
 // Dummy implementation for now
-async fn get_user_identity() -> Json<GetUserIdentityResponse> {
+async fn get_user_identity(State(server): State<FrontendServer>) -> Json<GetUserIdentityResponse> {
+    server.metrics.version.add(1, &[]);
     Json(GetUserIdentityResponse {
         user_id: String::new(),
         tenant: "default_tenant".to_string(),
@@ -217,6 +289,7 @@ async fn create_tenant(
     State(mut server): State<FrontendServer>,
     Json(request): Json<CreateTenantRequest>,
 ) -> Result<Json<CreateTenantResponse>, ServerError> {
+    server.metrics.create_tenant.add(1, &[]);
     tracing::info!("Creating tenant [{}]", request.name);
     Ok(Json(server.frontend.create_tenant(request).await?))
 }
@@ -225,6 +298,7 @@ async fn get_tenant(
     Path(name): Path<String>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<GetTenantResponse>, ServerError> {
+    server.metrics.get_tenant.add(1, &[]);
     tracing::info!("Getting tenant [{}]", name);
     Ok(Json(
         server
@@ -244,6 +318,7 @@ async fn create_database(
     State(mut server): State<FrontendServer>,
     Json(CreateDatabasePayload { name }): Json<CreateDatabasePayload>,
 ) -> Result<Json<CreateDatabaseResponse>, ServerError> {
+    server.metrics.create_database.add(1, &[]);
     tracing::info!("Creating database [{}] for tenant [{}]", name, tenant_id);
     let _guard = server.scorecard_request(&[
         "op:create_database",
@@ -272,6 +347,7 @@ async fn list_databases(
     State(mut server): State<FrontendServer>,
     Json(ListDatabasesPayload { limit, offset }): Json<ListDatabasesPayload>,
 ) -> Result<Json<ListDatabasesResponse>, ServerError> {
+    server.metrics.list_databases.add(1, &[]);
     tracing::info!("Listing database for tenant [{}]", tenant_id);
     let _guard = server.scorecard_request(&[
         "op:list_databases",
@@ -293,6 +369,7 @@ async fn get_database(
     Path((tenant_id, database_name)): Path<(String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<GetDatabaseResponse>, ServerError> {
+    server.metrics.get_database.add(1, &[]);
     tracing::info!(
         "Getting database [{}] for tenant [{}]",
         database_name,
@@ -314,6 +391,7 @@ async fn delete_database(
     Path((tenant_id, database_name)): Path<(String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<DeleteDatabaseResponse>, ServerError> {
+    server.metrics.delete_database.add(1, &[]);
     tracing::info!(
         "Deleting database [{}] for tenant [{}]",
         database_name,
@@ -346,6 +424,7 @@ async fn list_collections(
     Query(ListCollectionsParams { limit, offset }): Query<ListCollectionsParams>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<ListCollectionsResponse>, ServerError> {
+    server.metrics.list_collections.add(1, &[]);
     tracing::info!(
         "Listing collections in database [{}] for tenant [{}] with limit [{:?}] and offset [{:?}]",
         database_name,
@@ -374,6 +453,7 @@ async fn count_collections(
     Path((tenant_id, database_name)): Path<(String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<CountCollectionsResponse>, ServerError> {
+    server.metrics.count_collections.add(1, &[]);
     tracing::info!(
         "Counting collections in database [{}] for tenant [{}]",
         database_name,
@@ -407,6 +487,7 @@ async fn create_collection(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<CreateCollectionPayload>,
 ) -> Result<Json<Collection>, ServerError> {
+    server.metrics.create_collection.add(1, &[]);
     tracing::info!("Creating collection in database [{database_name}] for tenant [{tenant_id}]");
     let _guard = server.scorecard_request(&[
         "op:create_collection",
@@ -435,6 +516,7 @@ async fn get_collection(
     Path((tenant_id, database_name, collection_name)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<Collection>, ServerError> {
+    server.metrics.get_collection.add(1, &[]);
     tracing::info!("Getting collection [{collection_name}] in database [{database_name}] for tenant [{tenant_id}]");
     let _guard = server.scorecard_request(&[
         "op:get_collection",
@@ -462,6 +544,7 @@ async fn update_collection(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<UpdateCollectionPayload>,
 ) -> Result<Json<UpdateCollectionResponse>, ServerError> {
+    server.metrics.update_collection.add(1, &[]);
     tracing::info!("Updating collection [{collection_id}] in database [{database_name}] for tenant [{tenant_id}]");
     let _guard = server.scorecard_request(&[
         "op:update_collection",
@@ -495,6 +578,7 @@ async fn delete_collection(
     Path((tenant_id, database_name, collection_name)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<UpdateCollectionResponse>, ServerError> {
+    server.metrics.delete_collection.add(1, &[]);
     let _guard = server.scorecard_request(&[
         "op:delete_collection",
         format!("tenant:{}", tenant_id).as_str(),
@@ -525,6 +609,7 @@ async fn collection_add(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<AddCollectionRecordsPayload>,
 ) -> Result<Json<AddCollectionRecordsResponse>, ServerError> {
+    server.metrics.collection_add.add(1, &[]);
     let _guard = server.scorecard_request(&[
         "op:write",
         format!("tenant:{}", tenant_id).as_str(),
@@ -574,6 +659,7 @@ async fn collection_update(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<UpdateCollectionRecordsPayload>,
 ) -> Result<Json<UpdateCollectionRecordsResponse>, ServerError> {
+    server.metrics.collection_update.add(1, &[]);
     let collection_id =
         CollectionUuid(Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?);
     let _guard = server.scorecard_request(&[
@@ -623,6 +709,7 @@ async fn collection_upsert(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<UpsertCollectionRecordsPayload>,
 ) -> Result<Json<UpsertCollectionRecordsResponse>, ServerError> {
+    server.metrics.collection_upsert.add(1, &[]);
     let collection_id =
         CollectionUuid(Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?);
     let _guard = server.scorecard_request(&[
@@ -670,6 +757,7 @@ async fn collection_delete(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<DeleteCollectionRecordsPayload>,
 ) -> Result<Json<DeleteCollectionRecordsResponse>, ServerError> {
+    server.metrics.collection_delete.add(1, &[]);
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
     let _guard = server.scorecard_request(&[
@@ -703,6 +791,14 @@ async fn collection_count(
     Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<CountResponse>, ServerError> {
+    server.metrics.collection_count.add(
+        1,
+        &[
+            KeyValue::new("tenant_id", tenant_id.clone()),
+            KeyValue::new("database_name", database_name.clone()),
+            KeyValue::new("collection_id", collection_id.clone()),
+        ],
+    );
     tracing::info!(
         "Counting number of records in collection [{collection_id}] in database [{database_name}] for tenant [{tenant_id}]",
     );
@@ -741,6 +837,13 @@ async fn collection_get(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<GetRequestPayload>,
 ) -> Result<Json<GetResponse>, ServerError> {
+    server.metrics.collection_get.add(
+        1,
+        &[
+            KeyValue::new("tenant_id", tenant_id.clone()),
+            KeyValue::new("collection_id", collection_id.clone()),
+        ],
+    );
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
     tracing::info!(
@@ -783,6 +886,13 @@ async fn collection_query(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<QueryRequestPayload>,
 ) -> Result<Json<QueryResponse>, ServerError> {
+    server.metrics.collection_query.add(
+        1,
+        &[
+            KeyValue::new("tenant_id", tenant_id.clone()),
+            KeyValue::new("collection_id", collection_id.clone()),
+        ],
+    );
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
     tracing::info!(
