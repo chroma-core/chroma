@@ -4,15 +4,16 @@ use super::config::SysDbConfig;
 use super::test_sysdb::TestSysDb;
 use async_trait::async_trait;
 use chroma_config::Configurable;
-use chroma_error::{ChromaError, ErrorCodes};
+use chroma_error::{ChromaError, ErrorCodes, TonicMissingFieldError};
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
 use chroma_types::chroma_proto::VersionListForCollection;
 use chroma_types::{
-    chroma_proto, CollectionAndSegments, CollectionMetadataUpdate, CreateDatabaseError,
-    CreateDatabaseResponse, CreateTenantError, CreateTenantResponse, Database, DeleteDatabaseError,
-    DeleteDatabaseResponse, GetCollectionWithSegmentsError, GetDatabaseError, GetDatabaseResponse,
-    GetTenantError, GetTenantResponse, ListDatabasesError, ListDatabasesResponse, Metadata,
-    ResetError, ResetResponse, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
+    chroma_proto, CollectionAndSegments, CollectionMetadataUpdate, CreateCollectionError,
+    CreateDatabaseError, CreateDatabaseResponse, CreateTenantError, CreateTenantResponse, Database,
+    DeleteDatabaseError, DeleteDatabaseResponse, GetCollectionWithSegmentsError, GetDatabaseError,
+    GetDatabaseResponse, GetTenantError, GetTenantResponse, ListDatabasesError,
+    ListDatabasesResponse, Metadata, ResetError, ResetResponse, SegmentFlushInfo,
+    SegmentFlushInfoConversionError, SegmentUuid,
 };
 use chroma_types::{
     Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
@@ -166,8 +167,19 @@ impl SysDb {
                 )
                 .await
             }
-            SysDb::Sqlite(_) => {
-                todo!()
+            SysDb::Sqlite(sqlite) => {
+                sqlite
+                    .create_collection(
+                        tenant,
+                        database,
+                        collection_id,
+                        name,
+                        segments,
+                        metadata,
+                        dimension,
+                        get_or_create,
+                    )
+                    .await
             }
             SysDb::Test(_) => {
                 todo!()
@@ -651,7 +663,7 @@ impl GrpcSysDb {
                 id: collection_id.0.to_string(),
                 tenant,
                 database,
-                name,
+                name: name.clone(),
                 segments: segments
                     .into_iter()
                     .map(chroma_proto::Segment::from)
@@ -663,15 +675,18 @@ impl GrpcSysDb {
             })
             .await
             .map_err(|err| match err.code() {
-                Code::AlreadyExists => CreateCollectionError::CollectionNameExists,
-                _ => CreateCollectionError::FailedToCreateCollection(err),
+                Code::AlreadyExists => CreateCollectionError::AlreadyExists(name),
+                _ => CreateCollectionError::Internal(err.into()),
             })?;
 
         let collection = res
             .into_inner()
             .collection
-            .ok_or(CreateCollectionError::CollectionFieldMissing)?
-            .try_into()?;
+            .ok_or(CreateCollectionError::Internal(
+                TonicMissingFieldError("collection").boxed(),
+            ))?
+            .try_into()
+            .map_err(|e: CollectionConversionError| CreateCollectionError::Internal(e.boxed()))?;
 
         Ok(collection)
     }
@@ -951,28 +966,28 @@ impl ChromaError for GetCollectionsError {
     }
 }
 
-#[derive(Error, Debug)]
-pub enum CreateCollectionError {
-    #[error("Collection name already exists")]
-    CollectionNameExists,
-    #[error("Failed to create collection: {0}")]
-    FailedToCreateCollection(#[from] tonic::Status),
-    #[error("Collection field missing from proto response")]
-    CollectionFieldMissing,
-    #[error("Failed to convert proto collection: {0}")]
-    ConversionError(#[from] CollectionConversionError),
-}
+// #[derive(Error, Debug)]
+// pub enum CreateCollectionError {
+//     #[error("Collection name already exists")]
+//     CollectionNameExists,
+//     #[error("Failed to create collection: {0}")]
+//     FailedToCreateCollection(#[from] tonic::Status),
+//     #[error("Collection field missing from proto response")]
+//     CollectionFieldMissing,
+//     #[error("Failed to convert proto collection: {0}")]
+//     ConversionError(#[from] CollectionConversionError),
+// }
 
-impl ChromaError for CreateCollectionError {
-    fn code(&self) -> ErrorCodes {
-        match self {
-            CreateCollectionError::CollectionNameExists => ErrorCodes::AlreadyExists,
-            CreateCollectionError::FailedToCreateCollection(_) => ErrorCodes::Internal,
-            CreateCollectionError::CollectionFieldMissing => ErrorCodes::Internal,
-            CreateCollectionError::ConversionError(_) => ErrorCodes::Internal,
-        }
-    }
-}
+// impl ChromaError for CreateCollectionError {
+//     fn code(&self) -> ErrorCodes {
+//         match self {
+//             CreateCollectionError::CollectionNameExists => ErrorCodes::AlreadyExists,
+//             CreateCollectionError::FailedToCreateCollection(_) => ErrorCodes::Internal,
+//             CreateCollectionError::CollectionFieldMissing => ErrorCodes::Internal,
+//             CreateCollectionError::ConversionError(_) => ErrorCodes::Internal,
+//         }
+//     }
+// }
 
 #[derive(Error, Debug)]
 pub enum UpdateCollectionError {

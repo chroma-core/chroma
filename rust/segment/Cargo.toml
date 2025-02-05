@@ -38,4 +38,3 @@ chroma-cache = { workspace = true }
 chroma-log = { workspace = true }
 chroma-storage = { workspace = true }
 chroma-types = { workspace = true, features = ["testing"] }
-

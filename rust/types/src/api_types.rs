@@ -308,6 +308,8 @@ pub type CreateCollectionResponse = Collection;
 pub enum CreateCollectionError {
     #[error("Collection [{0}] already exists")]
     AlreadyExists(String),
+    #[error("Database [{0}] does not exist")]
+    DatabaseNotFound(String),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
 }
@@ -316,6 +318,7 @@ impl ChromaError for CreateCollectionError {
     fn code(&self) -> ErrorCodes {
         match self {
             CreateCollectionError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
+            CreateCollectionError::DatabaseNotFound(_) => ErrorCodes::InvalidArgument,
             CreateCollectionError::Internal(err) => err.code(),
         }
     }
