@@ -237,6 +237,7 @@ impl LocalHnswSegmentWriter {
     async fn persist(&mut self) -> Result<(), LocalHnswSegmentWriterError> {
         let guard = self.index.write().await;
         // Persist hnsw index.
+        // TODO(Sanket): Use file descriptor pool.
         guard
             .index
             .save()
