@@ -1,9 +1,18 @@
 from typing import Optional, Sequence
-from chromadb import CollectionMetadata
+from uuid import UUID
+from chromadb import CollectionMetadata, Embeddings, IDs
 from chromadb.api.configuration import CollectionConfigurationInternal
 from chromadb.api.segment import SegmentAPI
+from chromadb.api.types import (
+    CollectionMetadata,
+    Documents,
+    Embeddings,
+    IDs,
+    Metadatas,
+    URIs,
+)
+from chromadb.types import Database, Tenant, Collection as CollectionModel
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
-from chromadb.types import Collection, Database, Tenant
 from enum import Enum
 
 class Bindings:
@@ -30,9 +39,19 @@ class Bindings:
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> Collection: ...
+    ) -> CollectionModel: ...
+    def add(
+        self,
+        ids: IDs,
+        collection_id: str,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool: ...
 
-###################### rust/sqlite  ######################
 class MigrationMode(Enum):
     Apply = 0
     Validate = 1
