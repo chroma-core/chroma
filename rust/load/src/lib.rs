@@ -114,6 +114,8 @@ pub struct Metrics {
     failed: Counter<u64>,
     /// The number of times a workload was rate-limited.
     limited: Counter<u64>,
+    /// The collection is returning no results when it is susposed to return results.
+    no_results: Counter<u64>,
     /// The latency of get operations.
     get_latency: opentelemetry::metrics::Histogram<f64>,
     /// The latency of query operations.
@@ -1024,6 +1026,7 @@ impl LoadService {
         let upsert = meter.u64_counter("upsert").build();
         let failed = meter.u64_counter("failed").build();
         let limited = meter.u64_counter("limited").build();
+        let no_results = meter.u64_counter("no_results").build();
         let get_latency = meter.f64_histogram("get_latency").build();
         let query_latency = meter.f64_histogram("query_latency").build();
         let metrics = Metrics {
@@ -1036,6 +1039,7 @@ impl LoadService {
             upsert,
             failed,
             limited,
+            no_results,
             get_latency,
             query_latency,
         };
@@ -1302,10 +1306,27 @@ impl LoadService {
                             Value::from(data_set.name()),
                         )],
                     );
-                    workload
+                    match workload
                         .step(&client, &this.metrics, &*data_set, &mut state)
                         .await
                         .map_err(|err| Error::FailWorkload(err.to_string()))
+                    {
+                        Ok(()) => Ok(()),
+                        Err(err) => {
+                            if err.to_string().contains("invalid request: No results") {
+                                this.metrics.no_results.add(
+                                    1,
+                                    &[KeyValue::new(
+                                        Key::from_static_str("data_set"),
+                                        Value::from(data_set.name()),
+                                    )],
+                                );
+                                Ok(())
+                            } else {
+                                Err(err)
+                            }
+                        }
+                    }
                 };
                 tx.send(tokio::spawn(fut)).await.unwrap();
             }
