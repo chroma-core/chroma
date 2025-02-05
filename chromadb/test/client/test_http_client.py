@@ -6,11 +6,12 @@ from pytest_httpserver import HTTPServer
 
 import chromadb
 from chromadb import DEFAULT_TENANT, DEFAULT_DATABASE
+from chromadb.api.shared_system_client import SharedSystemClient
 from chromadb.auth import UserIdentity
 from chromadb.types import Tenant, Database
 
 
-@pytest.fixture
+@pytest.fixture(scope="function")
 def mock_server(httpserver: HTTPServer):
     identity = UserIdentity(
         user_id="", tenant=DEFAULT_TENANT, databases=[DEFAULT_DATABASE]
@@ -32,16 +33,17 @@ def mock_server(httpserver: HTTPServer):
 
 
 def test_http_client_cardinality_with_same_settings(mock_server: HTTPServer):
-    client: chromadb.HttpClient = None
+    SharedSystemClient._identifier_to_system.clear()
     for _ in range(10):
-        client = chromadb.HttpClient(host=mock_server.host, port=mock_server.port)
-    assert len(client._identifier_to_system.keys()) == 1
+        chromadb.HttpClient(host=mock_server.host, port=mock_server.port)
+    assert len(SharedSystemClient._identifier_to_system.keys()) == 1
 
 
 def test_http_client_cardinality_with_different_settings(mock_server: HTTPServer):
-    client: chromadb.HttpClient = None
-    for i in range(10):
-        client = chromadb.HttpClient(
+    SharedSystemClient._identifier_to_system.clear()
+    expected_clients_count = 10
+    for i in range(expected_clients_count):
+        chromadb.HttpClient(
             host=mock_server.host, port=mock_server.port, headers={"header": str(i)}
         )
-    assert len(client._identifier_to_system.keys()) == 10
+    assert len(SharedSystemClient._identifier_to_system.keys()) == expected_clients_count
