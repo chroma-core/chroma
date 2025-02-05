@@ -5420,17 +5420,13 @@ dependencies = [
 name = "rust_bindings"
 version = "0.1.0"
 dependencies = [
-<<<<<<< HEAD
+ "async-trait",
  "chroma-cache",
  "chroma-config",
  "chroma-frontend",
  "chroma-log",
  "chroma-sqlite",
  "chroma-sysdb",
-=======
- "async-trait",
- "chroma-log",
->>>>>>> 58b1eebc2 (Basic compaction manager scaffold)
  "chroma-system",
  "pyo3",
  "tokio",
