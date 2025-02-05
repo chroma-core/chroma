@@ -206,7 +206,7 @@ pub type GetDatabaseResponse = Database;
 #[derive(Error, Debug)]
 pub enum GetDatabaseError {
     #[error(transparent)]
-    Internal(#[from] Status),
+    Internal(#[from] Box<dyn ChromaError>),
     #[error("Invalid database id [{0}]")]
     InvalidID(String),
     #[error("Database [{0}] not found")]
@@ -216,7 +216,7 @@ pub enum GetDatabaseError {
 impl ChromaError for GetDatabaseError {
     fn code(&self) -> ErrorCodes {
         match self {
-            GetDatabaseError::Internal(status) => status.code().into(),
+            GetDatabaseError::Internal(err) => err.code(),
             GetDatabaseError::InvalidID(_) => ErrorCodes::InvalidArgument,
             GetDatabaseError::NotFound(_) => ErrorCodes::NotFound,
         }

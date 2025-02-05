@@ -101,7 +101,7 @@ impl SysDb {
     ) -> Result<GetDatabaseResponse, GetDatabaseError> {
         match self {
             SysDb::Grpc(grpc) => grpc.get_database(database_name, tenant).await,
-            SysDb::Sqlite(_) => todo!(),
+            SysDb::Sqlite(sqlite) => sqlite.get_database(&database_name, &tenant).await,
             SysDb::Test(_) => todo!(),
         }
     }
@@ -567,7 +567,7 @@ impl GrpcSysDb {
                 tracing::error!("Failed to get database {:?}", e);
                 let res = match e.code() {
                     Code::NotFound => GetDatabaseError::NotFound(database_name),
-                    _ => GetDatabaseError::Internal(e),
+                    _ => GetDatabaseError::Internal(e.into()),
                 };
                 Err(res)
             }

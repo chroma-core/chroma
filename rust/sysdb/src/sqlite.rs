@@ -1,9 +1,13 @@
+use std::str::FromStr;
+
 use chroma_sqlite::db::SqliteDb;
 use chroma_types::{
-    Collection, CollectionUuid, CreateDatabaseError, CreateDatabaseResponse, Database, Metadata,
-    Segment, Tenant,
+    Collection, CollectionUuid, CreateDatabaseError, CreateDatabaseResponse, Database,
+    GetDatabaseError, Metadata, Segment, Tenant,
 };
 use sqlx::error::ErrorKind;
+use sqlx::Row;
+use uuid::Uuid;
 
 //////////////////////// SqliteSysDb ////////////////////////
 
@@ -52,12 +56,29 @@ impl SqliteSysDb {
         Ok(CreateDatabaseResponse {})
     }
 
-    pub(crate) async fn _get_database(
+    pub(crate) async fn get_database(
         &self,
-        _name: &str,
-        _tenant: &str,
-    ) -> Result<Database, String> {
-        unimplemented!();
+        name: &str,
+        tenant: &str,
+    ) -> Result<Database, GetDatabaseError> {
+        sqlx::query("SELECT id, name, tenant_id FROM databases WHERE name = $1 AND tenant_id = $2")
+            .bind(name)
+            .bind(tenant)
+            .fetch_one(self.db.get_conn())
+            .await
+            .map_err(|e| match e {
+                sqlx::Error::RowNotFound => GetDatabaseError::NotFound(name.to_string()),
+                _ => GetDatabaseError::Internal(e.into()),
+            })
+            .and_then(|row| {
+                let id = Uuid::from_str(row.get::<&str, _>(0))
+                    .map_err(|e| GetDatabaseError::InvalidID(e.to_string()))?;
+                Ok(Database {
+                    id,
+                    name: row.get(1),
+                    tenant: row.get(2),
+                })
+            })
     }
 
     ////////////////////////// Tenant Methods ////////////////////////
@@ -110,6 +131,9 @@ mod tests {
             .await;
 
         matches!(result, Err(CreateDatabaseError::AlreadyExists(_)));
+
+        let database = sysdb.get_database("test", "default_tenant").await.unwrap();
+        assert_eq!(database.name, "test");
 
         // TODO: Add tests
         // test same id or name
