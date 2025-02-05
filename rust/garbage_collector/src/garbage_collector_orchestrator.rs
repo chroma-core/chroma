@@ -73,16 +73,15 @@ use crate::operators::mark_versions_at_sysdb::{
 };
 
 use prost::Message;
-#[allow(dead_code)]
+
 pub struct GarbageCollectorOrchestrator {
     collection_id: CollectionUuid,
     version_file_path: String,
     cutoff_time_hours: u32,
     sysdb_client: SysDb,
     dispatcher: ComponentHandle<Dispatcher>,
-    // Result Channel
-    result_channel: Option<Sender<Result<GarbageCollectorResponse, GarbageCollectorError>>>,
     storage: Storage,
+    result_channel: Option<Sender<Result<GarbageCollectorResponse, GarbageCollectorError>>>,
 }
 
 impl Debug for GarbageCollectorOrchestrator {
@@ -113,8 +112,8 @@ impl GarbageCollectorOrchestrator {
             cutoff_time_hours,
             sysdb_client,
             dispatcher,
-            result_channel: None,
             storage,
+            result_channel: None,
         }
     }
 }
@@ -338,15 +337,19 @@ impl Handler<TaskResult<FetchSparseIndexFilesOutput, FetchSparseIndexFilesError>
             None => return,
         };
 
+        let input = ComputeUnusedBetweenVersionsInput {
+            version_file: output.version_file,
+            epoch_id: output.epoch_id,
+            sysdb_client: self.sysdb_client.clone(),
+            versions_to_delete: output.versions_to_delete,
+            version_to_content: output.version_to_content,
+        };
+
         let compute_task = wrap(
-            Box::new(ComputeUnusedBetweenVersionsOperator {}),
-            ComputeUnusedBetweenVersionsInput {
-                version_file: output.version_file,
-                epoch_id: output.epoch_id,
-                sysdb_client: output.sysdb_client,
-                versions_to_delete: output.versions_to_delete,
-                version_to_content: output.version_to_content,
-            },
+            Box::new(ComputeUnusedBetweenVersionsOperator::new(
+                self.storage.clone(),
+            )),
+            input,
             ctx.receiver(),
         );
 
@@ -379,7 +382,7 @@ impl Handler<TaskResult<ComputeUnusedBetweenVersionsOutput, ComputeUnusedBetween
             DeleteVersionsAtSysDbInput {
                 version_file: output.version_file,
                 epoch_id: output.epoch_id,
-                sysdb_client: output.sysdb_client,
+                sysdb_client: self.sysdb_client.clone(),
                 versions_to_delete: output.versions_to_delete,
                 unused_s3_files: output.unused_s3_files,
             },
@@ -416,5 +419,335 @@ impl Handler<TaskResult<DeleteVersionsAtSysDbOutput, DeleteVersionsAtSysDbError>
         };
 
         self.terminate_with_result(Ok(response), ctx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::helper::ChromaGrpcClients;
+    use chromadb::client::{
+        ChromaAuthMethod, ChromaClient, ChromaClientOptions, ChromaTokenHeader,
+    };
+
+    async fn get_test_client() -> ChromaClient {
+        let client = if let Ok(auth) = std::env::var("CHROMA_TOKEN") {
+            println!("Creating ChromaClient with auth token");
+            ChromaClient::new(ChromaClientOptions {
+                url: Some("http://localhost:8000".to_string()),
+                auth: ChromaAuthMethod::TokenAuth {
+                    token: auth,
+                    header: ChromaTokenHeader::Authorization,
+                },
+                database: "test".into(),
+                connections: 32,
+            })
+            .await
+        } else {
+            println!("Creating ChromaClient with default settings");
+            ChromaClient::new(Default::default()).await
+        };
+
+        match client {
+            Ok(client) => client,
+            Err(e) => {
+                println!("Failed to create ChromaClient: {}", e);
+                println!("Make sure ChromaDB is running at http://localhost:8000");
+                panic!("ChromaDB connection failed");
+            }
+        }
+    }
+
+    // #[tokio::test]
+    // async fn test_collection_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
+    //     println!("Starting collection lifecycle test");
+    //     let client = get_test_client().await;
+    //     let collection_name = format!("test_collection_{}", uuid::Uuid::new_v4());
+    //     println!("Using collection name: {}", collection_name);
+
+    //     // Get or create collection
+    //     let collection: ChromaCollection = client
+    //         .get_or_create_collection(&collection_name, None)
+    //         .await
+    //         .map_err(|e| {
+    //             println!("Failed to create collection: {}", e);
+    //             e
+    //         })?;
+
+    //     println!("Created collection with UUID: {}", collection.id());
+
+    //     // Insert records with fixed embeddings
+    //     let collection_entries = CollectionEntries {
+    //         ids: vec!["id1".into(), "id2".into()],
+    //         embeddings: Some(vec![
+    //             vec![1.0_f32, 0.0_f32, 0.0_f32], // First document embedding
+    //             vec![0.0_f32, 1.0_f32, 0.0_f32], // Second document embedding
+    //         ]),
+    //         metadatas: Some(vec![json!({"source": "test1"}), json!({"source": "test2"})]),
+    //         documents: Some(vec![
+    //             "This is document 1".into(),
+    //             "This is document 2".into(),
+    //         ]),
+    //     };
+
+    //     collection.upsert(collection_entries, None).await?;
+
+    //     // Query the collection using vector search
+    //     let query = QueryOptions {
+    //         query_texts: None,
+    //         query_embeddings: Some(vec![vec![1.0_f32, 0.0_f32, 0.0_f32]]), // Should match first document better
+    //         where_metadata: None,
+    //         where_document: None,
+    //         n_results: Some(2),
+    //         include: None,
+    //     };
+
+    //     let query_result = collection.query(query, None).await?;
+
+    //     // Verify results
+    //     let ids = query_result.ids.expect("Query should return IDs");
+    //     assert_eq!(ids.len(), 2);
+    //     assert_eq!(ids[0], "id1"); // First result should be id1 since it has the same embedding
+    //     assert_eq!(ids[1], "id2");
+
+    //     // Clean up - delete the collection
+    //     client.delete_collection(&collection_name).await?;
+
+    //     Ok(())
+    // }
+
+    use chroma_types::chroma_proto::ListCollectionVersionsRequest;
+    use std::time::Duration;
+    use tracing_subscriber;
+
+    // Add this helper function inside the tests module
+    async fn wait_for_new_version(
+        clients: &mut ChromaGrpcClients,
+        collection_id: &str,
+        tenant_id: &str,
+        current_version_count: usize,
+        max_attempts: usize,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        for attempt in 1..=max_attempts {
+            tracing::info!(
+                attempt,
+                max_attempts,
+                "Waiting for new version to be created..."
+            );
+
+            tokio::time::sleep(Duration::from_secs(2)).await;
+
+            let versions = clients
+                .list_collection_versions(collection_id, tenant_id, Some(100), None, None)
+                .await?;
+
+            if versions.versions.len() > current_version_count {
+                tracing::info!(
+                    previous_count = current_version_count,
+                    new_count = versions.versions.len(),
+                    "New version detected"
+                );
+                return Ok(());
+            }
+        }
+
+        Err("Timeout waiting for new version to be created".into())
+    }
+
+    #[tokio::test]
+    async fn test_direct_service_calls() -> Result<(), Box<dyn std::error::Error>> {
+        tracing_subscriber::fmt::init();
+        let mut clients = ChromaGrpcClients::new().await.map_err(|e| {
+            tracing::error!(error = ?e, "Failed to create ChromaGrpcClients");
+            e
+        })?;
+
+        // Create unique identifiers for tenant and database
+        let test_uuid = uuid::Uuid::new_v4();
+        let tenant_id = format!("test_tenant_{}", test_uuid);
+        let database_name = format!("test_db_{}", test_uuid);
+        let collection_name = format!("test_collection_{}", test_uuid);
+
+        tracing::info!(
+            tenant_id = %tenant_id,
+            database = %database_name,
+            collection = %collection_name,
+            "Starting test with resources"
+        );
+
+        let collection_id = clients
+            .create_database_and_collection(&tenant_id, &database_name, &collection_name)
+            .await
+            .map_err(|e| {
+                tracing::error!(
+                    error = ?e,
+                    tenant_id = %tenant_id,
+                    database = %database_name,
+                    collection = %collection_name,
+                    "Failed to create database and collection"
+                );
+                e
+            })?;
+
+        tracing::info!(collection_id = %collection_id, "Created collection");
+
+        // Create 22 records
+        let mut embeddings = Vec::with_capacity(22);
+        let mut ids = Vec::with_capacity(22);
+
+        for i in 0..22 {
+            let mut embedding = vec![0.0; 3];
+            embedding[i % 3] = 1.0;
+            embeddings.push(embedding);
+            ids.push(format!("id{}", i));
+        }
+
+        // Get initial version count
+        let initial_versions = clients
+            .list_collection_versions(&collection_id, &tenant_id, Some(100), None, None)
+            .await?;
+        let initial_version_count = initial_versions.versions.len();
+
+        tracing::info!(
+            initial_count = initial_version_count,
+            "Initial version count"
+        );
+
+        // Add first batch of 11 records
+        tracing::info!("Adding first batch of embeddings");
+        clients
+            .add_embeddings(
+                &collection_id,
+                embeddings[..11].to_vec(),
+                ids[..11].to_vec(),
+            )
+            .await?;
+
+        // Wait for new version after first batch
+        wait_for_new_version(
+            &mut clients,
+            &collection_id,
+            &tenant_id,
+            initial_version_count,
+            10,
+        )
+        .await?;
+
+        // Add second batch of 11 records
+        tracing::info!("Adding second batch of embeddings");
+        clients
+            .add_embeddings(
+                &collection_id,
+                embeddings[11..].to_vec(),
+                ids[11..].to_vec(),
+            )
+            .await?;
+
+        // Get current version count and wait for it to increase
+        let mid_versions = clients
+            .list_collection_versions(&collection_id, &tenant_id, Some(100), None, None)
+            .await?;
+        wait_for_new_version(
+            &mut clients,
+            &collection_id,
+            &tenant_id,
+            mid_versions.versions.len(),
+            10,
+        )
+        .await?;
+
+        // Get records from the collection
+        tracing::info!(collection_id = %collection_id, "Getting records from collection");
+
+        let results = clients
+            .get_records(
+                &collection_id,
+                None,
+                true,
+                false,
+                false,
+            )
+            .await
+            .map_err(|e| {
+                tracing::error!(error = ?e, collection_id = %collection_id, "Failed to get records");
+                e
+            })?;
+
+        // Verify results
+        tracing::info!(
+            num_results = results.ids.len(),
+            "Get records results received"
+        );
+        assert_eq!(results.ids.len(), 22, "Expected 22 results");
+
+        // Verify all IDs are present
+        for i in 0..22 {
+            let expected_id = format!("id{}", i);
+            assert!(
+                results.ids.contains(&expected_id),
+                "Expected to find {}",
+                expected_id
+            );
+        }
+
+        // Verify embeddings
+        if let Some(returned_embeddings) = results.embeddings {
+            assert_eq!(returned_embeddings.len(), 22, "Expected 22 embeddings");
+
+            for (i, embedding) in returned_embeddings.iter().enumerate() {
+                let expected_index = ids
+                    .iter()
+                    .position(|id| id == &format!("id{}", i))
+                    .expect("ID should exist");
+                assert_eq!(
+                    embedding, &embeddings[expected_index],
+                    "Embedding mismatch for id{}",
+                    i
+                );
+            }
+        } else {
+            panic!("Expected embeddings in results");
+        }
+
+        // Get final versions
+        tracing::info!(collection_id = %collection_id, "Requesting final collection versions");
+
+        let versions_response = clients
+            .list_collection_versions(&collection_id, &tenant_id, Some(10), None, None)
+            .await?;
+
+        tracing::info!("Collection versions:");
+        for version in versions_response.versions {
+            tracing::info!(
+                version = version.version,
+                created_at = version.created_at_secs,
+                change_reason = ?version.version_change_reason,
+                marked_for_deletion = version.marked_for_deletion,
+                "Version info"
+            );
+
+            if let Some(collection_info) = version.collection_info_mutable {
+                tracing::info!(
+                    log_position = collection_info.current_log_position,
+                    collection_version = collection_info.current_collection_version,
+                    last_compaction = collection_info.last_compaction_time_secs,
+                    dimension = collection_info.dimension,
+                    "Collection mutable info"
+                );
+            }
+
+            if let Some(segment_info) = version.segment_info {
+                tracing::info!(
+                    num_segments = segment_info.segment_compaction_info.len(),
+                    "Segment info"
+                );
+            }
+        }
+
+        tracing::info!(
+            is_truncated = versions_response.list_is_truncated,
+            "Version list complete"
+        );
+
+        Ok(())
     }
 }

@@ -7,7 +7,8 @@ use opentelemetry_config::init_otel_tracing;
 mod config;
 mod fetch_version_file;
 mod garbage_collector_component;
-mod garbage_collector_orchestrator;
+pub mod garbage_collector_orchestrator;
+pub mod helper;
 mod opentelemetry_config;
 pub mod operators;
 

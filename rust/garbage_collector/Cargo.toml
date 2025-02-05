@@ -43,3 +43,5 @@ chroma-system = { workspace = true }
 chroma-types = { workspace = true }
 chroma-sysdb = { workspace = true }
 chroma-storage = { workspace = true }
+chroma-blockstore = { path = "../blockstore" }
+chroma-cache = { path = "../cache" }
