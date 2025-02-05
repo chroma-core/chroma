@@ -10,10 +10,10 @@ use chroma_types::chroma_proto::VersionListForCollection;
 use chroma_types::{
     chroma_proto, CollectionAndSegments, CollectionMetadataUpdate, CreateCollectionError,
     CreateDatabaseError, CreateDatabaseResponse, CreateTenantError, CreateTenantResponse, Database,
-    DeleteDatabaseError, DeleteDatabaseResponse, GetCollectionWithSegmentsError, GetDatabaseError,
-    GetDatabaseResponse, GetTenantError, GetTenantResponse, ListDatabasesError,
-    ListDatabasesResponse, Metadata, ResetError, ResetResponse, SegmentFlushInfo,
-    SegmentFlushInfoConversionError, SegmentUuid,
+    DeleteDatabaseError, DeleteDatabaseResponse, GetCollectionWithSegmentsError,
+    GetCollectionsError, GetDatabaseError, GetDatabaseResponse, GetTenantError, GetTenantResponse,
+    ListDatabasesError, ListDatabasesResponse, Metadata, ResetError, ResetResponse,
+    SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
 };
 use chroma_types::{
     Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
@@ -133,7 +133,11 @@ impl SysDb {
                 grpc.get_collections(collection_id, name, tenant, database, limit, offset)
                     .await
             }
-            SysDb::Sqlite(_) => todo!(),
+            SysDb::Sqlite(sqlite) => {
+                sqlite
+                    .get_collections(collection_id, name, tenant, database, limit, offset)
+                    .await
+            }
             SysDb::Test(test) => {
                 test.get_collections(collection_id, name, tenant, database)
                     .await
@@ -638,10 +642,10 @@ impl GrpcSysDb {
 
                 match collections {
                     Ok(collections) => Ok(collections),
-                    Err(e) => Err(GetCollectionsError::ConversionError(e)),
+                    Err(e) => Err(GetCollectionsError::Internal(e.boxed())),
                 }
             }
-            Err(e) => Err(GetCollectionsError::FailedToGetCollections(e)),
+            Err(e) => Err(GetCollectionsError::Internal(e.into())),
         }
     }
 
@@ -946,48 +950,6 @@ impl GrpcSysDb {
         Ok(ResetResponse {})
     }
 }
-
-#[derive(Error, Debug)]
-// TODO: This should use our sysdb errors from the proto definition
-// We will have to do an error uniformization pass at some point
-pub enum GetCollectionsError {
-    #[error("Failed to fetch")]
-    FailedToGetCollections(#[from] tonic::Status),
-    #[error("Failed to convert proto collection")]
-    ConversionError(#[from] CollectionConversionError),
-}
-
-impl ChromaError for GetCollectionsError {
-    fn code(&self) -> ErrorCodes {
-        match self {
-            GetCollectionsError::FailedToGetCollections(_) => ErrorCodes::Internal,
-            GetCollectionsError::ConversionError(_) => ErrorCodes::Internal,
-        }
-    }
-}
-
-// #[derive(Error, Debug)]
-// pub enum CreateCollectionError {
-//     #[error("Collection name already exists")]
-//     CollectionNameExists,
-//     #[error("Failed to create collection: {0}")]
-//     FailedToCreateCollection(#[from] tonic::Status),
-//     #[error("Collection field missing from proto response")]
-//     CollectionFieldMissing,
-//     #[error("Failed to convert proto collection: {0}")]
-//     ConversionError(#[from] CollectionConversionError),
-// }
-
-// impl ChromaError for CreateCollectionError {
-//     fn code(&self) -> ErrorCodes {
-//         match self {
-//             CreateCollectionError::CollectionNameExists => ErrorCodes::AlreadyExists,
-//             CreateCollectionError::FailedToCreateCollection(_) => ErrorCodes::Internal,
-//             CreateCollectionError::CollectionFieldMissing => ErrorCodes::Internal,
-//             CreateCollectionError::ConversionError(_) => ErrorCodes::Internal,
-//         }
-//     }
-// }
 
 #[derive(Error, Debug)]
 pub enum UpdateCollectionError {

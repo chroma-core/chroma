@@ -5,7 +5,7 @@ use crate::{
 use backon::Retryable;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_sysdb::{sysdb, GetCollectionsError};
+use chroma_sysdb::sysdb;
 use chroma_system::System;
 use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
@@ -17,13 +17,13 @@ use chroma_types::{
     CreateTenantResponse, DeleteCollectionError, DeleteCollectionRecordsError,
     DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, DeleteCollectionRequest,
     DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse, GetCollectionError,
-    GetCollectionRequest, GetCollectionResponse, GetDatabaseError, GetDatabaseRequest,
-    GetDatabaseResponse, GetRequest, GetResponse, GetTenantError, GetTenantRequest,
-    GetTenantResponse, HealthCheckResponse, HeartbeatError, HeartbeatResponse, Include,
-    ListCollectionsRequest, ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest,
-    ListDatabasesResponse, Metadata, Operation, OperationRecord, QueryError, QueryRequest,
-    QueryResponse, ResetError, ResetResponse, ScalarEncoding, Segment, SegmentScope, SegmentType,
-    SegmentUuid, UpdateCollectionError, UpdateCollectionRecordsError,
+    GetCollectionRequest, GetCollectionResponse, GetCollectionsError, GetDatabaseError,
+    GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantError,
+    GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError, HeartbeatResponse,
+    Include, ListCollectionsRequest, ListCollectionsResponse, ListDatabasesError,
+    ListDatabasesRequest, ListDatabasesResponse, Metadata, Operation, OperationRecord, QueryError,
+    QueryRequest, QueryResponse, ResetError, ResetResponse, ScalarEncoding, Segment, SegmentScope,
+    SegmentType, SegmentUuid, UpdateCollectionError, UpdateCollectionRecordsError,
     UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateCollectionRequest,
     UpdateCollectionResponse, UpdateMetadata, UpdateMetadataValue, UpsertCollectionRecordsError,
     UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, CHROMA_DOCUMENT_KEY,

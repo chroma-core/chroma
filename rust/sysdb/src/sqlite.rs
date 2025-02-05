@@ -4,8 +4,8 @@ use chroma_sqlite::table;
 use chroma_types::{
     Collection, CollectionUuid, CreateCollectionError, CreateCollectionResponse,
     CreateDatabaseError, CreateDatabaseResponse, CreateTenantError, CreateTenantResponse, Database,
-    DeleteDatabaseError, DeleteDatabaseResponse, GetDatabaseError, GetTenantError,
-    GetTenantResponse, ListDatabasesError, Metadata, MetadataValue, Segment,
+    DeleteDatabaseError, DeleteDatabaseResponse, GetCollectionsError, GetDatabaseError,
+    GetTenantError, GetTenantResponse, ListDatabasesError, Metadata, MetadataValue, Segment,
 };
 use futures::TryStreamExt;
 use sea_query_binder::SqlxBinder;
@@ -200,14 +200,17 @@ impl SqliteSysDb {
         // todo: default tenant
 
         let mut existing_collections = self
-            .get_collections(
+            .get_collections_with_conn(
                 &mut *tx,
+                None,
                 Some(name.clone()),
                 Some(tenant.clone()),
                 Some(database.clone()), // todo: remove clones
+                None,
+                0,
             )
             .await
-            .unwrap();
+            .map_err(|e| CreateCollectionError::Get(e))?;
 
         if let Some(collection) = existing_collections.pop() {
             if get_or_create {
@@ -268,7 +271,8 @@ impl SqliteSysDb {
             name,
             tenant,
             database,
-            configuration_json: serde_json::from_str(config_json_str).unwrap(),
+            configuration_json: serde_json::from_str(config_json_str)
+                .map_err(|e| CreateCollectionError::Configuration(e))?,
             metadata,
             dimension,
             log_position: 0,
@@ -279,11 +283,11 @@ impl SqliteSysDb {
 
     async fn create_segment_with_tx<'a, C>(
         &self,
-        conn: &'a mut C,
+        conn: C,
         segment: Segment,
     ) -> Result<(), WrappedSqlxError>
     where
-        &'a mut C: sqlx::Executor<'a, Database = sqlx::Sqlite>,
+        C: sqlx::Executor<'a, Database = sqlx::Sqlite>,
     {
         sqlx::query(
             r#"
@@ -342,15 +346,39 @@ impl SqliteSysDb {
         Ok(())
     }
 
-    async fn get_collections<'a, C>(
+    pub(crate) async fn get_collections(
         &self,
-        conn: &'a mut C,
+        collection_id: Option<CollectionUuid>,
         name: Option<String>,
         tenant: Option<String>,
-        database_name: Option<String>,
-    ) -> Result<Vec<Collection>, ()>
+        database: Option<String>,
+        limit: Option<u32>,
+        offset: u32,
+    ) -> Result<Vec<Collection>, GetCollectionsError> {
+        self.get_collections_with_conn(
+            self.db.get_conn(),
+            collection_id,
+            name,
+            tenant,
+            database,
+            limit,
+            offset,
+        )
+        .await
+    }
+
+    async fn get_collections_with_conn<'a, C>(
+        &self,
+        conn: C,
+        collection_id: Option<CollectionUuid>,
+        name: Option<String>,
+        tenant: Option<String>,
+        database: Option<String>,
+        limit: Option<u32>,
+        offset: u32,
+    ) -> Result<Vec<Collection>, GetCollectionsError>
     where
-        &'a mut C: sqlx::Executor<'a, Database = sqlx::Sqlite>,
+        C: sqlx::Executor<'a, Database = sqlx::Sqlite>,
     {
         let (sql, values) = sea_query::Query::select()
             .from(table::Collections::Table)
@@ -365,7 +393,7 @@ impl SqliteSysDb {
                         sea_query::Expr::col((table::Collections::Table, table::Collections::Name))
                             .eq(name)
                     }))
-                    .add_option(database_name.map(|database| {
+                    .add_option(database.map(|database| {
                         sea_query::Expr::col((table::Databases::Table, table::Databases::Name))
                             .eq(database)
                     }))
@@ -373,8 +401,14 @@ impl SqliteSysDb {
                         tenant.map(|tenant| {
                             sea_query::Expr::col(table::Databases::TenantId).eq(tenant)
                         }),
-                    ),
+                    )
+                    .add_option(collection_id.map(|collection_id| {
+                        sea_query::Expr::col((table::Collections::Table, table::Collections::Id))
+                            .eq(collection_id.to_string())
+                    })),
             )
+            .limit(limit.unwrap_or(u32::MAX).into()) // SQLite requires that limit is always set if offset is provided
+            .offset(offset.into())
             .column((table::Collections::Table, table::Collections::Id))
             .column((table::Collections::Table, table::Collections::Name))
             .column((table::Collections::Table, table::Collections::ConfigJsonStr))
@@ -388,15 +422,14 @@ impl SqliteSysDb {
         while let Some(row) = rows
             .try_next()
             .await
-            .map_err(|e| GetDatabaseError::Internal(e.into()))
-            .unwrap()
+            .map_err(|e| GetCollectionsError::Internal(e.into()))?
         {
             let collection_id = CollectionUuid::from_str(row.get::<&str, _>(0))
-                .map_err(|e| GetDatabaseError::InvalidID(e.to_string()))
-                .unwrap();
+                .map_err(|e| GetCollectionsError::CollectionId(e))?;
 
             let configuration_json =
-                serde_json::from_str::<serde_json::Value>(row.get::<&str, _>(2)).unwrap(); // todo
+                serde_json::from_str::<serde_json::Value>(row.get::<&str, _>(2))
+                    .map_err(|e| GetCollectionsError::Configuration(e))?;
 
             collections.push(Collection {
                 collection_id,
@@ -550,26 +583,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_create_collection() {
+    async fn test_create_collection_fails_for_duplicate_name() {
         let db = get_new_sqlite_db().await;
         let sysdb = SqliteSysDb::new(db);
-
-        // Get non-existent tenant
-        let result = sysdb.get_tenant("test").await;
-        matches!(result, Err(GetTenantError::NotFound(_)));
-
-        // Create tenant
-        sysdb.create_tenant("new_tenant".to_string()).await.unwrap();
-
-        // Get tenant
-        let tenant = sysdb.get_tenant("new_tenant").await.unwrap();
-        assert_eq!(tenant.name, "new_tenant");
-
-        // Create collection
-        sysdb
-            .create_database(uuid::Uuid::new_v4(), "test", "new_tenant")
-            .await
-            .unwrap();
 
         let collection_id = CollectionUuid::new();
         let segments = vec![Segment {
@@ -582,8 +598,8 @@ mod tests {
         }];
         let result = sysdb
             .create_collection(
-                "new_tenant".to_string(),
-                "test".to_string(),
+                "default_tenant".to_string(),
+                "default_database".to_string(),
                 collection_id,
                 "test_collection".to_string(),
                 segments.clone(),
@@ -595,11 +611,11 @@ mod tests {
             .unwrap();
         assert_eq!(result.name, "test_collection");
 
-        // Second call should fail
+        // Should fail when attempting to create with the same name
         let result = sysdb
             .create_collection(
-                "new_tenant".to_string(),
-                "test".to_string(),
+                "default_tenant".to_string(),
+                "default_database".to_string(),
                 collection_id,
                 "test_collection".to_string(),
                 segments,
@@ -609,12 +625,42 @@ mod tests {
             )
             .await;
         matches!(result, Err(CreateCollectionError::AlreadyExists(_)));
+    }
 
-        // get_or_create collection
+    #[tokio::test]
+    async fn test_create_collection_get_or_create() {
+        let db = get_new_sqlite_db().await;
+        let sysdb = SqliteSysDb::new(db);
+
+        let collection_id = CollectionUuid::new();
+        let segments = vec![Segment {
+            id: SegmentUuid::new(),
+            r#type: SegmentType::BlockfileMetadata,
+            scope: SegmentScope::METADATA,
+            collection: collection_id,
+            metadata: None,
+            file_path: HashMap::new(),
+        }];
         let result = sysdb
             .create_collection(
-                "new_tenant".to_string(),
-                "test".to_string(),
+                "default_tenant".to_string(),
+                "default_database".to_string(),
+                collection_id,
+                "test_collection".to_string(),
+                segments.clone(),
+                None,
+                None,
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.name, "test_collection");
+
+        // Should return existing collection
+        let result = sysdb
+            .create_collection(
+                "default_tenant".to_string(),
+                "default_database".to_string(),
                 CollectionUuid::new(),
                 "test_collection".to_string(),
                 vec![],
@@ -625,17 +671,5 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result.collection_id, collection_id);
-
-        // TODO: Add tests
-        // test same id or name
-        // custom tenant
-
-        // let db = sysdb
-        //     .get_database("test", "default_tenant")
-        //     .await
-        //     .expect("Database to be created");
-        // assert_eq!(db.name, "test");
-        // assert_eq!(db.tenant, "default_tenant");
-        // assert_eq!(db.id, db_id);
     }
 }
