@@ -42,6 +42,10 @@ FROM debian:bookworm-slim AS runner
 RUN apt-get update && apt-get install -y libssl-dev ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /chroma/rust/worker/chroma_config.yaml .
 
+# Install python for pyo3
+RUN apt-get update && apt-get install -y python3 python3-pip && rm -rf /var/lib/apt/lists/*
+
+
 FROM runner AS query_service
 COPY --from=query_service_builder /chroma/query_service .
 ENTRYPOINT [ "./query_service" ]
