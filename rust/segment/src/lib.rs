@@ -3,6 +3,7 @@ pub mod blockfile_record;
 pub mod config;
 pub mod distributed_hnsw;
 pub mod distributed_spann;
+pub mod local_hnsw;
 pub mod sqlite_metadata;
 pub mod test;
 pub mod types;
