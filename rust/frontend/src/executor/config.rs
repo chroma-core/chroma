@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use super::{distributed::DistributedExecutor, local::LocalExecutor, Executor};
+use super::{distributed::DistributedExecutor, Executor};
 use async_trait::async_trait;
 use backon::ExponentialBuilder;
 use chroma_config::Configurable;
@@ -48,9 +48,9 @@ impl Configurable<(ExecutorConfig, System)> for Executor {
                 .await?;
                 Ok(Executor::Distributed(distributed_executor))
             }
-            ExecutorConfig::Local => {
-                Ok(Executor::Local(LocalExecutor::try_from_config(&()).await?))
-            }
+            // TODO(hammadb): WE cannot use this since we cannot inject the sysdb into the local executor
+            // use ::new() instead for now
+            ExecutorConfig::Local => unimplemented!(),
         }
     }
 }

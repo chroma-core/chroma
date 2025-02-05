@@ -1,6 +1,7 @@
 use chroma_config::Configurable;
 use chroma_frontend::{
-    executor::{config::ExecutorConfig, Executor},
+    executor::local::LocalExecutor,
+    executor::Executor,
     frontend::Frontend,
     get_collection_with_segments_provider::{
         CacheInvalidationRetryConfig, CollectionsWithSegmentsProvider,
@@ -49,7 +50,7 @@ impl Bindings {
         // TODO: runtime config
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let _guard = runtime.enter();
-        let system = System::new();
+        let _system = System::new();
 
         //////////////////////////// Frontend Setup ////////////////////////////
 
@@ -69,7 +70,7 @@ impl Bindings {
                 }
             };
 
-        let sqlite_sysdb = SqliteSysDb::new(sqlite_db);
+        let sqlite_sysdb = SqliteSysDb::new(sqlite_db.clone());
         // TODO: verify this clone is safe / consistent
         let sysdb = Box::new(SysDb::Sqlite(sqlite_sysdb));
         let log = Box::new(Log::InMemory(chroma_log::in_memory_log::InMemoryLog::new()));
@@ -103,20 +104,7 @@ impl Bindings {
         // TODO: executor should NOT be exposed to the bindings module. try_from_config should work.
         // The reason this works this way right now is because try_from_config cannot share the sqlite_db
         // across the downstream components.
-        let executor_config = ExecutorConfig::Local;
-        let executor = match runtime
-            .block_on(async { Executor::try_from_config(&(executor_config, system)).await })
-        {
-            Ok(executor) => executor,
-            Err(e) => {
-                // TODO: error type
-                return Err(PyOSError::new_err(format!(
-                    "Failed to create executor: {}",
-                    e
-                )));
-            }
-        };
-
+        let executor = Executor::Local(LocalExecutor::new(sqlite_db));
         let frontend = Frontend::new(false, sysdb.clone(), collections_cache, log, executor);
 
         Ok(Bindings {

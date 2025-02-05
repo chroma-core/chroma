@@ -148,6 +148,10 @@ pub struct SqliteMetadataReader {
 }
 
 impl SqliteMetadataReader {
+    pub fn new(db: SqliteDb) -> Self {
+        Self { db }
+    }
+
     pub async fn count(
         &self,
         Count {

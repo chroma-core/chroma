@@ -1301,6 +1301,7 @@ dependencies = [
  "chroma-log",
  "chroma-memberlist",
  "chroma-segment",
+ "chroma-sqlite",
  "chroma-sysdb",
  "chroma-system",
  "chroma-tracing",

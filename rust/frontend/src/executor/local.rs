@@ -1,5 +1,5 @@
-use async_trait::async_trait;
 use chroma_segment::sqlite_metadata::SqliteMetadataReader;
+use chroma_sqlite::db::SqliteDb;
 use chroma_types::{
     operator::{CountResult, GetResult, KnnBatchResult},
     plan::{Count, Get, Knn},
@@ -9,6 +9,14 @@ use chroma_types::{
 #[derive(Clone, Debug)]
 pub struct LocalExecutor {
     metadata_reader: SqliteMetadataReader,
+}
+
+impl LocalExecutor {
+    pub fn new(sqlite_db: SqliteDb) -> Self {
+        Self {
+            metadata_reader: SqliteMetadataReader::new(sqlite_db),
+        }
+    }
 }
 
 impl LocalExecutor {

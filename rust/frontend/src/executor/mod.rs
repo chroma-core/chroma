@@ -9,12 +9,13 @@ use local::LocalExecutor;
 //////////////////////// Exposed Modules ////////////////////////
 pub(super) mod client_manager;
 pub(crate) mod config;
+// TODO: This should be private once we fix dep injection
 mod distributed;
-mod local;
+pub mod local;
 
 //////////////////////// Main Types ////////////////////////
 #[derive(Clone, Debug)]
-pub(crate) enum Executor {
+pub enum Executor {
     Distributed(DistributedExecutor),
     Local(LocalExecutor),
 }
@@ -41,6 +42,7 @@ impl Executor {
     pub async fn is_ready(&self) -> bool {
         match self {
             Executor::Distributed(distributed_executor) => distributed_executor.is_ready().await,
+            Executor::Local(_local_executor) => todo!(),
         }
     }
 }
