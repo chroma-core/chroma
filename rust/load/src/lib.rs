@@ -36,6 +36,7 @@ use tower_http::trace::TraceLayer;
 use tracing::Instrument;
 use uuid::Uuid;
 
+pub mod backoff;
 pub mod bit_difference;
 pub mod config;
 pub mod data_sets;
@@ -148,33 +149,49 @@ impl Drop for Stopwatch<'_> {
 
 /// Instantiate a new Chroma client.  This will use the CHROMA_HOST environment variable (or
 /// http://localhost:8000 when unset) as the argument to [client_for_url].
-pub async fn client() -> ChromaClient {
+pub async fn client(deadline: chrono::DateTime<chrono::FixedOffset>) -> Option<ChromaClient> {
     let url = std::env::var("CHROMA_HOST").unwrap_or_else(|_| "http://localhost:8000".into());
-    client_for_url(url).await
+    client_for_url(deadline, url).await
 }
 
 /// Create a new Chroma client for the given URL.  This will use the CHROMA_TOKEN environment
 /// variable if set, or no authentication if unset.
-pub async fn client_for_url(url: String) -> ChromaClient {
-    if let Ok(auth) = std::env::var("CHROMA_TOKEN") {
-        ChromaClient::new(ChromaClientOptions {
-            url: Some(url),
-            auth: ChromaAuthMethod::TokenAuth {
-                token: auth,
-                header: ChromaTokenHeader::XChromaToken,
-            },
-            database: "hf-tiny-stories".to_string(),
-        })
-        .await
-        .unwrap()
-    } else {
-        ChromaClient::new(ChromaClientOptions {
-            url: Some(url),
-            auth: ChromaAuthMethod::None,
-            database: "hf-tiny-stories".to_string(),
-        })
-        .await
-        .unwrap()
+pub async fn client_for_url(
+    deadline: chrono::DateTime<chrono::FixedOffset>,
+    url: String,
+) -> Option<ChromaClient> {
+    let backoff = backoff::ExponentialBackoff::new(1000, 1000);
+    loop {
+        let client = if let Ok(auth) = std::env::var("CHROMA_TOKEN") {
+            ChromaClient::new(ChromaClientOptions {
+                url: Some(url.clone()),
+                auth: ChromaAuthMethod::TokenAuth {
+                    token: auth,
+                    header: ChromaTokenHeader::XChromaToken,
+                },
+                database: "hf-tiny-stories".to_string(),
+            })
+            .await
+        } else {
+            ChromaClient::new(ChromaClientOptions {
+                url: Some(url.clone()),
+                auth: ChromaAuthMethod::None,
+                database: "hf-tiny-stories".to_string(),
+            })
+            .await
+        };
+        match client {
+            Ok(client) => return Some(client),
+            Err(e) => {
+                let wait = backoff.next();
+                if deadline < chrono::Utc::now().fixed_offset() {
+                    tracing::error!("failed to create client and deadline expired: {}", e);
+                    return None;
+                }
+                tracing::error!("failed to create client, sleeping for {:?}: {}", wait, e);
+                tokio::time::sleep(wait).await;
+            }
+        }
     }
 }
 
@@ -1206,7 +1223,13 @@ impl LoadService {
         inhibit: Arc<AtomicBool>,
         spec: RunningWorkload,
     ) {
-        let client = Arc::new(client().await);
+        let client = match client(spec.expires).await {
+            Some(client) => Arc::new(client),
+            None => {
+                tracing::error!("workload finished without creating client");
+                return;
+            }
+        };
         let mut guac = Guacamole::new(spec.expires.timestamp_millis() as u64);
         let mut next_op = Instant::now();
         let (tx, mut rx) = tokio::sync::mpsc::channel(1000);
