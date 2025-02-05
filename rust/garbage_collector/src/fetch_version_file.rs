@@ -27,6 +27,12 @@ pub struct FetchVersionFileOutput {
     version_file_content: String,
 }
 
+impl FetchVersionFileOutput {
+    pub fn version_file_content(&self) -> &str {
+        &self.version_file_content
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum FetchVersionFileError {
     #[error("Error fetching version file")]

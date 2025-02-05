@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
+use chroma_types::chroma_proto::VersionListForCollection;
 use chroma_types::{
     chroma_proto, CollectionAndSegments, CollectionMetadataUpdate, CreateDatabaseError,
     CreateDatabaseResponse, CreateTenantError, CreateTenantResponse, Database, DeleteDatabaseError,
@@ -297,6 +298,46 @@ impl SysDb {
                 )
                 .await
             }
+        }
+    }
+
+    pub async fn mark_version_for_deletion(
+        &mut self,
+        epoch_id: i64,
+        versions: Vec<VersionListForCollection>,
+    ) -> Result<HashMap<String, bool>, MarkVersionForDeletionError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.mark_version_for_deletion(epoch_id, versions).await,
+            SysDb::Test(test) => {
+                let versions_clone = versions.clone();
+                test.mark_version_for_deletion(epoch_id, versions_clone)
+                    .await
+                    .map_err(|e| {
+                        MarkVersionForDeletionError::FailedToMarkVersion(tonic::Status::internal(e))
+                    })
+                    .map(|_| {
+                        let mut result = HashMap::new();
+                        for version in versions {
+                            result.insert(version.collection_id, true);
+                        }
+                        result
+                    })
+            }
+            SysDb::Sqlite(_) => todo!(),
+        }
+    }
+
+    pub async fn delete_collection_version(
+        &mut self,
+        versions: Vec<VersionListForCollection>,
+    ) -> Result<HashMap<String, bool>, DeleteCollectionVersionError> {
+        match self {
+            SysDb::Grpc(client) => {
+                let response = client.delete_collection_version(versions).await?;
+                Ok(response)
+            }
+            SysDb::Test(client) => Ok(client.delete_collection_version(versions).await),
+            SysDb::Sqlite(_) => todo!(),
         }
     }
 
@@ -859,6 +900,30 @@ impl GrpcSysDb {
         }
     }
 
+    async fn mark_version_for_deletion(
+        &mut self,
+        epoch_id: i64,
+        versions: Vec<chroma_proto::VersionListForCollection>,
+    ) -> Result<HashMap<String, bool>, MarkVersionForDeletionError> {
+        let req = chroma_proto::MarkVersionForDeletionRequest { epoch_id, versions };
+
+        let res = self.client.mark_version_for_deletion(req).await?;
+        Ok(res.into_inner().collection_id_to_success)
+    }
+
+    async fn delete_collection_version(
+        &mut self,
+        versions: Vec<chroma_proto::VersionListForCollection>,
+    ) -> Result<HashMap<String, bool>, DeleteCollectionVersionError> {
+        let req = chroma_proto::DeleteCollectionVersionRequest {
+            epoch_id: 0, // TODO: Pass this through
+            versions,
+        };
+
+        let res = self.client.delete_collection_version(req).await?;
+        Ok(res.into_inner().collection_id_to_success)
+    }
+
     async fn reset(&mut self) -> Result<ResetResponse, ResetError> {
         self.client.reset_state(()).await?;
         Ok(ResetResponse {})
@@ -997,6 +1062,34 @@ impl ChromaError for FlushCompactionError {
             FlushCompactionError::FlushCompactionResponseConversionError(_) => ErrorCodes::Internal,
             FlushCompactionError::CollectionNotFound => ErrorCodes::Internal,
             FlushCompactionError::SegmentNotFound => ErrorCodes::Internal,
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum MarkVersionForDeletionError {
+    #[error("Failed to mark version for deletion")]
+    FailedToMarkVersion(#[from] tonic::Status),
+}
+
+impl ChromaError for MarkVersionForDeletionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            MarkVersionForDeletionError::FailedToMarkVersion(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum DeleteCollectionVersionError {
+    #[error("Failed to delete version")]
+    FailedToDeleteVersion(#[from] tonic::Status),
+}
+
+impl ChromaError for DeleteCollectionVersionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            DeleteCollectionVersionError::FailedToDeleteVersion(_) => ErrorCodes::Internal,
         }
     }
 }

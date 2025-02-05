@@ -9,6 +9,7 @@ mod fetch_version_file;
 mod garbage_collector_component;
 mod garbage_collector_orchestrator;
 mod opentelemetry_config;
+pub mod operators;
 
 const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
 
