@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{hash_map::Entry, HashMap, HashSet},
     ops::{BitAnd, BitOr},
     sync::atomic::AtomicU32,
 };
@@ -12,7 +12,7 @@ use chroma_types::{
     test_segment, BooleanOperator, Chunk, Collection, CollectionAndSegments, CompositeExpression,
     DocumentExpression, DocumentOperator, LogRecord, Metadata, MetadataComparison,
     MetadataExpression, MetadataSetValue, MetadataValue, Operation, OperationRecord,
-    PrimitiveOperator, Segment, SegmentScope, SegmentUuid, SetOperator, Where,
+    PrimitiveOperator, Segment, SegmentScope, SegmentUuid, SetOperator, UpdateMetadata, Where,
 };
 use thiserror::Error;
 
@@ -144,11 +144,33 @@ pub struct TestReferenceSegment {
 }
 
 impl TestReferenceSegment {
-    fn merge_meta(old_meta: Option<Metadata>, new_meta: Option<Metadata>) -> Option<Metadata> {
+    fn merge_meta(old_meta: Option<Metadata>, delta: Option<UpdateMetadata>) -> Option<Metadata> {
+        let (deleted_keys, new_meta) = if let Some(m) = delta {
+            let mut dk = HashSet::new();
+            let mut nm = HashMap::new();
+            for (k, v) in m {
+                match MetadataValue::try_from(&v) {
+                    Ok(mv) => {
+                        nm.insert(k, mv);
+                    }
+                    Err(_) => {
+                        dk.insert(k);
+                    }
+                }
+            }
+            (dk, Some(nm))
+        } else {
+            (HashSet::new(), None)
+        };
         match (old_meta, new_meta) {
             (None, None) => None,
             (None, Some(m)) | (Some(m), None) => Some(m),
-            (Some(o), Some(n)) => Some(o.into_iter().chain(n).collect()),
+            (Some(o), Some(n)) => Some(
+                o.into_iter()
+                    .filter(|(k, _)| !deleted_keys.contains(k))
+                    .chain(n)
+                    .collect(),
+            ),
         }
     }
 
@@ -167,23 +189,6 @@ impl TestReferenceSegment {
                 },
         } in logs
         {
-            let (deleted_keys, new_meta) = if let Some(m) = metadata {
-                let mut dk = HashSet::new();
-                let mut nm = HashMap::new();
-                for (k, v) in m {
-                    match MetadataValue::try_from(&v) {
-                        Ok(mv) => {
-                            nm.insert(k, mv);
-                        }
-                        Err(_) => {
-                            dk.insert(k);
-                        }
-                    }
-                }
-                (dk, Some(nm))
-            } else {
-                (HashSet::new(), None)
-            };
             let mut record = ProjectionRecord {
                 id: id.clone(),
                 document,
@@ -192,9 +197,9 @@ impl TestReferenceSegment {
             };
             match operation {
                 Operation::Add => {
-                    if !coll.contains_key(&id) && deleted_keys.is_empty() {
-                        record.metadata = new_meta;
-                        coll.insert(id, (self.max_id, record));
+                    if let Entry::Vacant(entry) = coll.entry(id) {
+                        record.metadata = Self::merge_meta(None, metadata);
+                        entry.insert((self.max_id, record));
                         self.max_id += 1;
                     }
                 }
@@ -203,7 +208,7 @@ impl TestReferenceSegment {
                         old_record.document = record.document;
                         old_record.embedding = record.embedding;
                         old_record.metadata =
-                            Self::merge_meta(old_record.metadata.clone(), new_meta);
+                            Self::merge_meta(old_record.metadata.clone(), metadata);
                     }
                 }
                 Operation::Upsert => {
@@ -211,9 +216,9 @@ impl TestReferenceSegment {
                         old_record.document = record.document;
                         old_record.embedding = record.embedding;
                         old_record.metadata =
-                            Self::merge_meta(old_record.metadata.clone(), new_meta);
+                            Self::merge_meta(old_record.metadata.clone(), metadata);
                     } else {
-                        record.metadata = new_meta;
+                        record.metadata = Self::merge_meta(None, metadata);
                         coll.insert(id, (self.max_id, record));
                         self.max_id += 1;
                     }
@@ -228,7 +233,7 @@ impl TestReferenceSegment {
     pub fn count(&self, plan: Count) -> Result<CountResult, TestReferenceSegmentError> {
         let coll = self
             .record
-            .get(&plan.scan.collection_and_segments.record_segment.id)
+            .get(&plan.scan.collection_and_segments.metadata_segment.id)
             .ok_or(TestReferenceSegmentError::NotFound)?;
         Ok(coll.len() as u32)
     }
@@ -236,7 +241,7 @@ impl TestReferenceSegment {
     pub fn get(&self, plan: Get) -> Result<GetResult, TestReferenceSegmentError> {
         let coll = self
             .record
-            .get(&plan.scan.collection_and_segments.record_segment.id)
+            .get(&plan.scan.collection_and_segments.metadata_segment.id)
             .ok_or(TestReferenceSegmentError::NotFound)?;
         let mut records = coll
             .iter()

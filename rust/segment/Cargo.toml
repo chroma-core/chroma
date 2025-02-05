@@ -29,6 +29,7 @@ chroma-sqlite = { workspace = true }
 chroma-types = { workspace = true }
 
 [dev-dependencies]
+proptest = { workspace = true }
 shuttle = { workspace = true }
 tokio = { workspace = true }
 tempfile = { workspace = true }
@@ -36,4 +37,5 @@ tempfile = { workspace = true }
 chroma-cache = { workspace = true }
 chroma-log = { workspace = true }
 chroma-storage = { workspace = true }
+chroma-types = { workspace = true, features = ["testing"] }
 
