@@ -93,6 +93,8 @@ impl axum::response::IntoResponse for Error {
 
 #[derive(Debug)]
 pub struct Metrics {
+    /// The number of operations performed by chroma-load.
+    num_operations: Counter<u64>,
     /// The number of times an individual workload step was inhibited.  It will not be tracked as
     /// inactive or stepped.
     inhibited: Counter<u64>,
@@ -976,6 +978,7 @@ impl LoadService {
     /// Create a new load service from the given data sets and workloads.
     pub fn new(data_sets: Vec<Arc<dyn DataSet>>, workloads: HashMap<String, Workload>) -> Self {
         let meter = global::meter("chroma");
+        let num_operations = meter.u64_counter("num_operations").build();
         let inhibited = meter.u64_counter("inhibited").build();
         let inactive = meter.u64_counter("inactive").build();
         let step = meter.u64_counter("step").build();
@@ -987,6 +990,7 @@ impl LoadService {
         let get_latency = meter.f64_histogram("get_latency").build();
         let query_latency = meter.f64_histogram("query_latency").build();
         let metrics = Metrics {
+            num_operations,
             inhibited,
             inactive,
             step,
@@ -1253,6 +1257,7 @@ impl LoadService {
                 let guac = Guacamole::new(any(&mut guac));
                 let mut state = WorkloadState { seq_no, guac };
                 let fut = async move {
+                    this.metrics.num_operations.add(1, &[]);
                     this.metrics.step.add(
                         1,
                         &[KeyValue::new(
