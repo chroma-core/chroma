@@ -46,7 +46,7 @@ impl ChromaError for ComputeUnusedBetweenVersionsError {
 
 impl ComputeUnusedBetweenVersionsOperator {
     /// Extract S3 file references from a sparse index file content
-    fn extract_s3_files(content: &[u8]) -> Result<HashSet<String>, String> {
+    fn extract_s3_files(_content: &[u8]) -> Result<HashSet<String>, String> {
         // TODO: Implement parsing of sparse index file to extract S3 file references
         // This will depend on the format of your sparse index files
         Ok(HashSet::new())
@@ -88,14 +88,12 @@ impl Operator<ComputeUnusedBetweenVersionsInput, ComputeUnusedBetweenVersionsOut
             let newer_version = versions_window[1];
 
             // Get content for both versions
-            let older_content = input
-                .version_to_content
-                .get(&older_version)
-                .ok_or_else(|| ComputeUnusedBetweenVersionsError::MissingContent(older_version))?;
-            let newer_content = input
-                .version_to_content
-                .get(&newer_version)
-                .ok_or_else(|| ComputeUnusedBetweenVersionsError::MissingContent(newer_version))?;
+            let older_content = input.version_to_content.get(&older_version).ok_or(
+                ComputeUnusedBetweenVersionsError::MissingContent(older_version),
+            )?;
+            let newer_content = input.version_to_content.get(&newer_version).ok_or(
+                ComputeUnusedBetweenVersionsError::MissingContent(newer_version),
+            )?;
 
             // Extract S3 files from both versions
             let older_files = Self::extract_s3_files(older_content)

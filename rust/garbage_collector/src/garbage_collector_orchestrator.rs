@@ -405,13 +405,13 @@ impl Handler<TaskResult<DeleteVersionsAtSysDbOutput, DeleteVersionsAtSysDbError>
         ctx: &ComponentContext<GarbageCollectorOrchestrator>,
     ) {
         // Stage 6: Final stage - versions deleted, complete the garbage collection process
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let _output = match self.ok_or_terminate(message.into_inner(), ctx) {
             Some(output) => output,
             None => return,
         };
 
         let response = GarbageCollectorResponse {
-            collection_id: self.collection_id.clone(),
+            collection_id: self.collection_id,
             version_file_path: self.version_file_path.clone(),
         };
 

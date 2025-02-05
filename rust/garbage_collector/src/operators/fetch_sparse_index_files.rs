@@ -82,7 +82,7 @@ impl Operator<FetchSparseIndexFilesInput, FetchSparseIndexFilesOutput>
                         for file_paths in segment_compaction_info.file_paths.values() {
                             // Attempt to fetch each file
                             for file_path in &file_paths.paths {
-                                match self.storage.get(&file_path).await {
+                                match self.storage.get(file_path).await {
                                     Ok(content) => {
                                         version_to_content.insert(*version, (*content).to_vec());
                                     }
@@ -116,9 +116,6 @@ impl Operator<FetchSparseIndexFilesInput, FetchSparseIndexFilesOutput>
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use chroma_sysdb::TestSysDb;
-
     // Add tests here
     #[tokio::test]
     async fn test_fetch_files_success() {
