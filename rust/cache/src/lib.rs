@@ -43,7 +43,7 @@ impl ChromaError for CacheError {
 /// "unbounded" is a cache that doesn't evict.
 /// "disk" is a foyer-backed cache that lives on disk.
 /// "memory" is a foyer-backed cache that lives in memory.
-#[derive(Deserialize, Debug, Clone, Serialize)]
+#[derive(Default, Deserialize, Debug, Clone, Serialize)]
 pub enum CacheConfig {
     // case-insensitive
     #[serde(rename = "unbounded")]
@@ -56,6 +56,7 @@ pub enum CacheConfig {
     #[serde(alias = "weighted_lru")]
     Memory(FoyerCacheConfig),
     #[serde(rename = "nop")]
+    #[default]
     Nop,
 }
 
