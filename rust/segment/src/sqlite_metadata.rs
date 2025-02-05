@@ -8,26 +8,196 @@ use chroma_sqlite::{
 use chroma_types::{
     operator::{CountResult, Filter, GetResult, Limit, Projection, ProjectionRecord, Scan},
     plan::{Count, Get},
-    BooleanOperator, CompositeExpression, DocumentExpression, DocumentOperator, MetadataComparison,
-    MetadataExpression, MetadataSetValue, MetadataValue, PrimitiveOperator, SetOperator, Where,
-    CHROMA_DOCUMENT_KEY,
+    BooleanOperator, CompositeExpression, DocumentExpression, DocumentOperator,
+    MaterializedLogOperation, Metadata, MetadataComparison, MetadataExpression, MetadataSetValue,
+    MetadataValue, PrimitiveOperator, SegmentUuid, SetOperator, Where, CHROMA_DOCUMENT_KEY,
 };
-use sea_query::{Alias, Expr, Func, Query, SimpleExpr, SqliteQueryBuilder};
+use sea_query::{
+    Alias, DeleteStatement, Expr, Func, InsertStatement, Nullable, OnConflict, Query, SimpleExpr,
+    SqliteQueryBuilder,
+};
 use sea_query_binder::SqlxBinder;
 use sqlx::Row;
 use thiserror::Error;
+
+use crate::types::MaterializeLogsResult;
 
 const SUBQ_ALIAS: &str = "filter_limit_subq";
 
 #[derive(Debug, Error)]
 pub enum SqliteMetadataError {
     #[error(transparent)]
-    Sqlite(#[from] sqlx::Error),
+    SeaQuery(#[from] sea_query::error::Error),
+    #[error(transparent)]
+    Sqlx(#[from] sqlx::Error),
 }
 
 impl ChromaError for SqliteMetadataError {
     fn code(&self) -> ErrorCodes {
         ErrorCodes::Internal
+    }
+}
+
+pub struct SqliteMetadataWriter {
+    pub db: SqliteDb,
+}
+
+impl SqliteMetadataWriter {
+    fn add_embedding(
+        segment_id: SegmentUuid,
+        seq_id: u32,
+        user_id: String,
+    ) -> Result<InsertStatement, SqliteMetadataError> {
+        Ok(Query::insert()
+            .into_table(Embeddings::Table)
+            .columns([
+                Embeddings::SegmentId,
+                Embeddings::EmbeddingId,
+                Embeddings::SeqId,
+            ])
+            .values([segment_id.to_string().into(), user_id.into(), seq_id.into()])?
+            .returning_col(Embeddings::Id)
+            .to_owned())
+    }
+
+    fn upsert_embedding(
+        segment_id: SegmentUuid,
+        seq_id: u32,
+        user_id: String,
+    ) -> Result<InsertStatement, SqliteMetadataError> {
+        Ok(Self::add_embedding(segment_id, seq_id, user_id)?
+            .on_conflict(
+                OnConflict::columns([Embeddings::SegmentId, Embeddings::EmbeddingId])
+                    .update_columns([Embeddings::SeqId])
+                    .to_owned(),
+            )
+            .to_owned())
+    }
+
+    fn delete_embedding(segment_id: SegmentUuid, user_id: String) -> DeleteStatement {
+        Query::delete()
+            .from_table(Embeddings::Table)
+            .and_where(
+                Expr::col(Embeddings::SegmentId)
+                    .eq(segment_id.to_string())
+                    .and(Expr::col(Embeddings::EmbeddingId).eq(user_id)),
+            )
+            .to_owned()
+    }
+
+    fn upsert_metadata(
+        id: u32,
+        metadata: Metadata,
+    ) -> Result<InsertStatement, SqliteMetadataError> {
+        let mut stmt = Query::insert();
+        stmt.into_table(EmbeddingMetadata::Table)
+            .columns([
+                EmbeddingMetadata::Id,
+                EmbeddingMetadata::Key,
+                EmbeddingMetadata::StringValue,
+                EmbeddingMetadata::IntValue,
+                EmbeddingMetadata::FloatValue,
+                EmbeddingMetadata::BoolValue,
+            ])
+            .on_conflict(
+                OnConflict::columns([EmbeddingMetadata::Id, EmbeddingMetadata::Key])
+                    .update_columns([
+                        EmbeddingMetadata::Id,
+                        EmbeddingMetadata::Key,
+                        EmbeddingMetadata::StringValue,
+                        EmbeddingMetadata::IntValue,
+                        EmbeddingMetadata::FloatValue,
+                        EmbeddingMetadata::BoolValue,
+                    ])
+                    .to_owned(),
+            );
+        for (key, val) in metadata {
+            stmt.values(match val {
+                MetadataValue::Bool(b) => [
+                    id.into(),
+                    key.into(),
+                    String::null().into(),
+                    i32::null().into(),
+                    f32::null().into(),
+                    b.into(),
+                ],
+                MetadataValue::Int(i) => [
+                    id.into(),
+                    key.into(),
+                    String::null().into(),
+                    i.into(),
+                    f32::null().into(),
+                    bool::null().into(),
+                ],
+                MetadataValue::Float(f) => [
+                    id.into(),
+                    key.into(),
+                    String::null().into(),
+                    i32::null().into(),
+                    f.into(),
+                    bool::null().into(),
+                ],
+                MetadataValue::Str(s) => [
+                    id.into(),
+                    key.into(),
+                    s.into(),
+                    i32::null().into(),
+                    f32::null().into(),
+                    bool::null().into(),
+                ],
+            })?;
+        }
+        Ok(stmt)
+    }
+
+    fn delete_metadata(id: u32) -> DeleteStatement {
+        Query::delete()
+            .from_table(EmbeddingMetadata::Table)
+            .and_where(Expr::col(EmbeddingMetadata::Id).eq(id))
+            .to_owned()
+    }
+
+    fn delete_metadata_by_key(id: u32, keys: Vec<String>) -> DeleteStatement {
+        Query::delete()
+            .from_table(EmbeddingMetadata::Table)
+            .and_where(
+                Expr::col(EmbeddingMetadata::Id)
+                    .eq(id)
+                    .and(Expr::col(EmbeddingMetadata::Key).is_in(keys)),
+            )
+            .to_owned()
+    }
+
+    fn add_document(id: u32, document: String) -> Result<InsertStatement, SqliteMetadataError> {
+        Ok(Query::insert()
+            .into_table(EmbeddingFulltextSearch::Table)
+            .columns([
+                EmbeddingFulltextSearch::Rowid,
+                EmbeddingFulltextSearch::StringValue,
+            ])
+            .values([id.into(), document.into()])?
+            .to_owned())
+    }
+
+    pub async fn apply_materialized_logs(
+        &self,
+        logs: MaterializeLogsResult,
+        segment_id: SegmentUuid,
+    ) -> Result<(), SqliteMetadataError> {
+        let mut tx = self.db.get_conn().begin().await?;
+        for log in logs.iter() {
+            match log.get_operation() {
+                MaterializedLogOperation::Initial => {
+                    unreachable!("Initial operation should be internal to log materializer")
+                }
+                MaterializedLogOperation::AddNew => todo!(),
+                MaterializedLogOperation::OverwriteExisting => todo!(),
+                MaterializedLogOperation::UpdateExisting => todo!(),
+                MaterializedLogOperation::DeleteExisting => todo!(),
+            }
+        }
+
+        Ok(tx.commit().await?)
     }
 }
 
@@ -87,8 +257,8 @@ impl IntoSqliteExpr for DocumentExpression {
 
 impl IntoSqliteExpr for MetadataExpression {
     fn eval(&self) -> SimpleExpr {
-        let key_cond = Expr::col((EmbeddingMetadata::Table, EmbeddingMetadata::Key))
-            .eq(Expr::val(self.key.to_string()));
+        let key_cond =
+            Expr::col((EmbeddingMetadata::Table, EmbeddingMetadata::Key)).eq(self.key.to_string());
         match &self.comparison {
             MetadataComparison::Primitive(op, val) => {
                 let (col, sval) = match val {
