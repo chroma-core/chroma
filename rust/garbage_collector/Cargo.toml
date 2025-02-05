@@ -45,3 +45,10 @@ chroma-sysdb = { workspace = true }
 chroma-storage = { workspace = true }
 chroma-blockstore = { path = "../blockstore" }
 chroma-cache = { path = "../cache" }
+
+# TODO(rohitcp): Remove this git dependency and create a new crate instead
+chromadb = { git = "https://github.com/rescrv/chromadb-rs", rev = "7b46aab7366f009388f014929a92785c94134d61" }
+
+tonic = { workspace = true }  # For gRPC
+
+tempfile = { workspace = true }

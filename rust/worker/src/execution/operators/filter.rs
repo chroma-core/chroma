@@ -20,7 +20,7 @@ use chroma_types::{
 };
 use roaring::RoaringBitmap;
 use thiserror::Error;
-use tracing::{trace, Instrument, Span};
+use tracing::{info, trace, Instrument, Span};
 
 /// The `FilterOperator` filters the collection with specified criteria
 ///
@@ -402,7 +402,8 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
     type Error = FilterError;
 
     async fn run(&self, input: &FilterInput) -> Result<FilterOutput, FilterError> {
-        trace!("[{}]: {:?}", self.get_name(), input);
+        info!("[{}]: {:?}", self.get_name(), input);
+        println!("[{}]: {:?}", self.get_name(), input);
 
         let record_segment_reader = match RecordSegmentReader::from_segment(
             &input.record_segment,
@@ -421,6 +422,7 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
             materialize_logs(&cloned_record_segment_reader, input.logs.clone(), None)
                 .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
                 .await?;
+        println!("Materialized logs: {:?}", materialized_logs);
         let metadata_log_reader =
             MetadataLogReader::create(&materialized_logs, &record_segment_reader)
                 .await
@@ -437,6 +439,7 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
         // Get offset ids corresponding to user ids
         let (user_allowed_log_offset_ids, user_allowed_compact_offset_ids) =
             if let Some(user_allowed_ids) = self.query_ids.as_ref() {
+                println!("User allowed ids: {:?}", user_allowed_ids);
                 let log_offset_ids = SignedRoaringBitmap::Include(
                     metadata_log_reader.search_user_ids(
                         user_allowed_ids
@@ -446,6 +449,7 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
                             .as_slice(),
                     ),
                 );
+                println!("Log offset ids: {:?}", log_offset_ids);
                 let compact_offset_ids = if let Some(reader) = record_segment_reader.as_ref() {
                     let mut offset_ids = RoaringBitmap::new();
                     for user_id in user_allowed_ids {
@@ -489,6 +493,8 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
                 & SignedRoaringBitmap::Exclude(metadata_log_reader.updated_offset_ids)
         };
 
+        println!("Log offset ids: {:?}", log_offset_ids);
+        println!("Compact offset ids: {:?}", compact_offset_ids);
         Ok(FilterOutput {
             log_offset_ids,
             compact_offset_ids,
