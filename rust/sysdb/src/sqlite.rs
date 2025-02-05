@@ -1,7 +1,9 @@
 use chroma_sqlite::db::SqliteDb;
-use chroma_types::{Collection, CollectionUuid, Database, Metadata, Segment, Tenant};
+use chroma_types::{
+    Collection, CollectionUuid, CreateDatabaseError, CreateDatabaseResponse, Database, Metadata,
+    Segment, Tenant,
+};
 use sqlx::error::ErrorKind;
-use sqlx::Executor;
 
 //////////////////////// SqliteSysDb ////////////////////////
 
@@ -31,38 +33,23 @@ impl SqliteSysDb {
         id: uuid::Uuid,
         name: &str,
         tenant: &str,
-    ) -> Result<(), String> {
-        let query = "INSERT INTO databases (id, name, tenant_id) VALUES ($1, $2, $3)";
-
-        let conn = self.db.get_conn();
-        let query = sqlx::query(query)
+    ) -> Result<CreateDatabaseResponse, CreateDatabaseError> {
+        sqlx::query("INSERT INTO databases (id, name, tenant_id) VALUES ($1, $2, $3)")
             .bind(id.to_string())
             .bind(name)
-            .bind(tenant);
-
-        // TODO: error
-        let mut tx = conn.begin().await.map_err(|e| e.to_string())?;
-
-        let res = tx.execute(query).await;
-        match res {
-            Ok(_) => {}
-            Err(e) => match e {
-                sqlx::Error::Database(ref db_err) => {
-                    if db_err.kind() == ErrorKind::UniqueViolation {
-                        // TODO: real error
-                        return Err(format!(
-                            "Database {} already exists for tenant {}",
-                            name, tenant
-                        ));
-                    }
+            .bind(tenant)
+            .execute(self.db.get_conn())
+            .await
+            .map_err(|e| match e {
+                sqlx::Error::Database(ref db_err)
+                    if db_err.kind() == ErrorKind::UniqueViolation =>
+                {
+                    CreateDatabaseError::AlreadyExists(name.to_string())
                 }
-                _ => {
-                    return Err(e.to_string());
-                }
-            },
-        }
-        tx.commit().await.map_err(|e| e.to_string())?;
-        Ok(())
+                _ => CreateDatabaseError::Internal(e.into()),
+            })?;
+
+        Ok(CreateDatabaseResponse {})
     }
 
     pub(crate) async fn _get_database(
@@ -122,15 +109,11 @@ mod tests {
             .create_database(uuid::Uuid::new_v4(), "test", "default_tenant")
             .await;
 
+        matches!(result, Err(CreateDatabaseError::AlreadyExists(_)));
+
         // TODO: Add tests
         // test same id or name
         // custom tenant
-
-        // TODO: real error
-        assert_eq!(
-            result,
-            Err("Database test already exists for tenant default_tenant".to_string())
-        );
 
         // let db = sysdb
         //     .get_database("test", "default_tenant")

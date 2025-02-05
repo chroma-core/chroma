@@ -152,14 +152,14 @@ pub enum CreateDatabaseError {
     #[error("Database [{0}] already exists")]
     AlreadyExists(String),
     #[error(transparent)]
-    Internal(#[from] Status),
+    Internal(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for CreateDatabaseError {
     fn code(&self) -> ErrorCodes {
         match self {
             CreateDatabaseError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
-            CreateDatabaseError::Internal(status) => status.code().into(),
+            CreateDatabaseError::Internal(status) => status.code(),
         }
     }
 }
