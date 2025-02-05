@@ -16,6 +16,7 @@ use sea_query::{Alias, Expr, Func, Query, SimpleExpr, SqliteQueryBuilder};
 use sea_query_binder::SqlxBinder;
 use sqlx::Row;
 use thiserror::Error;
+use uuid::Uuid;
 
 const SUBQ_ALIAS: &str = "filter_limit_subq";
 
@@ -23,6 +24,8 @@ const SUBQ_ALIAS: &str = "filter_limit_subq";
 pub enum SqliteMetadataError {
     #[error(transparent)]
     Sqlite(#[from] sqlx::Error),
+    #[error("Invariant violation")]
+    InvariantViolation,
 }
 
 impl ChromaError for SqliteMetadataError {
@@ -147,7 +150,130 @@ pub struct SqliteMetadataReader {
     pub db: SqliteDb,
 }
 
+#[allow(dead_code)]
+pub struct MetadataRecord {
+    id: String,
+    segment_id: Uuid,
+    embedding_id: Uuid,
+    seq_id: u64,
+    document: Option<String>,
+    metadata: Option<HashMap<String, MetadataValue>>,
+}
+
 impl SqliteMetadataReader {
+    pub async fn record_exists(
+        &self,
+        segment_id: &Uuid,
+        embedding_id: &Uuid,
+    ) -> Result<bool, SqliteMetadataError> {
+        let mut query_builder = Query::select();
+        let query = query_builder
+            .column(Embeddings::Id)
+            .from(Embeddings::Table)
+            .and_where(
+                Expr::col((Embeddings::Table, Embeddings::SegmentId)).eq(segment_id.to_string()),
+            )
+            .and_where(
+                Expr::col((Embeddings::Table, Embeddings::EmbeddingId))
+                    .eq(embedding_id.to_string()),
+            );
+        let (sql, values) = query.build_sqlx(SqliteQueryBuilder);
+        let res = sqlx::query_with(&sql, values)
+            .fetch_all(self.db.get_conn())
+            .await?;
+        Ok(!res.is_empty())
+    }
+
+    pub async fn get_record_by_id(
+        &self,
+        segment_id: &Uuid,
+        embedding_id: &Uuid,
+    ) -> Result<MetadataRecord, SqliteMetadataError> {
+        let mut query_builder = Query::select();
+        let query = query_builder
+            .columns([
+                (Embeddings::Table, Embeddings::Id),
+                (Embeddings::Table, Embeddings::SeqId),
+            ])
+            .columns([
+                EmbeddingMetadata::Key,
+                EmbeddingMetadata::StringValue,
+                EmbeddingMetadata::IntValue,
+                EmbeddingMetadata::FloatValue,
+                EmbeddingMetadata::BoolValue,
+            ])
+            .from(Embeddings::Table)
+            .left_join(
+                EmbeddingMetadata::Table,
+                Expr::col((Embeddings::Table, Embeddings::Id))
+                    .equals((EmbeddingMetadata::Table, EmbeddingMetadata::Id)),
+            )
+            .and_where(
+                Expr::col((Embeddings::Table, Embeddings::SegmentId)).eq(segment_id.to_string()),
+            )
+            .and_where(
+                Expr::col((Embeddings::Table, Embeddings::EmbeddingId))
+                    .eq(embedding_id.to_string()),
+            );
+        let (sql, values) = query.build_sqlx(SqliteQueryBuilder);
+        let res = sqlx::query_with(&sql, values)
+            .fetch_all(self.db.get_conn())
+            .await?;
+        let mut records = HashMap::new();
+        for row in res {
+            let id = row.try_get::<String, _>(0)?;
+            // TODO(Sanket): Parse the seq_id appropriately.
+            let _ = row.try_get::<String, _>(1)?;
+            let record = records.entry(id.clone()).or_insert(ProjectionRecord {
+                id,
+                document: None,
+                embedding: None,
+                metadata: None,
+            });
+            // Metadata key can be null in which case return.
+            if row.try_get::<String, _>(2).is_err() {
+                continue;
+            }
+            // There is at least one valid metadata.
+            if record.metadata.is_none() {
+                record.metadata = Some(HashMap::new());
+            }
+            // This should not error because we are handling it above.
+            let metadata_key = row.try_get::<String, _>(2)?;
+            if metadata_key.eq(CHROMA_DOCUMENT_KEY) {
+                record.document = Some(row.try_get::<String, _>(3)?);
+            } else {
+                let metadata = record
+                    .metadata
+                    .as_mut()
+                    .ok_or(SqliteMetadataError::InvariantViolation)?;
+                if let Ok(Some(s)) = row.try_get(3) {
+                    metadata.insert(metadata_key.clone(), MetadataValue::Str(s));
+                } else if let Ok(Some(i)) = row.try_get(4) {
+                    metadata.insert(metadata_key.clone(), MetadataValue::Int(i));
+                } else if let Ok(Some(f)) = row.try_get(5) {
+                    metadata.insert(metadata_key.clone(), MetadataValue::Float(f));
+                } else if let Ok(Some(b)) = row.try_get(6) {
+                    metadata.insert(metadata_key, MetadataValue::Bool(b));
+                }
+            }
+        }
+        if records.len() != 1 {
+            return Err(SqliteMetadataError::InvariantViolation);
+        }
+        // SAFETY: unwrap is safe here since we already checked the length above.
+        let record = records.into_iter().next().unwrap();
+        // TODO(Sanket): Populate the seq id properly.
+        Ok(MetadataRecord {
+            id: record.0,
+            segment_id: *segment_id,
+            embedding_id: *embedding_id,
+            seq_id: 0,
+            document: record.1.document,
+            metadata: record.1.metadata,
+        })
+    }
+
     pub async fn count(
         &self,
         Count {
@@ -277,10 +403,9 @@ impl SqliteMetadataReader {
 
             if document || metadata {
                 if let Ok(key) = row.try_get::<String, _>(1) {
-                    if let (true, Ok(doc)) = (
-                        document && key.starts_with(CHROMA_DOCUMENT_KEY),
-                        row.try_get(2),
-                    ) {
+                    if let (true, Ok(doc)) =
+                        (document && key.eq(CHROMA_DOCUMENT_KEY), row.try_get(2))
+                    {
                         record.document = Some(doc);
                     }
 
