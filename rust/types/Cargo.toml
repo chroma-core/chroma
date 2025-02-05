@@ -17,8 +17,15 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 
+# (Cross-crate testing dependencies)
+proptest = { workspace = true, optional = true }
+proptest-derive = { workspace = true, optional = true }
+
 chroma-error = { workspace = true }
 chroma-config = { workspace = true }
 
 [build-dependencies]
 tonic-build = "0.10"
+
+[features]
+testing = ["dep:proptest", "dep:proptest-derive"]
