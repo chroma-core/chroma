@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+async-trait = { workspace = true }
 futures = { workspace = true }
 parking_lot = { workspace = true }
 roaring = { workspace = true }
@@ -19,6 +20,8 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 
 chroma-blockstore = { workspace = true }
+chroma-cache = { workspace = true }
+chroma-config = { workspace = true }
 chroma-distance = { workspace = true }
 chroma-error = { workspace = true }
 chroma-index = { workspace = true }

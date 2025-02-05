@@ -1,5 +1,6 @@
 use std::{collections::HashMap, path::Path, sync::Arc};
 
+use chroma_cache::Weighted;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::{HnswIndex, HnswIndexConfig, Index, IndexConfig, PersistentIndex};
 use chroma_types::{Chunk, LogRecord, Operation, Segment};
@@ -13,8 +14,9 @@ use crate::utils::{distance_function_from_segment, hnsw_params_from_segment};
 const METADATA_FILE: &str = "index_metadata.pickle";
 
 #[allow(dead_code)]
+#[derive(Clone)]
 pub struct LocalHnswSegmentReader {
-    index: Arc<tokio::sync::RwLock<LocalHnswIndex>>,
+    pub index: LocalHnswIndex,
     index_inited: bool,
     allow_reset: bool,
 }
@@ -31,6 +33,8 @@ pub enum LocalHnswSegmentReaderError {
     UninitializedSegment,
     #[error("Cannot obtain hnsw distance function from segment")]
     DistanceFunctionError(#[from] Box<chroma_distance::DistanceFunctionError>),
+    #[error("Error serializing path to string")]
+    PersistPathError,
 }
 
 impl ChromaError for LocalHnswSegmentReaderError {
@@ -41,13 +45,22 @@ impl ChromaError for LocalHnswSegmentReaderError {
             LocalHnswSegmentReaderError::HnswIndexLoadError => ErrorCodes::Internal,
             LocalHnswSegmentReaderError::UninitializedSegment => ErrorCodes::Internal,
             LocalHnswSegmentReaderError::DistanceFunctionError(e) => e.code(),
+            LocalHnswSegmentReaderError::PersistPathError => ErrorCodes::Internal,
         }
     }
 }
 
 impl LocalHnswSegmentReader {
+    pub fn from_index(hnsw_index: LocalHnswIndex) -> Self {
+        Self {
+            index: hnsw_index,
+            index_inited: true,
+            allow_reset: false,
+        }
+    }
+
     #[allow(dead_code)]
-    async fn from_segment(
+    pub async fn from_segment(
         segment: &Segment,
         dimensionality: usize,
         persist_path: &Path,
@@ -57,6 +70,10 @@ impl LocalHnswSegmentReader {
             // Return uninitialized reader.
             return Err(LocalHnswSegmentReaderError::UninitializedSegment);
         }
+        let index_folder_str = match index_folder.to_str() {
+            Some(path) => path,
+            None => return Err(LocalHnswSegmentReaderError::PersistPathError),
+        };
         let pickle_file_path = persist_path
             .join(segment.id.to_string())
             .join(METADATA_FILE);
@@ -71,14 +88,16 @@ impl LocalHnswSegmentReader {
                 let distance_function = distance_function_from_segment(segment)?;
                 let index_config = IndexConfig::new(dimensionality as i32, distance_function);
                 let index = HnswIndex::load(
-                    index_folder.to_str().unwrap(),
+                    index_folder_str,
                     &index_config,
                     chroma_index::IndexUuid(segment.id.0),
                 )
                 .map_err(|_| LocalHnswSegmentReaderError::HnswIndexLoadError)?;
                 // TODO(Sanket): Set allow reset appropriately.
                 return Ok(Self {
-                    index: Arc::new(tokio::sync::RwLock::new(LocalHnswIndex { index, id_map })),
+                    index: LocalHnswIndex {
+                        inner: Arc::new(tokio::sync::RwLock::new(Inner { index, id_map })),
+                    },
                     index_inited: true,
                     allow_reset: false,
                 });
@@ -103,15 +122,35 @@ struct IdMap {
 }
 
 #[allow(dead_code)]
-struct LocalHnswIndex {
+pub struct Inner {
     index: HnswIndex,
     // Loaded from pickle file.
     id_map: IdMap,
 }
 
+#[derive(Clone)]
+pub struct LocalHnswIndex {
+    inner: Arc<tokio::sync::RwLock<Inner>>,
+}
+
+impl LocalHnswIndex {
+    pub async fn close(&self) {
+        self.inner.write().await.index.close_fd();
+    }
+    pub async fn start(&self) {
+        self.inner.write().await.index.open_fd();
+    }
+}
+
+impl Weighted for LocalHnswIndex {
+    fn weight(&self) -> usize {
+        1
+    }
+}
+
 #[allow(dead_code)]
 pub struct LocalHnswSegmentWriter {
-    index: Arc<tokio::sync::RwLock<LocalHnswIndex>>,
+    pub index: LocalHnswIndex,
     persist_path: String,
     index_inited: bool,
     allow_reset: bool,
@@ -143,6 +182,8 @@ pub enum LocalHnswSegmentWriterError {
     HnswIndexResizeError,
     #[error("Error applying log chunk")]
     HnswIndexDeleteError,
+    #[error("Error converting persistant path to string")]
+    PersistPathError,
 }
 
 impl ChromaError for LocalHnswSegmentWriterError {
@@ -160,13 +201,29 @@ impl ChromaError for LocalHnswSegmentWriterError {
             LocalHnswSegmentWriterError::HnwsIndexAddError => ErrorCodes::Internal,
             LocalHnswSegmentWriterError::HnswIndexResizeError => ErrorCodes::Internal,
             LocalHnswSegmentWriterError::HnswIndexDeleteError => ErrorCodes::Internal,
+            LocalHnswSegmentWriterError::PersistPathError => ErrorCodes::Internal,
         }
     }
 }
 
 impl LocalHnswSegmentWriter {
+    pub fn from_index(
+        hnsw_index: LocalHnswIndex,
+        persist_path: &Path,
+    ) -> Result<Self, LocalHnswSegmentWriterError> {
+        match persist_path.to_str() {
+            Some(path) => Ok(Self {
+                index: hnsw_index,
+                persist_path: path.to_string(),
+                index_inited: true,
+                allow_reset: false,
+            }),
+            None => Err(LocalHnswSegmentWriterError::PersistPathError),
+        }
+    }
+
     #[allow(dead_code)]
-    async fn from_segment(
+    pub async fn from_segment(
         segment: &Segment,
         dimensionality: usize,
         persist_path: &Path,
@@ -175,6 +232,14 @@ impl LocalHnswSegmentWriter {
         if !index_folder.exists() {
             tokio::fs::create_dir_all(&index_folder).await?;
         }
+        let index_folder_str = match index_folder.to_str() {
+            Some(path) => path,
+            None => return Err(LocalHnswSegmentWriterError::PersistPathError),
+        };
+        let persist_path_str = match persist_path.to_str() {
+            Some(path) => path,
+            None => return Err(LocalHnswSegmentWriterError::PersistPathError),
+        };
         let pickle_file_path = persist_path
             .join(segment.id.to_string())
             .join(METADATA_FILE);
@@ -189,15 +254,17 @@ impl LocalHnswSegmentWriter {
                 let distance_function = distance_function_from_segment(segment)?;
                 let index_config = IndexConfig::new(dimensionality as i32, distance_function);
                 let index = HnswIndex::load(
-                    index_folder.to_str().unwrap(),
+                    index_folder_str,
                     &index_config,
                     chroma_index::IndexUuid(segment.id.0),
                 )
                 .map_err(|_| LocalHnswSegmentWriterError::HnswIndexLoadError)?;
                 // TODO(Sanket): Set allow reset appropriately.
                 return Ok(Self {
-                    index: Arc::new(tokio::sync::RwLock::new(LocalHnswIndex { index, id_map })),
-                    persist_path: persist_path.to_str().unwrap().to_string(),
+                    index: LocalHnswIndex {
+                        inner: Arc::new(tokio::sync::RwLock::new(Inner { index, id_map })),
+                    },
+                    persist_path: persist_path_str.to_string(),
                     index_inited: true,
                     allow_reset: false,
                 });
@@ -223,11 +290,13 @@ impl LocalHnswSegmentWriter {
         .map_err(|_| LocalHnswSegmentWriterError::HnswIndexInitError)?;
         // Return uninitialized reader.
         Ok(Self {
-            index: Arc::new(tokio::sync::RwLock::new(LocalHnswIndex {
-                index,
-                id_map: IdMap::default(),
-            })),
-            persist_path: index_folder.to_str().unwrap().to_string(),
+            index: LocalHnswIndex {
+                inner: Arc::new(tokio::sync::RwLock::new(Inner {
+                    index,
+                    id_map: IdMap::default(),
+                })),
+            },
+            persist_path: index_folder_str.to_string(),
             index_inited: true,
             allow_reset: false,
         })
@@ -235,7 +304,7 @@ impl LocalHnswSegmentWriter {
 
     #[allow(dead_code)]
     async fn persist(&mut self) -> Result<(), LocalHnswSegmentWriterError> {
-        let guard = self.index.write().await;
+        let guard = self.index.inner.write().await;
         // Persist hnsw index.
         // TODO(Sanket): Use file descriptor pool.
         guard
@@ -258,7 +327,7 @@ impl LocalHnswSegmentWriter {
         &mut self,
         log_chunk: Chunk<LogRecord>,
     ) -> Result<u32, LocalHnswSegmentWriterError> {
-        let mut guard = self.index.write().await;
+        let mut guard = self.index.inner.write().await;
         let mut next_label = guard.id_map.total_elements_added + 1;
         for (log, _) in log_chunk.iter() {
             match log.record.operation {

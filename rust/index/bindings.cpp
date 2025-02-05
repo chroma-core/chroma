@@ -230,6 +230,16 @@ public:
         }
         appr_alg->resizeIndex(new_size);
     }
+
+    void open_fd()
+    {
+        appr_alg->openPersistentIndex();
+    }
+
+    void close_fd()
+    {
+        appr_alg->closePersistentIndex();
+    }
 };
 
 // All these methods except for len() and capacity() can "throw" a std::exception
@@ -486,5 +496,15 @@ extern "C"
             return nullptr;
         }
         return last_error.c_str();
+    }
+
+    void open_fd(Index<float> *index)
+    {
+        index->open_fd();
+    }
+
+    void close_fd(Index<float> *index)
+    {
+        index->close_fd();
     }
 }
