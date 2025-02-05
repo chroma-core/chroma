@@ -100,14 +100,14 @@ pub enum CreateTenantError {
     #[error("Tenant [{0}] already exists")]
     AlreadyExists(String),
     #[error(transparent)]
-    Internal(#[from] Status),
+    Internal(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for CreateTenantError {
     fn code(&self) -> ErrorCodes {
         match self {
             CreateTenantError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
-            CreateTenantError::Internal(status) => status.code().into(),
+            CreateTenantError::Internal(err) => err.code(),
         }
     }
 }

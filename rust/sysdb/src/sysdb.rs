@@ -43,7 +43,7 @@ impl SysDb {
     ) -> Result<CreateTenantResponse, CreateTenantError> {
         match self {
             SysDb::Grpc(grpc) => grpc.create_tenant(tenant_name).await,
-            SysDb::Sqlite(_) => todo!(),
+            SysDb::Sqlite(sqlite) => sqlite.create_tenant(tenant_name).await,
             SysDb::Test(_) => todo!(),
         }
     }
@@ -459,7 +459,7 @@ impl GrpcSysDb {
             Err(err) if matches!(err.code(), Code::AlreadyExists) => {
                 Err(CreateTenantError::AlreadyExists(tenant_name))
             }
-            Err(err) => Err(err.into()),
+            Err(err) => Err(CreateTenantError::Internal(err.into())),
         }
     }
 

@@ -3,9 +3,9 @@ use std::u32;
 
 use chroma_sqlite::db::SqliteDb;
 use chroma_types::{
-    Collection, CollectionUuid, CreateDatabaseError, CreateDatabaseResponse, Database,
-    DeleteDatabaseError, DeleteDatabaseResponse, GetDatabaseError, ListDatabasesError, Metadata,
-    Segment, Tenant,
+    Collection, CollectionUuid, CreateDatabaseError, CreateDatabaseResponse, CreateTenantError,
+    CreateTenantResponse, Database, DeleteDatabaseError, DeleteDatabaseResponse, GetDatabaseError,
+    ListDatabasesError, Metadata, Segment, Tenant,
 };
 use futures::TryStreamExt;
 use sqlx::error::ErrorKind;
@@ -142,8 +142,24 @@ impl SqliteSysDb {
 
     ////////////////////////// Tenant Methods ////////////////////////
 
-    pub(crate) async fn _create_tenant(&self, _name: &str) -> Result<Tenant, String> {
-        unimplemented!();
+    pub(crate) async fn create_tenant(
+        &self,
+        name: String,
+    ) -> Result<CreateTenantResponse, CreateTenantError> {
+        sqlx::query("INSERT INTO tenants (id) VALUES ($1)")
+            .bind(&name)
+            .execute(self.db.get_conn())
+            .await
+            .map_err(|e| match e {
+                sqlx::Error::Database(ref db_err)
+                    if db_err.kind() == ErrorKind::UniqueViolation =>
+                {
+                    CreateTenantError::AlreadyExists(name.clone())
+                }
+                _ => CreateTenantError::Internal(e.into()),
+            })?;
+
+        Ok(CreateTenantResponse {})
     }
 
     pub(crate) async fn _get_tenant(&self, _name: &str) -> Result<Tenant, String> {
@@ -211,6 +227,13 @@ mod tests {
             .delete_database("test".to_string(), "default_tenant".to_string())
             .await;
         matches!(result, Err(DeleteDatabaseError::NotFound(_)));
+
+        // Create tenant
+        sysdb.create_tenant("new_tenant".to_string()).await.unwrap();
+
+        // Second call should fail
+        let result = sysdb.create_tenant("new_tenant".to_string()).await;
+        matches!(result, Err(CreateTenantError::AlreadyExists(_)));
 
         // TODO: Add tests
         // test same id or name
