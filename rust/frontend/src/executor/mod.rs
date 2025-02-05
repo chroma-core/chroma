@@ -41,7 +41,7 @@ impl Executor {
     pub async fn is_ready(&self) -> bool {
         match self {
             Executor::Distributed(distributed_executor) => distributed_executor.is_ready().await,
-            Executor::Local(local_executor) => todo!(),
+            Executor::Local(_) => todo!(),
         }
     }
 }
