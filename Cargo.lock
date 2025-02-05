@@ -1439,8 +1439,10 @@ dependencies = [
 name = "chroma-segment"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "chroma-blockstore",
  "chroma-cache",
+ "chroma-config",
  "chroma-distance",
  "chroma-error",
  "chroma-index",

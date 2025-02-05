@@ -331,6 +331,14 @@ impl HnswIndex {
         read_and_return_hnsw_error(self.ffi_ptr)
     }
 
+    pub fn open_fd(&self) {
+        unsafe { open_fd(self.ffi_ptr) }
+    }
+
+    pub fn close_fd(&self) {
+        unsafe { close_fd(self.ffi_ptr) }
+    }
+
     #[cfg(test)]
     fn get_ef(&self) -> Result<usize, Box<dyn ChromaError>> {
         let ret_val;
@@ -400,6 +408,8 @@ extern "C" {
         disallowed_ids: *const usize,
         disallowed_ids_length: usize,
     ) -> c_int;
+    fn open_fd(index: *const IndexPtrFFI);
+    fn close_fd(index: *const IndexPtrFFI);
 
     #[cfg(test)]
     fn get_ef(index: *const IndexPtrFFI) -> c_int;
