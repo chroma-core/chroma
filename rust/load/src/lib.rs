@@ -556,7 +556,7 @@ pub enum Workload {
 impl Workload {
     /// A human-readable description of the workload.
     pub fn description(&self) -> String {
-        serde_json::to_string_pretty(self).unwrap()
+        serde_json::to_string(self).unwrap()
     }
 
     /// Resolve named workload references to the actual workloads they reference.
@@ -1433,10 +1433,12 @@ This is a load generator service for Chroma.  This API is intended to be self-do
 
 It consists of endpoints, data sets, and workloads.  An endpoint is an exposed HTTP endpoint for
 controlling chroma-load.  A workload specifies a mix of operations to perform.  A data set specifies
-how to perform those operations.
+how to perform those operations against a Chroma collection.
 
 # Endpoints
 GET /           this document, available in "Accept: text/plain" and "Accept: application/json".
+GET /data-sets  a list of data sets, available in "Accept: text/plain" and "Accept: application/json".
+GET /workloads  a list of workloads, available in "Accept: text/plain" and "Accept: application/json".
 POST /start     start a job, requires a JSON body with the following fields:
                 - name: the name of the job; this is a human-readable identifier and can duplicate
                 - data_set: the name of the data set to use; see / for a list of data sets.
@@ -1448,41 +1450,87 @@ POST /stop      stop a job, requires a JSON body with the following fields:
 POST /inhibit   inhibit load generation.
 POST /uninhibit stop inhibiting load generation.
 
-# Data Sets
-        "#
+At a Glance
+-----------
+"#
+            .to_string();
+            if state.load.is_inhibited() {
+                output.push_str("Load generation is inhibited.\n");
+            } else {
+                for running in state.load.status() {
+                    output.push_str(&format!("## {}\n", running.name));
+                    output.push_str(&format!(
+                        "Workload: {}\n",
+                        running.workload.description().trim()
+                    ));
+                    output.push_str(&format!("Data Set: {}\n", running.data_set));
+                    output.push_str(&format!("Expires: {}\n", running.expires));
+                    output.push_str(&format!("Target Throughput: {}\n", running.throughput));
+                }
+                if state.load.status().is_empty() {
+                    output.push_str("No workloads are running.\n");
+                }
+            }
+            output.into_response()
+        }
+        Some(_) => StatusCode::BAD_REQUEST.into_response(),
+    }
+}
+
+async fn data_sets(headers: HeaderMap, State(state): State<AppState>) -> impl IntoResponse {
+    match headers.get(ACCEPT).map(|x| x.as_bytes()) {
+        Some(b"application/json") => {
+            let data_sets = state
+                .load
+                .data_sets()
+                .iter()
+                .map(|x| rest::Description::from(&**x))
+                .collect::<Vec<_>>();
+            Json(data_sets).into_response()
+        }
+        Some(b"*/*") | Some(b"text/plain") | None => {
+            let mut output = r#"data sets
+=========
+"#
             .to_string();
             for data_set in state.load.data_sets().iter() {
-                output.push_str(&format!("\n## {}\n", data_set.name()));
-                output.push_str(data_set.description().trim());
-                output.push('\n');
+                output.push_str(&format!(
+                    "{}: {}\n",
+                    data_set.name(),
+                    data_set.description().trim()
+                ));
             }
             if state.load.data_sets().is_empty() {
                 output.push_str("\nNo data sets are available.\n");
             }
+            output.into_response()
+        }
+        Some(_) => StatusCode::BAD_REQUEST.into_response(),
+    }
+}
 
-            output.push_str("\n# Workloads\n");
+async fn workloads(headers: HeaderMap, State(state): State<AppState>) -> impl IntoResponse {
+    match headers.get(ACCEPT).map(|x| x.as_bytes()) {
+        Some(b"application/json") => {
+            let workloads = state
+                .load
+                .workloads()
+                .iter()
+                // SAFETY(rescrv): x.1 is always serializable to JSON.
+                .map(|x| serde_json::to_value(x.1).unwrap())
+                .collect::<Vec<_>>();
+            Json(workloads).into_response()
+        }
+        Some(b"*/*") | Some(b"text/plain") | None => {
+            let mut output = r#"workloads
+=========
+"#
+            .to_string();
             for (name, workload) in state.load.workloads().iter() {
-                output.push_str(&format!("\n## {}\n", name));
-                output.push_str(workload.description().trim());
-                output.push('\n');
+                output.push_str(&format!("{}: {}\n", name, workload.description().trim()));
             }
             if state.load.workloads().is_empty() {
                 output.push_str("\nNo workloads are available.\n");
-            }
-            output.push_str("\n# At a Glance\n");
-            if state.load.is_inhibited() {
-                output.push_str("\nLoad generation is inhibited.\n");
-            } else {
-                for running in state.load.status() {
-                    output.push_str(&format!("\n## {}\n", running.name));
-                    output.push_str(&format!("Workload: {:?}\n", running.workload));
-                    output.push_str(&format!("Data Set: {}\n", running.data_set));
-                    output.push_str(&format!("Expires: {}\n", running.expires));
-                    output.push_str(&format!("Throughput: {}\n", running.throughput));
-                }
-                if state.load.status().is_empty() {
-                    output.push_str("\nNo workloads are running.\n");
-                }
             }
             output.into_response()
         }
@@ -1543,6 +1591,8 @@ pub async fn entrypoint() {
     };
     let app = Router::new()
         .route("/", get(readme))
+        .route("/data-sets", get(data_sets))
+        .route("/workloads", get(workloads))
         .route("/start", post(start))
         .route("/stop", post(stop))
         .route("/inhibit", post(inhibit))
