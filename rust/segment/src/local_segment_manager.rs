@@ -105,10 +105,7 @@ impl LocalSegmentManager {
         let persist_path = Path::new(&persist_path);
         let index_uuid = IndexUuid(segment.id.0);
         match self.hnsw_index_pool.get(&IndexUuid(segment.id.0)).await? {
-            Some(hnsw_index) => Ok(LocalHnswSegmentWriter::from_index(
-                hnsw_index,
-                persist_path,
-            )?),
+            Some(hnsw_index) => Ok(LocalHnswSegmentWriter::from_index(hnsw_index)?),
             None => {
                 let writer =
                     LocalHnswSegmentWriter::from_segment(segment, dimensionality, persist_path)
