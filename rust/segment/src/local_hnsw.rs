@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 use serde_pickle::{DeOptions, SerOptions};
 use thiserror::Error;
 
-use crate::utils::{distance_function_from_segment, hnsw_params_from_segment};
+use crate::utils::{
+    distance_function_from_segment, hnsw_params_from_segment, sync_threshold_from_segment,
+};
 
 #[allow(dead_code)]
 const METADATA_FILE: &str = "index_metadata.pickle";
@@ -17,8 +19,6 @@ const METADATA_FILE: &str = "index_metadata.pickle";
 #[derive(Clone)]
 pub struct LocalHnswSegmentReader {
     pub index: LocalHnswIndex,
-    index_inited: bool,
-    allow_reset: bool,
 }
 
 #[derive(Error, Debug)]
@@ -52,11 +52,7 @@ impl ChromaError for LocalHnswSegmentReaderError {
 
 impl LocalHnswSegmentReader {
     pub fn from_index(hnsw_index: LocalHnswIndex) -> Self {
-        Self {
-            index: hnsw_index,
-            index_inited: true,
-            allow_reset: false,
-        }
+        Self { index: hnsw_index }
     }
 
     #[allow(dead_code)]
@@ -86,6 +82,7 @@ impl LocalHnswSegmentReader {
             if !id_map.id_to_label.is_empty() {
                 // Load hnsw index.
                 let distance_function = distance_function_from_segment(segment)?;
+                let sync_threshold = sync_threshold_from_segment(segment);
                 let index_config = IndexConfig::new(dimensionality as i32, distance_function);
                 let index = HnswIndex::load(
                     index_folder_str,
@@ -96,10 +93,16 @@ impl LocalHnswSegmentReader {
                 // TODO(Sanket): Set allow reset appropriately.
                 return Ok(Self {
                     index: LocalHnswIndex {
-                        inner: Arc::new(tokio::sync::RwLock::new(Inner { index, id_map })),
+                        inner: Arc::new(tokio::sync::RwLock::new(Inner {
+                            index,
+                            id_map,
+                            index_init: true,
+                            allow_reset: false,
+                            num_elements_since_last_persist: 0,
+                            sync_threshold,
+                            persist_path: index_folder_str.to_string(),
+                        })),
                     },
-                    index_inited: true,
-                    allow_reset: false,
                 });
             } else {
                 // An empty reader.
@@ -126,6 +129,11 @@ pub struct Inner {
     index: HnswIndex,
     // Loaded from pickle file.
     id_map: IdMap,
+    index_init: bool,
+    allow_reset: bool,
+    num_elements_since_last_persist: u64,
+    sync_threshold: usize,
+    persist_path: String,
 }
 
 #[derive(Clone)]
@@ -151,9 +159,6 @@ impl Weighted for LocalHnswIndex {
 #[allow(dead_code)]
 pub struct LocalHnswSegmentWriter {
     pub index: LocalHnswIndex,
-    persist_path: String,
-    index_inited: bool,
-    allow_reset: bool,
 }
 
 #[derive(Error, Debug)]
@@ -207,19 +212,8 @@ impl ChromaError for LocalHnswSegmentWriterError {
 }
 
 impl LocalHnswSegmentWriter {
-    pub fn from_index(
-        hnsw_index: LocalHnswIndex,
-        persist_path: &Path,
-    ) -> Result<Self, LocalHnswSegmentWriterError> {
-        match persist_path.to_str() {
-            Some(path) => Ok(Self {
-                index: hnsw_index,
-                persist_path: path.to_string(),
-                index_inited: true,
-                allow_reset: false,
-            }),
-            None => Err(LocalHnswSegmentWriterError::PersistPathError),
-        }
+    pub fn from_index(hnsw_index: LocalHnswIndex) -> Result<Self, LocalHnswSegmentWriterError> {
+        Ok(Self { index: hnsw_index })
     }
 
     #[allow(dead_code)]
@@ -236,10 +230,6 @@ impl LocalHnswSegmentWriter {
             Some(path) => path,
             None => return Err(LocalHnswSegmentWriterError::PersistPathError),
         };
-        let persist_path_str = match persist_path.to_str() {
-            Some(path) => path,
-            None => return Err(LocalHnswSegmentWriterError::PersistPathError),
-        };
         let pickle_file_path = persist_path
             .join(segment.id.to_string())
             .join(METADATA_FILE);
@@ -253,6 +243,7 @@ impl LocalHnswSegmentWriter {
                 // Load hnsw index.
                 let distance_function = distance_function_from_segment(segment)?;
                 let index_config = IndexConfig::new(dimensionality as i32, distance_function);
+                let sync_threshold = sync_threshold_from_segment(segment);
                 let index = HnswIndex::load(
                     index_folder_str,
                     &index_config,
@@ -262,17 +253,23 @@ impl LocalHnswSegmentWriter {
                 // TODO(Sanket): Set allow reset appropriately.
                 return Ok(Self {
                     index: LocalHnswIndex {
-                        inner: Arc::new(tokio::sync::RwLock::new(Inner { index, id_map })),
+                        inner: Arc::new(tokio::sync::RwLock::new(Inner {
+                            index,
+                            id_map,
+                            index_init: true,
+                            allow_reset: false,
+                            num_elements_since_last_persist: 0,
+                            sync_threshold,
+                            persist_path: index_folder_str.to_string(),
+                        })),
                     },
-                    persist_path: persist_path_str.to_string(),
-                    index_inited: true,
-                    allow_reset: false,
                 });
             }
         }
         // Initialize index.
         let distance_function = distance_function_from_segment(segment)?;
         let hnsw_params = hnsw_params_from_segment(segment);
+        let sync_threshold = sync_threshold_from_segment(segment);
         let index_config = IndexConfig::new(dimensionality as i32, distance_function);
         let hnsw_config = HnswIndexConfig::new(
             hnsw_params.m,
@@ -281,7 +278,7 @@ impl LocalHnswSegmentWriter {
             &index_folder,
         )?;
 
-        // HnswIndex init is not thread safe. We should not call it from multiple threads
+        // TODO(Sanket): HnswIndex init is not thread safe. We should not call it from multiple threads
         let index = HnswIndex::init(
             &index_config,
             Some(&hnsw_config),
@@ -294,31 +291,14 @@ impl LocalHnswSegmentWriter {
                 inner: Arc::new(tokio::sync::RwLock::new(Inner {
                     index,
                     id_map: IdMap::default(),
+                    index_init: true,
+                    allow_reset: false,
+                    num_elements_since_last_persist: 0,
+                    sync_threshold,
+                    persist_path: index_folder_str.to_string(),
                 })),
             },
-            persist_path: index_folder_str.to_string(),
-            index_inited: true,
-            allow_reset: false,
         })
-    }
-
-    #[allow(dead_code)]
-    async fn persist(&mut self) -> Result<(), LocalHnswSegmentWriterError> {
-        let guard = self.index.inner.write().await;
-        // Persist hnsw index.
-        // TODO(Sanket): Use file descriptor pool.
-        guard
-            .index
-            .save()
-            .map_err(|_| LocalHnswSegmentWriterError::HnswIndexPersistError)?;
-        // Persist id map.
-        let metadata_file_path = Path::new(&self.persist_path).join(METADATA_FILE);
-        let mut file = tokio::fs::File::create(metadata_file_path)
-            .await?
-            .into_std()
-            .await;
-        serde_pickle::to_writer(&mut file, &guard.id_map, SerOptions::new())?;
-        Ok(())
     }
 
     // Returns the updated log seq id.
@@ -330,6 +310,7 @@ impl LocalHnswSegmentWriter {
         let mut guard = self.index.inner.write().await;
         let mut next_label = guard.id_map.total_elements_added + 1;
         for (log, _) in log_chunk.iter() {
+            guard.num_elements_since_last_persist += 1;
             match log.record.operation {
                 Operation::Add => {
                     // only update if the id is not already present
@@ -431,7 +412,30 @@ impl LocalHnswSegmentWriter {
                 }
             }
         }
+        if guard.num_elements_since_last_persist >= guard.sync_threshold as u64 {
+            guard = persist(guard).await?;
+            guard.num_elements_since_last_persist = 0;
+        }
 
         Ok(next_label)
     }
+}
+
+#[allow(dead_code)]
+async fn persist(
+    guard: tokio::sync::RwLockWriteGuard<'_, Inner>,
+) -> Result<tokio::sync::RwLockWriteGuard<'_, Inner>, LocalHnswSegmentWriterError> {
+    // Persist hnsw index.
+    guard
+        .index
+        .save()
+        .map_err(|_| LocalHnswSegmentWriterError::HnswIndexPersistError)?;
+    // Persist id map.
+    let metadata_file_path = Path::new(&guard.persist_path).join(METADATA_FILE);
+    let mut file = tokio::fs::File::create(metadata_file_path)
+        .await?
+        .into_std()
+        .await;
+    serde_pickle::to_writer(&mut file, &guard.id_map, SerOptions::new())?;
+    Ok(guard)
 }

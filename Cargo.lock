@@ -2671,6 +2671,7 @@ dependencies = [
  "opentelemetry-http",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
+ "prost 0.13.3",
  "serde",
  "serde_json",
  "thiserror 1.0.69",

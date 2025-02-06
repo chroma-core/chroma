@@ -1,5 +1,7 @@
 use chroma_distance::{DistanceFunction, DistanceFunctionError};
-use chroma_index::{DEFAULT_HNSW_EF_CONSTRUCTION, DEFAULT_HNSW_EF_SEARCH, DEFAULT_HNSW_M};
+use chroma_index::{
+    DEFAULT_HNSW_EF_CONSTRUCTION, DEFAULT_HNSW_EF_SEARCH, DEFAULT_HNSW_M, DEFAULT_SYNC_THRESHOLD,
+};
 use chroma_types::{get_metadata_value_as, MetadataValue, Segment};
 
 use super::distributed_hnsw::HnswIndexParamsFromSegment;
@@ -49,5 +51,15 @@ pub fn distance_function_from_segment(
     match DistanceFunction::try_from(space) {
         Ok(distance_function) => Ok(distance_function),
         Err(e) => Err(Box::new(e)),
+    }
+}
+
+pub fn sync_threshold_from_segment(segment: &Segment) -> usize {
+    match segment.metadata {
+        Some(ref metadata) => match metadata.get("hnsw:sync_threshold") {
+            Some(MetadataValue::Int(value)) => *value as usize,
+            _ => DEFAULT_SYNC_THRESHOLD,
+        },
+        None => DEFAULT_SYNC_THRESHOLD,
     }
 }
