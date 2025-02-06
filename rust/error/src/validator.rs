@@ -10,3 +10,11 @@ impl ChromaError for ChromaValidationError {
         ErrorCodes::InvalidArgument
     }
 }
+
+impl From<(&'static str, validator::ValidationError)> for ChromaValidationError {
+    fn from((field, error): (&'static str, validator::ValidationError)) -> Self {
+        let mut errors = validator::ValidationErrors::new();
+        errors.add(field, error);
+        Self(errors)
+    }
+}

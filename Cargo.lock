@@ -1596,6 +1596,7 @@ dependencies = [
  "prost 0.13.3",
  "prost-types",
  "pyo3",
+ "regex",
  "roaring",
  "serde",
  "serde_json",

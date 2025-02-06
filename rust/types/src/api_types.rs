@@ -5,6 +5,9 @@ use crate::operator::GetResult;
 use crate::operator::KnnBatchResult;
 use crate::operator::KnnProjectionRecord;
 use crate::operator::ProjectionRecord;
+use crate::validators::{
+    validate_name, validate_non_empty_collection_update_metadata, validate_non_empty_metadata,
+};
 use crate::Collection;
 use crate::CollectionConversionError;
 use crate::CollectionUuid;
@@ -23,6 +26,7 @@ use thiserror::Error;
 use tonic::Status;
 use uuid::Uuid;
 use validator::Validate;
+use validator::ValidationError;
 
 #[derive(Debug, Error)]
 pub enum GetSegmentsError {
@@ -106,9 +110,21 @@ pub struct GetUserIdentityResponse {
     pub databases: Vec<String>,
 }
 
-#[derive(Deserialize)]
+#[non_exhaustive]
+#[derive(Deserialize, Validate)]
 pub struct CreateTenantRequest {
+    #[validate(length(min = 3))]
     pub name: String,
+}
+
+impl CreateTenantRequest {
+    pub fn try_new(name: String) -> Result<Self, ChromaValidationError> {
+        let request = Self { name };
+        request
+            .validate()
+            .map_err(|err| ChromaValidationError::from(err))?;
+        Ok(request)
+    }
 }
 
 #[derive(Serialize)]
@@ -131,8 +147,20 @@ impl ChromaError for CreateTenantError {
     }
 }
 
+#[non_exhaustive]
+#[derive(Validate)]
 pub struct GetTenantRequest {
     pub name: String,
+}
+
+impl GetTenantRequest {
+    pub fn try_new(name: String) -> Result<Self, ChromaValidationError> {
+        let request = Self { name };
+        request
+            .validate()
+            .map_err(|err| ChromaValidationError::from(err))?;
+        Ok(request)
+    }
 }
 
 #[derive(Serialize)]
@@ -211,10 +239,30 @@ pub struct Database {
     pub tenant: String,
 }
 
+#[non_exhaustive]
+#[derive(Validate)]
 pub struct ListDatabasesRequest {
     pub tenant_id: String,
     pub limit: Option<u32>,
     pub offset: u32,
+}
+
+impl ListDatabasesRequest {
+    pub fn try_new(
+        tenant_id: String,
+        limit: Option<u32>,
+        offset: u32,
+    ) -> Result<Self, ChromaValidationError> {
+        let request = Self {
+            tenant_id,
+            limit,
+            offset,
+        };
+        request
+            .validate()
+            .map_err(|err| ChromaValidationError::from(err))?;
+        Ok(request)
+    }
 }
 
 pub type ListDatabasesResponse = Vec<Database>;
@@ -236,9 +284,27 @@ impl ChromaError for ListDatabasesError {
     }
 }
 
+#[non_exhaustive]
+#[derive(Validate)]
 pub struct GetDatabaseRequest {
     pub tenant_id: String,
     pub database_name: String,
+}
+
+impl GetDatabaseRequest {
+    pub fn try_new(
+        tenant_id: String,
+        database_name: String,
+    ) -> Result<Self, ChromaValidationError> {
+        let request = Self {
+            tenant_id,
+            database_name,
+        };
+        request
+            .validate()
+            .map_err(|err| ChromaValidationError::from(err))?;
+        Ok(request)
+    }
 }
 
 pub type GetDatabaseResponse = Database;
@@ -263,9 +329,27 @@ impl ChromaError for GetDatabaseError {
     }
 }
 
+#[non_exhaustive]
+#[derive(Validate)]
 pub struct DeleteDatabaseRequest {
     pub tenant_id: String,
     pub database_name: String,
+}
+
+impl DeleteDatabaseRequest {
+    pub fn try_new(
+        tenant_id: String,
+        database_name: String,
+    ) -> Result<Self, ChromaValidationError> {
+        let request = Self {
+            tenant_id,
+            database_name,
+        };
+        request
+            .validate()
+            .map_err(|err| ChromaValidationError::from(err))?;
+        Ok(request)
+    }
 }
 
 #[derive(Serialize)]
@@ -291,6 +375,8 @@ impl ChromaError for DeleteDatabaseError {
     }
 }
 
+#[non_exhaustive]
+#[derive(Validate)]
 pub struct ListCollectionsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -298,19 +384,77 @@ pub struct ListCollectionsRequest {
     pub offset: u32,
 }
 
+impl ListCollectionsRequest {
+    pub fn try_new(
+        tenant_id: String,
+        database_name: String,
+        limit: Option<u32>,
+        offset: u32,
+    ) -> Result<Self, ChromaValidationError> {
+        let request = Self {
+            tenant_id,
+            database_name,
+            limit,
+            offset,
+        };
+        request
+            .validate()
+            .map_err(|err| ChromaValidationError::from(err))?;
+        Ok(request)
+    }
+}
+
 pub type ListCollectionsResponse = Vec<Collection>;
 
+#[non_exhaustive]
+#[derive(Validate)]
 pub struct CountCollectionsRequest {
     pub tenant_id: String,
     pub database_name: String,
 }
 
+impl CountCollectionsRequest {
+    pub fn try_new(
+        tenant_id: String,
+        database_name: String,
+    ) -> Result<Self, ChromaValidationError> {
+        let request = Self {
+            tenant_id,
+            database_name,
+        };
+        request
+            .validate()
+            .map_err(|err| ChromaValidationError::from(err))?;
+        Ok(request)
+    }
+}
+
 pub type CountCollectionsResponse = u32;
 
+#[non_exhaustive]
+#[derive(Validate)]
 pub struct GetCollectionRequest {
     pub tenant_id: String,
     pub database_name: String,
     pub collection_name: String,
+}
+
+impl GetCollectionRequest {
+    pub fn try_new(
+        tenant_id: String,
+        database_name: String,
+        collection_name: String,
+    ) -> Result<Self, ChromaValidationError> {
+        let request = Self {
+            tenant_id,
+            database_name,
+            collection_name,
+        };
+        request
+            .validate()
+            .map_err(|err| ChromaValidationError::from(err))?;
+        Ok(request)
+    }
 }
 
 pub type GetCollectionResponse = Collection;
@@ -332,14 +476,41 @@ impl ChromaError for GetCollectionError {
     }
 }
 
-#[derive(Clone)]
+#[non_exhaustive]
+#[derive(Clone, Validate)]
 pub struct CreateCollectionRequest {
     pub tenant_id: String,
     pub database_name: String,
+    #[validate(custom(function = "validate_name"))]
     pub name: String,
+    #[validate(custom(function = "validate_non_empty_metadata"))]
     pub metadata: Option<Metadata>,
     pub configuration_json: Option<Value>,
     pub get_or_create: bool,
+}
+
+impl CreateCollectionRequest {
+    pub fn try_new(
+        tenant_id: String,
+        database_name: String,
+        name: String,
+        metadata: Option<Metadata>,
+        configuration_json: Option<Value>,
+        get_or_create: bool,
+    ) -> Result<Self, ChromaValidationError> {
+        let request = Self {
+            tenant_id,
+            database_name,
+            name,
+            metadata,
+            configuration_json,
+            get_or_create,
+        };
+        request
+            .validate()
+            .map_err(|err| ChromaValidationError::from(err))?;
+        Ok(request)
+    }
 }
 
 pub type CreateCollectionResponse = Collection;
@@ -390,17 +561,38 @@ impl ChromaError for GetCollectionsError {
     }
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub enum CollectionMetadataUpdate {
     ResetMetadata,
     UpdateMetadata(UpdateMetadata),
 }
 
-#[derive(Clone)]
+#[non_exhaustive]
+#[derive(Clone, Validate)]
 pub struct UpdateCollectionRequest {
     pub collection_id: CollectionUuid,
+    #[validate(custom(function = "validate_name"))]
     pub new_name: Option<String>,
+    #[validate(custom(function = "validate_non_empty_collection_update_metadata"))]
     pub new_metadata: Option<CollectionMetadataUpdate>,
+}
+
+impl UpdateCollectionRequest {
+    pub fn try_new(
+        collection_id: CollectionUuid,
+        new_name: Option<String>,
+        new_metadata: Option<CollectionMetadataUpdate>,
+    ) -> Result<Self, ChromaValidationError> {
+        let request = Self {
+            collection_id,
+            new_name,
+            new_metadata,
+        };
+        request
+            .validate()
+            .map_err(|err| ChromaValidationError::from(err))?;
+        Ok(request)
+    }
 }
 
 #[derive(Serialize)]
@@ -420,11 +612,30 @@ impl ChromaError for UpdateCollectionError {
     }
 }
 
-#[derive(Clone)]
+#[non_exhaustive]
+#[derive(Clone, Validate)]
 pub struct DeleteCollectionRequest {
     pub tenant_id: String,
     pub database_name: String,
     pub collection_name: String,
+}
+
+impl DeleteCollectionRequest {
+    pub fn try_new(
+        tenant_id: String,
+        database_name: String,
+        collection_name: String,
+    ) -> Result<Self, ChromaValidationError> {
+        let request = Self {
+            tenant_id,
+            database_name,
+            collection_name,
+        };
+        request
+            .validate()
+            .map_err(|err| ChromaValidationError::from(err))?;
+        Ok(request)
+    }
 }
 
 #[derive(Serialize)]
@@ -432,6 +643,8 @@ pub struct DeleteCollectionResponse {}
 
 #[derive(Error, Debug)]
 pub enum DeleteCollectionError {
+    #[error(transparent)]
+    Validation(#[from] ChromaValidationError),
     #[error(transparent)]
     Get(#[from] GetCollectionError),
     #[error(transparent)]
@@ -441,13 +654,15 @@ pub enum DeleteCollectionError {
 impl ChromaError for DeleteCollectionError {
     fn code(&self) -> ErrorCodes {
         match self {
+            DeleteCollectionError::Validation(err) => err.code(),
             DeleteCollectionError::Get(err) => err.code(),
             DeleteCollectionError::Internal(err) => err.code(),
         }
     }
 }
 
-#[derive(Debug)]
+#[non_exhaustive]
+#[derive(Debug, Validate)]
 pub struct AddCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -457,6 +672,34 @@ pub struct AddCollectionRecordsRequest {
     pub documents: Option<Vec<Option<String>>>,
     pub uris: Option<Vec<Option<String>>>,
     pub metadatas: Option<Vec<Option<Metadata>>>,
+}
+
+impl AddCollectionRecordsRequest {
+    pub fn try_new(
+        tenant_id: String,
+        database_name: String,
+        collection_id: CollectionUuid,
+        ids: Vec<String>,
+        embeddings: Option<Vec<Vec<f32>>>,
+        documents: Option<Vec<Option<String>>>,
+        uris: Option<Vec<Option<String>>>,
+        metadatas: Option<Vec<Option<Metadata>>>,
+    ) -> Result<Self, ChromaValidationError> {
+        let request = Self {
+            tenant_id,
+            database_name,
+            collection_id,
+            ids,
+            embeddings,
+            documents,
+            uris,
+            metadatas,
+        };
+        request
+            .validate()
+            .map_err(|err| ChromaValidationError::from(err))?;
+        Ok(request)
+    }
 }
 
 #[derive(Serialize)]
@@ -479,6 +722,8 @@ impl ChromaError for AddCollectionRecordsError {
     }
 }
 
+#[non_exhaustive]
+#[derive(Validate)]
 pub struct UpdateCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -488,6 +733,34 @@ pub struct UpdateCollectionRecordsRequest {
     pub documents: Option<Vec<Option<String>>>,
     pub uris: Option<Vec<Option<String>>>,
     pub metadatas: Option<Vec<Option<UpdateMetadata>>>,
+}
+
+impl UpdateCollectionRecordsRequest {
+    pub fn try_new(
+        tenant_id: String,
+        database_name: String,
+        collection_id: CollectionUuid,
+        ids: Vec<String>,
+        embeddings: Option<Vec<Option<Vec<f32>>>>,
+        documents: Option<Vec<Option<String>>>,
+        uris: Option<Vec<Option<String>>>,
+        metadatas: Option<Vec<Option<UpdateMetadata>>>,
+    ) -> Result<Self, ChromaValidationError> {
+        let request = Self {
+            tenant_id,
+            database_name,
+            collection_id,
+            ids,
+            embeddings,
+            documents,
+            uris,
+            metadatas,
+        };
+        request
+            .validate()
+            .map_err(|err| ChromaValidationError::from(err))?;
+        Ok(request)
+    }
 }
 
 #[derive(Serialize)]
@@ -507,6 +780,8 @@ impl ChromaError for UpdateCollectionRecordsError {
     }
 }
 
+#[non_exhaustive]
+#[derive(Validate)]
 pub struct UpsertCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -516,6 +791,34 @@ pub struct UpsertCollectionRecordsRequest {
     pub documents: Option<Vec<Option<String>>>,
     pub uris: Option<Vec<Option<String>>>,
     pub metadatas: Option<Vec<Option<UpdateMetadata>>>,
+}
+
+impl UpsertCollectionRecordsRequest {
+    pub fn try_new(
+        tenant_id: String,
+        database_name: String,
+        collection_id: CollectionUuid,
+        ids: Vec<String>,
+        embeddings: Option<Vec<Vec<f32>>>,
+        documents: Option<Vec<Option<String>>>,
+        uris: Option<Vec<Option<String>>>,
+        metadatas: Option<Vec<Option<UpdateMetadata>>>,
+    ) -> Result<Self, ChromaValidationError> {
+        let request = Self {
+            tenant_id,
+            database_name,
+            collection_id,
+            ids,
+            embeddings,
+            documents,
+            uris,
+            metadatas,
+        };
+        request
+            .validate()
+            .map_err(|err| ChromaValidationError::from(err))?;
+        Ok(request)
+    }
 }
 
 #[derive(Serialize)]
@@ -535,13 +838,44 @@ impl ChromaError for UpsertCollectionRecordsError {
     }
 }
 
-#[derive(Clone)]
+#[non_exhaustive]
+#[derive(Clone, Validate)]
 pub struct DeleteCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
     pub collection_id: CollectionUuid,
     pub ids: Option<Vec<String>>,
     pub r#where: Option<Where>,
+}
+
+impl DeleteCollectionRecordsRequest {
+    pub fn try_new(
+        tenant_id: String,
+        database_name: String,
+        collection_id: CollectionUuid,
+        ids: Option<Vec<String>>,
+        r#where: Option<Where>,
+    ) -> Result<Self, ChromaValidationError> {
+        if ids.as_ref().map(|ids| ids.is_empty()).unwrap_or(false) && r#where.is_none() {
+            return Err(ChromaValidationError::from((
+                ("ids, where"),
+                ValidationError::new("filter")
+                    .with_message("Either ids or where must be specified".into()),
+            )));
+        }
+
+        let request = Self {
+            tenant_id,
+            database_name,
+            collection_id,
+            ids,
+            r#where,
+        };
+        request
+            .validate()
+            .map_err(|err| ChromaValidationError::from(err))?;
+        Ok(request)
+    }
 }
 
 #[derive(Serialize)]
@@ -594,11 +928,30 @@ impl IncludeList {
     }
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[non_exhaustive]
+#[derive(Clone, Deserialize, Serialize, Validate)]
 pub struct CountRequest {
     pub tenant_id: String,
     pub database_name: String,
     pub collection_id: CollectionUuid,
+}
+
+impl CountRequest {
+    pub fn try_new(
+        tenant_id: String,
+        database_name: String,
+        collection_id: CollectionUuid,
+    ) -> Result<Self, ChromaValidationError> {
+        let request = Self {
+            tenant_id,
+            database_name,
+            collection_id,
+        };
+        request
+            .validate()
+            .map_err(|err| ChromaValidationError::from(err))?;
+        Ok(request)
+    }
 }
 
 pub type CountResponse = u32;
@@ -607,7 +960,8 @@ pub const CHROMA_KEY: &str = "chroma:";
 pub const CHROMA_DOCUMENT_KEY: &str = "chroma:document";
 pub const CHROMA_URI_KEY: &str = "chroma:uri";
 
-#[derive(Clone)]
+#[non_exhaustive]
+#[derive(Clone, Validate)]
 pub struct GetRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -617,6 +971,34 @@ pub struct GetRequest {
     pub limit: Option<u32>,
     pub offset: u32,
     pub include: IncludeList,
+}
+
+impl GetRequest {
+    pub fn try_new(
+        tenant_id: String,
+        database_name: String,
+        collection_id: CollectionUuid,
+        ids: Option<Vec<String>>,
+        r#where: Option<Where>,
+        limit: Option<u32>,
+        offset: u32,
+        include: IncludeList,
+    ) -> Result<Self, ChromaValidationError> {
+        let request = Self {
+            tenant_id,
+            database_name,
+            collection_id,
+            ids,
+            r#where,
+            limit,
+            offset,
+            include,
+        };
+        request
+            .validate()
+            .map_err(|err| ChromaValidationError::from(err))?;
+        Ok(request)
+    }
 }
 
 #[derive(Clone, Deserialize, Serialize, Debug)]
@@ -686,7 +1068,8 @@ impl From<(GetResult, IncludeList)> for GetResponse {
     }
 }
 
-#[derive(Clone)]
+#[non_exhaustive]
+#[derive(Clone, Validate)]
 pub struct QueryRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -696,6 +1079,34 @@ pub struct QueryRequest {
     pub embeddings: Vec<Vec<f32>>,
     pub n_results: u32,
     pub include: IncludeList,
+}
+
+impl QueryRequest {
+    pub fn try_new(
+        tenant_id: String,
+        database_name: String,
+        collection_id: CollectionUuid,
+        ids: Option<Vec<String>>,
+        r#where: Option<Where>,
+        embeddings: Vec<Vec<f32>>,
+        n_results: u32,
+        include: IncludeList,
+    ) -> Result<Self, ChromaValidationError> {
+        let request = Self {
+            tenant_id,
+            database_name,
+            collection_id,
+            ids,
+            r#where,
+            embeddings,
+            n_results,
+            include,
+        };
+        request
+            .validate()
+            .map_err(|err| ChromaValidationError::from(err))?;
+        Ok(request)
+    }
 }
 
 #[derive(Clone, Deserialize, Serialize)]

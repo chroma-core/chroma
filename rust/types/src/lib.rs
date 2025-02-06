@@ -17,6 +17,7 @@ mod spann_posting_list;
 #[cfg(feature = "testing")]
 pub mod strategies;
 mod tenant;
+mod validators;
 mod where_parsing;
 
 // Re-export the types module, so that we can use it as a single import in other modules.

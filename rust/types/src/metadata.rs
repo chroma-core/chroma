@@ -427,6 +427,15 @@ pub enum Where {
     Metadata(MetadataExpression),
 }
 
+impl serde::Serialize for Where {
+    fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        todo!()
+    }
+}
+
 impl Where {
     pub fn conjunction(children: Vec<Where>) -> Self {
         Self::Composite(CompositeExpression {

@@ -13,16 +13,16 @@ use axum::{
 };
 use chroma_types::RawWhereFields;
 use chroma_types::{
-    operator::Filter, AddCollectionRecordsResponse, ChecklistResponse, Collection,
-    CollectionMetadataUpdate, CollectionUuid, CountCollectionsRequest, CountCollectionsResponse,
-    CountRequest, CountResponse, CreateCollectionRequest, CreateDatabaseRequest,
-    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
-    DeleteCollectionRecordsResponse, DeleteDatabaseRequest, DeleteDatabaseResponse,
-    GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
-    GetTenantRequest, GetTenantResponse, GetUserIdentityResponse, HeartbeatResponse, IncludeList,
-    ListCollectionsRequest, ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse,
-    Metadata, QueryRequest, QueryResponse, UpdateCollectionRecordsResponse,
-    UpdateCollectionResponse, UpdateMetadata, UpsertCollectionRecordsResponse,
+    AddCollectionRecordsResponse, ChecklistResponse, Collection, CollectionMetadataUpdate,
+    CollectionUuid, CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
+    CreateCollectionRequest, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest,
+    CreateTenantResponse, DeleteCollectionRecordsResponse, DeleteDatabaseRequest,
+    DeleteDatabaseResponse, GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse,
+    GetRequest, GetResponse, GetTenantRequest, GetTenantResponse, GetUserIdentityResponse,
+    HeartbeatResponse, IncludeList, ListCollectionsRequest, ListCollectionsResponse,
+    ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
+    UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateMetadata,
+    UpsertCollectionRecordsResponse,
 };
 use mdac::{Rule, Scorecard, ScorecardTicket};
 use opentelemetry::global;
@@ -36,7 +36,6 @@ use crate::{
     frontend::Frontend,
     tower_tracing::add_tracing_middleware,
     types::errors::{ServerError, ValidationError},
-    utils::{validate_name, validate_non_empty_filter, validate_non_empty_metadata},
     FrontendConfig,
 };
 
@@ -298,12 +297,8 @@ async fn get_tenant(
 ) -> Result<Json<GetTenantResponse>, ServerError> {
     server.metrics.get_tenant.add(1, &[]);
     tracing::info!("Getting tenant [{}]", name);
-    Ok(Json(
-        server
-            .frontend
-            .get_tenant(GetTenantRequest { name })
-            .await?,
-    ))
+    let request = GetTenantRequest::try_new(name)?;
+    Ok(Json(server.frontend.get_tenant(request).await?))
 }
 
 #[derive(Deserialize, Debug)]
@@ -347,16 +342,9 @@ async fn list_databases(
         "op:list_databases",
         format!("tenant:{}", tenant_id).as_str(),
     ]);
-    Ok(Json(
-        server
-            .frontend
-            .list_databases(ListDatabasesRequest {
-                tenant_id,
-                limit,
-                offset,
-            })
-            .await?,
-    ))
+
+    let request = ListDatabasesRequest::try_new(tenant_id, limit, offset)?;
+    Ok(Json(server.frontend.list_databases(request).await?))
 }
 
 async fn get_database(
@@ -371,13 +359,8 @@ async fn get_database(
     );
     let _guard =
         server.scorecard_request(&["op:get_database", format!("tenant:{}", tenant_id).as_str()]);
-    let res = server
-        .frontend
-        .get_database(GetDatabaseRequest {
-            tenant_id,
-            database_name,
-        })
-        .await?;
+    let request = GetDatabaseRequest::try_new(tenant_id, database_name)?;
+    let res = server.frontend.get_database(request).await?;
     Ok(Json(res))
 }
 
@@ -395,15 +378,8 @@ async fn delete_database(
         "op:delete_database",
         format!("tenant:{}", tenant_id).as_str(),
     ]);
-    Ok(Json(
-        server
-            .frontend
-            .delete_database(DeleteDatabaseRequest {
-                tenant_id,
-                database_name,
-            })
-            .await?,
-    ))
+    let request = DeleteDatabaseRequest::try_new(tenant_id, database_name)?;
+    Ok(Json(server.frontend.delete_database(request).await?))
 }
 
 #[derive(Deserialize)]
@@ -430,17 +406,8 @@ async fn list_collections(
         "op:list_collections",
         format!("tenant:{}", tenant_id).as_str(),
     ]);
-    Ok(Json(
-        server
-            .frontend
-            .list_collections(ListCollectionsRequest {
-                tenant_id,
-                database_name,
-                limit,
-                offset,
-            })
-            .await?,
-    ))
+    let request = ListCollectionsRequest::try_new(tenant_id, database_name, limit, offset)?;
+    Ok(Json(server.frontend.list_collections(request).await?))
 }
 
 async fn count_collections(
@@ -457,15 +424,8 @@ async fn count_collections(
         "op:count_collections",
         format!("tenant:{}", tenant_id).as_str(),
     ]);
-    Ok(Json(
-        server
-            .frontend
-            .count_collections(CountCollectionsRequest {
-                tenant_id,
-                database_name,
-            })
-            .await?,
-    ))
+    let request = CountCollectionsRequest::try_new(tenant_id, database_name)?;
+    Ok(Json(server.frontend.count_collections(request).await?))
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -487,21 +447,15 @@ async fn create_collection(
         "op:create_collection",
         format!("tenant:{}", tenant_id).as_str(),
     ]);
-    validate_name(&payload.name)?;
-    if let Some(metadata) = payload.metadata.as_ref() {
-        validate_non_empty_metadata(metadata)?;
-    }
-    let collection = server
-        .frontend
-        .create_collection(CreateCollectionRequest {
-            name: payload.name,
-            tenant_id,
-            database_name,
-            metadata: payload.metadata,
-            configuration_json: payload.configuration,
-            get_or_create: payload.get_or_create,
-        })
-        .await?;
+    let request = CreateCollectionRequest::try_new(
+        tenant_id,
+        database_name,
+        payload.name,
+        payload.metadata,
+        payload.configuration,
+        payload.get_or_create,
+    )?;
+    let collection = server.frontend.create_collection(request).await?;
 
     Ok(Json(collection))
 }
@@ -516,14 +470,8 @@ async fn get_collection(
         "op:get_collection",
         format!("tenant:{}", tenant_id).as_str(),
     ]);
-    let collection = server
-        .frontend
-        .get_collection(GetCollectionRequest {
-            tenant_id,
-            database_name,
-            collection_name,
-        })
-        .await?;
+    let request = GetCollectionRequest::try_new(tenant_id, database_name, collection_name)?;
+    let collection = server.frontend.get_collection(request).await?;
     Ok(Json(collection))
 }
 
@@ -544,26 +492,18 @@ async fn update_collection(
         "op:update_collection",
         format!("tenant:{}", tenant_id).as_str(),
     ]);
-    if let Some(name) = payload.new_name.as_ref() {
-        validate_name(name)?;
-    }
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
 
-    if let Some(metadata) = payload.new_metadata.as_ref() {
-        validate_non_empty_metadata(metadata)?;
-    }
+    let request = chroma_types::UpdateCollectionRequest::try_new(
+        collection_id,
+        payload.new_name,
+        payload
+            .new_metadata
+            .map(CollectionMetadataUpdate::UpdateMetadata),
+    )?;
 
-    server
-        .frontend
-        .update_collection(chroma_types::UpdateCollectionRequest {
-            collection_id,
-            new_name: payload.new_name,
-            new_metadata: payload
-                .new_metadata
-                .map(CollectionMetadataUpdate::UpdateMetadata),
-        })
-        .await?;
+    server.frontend.update_collection(request).await?;
 
     Ok(Json(UpdateCollectionResponse {}))
 }
@@ -577,14 +517,9 @@ async fn delete_collection(
         "op:delete_collection",
         format!("tenant:{}", tenant_id).as_str(),
     ]);
-    server
-        .frontend
-        .delete_collection(chroma_types::DeleteCollectionRequest {
-            tenant_id,
-            database_name,
-            collection_name,
-        })
-        .await?;
+    let request =
+        chroma_types::DeleteCollectionRequest::try_new(tenant_id, database_name, collection_name)?;
+    server.frontend.delete_collection(request).await?;
 
     Ok(Json(UpdateCollectionResponse {}))
 }
@@ -622,19 +557,18 @@ async fn collection_add(
         )
         .await?;
 
-    let res = server
-        .frontend
-        .add(chroma_types::AddCollectionRecordsRequest {
-            tenant_id,
-            database_name,
-            collection_id,
-            ids: payload.ids,
-            embeddings: payload.embeddings,
-            documents: payload.documents,
-            uris: payload.uris,
-            metadatas: payload.metadatas,
-        })
-        .await?;
+    let request = chroma_types::AddCollectionRecordsRequest::try_new(
+        tenant_id,
+        database_name,
+        collection_id,
+        payload.ids,
+        payload.embeddings,
+        payload.documents,
+        payload.uris,
+        payload.metadatas,
+    )?;
+
+    let res = server.frontend.add(request).await?;
 
     Ok(Json(res))
 }
@@ -672,21 +606,18 @@ async fn collection_update(
         )
         .await?;
 
-    Ok(Json(
-        server
-            .frontend
-            .update(chroma_types::UpdateCollectionRecordsRequest {
-                tenant_id,
-                database_name,
-                collection_id,
-                ids: payload.ids,
-                embeddings: payload.embeddings,
-                documents: payload.documents,
-                uris: payload.uris,
-                metadatas: payload.metadatas,
-            })
-            .await?,
-    ))
+    let request = chroma_types::UpdateCollectionRecordsRequest::try_new(
+        tenant_id,
+        database_name,
+        collection_id,
+        payload.ids,
+        payload.embeddings,
+        payload.documents,
+        payload.uris,
+        payload.metadatas,
+    )?;
+
+    Ok(Json(server.frontend.update(request).await?))
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -722,21 +653,18 @@ async fn collection_upsert(
         )
         .await?;
 
-    Ok(Json(
-        server
-            .frontend
-            .upsert(chroma_types::UpsertCollectionRecordsRequest {
-                tenant_id,
-                database_name,
-                collection_id,
-                ids: payload.ids,
-                embeddings: payload.embeddings,
-                documents: payload.documents,
-                uris: payload.uris,
-                metadatas: payload.metadatas,
-            })
-            .await?,
-    ))
+    let request = chroma_types::UpsertCollectionRecordsRequest::try_new(
+        tenant_id,
+        database_name,
+        collection_id,
+        payload.ids,
+        payload.embeddings,
+        payload.documents,
+        payload.uris,
+        payload.metadatas,
+    )?;
+
+    Ok(Json(server.frontend.upsert(request).await?))
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -762,21 +690,15 @@ async fn collection_delete(
 
     let r#where = payload.where_fields.parse()?;
 
-    validate_non_empty_filter(&Filter {
-        query_ids: payload.ids.clone(),
-        where_clause: r#where.clone(),
-    })?;
+    let request = chroma_types::DeleteCollectionRecordsRequest::try_new(
+        tenant_id,
+        database_name,
+        collection_id,
+        payload.ids,
+        r#where,
+    )?;
 
-    server
-        .frontend
-        .delete(chroma_types::DeleteCollectionRecordsRequest {
-            tenant_id,
-            database_name,
-            collection_id,
-            ids: payload.ids,
-            r#where,
-        })
-        .await?;
+    server.frontend.delete(request).await?;
 
     Ok(Json(DeleteCollectionRecordsResponse {}))
 }
@@ -802,17 +724,13 @@ async fn collection_count(
         format!("collection:{}", collection_id).as_str(),
     ]);
 
-    Ok(Json(
-        server
-            .frontend
-            .count(CountRequest {
-                tenant_id,
-                database_name,
-                collection_id: CollectionUuid::from_str(&collection_id)
-                    .map_err(|_| ValidationError::CollectionId)?,
-            })
-            .await?,
-    ))
+    let request = CountRequest::try_new(
+        tenant_id,
+        database_name,
+        CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
+    )?;
+
+    Ok(Json(server.frontend.count(request).await?))
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -848,19 +766,17 @@ async fn collection_get(
         format!("tenant:{}", tenant_id).as_str(),
         format!("collection:{}", collection_id).as_str(),
     ]);
-    let res = server
-        .frontend
-        .get(GetRequest {
-            tenant_id,
-            database_name,
-            collection_id,
-            ids: payload.ids,
-            r#where: payload.where_fields.parse()?,
-            limit: payload.limit,
-            offset: payload.offset.unwrap_or(0),
-            include: payload.include,
-        })
-        .await?;
+    let request = GetRequest::try_new(
+        tenant_id,
+        database_name,
+        collection_id,
+        payload.ids,
+        payload.where_fields.parse()?,
+        payload.limit,
+        payload.offset.unwrap_or(0),
+        payload.include,
+    )?;
+    let res = server.frontend.get(request).await?;
     Ok(Json(res))
 }
 
@@ -908,19 +824,18 @@ async fn collection_query(
         )
         .await?;
 
-    let res = server
-        .frontend
-        .query(QueryRequest {
-            tenant_id,
-            database_name,
-            collection_id,
-            ids: payload.ids,
-            r#where: payload.where_fields.parse()?,
-            include: payload.include,
-            embeddings: payload.query_embeddings,
-            n_results: payload.n_results.unwrap_or(10),
-        })
-        .await?;
+    let request = QueryRequest::try_new(
+        tenant_id,
+        database_name,
+        collection_id,
+        payload.ids,
+        payload.where_fields.parse()?,
+        payload.query_embeddings,
+        payload.n_results.unwrap_or(10),
+        payload.include,
+    )?;
+
+    let res = server.frontend.query(request).await?;
 
     Ok(Json(res))
 }
