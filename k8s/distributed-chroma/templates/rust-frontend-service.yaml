@@ -32,10 +32,11 @@ spec:
               cpu: {{ .Values.rustFrontendService.resources.requests.cpu }}
               memory: {{ .Values.rustFrontendService.resources.requests.memory }}
           {{ end }}
-      {{if .Values.rustFrontendService.tolerations}}
+{{ if .Values.frontendService.otherEnvConfig }}
           env:
 {{ .Values.frontendService.otherEnvConfig | nindent 12 }}
-      {{if .Values.frontendService.tolerations}}
+{{ end }}
+      {{if .Values.rustFrontendService.tolerations}}
       tolerations:
         {{ toYaml .Values.rustFrontendService.tolerations | nindent 8 }}
       {{ end }}
