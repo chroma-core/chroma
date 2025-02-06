@@ -24,7 +24,8 @@ use pyo3::{
     exceptions::{PyOSError, PyRuntimeError, PyValueError},
     pyclass, pymethods, Py, PyAny, PyObject, PyResult, Python,
 };
-use std::time::SystemTime;
+use std::{sync::Arc, time::SystemTime};
+use tokio::runtime;
 
 const DEFAULT_DATABASE: &str = "default_database";
 const DEFAULT_TENANT: &str = "default_tenant";
