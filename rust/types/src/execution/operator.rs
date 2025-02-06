@@ -186,7 +186,7 @@ impl TryFrom<KnnBatch> for chroma_proto::KnnOperator {
 /// # Parameters
 /// - `skip`: The number of records to skip in the beginning
 /// - `fetch`: The number of records to fetch after `skip`
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Limit {
     pub skip: u32,
     pub fetch: Option<u32>,
@@ -306,7 +306,7 @@ impl KnnMerge {
 /// - `document`: Whether to retrieve document
 /// - `embedding`: Whether to retrieve embedding
 /// - `metadata`: Whether to retrieve metadata
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Projection {
     pub document: bool,
     pub embedding: bool,

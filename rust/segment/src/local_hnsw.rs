@@ -4,7 +4,7 @@ use chroma_cache::Weighted;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::{HnswIndex, HnswIndexConfig, Index, IndexConfig, PersistentIndex};
 use chroma_sqlite::{db::SqliteDb, table::MaxSeqId};
-use chroma_types::{Chunk, LogRecord, Operation, Segment};
+use chroma_types::{operator::RecordDistance, Chunk, LogRecord, Operation, Segment};
 use sea_query::{Query, SqliteQueryBuilder};
 use sea_query_binder::SqlxBinder;
 use serde::{Deserialize, Serialize};
@@ -38,10 +38,12 @@ pub enum LocalHnswSegmentReaderError {
     DistanceFunctionError(#[from] Box<chroma_distance::DistanceFunctionError>),
     #[error("Error serializing path to string")]
     PersistPathError,
-    #[error("Error finding user id")]
-    UserIdNotFound,
+    #[error("Error finding id")]
+    IdNotFound,
     #[error("Error getting embedding")]
     GetEmbeddingError,
+    #[error("Error querying knn")]
+    QueryError,
 }
 
 impl ChromaError for LocalHnswSegmentReaderError {
@@ -53,8 +55,9 @@ impl ChromaError for LocalHnswSegmentReaderError {
             LocalHnswSegmentReaderError::UninitializedSegment => ErrorCodes::Internal,
             LocalHnswSegmentReaderError::DistanceFunctionError(e) => e.code(),
             LocalHnswSegmentReaderError::PersistPathError => ErrorCodes::Internal,
-            LocalHnswSegmentReaderError::UserIdNotFound => ErrorCodes::Internal,
+            LocalHnswSegmentReaderError::IdNotFound => ErrorCodes::Internal,
             LocalHnswSegmentReaderError::GetEmbeddingError => ErrorCodes::Internal,
+            LocalHnswSegmentReaderError::QueryError => ErrorCodes::Internal,
         }
     }
 }
@@ -133,12 +136,62 @@ impl LocalHnswSegmentReader {
             .id_map
             .id_to_label
             .get(user_id)
-            .ok_or(LocalHnswSegmentReaderError::UserIdNotFound)?;
+            .ok_or(LocalHnswSegmentReaderError::IdNotFound)?;
         guard
             .index
             .get(*offset_id as usize)
             .map_err(|_| LocalHnswSegmentReaderError::GetEmbeddingError)?
             .ok_or(LocalHnswSegmentReaderError::GetEmbeddingError)
+    }
+
+    pub async fn get_offset_id_by_user_id(
+        &self,
+        user_id: &String,
+    ) -> Result<u32, LocalHnswSegmentReaderError> {
+        let guard = self.index.inner.read().await;
+        guard
+            .id_map
+            .id_to_label
+            .get(user_id)
+            .cloned()
+            .ok_or(LocalHnswSegmentReaderError::IdNotFound)
+    }
+
+    pub async fn get_embedding_by_offset_id(
+        &self,
+        offset_id: u32,
+    ) -> Result<Vec<f32>, LocalHnswSegmentReaderError> {
+        let guard = self.index.inner.read().await;
+        guard
+            .index
+            .get(offset_id as usize)
+            .map_err(|_| LocalHnswSegmentReaderError::GetEmbeddingError)?
+            .ok_or(LocalHnswSegmentReaderError::GetEmbeddingError)
+    }
+
+    pub async fn query_embedding(
+        &self,
+        allowed_offset_ids: &[u32],
+        embedding: Vec<f32>,
+        k: u32,
+    ) -> Result<Vec<RecordDistance>, LocalHnswSegmentReaderError> {
+        let guard = self.index.inner.read().await;
+        let allowed_ids = allowed_offset_ids
+            .iter()
+            .map(|oid| *oid as usize)
+            .collect::<Vec<_>>();
+        let (offset_ids, distances) = guard
+            .index
+            .query(&embedding, k as usize, allowed_ids.as_slice(), &[])
+            .map_err(|_| LocalHnswSegmentReaderError::QueryError)?;
+        Ok(offset_ids
+            .into_iter()
+            .zip(distances)
+            .map(|(offset_id, measure)| RecordDistance {
+                offset_id: offset_id as u32,
+                measure,
+            })
+            .collect())
     }
 }
 
