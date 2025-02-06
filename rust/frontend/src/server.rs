@@ -11,6 +11,7 @@ use axum::{
     routing::{get, post},
     Json, Router, ServiceExt,
 };
+use chroma_types::RawWhereFields;
 use chroma_types::{
     operator::Filter, AddCollectionRecordsResponse, ChecklistResponse, Collection,
     CollectionMetadataUpdate, CollectionUuid, CountCollectionsRequest, CountCollectionsResponse,
@@ -34,10 +35,7 @@ use crate::{
     ac::AdmissionControlledService,
     frontend::Frontend,
     tower_tracing::add_tracing_middleware,
-    types::{
-        errors::{ServerError, ValidationError},
-        where_parsing::RawWhereFields,
-    },
+    types::errors::{ServerError, ValidationError},
     utils::{validate_name, validate_non_empty_filter, validate_non_empty_metadata},
     FrontendConfig,
 };

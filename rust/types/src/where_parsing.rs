@@ -1,12 +1,11 @@
-use super::errors::ValidationError;
-use chroma_types::{
-    CompositeExpression, DocumentOperator, MetadataExpression, PrimitiveOperator, Where,
-};
+use crate::{CompositeExpression, DocumentOperator, MetadataExpression, PrimitiveOperator, Where};
+use chroma_error::ChromaError;
 use serde::Deserialize;
 use serde_json::Value;
+use thiserror::Error;
 
 #[derive(Deserialize, Debug, Clone)]
-pub(crate) struct RawWhereFields {
+pub struct RawWhereFields {
     #[serde(default)]
     r#where: Value,
     #[serde(default)]
@@ -14,7 +13,33 @@ pub(crate) struct RawWhereFields {
 }
 
 impl RawWhereFields {
-    pub(crate) fn parse(self) -> Result<Option<Where>, ValidationError> {
+    pub fn new(r#where: Value, where_document: Value) -> Self {
+        Self {
+            r#where,
+            where_document,
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum WhereValidationError {
+    #[error("Invalid where clause")]
+    WhereClause,
+    #[error("Invalid where document clause")]
+    WhereDocumentClause,
+}
+
+impl ChromaError for WhereValidationError {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        match self {
+            WhereValidationError::WhereClause => chroma_error::ErrorCodes::InvalidArgument,
+            WhereValidationError::WhereDocumentClause => chroma_error::ErrorCodes::InvalidArgument,
+        }
+    }
+}
+
+impl RawWhereFields {
+    pub fn parse(self) -> Result<Option<Where>, WhereValidationError> {
         let mut where_clause = None;
         if !self.r#where.is_null() {
             let where_payload = &self.r#where;
@@ -28,7 +53,7 @@ impl RawWhereFields {
         let combined_where = match where_clause {
             Some(where_clause) => match where_document_clause {
                 Some(where_document_clause) => Some(Where::Composite(CompositeExpression {
-                    operator: chroma_types::BooleanOperator::And,
+                    operator: crate::BooleanOperator::And,
                     children: vec![where_clause, where_document_clause],
                 })),
                 None => Some(where_clause),
@@ -40,21 +65,21 @@ impl RawWhereFields {
     }
 }
 
-pub fn parse_where_document(json_payload: &Value) -> Result<Where, ValidationError> {
+pub fn parse_where_document(json_payload: &Value) -> Result<Where, WhereValidationError> {
     let where_doc_payload = json_payload
         .as_object()
-        .ok_or(ValidationError::WhereDocumentClause)?;
+        .ok_or(WhereValidationError::WhereDocumentClause)?;
     if where_doc_payload.len() != 1 {
-        return Err(ValidationError::WhereDocumentClause);
+        return Err(WhereValidationError::WhereDocumentClause);
     }
     let (key, value) = where_doc_payload.iter().next().unwrap();
     // Check if it is a composite expression.
     if key == "$and" {
-        let logical_operator = chroma_types::BooleanOperator::And;
+        let logical_operator = crate::BooleanOperator::And;
         // Check that the value is list type.
         let children = value
             .as_array()
-            .ok_or(ValidationError::WhereDocumentClause)?;
+            .ok_or(WhereValidationError::WhereDocumentClause)?;
         let mut predicate_list = vec![];
         // Recursively parse the children.
         for child in children {
@@ -66,11 +91,11 @@ pub fn parse_where_document(json_payload: &Value) -> Result<Where, ValidationErr
         }));
     }
     if key == "$or" {
-        let logical_operator = chroma_types::BooleanOperator::Or;
+        let logical_operator = crate::BooleanOperator::Or;
         // Check that the value is list type.
         let children = value
             .as_array()
-            .ok_or(ValidationError::WhereDocumentClause)?;
+            .ok_or(WhereValidationError::WhereDocumentClause)?;
         let mut predicate_list = vec![];
         // Recursively parse the children.
         for child in children {
@@ -82,7 +107,7 @@ pub fn parse_where_document(json_payload: &Value) -> Result<Where, ValidationErr
         }));
     }
     if !value.is_string() {
-        return Err(ValidationError::WhereDocumentClause);
+        return Err(WhereValidationError::WhereDocumentClause);
     }
     let value_str = value.as_str().unwrap();
     let operator_type;
@@ -91,27 +116,27 @@ pub fn parse_where_document(json_payload: &Value) -> Result<Where, ValidationErr
     } else if key == "$not_contains" {
         operator_type = DocumentOperator::NotContains;
     } else {
-        return Err(ValidationError::WhereDocumentClause);
+        return Err(WhereValidationError::WhereDocumentClause);
     }
-    Ok(Where::Document(chroma_types::DocumentExpression {
+    Ok(Where::Document(crate::DocumentExpression {
         operator: operator_type,
         text: value_str.to_string(),
     }))
 }
 
-pub fn parse_where(json_payload: &Value) -> Result<Where, ValidationError> {
+pub fn parse_where(json_payload: &Value) -> Result<Where, WhereValidationError> {
     let where_payload = json_payload
         .as_object()
-        .ok_or(ValidationError::WhereClause)?;
+        .ok_or(WhereValidationError::WhereClause)?;
     if where_payload.len() != 1 {
-        return Err(ValidationError::WhereClause);
+        return Err(WhereValidationError::WhereClause);
     }
     let (key, value) = where_payload.iter().next().unwrap();
     // Check if it is a composite expression.
     if key == "$and" {
-        let logical_operator = chroma_types::BooleanOperator::And;
+        let logical_operator = crate::BooleanOperator::And;
         // Check that the value is list type.
-        let children = value.as_array().ok_or(ValidationError::WhereClause)?;
+        let children = value.as_array().ok_or(WhereValidationError::WhereClause)?;
         let mut predicate_list = vec![];
         // Recursively parse the children.
         for child in children {
@@ -123,9 +148,9 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, ValidationError> {
         }));
     }
     if key == "$or" {
-        let logical_operator = chroma_types::BooleanOperator::Or;
+        let logical_operator = crate::BooleanOperator::Or;
         // Check that the value is list type.
-        let children = value.as_array().ok_or(ValidationError::WhereClause)?;
+        let children = value.as_array().ok_or(WhereValidationError::WhereClause)?;
         let mut predicate_list = vec![];
         // Recursively parse the children.
         for child in children {
@@ -141,36 +166,36 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, ValidationError> {
     if value.is_string() {
         return Ok(Where::Metadata(MetadataExpression {
             key: key.clone(),
-            comparison: chroma_types::MetadataComparison::Primitive(
-                chroma_types::PrimitiveOperator::Equal,
-                chroma_types::MetadataValue::Str(value.as_str().unwrap().to_string()),
+            comparison: crate::MetadataComparison::Primitive(
+                crate::PrimitiveOperator::Equal,
+                crate::MetadataValue::Str(value.as_str().unwrap().to_string()),
             ),
         }));
     }
     if value.is_boolean() {
         return Ok(Where::Metadata(MetadataExpression {
             key: key.clone(),
-            comparison: chroma_types::MetadataComparison::Primitive(
-                chroma_types::PrimitiveOperator::Equal,
-                chroma_types::MetadataValue::Bool(value.as_bool().unwrap()),
+            comparison: crate::MetadataComparison::Primitive(
+                crate::PrimitiveOperator::Equal,
+                crate::MetadataValue::Bool(value.as_bool().unwrap()),
             ),
         }));
     }
     if value.is_f64() {
         return Ok(Where::Metadata(MetadataExpression {
             key: key.clone(),
-            comparison: chroma_types::MetadataComparison::Primitive(
-                chroma_types::PrimitiveOperator::Equal,
-                chroma_types::MetadataValue::Float(value.as_f64().unwrap()),
+            comparison: crate::MetadataComparison::Primitive(
+                crate::PrimitiveOperator::Equal,
+                crate::MetadataValue::Float(value.as_f64().unwrap()),
             ),
         }));
     }
     if value.is_i64() {
         return Ok(Where::Metadata(MetadataExpression {
             key: key.clone(),
-            comparison: chroma_types::MetadataComparison::Primitive(
-                chroma_types::PrimitiveOperator::Equal,
-                chroma_types::MetadataValue::Int(value.as_i64().unwrap()),
+            comparison: crate::MetadataComparison::Primitive(
+                crate::PrimitiveOperator::Equal,
+                crate::MetadataValue::Int(value.as_i64().unwrap()),
             ),
         }));
     }
@@ -178,79 +203,79 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, ValidationError> {
         let value_obj = value.as_object().unwrap();
         // value_obj should have exactly one key.
         if value_obj.len() != 1 {
-            return Err(ValidationError::WhereClause);
+            return Err(WhereValidationError::WhereClause);
         }
         let (operator, operand) = value_obj.iter().next().unwrap();
         if operand.is_array() {
             let set_operator;
             if operator == "$in" {
-                set_operator = chroma_types::SetOperator::In;
+                set_operator = crate::SetOperator::In;
             } else if operator == "$nin" {
-                set_operator = chroma_types::SetOperator::NotIn;
+                set_operator = crate::SetOperator::NotIn;
             } else {
-                return Err(ValidationError::WhereClause);
+                return Err(WhereValidationError::WhereClause);
             }
             let operand = operand.as_array().unwrap();
             if operand.is_empty() {
-                return Err(ValidationError::WhereClause);
+                return Err(WhereValidationError::WhereClause);
             }
             if operand[0].is_string() {
                 let operand_str = operand
                     .iter()
                     .map(|val| {
                         val.as_str()
-                            .ok_or(ValidationError::WhereClause)
+                            .ok_or(WhereValidationError::WhereClause)
                             .map(|s| s.to_string())
                     })
                     .collect::<Result<Vec<String>, _>>()?;
                 return Ok(Where::Metadata(MetadataExpression {
                     key: key.clone(),
-                    comparison: chroma_types::MetadataComparison::Set(
+                    comparison: crate::MetadataComparison::Set(
                         set_operator,
-                        chroma_types::MetadataSetValue::Str(operand_str),
+                        crate::MetadataSetValue::Str(operand_str),
                     ),
                 }));
             }
             if operand[0].is_boolean() {
                 let operand_bool = operand
                     .iter()
-                    .map(|val| val.as_bool().ok_or(ValidationError::WhereClause))
+                    .map(|val| val.as_bool().ok_or(WhereValidationError::WhereClause))
                     .collect::<Result<Vec<bool>, _>>()?;
                 return Ok(Where::Metadata(MetadataExpression {
                     key: key.clone(),
-                    comparison: chroma_types::MetadataComparison::Set(
+                    comparison: crate::MetadataComparison::Set(
                         set_operator,
-                        chroma_types::MetadataSetValue::Bool(operand_bool),
+                        crate::MetadataSetValue::Bool(operand_bool),
                     ),
                 }));
             }
             if operand[0].is_f64() {
                 let operand_f64 = operand
                     .iter()
-                    .map(|val| val.as_f64().ok_or(ValidationError::WhereClause))
+                    .map(|val| val.as_f64().ok_or(WhereValidationError::WhereClause))
                     .collect::<Result<Vec<f64>, _>>()?;
                 return Ok(Where::Metadata(MetadataExpression {
                     key: key.clone(),
-                    comparison: chroma_types::MetadataComparison::Set(
+                    comparison: crate::MetadataComparison::Set(
                         set_operator,
-                        chroma_types::MetadataSetValue::Float(operand_f64),
+                        crate::MetadataSetValue::Float(operand_f64),
                     ),
                 }));
             }
             if operand[0].is_i64() {
                 let operand_i64 = operand
                     .iter()
-                    .map(|val| val.as_i64().ok_or(ValidationError::WhereClause))
+                    .map(|val| val.as_i64().ok_or(WhereValidationError::WhereClause))
                     .collect::<Result<Vec<i64>, _>>()?;
                 return Ok(Where::Metadata(MetadataExpression {
                     key: key.clone(),
-                    comparison: chroma_types::MetadataComparison::Set(
+                    comparison: crate::MetadataComparison::Set(
                         set_operator,
-                        chroma_types::MetadataSetValue::Int(operand_i64),
+                        crate::MetadataSetValue::Int(operand_i64),
                     ),
                 }));
             }
-            return Err(ValidationError::WhereClause);
+            return Err(WhereValidationError::WhereClause);
         }
         if operand.is_string() {
             let operand_str = operand.as_str().unwrap();
@@ -260,13 +285,13 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, ValidationError> {
             } else if operator == "$ne" {
                 operator_type = PrimitiveOperator::NotEqual;
             } else {
-                return Err(ValidationError::WhereClause);
+                return Err(WhereValidationError::WhereClause);
             }
             return Ok(Where::Metadata(MetadataExpression {
                 key: key.clone(),
-                comparison: chroma_types::MetadataComparison::Primitive(
+                comparison: crate::MetadataComparison::Primitive(
                     operator_type,
-                    chroma_types::MetadataValue::Str(operand_str.to_string()),
+                    crate::MetadataValue::Str(operand_str.to_string()),
                 ),
             }));
         }
@@ -278,13 +303,13 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, ValidationError> {
             } else if operator == "$ne" {
                 operator_type = PrimitiveOperator::NotEqual;
             } else {
-                return Err(ValidationError::WhereClause);
+                return Err(WhereValidationError::WhereClause);
             }
             return Ok(Where::Metadata(MetadataExpression {
                 key: key.clone(),
-                comparison: chroma_types::MetadataComparison::Primitive(
+                comparison: crate::MetadataComparison::Primitive(
                     operator_type,
-                    chroma_types::MetadataValue::Bool(operand_bool),
+                    crate::MetadataValue::Bool(operand_bool),
                 ),
             }));
         }
@@ -304,13 +329,13 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, ValidationError> {
             } else if operator == "$gte" {
                 operator_type = PrimitiveOperator::GreaterThanOrEqual;
             } else {
-                return Err(ValidationError::WhereClause);
+                return Err(WhereValidationError::WhereClause);
             }
             return Ok(Where::Metadata(MetadataExpression {
                 key: key.clone(),
-                comparison: chroma_types::MetadataComparison::Primitive(
+                comparison: crate::MetadataComparison::Primitive(
                     operator_type,
-                    chroma_types::MetadataValue::Float(operand_f64),
+                    crate::MetadataValue::Float(operand_f64),
                 ),
             }));
         }
@@ -330,19 +355,19 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, ValidationError> {
             } else if operator == "$gte" {
                 operator_type = PrimitiveOperator::GreaterThanOrEqual;
             } else {
-                return Err(ValidationError::WhereClause);
+                return Err(WhereValidationError::WhereClause);
             }
             return Ok(Where::Metadata(MetadataExpression {
                 key: key.clone(),
-                comparison: chroma_types::MetadataComparison::Primitive(
+                comparison: crate::MetadataComparison::Primitive(
                     operator_type,
-                    chroma_types::MetadataValue::Int(operand_i64),
+                    crate::MetadataValue::Int(operand_i64),
                 ),
             }));
         }
-        return Err(ValidationError::WhereClause);
+        return Err(WhereValidationError::WhereClause);
     }
-    Err(ValidationError::WhereClause)
+    Err(WhereValidationError::WhereClause)
 }
 
 #[cfg(test)]
@@ -373,20 +398,20 @@ mod tests {
         let expected_results = [
             // $contains
             Where::Composite(CompositeExpression {
-                operator: chroma_types::BooleanOperator::And,
+                operator: crate::BooleanOperator::And,
                 children: vec![
-                    Where::Document(chroma_types::DocumentExpression {
+                    Where::Document(crate::DocumentExpression {
                         operator: DocumentOperator::Contains,
                         text: "value1".to_string(),
                     }),
                     Where::Composite(CompositeExpression {
-                        operator: chroma_types::BooleanOperator::Or,
+                        operator: crate::BooleanOperator::Or,
                         children: vec![
-                            Where::Document(chroma_types::DocumentExpression {
+                            Where::Document(crate::DocumentExpression {
                                 operator: DocumentOperator::Contains,
                                 text: "value2".to_string(),
                             }),
-                            Where::Document(chroma_types::DocumentExpression {
+                            Where::Document(crate::DocumentExpression {
                                 operator: DocumentOperator::Contains,
                                 text: "value3".to_string(),
                             }),
@@ -395,7 +420,7 @@ mod tests {
                 ],
             }),
             // $not_contains
-            Where::Document(chroma_types::DocumentExpression {
+            Where::Document(crate::DocumentExpression {
                 operator: DocumentOperator::NotContains,
                 text: "value1".to_string(),
             }),
@@ -443,9 +468,9 @@ mod tests {
             // $in
             Where::Metadata(MetadataExpression {
                 key: "key1".to_string(),
-                comparison: chroma_types::MetadataComparison::Set(
-                    chroma_types::SetOperator::In,
-                    chroma_types::MetadataSetValue::Str(vec![
+                comparison: crate::MetadataComparison::Set(
+                    crate::SetOperator::In,
+                    crate::MetadataSetValue::Str(vec![
                         "value1".to_string(),
                         "value2".to_string(),
                         "value3".to_string(),
@@ -455,9 +480,9 @@ mod tests {
             // $nin
             Where::Metadata(MetadataExpression {
                 key: "key1".to_string(),
-                comparison: chroma_types::MetadataComparison::Set(
-                    chroma_types::SetOperator::NotIn,
-                    chroma_types::MetadataSetValue::Str(vec![
+                comparison: crate::MetadataComparison::Set(
+                    crate::SetOperator::NotIn,
+                    crate::MetadataSetValue::Str(vec![
                         "value1".to_string(),
                         "value2".to_string(),
                         "value3".to_string(),
@@ -467,17 +492,17 @@ mod tests {
             // $eq
             Where::Metadata(MetadataExpression {
                 key: "key1".to_string(),
-                comparison: chroma_types::MetadataComparison::Primitive(
+                comparison: crate::MetadataComparison::Primitive(
                     PrimitiveOperator::Equal,
-                    chroma_types::MetadataValue::Str("value1".to_string()),
+                    crate::MetadataValue::Str("value1".to_string()),
                 ),
             }),
             // $ne
             Where::Metadata(MetadataExpression {
                 key: "key1".to_string(),
-                comparison: chroma_types::MetadataComparison::Primitive(
+                comparison: crate::MetadataComparison::Primitive(
                     PrimitiveOperator::NotEqual,
-                    chroma_types::MetadataValue::Str("value1".to_string()),
+                    crate::MetadataValue::Str("value1".to_string()),
                 ),
             }),
         ];
