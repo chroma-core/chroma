@@ -353,24 +353,52 @@ impl Frontend {
         });
 
         let collection_id = CollectionUuid::new();
-        let segments = vec![
-            Segment {
-                id: SegmentUuid::new(),
-                r#type: SegmentType::HnswLocalPersisted,
-                scope: SegmentScope::VECTOR,
-                collection: collection_id,
-                metadata: hnsw_metadata,
-                file_path: Default::default(),
-            },
-            Segment {
-                id: SegmentUuid::new(),
-                r#type: SegmentType::Sqlite,
-                scope: SegmentScope::METADATA,
-                collection: collection_id,
-                metadata: None,
-                file_path: Default::default(),
-            },
-        ];
+        let segments = match self.executor {
+            Executor::Distributed(_) => vec![
+                Segment {
+                    id: SegmentUuid::new(),
+                    r#type: SegmentType::HnswDistributed,
+                    scope: SegmentScope::VECTOR,
+                    collection: collection_id,
+                    metadata: hnsw_metadata,
+                    file_path: Default::default(),
+                },
+                Segment {
+                    id: SegmentUuid::new(),
+                    r#type: SegmentType::BlockfileMetadata,
+                    scope: SegmentScope::METADATA,
+                    collection: collection_id,
+                    metadata: None,
+                    file_path: Default::default(),
+                },
+                Segment {
+                    id: SegmentUuid::new(),
+                    r#type: SegmentType::BlockfileRecord,
+                    scope: SegmentScope::RECORD,
+                    collection: collection_id,
+                    metadata: None,
+                    file_path: Default::default(),
+                },
+            ],
+            Executor::Local(_) => vec![
+                Segment {
+                    id: SegmentUuid::new(),
+                    r#type: SegmentType::HnswLocalPersisted,
+                    scope: SegmentScope::VECTOR,
+                    collection: collection_id,
+                    metadata: hnsw_metadata,
+                    file_path: Default::default(),
+                },
+                Segment {
+                    id: SegmentUuid::new(),
+                    r#type: SegmentType::Sqlite,
+                    scope: SegmentScope::METADATA,
+                    collection: collection_id,
+                    metadata: None,
+                    file_path: Default::default(),
+                },
+            ],
+        };
 
         let collection = self
             .sysdb_client
