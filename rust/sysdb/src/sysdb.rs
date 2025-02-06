@@ -159,7 +159,7 @@ impl SysDb {
     ) -> Result<Collection, CreateCollectionError> {
         const CONFIGURATION_JSON_STR: &str = r#"{"hnsw_configuration": {"space": "l2", "ef_construction": 100, "ef_search": 100, "num_threads": 16, "M": 16, "resize_factor": 1.2, "batch_size": 100, "sync_threshold": 1000, "_type": "HNSWConfigurationInternal"}, "_type": "CollectionConfigurationInternal"}"#;
         let configuration_json: serde_json::Value = serde_json::from_str(CONFIGURATION_JSON_STR)
-            .map_err(|e| CreateCollectionError::Configuration(e))?;
+            .map_err(CreateCollectionError::Configuration)?;
 
         match self {
             SysDb::Grpc(grpc) => {
@@ -680,7 +680,7 @@ impl GrpcSysDb {
                     .map(chroma_proto::Segment::from)
                     .collect(),
                 configuration_json_str: serde_json::to_string(&configuration_json)
-                    .map_err(|e| CreateCollectionError::Configuration(e))?,
+                    .map_err(CreateCollectionError::Configuration)?,
                 metadata: metadata.map(|metadata| metadata.into()),
                 dimension,
                 get_or_create: Some(get_or_create),

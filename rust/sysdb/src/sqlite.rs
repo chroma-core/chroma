@@ -209,7 +209,7 @@ impl SqliteSysDb {
                 0,
             )
             .await
-            .map_err(|e| CreateCollectionError::Get(e))?;
+            .map_err(CreateCollectionError::Get)?;
 
         if let Some(collection) = existing_collections.pop() {
             if get_or_create {
@@ -245,7 +245,7 @@ impl SqliteSysDb {
         .bind(&name)
         .bind(
             serde_json::to_string(&configuration_json)
-                .map_err(|e| CreateCollectionError::Configuration(e))?,
+                .map_err(CreateCollectionError::Configuration)?,
         )
         .bind(dimension.unwrap_or_default())
         .bind(database_id)
@@ -345,6 +345,7 @@ impl SqliteSysDb {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn get_collections_with_conn<'a, C>(
         &self,
         conn: C,
@@ -419,7 +420,7 @@ impl SqliteSysDb {
             .map_err(|e| GetCollectionsError::Internal(e.into()))?
         {
             let collection_id = CollectionUuid::from_str(row.get::<&str, _>(0))
-                .map_err(|e| GetCollectionsError::CollectionId(e))?;
+                .map_err(GetCollectionsError::CollectionId)?;
 
             if let Some(entry) = rows_by_collection_id.get_mut(&collection_id) {
                 entry.push(row);
@@ -441,7 +442,7 @@ impl SqliteSysDb {
 
                 let configuration_json =
                     match serde_json::from_str::<serde_json::Value>(first_row.get::<&str, _>(2))
-                        .map_err(|e| GetCollectionsError::Configuration(e))
+                        .map_err(GetCollectionsError::Configuration)
                     {
                         Ok(configuration_json) => configuration_json,
                         Err(e) => return Some(Err(e)),
@@ -688,7 +689,7 @@ mod tests {
         let mut collection_metadata = Metadata::new();
         collection_metadata.insert("key1".to_string(), MetadataValue::Str("value1".to_string()));
         collection_metadata.insert("key2".to_string(), MetadataValue::Int(42));
-        collection_metadata.insert("key3".to_string(), MetadataValue::Float(3.14));
+        collection_metadata.insert("key3".to_string(), MetadataValue::Float(42.0));
         collection_metadata.insert("key4".to_string(), MetadataValue::Bool(true));
 
         let collection_id = CollectionUuid::new();
