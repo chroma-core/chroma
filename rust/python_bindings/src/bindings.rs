@@ -24,7 +24,7 @@ use pyo3::{
     exceptions::{PyOSError, PyRuntimeError, PyValueError},
     pyclass, pymethods, Py, PyAny, PyObject, PyResult, Python,
 };
-use std::{sync::Arc, time::SystemTime};
+use std::time::SystemTime;
 
 const DEFAULT_DATABASE: &str = "default_database";
 const DEFAULT_TENANT: &str = "default_tenant";
@@ -124,9 +124,12 @@ impl Bindings {
             segment_manager.clone(),
             sysdb.clone(),
         ));
-        let log_clone = log.clone();
-        if let Log::Sqlite(mut sqlite_log) = *log_clone {
-            sqlite_log.init_compactor_handle(Arc::new(handle.clone()));
+        if let Log::Sqlite(sqlite_log) = log.as_ref() {
+            if sqlite_log.init_compactor_handle(handle.clone()).is_err() {
+                return Err(PyOSError::new_err(
+                    "Unable to set compactor handle for sqlite log service",
+                ));
+            };
         }
 
         // TODO: clean up the cache configuration and decide the source of truth owner
