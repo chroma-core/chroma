@@ -28,3 +28,9 @@ impl From<sqlx::Error> for Box<dyn ChromaError> {
         Box::new(WrappedSqlxError(value))
     }
 }
+
+impl From<WrappedSqlxError> for Box<dyn ChromaError> {
+    fn from(value: WrappedSqlxError) -> Self {
+        Box::new(value)
+    }
+}

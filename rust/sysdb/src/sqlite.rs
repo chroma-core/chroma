@@ -1,12 +1,19 @@
+use chroma_error::{ChromaError, WrappedSqlxError};
 use chroma_sqlite::db::SqliteDb;
+use chroma_sqlite::helpers::update_metadata;
+use chroma_sqlite::table;
 use chroma_types::{
-    Collection, CollectionUuid, CreateDatabaseError, CreateDatabaseResponse, CreateTenantError,
-    CreateTenantResponse, Database, DeleteDatabaseError, DeleteDatabaseResponse, GetDatabaseError,
-    GetTenantError, GetTenantResponse, ListDatabasesError, Metadata, Segment,
+    Collection, CollectionUuid, CreateCollectionError, CreateCollectionResponse,
+    CreateDatabaseError, CreateDatabaseResponse, CreateTenantError, CreateTenantResponse, Database,
+    DeleteDatabaseError, DeleteDatabaseResponse, GetCollectionsError, GetDatabaseError,
+    GetTenantError, GetTenantResponse, ListDatabasesError, Metadata, MetadataValue, Segment,
 };
 use futures::TryStreamExt;
+use sea_query_binder::SqlxBinder;
 use sqlx::error::ErrorKind;
+use sqlx::sqlite::SqliteRow;
 use sqlx::Row;
+use std::collections::HashMap;
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -30,8 +37,6 @@ impl SqliteSysDb {
     }
 
     ////////////////////////// Database Methods ////////////////////////
-
-    // TODO: real error
     #[allow(dead_code)]
     pub(crate) async fn create_database(
         &self,
@@ -175,26 +180,329 @@ impl SqliteSysDb {
     ////////////////////////// Collection Methods ////////////////////////
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn _create_collection(
+    pub(crate) async fn create_collection(
         &self,
-        // TODO: unify all id types on wrappers
-        _id: Option<CollectionUuid>,
-        _name: &str,
-        _segments: Vec<Segment>,
-        _metadata: Option<&Metadata>,
-        _dimension: Option<i32>,
-        _get_or_create: bool,
-        _tenant: Option<&str>,
-        _database: Option<&str>,
-    ) -> Result<(Collection, bool), String> {
-        unimplemented!();
+        tenant: String,
+        database: String,
+        collection_id: CollectionUuid,
+        name: String,
+        segments: Vec<Segment>,
+        configuration_json: serde_json::Value,
+        metadata: Option<Metadata>,
+        dimension: Option<i32>,
+        get_or_create: bool,
+    ) -> Result<CreateCollectionResponse, CreateCollectionError> {
+        let mut tx = self
+            .db
+            .get_conn()
+            .begin()
+            .await
+            .map_err(|e| CreateCollectionError::Internal(e.into()))?;
+
+        let mut existing_collections = self
+            .get_collections_with_conn(
+                &mut *tx,
+                None,
+                Some(name.clone()),
+                Some(tenant.clone()),
+                Some(database.clone()),
+                None,
+                0,
+            )
+            .await
+            .map_err(CreateCollectionError::Get)?;
+
+        if let Some(collection) = existing_collections.pop() {
+            if get_or_create {
+                return Ok(collection);
+            } else {
+                return Err(CreateCollectionError::AlreadyExists(name.to_string()));
+            }
+        }
+
+        // Look up database
+        let database_result =
+            sqlx::query("SELECT id FROM databases WHERE name = $1 AND tenant_id = $2")
+                .bind(&database)
+                .bind(&tenant)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(|e| match e {
+                    sqlx::Error::RowNotFound => {
+                        CreateCollectionError::DatabaseNotFound(database.clone())
+                    }
+                    _ => CreateCollectionError::Internal(e.into()),
+                })?;
+        let database_id = database_result.get::<&str, _>(0);
+
+        sqlx::query(
+            r#"
+            INSERT INTO collections
+                (id, name, config_json_str, dimension, database_id)
+            VALUES ($1, $2, $3, $4, $5)
+        "#,
+        )
+        .bind(collection_id.to_string())
+        .bind(&name)
+        .bind(
+            serde_json::to_string(&configuration_json)
+                .map_err(CreateCollectionError::Configuration)?,
+        )
+        .bind(dimension.unwrap_or_default())
+        .bind(database_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| CreateCollectionError::Internal(e.into()))?;
+
+        if let Some(metadata) = metadata.clone() {
+            update_metadata::<table::CollectionMetadata, _, _>(
+                &mut *tx,
+                collection_id.to_string(),
+                metadata.into_iter().map(|(k, v)| (k, v.into())).collect(),
+            )
+            .await
+            .map_err(|e| e.boxed())?;
+        }
+
+        for segment in segments {
+            self.create_segment_with_tx(&mut *tx, segment)
+                .await
+                .map_err(|e| CreateCollectionError::Internal(e.boxed()))?;
+        }
+
+        tx.commit()
+            .await
+            .map_err(|e| CreateCollectionError::Internal(e.into()))?;
+
+        Ok(CreateCollectionResponse {
+            collection_id,
+            name,
+            tenant,
+            database,
+            configuration_json,
+            metadata,
+            dimension,
+            log_position: 0,
+            total_records_post_compaction: 0,
+            version: 0,
+        })
+    }
+
+    async fn create_segment_with_tx<C>(
+        &self,
+        conn: &mut C,
+        segment: Segment,
+    ) -> Result<(), Box<dyn ChromaError>>
+    where
+        for<'a> &'a mut C: sqlx::Executor<'a, Database = sqlx::Sqlite>,
+    {
+        sqlx::query(
+            r#"
+            INSERT INTO segments (id, type, scope, collection) VALUES ($1, $2, $3, $4)
+        "#,
+        )
+        .bind(segment.id.to_string())
+        .bind(String::from(segment.r#type))
+        .bind(String::from(segment.scope))
+        .bind(segment.collection.to_string())
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| WrappedSqlxError(e).boxed())?;
+
+        if let Some(metadata) = segment.metadata {
+            update_metadata::<table::SegmentMetadata, _, _>(
+                conn,
+                segment.id.to_string(),
+                metadata.into_iter().map(|(k, v)| (k, v.into())).collect(),
+            )
+            .await
+            .map_err(|e| e.boxed())?;
+        }
+
+        Ok(())
+    }
+
+    pub(crate) async fn get_collections(
+        &self,
+        collection_id: Option<CollectionUuid>,
+        name: Option<String>,
+        tenant: Option<String>,
+        database: Option<String>,
+        limit: Option<u32>,
+        offset: u32,
+    ) -> Result<Vec<Collection>, GetCollectionsError> {
+        self.get_collections_with_conn(
+            self.db.get_conn(),
+            collection_id,
+            name,
+            tenant,
+            database,
+            limit,
+            offset,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn get_collections_with_conn<'a, C>(
+        &self,
+        conn: C,
+        collection_id: Option<CollectionUuid>,
+        name: Option<String>,
+        tenant: Option<String>,
+        database: Option<String>,
+        limit: Option<u32>,
+        offset: u32,
+    ) -> Result<Vec<Collection>, GetCollectionsError>
+    where
+        C: sqlx::Executor<'a, Database = sqlx::Sqlite>,
+    {
+        let (sql, values) = sea_query::Query::select()
+            .from(table::Collections::Table)
+            .inner_join(
+                table::Databases::Table,
+                sea_query::Expr::col((table::Databases::Table, table::Databases::Id))
+                    .equals((table::Collections::Table, table::Collections::DatabaseId)),
+            )
+            .left_join(
+                table::CollectionMetadata::Table,
+                sea_query::Expr::col((
+                    table::CollectionMetadata::Table,
+                    table::CollectionMetadata::CollectionId,
+                ))
+                .equals((table::Collections::Table, table::Collections::Id)),
+            )
+            .cond_where(
+                sea_query::Cond::all()
+                    .add_option(name.map(|name| {
+                        sea_query::Expr::col((table::Collections::Table, table::Collections::Name))
+                            .eq(name)
+                    }))
+                    .add_option(database.map(|database| {
+                        sea_query::Expr::col((table::Databases::Table, table::Databases::Name))
+                            .eq(database)
+                    }))
+                    .add_option(
+                        tenant.map(|tenant| {
+                            sea_query::Expr::col(table::Databases::TenantId).eq(tenant)
+                        }),
+                    )
+                    .add_option(collection_id.map(|collection_id| {
+                        sea_query::Expr::col((table::Collections::Table, table::Collections::Id))
+                            .eq(collection_id.to_string())
+                    })),
+            )
+            .limit(limit.unwrap_or(u32::MAX).into()) // SQLite requires that limit is always set if offset is provided
+            .offset(offset.into())
+            .column((table::Collections::Table, table::Collections::Id))
+            .column((table::Collections::Table, table::Collections::Name))
+            .column((table::Collections::Table, table::Collections::ConfigJsonStr))
+            .column((table::Collections::Table, table::Collections::Dimension))
+            .column((table::Databases::Table, table::Databases::TenantId))
+            .column((table::Databases::Table, table::Databases::Name))
+            .columns([
+                table::CollectionMetadata::Key,
+                table::CollectionMetadata::StrValue,
+                table::CollectionMetadata::IntValue,
+                table::CollectionMetadata::FloatValue,
+                table::CollectionMetadata::BoolValue,
+            ])
+            .build_sqlx(sea_query::SqliteQueryBuilder);
+
+        let mut rows = sqlx::query_with(&sql, values).fetch(conn);
+        let mut rows_by_collection_id: HashMap<CollectionUuid, Vec<SqliteRow>> = HashMap::new();
+
+        while let Some(row) = rows
+            .try_next()
+            .await
+            .map_err(|e| GetCollectionsError::Internal(e.into()))?
+        {
+            let collection_id = CollectionUuid::from_str(row.get::<&str, _>(0))
+                .map_err(GetCollectionsError::CollectionId)?;
+
+            if let Some(entry) = rows_by_collection_id.get_mut(&collection_id) {
+                entry.push(row);
+            } else {
+                rows_by_collection_id.insert(collection_id, vec![row]);
+            }
+        }
+
+        let collections = rows_by_collection_id
+            .into_iter()
+            .filter_map(|(collection_id, rows)| {
+                if rows.is_empty() {
+                    // should never happen
+                    return None;
+                }
+
+                let metadata = self.metadata_from_rows(rows.iter());
+                let first_row = rows.first().unwrap();
+
+                let configuration_json =
+                    match serde_json::from_str::<serde_json::Value>(first_row.get::<&str, _>(2))
+                        .map_err(GetCollectionsError::Configuration)
+                    {
+                        Ok(configuration_json) => configuration_json,
+                        Err(e) => return Some(Err(e)),
+                    };
+
+                Some(Ok(Collection {
+                    collection_id,
+                    configuration_json,
+                    metadata,
+                    total_records_post_compaction: 0,
+                    version: 0,
+                    log_position: 0,
+                    dimension: first_row.get(3),
+                    name: first_row.get(1),
+                    tenant: first_row.get(4),
+                    database: first_row.get(5),
+                }))
+            })
+            .collect::<Result<Vec<_>, GetCollectionsError>>()?;
+
+        Ok(collections)
+    }
+
+    // TODO: reuse logic from metadata reader
+    fn metadata_from_rows<'row>(
+        &self,
+        rows: impl Iterator<Item = &'row SqliteRow>,
+    ) -> Option<Metadata> {
+        let metadata: Metadata = rows
+            .map(|row| {
+                let key = row.get::<&str, _>("key");
+
+                if let Some(str_value) = row.get::<Option<String>, _>("str_value") {
+                    (key.to_string(), MetadataValue::Str(str_value))
+                } else if let Some(int_value) = row.get::<Option<i64>, _>("int_value") {
+                    (key.to_string(), MetadataValue::Int(int_value))
+                } else if let Some(float_value) = row.get::<Option<f64>, _>("float_value") {
+                    (key.to_string(), MetadataValue::Float(float_value))
+                } else if let Some(bool_value) = row.get::<Option<bool>, _>("bool_value") {
+                    (key.to_string(), MetadataValue::Bool(bool_value))
+                } else {
+                    // should never happen
+                    (key.to_string(), MetadataValue::Str("".to_string()))
+                }
+            })
+            .collect();
+
+        if metadata.is_empty() {
+            None
+        } else {
+            Some(metadata)
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
     use chroma_sqlite::db::test_utils::get_new_sqlite_db;
+    use chroma_types::{SegmentScope, SegmentType, SegmentUuid};
 
     #[tokio::test]
     async fn test_create_database() {
@@ -319,5 +627,146 @@ mod tests {
         // Get tenant
         let tenant = sysdb.get_tenant("new_tenant").await.unwrap();
         assert_eq!(tenant.name, "new_tenant");
+    }
+
+    #[tokio::test]
+    async fn test_create_collection() {
+        let db = get_new_sqlite_db().await;
+        let sysdb = SqliteSysDb::new(db);
+
+        let mut collection_metadata = Metadata::new();
+        collection_metadata.insert("key1".to_string(), MetadataValue::Str("value1".to_string()));
+        collection_metadata.insert("key2".to_string(), MetadataValue::Int(42));
+        collection_metadata.insert("key3".to_string(), MetadataValue::Float(42.0));
+        collection_metadata.insert("key4".to_string(), MetadataValue::Bool(true));
+
+        let collection_id = CollectionUuid::new();
+        let segments = vec![Segment {
+            id: SegmentUuid::new(),
+            r#type: SegmentType::BlockfileMetadata,
+            scope: SegmentScope::METADATA,
+            collection: collection_id,
+            metadata: None,
+            file_path: HashMap::new(),
+        }];
+        sysdb
+            .create_collection(
+                "default_tenant".to_string(),
+                "default_database".to_string(),
+                collection_id,
+                "test_collection".to_string(),
+                segments.clone(),
+                serde_json::Value::Null,
+                Some(collection_metadata.clone()),
+                None,
+                false,
+            )
+            .await
+            .unwrap();
+
+        let collections = sysdb
+            .get_collections(Some(collection_id), None, None, None, None, 0)
+            .await
+            .unwrap();
+        let collection = collections.first().unwrap();
+
+        assert_eq!(collection.name, "test_collection");
+        assert_eq!(collection.metadata.as_ref().unwrap().len(), 4);
+        assert_eq!(collection.metadata, Some(collection_metadata));
+    }
+
+    #[tokio::test]
+    async fn test_create_collection_fails_for_duplicate_name() {
+        let db = get_new_sqlite_db().await;
+        let sysdb = SqliteSysDb::new(db);
+
+        let collection_id = CollectionUuid::new();
+        let segments = vec![Segment {
+            id: SegmentUuid::new(),
+            r#type: SegmentType::BlockfileMetadata,
+            scope: SegmentScope::METADATA,
+            collection: collection_id,
+            metadata: None,
+            file_path: HashMap::new(),
+        }];
+        let result = sysdb
+            .create_collection(
+                "default_tenant".to_string(),
+                "default_database".to_string(),
+                collection_id,
+                "test_collection".to_string(),
+                segments.clone(),
+                serde_json::Value::Null,
+                None,
+                None,
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.name, "test_collection");
+
+        // Should fail when attempting to create with the same name
+        let result = sysdb
+            .create_collection(
+                "default_tenant".to_string(),
+                "default_database".to_string(),
+                collection_id,
+                "test_collection".to_string(),
+                segments,
+                serde_json::Value::Null,
+                None,
+                None,
+                false,
+            )
+            .await;
+        matches!(result, Err(CreateCollectionError::AlreadyExists(_)));
+    }
+
+    #[tokio::test]
+    async fn test_create_collection_get_or_create() {
+        let db = get_new_sqlite_db().await;
+        let sysdb = SqliteSysDb::new(db);
+
+        let collection_id = CollectionUuid::new();
+        let segments = vec![Segment {
+            id: SegmentUuid::new(),
+            r#type: SegmentType::BlockfileMetadata,
+            scope: SegmentScope::METADATA,
+            collection: collection_id,
+            metadata: None,
+            file_path: HashMap::new(),
+        }];
+        let result = sysdb
+            .create_collection(
+                "default_tenant".to_string(),
+                "default_database".to_string(),
+                collection_id,
+                "test_collection".to_string(),
+                segments.clone(),
+                serde_json::Value::Null,
+                None,
+                None,
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.name, "test_collection");
+
+        // Should return existing collection
+        let result = sysdb
+            .create_collection(
+                "default_tenant".to_string(),
+                "default_database".to_string(),
+                CollectionUuid::new(),
+                "test_collection".to_string(),
+                vec![],
+                serde_json::Value::Null,
+                None,
+                None,
+                true,
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.collection_id, collection_id);
     }
 }

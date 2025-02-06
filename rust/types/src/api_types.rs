@@ -308,6 +308,12 @@ pub type CreateCollectionResponse = Collection;
 pub enum CreateCollectionError {
     #[error("Collection [{0}] already exists")]
     AlreadyExists(String),
+    #[error("Database [{0}] does not exist")]
+    DatabaseNotFound(String),
+    #[error("Could not fetch collections: {0}")]
+    Get(#[from] GetCollectionsError),
+    #[error("Could not deserialize configuration: {0}")]
+    Configuration(#[from] serde_json::Error),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
 }
@@ -316,7 +322,30 @@ impl ChromaError for CreateCollectionError {
     fn code(&self) -> ErrorCodes {
         match self {
             CreateCollectionError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
+            CreateCollectionError::DatabaseNotFound(_) => ErrorCodes::InvalidArgument,
+            CreateCollectionError::Get(err) => err.code(),
+            CreateCollectionError::Configuration(_) => ErrorCodes::Internal,
             CreateCollectionError::Internal(err) => err.code(),
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum GetCollectionsError {
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+    #[error("Could not deserialize configuration")]
+    Configuration(#[from] serde_json::Error),
+    #[error("Could not deserialize collection ID")]
+    CollectionId(#[from] uuid::Error),
+}
+
+impl ChromaError for GetCollectionsError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GetCollectionsError::Internal(err) => err.code(),
+            GetCollectionsError::Configuration(_) => ErrorCodes::Internal,
+            GetCollectionsError::CollectionId(_) => ErrorCodes::Internal,
         }
     }
 }

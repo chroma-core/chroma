@@ -11,6 +11,17 @@ pub enum SegmentScope {
     SQLITE,
 }
 
+impl From<SegmentScope> for String {
+    fn from(scope: SegmentScope) -> String {
+        match scope {
+            SegmentScope::VECTOR => "VECTOR".to_string(),
+            SegmentScope::METADATA => "METADATA".to_string(),
+            SegmentScope::RECORD => "RECORD".to_string(),
+            SegmentScope::SQLITE => "SQLITE".to_string(),
+        }
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum SegmentScopeConversionError {
     #[error("Invalid segment scope, valid scopes are: Vector, Metadata")]

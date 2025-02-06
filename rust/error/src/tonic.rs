@@ -65,3 +65,13 @@ impl From<tonic::Status> for Box<dyn ChromaError> {
         Box::new(TonicError(value))
     }
 }
+
+#[derive(Debug, Error)]
+#[error("Field missing from gRPC response: {0}")]
+pub struct TonicMissingFieldError(pub &'static str);
+
+impl ChromaError for TonicMissingFieldError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::Internal
+    }
+}

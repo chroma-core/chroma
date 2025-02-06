@@ -3,8 +3,8 @@ use chroma_error::{ChromaError, ErrorCodes, WrappedSqlxError};
 use chroma_sqlite::db::SqliteDb;
 use chroma_system::{ComponentHandle, RequestError};
 use chroma_types::{
-    CollectionConversionError, CollectionUuid, LogRecord, Operation, OperationRecord,
-    ScalarEncoding, ScalarEncodingConversionError, UpdateMetadata, UpdateMetadataValue,
+    CollectionUuid, LogRecord, Operation, OperationRecord, ScalarEncoding,
+    ScalarEncodingConversionError, UpdateMetadata, UpdateMetadataValue,
 };
 use futures::TryStreamExt;
 use sqlx::{QueryBuilder, Row};
@@ -62,7 +62,7 @@ pub enum SqliteGetCollectionsWithNewDataError {
     #[error("Query error: {0}")]
     QueryError(#[from] WrappedSqlxError),
     #[error("Invalid collection ID: {0}")]
-    InvalidCollectionId(#[from] CollectionConversionError),
+    InvalidCollectionId(#[from] uuid::Error),
 }
 
 impl ChromaError for SqliteGetCollectionsWithNewDataError {

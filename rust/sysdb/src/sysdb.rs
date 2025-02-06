@@ -4,15 +4,16 @@ use super::config::SysDbConfig;
 use super::test_sysdb::TestSysDb;
 use async_trait::async_trait;
 use chroma_config::Configurable;
-use chroma_error::{ChromaError, ErrorCodes};
+use chroma_error::{ChromaError, ErrorCodes, TonicMissingFieldError};
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
 use chroma_types::chroma_proto::VersionListForCollection;
 use chroma_types::{
-    chroma_proto, CollectionAndSegments, CollectionMetadataUpdate, CreateDatabaseError,
-    CreateDatabaseResponse, CreateTenantError, CreateTenantResponse, Database, DeleteDatabaseError,
-    DeleteDatabaseResponse, GetCollectionWithSegmentsError, GetDatabaseError, GetDatabaseResponse,
-    GetTenantError, GetTenantResponse, ListDatabasesError, ListDatabasesResponse, Metadata,
-    ResetError, ResetResponse, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
+    chroma_proto, CollectionAndSegments, CollectionMetadataUpdate, CreateCollectionError,
+    CreateDatabaseError, CreateDatabaseResponse, CreateTenantError, CreateTenantResponse, Database,
+    DeleteDatabaseError, DeleteDatabaseResponse, GetCollectionWithSegmentsError,
+    GetCollectionsError, GetDatabaseError, GetDatabaseResponse, GetTenantError, GetTenantResponse,
+    ListDatabasesError, ListDatabasesResponse, Metadata, ResetError, ResetResponse,
+    SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
 };
 use chroma_types::{
     Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
@@ -132,7 +133,11 @@ impl SysDb {
                 grpc.get_collections(collection_id, name, tenant, database, limit, offset)
                     .await
             }
-            SysDb::Sqlite(_) => todo!(),
+            SysDb::Sqlite(sqlite) => {
+                sqlite
+                    .get_collections(collection_id, name, tenant, database, limit, offset)
+                    .await
+            }
             SysDb::Test(test) => {
                 test.get_collections(collection_id, name, tenant, database)
                     .await
@@ -152,6 +157,10 @@ impl SysDb {
         dimension: Option<i32>,
         get_or_create: bool,
     ) -> Result<Collection, CreateCollectionError> {
+        const CONFIGURATION_JSON_STR: &str = r#"{"hnsw_configuration": {"space": "l2", "ef_construction": 100, "ef_search": 100, "num_threads": 16, "M": 16, "resize_factor": 1.2, "batch_size": 100, "sync_threshold": 1000, "_type": "HNSWConfigurationInternal"}, "_type": "CollectionConfigurationInternal"}"#;
+        let configuration_json: serde_json::Value = serde_json::from_str(CONFIGURATION_JSON_STR)
+            .map_err(CreateCollectionError::Configuration)?;
+
         match self {
             SysDb::Grpc(grpc) => {
                 grpc.create_collection(
@@ -160,14 +169,27 @@ impl SysDb {
                     collection_id,
                     name,
                     segments,
+                    configuration_json,
                     metadata,
                     dimension,
                     get_or_create,
                 )
                 .await
             }
-            SysDb::Sqlite(_) => {
-                todo!()
+            SysDb::Sqlite(sqlite) => {
+                sqlite
+                    .create_collection(
+                        tenant,
+                        database,
+                        collection_id,
+                        name,
+                        segments,
+                        configuration_json,
+                        metadata,
+                        dimension,
+                        get_or_create,
+                    )
+                    .await
             }
             SysDb::Test(_) => {
                 todo!()
@@ -626,10 +648,10 @@ impl GrpcSysDb {
 
                 match collections {
                     Ok(collections) => Ok(collections),
-                    Err(e) => Err(GetCollectionsError::ConversionError(e)),
+                    Err(e) => Err(GetCollectionsError::Internal(e.boxed())),
                 }
             }
-            Err(e) => Err(GetCollectionsError::FailedToGetCollections(e)),
+            Err(e) => Err(GetCollectionsError::Internal(e.into())),
         }
     }
 
@@ -641,6 +663,7 @@ impl GrpcSysDb {
         collection_id: CollectionUuid,
         name: String,
         segments: Vec<Segment>,
+        configuration_json: serde_json::Value,
         metadata: Option<Metadata>,
         dimension: Option<i32>,
         get_or_create: bool,
@@ -651,27 +674,31 @@ impl GrpcSysDb {
                 id: collection_id.0.to_string(),
                 tenant,
                 database,
-                name,
+                name: name.clone(),
                 segments: segments
                     .into_iter()
                     .map(chroma_proto::Segment::from)
                     .collect(),
-                configuration_json_str: r#"{"hnsw_configuration": {"space": "l2", "ef_construction": 100, "ef_search": 100, "num_threads": 16, "M": 16, "resize_factor": 1.2, "batch_size": 100, "sync_threshold": 1000, "_type": "HNSWConfigurationInternal"}, "_type": "CollectionConfigurationInternal"}"#.to_string(), // Configuration is currently unused by distributed Chroma
+                configuration_json_str: serde_json::to_string(&configuration_json)
+                    .map_err(CreateCollectionError::Configuration)?,
                 metadata: metadata.map(|metadata| metadata.into()),
                 dimension,
                 get_or_create: Some(get_or_create),
             })
             .await
             .map_err(|err| match err.code() {
-                Code::AlreadyExists => CreateCollectionError::CollectionNameExists,
-                _ => CreateCollectionError::FailedToCreateCollection(err),
+                Code::AlreadyExists => CreateCollectionError::AlreadyExists(name),
+                _ => CreateCollectionError::Internal(err.into()),
             })?;
 
         let collection = res
             .into_inner()
             .collection
-            .ok_or(CreateCollectionError::CollectionFieldMissing)?
-            .try_into()?;
+            .ok_or(CreateCollectionError::Internal(
+                TonicMissingFieldError("collection").boxed(),
+            ))?
+            .try_into()
+            .map_err(|e: CollectionConversionError| CreateCollectionError::Internal(e.boxed()))?;
 
         Ok(collection)
     }
@@ -929,48 +956,6 @@ impl GrpcSysDb {
     async fn reset(&mut self) -> Result<ResetResponse, ResetError> {
         self.client.reset_state(()).await?;
         Ok(ResetResponse {})
-    }
-}
-
-#[derive(Error, Debug)]
-// TODO: This should use our sysdb errors from the proto definition
-// We will have to do an error uniformization pass at some point
-pub enum GetCollectionsError {
-    #[error("Failed to fetch")]
-    FailedToGetCollections(#[from] tonic::Status),
-    #[error("Failed to convert proto collection")]
-    ConversionError(#[from] CollectionConversionError),
-}
-
-impl ChromaError for GetCollectionsError {
-    fn code(&self) -> ErrorCodes {
-        match self {
-            GetCollectionsError::FailedToGetCollections(_) => ErrorCodes::Internal,
-            GetCollectionsError::ConversionError(_) => ErrorCodes::Internal,
-        }
-    }
-}
-
-#[derive(Error, Debug)]
-pub enum CreateCollectionError {
-    #[error("Collection name already exists")]
-    CollectionNameExists,
-    #[error("Failed to create collection: {0}")]
-    FailedToCreateCollection(#[from] tonic::Status),
-    #[error("Collection field missing from proto response")]
-    CollectionFieldMissing,
-    #[error("Failed to convert proto collection: {0}")]
-    ConversionError(#[from] CollectionConversionError),
-}
-
-impl ChromaError for CreateCollectionError {
-    fn code(&self) -> ErrorCodes {
-        match self {
-            CreateCollectionError::CollectionNameExists => ErrorCodes::AlreadyExists,
-            CreateCollectionError::FailedToCreateCollection(_) => ErrorCodes::Internal,
-            CreateCollectionError::CollectionFieldMissing => ErrorCodes::Internal,
-            CreateCollectionError::ConversionError(_) => ErrorCodes::Internal,
-        }
     }
 }
 

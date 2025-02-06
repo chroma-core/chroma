@@ -1,14 +1,13 @@
-use chroma_types::SegmentUuid;
 use chroma_types::{
     Collection, CollectionUuid, FlushCompactionResponse, Segment, SegmentFlushInfo, SegmentScope,
     SegmentType, Tenant,
 };
+use chroma_types::{GetCollectionsError, SegmentUuid};
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::sysdb::FlushCompactionError;
-use super::sysdb::GetCollectionsError;
 use super::sysdb::GetLastCompactionTimeError;
 use super::sysdb::GetSegmentsError;
 use chroma_types::chroma_proto::VersionListForCollection;

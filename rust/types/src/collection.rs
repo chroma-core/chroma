@@ -19,12 +19,12 @@ impl CollectionUuid {
 }
 
 impl std::str::FromStr for CollectionUuid {
-    type Err = CollectionConversionError;
+    type Err = uuid::Error;
 
-    fn from_str(s: &str) -> Result<Self, CollectionConversionError> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match Uuid::parse_str(s) {
             Ok(uuid) => Ok(CollectionUuid(uuid)),
-            Err(_) => Err(CollectionConversionError::InvalidUuid),
+            Err(err) => Err(err),
         }
     }
 }
