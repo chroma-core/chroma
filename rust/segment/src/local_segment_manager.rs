@@ -21,9 +21,10 @@ pub struct LocalSegmentManagerConfig {
     pub persist_path: String,
 }
 
-#[allow(dead_code)]
+#[derive(Clone, Debug)]
 pub struct LocalSegmentManager {
     hnsw_index_pool: Arc<dyn Cache<IndexUuid, LocalHnswIndex>>,
+    #[allow(dead_code)]
     eviction_callback_task_handle: Option<Arc<tokio::task::JoinHandle<()>>>,
     sqlite: SqliteDb,
     persist_path: String,
@@ -75,14 +76,12 @@ impl ChromaError for LocalSegmentManagerError {
 }
 
 impl LocalSegmentManager {
-    #[allow(dead_code)]
-    async fn get_hnsw_reader(
+    pub async fn get_hnsw_reader(
         &self,
         segment: &Segment,
         dimensionality: usize,
-        persist_path: String,
     ) -> Result<LocalHnswSegmentReader, LocalSegmentManagerError> {
-        let persist_path = Path::new(&persist_path);
+        let persist_path = Path::new(&self.persist_path);
         let index_uuid = IndexUuid(segment.id.0);
         match self.hnsw_index_pool.get(&IndexUuid(segment.id.0)).await? {
             Some(hnsw_index) => Ok(LocalHnswSegmentReader::from_index(hnsw_index)),
@@ -109,9 +108,8 @@ impl LocalSegmentManager {
         &self,
         segment: &Segment,
         dimensionality: usize,
-        persist_path: String,
     ) -> Result<LocalHnswSegmentWriter, LocalSegmentManagerError> {
-        let persist_path = Path::new(&persist_path);
+        let persist_path = Path::new(&self.persist_path);
         let index_uuid = IndexUuid(segment.id.0);
         match self.hnsw_index_pool.get(&IndexUuid(segment.id.0)).await? {
             Some(hnsw_index) => Ok(LocalHnswSegmentWriter::from_index(hnsw_index)?),

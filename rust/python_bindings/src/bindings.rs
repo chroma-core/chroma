@@ -1,4 +1,3 @@
-use chroma_cache::FoyerCacheConfig;
 use chroma_config::Configurable;
 use chroma_frontend::{
     executor::{local::LocalExecutor, Executor},
@@ -10,10 +9,6 @@ use chroma_frontend::{
     LocalCompactionManager,
 };
 use chroma_log::Log;
-use chroma_segment::{
-    local_segment_manager::{LocalSegmentManager, LocalSegmentManagerConfig},
-    sqlite_metadata::SqliteMetadataWriter,
-};
 use chroma_sqlite::{config::SqliteDBConfig, db::SqliteDb};
 use chroma_sysdb::{sqlite::SqliteSysDb, sysdb::SysDb};
 use chroma_system::System;
@@ -151,10 +146,26 @@ impl Bindings {
             }
         };
 
+        // TODO: segment manager config should be loaded
+        let segment_manager = match runtime.block_on(LocalSegmentManager::try_from_config(
+            &LocalSegmentManagerConfig {
+                hnsw_index_pool_cache_config: CacheConfig::default(),
+                persist_path,
+            },
+        )) {
+            Ok(sm) => sm,
+            Err(e) => {
+                return Err(PyOSError::new_err(format!(
+                    "Failed to create segment manager: {}",
+                    e
+                )))
+            }
+        };
+
         // TODO: executor should NOT be exposed to the bindings module. try_from_config should work.
         // The reason this works this way right now is because try_from_config cannot share the sqlite_db
         // across the downstream components.
-        let executor = Executor::Local(LocalExecutor::new(sqlite_db));
+        let executor = Executor::Local(LocalExecutor::new(segment_manager, sqlite_db));
         let frontend = Frontend::new(false, sysdb.clone(), collections_cache, log, executor);
 
         Ok(Bindings {

@@ -38,6 +38,10 @@ pub enum LocalHnswSegmentReaderError {
     DistanceFunctionError(#[from] Box<chroma_distance::DistanceFunctionError>),
     #[error("Error serializing path to string")]
     PersistPathError,
+    #[error("Error finding user id")]
+    UserIdNotFound,
+    #[error("Error getting embedding")]
+    GetEmbeddingError,
 }
 
 impl ChromaError for LocalHnswSegmentReaderError {
@@ -49,6 +53,8 @@ impl ChromaError for LocalHnswSegmentReaderError {
             LocalHnswSegmentReaderError::UninitializedSegment => ErrorCodes::Internal,
             LocalHnswSegmentReaderError::DistanceFunctionError(e) => e.code(),
             LocalHnswSegmentReaderError::PersistPathError => ErrorCodes::Internal,
+            LocalHnswSegmentReaderError::UserIdNotFound => ErrorCodes::Internal,
+            LocalHnswSegmentReaderError::GetEmbeddingError => ErrorCodes::Internal,
         }
     }
 }
@@ -116,6 +122,23 @@ impl LocalHnswSegmentReader {
         }
         // Return uninitialized reader.
         Err(LocalHnswSegmentReaderError::UninitializedSegment)
+    }
+
+    pub async fn get_embedding_by_user_id(
+        &self,
+        user_id: &String,
+    ) -> Result<Vec<f32>, LocalHnswSegmentReaderError> {
+        let guard = self.index.inner.read().await;
+        let offset_id = guard
+            .id_map
+            .id_to_label
+            .get(user_id)
+            .ok_or(LocalHnswSegmentReaderError::UserIdNotFound)?;
+        guard
+            .index
+            .get(*offset_id as usize)
+            .map_err(|_| LocalHnswSegmentReaderError::GetEmbeddingError)?
+            .ok_or(LocalHnswSegmentReaderError::GetEmbeddingError)
     }
 }
 
