@@ -13,6 +13,11 @@ mod sqlx;
 #[cfg(feature = "sqlx")]
 pub use sqlx::*;
 
+#[cfg(feature = "validator")]
+mod validator;
+#[cfg(feature = "validator")]
+pub use validator::*;
+
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub enum ErrorCodes {
     // OK is returned on success, we use "Success" since Ok is a keyword in Rust.

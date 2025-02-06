@@ -14,6 +14,7 @@ use crate::SegmentScopeConversionError;
 use crate::UpdateMetadata;
 use crate::Where;
 use chroma_config::assignment::rendezvous_hash::AssignmentError;
+use chroma_error::ChromaValidationError;
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::Deserialize;
 use serde::Serialize;
@@ -21,6 +22,7 @@ use serde_json::Value;
 use thiserror::Error;
 use tonic::Status;
 use uuid::Uuid;
+use validator::Validate;
 
 #[derive(Debug, Error)]
 pub enum GetSegmentsError {
@@ -155,10 +157,31 @@ impl ChromaError for GetTenantError {
     }
 }
 
+#[non_exhaustive]
+#[derive(Validate)]
 pub struct CreateDatabaseRequest {
     pub database_id: Uuid,
     pub tenant_id: String,
+    #[validate(length(min = 3))]
     pub database_name: String,
+}
+
+impl CreateDatabaseRequest {
+    pub fn try_new(
+        tenant_id: String,
+        database_name: String,
+    ) -> Result<Self, ChromaValidationError> {
+        let database_id = Uuid::new_v4();
+        let request = Self {
+            database_id,
+            tenant_id,
+            database_name,
+        };
+        request
+            .validate()
+            .map_err(|err| ChromaValidationError::from(err))?;
+        Ok(request)
+    }
 }
 
 #[derive(Serialize)]

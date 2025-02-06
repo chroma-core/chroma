@@ -322,11 +322,7 @@ async fn create_database(
         "op:create_database",
         format!("tenant:{}", tenant_id).as_str(),
     ]);
-    let create_database_request = CreateDatabaseRequest {
-        database_id: Uuid::new_v4(),
-        tenant_id,
-        database_name: name,
-    };
+    let create_database_request = CreateDatabaseRequest::try_new(tenant_id, name)?;
     let res = server
         .frontend
         .create_database(create_database_request)
