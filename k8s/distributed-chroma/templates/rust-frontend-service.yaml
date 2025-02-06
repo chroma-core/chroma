@@ -33,6 +33,9 @@ spec:
               memory: {{ .Values.rustFrontendService.resources.requests.memory }}
           {{ end }}
       {{if .Values.rustFrontendService.tolerations}}
+          env:
+{{ .Values.frontendService.otherEnvConfig | nindent 12 }}
+      {{if .Values.frontendService.tolerations}}
       tolerations:
         {{ toYaml .Values.rustFrontendService.tolerations | nindent 8 }}
       {{ end }}
