@@ -3,12 +3,12 @@ use chroma_sqlite::db::SqliteDb;
 use chroma_sqlite::helpers::update_metadata;
 use chroma_sqlite::table;
 use chroma_types::{
-    Collection, CollectionAndSegments, CollectionUuid, CreateCollectionError,
-    CreateCollectionResponse, CreateDatabaseError, CreateDatabaseResponse, CreateTenantError,
-    CreateTenantResponse, Database, DeleteDatabaseError, DeleteDatabaseResponse,
+    Collection, CollectionAndSegments, CollectionMetadataUpdate, CollectionUuid,
+    CreateCollectionError, CreateCollectionResponse, CreateDatabaseError, CreateDatabaseResponse,
+    CreateTenantError, CreateTenantResponse, Database, DeleteDatabaseError, DeleteDatabaseResponse,
     GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError, GetSegmentsError,
     GetTenantError, GetTenantResponse, ListDatabasesError, Metadata, MetadataValue, Segment,
-    SegmentScope, SegmentType, SegmentUuid,
+    SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError,
 };
 use futures::TryStreamExt;
 use sea_query_binder::SqlxBinder;
@@ -288,6 +288,68 @@ impl SqliteSysDb {
             total_records_post_compaction: 0,
             version: 0,
         })
+    }
+
+    pub(crate) async fn update_collection(
+        &self,
+        collection_id: CollectionUuid,
+        name: Option<String>,
+        metadata: Option<CollectionMetadataUpdate>,
+        dimension: Option<u32>,
+    ) -> Result<(), UpdateCollectionError> {
+        let mut query = sea_query::Query::update();
+        let mut query = query.table(table::Collections::Table).and_where(
+            sea_query::Expr::col((table::Collections::Table, table::Collections::Id))
+                .eq(collection_id.to_string()),
+        );
+
+        if let Some(name) = name {
+            query = query.value(table::Collections::Name, name.to_string());
+        }
+
+        if let Some(dimension) = dimension {
+            query = query.value(table::Collections::Dimension, dimension);
+        }
+
+        let (sql, values) = query.build_sqlx(sea_query::SqliteQueryBuilder);
+
+        let mut tx = self
+            .db
+            .get_conn()
+            .begin()
+            .await
+            .map_err(|e| UpdateCollectionError::Internal(e.into()))?;
+
+        let result = sqlx::query_with(&sql, values)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| UpdateCollectionError::Internal(e.into()))?;
+        if result.rows_affected() == 0 {
+            return Err(UpdateCollectionError::CollectionNotFound);
+        }
+
+        if let Some(metadata) = metadata {
+            match metadata {
+                CollectionMetadataUpdate::ResetMetadata => {
+                    return Err(UpdateCollectionError::MetadataResetUnsupported);
+                }
+                CollectionMetadataUpdate::UpdateMetadata(metadata) => {
+                    update_metadata::<table::CollectionMetadata, _, _>(
+                        &mut *tx,
+                        collection_id.to_string(),
+                        metadata,
+                    )
+                    .await
+                    .map_err(|e| e.boxed())?;
+                }
+            }
+        }
+
+        tx.commit()
+            .await
+            .map_err(|e| UpdateCollectionError::Internal(e.into()))?;
+
+        Ok(())
     }
 
     async fn create_segment_with_tx<C>(
@@ -641,7 +703,9 @@ mod tests {
 
     use super::*;
     use chroma_sqlite::db::test_utils::get_new_sqlite_db;
-    use chroma_types::{SegmentScope, SegmentType, SegmentUuid};
+    use chroma_types::{
+        SegmentScope, SegmentType, SegmentUuid, UpdateMetadata, UpdateMetadataValue,
+    };
 
     #[tokio::test]
     async fn test_create_database() {
@@ -907,6 +971,58 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result.collection_id, collection_id);
+    }
+
+    #[tokio::test]
+    async fn test_update_collection() {
+        let db = get_new_sqlite_db().await;
+        let sysdb = SqliteSysDb::new(db);
+
+        let collection_id = CollectionUuid::new();
+        sysdb
+            .create_collection(
+                "default_tenant".to_string(),
+                "default_database".to_string(),
+                collection_id,
+                "test_collection".to_string(),
+                vec![],
+                serde_json::Value::Null,
+                None,
+                None,
+                false,
+            )
+            .await
+            .unwrap();
+
+        let mut metadata: UpdateMetadata = HashMap::new();
+        metadata.insert(
+            "key1".to_string(),
+            UpdateMetadataValue::Str("value1".to_string()),
+        );
+
+        sysdb
+            .update_collection(
+                collection_id,
+                Some("new_name".to_string()),
+                Some(CollectionMetadataUpdate::UpdateMetadata(metadata)),
+                Some(1024),
+            )
+            .await
+            .unwrap();
+
+        let collections = sysdb
+            .get_collections(Some(collection_id), None, None, None, None, 0)
+            .await
+            .unwrap();
+        let collection = collections.first().unwrap();
+        assert_eq!(collection.name, "new_name");
+        assert_eq!(collection.dimension, Some(1024));
+        let metadata = collection.metadata.as_ref().unwrap();
+        assert_eq!(metadata.len(), 1);
+        assert_eq!(
+            metadata.get("key1").unwrap(),
+            &MetadataValue::Str("value1".to_string())
+        );
     }
 
     #[tokio::test]
