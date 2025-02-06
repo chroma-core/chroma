@@ -6,18 +6,19 @@ use std::{
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_sqlite::{
     db::SqliteDb,
+    helpers::{delete_metadata, update_metadata},
     table::{EmbeddingFulltextSearch, EmbeddingMetadata, Embeddings, MaxSeqId},
 };
 use chroma_types::{
     operator::{CountResult, Filter, GetResult, Limit, Projection, ProjectionRecord, Scan},
     plan::{Count, Get},
     BooleanOperator, Chunk, CompositeExpression, DocumentExpression, DocumentOperator, LogRecord,
-    Metadata, MetadataComparison, MetadataExpression, MetadataSetValue, MetadataValue,
+    MetadataComparison, MetadataExpression, MetadataSetValue, MetadataValue,
     MetadataValueConversionError, Operation, OperationRecord, PrimitiveOperator, SegmentUuid,
-    SetOperator, UpdateMetadata, Where, CHROMA_DOCUMENT_KEY,
+    SetOperator, Where, CHROMA_DOCUMENT_KEY,
 };
 use sea_query::{
-    Alias, DeleteStatement, Expr, Func, InsertStatement, Nullable, OnConflict, Query, SimpleExpr,
+    Alias, DeleteStatement, Expr, Func, InsertStatement, OnConflict, Query, SimpleExpr,
     SqliteQueryBuilder, UpdateStatement,
 };
 use sea_query_binder::SqlxBinder;
@@ -32,6 +33,8 @@ pub enum SqliteMetadataError {
     LogOffset(#[from] TryFromIntError),
     #[error("Invalid metadata value: {0}")]
     MetadataValue(#[from] MetadataValueConversionError),
+    #[error("Could not update metadata table: {0}")]
+    UpdateMetadata(#[from] chroma_sqlite::helpers::MetadataError),
     #[error(transparent)]
     SeaQuery(#[from] sea_query::error::Error),
     #[error(transparent)]
@@ -71,16 +74,19 @@ impl SqliteMetadataWriter {
             .to_owned())
     }
 
-    async fn add_record(
-        tx: &mut Transaction<'static, Sqlite>,
+    async fn add_record<C>(
+        tx: &mut C,
         segment_id: SegmentUuid,
         seq_id: u64,
         user_id: String,
-    ) -> Result<Option<u32>, SqliteMetadataError> {
+    ) -> Result<Option<u32>, SqliteMetadataError>
+    where
+        for<'connection> &'connection mut C: sqlx::Executor<'connection, Database = sqlx::Sqlite>,
+    {
         let (add_rec_stmt, values) =
             Self::add_record_stmt(segment_id, seq_id, user_id)?.build_sqlx(SqliteQueryBuilder);
         Ok(sqlx::query_with(&add_rec_stmt, values)
-            .fetch_optional(&mut **tx)
+            .fetch_optional(&mut *tx)
             .await?
             .map(|row| row.try_get(0))
             .transpose()?)
@@ -103,16 +109,19 @@ impl SqliteMetadataWriter {
             .to_owned()
     }
 
-    async fn update_record(
-        tx: &mut Transaction<'static, Sqlite>,
+    async fn update_record<C>(
+        tx: &mut C,
         segment_id: SegmentUuid,
         seq_id: u64,
         user_id: String,
-    ) -> Result<Option<u32>, SqliteMetadataError> {
+    ) -> Result<Option<u32>, SqliteMetadataError>
+    where
+        for<'connection> &'connection mut C: sqlx::Executor<'connection, Database = sqlx::Sqlite>,
+    {
         let (update_rec_stmt, values) =
             Self::update_record_stmt(segment_id, seq_id, user_id).build_sqlx(SqliteQueryBuilder);
         Ok(sqlx::query_with(&update_rec_stmt, values)
-            .fetch_optional(&mut **tx)
+            .fetch_optional(&mut *tx)
             .await?
             .map(|row| row.try_get(0))
             .transpose()?)
@@ -132,16 +141,19 @@ impl SqliteMetadataWriter {
             .to_owned())
     }
 
-    async fn upsert_record(
-        tx: &mut Transaction<'static, Sqlite>,
+    async fn upsert_record<C>(
+        tx: &mut C,
         segment_id: SegmentUuid,
         seq_id: u64,
         user_id: String,
-    ) -> Result<u32, SqliteMetadataError> {
+    ) -> Result<u32, SqliteMetadataError>
+    where
+        for<'connection> &'connection mut C: sqlx::Executor<'connection, Database = sqlx::Sqlite>,
+    {
         let (upsert_rec_stmt, values) =
             Self::upsert_record_stmt(segment_id, seq_id, user_id)?.build_sqlx(SqliteQueryBuilder);
         Ok(sqlx::query_with(&upsert_rec_stmt, values)
-            .fetch_one(&mut **tx)
+            .fetch_one(&mut *tx)
             .await?
             .try_get(0)?)
     }
@@ -158,161 +170,21 @@ impl SqliteMetadataWriter {
             .to_owned()
     }
 
-    async fn delete_record(
-        tx: &mut Transaction<'static, Sqlite>,
+    async fn delete_record<C>(
+        tx: &mut C,
         segment_id: SegmentUuid,
         user_id: String,
-    ) -> Result<Option<u32>, SqliteMetadataError> {
+    ) -> Result<Option<u32>, SqliteMetadataError>
+    where
+        for<'connection> &'connection mut C: sqlx::Executor<'connection, Database = sqlx::Sqlite>,
+    {
         let (delete_rec_stmt, values) =
             Self::delete_record_stmt(segment_id, user_id).build_sqlx(SqliteQueryBuilder);
         Ok(sqlx::query_with(&delete_rec_stmt, values)
-            .fetch_optional(&mut **tx)
+            .fetch_optional(&mut *tx)
             .await?
             .map(|r| r.try_get(0))
             .transpose()?)
-    }
-
-    fn upsert_metadata_stmt(
-        id: u32,
-        metadata: Metadata,
-    ) -> Result<InsertStatement, SqliteMetadataError> {
-        let mut stmt = Query::insert();
-        stmt.into_table(EmbeddingMetadata::Table)
-            .columns([
-                EmbeddingMetadata::Id,
-                EmbeddingMetadata::Key,
-                EmbeddingMetadata::StringValue,
-                EmbeddingMetadata::IntValue,
-                EmbeddingMetadata::FloatValue,
-                EmbeddingMetadata::BoolValue,
-            ])
-            .on_conflict(
-                OnConflict::columns([EmbeddingMetadata::Id, EmbeddingMetadata::Key])
-                    .update_columns([
-                        EmbeddingMetadata::StringValue,
-                        EmbeddingMetadata::IntValue,
-                        EmbeddingMetadata::FloatValue,
-                        EmbeddingMetadata::BoolValue,
-                    ])
-                    .to_owned(),
-            );
-        for (key, val) in metadata {
-            stmt.values(match val {
-                MetadataValue::Bool(b) => [
-                    id.into(),
-                    key.into(),
-                    String::null().into(),
-                    i32::null().into(),
-                    f32::null().into(),
-                    b.into(),
-                ],
-                MetadataValue::Int(i) => [
-                    id.into(),
-                    key.into(),
-                    String::null().into(),
-                    i.into(),
-                    f32::null().into(),
-                    bool::null().into(),
-                ],
-                MetadataValue::Float(f) => [
-                    id.into(),
-                    key.into(),
-                    String::null().into(),
-                    i32::null().into(),
-                    f.into(),
-                    bool::null().into(),
-                ],
-                MetadataValue::Str(s) => [
-                    id.into(),
-                    key.into(),
-                    s.into(),
-                    i32::null().into(),
-                    f32::null().into(),
-                    bool::null().into(),
-                ],
-            })?;
-        }
-        Ok(stmt)
-    }
-
-    async fn upsert_metadata(
-        tx: &mut Transaction<'static, Sqlite>,
-        id: u32,
-        metadata: Metadata,
-    ) -> Result<(), SqliteMetadataError> {
-        let (upsert_meta_stmt, meta_values) =
-            Self::upsert_metadata_stmt(id, metadata)?.build_sqlx(SqliteQueryBuilder);
-        sqlx::query_with(&upsert_meta_stmt, meta_values)
-            .execute(&mut **tx)
-            .await?;
-        Ok(())
-    }
-
-    fn delete_metadata_stmt(id: u32) -> DeleteStatement {
-        Query::delete()
-            .from_table(EmbeddingMetadata::Table)
-            .and_where(Expr::col(EmbeddingMetadata::Id).eq(id))
-            .to_owned()
-    }
-
-    async fn delete_metadata(
-        tx: &mut Transaction<'static, Sqlite>,
-        id: u32,
-    ) -> Result<(), SqliteMetadataError> {
-        let (delete_meta_stmt, meta_values) =
-            Self::delete_metadata_stmt(id).build_sqlx(SqliteQueryBuilder);
-        sqlx::query_with(&delete_meta_stmt, meta_values)
-            .execute(&mut **tx)
-            .await?;
-        Ok(())
-    }
-
-    fn delete_metadata_by_key_stmt(id: u32, keys: Vec<String>) -> DeleteStatement {
-        Query::delete()
-            .from_table(EmbeddingMetadata::Table)
-            .and_where(
-                Expr::col(EmbeddingMetadata::Id)
-                    .eq(id)
-                    .and(Expr::col(EmbeddingMetadata::Key).is_in(keys)),
-            )
-            .to_owned()
-    }
-
-    async fn delete_metadata_by_key(
-        tx: &mut Transaction<'static, Sqlite>,
-        id: u32,
-        keys: Vec<String>,
-    ) -> Result<(), SqliteMetadataError> {
-        let (delete_meta_by_key_stmt, meta_values) =
-            Self::delete_metadata_by_key_stmt(id, keys).build_sqlx(SqliteQueryBuilder);
-        sqlx::query_with(&delete_meta_by_key_stmt, meta_values)
-            .execute(&mut **tx)
-            .await?;
-        Ok(())
-    }
-
-    async fn update_metadata(
-        tx: &mut Transaction<'static, Sqlite>,
-        id: u32,
-        metadata: UpdateMetadata,
-    ) -> Result<(), SqliteMetadataError> {
-        let mut deleted_keys = Vec::new();
-        let mut metadata_not_null = HashMap::new();
-        for (key, value) in metadata {
-            match (&value).try_into() {
-                Ok(val) => {
-                    metadata_not_null.insert(key, val);
-                }
-                Err(_) => deleted_keys.push(key),
-            }
-        }
-        if !deleted_keys.is_empty() {
-            Self::delete_metadata_by_key(tx, id, deleted_keys).await?;
-        }
-        if !metadata_not_null.is_empty() {
-            Self::upsert_metadata(tx, id, metadata_not_null).await?;
-        }
-        Ok(())
     }
 
     fn add_document_stmt(
@@ -329,15 +201,18 @@ impl SqliteMetadataWriter {
             .to_owned())
     }
 
-    async fn add_document(
-        tx: &mut Transaction<'static, Sqlite>,
+    async fn add_document<C>(
+        tx: &mut C,
         id: u32,
         document: String,
-    ) -> Result<(), SqliteMetadataError> {
+    ) -> Result<(), SqliteMetadataError>
+    where
+        for<'connection> &'connection mut C: sqlx::Executor<'connection, Database = sqlx::Sqlite>,
+    {
         let (add_doc_stmt, values) =
             Self::add_document_stmt(id, document)?.build_sqlx(SqliteQueryBuilder);
         sqlx::query_with(&add_doc_stmt, values)
-            .execute(&mut **tx)
+            .execute(&mut *tx)
             .await?;
         Ok(())
     }
@@ -349,14 +224,14 @@ impl SqliteMetadataWriter {
             .to_owned()
     }
 
-    async fn delete_document(
-        tx: &mut Transaction<'static, Sqlite>,
-        id: u32,
-    ) -> Result<(), SqliteMetadataError> {
+    async fn delete_document<C>(tx: &mut C, id: u32) -> Result<(), SqliteMetadataError>
+    where
+        for<'connection> &'connection mut C: sqlx::Executor<'connection, Database = sqlx::Sqlite>,
+    {
         let (delete_doc_stmt, values) =
             Self::delete_document_stmt(id).build_sqlx(SqliteQueryBuilder);
         sqlx::query_with(&delete_doc_stmt, values)
-            .execute(&mut **tx)
+            .execute(&mut *tx)
             .await?;
         Ok(())
     }
@@ -377,15 +252,18 @@ impl SqliteMetadataWriter {
             .to_owned())
     }
 
-    async fn upsert_max_seq_id(
-        tx: &mut Transaction<'static, Sqlite>,
+    async fn upsert_max_seq_id<C>(
+        tx: &mut C,
         segment_id: SegmentUuid,
         seq_id: u64,
-    ) -> Result<(), SqliteMetadataError> {
+    ) -> Result<(), SqliteMetadataError>
+    where
+        for<'connection> &'connection mut C: sqlx::Executor<'connection, Database = sqlx::Sqlite>,
+    {
         let (upsert_max_seq_id_stmt, values) =
             Self::upsert_max_seq_id_stmt(segment_id, seq_id)?.build_sqlx(SqliteQueryBuilder);
         sqlx::query_with(&upsert_max_seq_id_stmt, values)
-            .execute(&mut **tx)
+            .execute(&mut *tx)
             .await?;
         Ok(())
     }
@@ -394,12 +272,15 @@ impl SqliteMetadataWriter {
         Ok(self.db.get_conn().begin().await?)
     }
 
-    pub async fn apply_logs(
+    pub async fn apply_logs<C>(
         &self,
         logs: Chunk<LogRecord>,
         segment_id: SegmentUuid,
-        tx: &mut Transaction<'static, Sqlite>,
-    ) -> Result<(), SqliteMetadataError> {
+        tx: &mut C,
+    ) -> Result<(), SqliteMetadataError>
+    where
+        for<'connection> &'connection mut C: sqlx::Executor<'connection, Database = sqlx::Sqlite>,
+    {
         if logs.is_empty() {
             return Ok(());
         }
@@ -427,7 +308,8 @@ impl SqliteMetadataWriter {
                         Self::add_record(tx, segment_id, log_offset_unsigned, id.clone()).await?
                     {
                         if let Some(meta) = metadata {
-                            Self::update_metadata(tx, offset_id, meta.clone()).await?;
+                            update_metadata::<EmbeddingMetadata, _, _>(tx, offset_id, meta.clone())
+                                .await?;
                         }
 
                         if let Some(doc) = document {
@@ -440,7 +322,8 @@ impl SqliteMetadataWriter {
                         Self::update_record(tx, segment_id, log_offset_unsigned, id.clone()).await?
                     {
                         if let Some(meta) = metadata {
-                            Self::update_metadata(tx, offset_id, meta.clone()).await?;
+                            update_metadata::<EmbeddingMetadata, _, _>(tx, offset_id, meta.clone())
+                                .await?;
                         }
 
                         if let Some(doc) = document {
@@ -455,7 +338,8 @@ impl SqliteMetadataWriter {
                             .await?;
 
                     if let Some(meta) = metadata {
-                        Self::update_metadata(tx, offset_id, meta.clone()).await?;
+                        update_metadata::<EmbeddingMetadata, _, _>(tx, offset_id, meta.clone())
+                            .await?;
                     }
 
                     if let Some(doc) = document {
@@ -466,7 +350,7 @@ impl SqliteMetadataWriter {
                 Operation::Delete => {
                     if let Some(offset_id) = Self::delete_record(tx, segment_id, id.clone()).await?
                     {
-                        Self::delete_metadata(tx, offset_id).await?;
+                        delete_metadata::<EmbeddingMetadata, _, _>(tx, offset_id).await?;
                         Self::delete_document(tx, offset_id).await?;
                     }
                 }
@@ -793,7 +677,7 @@ mod tests {
             ref_seg.apply_logs(logs.clone(), seg_id);
             let mut tx = runtime.block_on(sqlite_seg_writer.begin()).expect("Should be able to start transaction");
             let data: Chunk<LogRecord> = Chunk::new(logs.into());
-            runtime.block_on(sqlite_seg_writer.apply_logs(data, seg_id, &mut tx)).expect("Should be able to apply logs");
+            runtime.block_on(sqlite_seg_writer.apply_logs(data, seg_id, &mut *tx)).expect("Should be able to apply logs");
             runtime.block_on(tx.commit()).expect("Should be able to commit log");
 
             let sqlite_seg_reader = SqliteMetadataReader {
