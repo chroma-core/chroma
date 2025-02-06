@@ -3,10 +3,12 @@ use chroma_sqlite::db::SqliteDb;
 use chroma_sqlite::helpers::update_metadata;
 use chroma_sqlite::table;
 use chroma_types::{
-    Collection, CollectionUuid, CreateCollectionError, CreateCollectionResponse,
-    CreateDatabaseError, CreateDatabaseResponse, CreateTenantError, CreateTenantResponse, Database,
-    DeleteDatabaseError, DeleteDatabaseResponse, GetCollectionsError, GetDatabaseError,
+    Collection, CollectionAndSegments, CollectionUuid, CreateCollectionError,
+    CreateCollectionResponse, CreateDatabaseError, CreateDatabaseResponse, CreateTenantError,
+    CreateTenantResponse, Database, DeleteDatabaseError, DeleteDatabaseResponse,
+    GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError, GetSegmentsError,
     GetTenantError, GetTenantResponse, ListDatabasesError, Metadata, MetadataValue, Segment,
+    SegmentScope, SegmentType, SegmentUuid,
 };
 use futures::TryStreamExt;
 use sea_query_binder::SqlxBinder;
@@ -343,6 +345,59 @@ impl SqliteSysDb {
         .await
     }
 
+    pub async fn get_collection_with_segments(
+        &self,
+        collection_id: CollectionUuid,
+    ) -> Result<CollectionAndSegments, GetCollectionWithSegmentsError> {
+        let collections = self
+            .get_collections_with_conn(
+                self.db.get_conn(),
+                Some(collection_id),
+                None,
+                None,
+                None,
+                None,
+                0,
+            )
+            .await
+            .map_err(|e| e.boxed())?;
+        let collection = collections
+            .first()
+            .ok_or(GetCollectionWithSegmentsError::NotFound)?;
+
+        let segments = self
+            .get_segments_with_conn(self.db.get_conn(), collection_id)
+            .await?;
+
+        let metadata_segment = segments
+            .iter()
+            .find(|s| s.scope == SegmentScope::METADATA)
+            .ok_or(GetCollectionWithSegmentsError::Field(
+                "Missing metadata segment".to_string(),
+            ))?;
+
+        let vector_segment = segments
+            .iter()
+            .find(|s| s.scope == SegmentScope::VECTOR)
+            .ok_or(GetCollectionWithSegmentsError::Field(
+                "Missing vector segment".to_string(),
+            ))?;
+
+        let record_segment = segments
+            .iter()
+            .find(|s| s.scope == SegmentScope::RECORD)
+            .ok_or(GetCollectionWithSegmentsError::Field(
+                "Missing record segment".to_string(),
+            ))?;
+
+        Ok(CollectionAndSegments {
+            collection: collection.clone(),
+            metadata_segment: metadata_segment.clone(),
+            vector_segment: vector_segment.clone(),
+            record_segment: record_segment.clone(),
+        })
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn get_collections_with_conn<'a, C>(
         &self,
@@ -462,6 +517,97 @@ impl SqliteSysDb {
             .collect::<Result<Vec<_>, GetCollectionsError>>()?;
 
         Ok(collections)
+    }
+
+    async fn get_segments_with_conn<'a, C>(
+        &self,
+        conn: C,
+        collection_id: CollectionUuid,
+    ) -> Result<Vec<Segment>, GetSegmentsError>
+    where
+        C: sqlx::Executor<'a, Database = sqlx::Sqlite>,
+    {
+        let (sql, values) = sea_query::Query::select()
+            .from(table::Segments::Table)
+            .left_join(
+                table::SegmentMetadata::Table,
+                sea_query::Expr::col((
+                    table::SegmentMetadata::Table,
+                    table::SegmentMetadata::SegmentId,
+                ))
+                .equals((table::Segments::Table, table::Segments::Id)),
+            )
+            .and_where(
+                sea_query::Expr::col((table::Segments::Table, table::Segments::Collection))
+                    .eq(collection_id.to_string()),
+            )
+            .column((table::Segments::Table, table::Segments::Id))
+            .column((table::Segments::Table, table::Segments::Type))
+            .column((table::Segments::Table, table::Segments::Scope))
+            .columns([
+                table::SegmentMetadata::Key,
+                table::SegmentMetadata::StrValue,
+                table::SegmentMetadata::IntValue,
+                table::SegmentMetadata::FloatValue,
+                table::SegmentMetadata::BoolValue,
+            ])
+            .build_sqlx(sea_query::SqliteQueryBuilder);
+
+        let mut rows = sqlx::query_with(&sql, values).fetch(conn);
+        let mut rows_by_segment_id: HashMap<SegmentUuid, Vec<SqliteRow>> = HashMap::new();
+
+        while let Some(row) = rows
+            .try_next()
+            .await
+            .map_err(|e| WrappedSqlxError(e).boxed())?
+        {
+            let segment_id = SegmentUuid::from_str(row.get::<&str, _>(0))
+                .map_err(GetSegmentsError::SegmentConversion)?;
+
+            if let Some(entry) = rows_by_segment_id.get_mut(&segment_id) {
+                entry.push(row);
+            } else {
+                rows_by_segment_id.insert(segment_id, vec![row]);
+            }
+        }
+
+        let segments = rows_by_segment_id
+            .into_iter()
+            .filter_map(|(segment_id, rows)| {
+                if rows.is_empty() {
+                    // should never happen
+                    return None;
+                }
+
+                let metadata = self.metadata_from_rows(rows.iter());
+                let first_row = rows.first().unwrap();
+
+                let segment_type = match SegmentType::try_from(first_row.get::<&str, _>(1))
+                    .map_err(GetSegmentsError::SegmentConversion)
+                {
+                    Ok(segment_type) => segment_type,
+                    Err(err) => return Some(Err(err)),
+                };
+
+                let segment_scope = match SegmentScope::try_from(first_row.get::<&str, _>(2))
+                    .map_err(GetSegmentsError::UnknownScope)
+                {
+                    Ok(scope) => scope,
+                    Err(err) => return Some(Err(err)),
+                };
+
+                Some(Ok(Segment {
+                    id: segment_id,
+                    r#type: segment_type,
+                    scope: segment_scope,
+                    collection: collection_id,
+                    metadata,
+                    file_path: HashMap::new(),
+                }))
+            })
+            .collect::<Result<Vec<_>, GetSegmentsError>>()?;
+
+        Ok(segments)
     }
 
     // TODO: reuse logic from metadata reader
@@ -768,5 +914,73 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result.collection_id, collection_id);
+    }
+
+    #[tokio::test]
+    async fn test_get_collection_with_segments() {
+        let db = get_new_sqlite_db().await;
+        let sysdb = SqliteSysDb::new(db);
+
+        let mut collection_metadata = Metadata::new();
+        collection_metadata.insert("key1".to_string(), MetadataValue::Str("value1".to_string()));
+        collection_metadata.insert("key2".to_string(), MetadataValue::Int(42));
+        collection_metadata.insert("key3".to_string(), MetadataValue::Float(42.0));
+        collection_metadata.insert("key4".to_string(), MetadataValue::Bool(true));
+
+        let segment_metadata = collection_metadata.clone();
+
+        let collection_id = CollectionUuid::new();
+        let segments = vec![
+            Segment {
+                id: SegmentUuid::new(),
+                r#type: SegmentType::BlockfileMetadata,
+                scope: SegmentScope::METADATA,
+                collection: collection_id,
+                metadata: Some(segment_metadata),
+                file_path: HashMap::new(),
+            },
+            Segment {
+                id: SegmentUuid::new(),
+                r#type: SegmentType::HnswDistributed,
+                scope: SegmentScope::VECTOR,
+                collection: collection_id,
+                metadata: None,
+                file_path: HashMap::new(),
+            },
+            Segment {
+                id: SegmentUuid::new(),
+                r#type: SegmentType::BlockfileRecord,
+                scope: SegmentScope::RECORD,
+                collection: collection_id,
+                metadata: None,
+                file_path: HashMap::new(),
+            },
+        ];
+        sysdb
+            .create_collection(
+                "default_tenant".to_string(),
+                "default_database".to_string(),
+                collection_id,
+                "test_collection".to_string(),
+                segments.clone(),
+                serde_json::Value::Null,
+                Some(collection_metadata.clone()),
+                None,
+                false,
+            )
+            .await
+            .unwrap();
+
+        let collection_and_segments = sysdb
+            .get_collection_with_segments(collection_id)
+            .await
+            .unwrap();
+
+        assert_eq!(collection_and_segments.collection.name, "test_collection");
+        assert_eq!(collection_and_segments.metadata_segment.id, segments[0].id);
+        assert_eq!(
+            collection_and_segments.metadata_segment.metadata,
+            segments[0].metadata
+        );
     }
 }
