@@ -1,13 +1,17 @@
-use crate::{CollectionInfo, WrappedSqlxError};
+use crate::{
+    CollectionInfo, CompactionManagerError, CompactionMessage, LocalCompactionManager,
+    WrappedSqlxError,
+};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_sqlite::db::SqliteDb;
+use chroma_system::{ComponentHandle, RequestError};
 use chroma_types::{
     CollectionConversionError, CollectionUuid, LogRecord, Operation, OperationRecord,
     ScalarEncoding, ScalarEncodingConversionError, UpdateMetadata, UpdateMetadataValue,
 };
 use futures::TryStreamExt;
 use sqlx::{QueryBuilder, Row};
-use std::str::FromStr;
+use std::{str::FromStr, sync::Arc};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -39,6 +43,10 @@ pub enum SqlitePushLogsError {
     QueryError(#[from] WrappedSqlxError),
     #[error("Failed to serialize metadata: {0}")]
     InvalidMetadata(#[from] serde_json::Error),
+    #[error("Error in compaction")]
+    CompactionError(#[from] CompactionManagerError),
+    #[error("Error sending message to compactor")]
+    MessageSendingError(#[from] RequestError),
 }
 
 impl ChromaError for SqlitePushLogsError {
@@ -46,6 +54,8 @@ impl ChromaError for SqlitePushLogsError {
         match self {
             SqlitePushLogsError::QueryError(err) => err.code(),
             SqlitePushLogsError::InvalidMetadata(_) => ErrorCodes::Internal,
+            SqlitePushLogsError::CompactionError(e) => e.code(),
+            SqlitePushLogsError::MessageSendingError(e) => e.code(),
         }
     }
 }
@@ -86,6 +96,7 @@ pub struct SqliteLog {
     db: SqliteDb,
     tenant_id: String,
     topic_namespace: String,
+    compactor_handle: Option<Arc<ComponentHandle<LocalCompactionManager>>>,
 }
 
 impl SqliteLog {
@@ -94,7 +105,15 @@ impl SqliteLog {
             db,
             tenant_id,
             topic_namespace,
+            compactor_handle: None,
         }
+    }
+
+    pub fn init_compactor_handle(
+        &mut self,
+        compactor_handle: Arc<ComponentHandle<LocalCompactionManager>>,
+    ) {
+        self.compactor_handle = Some(compactor_handle);
     }
 
     pub(super) async fn read(
@@ -209,6 +228,13 @@ impl SqliteLog {
             return Ok(());
         }
 
+        let row = sqlx::query("SELECT MAX(seq_id) AS max_seq_id FROM embeddings_queue")
+            .fetch_one(self.db.get_conn())
+            .await
+            .map_err(WrappedSqlxError)?;
+        let start_log_offset: i64 = row.get("max_seq_id");
+        let end_log_offset = start_log_offset + records.len() as i64;
+
         let topic = get_topic_name(&self.tenant_id, &self.topic_namespace, collection_id);
 
         let records_and_serialized_metadatas = records
@@ -252,6 +278,14 @@ impl SqliteLog {
             .execute(self.db.get_conn())
             .await
             .map_err(WrappedSqlxError)?;
+        let compact_message = CompactionMessage {
+            collection_id,
+            start_offset: start_log_offset,
+            end_offset: end_log_offset,
+        };
+        if let Some(compactor_handle) = &self.compactor_handle {
+            compactor_handle.request(compact_message, None).await??;
+        }
 
         Ok(())
     }

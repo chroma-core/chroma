@@ -1396,6 +1396,8 @@ dependencies = [
  "chroma-error",
  "chroma-segment",
  "chroma-sqlite",
+ "chroma-sysdb",
+ "chroma-system",
  "chroma-tracing",
  "chroma-types",
  "futures",

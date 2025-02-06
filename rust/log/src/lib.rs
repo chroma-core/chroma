@@ -1,6 +1,7 @@
 pub mod config;
 pub mod grpc_log;
 pub mod in_memory_log;
+pub mod local_compaction_manager;
 #[allow(clippy::module_inception)]
 mod log;
 pub mod sqlite_log;
@@ -10,6 +11,7 @@ pub mod types;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use config::LogConfig;
+pub use local_compaction_manager::*;
 pub use log::*;
 pub use types::*;
 

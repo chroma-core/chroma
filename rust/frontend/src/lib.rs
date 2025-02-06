@@ -4,7 +4,6 @@ pub mod config;
 pub mod executor;
 pub mod frontend;
 pub mod get_collection_with_segments_provider;
-mod local_compaction_manager;
 mod server;
 mod tower_tracing;
 mod types;
@@ -15,7 +14,6 @@ use chroma_error::ChromaError;
 use chroma_system::System;
 use frontend::Frontend;
 use get_collection_with_segments_provider::*;
-pub use local_compaction_manager::*;
 use mdac::{Pattern, Rule};
 use server::FrontendServer;
 
