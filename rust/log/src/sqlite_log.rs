@@ -10,6 +10,7 @@ use futures::TryStreamExt;
 use sqlx::{QueryBuilder, Row};
 use std::{str::FromStr, sync::OnceLock};
 use thiserror::Error;
+use tokio::sync::Mutex;
 
 #[derive(Error, Debug)]
 pub enum SqlitePullLogsError {

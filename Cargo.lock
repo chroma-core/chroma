@@ -1404,6 +1404,7 @@ dependencies = [
  "chroma-types",
  "futures",
  "opentelemetry",
+ "parking_lot",
  "proptest",
  "rand",
  "serde",

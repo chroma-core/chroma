@@ -45,6 +45,7 @@ pub enum SegmentType {
     HnswLocalPersisted,
     Sqlite,
     Spann,
+    HnswLocal,
 }
 
 impl From<SegmentType> for String {
