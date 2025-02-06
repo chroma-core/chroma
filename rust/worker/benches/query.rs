@@ -6,7 +6,7 @@ use chroma_benchmark::{
     datasets::sift::Sift1MData,
 };
 use chroma_config::Configurable;
-use chroma_segment::test::TestSegment;
+use chroma_segment::test::TestDistributedSegment;
 use chroma_system::{ComponentHandle, Dispatcher, Orchestrator, System};
 use criterion::{criterion_group, criterion_main, Criterion};
 use futures::{stream, StreamExt, TryStreamExt};
@@ -27,7 +27,7 @@ use worker::{
 };
 
 fn trivial_knn_filter(
-    test_segments: TestSegment,
+    test_segments: TestDistributedSegment,
     dispatcher_handle: ComponentHandle<Dispatcher>,
 ) -> KnnFilterOrchestrator {
     let blockfile_provider = test_segments.blockfile_provider.clone();
@@ -45,7 +45,7 @@ fn trivial_knn_filter(
 }
 
 fn always_true_knn_filter(
-    test_segments: TestSegment,
+    test_segments: TestDistributedSegment,
     dispatcher_handle: ComponentHandle<Dispatcher>,
 ) -> KnnFilterOrchestrator {
     let blockfile_provider = test_segments.blockfile_provider.clone();
@@ -63,7 +63,7 @@ fn always_true_knn_filter(
 }
 
 fn always_false_knn_filter(
-    test_segments: TestSegment,
+    test_segments: TestDistributedSegment,
     dispatcher_handle: ComponentHandle<Dispatcher>,
 ) -> KnnFilterOrchestrator {
     let blockfile_provider = test_segments.blockfile_provider.clone();
@@ -81,7 +81,7 @@ fn always_false_knn_filter(
 }
 
 fn knn(
-    test_segments: TestSegment,
+    test_segments: TestDistributedSegment,
     dispatcher_handle: ComponentHandle<Dispatcher>,
     knn_filter_output: KnnFilterOutput,
     query: Vec<f32>,

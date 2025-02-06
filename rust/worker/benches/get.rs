@@ -3,7 +3,7 @@ mod load;
 
 use chroma_benchmark::benchmark::{bench_run, tokio_multi_thread};
 use chroma_config::Configurable;
-use chroma_segment::test::TestSegment;
+use chroma_segment::test::TestDistributedSegment;
 use chroma_system::{ComponentHandle, Dispatcher, Orchestrator, System};
 use criterion::{criterion_group, criterion_main, Criterion};
 use load::{
@@ -14,7 +14,7 @@ use load::{
 use worker::{config::RootConfig, execution::orchestration::get::GetOrchestrator};
 
 fn trivial_get(
-    test_segments: TestSegment,
+    test_segments: TestDistributedSegment,
     dispatcher_handle: ComponentHandle<Dispatcher>,
 ) -> GetOrchestrator {
     let blockfile_provider = test_segments.blockfile_provider.clone();
@@ -32,7 +32,7 @@ fn trivial_get(
 }
 
 fn get_false_filter(
-    test_segments: TestSegment,
+    test_segments: TestDistributedSegment,
     dispatcher_handle: ComponentHandle<Dispatcher>,
 ) -> GetOrchestrator {
     let blockfile_provider = test_segments.blockfile_provider.clone();
@@ -50,7 +50,7 @@ fn get_false_filter(
 }
 
 fn get_true_filter(
-    test_segments: TestSegment,
+    test_segments: TestDistributedSegment,
     dispatcher_handle: ComponentHandle<Dispatcher>,
 ) -> GetOrchestrator {
     let blockfile_provider = test_segments.blockfile_provider.clone();
@@ -68,7 +68,7 @@ fn get_true_filter(
 }
 
 fn get_true_filter_limit(
-    test_segments: TestSegment,
+    test_segments: TestDistributedSegment,
     dispatcher_handle: ComponentHandle<Dispatcher>,
 ) -> GetOrchestrator {
     let blockfile_provider = test_segments.blockfile_provider.clone();
@@ -86,7 +86,7 @@ fn get_true_filter_limit(
 }
 
 fn get_true_filter_limit_projection(
-    test_segments: TestSegment,
+    test_segments: TestDistributedSegment,
     dispatcher_handle: ComponentHandle<Dispatcher>,
 ) -> GetOrchestrator {
     let blockfile_provider = test_segments.blockfile_provider.clone();

@@ -403,7 +403,7 @@ mod tests {
     #[cfg(debug_assertions)]
     use chroma_proto::debug_client::DebugClient;
     use chroma_proto::query_executor_client::QueryExecutorClient;
-    use chroma_segment::test::TestSegment;
+    use chroma_segment::test::TestDistributedSegment;
     use chroma_sysdb::TestSysDb;
     use chroma_system::system;
     use chroma_system::DispatcherConfig;
@@ -412,7 +412,7 @@ mod tests {
     fn run_server() -> String {
         let sysdb = TestSysDb::new();
         let log = InMemoryLog::new();
-        let segments = TestSegment::default();
+        let segments = TestDistributedSegment::default();
         let port = random_port::PortPicker::new().random(true).pick().unwrap();
 
         let mut server = WorkerServer {

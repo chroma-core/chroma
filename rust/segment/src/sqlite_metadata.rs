@@ -67,7 +67,7 @@ impl SqliteMetadataWriter {
                     .do_nothing()
                     .to_owned(),
             )
-            .returning(Query::returning().columns([Embeddings::Id, Embeddings::SeqId]))
+            .returning_col(Embeddings::Id)
             .to_owned())
     }
 
@@ -79,10 +79,11 @@ impl SqliteMetadataWriter {
     ) -> Result<Option<u32>, SqliteMetadataError> {
         let (add_rec_stmt, values) =
             Self::add_record_stmt(segment_id, seq_id, user_id)?.build_sqlx(SqliteQueryBuilder);
-        let result = sqlx::query_with(&add_rec_stmt, values)
-            .fetch_one(&mut **tx)
-            .await?;
-        Ok((result.try_get::<u64, _>(1)? == seq_id).then_some(result.try_get(0)?))
+        Ok(sqlx::query_with(&add_rec_stmt, values)
+            .fetch_optional(&mut **tx)
+            .await?
+            .map(|row| row.try_get(0))
+            .transpose()?)
     }
 
     fn update_record_stmt(
@@ -107,13 +108,14 @@ impl SqliteMetadataWriter {
         segment_id: SegmentUuid,
         seq_id: u64,
         user_id: String,
-    ) -> Result<u32, SqliteMetadataError> {
+    ) -> Result<Option<u32>, SqliteMetadataError> {
         let (update_rec_stmt, values) =
             Self::update_record_stmt(segment_id, seq_id, user_id).build_sqlx(SqliteQueryBuilder);
         Ok(sqlx::query_with(&update_rec_stmt, values)
-            .fetch_one(&mut **tx)
+            .fetch_optional(&mut **tx)
             .await?
-            .try_get(0)?)
+            .map(|row| row.try_get(0))
+            .transpose()?)
     }
 
     fn upsert_record_stmt(
@@ -304,12 +306,16 @@ impl SqliteMetadataWriter {
                 Err(_) => deleted_keys.push(key),
             }
         }
-        Self::delete_metadata_by_key(tx, id, deleted_keys).await?;
-        Self::upsert_metadata(tx, id, metadata_not_null).await?;
+        if !deleted_keys.is_empty() {
+            Self::delete_metadata_by_key(tx, id, deleted_keys).await?;
+        }
+        if !metadata_not_null.is_empty() {
+            Self::upsert_metadata(tx, id, metadata_not_null).await?;
+        }
         Ok(())
     }
 
-    fn upsert_document_stmt(
+    fn add_document_stmt(
         id: u32,
         document: String,
     ) -> Result<InsertStatement, SqliteMetadataError> {
@@ -320,22 +326,17 @@ impl SqliteMetadataWriter {
                 EmbeddingFulltextSearch::StringValue,
             ])
             .values([id.into(), document.into()])?
-            .on_conflict(
-                OnConflict::column(EmbeddingFulltextSearch::Rowid)
-                    .update_column(EmbeddingFulltextSearch::StringValue)
-                    .to_owned(),
-            )
             .to_owned())
     }
 
-    async fn upsert_document(
+    async fn add_document(
         tx: &mut Transaction<'static, Sqlite>,
         id: u32,
         document: String,
     ) -> Result<(), SqliteMetadataError> {
-        let (upsert_doc_stmt, values) =
-            Self::upsert_document_stmt(id, document)?.build_sqlx(SqliteQueryBuilder);
-        sqlx::query_with(&upsert_doc_stmt, values)
+        let (add_doc_stmt, values) =
+            Self::add_document_stmt(id, document)?.build_sqlx(SqliteQueryBuilder);
+        sqlx::query_with(&add_doc_stmt, values)
             .execute(&mut **tx)
             .await?;
         Ok(())
@@ -389,15 +390,19 @@ impl SqliteMetadataWriter {
         Ok(())
     }
 
-    pub async fn apply_materialized_logs(
+    pub async fn begin(&self) -> Result<Transaction<'static, Sqlite>, SqliteMetadataError> {
+        Ok(self.db.get_conn().begin().await?)
+    }
+
+    pub async fn apply_logs(
         &self,
         logs: Vec<LogRecord>,
         segment_id: SegmentUuid,
+        tx: &mut Transaction<'static, Sqlite>,
     ) -> Result<(), SqliteMetadataError> {
         if logs.is_empty() {
             return Ok(());
         }
-        let mut tx = self.db.get_conn().begin().await?;
         let mut max_seq_id = u64::MIN;
         for LogRecord {
             log_offset,
@@ -416,53 +421,56 @@ impl SqliteMetadataWriter {
             match operation {
                 Operation::Add => {
                     if let Some(offset_id) =
-                        Self::add_record(&mut tx, segment_id, log_offset_unsigned, id).await?
+                        Self::add_record(tx, segment_id, log_offset_unsigned, id).await?
                     {
                         if let Some(meta) = metadata {
-                            Self::update_metadata(&mut tx, offset_id, meta).await?;
+                            Self::update_metadata(tx, offset_id, meta).await?;
                         }
 
                         if let Some(doc) = document {
-                            Self::upsert_document(&mut tx, offset_id, doc).await?;
+                            Self::add_document(tx, offset_id, doc).await?;
                         }
                     }
                 }
                 Operation::Update => {
-                    let offset_id =
-                        Self::update_record(&mut tx, segment_id, log_offset_unsigned, id).await?;
+                    if let Some(offset_id) =
+                        Self::update_record(tx, segment_id, log_offset_unsigned, id).await?
+                    {
+                        if let Some(meta) = metadata {
+                            Self::update_metadata(tx, offset_id, meta).await?;
+                        }
 
-                    if let Some(meta) = metadata {
-                        Self::update_metadata(&mut tx, offset_id, meta).await?;
-                    }
-
-                    if let Some(doc) = document {
-                        Self::upsert_document(&mut tx, offset_id, doc).await?;
+                        if let Some(doc) = document {
+                            Self::delete_document(tx, offset_id).await?;
+                            Self::add_document(tx, offset_id, doc).await?;
+                        }
                     }
                 }
                 Operation::Upsert => {
                     let offset_id =
-                        Self::upsert_record(&mut tx, segment_id, log_offset_unsigned, id).await?;
+                        Self::upsert_record(tx, segment_id, log_offset_unsigned, id).await?;
 
                     if let Some(meta) = metadata {
-                        Self::update_metadata(&mut tx, offset_id, meta).await?;
+                        Self::update_metadata(tx, offset_id, meta).await?;
                     }
 
                     if let Some(doc) = document {
-                        Self::upsert_document(&mut tx, offset_id, doc).await?;
+                        Self::delete_document(tx, offset_id).await?;
+                        Self::add_document(tx, offset_id, doc).await?;
                     }
                 }
                 Operation::Delete => {
-                    if let Some(offset_id) = Self::delete_record(&mut tx, segment_id, id).await? {
-                        Self::delete_metadata(&mut tx, offset_id).await?;
-                        Self::delete_document(&mut tx, offset_id).await?;
+                    if let Some(offset_id) = Self::delete_record(tx, segment_id, id).await? {
+                        Self::delete_metadata(tx, offset_id).await?;
+                        Self::delete_document(tx, offset_id).await?;
                     }
                 }
             }
         }
 
-        Self::upsert_max_seq_id(&mut tx, segment_id, max_seq_id).await?;
+        Self::upsert_max_seq_id(tx, segment_id, max_seq_id).await?;
 
-        Ok(tx.commit().await?)
+        Ok(())
     }
 }
 
@@ -750,29 +758,48 @@ mod tests {
     use chroma_types::{
         operator::{Filter, Limit, Projection, Scan},
         plan::{Count, Get},
-        BooleanOperator, CompositeExpression, DocumentExpression, MetadataComparison,
-        MetadataExpression, MetadataValue, PrimitiveOperator, Where,
+        BooleanOperator, CollectionAndSegments, CompositeExpression, DocumentExpression, LogRecord,
+        MetadataComparison, MetadataExpression, MetadataValue, OperationRecord, PrimitiveOperator,
+        Where,
     };
+    use proptest::prelude::*;
+    use tokio::runtime::Runtime;
 
-    use crate::test::TestSegment;
+    use crate::test::{TestDistributedSegment, TestReferenceSegment};
 
-    use super::SqliteMetadataReader;
+    use super::{SqliteMetadataReader, SqliteMetadataWriter};
 
-    #[tokio::test]
-    async fn test_count() {
-        let metadata_reader = SqliteMetadataReader {
-            db: get_new_sqlite_db().await,
-        };
+    proptest! {
+        #[test]
+        fn test_count(
+            operations in proptest::collection::vec(any::<OperationRecord>(), 0..100)
+        ) {
+            let runtime = Runtime::new().expect("Should be able to start tokio runtime");
+            let mut ref_seg = TestReferenceSegment::default();
+            let sqlite_seg_writer = SqliteMetadataWriter {
+                db: runtime.block_on(get_new_sqlite_db())
+            };
 
-        metadata_reader
-            .count(Count {
-                scan: Scan {
-                    collection_and_segments: TestSegment::default().into(),
-                },
-            })
-            .await
-            .expect("Count should not fail");
+            let collection_and_segments = CollectionAndSegments::test(6);
+            let seg_id = collection_and_segments.metadata_segment.id;
+
+            let logs = operations.into_iter().enumerate().map(|(i, record)| LogRecord { log_offset: (i + 1) as i64, record }).collect::<Vec<_>>();
+
+            ref_seg.apply_logs(logs.clone(), seg_id);
+            let mut tx = runtime.block_on(sqlite_seg_writer.begin()).expect("Should be able to start transaction");
+            runtime.block_on(sqlite_seg_writer.apply_logs(logs, seg_id, &mut tx)).expect("Should be able to apply logs");
+            runtime.block_on(tx.commit()).expect("Should be able to commit log");
+
+            let sqlite_seg_reader = SqliteMetadataReader {
+                db: sqlite_seg_writer.db
+            };
+            let plan = Count { scan: Scan { collection_and_segments }};
+            let ref_count = ref_seg.count(plan.clone()).expect("Count should not fail");
+            let sqlite_count = runtime.block_on(sqlite_seg_reader.count(plan)).expect("Count should not fail");
+            assert_eq!(ref_count, sqlite_count);
+        }
     }
+
     #[tokio::test]
     async fn test_get() {
         let metadata_reader = SqliteMetadataReader {
@@ -782,7 +809,7 @@ mod tests {
         let _result = metadata_reader
             .get(Get {
                 scan: Scan {
-                    collection_and_segments: TestSegment::default().into(),
+                    collection_and_segments: TestDistributedSegment::default().into(),
                 },
                 filter: Filter {
                     query_ids: None,

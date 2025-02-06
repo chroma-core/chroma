@@ -1,5 +1,5 @@
 use super::{Metadata, MetadataValueConversionError};
-use crate::{chroma_proto, Segment};
+use crate::{chroma_proto, test_segment, Segment, SegmentScope};
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -144,6 +144,19 @@ pub struct CollectionAndSegments {
     pub metadata_segment: Segment,
     pub record_segment: Segment,
     pub vector_segment: Segment,
+}
+
+impl CollectionAndSegments {
+    pub fn test(dim: i32) -> Self {
+        let collection = Collection::test_collection(dim);
+        let collection_uuid = collection.collection_id;
+        Self {
+            collection,
+            metadata_segment: test_segment(collection_uuid, SegmentScope::METADATA),
+            record_segment: test_segment(collection_uuid, SegmentScope::RECORD),
+            vector_segment: test_segment(collection_uuid, SegmentScope::VECTOR),
+        }
+    }
 }
 
 #[cfg(test)]

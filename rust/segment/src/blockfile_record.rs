@@ -875,7 +875,9 @@ mod tests {
     use chroma_types::Chunk;
     use shuttle::{future, thread};
 
-    use crate::{blockfile_record::MAX_OFFSET_ID, test::TestSegment, types::materialize_logs};
+    use crate::{
+        blockfile_record::MAX_OFFSET_ID, test::TestDistributedSegment, types::materialize_logs,
+    };
 
     use super::RecordSegmentWriter;
 
@@ -886,7 +888,7 @@ mod tests {
             .enable_all()
             .build()
             .expect("Runtime creation should not fail")
-            .block_on(async { TestSegment::default() });
+            .block_on(async { TestDistributedSegment::default() });
         shuttle::check_random(
             move || {
                 let log_partition_size = 100;
