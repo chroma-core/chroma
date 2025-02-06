@@ -11,7 +11,7 @@ use chroma_sqlite::{
 use chroma_types::{
     operator::{CountResult, Filter, GetResult, Limit, Projection, ProjectionRecord, Scan},
     plan::{Count, Get},
-    BooleanOperator, CompositeExpression, DocumentExpression, DocumentOperator, LogRecord,
+    BooleanOperator, Chunk, CompositeExpression, DocumentExpression, DocumentOperator, LogRecord,
     Metadata, MetadataComparison, MetadataExpression, MetadataSetValue, MetadataValue,
     MetadataValueConversionError, Operation, OperationRecord, PrimitiveOperator, SegmentUuid,
     SetOperator, UpdateMetadata, Where, CHROMA_DOCUMENT_KEY,
@@ -396,7 +396,7 @@ impl SqliteMetadataWriter {
 
     pub async fn apply_logs(
         &self,
-        logs: Vec<LogRecord>,
+        logs: Chunk<LogRecord>,
         segment_id: SegmentUuid,
         tx: &mut Transaction<'static, Sqlite>,
     ) -> Result<(), SqliteMetadataError> {
@@ -404,63 +404,68 @@ impl SqliteMetadataWriter {
             return Ok(());
         }
         let mut max_seq_id = u64::MIN;
-        for LogRecord {
-            log_offset,
-            record:
-                OperationRecord {
-                    id,
-                    metadata,
-                    document,
-                    operation,
-                    ..
-                },
-        } in logs
+        for (
+            LogRecord {
+                log_offset,
+                record:
+                    OperationRecord {
+                        id,
+                        metadata,
+                        document,
+                        operation,
+                        ..
+                    },
+            },
+            _,
+        ) in logs.iter()
         {
-            let log_offset_unsigned = log_offset.try_into()?;
+            let log_offset_unsigned = (*log_offset).try_into()?;
             max_seq_id = max_seq_id.max(log_offset_unsigned);
             match operation {
                 Operation::Add => {
                     if let Some(offset_id) =
-                        Self::add_record(tx, segment_id, log_offset_unsigned, id).await?
+                        Self::add_record(tx, segment_id, log_offset_unsigned, id.clone()).await?
                     {
                         if let Some(meta) = metadata {
-                            Self::update_metadata(tx, offset_id, meta).await?;
+                            Self::update_metadata(tx, offset_id, meta.clone()).await?;
                         }
 
                         if let Some(doc) = document {
-                            Self::add_document(tx, offset_id, doc).await?;
+                            Self::add_document(tx, offset_id, doc.clone()).await?;
                         }
                     }
                 }
                 Operation::Update => {
                     if let Some(offset_id) =
-                        Self::update_record(tx, segment_id, log_offset_unsigned, id).await?
+                        Self::update_record(tx, segment_id, log_offset_unsigned, id.clone()).await?
                     {
                         if let Some(meta) = metadata {
-                            Self::update_metadata(tx, offset_id, meta).await?;
+                            Self::update_metadata(tx, offset_id, meta.clone()).await?;
                         }
 
                         if let Some(doc) = document {
                             Self::delete_document(tx, offset_id).await?;
-                            Self::add_document(tx, offset_id, doc).await?;
+                            Self::add_document(tx, offset_id, doc.clone()).await?;
                         }
                     }
                 }
                 Operation::Upsert => {
                     let offset_id =
-                        Self::upsert_record(tx, segment_id, log_offset_unsigned, id).await?;
+                        Self::upsert_record(tx, segment_id, log_offset_unsigned, id.clone())
+                            .await?;
 
                     if let Some(meta) = metadata {
-                        Self::update_metadata(tx, offset_id, meta).await?;
+                        Self::update_metadata(tx, offset_id, meta.clone()).await?;
                     }
 
                     if let Some(doc) = document {
                         Self::delete_document(tx, offset_id).await?;
-                        Self::add_document(tx, offset_id, doc).await?;
+                        Self::add_document(tx, offset_id, doc.clone()).await?;
                     }
                 }
                 Operation::Delete => {
-                    if let Some(offset_id) = Self::delete_record(tx, segment_id, id).await? {
+                    if let Some(offset_id) = Self::delete_record(tx, segment_id, id.clone()).await?
+                    {
                         Self::delete_metadata(tx, offset_id).await?;
                         Self::delete_document(tx, offset_id).await?;
                     }
@@ -758,9 +763,9 @@ mod tests {
     use chroma_types::{
         operator::{Filter, Limit, Projection, Scan},
         plan::{Count, Get},
-        BooleanOperator, CollectionAndSegments, CompositeExpression, DocumentExpression, LogRecord,
-        MetadataComparison, MetadataExpression, MetadataValue, OperationRecord, PrimitiveOperator,
-        Where,
+        BooleanOperator, Chunk, CollectionAndSegments, CompositeExpression, DocumentExpression,
+        LogRecord, MetadataComparison, MetadataExpression, MetadataValue, OperationRecord,
+        PrimitiveOperator, Where,
     };
     use proptest::prelude::*;
     use tokio::runtime::Runtime;
@@ -787,7 +792,8 @@ mod tests {
 
             ref_seg.apply_logs(logs.clone(), seg_id);
             let mut tx = runtime.block_on(sqlite_seg_writer.begin()).expect("Should be able to start transaction");
-            runtime.block_on(sqlite_seg_writer.apply_logs(logs, seg_id, &mut tx)).expect("Should be able to apply logs");
+            let data: Chunk<LogRecord> = Chunk::new(logs.into());
+            runtime.block_on(sqlite_seg_writer.apply_logs(data, seg_id, &mut tx)).expect("Should be able to apply logs");
             runtime.block_on(tx.commit()).expect("Should be able to commit log");
 
             let sqlite_seg_reader = SqliteMetadataReader {
