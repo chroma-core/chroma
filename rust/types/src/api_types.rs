@@ -120,9 +120,7 @@ pub struct CreateTenantRequest {
 impl CreateTenantRequest {
     pub fn try_new(name: String) -> Result<Self, ChromaValidationError> {
         let request = Self { name };
-        request
-            .validate()
-            .map_err(|err| ChromaValidationError::from(err))?;
+        request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
 }
@@ -156,9 +154,7 @@ pub struct GetTenantRequest {
 impl GetTenantRequest {
     pub fn try_new(name: String) -> Result<Self, ChromaValidationError> {
         let request = Self { name };
-        request
-            .validate()
-            .map_err(|err| ChromaValidationError::from(err))?;
+        request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
 }
@@ -205,9 +201,7 @@ impl CreateDatabaseRequest {
             tenant_id,
             database_name,
         };
-        request
-            .validate()
-            .map_err(|err| ChromaValidationError::from(err))?;
+        request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
 }
@@ -258,9 +252,7 @@ impl ListDatabasesRequest {
             limit,
             offset,
         };
-        request
-            .validate()
-            .map_err(|err| ChromaValidationError::from(err))?;
+        request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
 }
@@ -300,9 +292,7 @@ impl GetDatabaseRequest {
             tenant_id,
             database_name,
         };
-        request
-            .validate()
-            .map_err(|err| ChromaValidationError::from(err))?;
+        request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
 }
@@ -345,9 +335,7 @@ impl DeleteDatabaseRequest {
             tenant_id,
             database_name,
         };
-        request
-            .validate()
-            .map_err(|err| ChromaValidationError::from(err))?;
+        request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
 }
@@ -397,9 +385,7 @@ impl ListCollectionsRequest {
             limit,
             offset,
         };
-        request
-            .validate()
-            .map_err(|err| ChromaValidationError::from(err))?;
+        request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
 }
@@ -422,9 +408,7 @@ impl CountCollectionsRequest {
             tenant_id,
             database_name,
         };
-        request
-            .validate()
-            .map_err(|err| ChromaValidationError::from(err))?;
+        request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
 }
@@ -450,9 +434,7 @@ impl GetCollectionRequest {
             database_name,
             collection_name,
         };
-        request
-            .validate()
-            .map_err(|err| ChromaValidationError::from(err))?;
+        request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
 }
@@ -506,9 +488,7 @@ impl CreateCollectionRequest {
             configuration_json,
             get_or_create,
         };
-        request
-            .validate()
-            .map_err(|err| ChromaValidationError::from(err))?;
+        request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
 }
@@ -588,9 +568,7 @@ impl UpdateCollectionRequest {
             new_name,
             new_metadata,
         };
-        request
-            .validate()
-            .map_err(|err| ChromaValidationError::from(err))?;
+        request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
 }
@@ -631,9 +609,7 @@ impl DeleteCollectionRequest {
             database_name,
             collection_name,
         };
-        request
-            .validate()
-            .map_err(|err| ChromaValidationError::from(err))?;
+        request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
 }
@@ -675,6 +651,7 @@ pub struct AddCollectionRecordsRequest {
 }
 
 impl AddCollectionRecordsRequest {
+    #[allow(clippy::too_many_arguments)]
     pub fn try_new(
         tenant_id: String,
         database_name: String,
@@ -695,9 +672,7 @@ impl AddCollectionRecordsRequest {
             uris,
             metadatas,
         };
-        request
-            .validate()
-            .map_err(|err| ChromaValidationError::from(err))?;
+        request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
 }
@@ -736,6 +711,7 @@ pub struct UpdateCollectionRecordsRequest {
 }
 
 impl UpdateCollectionRecordsRequest {
+    #[allow(clippy::too_many_arguments)]
     pub fn try_new(
         tenant_id: String,
         database_name: String,
@@ -756,9 +732,7 @@ impl UpdateCollectionRecordsRequest {
             uris,
             metadatas,
         };
-        request
-            .validate()
-            .map_err(|err| ChromaValidationError::from(err))?;
+        request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
 }
@@ -794,6 +768,7 @@ pub struct UpsertCollectionRecordsRequest {
 }
 
 impl UpsertCollectionRecordsRequest {
+    #[allow(clippy::too_many_arguments)]
     pub fn try_new(
         tenant_id: String,
         database_name: String,
@@ -814,9 +789,7 @@ impl UpsertCollectionRecordsRequest {
             uris,
             metadatas,
         };
-        request
-            .validate()
-            .map_err(|err| ChromaValidationError::from(err))?;
+        request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
 }
@@ -871,9 +844,7 @@ impl DeleteCollectionRecordsRequest {
             ids,
             r#where,
         };
-        request
-            .validate()
-            .map_err(|err| ChromaValidationError::from(err))?;
+        request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
 }
@@ -947,9 +918,7 @@ impl CountRequest {
             database_name,
             collection_id,
         };
-        request
-            .validate()
-            .map_err(|err| ChromaValidationError::from(err))?;
+        request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
 }
@@ -974,6 +943,7 @@ pub struct GetRequest {
 }
 
 impl GetRequest {
+    #[allow(clippy::too_many_arguments)]
     pub fn try_new(
         tenant_id: String,
         database_name: String,
@@ -994,9 +964,7 @@ impl GetRequest {
             offset,
             include,
         };
-        request
-            .validate()
-            .map_err(|err| ChromaValidationError::from(err))?;
+        request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
 }
@@ -1082,6 +1050,7 @@ pub struct QueryRequest {
 }
 
 impl QueryRequest {
+    #[allow(clippy::too_many_arguments)]
     pub fn try_new(
         tenant_id: String,
         database_name: String,
@@ -1102,9 +1071,7 @@ impl QueryRequest {
             n_results,
             include,
         };
-        request
-            .validate()
-            .map_err(|err| ChromaValidationError::from(err))?;
+        request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
 }
