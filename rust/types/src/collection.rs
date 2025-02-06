@@ -1,6 +1,7 @@
 use super::{Metadata, MetadataValueConversionError};
 use crate::{chroma_proto, test_segment, Segment, SegmentScope};
 use chroma_error::{ChromaError, ErrorCodes};
+use pyo3::types::PyAnyMethods;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
@@ -36,20 +37,37 @@ impl std::fmt::Display for CollectionUuid {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[pyo3::pyclass]
 pub struct Collection {
     #[serde(rename(serialize = "id"))]
     pub collection_id: CollectionUuid,
+    #[pyo3(get)]
     pub name: String,
     #[serde(rename(deserialize = "configuration_json_str"))]
     pub configuration_json: Value,
+    #[pyo3(get)]
     pub metadata: Option<Metadata>,
+    #[pyo3(get)]
     pub dimension: Option<i32>,
+    #[pyo3(get)]
     pub tenant: String,
+    #[pyo3(get)]
     pub database: String,
     pub log_position: i64,
     pub version: i32,
     #[serde(skip)]
     pub total_records_post_compaction: u64,
+}
+
+#[pyo3::pymethods]
+impl Collection {
+    #[getter]
+    fn id<'py>(&self, py: pyo3::Python<'py>) -> pyo3::PyResult<pyo3::Bound<'py, pyo3::PyAny>> {
+        let res = pyo3::prelude::PyModule::import(py, "uuid")?
+            .getattr("UUID")?
+            .call1((self.collection_id.to_string(),))?;
+        Ok(res)
+    }
 }
 
 impl Collection {

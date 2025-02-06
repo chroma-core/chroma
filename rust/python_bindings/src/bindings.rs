@@ -14,13 +14,14 @@ use chroma_sqlite::{config::SqliteDBConfig, db::SqliteDb};
 use chroma_sysdb::{sqlite::SqliteSysDb, sysdb::SysDb};
 use chroma_system::System;
 use chroma_types::{
-    AddCollectionRecordsError, CreateDatabaseRequest, GetCollectionError, GetResponse, IncludeList,
-    Metadata, QueryError, QueryResponse, UpdateCollectionRecordsError, UpdateMetadata,
+    AddCollectionRecordsError, Collection, CreateCollectionRequest, CreateDatabaseRequest,
+    GetCollectionError, GetResponse, IncludeList, Metadata, QueryError, QueryResponse,
+    UpdateCollectionRecordsError, UpdateMetadata,
 };
 use numpy::PyReadonlyArray1;
 use pyo3::{
     exceptions::{PyOSError, PyRuntimeError, PyValueError},
-    pyclass, pymethods, Py, PyAny, PyObject, PyResult, Python,
+    pyclass, pymethods, Py, PyAny, PyErr, PyObject, PyResult, Python,
 };
 use std::time::SystemTime;
 
@@ -249,28 +250,64 @@ impl Bindings {
 
     ////////////////////////////// Base API //////////////////////////////
     #[allow(clippy::too_many_arguments)]
+    #[pyo3(
+        signature = (name, configuration, metadata = None, get_or_create = false, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
+    )]
     fn create_collection(
         &self,
         name: String,
-        configuration: PyObject,
-        metadata: PyObject,
+        configuration: Option<PyObject>,
+        metadata: Option<Metadata>,
         get_or_create: bool,
         tenant: String,
         database: String,
         py: Python<'_>,
-    ) -> PyResult<PyObject> {
-        self.proxy_frontend.call_method1(
-            py,
-            "create_collection",
-            (
-                name,
-                configuration,
-                metadata,
-                get_or_create,
-                tenant,
-                database,
-            ),
+    ) -> Result<Collection, PyErr> {
+        if let Some(metadata) = &metadata {
+            if metadata.is_empty() {
+                return Err(PyValueError::new_err(
+                    "Metadata cannot be empty if provided",
+                ));
+            }
+        }
+
+        let configuration_json = match configuration {
+            Some(configuration) => {
+                let configuration_json_str = configuration
+                    .call_method0(py, "to_json_str")?
+                    .extract::<String>(py)?;
+
+                Some(
+                    serde_json::from_str::<serde_json::Value>(&configuration_json_str).map_err(
+                        |e| {
+                            PyValueError::new_err(format!(
+                                "Failed to parse configuration json: {}",
+                                e
+                            ))
+                        },
+                    )?,
+                )
+            }
+            None => None,
+        };
+
+        let request = CreateCollectionRequest::try_new(
+            tenant,
+            database,
+            name,
+            metadata,
+            configuration_json,
+            get_or_create,
         )
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+
+        let mut frontend = self.frontend.clone();
+        self.runtime.block_on(async {
+            frontend
+                .create_collection(request)
+                .await
+                .map_err(|e| PyRuntimeError::new_err(format!("Internal Error: {}", e)))
+        })
     }
 
     //////////////////////////// Record Methods ////////////////////////////
