@@ -27,8 +27,6 @@ const DEFAULT_TENANT: &str = "default_tenant";
 
 #[pyclass]
 pub(crate) struct Bindings {
-    // TODO(sanketkedia, hammadb): Add ServerAPI handle here
-    // server_api_handle: ComponentHandle<ServerAPI>,
     _runtime: tokio::runtime::Runtime,
     // TODO(hammadb): In order to make CI green, we proxy all
     // calls back into python.
@@ -81,9 +79,13 @@ impl Bindings {
             };
 
         let sqlite_sysdb = SqliteSysDb::new(sqlite_db.clone());
-        // TODO: verify this clone is safe / consistent
         let sysdb = Box::new(SysDb::Sqlite(sqlite_sysdb));
-        let log = Box::new(Log::InMemory(chroma_log::in_memory_log::InMemoryLog::new()));
+        // TODO: get the log configuration from the config sysdb
+        let log = Box::new(Log::Sqlite(chroma_log::sqlite_log::SqliteLog::new(
+            sqlite_db.clone(),
+            "default".to_string(),
+            "default".to_string(),
+        )));
 
         // TODO: clean up the cache configuration and decide the source of truth owner
         // make cache not a no-op
@@ -263,7 +265,40 @@ impl Bindings {
             },
         }
     }
+
+    // @override
+    // def _get(
+    //     self,
+    //     collection_id: UUID,
+    //     ids: Optional[IDs] = None,
+    //     where: Optional[Where] = None,
+    //     sort: Optional[str] = None,
+    //     limit: Optional[int] = None,
+    //     offset: Optional[int] = None,
+    //     page: Optional[int] = None,
+    //     page_size: Optional[int] = None,
+    //     where_document: Optional[WhereDocument] = None,
+    //     include: Include = ["metadatas", "documents"],  # type: ignore[list-item]
+    //     tenant: str = DEFAULT_TENANT,
+    //     database: str = DEFAULT_DATABASE,
+    // ) -> GetResult:
+    //     return self.proxy_segment_api._get(  # type: ignore[no-any-return]
+    //         collection_id,
+    //         ids,
+    //         where,
+    //         sort,
+    //         limit,
+    //         offset,
+    //         page,
+    //         page_size,
+    //         where_document,
+    //         include,
+    //         tenant,
+    //         database,
+    //     )
 }
+
+///////////////////// Data Transformation Functions /////////////////
 
 /// Converts a Vec<PyReadonlyArray1<f32>> to a Vec<Vec<f32>>
 /// # Note

@@ -7,6 +7,11 @@ use sqlx::Executor;
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
+/// A wrapper around a SqliteDb that accesses the SysDB
+/// This is the database that stores metadata about databases, tenants, and collections etc
+/// ## Notes
+/// - The SqliteSysDb should be "Shareable" - it should be possible to clone it and use it in multiple threads
+///     without having divergent state
 pub struct SqliteSysDb {
     db: SqliteDb,
 }

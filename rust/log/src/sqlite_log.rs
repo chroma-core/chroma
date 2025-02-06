@@ -89,6 +89,14 @@ pub struct SqliteLog {
 }
 
 impl SqliteLog {
+    pub fn new(db: SqliteDb, tenant_id: String, topic_namespace: String) -> Self {
+        Self {
+            db,
+            tenant_id,
+            topic_namespace,
+        }
+    }
+
     pub(super) async fn read(
         &mut self,
         collection_id: CollectionUuid,
@@ -354,11 +362,7 @@ mod tests {
         .await
         .unwrap();
 
-        SqliteLog {
-            db,
-            tenant_id: "default".to_string(),
-            topic_namespace: "default".to_string(),
-        }
+        SqliteLog::new(db, "default".to_string(), "default".to_string())
     }
 
     #[tokio::test]
