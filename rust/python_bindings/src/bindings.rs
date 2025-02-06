@@ -12,7 +12,10 @@ use chroma_log::Log;
 use chroma_sqlite::{config::SqliteDBConfig, db::SqliteDb};
 use chroma_sysdb::{sqlite::SqliteSysDb, sysdb::SysDb};
 use chroma_system::System;
-use chroma_types::{AddCollectionRecordsError, GetCollectionError, Metadata};
+use chroma_types::{
+    chroma_proto::where_document, AddCollectionRecordsError, GetCollectionError, IncludeList,
+    Metadata, QueryError,
+};
 use numpy::PyReadonlyArray1;
 use pyo3::{
     exceptions::{PyOSError, PyRuntimeError, PyValueError},
@@ -264,73 +267,71 @@ impl Bindings {
         }
     }
 
-    // @override
-    // def _get(
-    //     self,
-    //     collection_id: UUID,
-    //     ids: Optional[IDs] = None,
-    //     where: Optional[Where] = None,
-    //     sort: Optional[str] = None,
-    //     limit: Optional[int] = None,
-    //     offset: Optional[int] = None,
-    //     where_document: Optional[WhereDocument] = None,
-    //     include: Include = ["metadatas", "documents"],  # type: ignore[list-item]
-    //     tenant: str = DEFAULT_TENANT,
-    //     database: str = DEFAULT_DATABASE,
-    // ) -> GetResult:
+    #[pyo3(
+            signature = (collection_id, ids = None, r#where = None, limit = None, offset = 0, where_document = None, include = ["metadatas".to_string(), "documents".to_string()].to_vec(), tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
+        )]
+    fn get(
+        &self,
+        collection_id: String,
+        ids: Option<Vec<String>>,
+        r#where: Option<String>,
+        limit: Option<u32>,
+        offset: u32,
+        where_document: Option<String>,
+        include: Vec<String>,
+        tenant: String,
+        database: String,
+        py: Python<'_>,
+    ) -> PyResult<PyObject> {
+        // TODO: The way we convert where clauses into json and deserialize them is a bit clunky
+        // this could be improved
 
-    //     #[pyo3(
-    //         signature = (collection_id, ids = None, where_ = None, sort = None, limit = None, offset = None, where_document = None, include = ["metadatas".to_string(), "documents".to_string()].to_vec(), tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
-    //     )]
-    //     fn get(
-    //         &self,
-    //         collection_id: String,
-    //         ids: Option<Vec<String>>,
-    //         r#where: Option<String>,
-    //         sort: Option<String>,
-    //         limit: Option<i32>,
-    //         offset: Option<i32>,
-    //         where_document: Option<String>,
-    //         include: Vec<String>,
-    //         tenant: String,
-    //         database: String,
-    //         py: Python<'_>,
-    //     ) -> PyResult<PyObject> {
+        // TODO: Rethink the error handling strategy
+        let raw_where_fields =
+            chroma_types::RawWhereFields::new(r#where.into(), where_document.into());
+        let r#where = match raw_where_fields.parse() {
+            Ok(parsed) => parsed,
+            Err(e) => return Err(PyValueError::new_err(e.to_string())),
+        };
 
-    //         let raw_where_fields = chroma_types::RawWhereFields
+        let collection_id = chroma_types::CollectionUuid(
+            uuid::Uuid::parse_str(&collection_id)
+                .map_err(|e| PyValueError::new_err(e.to_string()))?,
+        );
 
-    //         let request = chroma_types::GetRequest {
-    //             collection_id: collection_id,
-    //             ids: ids,
-    //             r#where,
-    //             sort,
-    //             limit,
-    //             offset,
-    //             where_document,
-    //             include,
-    //             tenant_id: tenant,
-    //             database_name: database,
-    //         };
+        // TODO: support include
+        let request = chroma_types::GetRequest {
+            collection_id,
+            ids,
+            r#where,
+            limit,
+            offset,
+            include: IncludeList::default_get(),
+            tenant_id: tenant,
+            database_name: database,
+        };
 
-    //         // self.proxy_frontend.call_method1(
-    //         //     py,
-    //         //     "get",
-    //         //     (
-    //         //         collection_id,
-    //         //         ids,
-    //         //         where_,
-    //         //         sort,
-    //         //         limit,
-    //         //         offset,
-    //         //         page,
-    //         //         page_size,
-    //         //         where_document,
-    //         //         include,
-    //         //         tenant,
-    //         //         database,
-    //         //     ),
-    //         // )
-    //     }
+        let mut frontend_clone = self._frontend.clone();
+        let res = match self
+            ._runtime
+            .block_on(async { frontend_clone.get(request).await })
+        {
+            Ok(response) => Ok(response),
+            Err(e) => match e {
+                // TODO: error handling
+                QueryError::Executor(e) => {
+                    Err(PyRuntimeError::new_err(format!("Executor Error: {}", e)))
+                }
+                QueryError::Internal(e) => {
+                    Err(PyRuntimeError::new_err(format!("Internal Error: {}", e)))
+                }
+            },
+        };
+
+        println!("{:?}", res);
+
+        Ok(());
+    }
 }
 
 ///////////////////// Data Transformation Functions /////////////////

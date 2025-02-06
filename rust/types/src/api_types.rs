@@ -550,7 +550,7 @@ pub struct GetRequest {
     pub include: IncludeList,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize, Debug)]
 pub struct GetResponse {
     ids: Vec<String>,
     embeddings: Option<Vec<Vec<f32>>>,

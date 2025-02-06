@@ -12,6 +12,15 @@ pub struct RawWhereFields {
     where_document: Value,
 }
 
+impl RawWhereFields {
+    pub fn new(r#where: Value, where_document: Value) -> Self {
+        Self {
+            r#where,
+            where_document,
+        }
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum WhereValidationError {
     #[error("Invalid where clause")]
