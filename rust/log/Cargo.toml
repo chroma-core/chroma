@@ -25,7 +25,7 @@ futures = { workspace = true }
 
 chroma-tracing = { workspace = true, features = ["grpc"] }
 chroma-config = { workspace = true }
-chroma-error = { workspace = true }
+chroma-error = { workspace = true, features = ["sqlx"] }
 chroma-segment = { workspace = true }
 chroma-system = { workspace = true }
 chroma-sysdb = { workspace = true }

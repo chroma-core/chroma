@@ -1,8 +1,5 @@
-use crate::{
-    CollectionInfo, CompactionManagerError, CompactionMessage, LocalCompactionManager,
-    WrappedSqlxError,
-};
-use chroma_error::{ChromaError, ErrorCodes};
+use crate::{CollectionInfo, CompactionManagerError, CompactionMessage, LocalCompactionManager};
+use chroma_error::{ChromaError, ErrorCodes, WrappedSqlxError};
 use chroma_sqlite::db::SqliteDb;
 use chroma_system::{ComponentHandle, RequestError};
 use chroma_types::{
