@@ -506,6 +506,10 @@ impl LocalHnswSegmentWriter {
         }
         guard.id_map.total_elements_added = next_label - 1;
         if guard.num_elements_since_last_persist >= guard.sync_threshold as u64 {
+            println!(
+                "Persisting hnsw index since sync threshold is reached {:?}, {:?}",
+                guard.sync_threshold, guard.num_elements_since_last_persist
+            );
             guard = persist(guard).await?;
             let id = guard.index.id.to_string().into();
             let max_id = guard.id_map.max_seq_id.into();

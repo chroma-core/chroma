@@ -104,6 +104,10 @@ impl Handler<CompactionMessage> for LocalCompactionManager {
         message: CompactionMessage,
         _: &ComponentContext<LocalCompactionManager>,
     ) -> Self::Result {
+        println!(
+            "(Sanket-temp) Compaction started for collection: {}",
+            message.collection_id
+        );
         let data = self
             .log
             .read(
@@ -114,6 +118,10 @@ impl Handler<CompactionMessage> for LocalCompactionManager {
             )
             .await
             .map_err(|_| CompactionManagerError::PullLogsFailure)?;
+        // println!(
+        //     "(Sanket-temp) Compaction pulled {:?} logs for collection: {:?}",
+        //     data, message.collection_id
+        // );
         let data_chunk: Chunk<LogRecord> = Chunk::new(data.into());
         let collection_segments = self
             .sysdb
@@ -154,6 +162,10 @@ impl Handler<CompactionMessage> for LocalCompactionManager {
             .apply_log_chunk(data_chunk)
             .await
             .map_err(|_| CompactionManagerError::HnswApplyLogsError)?;
+        println!(
+            "(Sanket-temp) Compaction complete for collection: {}",
+            message.collection_id
+        );
         Ok(())
     }
 }

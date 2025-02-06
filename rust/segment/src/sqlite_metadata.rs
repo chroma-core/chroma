@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, HashMap},
+    hash::Hash,
     num::TryFromIntError,
 };
 
@@ -85,6 +86,7 @@ impl SqliteMetadataWriter {
     {
         let (add_rec_stmt, values) =
             Self::add_record_stmt(segment_id, seq_id, user_id)?.build_sqlx(SqliteQueryBuilder);
+        println!("(Sanket-temp) add_rec_stmt: {:?}", add_rec_stmt);
         Ok(sqlx::query_with(&add_rec_stmt, values)
             .fetch_optional(&mut *tx)
             .await?
@@ -300,6 +302,29 @@ impl SqliteMetadataWriter {
             _,
         ) in logs.iter()
         {
+            let meta_clone = metadata.clone();
+            let new_meta;
+            if let Some(document) = document {
+                new_meta = match meta_clone {
+                    Some(mut meta) => {
+                        meta.insert(
+                            "chroma:document".to_string(),
+                            chroma_types::UpdateMetadataValue::Str(document.clone()),
+                        );
+                        meta
+                    }
+                    None => {
+                        let mut m = HashMap::new();
+                        m.insert(
+                            "chroma:document".to_string(),
+                            chroma_types::UpdateMetadataValue::Str(document.clone()),
+                        );
+                        m
+                    }
+                };
+            } else {
+                new_meta = meta_clone.unwrap_or_default();
+            }
             let log_offset_unsigned = (*log_offset).try_into()?;
             max_seq_id = max_seq_id.max(log_offset_unsigned);
             let mut metadata_owned = metadata.clone();
@@ -316,8 +341,9 @@ impl SqliteMetadataWriter {
                     if let Some(offset_id) =
                         Self::add_record(tx, segment_id, log_offset_unsigned, id.clone()).await?
                     {
-                        if let Some(meta) = metadata_owned {
-                            update_metadata::<EmbeddingMetadata, _, _>(tx, offset_id, meta).await?;
+                        if !new_meta.is_empty() {
+                            update_metadata::<EmbeddingMetadata, _, _>(tx, offset_id, new_meta)
+                                .await?;
                         }
 
                         if let Some(doc) = document {
@@ -601,11 +627,15 @@ impl SqliteMetadataReader {
         }
 
         let (sql, values) = projection_query.build_sqlx(SqliteQueryBuilder);
+        println!(
+            "(Sanket-temp) projection_query: {:?} values {:?}",
+            sql, values
+        );
 
         let rows = sqlx::query_with(&sql, values)
             .fetch_all(self.db.get_conn())
             .await?;
-
+        println!("(Sanket-temp) number of rows {:?}", rows.len());
         let mut records = BTreeMap::new();
 
         for row in rows {

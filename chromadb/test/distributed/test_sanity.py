@@ -16,7 +16,6 @@ from chromadb.test.utils.wait_for_version_increase import (
 import numpy as np
 
 
-@skip_if_not_cluster()
 def test_add(
     client: ClientAPI,
 ) -> None:

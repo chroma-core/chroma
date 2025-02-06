@@ -31,6 +31,7 @@ chroma-system = { workspace = true }
 chroma-sysdb = { workspace = true }
 chroma-types = { workspace = true }
 chroma-sqlite = { workspace = true }
+parking_lot = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
