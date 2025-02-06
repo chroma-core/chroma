@@ -3,7 +3,10 @@ use std::{collections::HashMap, path::Path, sync::Arc};
 use chroma_cache::Weighted;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::{HnswIndex, HnswIndexConfig, Index, IndexConfig, PersistentIndex};
+use chroma_sqlite::{db::SqliteDb, table::MaxSeqId};
 use chroma_types::{Chunk, LogRecord, Operation, Segment};
+use sea_query::{Query, SqliteQueryBuilder};
+use sea_query_binder::SqlxBinder;
 use serde::{Deserialize, Serialize};
 use serde_pickle::{DeOptions, SerOptions};
 use thiserror::Error;
@@ -60,6 +63,7 @@ impl LocalHnswSegmentReader {
         segment: &Segment,
         dimensionality: usize,
         persist_path: &Path,
+        sql_db: SqliteDb,
     ) -> Result<Self, LocalHnswSegmentReaderError> {
         let index_folder = persist_path.join(segment.id.to_string());
         if !index_folder.exists() {
@@ -101,6 +105,7 @@ impl LocalHnswSegmentReader {
                             num_elements_since_last_persist: 0,
                             sync_threshold,
                             persist_path: index_folder_str.to_string(),
+                            sqlite: sql_db,
                         })),
                     },
                 });
@@ -118,7 +123,7 @@ impl LocalHnswSegmentReader {
 struct IdMap {
     dimensionality: Option<usize>,
     total_elements_added: u32,
-    max_seq_id: u32,
+    max_seq_id: u64,
     id_to_label: HashMap<String, u32>,
     label_to_id: HashMap<u32, String>,
     id_to_seq_id: HashMap<String, u32>,
@@ -134,6 +139,7 @@ pub struct Inner {
     num_elements_since_last_persist: u64,
     sync_threshold: usize,
     persist_path: String,
+    sqlite: SqliteDb,
 }
 
 #[derive(Clone)]
@@ -189,6 +195,10 @@ pub enum LocalHnswSegmentWriterError {
     HnswIndexDeleteError,
     #[error("Error converting persistant path to string")]
     PersistPathError,
+    #[error("Error updating max sequence id")]
+    QueryBuilderError(#[from] sea_query::error::Error),
+    #[error("Error updating max sequence id")]
+    MaxSeqIdUpdateError(#[from] sqlx::error::Error),
 }
 
 impl ChromaError for LocalHnswSegmentWriterError {
@@ -207,6 +217,8 @@ impl ChromaError for LocalHnswSegmentWriterError {
             LocalHnswSegmentWriterError::HnswIndexResizeError => ErrorCodes::Internal,
             LocalHnswSegmentWriterError::HnswIndexDeleteError => ErrorCodes::Internal,
             LocalHnswSegmentWriterError::PersistPathError => ErrorCodes::Internal,
+            LocalHnswSegmentWriterError::QueryBuilderError(_) => ErrorCodes::Internal,
+            LocalHnswSegmentWriterError::MaxSeqIdUpdateError(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -221,6 +233,7 @@ impl LocalHnswSegmentWriter {
         segment: &Segment,
         dimensionality: usize,
         persist_path: &Path,
+        sql_db: SqliteDb,
     ) -> Result<Self, LocalHnswSegmentWriterError> {
         let index_folder = persist_path.join(segment.id.to_string());
         if !index_folder.exists() {
@@ -261,6 +274,7 @@ impl LocalHnswSegmentWriter {
                             num_elements_since_last_persist: 0,
                             sync_threshold,
                             persist_path: index_folder_str.to_string(),
+                            sqlite: sql_db,
                         })),
                     },
                 });
@@ -296,6 +310,7 @@ impl LocalHnswSegmentWriter {
                     num_elements_since_last_persist: 0,
                     sync_threshold,
                     persist_path: index_folder_str.to_string(),
+                    sqlite: sql_db,
                 })),
             },
         })
@@ -303,7 +318,7 @@ impl LocalHnswSegmentWriter {
 
     // Returns the updated log seq id.
     #[allow(dead_code)]
-    async fn apply_log_chunk(
+    pub async fn apply_log_chunk(
         &mut self,
         log_chunk: Chunk<LogRecord>,
     ) -> Result<u32, LocalHnswSegmentWriterError> {
@@ -311,6 +326,7 @@ impl LocalHnswSegmentWriter {
         let mut next_label = guard.id_map.total_elements_added + 1;
         for (log, _) in log_chunk.iter() {
             guard.num_elements_since_last_persist += 1;
+            guard.id_map.max_seq_id = std::cmp::max(guard.id_map.max_seq_id, log.log_offset as u64);
             match log.record.operation {
                 Operation::Add => {
                     // only update if the id is not already present
@@ -412,8 +428,21 @@ impl LocalHnswSegmentWriter {
                 }
             }
         }
+        guard.id_map.total_elements_added = next_label - 1;
         if guard.num_elements_since_last_persist >= guard.sync_threshold as u64 {
             guard = persist(guard).await?;
+            let id = guard.index.id.to_string().into();
+            let max_id = guard.id_map.max_seq_id.into();
+            // Persist max_seq_id to sqlite.
+            let (query, values) = Query::insert()
+                .into_table(MaxSeqId::Table)
+                .replace()
+                .columns([MaxSeqId::SegmentId, MaxSeqId::SeqId])
+                .values([id, max_id])?
+                .build_sqlx(SqliteQueryBuilder);
+            let _ = sqlx::query_with(&query, values)
+                .execute(guard.sqlite.get_conn())
+                .await?;
             guard.num_elements_since_last_persist = 0;
         }
 

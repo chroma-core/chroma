@@ -5,6 +5,7 @@ use chroma_cache::{Cache, CacheConfig, CacheError};
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::IndexUuid;
+use chroma_sqlite::db::SqliteDb;
 use chroma_types::Segment;
 use thiserror::Error;
 
@@ -23,12 +24,13 @@ pub struct LocalSegmentManagerConfig {
 pub struct LocalSegmentManager {
     hnsw_index_pool: Arc<dyn Cache<IndexUuid, LocalHnswIndex>>,
     eviction_callback_task_handle: Option<Arc<tokio::task::JoinHandle<()>>>,
+    sqlite: SqliteDb,
 }
 
 #[async_trait::async_trait]
-impl Configurable<LocalSegmentManagerConfig> for LocalSegmentManager {
+impl Configurable<(LocalSegmentManagerConfig, SqliteDb)> for LocalSegmentManager {
     async fn try_from_config(
-        config: &LocalSegmentManagerConfig,
+        (config, sql_db): &(LocalSegmentManagerConfig, SqliteDb),
     ) -> Result<Self, Box<dyn chroma_error::ChromaError>> {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let hnsw_index_pool: Box<dyn Cache<IndexUuid, LocalHnswIndex>> =
@@ -45,6 +47,7 @@ impl Configurable<LocalSegmentManagerConfig> for LocalSegmentManager {
         Ok(Self {
             hnsw_index_pool: hnsw_index_pool.into(),
             eviction_callback_task_handle: Some(Arc::new(handle)),
+            sqlite: sql_db.clone(),
         })
     }
 }
@@ -82,9 +85,13 @@ impl LocalSegmentManager {
         match self.hnsw_index_pool.get(&IndexUuid(segment.id.0)).await? {
             Some(hnsw_index) => Ok(LocalHnswSegmentReader::from_index(hnsw_index)),
             None => {
-                let reader =
-                    LocalHnswSegmentReader::from_segment(segment, dimensionality, persist_path)
-                        .await?;
+                let reader = LocalHnswSegmentReader::from_segment(
+                    segment,
+                    dimensionality,
+                    persist_path,
+                    self.sqlite.clone(),
+                )
+                .await?;
                 // Open the FDs.
                 reader.index.start().await;
                 self.hnsw_index_pool
@@ -96,7 +103,7 @@ impl LocalSegmentManager {
     }
 
     #[allow(dead_code)]
-    async fn get_hnsw_writer(
+    pub async fn get_hnsw_writer(
         &self,
         segment: &Segment,
         dimensionality: usize,
@@ -107,9 +114,13 @@ impl LocalSegmentManager {
         match self.hnsw_index_pool.get(&IndexUuid(segment.id.0)).await? {
             Some(hnsw_index) => Ok(LocalHnswSegmentWriter::from_index(hnsw_index)?),
             None => {
-                let writer =
-                    LocalHnswSegmentWriter::from_segment(segment, dimensionality, persist_path)
-                        .await?;
+                let writer = LocalHnswSegmentWriter::from_segment(
+                    segment,
+                    dimensionality,
+                    persist_path,
+                    self.sqlite.clone(),
+                )
+                .await?;
                 // Open the FDs.
                 writer.index.start().await;
                 self.hnsw_index_pool

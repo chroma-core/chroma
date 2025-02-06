@@ -4,6 +4,7 @@ pub mod config;
 pub mod executor;
 pub mod frontend;
 pub mod get_collection_with_segments_provider;
+mod local_compaction_manager;
 mod server;
 mod tower_tracing;
 mod types;

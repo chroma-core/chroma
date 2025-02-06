@@ -1452,6 +1452,7 @@ dependencies = [
  "chroma-types",
  "futures",
  "parking_lot",
+ "proptest",
  "roaring",
  "sea-query",
  "sea-query-binder",
