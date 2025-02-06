@@ -70,24 +70,30 @@ impl LocalExecutor {
     pub async fn knn(&mut self, plan: Knn) -> Result<KnnBatchResult, ExecutorError> {
         let collection_and_segments = plan.scan.collection_and_segments.clone();
         if let Some(dimensionality) = collection_and_segments.collection.dimension {
-            let filter_plan = Get {
-                scan: plan.scan.clone(),
-                filter: plan.filter.clone(),
-                limit: Default::default(),
-                proj: Default::default(),
+            let allowed_user_ids = if plan.filter.where_clause.is_none() {
+                plan.filter.query_ids.unwrap_or_default()
+            } else {
+                let filter_plan = Get {
+                    scan: plan.scan.clone(),
+                    filter: plan.filter.clone(),
+                    limit: Default::default(),
+                    proj: Default::default(),
+                };
+
+                let allowed_uids = self
+                    .get(filter_plan)
+                    .await?
+                    .records
+                    .into_iter()
+                    .map(|record| record.id)
+                    .collect::<Vec<_>>();
+
+                if allowed_uids.is_empty() {
+                    return Ok(Vec::new());
+                }
+
+                allowed_uids
             };
-
-            let allowed_user_ids = self
-                .get(filter_plan)
-                .await?
-                .records
-                .into_iter()
-                .map(|record| record.id)
-                .collect::<Vec<_>>();
-
-            if allowed_user_ids.is_empty() {
-                return Ok(Vec::new());
-            }
 
             let hnsw_reader = self
                 .hnsw_manager
