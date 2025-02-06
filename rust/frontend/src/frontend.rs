@@ -33,6 +33,11 @@ use chroma_types::{
     UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, CHROMA_DOCUMENT_KEY,
     CHROMA_URI_KEY,
 };
+use opentelemetry::global;
+use opentelemetry::metrics::Counter;
+use opentelemetry::KeyValue;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(thiserror::Error, Debug)]
@@ -114,6 +119,13 @@ fn to_records<
     Ok(records)
 }
 
+#[derive(Debug)]
+struct Metrics {
+    delete_retries_counter: Counter<u64>,
+    count_retries_counter: Counter<u64>,
+    query_retries_counter: Counter<u64>,
+}
+
 #[derive(Clone, Debug)]
 pub struct Frontend {
     allow_reset: bool,
@@ -122,6 +134,7 @@ pub struct Frontend {
     sysdb_client: SysDb,
     collections_with_segments_provider: CollectionsWithSegmentsProvider,
     max_batch_size: u32,
+    metrics: Arc<Metrics>,
 }
 
 impl Frontend {
@@ -133,6 +146,15 @@ impl Frontend {
         executor: Executor,
         max_batch_size: u32,
     ) -> Self {
+        let meter = global::meter("chroma");
+        let delete_retries_counter = meter.u64_counter("delete_retries").build();
+        let count_retries_counter = meter.u64_counter("count_retries").build();
+        let query_retries_counter = meter.u64_counter("query_retries").build();
+        let metrics = Arc::new(Metrics {
+            delete_retries_counter,
+            count_retries_counter,
+            query_retries_counter,
+        });
         Frontend {
             allow_reset,
             executor,
@@ -140,6 +162,7 @@ impl Frontend {
             sysdb_client,
             collections_with_segments_provider,
             max_batch_size,
+            metrics,
         }
     }
 
@@ -668,6 +691,7 @@ impl Frontend {
         &mut self,
         request: DeleteCollectionRecordsRequest,
     ) -> Result<DeleteCollectionRecordsResponse, DeleteCollectionRecordsError> {
+        let retries = Arc::new(AtomicUsize::new(0));
         let delete_to_retry = || {
             let mut self_clone = self.clone();
             let request_clone = request.clone();
@@ -675,10 +699,21 @@ impl Frontend {
                 .collections_with_segments_provider
                 .collections_with_segments_cache
                 .clone();
+            let metrics = Arc::clone(&self.metrics);
+            let retries = Arc::clone(&retries);
             async move {
                 let res = self_clone.retryable_delete(request_clone).await;
                 match res {
-                    Ok(res) => Ok(res),
+                    Ok(res) => {
+                        metrics.delete_retries_counter.add(
+                            retries.load(Ordering::Relaxed) as u64,
+                            &[KeyValue::new(
+                                "collection_id",
+                                request.collection_id.to_string(),
+                            )],
+                        );
+                        Ok(res)
+                    }
                     Err(e) => {
                         if e.code() == ErrorCodes::NotFound {
                             tracing::info!(
@@ -686,6 +721,14 @@ impl Frontend {
                                 request.collection_id
                             );
                             cache_clone.remove(&request.collection_id).await;
+                        } else {
+                            metrics.delete_retries_counter.add(
+                                retries.load(Ordering::Relaxed) as u64,
+                                &[KeyValue::new(
+                                    "collection_id",
+                                    request.collection_id.to_string(),
+                                )],
+                            );
                         }
                         Err(e)
                     }
@@ -722,6 +765,7 @@ impl Frontend {
     }
 
     pub async fn count(&mut self, request: CountRequest) -> Result<CountResponse, QueryError> {
+        let retries = Arc::new(AtomicUsize::new(0));
         let count_to_retry = || {
             let mut self_clone = self.clone();
             let request_clone = request.clone();
@@ -729,10 +773,21 @@ impl Frontend {
                 .collections_with_segments_provider
                 .collections_with_segments_cache
                 .clone();
+            let metrics = Arc::clone(&self.metrics);
+            let retries = Arc::clone(&retries);
             async move {
                 let res = self_clone.retryable_count(request_clone).await;
                 match res {
-                    Ok(res) => Ok(res),
+                    Ok(res) => {
+                        metrics.count_retries_counter.add(
+                            retries.load(Ordering::Relaxed) as u64,
+                            &[KeyValue::new(
+                                "collection_id",
+                                request.collection_id.to_string(),
+                            )],
+                        );
+                        Ok(res)
+                    }
                     Err(e) => {
                         if e.code() == ErrorCodes::NotFound {
                             tracing::info!(
@@ -740,6 +795,14 @@ impl Frontend {
                                 request.collection_id
                             );
                             cache_clone.remove(&request.collection_id).await;
+                        } else {
+                            metrics.count_retries_counter.add(
+                                retries.load(Ordering::Relaxed) as u64,
+                                &[KeyValue::new(
+                                    "collection_id",
+                                    request.collection_id.to_string(),
+                                )],
+                            );
                         }
                         Err(e)
                     }
@@ -859,6 +922,7 @@ impl Frontend {
     }
 
     pub async fn query(&mut self, request: QueryRequest) -> Result<QueryResponse, QueryError> {
+        let retries = Arc::new(AtomicUsize::new(0));
         let query_to_retry = || {
             let mut self_clone = self.clone();
             let request_clone = request.clone();
@@ -866,10 +930,21 @@ impl Frontend {
                 .collections_with_segments_provider
                 .collections_with_segments_cache
                 .clone();
+            let metrics = Arc::clone(&self.metrics);
+            let retries = Arc::clone(&retries);
             async move {
                 let res = self_clone.retryable_query(request_clone).await;
                 match res {
-                    Ok(res) => Ok(res),
+                    Ok(res) => {
+                        metrics.query_retries_counter.add(
+                            retries.load(Ordering::Relaxed) as u64,
+                            &[KeyValue::new(
+                                "collection_id",
+                                request.collection_id.to_string(),
+                            )],
+                        );
+                        Ok(res)
+                    }
                     Err(e) => {
                         if e.code() == ErrorCodes::NotFound {
                             tracing::info!(
@@ -877,6 +952,15 @@ impl Frontend {
                                 request.collection_id
                             );
                             cache_clone.remove(&request.collection_id).await;
+                            retries.fetch_add(1, Ordering::Relaxed);
+                        } else {
+                            metrics.query_retries_counter.add(
+                                retries.load(Ordering::Relaxed) as u64,
+                                &[KeyValue::new(
+                                    "collection_id",
+                                    request.collection_id.to_string(),
+                                )],
+                            );
                         }
                         Err(e)
                     }
