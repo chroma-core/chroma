@@ -5483,6 +5483,7 @@ dependencies = [
  "chroma-config",
  "chroma-frontend",
  "chroma-log",
+ "chroma-segment",
  "chroma-sqlite",
  "chroma-sysdb",
  "chroma-system",

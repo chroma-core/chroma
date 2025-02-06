@@ -1,14 +1,19 @@
+use chroma_cache::FoyerCacheConfig;
 use chroma_config::Configurable;
 use chroma_frontend::{
-    executor::local::LocalExecutor,
-    executor::Executor,
+    executor::{local::LocalExecutor, Executor},
     frontend::Frontend,
     get_collection_with_segments_provider::{
         CacheInvalidationRetryConfig, CollectionsWithSegmentsProvider,
         CollectionsWithSegmentsProviderConfig,
     },
+    LocalCompactionManager,
 };
 use chroma_log::Log;
+use chroma_segment::{
+    local_segment_manager::{LocalSegmentManager, LocalSegmentManagerConfig},
+    sqlite_metadata::SqliteMetadataWriter,
+};
 use chroma_sqlite::{config::SqliteDBConfig, db::SqliteDb};
 use chroma_sysdb::{sqlite::SqliteSysDb, sysdb::SysDb};
 use chroma_system::System;
@@ -33,6 +38,7 @@ pub(crate) struct Bindings {
     // We should slowly start moving the logic from python to rust
     proxy_frontend: Py<PyAny>,
     _frontend: Frontend,
+    _compaction_manager_handle: chroma_system::ComponentHandle<LocalCompactionManager>,
 }
 
 #[pyclass]
@@ -54,11 +60,15 @@ impl PythonBindingsConfig {
 impl Bindings {
     #[new]
     #[allow(dead_code)]
-    pub fn py_new(proxy_frontend: Py<PyAny>, sqlite_db_config: SqliteDBConfig) -> PyResult<Self> {
+    pub fn py_new(
+        proxy_frontend: Py<PyAny>,
+        sqlite_db_config: SqliteDBConfig,
+        persist_path: String,
+    ) -> PyResult<Self> {
         // TODO: runtime config
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let _guard = runtime.enter();
-        let _system = System::new();
+        let system = System::new();
 
         //////////////////////////// Frontend Setup ////////////////////////////
 
@@ -78,6 +88,24 @@ impl Bindings {
                 }
             };
 
+        let cache_config = chroma_cache::CacheConfig::Memory(FoyerCacheConfig::default());
+        let segment_manager_config = LocalSegmentManagerConfig {
+            hnsw_index_pool_cache_config: cache_config,
+            persist_path,
+        };
+        // Create the hnsw segment manager.
+        let segment_manager = match runtime.block_on(LocalSegmentManager::try_from_config(&(
+            segment_manager_config,
+            sqlite_db.clone(),
+        ))) {
+            Ok(sm) => sm,
+            Err(e) => {
+                return Err(PyOSError::new_err(format!(
+                    "Failed to create segment manager: {}",
+                    e
+                )))
+            }
+        };
         let sqlite_sysdb = SqliteSysDb::new(sqlite_db.clone());
         let sysdb = Box::new(SysDb::Sqlite(sqlite_sysdb));
         // TODO: get the log configuration from the config sysdb
@@ -86,6 +114,16 @@ impl Bindings {
             "default".to_string(),
             "default".to_string(),
         )));
+
+        // Spawn the compaction manager.
+        let metadata_writer = SqliteMetadataWriter {
+            db: sqlite_db.clone(),
+        };
+        let handle = system.start_component(LocalCompactionManager::new(
+            log.clone(),
+            metadata_writer,
+            segment_manager,
+        ));
 
         // TODO: clean up the cache configuration and decide the source of truth owner
         // make cache not a no-op
@@ -123,6 +161,7 @@ impl Bindings {
             proxy_frontend,
             _runtime: runtime,
             _frontend: frontend,
+            _compaction_manager_handle: handle,
         })
     }
 

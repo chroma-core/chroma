@@ -69,7 +69,7 @@ class RustBindingsAPI(ServerAPI):
 
         # Construct the Rust bindings
         self.bindings = rust_bindings.Bindings(
-            proxy_frontend=self.proxy_segment_api, sqlite_db_config=sqlite_config
+            proxy_frontend=self.proxy_segment_api, sqlite_db_config=sqlite_config, persist_path=persist_path
         )
 
     # ////////////////////////////// Admin API //////////////////////////////
