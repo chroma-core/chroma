@@ -765,6 +765,8 @@ pub enum ExecutorError {
     EmptyMemberlist,
     #[error(transparent)]
     Grpc(#[from] Status),
+    #[error("Inconsistent data")]
+    InconsistentData,
     #[error("Internal error: {0}")]
     Internal(Box<dyn ChromaError>),
     #[error("No client found for node: {0}")]
@@ -778,6 +780,7 @@ impl ChromaError for ExecutorError {
             ExecutorError::Conversion(_) => ErrorCodes::InvalidArgument,
             ExecutorError::EmptyMemberlist => ErrorCodes::Internal,
             ExecutorError::Grpc(e) => e.code().into(),
+            ExecutorError::InconsistentData => ErrorCodes::Internal,
             ExecutorError::Internal(e) => e.code(),
             ExecutorError::NoClientFound(_) => ErrorCodes::Internal,
         }
