@@ -490,6 +490,21 @@ impl KeySelector {
         };
         format!("{:0>16}", index)
     }
+
+    /// Select a key from the distribution.
+    pub fn select_with_offset(
+        &self,
+        guac: &mut Guacamole,
+        data_set: &dyn DataSet,
+        offset: usize,
+    ) -> String {
+        let index = match self {
+            KeySelector::Index(i) => *i,
+            KeySelector::Random(skew) => skew.sample(guac, data_set.cardinality()),
+        };
+        let index = (index + offset) % data_set.cardinality();
+        format!("{:0>16}", index)
+    }
 }
 
 //////////////////////////////////////////// UpsertQuery ///////////////////////////////////////////
@@ -591,6 +606,7 @@ impl Workload {
         metrics: &Metrics,
         data_set: &dyn DataSet,
         state: &mut WorkloadState,
+        done: &Arc<AtomicBool>,
     ) -> Result<(), Box<dyn std::error::Error + Send>> {
         match self {
             Workload::Nop => {
@@ -658,7 +674,8 @@ impl Workload {
                     }
                     if workload.is_active() {
                         if *p >= total {
-                            return Box::pin(workload.step(client, metrics, data_set, state)).await;
+                            return Box::pin(workload.step(client, metrics, data_set, state, done))
+                                .await;
                         }
                         total -= *p;
                     }
@@ -668,9 +685,13 @@ impl Workload {
                 )))
             }
             Workload::Delay { after: _, wrap } => {
-                Box::pin(wrap.step(client, metrics, data_set, state)).await
+                Box::pin(wrap.step(client, metrics, data_set, state, done)).await
             }
             Workload::Load => {
+                if (state.seq_no * 100) >= data_set.cardinality() as u64 {
+                    done.store(true, std::sync::atomic::Ordering::Relaxed);
+                    return Ok(());
+                }
                 metrics.upsert.add(
                     1,
                     &[KeyValue::new(
@@ -682,7 +703,7 @@ impl Workload {
                     .upsert(
                         client,
                         UpsertQuery {
-                            key: KeySelector::Index(state.seq_no as usize),
+                            key: KeySelector::Index((state.seq_no * 100) as usize),
                             batch_size: 100,
                             // Associativity is the ratio of documents in a cluster to documents
                             // written by the workload.  It is ignored for load.
@@ -1297,6 +1318,7 @@ impl LoadService {
                 let data_set = Arc::clone(&spec.data_set);
                 let guac = Guacamole::new(any(&mut guac));
                 let mut state = WorkloadState { seq_no, guac };
+                let done = Arc::clone(&done);
                 let fut = async move {
                     this.metrics.num_operations.add(1, &[]);
                     this.metrics.step.add(
@@ -1307,7 +1329,7 @@ impl LoadService {
                         )],
                     );
                     match workload
-                        .step(&client, &this.metrics, &*data_set, &mut state)
+                        .step(&client, &this.metrics, &*data_set, &mut state, &done)
                         .await
                         .map_err(|err| Error::FailWorkload(err.to_string()))
                     {
@@ -1331,6 +1353,8 @@ impl LoadService {
                 tx.send(tokio::spawn(fut)).await.unwrap();
             }
         }
+        // Not an error, just needs to show up in stdout.
+        tracing::error!("workload done: {}/{}", spec.name, spec.description());
         drop(tx);
         reaper.await.unwrap();
     }

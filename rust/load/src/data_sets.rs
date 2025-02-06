@@ -1,7 +1,7 @@
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
-use chromadb::collection::{CollectionEntries, GetOptions, QueryOptions};
+use chromadb::collection::{CollectionEntries, GetOptions, GetResult, QueryOptions};
 use chromadb::ChromaClient;
 use guacamole::combinators::*;
 use guacamole::Guacamole;
@@ -130,8 +130,12 @@ impl TinyStoriesDataSetType {
             Self::Classic { name, model, size } => {
                 format!("{}-{}-{}", name, model, humanize(*size))
             }
-            Self::Reference { name, model, size } => {
-                format!("{}-{}-{}", name, model, humanize(*size))
+            Self::Reference {
+                name,
+                model,
+                size: _,
+            } => {
+                format!("{}-{}", name, model)
             }
         }
     }
@@ -210,6 +214,32 @@ impl DataSet for TinyStoriesDataSet {
 
     fn cardinality(&self) -> usize {
         self.data_set_type.size()
+    }
+
+    async fn get_by_key(
+        &self,
+        client: &ChromaClient,
+        ids: &[&str],
+    ) -> Result<Option<GetResult>, Box<dyn std::error::Error + Send>> {
+        let collection = client.get_collection(&self.name()).await?;
+        let ids = ids.iter().map(|id| id.to_string()).collect::<Vec<_>>();
+        Ok(Some(
+            collection
+                .get(GetOptions {
+                    ids,
+                    where_metadata: None,
+                    limit: None,
+                    offset: None,
+                    where_document: None,
+                    include: Some(vec![
+                        "documents".to_string(),
+                        "metadatas".to_string(),
+                        "embeddings".to_string(),
+                    ]),
+                })
+                .instrument(tracing::info_span!("get_by_key"))
+                .await?,
+        ))
     }
 
     async fn get(
@@ -796,8 +826,8 @@ impl DataSet for ReferencingDataSet {
     ) -> Result<(), Box<dyn std::error::Error + Send>> {
         let collection = client.get_collection(&self.operates_on).await?;
         let mut keys = vec![];
-        for _ in 0..uq.batch_size {
-            keys.push(uq.key.select(guac, self));
+        for offset in 0..uq.batch_size {
+            keys.push(uq.key.select_with_offset(guac, self, offset));
         }
         let keys = keys.iter().map(|k| k.as_str()).collect::<Vec<_>>();
         if let Some(res) = self.references.get_by_key(client, &keys).await? {
@@ -933,28 +963,28 @@ pub fn all_data_sets() -> Vec<Arc<dyn DataSet>> {
     for (cardinality, model, data_set_name) in &[
         (
             10_000,
-            ALL_MINILM_L6_V2,
-            "tiny-stories-all-minilm-l6-v2-10k-writable",
+            PARAPHRASE_ALBERT_SMALL_V2,
+            "tiny-stories-paraphrase-albert-small-v2-10k-writable",
         ),
         (
             25_000,
-            ALL_MINILM_L6_V2,
-            "tiny-stories-all-minilm-l6-v2-25k-writable",
+            PARAPHRASE_ALBERT_SMALL_V2,
+            "tiny-stories-paraphrase-albert-small-v2-25k-writable",
         ),
         (
             50_000,
-            ALL_MINILM_L6_V2,
-            "tiny-stories-all-minilm-l6-v2-50k-writable",
+            PARAPHRASE_ALBERT_SMALL_V2,
+            "tiny-stories-paraphrase-albert-small-v2-50k-writable",
         ),
         (
             100_000,
-            ALL_MINILM_L6_V2,
-            "tiny-stories-all-minilm-l6-v2-100k-writable",
+            PARAPHRASE_ALBERT_SMALL_V2,
+            "tiny-stories-paraphrase-albert-small-v2-100k-writable",
         ),
         (
             1_000_000,
-            ALL_MINILM_L6_V2,
-            "tiny-stories-all-minilm-l6-v2-1M-writable",
+            PARAPHRASE_ALBERT_SMALL_V2,
+            "tiny-stories-paraphrase-albert-small-v2-1M-writable",
         ),
     ] {
         let reference = Arc::new(TinyStoriesDataSet::new(TinyStoriesDataSetType::reference(
