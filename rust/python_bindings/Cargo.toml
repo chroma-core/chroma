@@ -15,6 +15,7 @@ tokio = { workspace = true }
 uuid = { workspace = true }
 numpy = "0.23.0"
 
+chroma-segment = { workspace = true }
 chroma-sqlite = { workspace = true }
 chroma-frontend = { workspace = true }
 chroma-sysdb = { workspace = true }

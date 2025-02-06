@@ -17,7 +17,8 @@ use crate::local_hnsw::{
 pub struct LocalSegmentManagerConfig {
     // TODO(Sanket): Estimate the max number of FDs that can be kept open and
     // use that as a capacity in the cache.
-    hnsw_index_pool_cache_config: CacheConfig,
+    pub hnsw_index_pool_cache_config: CacheConfig,
+    pub persist_path: String,
 }
 
 #[allow(dead_code)]
@@ -25,6 +26,7 @@ pub struct LocalSegmentManager {
     hnsw_index_pool: Arc<dyn Cache<IndexUuid, LocalHnswIndex>>,
     eviction_callback_task_handle: Option<Arc<tokio::task::JoinHandle<()>>>,
     sqlite: SqliteDb,
+    persist_path: String,
 }
 
 #[async_trait::async_trait]
@@ -41,13 +43,13 @@ impl Configurable<(LocalSegmentManagerConfig, SqliteDb)> for LocalSegmentManager
             while let Some((_, index)) = rx.recv().await {
                 // Close the FD here.
                 index.close().await;
-                // TODO(Sanket): Persist the index.
             }
         });
         Ok(Self {
             hnsw_index_pool: hnsw_index_pool.into(),
             eviction_callback_task_handle: Some(Arc::new(handle)),
             sqlite: sql_db.clone(),
+            persist_path: config.persist_path.clone(),
         })
     }
 }
