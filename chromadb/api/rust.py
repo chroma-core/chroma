@@ -245,6 +245,17 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
+        # TODO: This is an example
+        # self.bindings.add(
+        #     ids,
+        #     str(collection_id),
+        #     embeddings,
+        #     metadatas,
+        #     documents,
+        #     uris,
+        #     tenant,
+        #     database,
+        # )
         return self.proxy_segment_api._add(
             ids, collection_id, embeddings, metadatas, documents, uris, tenant, database
         )

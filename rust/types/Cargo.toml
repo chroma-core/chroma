@@ -16,6 +16,7 @@ uuid = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
+pyo3 = { workspace = true }
 
 # (Cross-crate testing dependencies)
 proptest = { workspace = true, optional = true }

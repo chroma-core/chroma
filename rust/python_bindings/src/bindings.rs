@@ -12,8 +12,18 @@ use chroma_log::Log;
 use chroma_sqlite::{config::SqliteDBConfig, db::SqliteDb};
 use chroma_sysdb::{sqlite::SqliteSysDb, sysdb::SysDb};
 use chroma_system::System;
-use pyo3::{exceptions::PyOSError, pyclass, pymethods, Py, PyAny, PyObject, PyResult, Python};
+use chroma_types::{
+    AddCollectionRecordsError, AddCollectionRecordsRequest, GetCollectionError, Metadata,
+};
+use numpy::PyReadonlyArray1;
+use pyo3::{
+    exceptions::{PyOSError, PyRuntimeError, PyValueError},
+    pyclass, pymethods, Py, PyAny, PyObject, PyResult, Python,
+};
 use std::time::SystemTime;
+
+const DEFAULT_DATABASE: &str = "default_database";
+const DEFAULT_TENANT: &str = "default_tenant";
 
 #[pyclass]
 pub(crate) struct Bindings {
@@ -194,4 +204,84 @@ impl Bindings {
             ),
         )
     }
+
+    //////////////////////////// Record Methods ////////////////////////////
+
+    #[pyo3(
+        signature = (ids, collection_id, embeddings, metadatas = None, documents = None, uris = None, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
+    )]
+    #[allow(clippy::too_many_arguments)]
+    fn add(
+        &self,
+        ids: Vec<String>,
+        collection_id: String,
+        embeddings: Vec<PyReadonlyArray1<f32>>,
+        metadatas: Option<Vec<Option<Metadata>>>,
+        documents: Option<Vec<Option<String>>>,
+        uris: Option<Vec<Option<String>>>,
+        tenant: String,
+        database: String,
+    ) -> PyResult<bool> {
+        let embeddings = py_embeddings_to_vec_f32(embeddings)?;
+
+        let collection_id = chroma_types::CollectionUuid(
+            uuid::Uuid::parse_str(&collection_id)
+                .map_err(|e| PyValueError::new_err(e.to_string()))?,
+        );
+
+        let req = AddCollectionRecordsRequest {
+            ids,
+            collection_id,
+            // TODO: WHY IS THIS Option for Add?
+            embeddings: Some(embeddings),
+            metadatas,
+            documents,
+            uris,
+            tenant_id: tenant,
+            database_name: database,
+        };
+
+        // TODO: Error handling cleanup
+        let mut frontend_clone = self._frontend.clone();
+        match self
+            ._runtime
+            .block_on(async { frontend_clone.add(req).await })
+        {
+            Ok(_) => Ok(true),
+            Err(e) => match e {
+                AddCollectionRecordsError::Collection(e) => match e {
+                    GetCollectionError::NotFound(_) => {
+                        Err(PyValueError::new_err("Collection not found"))
+                    }
+                    GetCollectionError::Internal(e) => {
+                        Err(PyRuntimeError::new_err(format!("Internal Error: {}", e)))
+                    }
+                },
+                AddCollectionRecordsError::Internal(e) => {
+                    Err(PyRuntimeError::new_err(format!("Internal Error: {}", e)))
+                }
+            },
+        }
+    }
+}
+
+/// Converts a Vec<PyReadonlyArray1<f32>> to a Vec<Vec<f32>>
+/// # Note
+/// - We cannot impl TryFrom etc because we don't own the types or the trait
+fn py_embeddings_to_vec_f32(embeddings: Vec<PyReadonlyArray1<f32>>) -> PyResult<Vec<Vec<f32>>> {
+    let mut embeddings_vec = Vec::with_capacity(embeddings.len());
+    for embedding in embeddings {
+        // We have to copy the data from the PyReadonlyArray1 to a Vec<f32>
+        // due to how the incoming python data is owned by the caller
+        // We can't assume we can take ownership of the data
+        // There are clever ways to avoid this copy, but they are not worth the complexity
+        // at this time
+        let e_minor = match embedding.as_slice() {
+            Ok(e) => e,
+            Err(e) => return Err(e.into()),
+        };
+        let as_vec = e_minor.to_vec();
+        embeddings_vec.push(as_vec);
+    }
+    Ok(embeddings_vec)
 }

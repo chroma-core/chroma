@@ -23,6 +23,5 @@ fn rust_bindings(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // Log config classes
     // TODO
-
     Ok(())
 }
