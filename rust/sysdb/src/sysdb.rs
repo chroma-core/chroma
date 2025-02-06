@@ -13,7 +13,7 @@ use chroma_types::{
     DeleteDatabaseError, DeleteDatabaseResponse, GetCollectionWithSegmentsError,
     GetCollectionsError, GetDatabaseError, GetDatabaseResponse, GetTenantError, GetTenantResponse,
     ListDatabasesError, ListDatabasesResponse, Metadata, ResetError, ResetResponse,
-    SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
+    SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid, UpdateCollectionError,
 };
 use chroma_types::{
     Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
@@ -209,8 +209,10 @@ impl SysDb {
                 grpc.update_collection(collection_id, name, metadata, dimension)
                     .await
             }
-            SysDb::Sqlite(_) => {
-                todo!()
+            SysDb::Sqlite(sqlite) => {
+                sqlite
+                    .update_collection(collection_id, name, metadata, dimension)
+                    .await
             }
             SysDb::Test(_) => {
                 todo!()
@@ -730,7 +732,7 @@ impl GrpcSysDb {
             if e.code() == Code::NotFound {
                 UpdateCollectionError::CollectionNotFound
             } else {
-                UpdateCollectionError::FailedToUpdateCollection(e)
+                UpdateCollectionError::Internal(e.into())
             }
         })?;
 
@@ -956,23 +958,6 @@ impl GrpcSysDb {
     async fn reset(&mut self) -> Result<ResetResponse, ResetError> {
         self.client.reset_state(()).await?;
         Ok(ResetResponse {})
-    }
-}
-
-#[derive(Error, Debug)]
-pub enum UpdateCollectionError {
-    #[error("Collection not found")]
-    CollectionNotFound,
-    #[error("Failed to update")]
-    FailedToUpdateCollection(#[from] tonic::Status),
-}
-
-impl ChromaError for UpdateCollectionError {
-    fn code(&self) -> ErrorCodes {
-        match self {
-            UpdateCollectionError::CollectionNotFound => ErrorCodes::NotFound,
-            UpdateCollectionError::FailedToUpdateCollection(_) => ErrorCodes::Internal,
-        }
     }
 }
 

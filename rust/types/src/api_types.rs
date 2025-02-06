@@ -385,6 +385,10 @@ pub struct UpdateCollectionResponse {}
 
 #[derive(Error, Debug)]
 pub enum UpdateCollectionError {
+    #[error("Collection does not exist")]
+    CollectionNotFound,
+    #[error("Metadata reset unsupported")]
+    MetadataResetUnsupported,
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
 }
@@ -392,6 +396,8 @@ pub enum UpdateCollectionError {
 impl ChromaError for UpdateCollectionError {
     fn code(&self) -> ErrorCodes {
         match self {
+            UpdateCollectionError::CollectionNotFound => ErrorCodes::NotFound,
+            UpdateCollectionError::MetadataResetUnsupported => ErrorCodes::InvalidArgument,
             UpdateCollectionError::Internal(err) => err.code(),
         }
     }
