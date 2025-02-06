@@ -356,7 +356,7 @@ impl Frontend {
         let segments = vec![
             Segment {
                 id: SegmentUuid::new(),
-                r#type: SegmentType::HnswDistributed,
+                r#type: SegmentType::HnswLocalPersisted,
                 scope: SegmentScope::VECTOR,
                 collection: collection_id,
                 metadata: hnsw_metadata,
@@ -364,16 +364,8 @@ impl Frontend {
             },
             Segment {
                 id: SegmentUuid::new(),
-                r#type: SegmentType::BlockfileMetadata,
+                r#type: SegmentType::Sqlite,
                 scope: SegmentScope::METADATA,
-                collection: collection_id,
-                metadata: None,
-                file_path: Default::default(),
-            },
-            Segment {
-                id: SegmentUuid::new(),
-                r#type: SegmentType::BlockfileRecord,
-                scope: SegmentScope::RECORD,
                 collection: collection_id,
                 metadata: None,
                 file_path: Default::default(),

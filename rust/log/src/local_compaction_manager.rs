@@ -60,6 +60,8 @@ impl Debug for LocalCompactionManager {
 
 #[derive(Error, Debug)]
 pub enum CompactionManagerError {
+    #[error("Collection uninitialized")]
+    CollectionUninitialized,
     #[error("Failed to pull logs from the log store")]
     PullLogsFailure,
     #[error("Failed to apply logs to the metadata segment")]
@@ -75,6 +77,7 @@ pub enum CompactionManagerError {
 impl ChromaError for CompactionManagerError {
     fn code(&self) -> ErrorCodes {
         match self {
+            CompactionManagerError::CollectionUninitialized => ErrorCodes::Internal,
             CompactionManagerError::PullLogsFailure => ErrorCodes::InvalidArgument,
             CompactionManagerError::MetadataApplyLogsFailed => ErrorCodes::Internal,
             CompactionManagerError::GetHnswWriterFailed => ErrorCodes::Internal,
@@ -112,11 +115,14 @@ impl Handler<CompactionMessage> for LocalCompactionManager {
             .await
             .map_err(|_| CompactionManagerError::PullLogsFailure)?;
         let data_chunk: Chunk<LogRecord> = Chunk::new(data.into());
-        // TODO(Sanket): Avoid the unwrap here.
         let collection_segments = self
             .sysdb
             .get_collection_with_segments(message.collection_id)
             .await?;
+        let collection_dimension = collection_segments
+            .collection
+            .dimension
+            .ok_or(CompactionManagerError::CollectionUninitialized)?;
         // Apply the records to the metadata writer.
         let mut tx = self
             .metadata_writer
@@ -126,7 +132,7 @@ impl Handler<CompactionMessage> for LocalCompactionManager {
         self.metadata_writer
             .apply_logs(
                 data_chunk.clone(),
-                collection_segments.vector_segment.id,
+                collection_segments.metadata_segment.id,
                 &mut *tx,
             )
             .await
@@ -140,7 +146,7 @@ impl Handler<CompactionMessage> for LocalCompactionManager {
             .hnsw_segment_manager
             .get_hnsw_writer(
                 &collection_segments.vector_segment,
-                collection_segments.collection.dimension.unwrap() as usize,
+                collection_dimension as usize,
             )
             .await
             .map_err(|_| CompactionManagerError::GetHnswWriterFailed)?;

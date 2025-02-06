@@ -15,7 +15,7 @@ use chroma_types::{
     BooleanOperator, Chunk, CompositeExpression, DocumentExpression, DocumentOperator, LogRecord,
     MetadataComparison, MetadataExpression, MetadataSetValue, MetadataValue,
     MetadataValueConversionError, Operation, OperationRecord, PrimitiveOperator, SegmentUuid,
-    SetOperator, Where, CHROMA_DOCUMENT_KEY,
+    SetOperator, UpdateMetadataValue, Where, CHROMA_DOCUMENT_KEY,
 };
 use sea_query::{
     Alias, DeleteStatement, Expr, Func, InsertStatement, OnConflict, Query, SimpleExpr,
@@ -302,14 +302,22 @@ impl SqliteMetadataWriter {
         {
             let log_offset_unsigned = (*log_offset).try_into()?;
             max_seq_id = max_seq_id.max(log_offset_unsigned);
+            let mut metadata_owned = metadata.clone();
+            if let Some(doc) = document {
+                let mut doc_embedded_meta = metadata_owned.unwrap_or_default();
+                doc_embedded_meta.insert(
+                    CHROMA_DOCUMENT_KEY.to_string(),
+                    UpdateMetadataValue::Str(doc.clone()),
+                );
+                metadata_owned = Some(doc_embedded_meta);
+            }
             match operation {
                 Operation::Add => {
                     if let Some(offset_id) =
                         Self::add_record(tx, segment_id, log_offset_unsigned, id.clone()).await?
                     {
-                        if let Some(meta) = metadata {
-                            update_metadata::<EmbeddingMetadata, _, _>(tx, offset_id, meta.clone())
-                                .await?;
+                        if let Some(meta) = metadata_owned {
+                            update_metadata::<EmbeddingMetadata, _, _>(tx, offset_id, meta).await?;
                         }
 
                         if let Some(doc) = document {
@@ -321,9 +329,8 @@ impl SqliteMetadataWriter {
                     if let Some(offset_id) =
                         Self::update_record(tx, segment_id, log_offset_unsigned, id.clone()).await?
                     {
-                        if let Some(meta) = metadata {
-                            update_metadata::<EmbeddingMetadata, _, _>(tx, offset_id, meta.clone())
-                                .await?;
+                        if let Some(meta) = metadata_owned {
+                            update_metadata::<EmbeddingMetadata, _, _>(tx, offset_id, meta).await?;
                         }
 
                         if let Some(doc) = document {
@@ -337,9 +344,8 @@ impl SqliteMetadataWriter {
                         Self::upsert_record(tx, segment_id, log_offset_unsigned, id.clone())
                             .await?;
 
-                    if let Some(meta) = metadata {
-                        update_metadata::<EmbeddingMetadata, _, _>(tx, offset_id, meta.clone())
-                            .await?;
+                    if let Some(meta) = metadata_owned {
+                        update_metadata::<EmbeddingMetadata, _, _>(tx, offset_id, meta).await?;
                     }
 
                     if let Some(doc) = document {
