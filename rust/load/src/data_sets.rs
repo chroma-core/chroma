@@ -192,13 +192,6 @@ impl TinyStoriesDataSet {
     pub const fn new(data_set_type: TinyStoriesDataSetType) -> Self {
         Self { data_set_type }
     }
-
-    fn model(&self) -> &str {
-        match self.data_set_type {
-            TinyStoriesDataSetType::Classic { model, .. } => model,
-            TinyStoriesDataSetType::Reference { model, .. } => model,
-        }
-    }
 }
 
 #[async_trait::async_trait]
@@ -930,28 +923,50 @@ pub fn all_data_sets() -> Vec<Arc<dyn DataSet>> {
     for data_set in TINY_STORIES_DATA_SETS {
         data_sets.push(Arc::new(data_set.clone()) as _);
     }
-    for model in &[
-        ALL_MINILM_L6_V2,
-        PARAPHRASE_MINILM_L3_V2,
-        PARAPHRASE_ALBERT_SMALL_V2,
+    // NOTE(rescrv):  When extending chroma-load to a new data set (or experiment), add it here.
+    // Give it a unique name (not enforced because we may want to simulate a scenario in which
+    // someone crosses embedding dimension), a description, and a cardinality.  The cardinality
+    // should be less than 1e6 because the reference data sets are only 1e6 in size.
+    //
+    // This will, for each listed data set, create a writable data set that refers to the reference
+    // data set that contains the data from hugging face as loaded by the perf test suite.
+    for (cardinality, model, data_set_name) in &[
+        (
+            10_000,
+            ALL_MINILM_L6_V2,
+            "tiny-stories-all-minilm-l6-v2-10k-writable",
+        ),
+        (
+            25_000,
+            ALL_MINILM_L6_V2,
+            "tiny-stories-all-minilm-l6-v2-25k-writable",
+        ),
+        (
+            50_000,
+            ALL_MINILM_L6_V2,
+            "tiny-stories-all-minilm-l6-v2-50k-writable",
+        ),
+        (
+            100_000,
+            ALL_MINILM_L6_V2,
+            "tiny-stories-all-minilm-l6-v2-100k-writable",
+        ),
+        (
+            1_000_000,
+            ALL_MINILM_L6_V2,
+            "tiny-stories-all-minilm-l6-v2-1M-writable",
+        ),
     ] {
         let reference = Arc::new(TinyStoriesDataSet::new(TinyStoriesDataSetType::reference(
             "reference",
             model,
             1_000_000,
         )));
-        for cardinality in [10_000, 25_000, 50_000, 100_000, 1_000_000] {
-            for data_set in TINY_STORIES_DATA_SETS {
-                if data_set.model() != *model {
-                    continue;
-                }
-                data_sets.push(Arc::new(ReferencingDataSet {
-                    references: reference.clone(),
-                    operates_on: data_set.name() + "-writable",
-                    cardinality,
-                }) as _);
-            }
-        }
+        data_sets.push(Arc::new(ReferencingDataSet {
+            references: reference,
+            operates_on: data_set_name.to_string(),
+            cardinality: *cardinality,
+        }) as _);
     }
     data_sets.push(Arc::new(RoundRobinDataSet {
         name: "tiny-stories".to_string(),
