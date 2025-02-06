@@ -271,12 +271,33 @@ impl Bindings {
         tenant: String,
         database: String,
     ) -> PyResult<bool> {
+        let mut frontend_clone = self._frontend.clone();
+
         let embeddings = py_embeddings_to_vec_f32(embeddings)?;
 
         let collection_id = chroma_types::CollectionUuid(
             uuid::Uuid::parse_str(&collection_id)
                 .map_err(|e| PyValueError::new_err(e.to_string()))?,
         );
+
+        let res = self._runtime.block_on(async {
+            frontend_clone
+                .validate_embedding(collection_id, Some(&embeddings), true, |embedding| {
+                    Some(embedding.len())
+                })
+                .await
+        });
+
+        // TODO: error handling
+        match res {
+            Ok(_) => (),
+            Err(e) => {
+                return Err(PyRuntimeError::new_err(format!(
+                    "Failed to validate embeddings: {}",
+                    e
+                )))
+            }
+        }
 
         let req = chroma_types::AddCollectionRecordsRequest {
             ids,
@@ -291,7 +312,6 @@ impl Bindings {
         };
 
         // TODO: Error handling cleanup
-        let mut frontend_clone = self._frontend.clone();
         match self
             ._runtime
             .block_on(async { frontend_clone.add(req).await })
