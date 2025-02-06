@@ -267,7 +267,7 @@ impl Bindings {
     }
 
     #[pyo3(
-            signature = (collection_id, ids = None, r#where = None, limit = None, offset = 0, where_document = None, include = ["metadatas".to_string(), "documents".to_string()].to_vec(), tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
+            signature = (collection_id, ids = None, r#where = None, limit = None, offset = 0, where_document = None, _include = ["metadatas".to_string(), "documents".to_string()].to_vec(), tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
         )]
     #[allow(clippy::too_many_arguments)]
     fn get(
