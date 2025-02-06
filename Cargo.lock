@@ -1476,11 +1476,14 @@ dependencies = [
 name = "chroma-sqlite"
 version = "0.1.0"
 dependencies = [
+ "chroma-error",
+ "chroma-types",
  "md5",
  "pyo3",
  "regex",
  "rust-embed",
  "sea-query",
+ "sea-query-binder",
  "sha2",
  "sqlx",
  "tempfile",

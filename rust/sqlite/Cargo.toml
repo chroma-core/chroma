@@ -6,11 +6,14 @@ edition = "2021"
 [dependencies]
 md5 = { workspace = true }
 regex = { workspace = true }
-rust-embed = {version = "8.5.0", features = ["include-exclude"]}
+rust-embed = { version = "8.5.0", features = ["include-exclude"] }
 sea-query = { workspace = true, features = ["derive"] }
-sha2 = { workspace = true}
+sea-query-binder = { workspace = true, features = ["sqlx-sqlite"] }
+sha2 = { workspace = true }
 sqlx = { workspace = true }
 tempfile = { workspace = true }
 pyo3 = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true}
+tokio = { workspace = true }
+chroma-error = { workspace = true, features = ["sqlx"] }
+chroma-types = { workspace = true }

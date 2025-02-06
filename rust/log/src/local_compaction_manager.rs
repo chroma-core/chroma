@@ -127,7 +127,7 @@ impl Handler<CompactionMessage> for LocalCompactionManager {
             .apply_logs(
                 data_chunk.clone(),
                 collection_segments.vector_segment.id,
-                &mut tx,
+                &mut *tx,
             )
             .await
             .map_err(|_| CompactionManagerError::MetadataApplyLogsFailed)?;
