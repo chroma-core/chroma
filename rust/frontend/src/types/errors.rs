@@ -26,10 +26,6 @@ pub enum ValidationError {
     Name(String),
     #[error("Error updatding collection: {0}")]
     UpdateCollection(#[from] UpdateCollectionError),
-    #[error("Error parsing where clause")]
-    WhereClause,
-    #[error("Error parsing where document clause")]
-    WhereDocumentClause,
 }
 
 impl ChromaError for ValidationError {
@@ -42,8 +38,6 @@ impl ChromaError for ValidationError {
             ValidationError::EmptyMetadata => chroma_error::ErrorCodes::InvalidArgument,
             ValidationError::GetCollection(err) => err.code(),
             ValidationError::Name(_) => chroma_error::ErrorCodes::InvalidArgument,
-            ValidationError::WhereClause => chroma_error::ErrorCodes::InvalidArgument,
-            ValidationError::WhereDocumentClause => chroma_error::ErrorCodes::InvalidArgument,
             ValidationError::UpdateCollection(err) => err.code(),
         }
     }
