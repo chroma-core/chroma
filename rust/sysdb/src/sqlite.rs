@@ -383,18 +383,11 @@ impl SqliteSysDb {
                 "Missing vector segment".to_string(),
             ))?;
 
-        let record_segment = segments
-            .iter()
-            .find(|s| s.scope == SegmentScope::RECORD)
-            .ok_or(GetCollectionWithSegmentsError::Field(
-                "Missing record segment".to_string(),
-            ))?;
-
         Ok(CollectionAndSegments {
             collection: collection.clone(),
             metadata_segment: metadata_segment.clone(),
             vector_segment: vector_segment.clone(),
-            record_segment: record_segment.clone(),
+            record_segment: metadata_segment.clone(), // single node Chroma does not have a record segment
         })
     }
 
@@ -943,14 +936,6 @@ mod tests {
                 id: SegmentUuid::new(),
                 r#type: SegmentType::HnswDistributed,
                 scope: SegmentScope::VECTOR,
-                collection: collection_id,
-                metadata: None,
-                file_path: HashMap::new(),
-            },
-            Segment {
-                id: SegmentUuid::new(),
-                r#type: SegmentType::BlockfileRecord,
-                scope: SegmentScope::RECORD,
                 collection: collection_id,
                 metadata: None,
                 file_path: HashMap::new(),
