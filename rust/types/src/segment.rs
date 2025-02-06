@@ -38,9 +38,11 @@ impl std::fmt::Display for SegmentUuid {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SegmentType {
-    HnswDistributed,
     BlockfileMetadata,
     BlockfileRecord,
+    HnswDistributed,
+    HnswLocalMemory,
+    HnswLocalPersisted,
     Sqlite,
     Spann,
 }
@@ -48,13 +50,19 @@ pub enum SegmentType {
 impl From<SegmentType> for String {
     fn from(segment_type: SegmentType) -> String {
         match segment_type {
+            SegmentType::BlockfileMetadata => "urn:chroma:segment/metadata/blockfile".to_string(),
+            SegmentType::BlockfileRecord => "urn:chroma:segment/record/blockfile".to_string(),
             SegmentType::HnswDistributed => {
                 "urn:chroma:segment/vector/hnsw-distributed".to_string()
             }
-            SegmentType::BlockfileRecord => "urn:chroma:segment/record/blockfile".to_string(),
-            SegmentType::Sqlite => "urn:chroma:segment/metadata/sqlite".to_string(),
-            SegmentType::BlockfileMetadata => "urn:chroma:segment/metadata/blockfile".to_string(),
+            SegmentType::HnswLocalMemory => {
+                "urn:chroma:segment/vector/hnsw-local-memory".to_string()
+            }
+            SegmentType::HnswLocalPersisted => {
+                "urn:chroma:segment/vector/hnsw-local-persisted".to_string()
+            }
             SegmentType::Spann => "urn:chroma:segment/vector/spann".to_string(),
+            SegmentType::Sqlite => "urn:chroma:segment/metadata/sqlite".to_string(),
         }
     }
 }
@@ -64,11 +72,13 @@ impl TryFrom<&str> for SegmentType {
 
     fn try_from(segment_type: &str) -> Result<Self, Self::Error> {
         match segment_type {
-            "urn:chroma:segment/vector/hnsw-distributed" => Ok(SegmentType::HnswDistributed),
-            "urn:chroma:segment/record/blockfile" => Ok(SegmentType::BlockfileRecord),
-            "urn:chroma:segment/metadata/sqlite" => Ok(SegmentType::Sqlite),
             "urn:chroma:segment/metadata/blockfile" => Ok(SegmentType::BlockfileMetadata),
+            "urn:chroma:segment/record/blockfile" => Ok(SegmentType::BlockfileRecord),
+            "urn:chroma:segment/vector/hnsw-distributed" => Ok(SegmentType::HnswDistributed),
+            "urn:chroma:segment/vector/hnsw-local-memory" => Ok(SegmentType::HnswLocalMemory),
+            "urn:chroma:segment/vector/hnsw-local-persisted" => Ok(Self::HnswLocalPersisted),
             "urn:chroma:segment/vector/spann" => Ok(SegmentType::Spann),
+            "urn:chroma:segment/metadata/sqlite" => Ok(SegmentType::Sqlite),
             _ => Err(SegmentConversionError::InvalidSegmentType),
         }
     }

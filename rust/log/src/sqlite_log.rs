@@ -8,7 +8,7 @@ use chroma_types::{
 };
 use futures::TryStreamExt;
 use sqlx::{QueryBuilder, Row};
-use std::{str::FromStr, sync::Arc};
+use std::{str::FromStr, sync::OnceLock};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -36,23 +36,26 @@ impl ChromaError for SqlitePullLogsError {
 
 #[derive(Error, Debug)]
 pub enum SqlitePushLogsError {
-    #[error("Query error: {0}")]
-    QueryError(#[from] WrappedSqlxError),
-    #[error("Failed to serialize metadata: {0}")]
-    InvalidMetadata(#[from] serde_json::Error),
     #[error("Error in compaction")]
     CompactionError(#[from] CompactionManagerError),
+    #[error("Compactor handle uninitialized")]
+    CompactorHandleUnintialized,
+    #[error("Failed to serialize metadata: {0}")]
+    InvalidMetadata(#[from] serde_json::Error),
     #[error("Error sending message to compactor")]
     MessageSendingError(#[from] RequestError),
+    #[error("Query error: {0}")]
+    QueryError(#[from] WrappedSqlxError),
 }
 
 impl ChromaError for SqlitePushLogsError {
     fn code(&self) -> ErrorCodes {
         match self {
-            SqlitePushLogsError::QueryError(err) => err.code(),
-            SqlitePushLogsError::InvalidMetadata(_) => ErrorCodes::Internal,
             SqlitePushLogsError::CompactionError(e) => e.code(),
+            SqlitePushLogsError::CompactorHandleUnintialized => ErrorCodes::FailedPrecondition,
+            SqlitePushLogsError::InvalidMetadata(_) => ErrorCodes::Internal,
             SqlitePushLogsError::MessageSendingError(e) => e.code(),
+            SqlitePushLogsError::QueryError(err) => err.code(),
         }
     }
 }
@@ -93,7 +96,7 @@ pub struct SqliteLog {
     db: SqliteDb,
     tenant_id: String,
     topic_namespace: String,
-    compactor_handle: Option<Arc<ComponentHandle<LocalCompactionManager>>>,
+    compactor_handle: OnceLock<ComponentHandle<LocalCompactionManager>>,
 }
 
 impl SqliteLog {
@@ -102,15 +105,17 @@ impl SqliteLog {
             db,
             tenant_id,
             topic_namespace,
-            compactor_handle: None,
+            compactor_handle: OnceLock::new(),
         }
     }
 
     pub fn init_compactor_handle(
-        &mut self,
-        compactor_handle: Arc<ComponentHandle<LocalCompactionManager>>,
-    ) {
-        self.compactor_handle = Some(compactor_handle);
+        &self,
+        compactor_handle: ComponentHandle<LocalCompactionManager>,
+    ) -> Result<(), SqlitePushLogsError> {
+        self.compactor_handle
+            .set(compactor_handle)
+            .map_err(|_| SqlitePushLogsError::CompactorHandleUnintialized)
     }
 
     pub(super) async fn read(
@@ -280,9 +285,11 @@ impl SqliteLog {
             start_offset: start_log_offset,
             end_offset: end_log_offset,
         };
-        if let Some(compactor_handle) = &self.compactor_handle {
-            compactor_handle.request(compact_message, None).await??;
-        }
+        self.compactor_handle
+            .get()
+            .ok_or(SqlitePushLogsError::CompactorHandleUnintialized)?
+            .request(compact_message, None)
+            .await??;
 
         Ok(())
     }
