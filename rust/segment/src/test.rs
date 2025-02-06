@@ -288,6 +288,9 @@ impl TestReferenceSegment {
     }
 }
 
+/// Given a record, verify if the predicate evaluates to true on it
+/// This is intended to be used with the reference segment impl
+/// This should be implemented for all (sub)types of the where clause
 trait CheckRecord {
     fn eval(&self, record: &ProjectionRecord) -> bool;
 }
