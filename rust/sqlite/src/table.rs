@@ -46,17 +46,6 @@ pub enum Collections {
 }
 
 #[derive(Iden)]
-pub enum CollectionMetadata {
-    Table,
-    CollectionId,
-    Key,
-    StrValue,
-    IntValue,
-    FloatValue,
-    BoolValue,
-}
-
-#[derive(Iden)]
 pub enum Databases {
     Table,
     Id,
@@ -143,5 +132,46 @@ impl MetadataTable for EmbeddingMetadata {
 
     fn bool_value_column() -> Self {
         EmbeddingMetadata::BoolValue
+    }
+}
+
+#[derive(Iden)]
+pub enum SegmentMetadata {
+    Table,
+    SegmentId,
+    Key,
+    StringValue,
+    IntValue,
+    FloatValue,
+    BoolValue,
+}
+
+impl MetadataTable for SegmentMetadata {
+    fn table_name() -> Self {
+        SegmentMetadata::Table
+    }
+
+    fn id_column() -> Self {
+        SegmentMetadata::SegmentId
+    }
+
+    fn key_column() -> Self {
+        SegmentMetadata::Key
+    }
+
+    fn str_value_column() -> Self {
+        SegmentMetadata::StringValue
+    }
+
+    fn int_value_column() -> Self {
+        SegmentMetadata::IntValue
+    }
+
+    fn float_value_column() -> Self {
+        SegmentMetadata::FloatValue
+    }
+
+    fn bool_value_column() -> Self {
+        SegmentMetadata::BoolValue
     }
 }

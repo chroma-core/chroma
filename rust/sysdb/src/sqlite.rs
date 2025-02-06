@@ -1,5 +1,6 @@
 use chroma_error::{ChromaError, WrappedSqlxError};
 use chroma_sqlite::db::SqliteDb;
+use chroma_sqlite::helpers::update_metadata;
 use chroma_sqlite::table;
 use chroma_types::{
     Collection, CollectionUuid, CreateCollectionError, CreateCollectionResponse,
@@ -11,7 +12,7 @@ use futures::TryStreamExt;
 use sea_query_binder::SqlxBinder;
 use sqlx::error::ErrorKind;
 use sqlx::sqlite::SqliteRow;
-use sqlx::{QueryBuilder, Row};
+use sqlx::Row;
 use std::collections::HashMap;
 use std::str::FromStr;
 use uuid::Uuid;
@@ -253,16 +254,14 @@ impl SqliteSysDb {
         .await
         .map_err(|e| CreateCollectionError::Internal(e.into()))?;
 
-        if let Some(metadata) = &metadata {
-            self.insert_metadata_with_conn(
+        if let Some(metadata) = metadata.clone() {
+            update_metadata::<table::CollectionMetadata, _, _>(
                 &mut *tx,
-                metadata,
-                "collection_metadata",
-                "collection_id",
-                &collection_id.to_string(),
+                collection_id.to_string(),
+                metadata.into_iter().map(|(k, v)| (k, v.into())).collect(),
             )
             .await
-            .map_err(|e| CreateCollectionError::Internal(e.into()))?;
+            .map_err(|e| e.boxed())?;
         }
 
         for segment in segments {
@@ -293,7 +292,7 @@ impl SqliteSysDb {
         &self,
         conn: &mut C,
         segment: Segment,
-    ) -> Result<(), WrappedSqlxError>
+    ) -> Result<(), Box<dyn ChromaError>>
     where
         for<'a> &'a mut C: sqlx::Executor<'a, Database = sqlx::Sqlite>,
     {
@@ -308,17 +307,16 @@ impl SqliteSysDb {
         .bind(segment.collection.to_string())
         .execute(&mut *conn)
         .await
-        .map_err(WrappedSqlxError)?;
+        .map_err(|e| WrappedSqlxError(e).boxed())?;
 
         if let Some(metadata) = segment.metadata {
-            self.insert_metadata_with_conn(
+            update_metadata::<table::SegmentMetadata, _, _>(
                 conn,
-                &metadata,
-                "segment_metadata",
-                "segment_id",
-                segment.id.to_string().as_str(),
+                segment.id.to_string(),
+                metadata.into_iter().map(|(k, v)| (k, v.into())).collect(),
             )
-            .await?;
+            .await
+            .map_err(|e| e.boxed())?;
         }
 
         Ok(())
@@ -466,57 +464,7 @@ impl SqliteSysDb {
         Ok(collections)
     }
 
-    async fn insert_metadata_with_conn<'a, C>(
-        &self,
-        conn: C,
-        metadata: &Metadata,
-        table_name: &str,
-        id_column_name: &str,
-        id: &str,
-    ) -> Result<(), WrappedSqlxError>
-    where
-        C: sqlx::Executor<'a, Database = sqlx::Sqlite>,
-    {
-        let mut query_builder = QueryBuilder::new(format!(
-            "INSERT INTO {} ({}, key, str_value, int_value, float_value, bool_value)",
-            table_name, id_column_name
-        ));
-
-        query_builder.push_values(metadata.iter(), |mut builder, (key, value)| {
-            builder.push_bind(id);
-            builder.push_bind(key);
-
-            if let MetadataValue::Str(str_value) = value {
-                builder.push_bind(str_value);
-            } else {
-                builder.push_bind::<Option<String>>(None);
-            }
-
-            if let MetadataValue::Int(int_value) = value {
-                builder.push_bind(int_value);
-            } else {
-                builder.push_bind::<Option<i64>>(None);
-            }
-
-            if let MetadataValue::Float(float_value) = value {
-                builder.push_bind(float_value);
-            } else {
-                builder.push_bind::<Option<f64>>(None);
-            }
-
-            if let MetadataValue::Bool(bool_value) = value {
-                builder.push_bind(bool_value);
-            } else {
-                builder.push_bind::<Option<bool>>(None);
-            }
-        });
-
-        let query = query_builder.build();
-        query.execute(conn).await.map_err(WrappedSqlxError)?;
-
-        Ok(())
-    }
-
+    // TODO: reuse logic from metadata reader
     fn metadata_from_rows<'row>(
         &self,
         rows: impl Iterator<Item = &'row SqliteRow>,
