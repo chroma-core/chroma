@@ -7,9 +7,8 @@ use chroma_frontend::{
         CacheInvalidationRetryConfig, CollectionsWithSegmentsProvider,
         CollectionsWithSegmentsProviderConfig,
     },
-    LocalCompactionManager,
 };
-use chroma_log::Log;
+use chroma_log::{LocalCompactionManager, Log};
 use chroma_segment::{
     local_segment_manager::{LocalSegmentManager, LocalSegmentManagerConfig},
     sqlite_metadata::SqliteMetadataWriter,
@@ -25,7 +24,7 @@ use pyo3::{
     exceptions::{PyOSError, PyRuntimeError, PyValueError},
     pyclass, pymethods, Py, PyAny, PyObject, PyResult, Python,
 };
-use std::time::SystemTime;
+use std::{sync::Arc, time::SystemTime};
 
 const DEFAULT_DATABASE: &str = "default_database";
 const DEFAULT_TENANT: &str = "default_tenant";
@@ -91,7 +90,7 @@ impl Bindings {
         let cache_config = chroma_cache::CacheConfig::Memory(FoyerCacheConfig::default());
         let segment_manager_config = LocalSegmentManagerConfig {
             hnsw_index_pool_cache_config: cache_config,
-            persist_path,
+            persist_path: persist_path.clone(),
         };
         // Create the hnsw segment manager.
         let segment_manager = match runtime.block_on(LocalSegmentManager::try_from_config(&(
@@ -123,7 +122,12 @@ impl Bindings {
             log.clone(),
             metadata_writer,
             segment_manager.clone(),
+            sysdb.clone(),
         ));
+        let log_clone = log.clone();
+        if let Log::Sqlite(mut sqlite_log) = *log_clone {
+            sqlite_log.init_compactor_handle(Arc::new(handle.clone()));
+        }
 
         // TODO: clean up the cache configuration and decide the source of truth owner
         // make cache not a no-op
