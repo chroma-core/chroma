@@ -186,6 +186,7 @@ impl SqliteSysDb {
         collection_id: CollectionUuid,
         name: String,
         segments: Vec<Segment>,
+        configuration_json: serde_json::Value,
         metadata: Option<Metadata>,
         dimension: Option<i32>,
         get_or_create: bool,
@@ -205,7 +206,7 @@ impl SqliteSysDb {
                 None,
                 Some(name.clone()),
                 Some(tenant.clone()),
-                Some(database.clone()), // todo: remove clones
+                Some(database.clone()),
                 None,
                 0,
             )
@@ -235,8 +236,6 @@ impl SqliteSysDb {
                 })?;
         let database_id = database_result.get::<&str, _>(0);
 
-        let config_json_str = "{}"; // todo
-
         sqlx::query(
             r#"
             INSERT INTO collections
@@ -246,7 +245,10 @@ impl SqliteSysDb {
         )
         .bind(collection_id.to_string())
         .bind(&name)
-        .bind(config_json_str)
+        .bind(
+            serde_json::to_string(&configuration_json)
+                .map_err(|e| CreateCollectionError::Configuration(e))?,
+        )
         .bind(dimension.unwrap_or_default())
         .bind(database_id)
         .execute(&mut *tx)
@@ -280,8 +282,7 @@ impl SqliteSysDb {
             name,
             tenant,
             database,
-            configuration_json: serde_json::from_str(config_json_str)
-                .map_err(|e| CreateCollectionError::Configuration(e))?,
+            configuration_json,
             metadata,
             dimension,
             log_position: 0,
@@ -708,6 +709,7 @@ mod tests {
                 collection_id,
                 "test_collection".to_string(),
                 segments.clone(),
+                serde_json::Value::Null,
                 Some(collection_metadata.clone()),
                 None,
                 false,
@@ -747,6 +749,7 @@ mod tests {
                 collection_id,
                 "test_collection".to_string(),
                 segments.clone(),
+                serde_json::Value::Null,
                 None,
                 None,
                 false,
@@ -763,6 +766,7 @@ mod tests {
                 collection_id,
                 "test_collection".to_string(),
                 segments,
+                serde_json::Value::Null,
                 None,
                 None,
                 false,
@@ -792,6 +796,7 @@ mod tests {
                 collection_id,
                 "test_collection".to_string(),
                 segments.clone(),
+                serde_json::Value::Null,
                 None,
                 None,
                 false,
@@ -808,6 +813,7 @@ mod tests {
                 CollectionUuid::new(),
                 "test_collection".to_string(),
                 vec![],
+                serde_json::Value::Null,
                 None,
                 None,
                 true,
