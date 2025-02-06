@@ -55,6 +55,7 @@ pub struct CompactionMessage {
     end_offset: i64,
     segment: Segment,
     dimensionality: usize,
+    #[allow(dead_code)]
     persist_path: String,
 }
 
@@ -124,11 +125,7 @@ impl Handler<CompactionMessage> for LocalCompactionManager {
         // Next apply it to the hnsw writer.
         let mut hnsw_writer = self
             .hnsw_segment_manager
-            .get_hnsw_writer(
-                &message.segment,
-                message.dimensionality,
-                message.persist_path,
-            )
+            .get_hnsw_writer(&message.segment, message.dimensionality)
             .await
             .map_err(|_| CompactionManagerError::GetHnswWriterFailed)?;
         hnsw_writer

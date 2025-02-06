@@ -1,3 +1,4 @@
+use chroma_cache::FoyerCacheConfig;
 use chroma_config::Configurable;
 use chroma_frontend::{
     executor::{local::LocalExecutor, Executor},
@@ -9,6 +10,10 @@ use chroma_frontend::{
     LocalCompactionManager,
 };
 use chroma_log::Log;
+use chroma_segment::{
+    local_segment_manager::{LocalSegmentManager, LocalSegmentManagerConfig},
+    sqlite_metadata::SqliteMetadataWriter,
+};
 use chroma_sqlite::{config::SqliteDBConfig, db::SqliteDb};
 use chroma_sysdb::{sqlite::SqliteSysDb, sysdb::SysDb};
 use chroma_system::System;
@@ -117,7 +122,7 @@ impl Bindings {
         let handle = system.start_component(LocalCompactionManager::new(
             log.clone(),
             metadata_writer,
-            segment_manager,
+            segment_manager.clone(),
         ));
 
         // TODO: clean up the cache configuration and decide the source of truth owner
@@ -143,22 +148,6 @@ impl Bindings {
                     "Failed to create collections cache: {}",
                     e
                 )));
-            }
-        };
-
-        // TODO: segment manager config should be loaded
-        let segment_manager = match runtime.block_on(LocalSegmentManager::try_from_config(
-            &LocalSegmentManagerConfig {
-                hnsw_index_pool_cache_config: CacheConfig::default(),
-                persist_path,
-            },
-        )) {
-            Ok(sm) => sm,
-            Err(e) => {
-                return Err(PyOSError::new_err(format!(
-                    "Failed to create segment manager: {}",
-                    e
-                )))
             }
         };
 
