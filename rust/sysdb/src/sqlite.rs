@@ -198,8 +198,6 @@ impl SqliteSysDb {
             .await
             .map_err(|e| CreateCollectionError::Internal(e.into()))?;
 
-        // todo: default tenant
-
         let mut existing_collections = self
             .get_collections_with_conn(
                 &mut *tx,
@@ -453,9 +451,9 @@ impl SqliteSysDb {
                     collection_id,
                     configuration_json,
                     metadata,
-                    total_records_post_compaction: 0, // todo
-                    version: 0,                       // todo
-                    log_position: 0,                  // todo
+                    total_records_post_compaction: 0,
+                    version: 0,
+                    log_position: 0,
                     dimension: first_row.get(3),
                     name: first_row.get(1),
                     tenant: first_row.get(4),
