@@ -46,6 +46,15 @@ pub enum Collections {
 }
 
 #[derive(Iden)]
+pub enum Segments {
+    Table,
+    Id,
+    Type,
+    Scope,
+    Collection,
+}
+
+#[derive(Iden)]
 pub enum Databases {
     Table,
     Id,
@@ -140,7 +149,7 @@ pub enum SegmentMetadata {
     Table,
     SegmentId,
     Key,
-    StringValue,
+    StrValue,
     IntValue,
     FloatValue,
     BoolValue,
@@ -160,7 +169,7 @@ impl MetadataTable for SegmentMetadata {
     }
 
     fn str_value_column() -> Self {
-        SegmentMetadata::StringValue
+        SegmentMetadata::StrValue
     }
 
     fn int_value_column() -> Self {

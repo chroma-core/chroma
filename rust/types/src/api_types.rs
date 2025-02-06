@@ -10,6 +10,7 @@ use crate::CollectionConversionError;
 use crate::CollectionUuid;
 use crate::Metadata;
 use crate::SegmentConversionError;
+use crate::SegmentScopeConversionError;
 use crate::UpdateMetadata;
 use crate::Where;
 use chroma_config::assignment::rendezvous_hash::AssignmentError;
@@ -20,6 +21,16 @@ use serde_json::Value;
 use thiserror::Error;
 use tonic::Status;
 use uuid::Uuid;
+
+#[derive(Debug, Error)]
+pub enum GetSegmentsError {
+    #[error("Could not parse segment")]
+    SegmentConversion(#[from] SegmentConversionError),
+    #[error("Unknown segment scope")]
+    UnknownScope(#[from] SegmentScopeConversionError),
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+}
 
 #[derive(Debug, Error)]
 pub enum GetCollectionWithSegmentsError {
@@ -33,6 +44,12 @@ pub enum GetCollectionWithSegmentsError {
     SegmentConversionError(#[from] SegmentConversionError),
     #[error("Failed to fetch")]
     FailedToGetSegments(#[from] tonic::Status),
+    #[error("Failed to get segments")]
+    GetSegmentsError(#[from] GetSegmentsError),
+    #[error("Collection not found")]
+    NotFound,
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
 }
 
 pub struct ResetResponse {}
