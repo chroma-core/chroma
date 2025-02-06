@@ -43,7 +43,7 @@ impl SysDb {
     ) -> Result<CreateTenantResponse, CreateTenantError> {
         match self {
             SysDb::Grpc(grpc) => grpc.create_tenant(tenant_name).await,
-            SysDb::Sqlite(_) => todo!(),
+            SysDb::Sqlite(sqlite) => sqlite.create_tenant(tenant_name).await,
             SysDb::Test(_) => todo!(),
         }
     }
@@ -54,7 +54,7 @@ impl SysDb {
     ) -> Result<GetTenantResponse, GetTenantError> {
         match self {
             SysDb::Grpc(grpc) => grpc.get_tenant(tenant_name).await,
-            SysDb::Sqlite(_) => todo!(),
+            SysDb::Sqlite(sqlite) => sqlite.get_tenant(&tenant_name).await,
             SysDb::Test(_) => todo!(),
         }
     }
@@ -70,8 +70,10 @@ impl SysDb {
                 grpc.create_database(database_id, database_name, tenant)
                     .await
             }
-            SysDb::Sqlite(_) => {
-                todo!()
+            SysDb::Sqlite(sqlite) => {
+                sqlite
+                    .create_database(database_id, &database_name, &tenant)
+                    .await
             }
             SysDb::Test(_) => {
                 todo!()
@@ -87,7 +89,7 @@ impl SysDb {
     ) -> Result<ListDatabasesResponse, ListDatabasesError> {
         match self {
             SysDb::Grpc(grpc) => grpc.list_databases(tenant_id, limit, offset).await,
-            SysDb::Sqlite(_) => todo!(),
+            SysDb::Sqlite(sqlite) => sqlite.list_databases(tenant_id, limit, offset).await,
             SysDb::Test(_) => todo!(),
         }
     }
@@ -99,7 +101,7 @@ impl SysDb {
     ) -> Result<GetDatabaseResponse, GetDatabaseError> {
         match self {
             SysDb::Grpc(grpc) => grpc.get_database(database_name, tenant).await,
-            SysDb::Sqlite(_) => todo!(),
+            SysDb::Sqlite(sqlite) => sqlite.get_database(&database_name, &tenant).await,
             SysDb::Test(_) => todo!(),
         }
     }
@@ -111,7 +113,7 @@ impl SysDb {
     ) -> Result<DeleteDatabaseResponse, DeleteDatabaseError> {
         match self {
             SysDb::Grpc(grpc) => grpc.delete_database(database_name, tenant).await,
-            SysDb::Sqlite(_) => todo!(),
+            SysDb::Sqlite(sqlite) => sqlite.delete_database(database_name, tenant).await,
             SysDb::Test(_) => todo!(),
         }
     }
@@ -457,7 +459,7 @@ impl GrpcSysDb {
             Err(err) if matches!(err.code(), Code::AlreadyExists) => {
                 Err(CreateTenantError::AlreadyExists(tenant_name))
             }
-            Err(err) => Err(err.into()),
+            Err(err) => Err(CreateTenantError::Internal(err.into())),
         }
     }
 
@@ -476,11 +478,11 @@ impl GrpcSysDb {
                     .ok_or(GetTenantError::NotFound(tenant_name))?
                     .name,
             }),
-            Err(err) => Err(err.into()),
+            Err(err) => Err(GetTenantError::Internal(err.into())),
         }
     }
 
-    pub async fn create_database(
+    pub(crate) async fn create_database(
         &mut self,
         database_id: Uuid,
         database_name: String,
@@ -498,7 +500,7 @@ impl GrpcSysDb {
                 tracing::error!("Failed to create database {:?}", e);
                 let res = match e.code() {
                     Code::AlreadyExists => CreateDatabaseError::AlreadyExists(database_name),
-                    _ => CreateDatabaseError::Internal(e),
+                    _ => CreateDatabaseError::Internal(e.into()),
                 };
                 Err(res)
             }
@@ -531,7 +533,7 @@ impl GrpcSysDb {
                         })
                 })
                 .collect(),
-            Err(err) => Err(ListDatabasesError::Internal(err)),
+            Err(err) => Err(ListDatabasesError::Internal(err.into())),
         }
     }
 
@@ -565,7 +567,7 @@ impl GrpcSysDb {
                 tracing::error!("Failed to get database {:?}", e);
                 let res = match e.code() {
                     Code::NotFound => GetDatabaseError::NotFound(database_name),
-                    _ => GetDatabaseError::Internal(e),
+                    _ => GetDatabaseError::Internal(e.into()),
                 };
                 Err(res)
             }
@@ -586,7 +588,7 @@ impl GrpcSysDb {
             Err(err) if matches!(err.code(), Code::NotFound) => {
                 Err(DeleteDatabaseError::NotFound(database_name))
             }
-            Err(err) => Err(err.into()),
+            Err(err) => Err(DeleteDatabaseError::Internal(err.into())),
         }
     }
 

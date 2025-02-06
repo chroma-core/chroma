@@ -95,7 +95,7 @@ impl BlockfileProvider {
         match self {
             BlockfileProvider::HashMapBlockfileProvider(provider) => provider.clear(),
             BlockfileProvider::ArrowBlockfileProvider(provider) => {
-                provider.clear().await.map_err(|e| e.boxed())?;
+                provider.clear().await.map_err(|e| e.boxed())?
             }
         };
         Ok(())

@@ -100,14 +100,14 @@ pub enum CreateTenantError {
     #[error("Tenant [{0}] already exists")]
     AlreadyExists(String),
     #[error(transparent)]
-    Internal(#[from] Status),
+    Internal(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for CreateTenantError {
     fn code(&self) -> ErrorCodes {
         match self {
             CreateTenantError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
-            CreateTenantError::Internal(status) => status.code().into(),
+            CreateTenantError::Internal(err) => err.code(),
         }
     }
 }
@@ -124,7 +124,7 @@ pub struct GetTenantResponse {
 #[derive(Debug, Error)]
 pub enum GetTenantError {
     #[error(transparent)]
-    Internal(#[from] Status),
+    Internal(#[from] Box<dyn ChromaError>),
     #[error("Tenant [{0}] not found")]
     NotFound(String),
 }
@@ -132,7 +132,7 @@ pub enum GetTenantError {
 impl ChromaError for GetTenantError {
     fn code(&self) -> ErrorCodes {
         match self {
-            GetTenantError::Internal(status) => status.code().into(),
+            GetTenantError::Internal(err) => err.code(),
             GetTenantError::NotFound(_) => ErrorCodes::NotFound,
         }
     }
@@ -152,19 +152,19 @@ pub enum CreateDatabaseError {
     #[error("Database [{0}] already exists")]
     AlreadyExists(String),
     #[error(transparent)]
-    Internal(#[from] Status),
+    Internal(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for CreateDatabaseError {
     fn code(&self) -> ErrorCodes {
         match self {
             CreateDatabaseError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
-            CreateDatabaseError::Internal(status) => status.code().into(),
+            CreateDatabaseError::Internal(status) => status.code(),
         }
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct Database {
     pub id: Uuid,
     pub name: String,
@@ -182,7 +182,7 @@ pub type ListDatabasesResponse = Vec<Database>;
 #[derive(Debug, Error)]
 pub enum ListDatabasesError {
     #[error(transparent)]
-    Internal(#[from] Status),
+    Internal(#[from] Box<dyn ChromaError>),
     #[error("Invalid database id [{0}]")]
     InvalidID(String),
 }
@@ -190,7 +190,7 @@ pub enum ListDatabasesError {
 impl ChromaError for ListDatabasesError {
     fn code(&self) -> ErrorCodes {
         match self {
-            ListDatabasesError::Internal(status) => status.code().into(),
+            ListDatabasesError::Internal(status) => status.code(),
             ListDatabasesError::InvalidID(_) => ErrorCodes::InvalidArgument,
         }
     }
@@ -206,7 +206,7 @@ pub type GetDatabaseResponse = Database;
 #[derive(Error, Debug)]
 pub enum GetDatabaseError {
     #[error(transparent)]
-    Internal(#[from] Status),
+    Internal(#[from] Box<dyn ChromaError>),
     #[error("Invalid database id [{0}]")]
     InvalidID(String),
     #[error("Database [{0}] not found")]
@@ -216,7 +216,7 @@ pub enum GetDatabaseError {
 impl ChromaError for GetDatabaseError {
     fn code(&self) -> ErrorCodes {
         match self {
-            GetDatabaseError::Internal(status) => status.code().into(),
+            GetDatabaseError::Internal(err) => err.code(),
             GetDatabaseError::InvalidID(_) => ErrorCodes::InvalidArgument,
             GetDatabaseError::NotFound(_) => ErrorCodes::NotFound,
         }
@@ -234,7 +234,7 @@ pub struct DeleteDatabaseResponse {}
 #[derive(Debug, Error)]
 pub enum DeleteDatabaseError {
     #[error(transparent)]
-    Internal(#[from] Status),
+    Internal(#[from] Box<dyn ChromaError>),
     #[error("Invalid database id [{0}]")]
     InvalidID(String),
     #[error("Database [{0}] not found")]
@@ -244,7 +244,7 @@ pub enum DeleteDatabaseError {
 impl ChromaError for DeleteDatabaseError {
     fn code(&self) -> ErrorCodes {
         match self {
-            DeleteDatabaseError::Internal(status) => status.code().into(),
+            DeleteDatabaseError::Internal(err) => err.code(),
             DeleteDatabaseError::InvalidID(_) => ErrorCodes::InvalidArgument,
             DeleteDatabaseError::NotFound(_) => ErrorCodes::NotFound,
         }
