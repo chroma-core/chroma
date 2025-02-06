@@ -222,16 +222,6 @@ impl Bindings {
         tenant: String,
         database: String,
     ) -> PyResult<bool> {
-        println!("[BINDINGS] Add called");
-        println!("ids: {:?}", ids);
-        println!("collection_id: {:?}", collection_id);
-        println!("tenant: {:?}", tenant);
-        println!("database: {:?}", database);
-        println!("embeddings: {:?}", embeddings);
-        println!("metadatas: {:?}", metadatas);
-        println!("documents: {:?}", documents);
-        println!("uris: {:?}", uris);
-
         let embeddings = py_embeddings_to_vec_f32(embeddings)?;
 
         let collection_id = chroma_types::CollectionUuid(
