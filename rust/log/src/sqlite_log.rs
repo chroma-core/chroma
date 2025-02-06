@@ -38,8 +38,8 @@ impl ChromaError for SqlitePullLogsError {
 pub enum SqlitePushLogsError {
     #[error("Error in compaction")]
     CompactionError(#[from] CompactionManagerError),
-    #[error("Compactor handle uninitialized")]
-    CompactorHandleUnintialized,
+    #[error("Error setting compactor handle")]
+    CompactorHandleSetError,
     #[error("Failed to serialize metadata: {0}")]
     InvalidMetadata(#[from] serde_json::Error),
     #[error("Error sending message to compactor")]
@@ -52,7 +52,7 @@ impl ChromaError for SqlitePushLogsError {
     fn code(&self) -> ErrorCodes {
         match self {
             SqlitePushLogsError::CompactionError(e) => e.code(),
-            SqlitePushLogsError::CompactorHandleUnintialized => ErrorCodes::FailedPrecondition,
+            SqlitePushLogsError::CompactorHandleSetError => ErrorCodes::FailedPrecondition,
             SqlitePushLogsError::InvalidMetadata(_) => ErrorCodes::Internal,
             SqlitePushLogsError::MessageSendingError(e) => e.code(),
             SqlitePushLogsError::QueryError(err) => err.code(),
@@ -115,7 +115,7 @@ impl SqliteLog {
     ) -> Result<(), SqlitePushLogsError> {
         self.compactor_handle
             .set(compactor_handle)
-            .map_err(|_| SqlitePushLogsError::CompactorHandleUnintialized)
+            .map_err(|_| SqlitePushLogsError::CompactorHandleSetError)
     }
 
     pub(super) async fn read(
@@ -280,16 +280,15 @@ impl SqliteLog {
             .execute(self.db.get_conn())
             .await
             .map_err(WrappedSqlxError)?;
-        let compact_message = CompactionMessage {
-            collection_id,
-            start_offset: start_log_offset,
-            end_offset: end_log_offset,
-        };
-        self.compactor_handle
-            .get()
-            .ok_or(SqlitePushLogsError::CompactorHandleUnintialized)?
-            .request(compact_message, None)
-            .await??;
+
+        if let Some(handle) = self.compactor_handle.get() {
+            let compact_message = CompactionMessage {
+                collection_id,
+                start_offset: start_log_offset,
+                end_offset: end_log_offset,
+            };
+            handle.request(compact_message, None).await??;
+        }
 
         Ok(())
     }
