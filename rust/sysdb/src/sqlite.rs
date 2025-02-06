@@ -5,10 +5,10 @@ use chroma_sqlite::table;
 use chroma_types::{
     Collection, CollectionAndSegments, CollectionMetadataUpdate, CollectionUuid,
     CreateCollectionError, CreateCollectionResponse, CreateDatabaseError, CreateDatabaseResponse,
-    CreateTenantError, CreateTenantResponse, Database, DeleteDatabaseError, DeleteDatabaseResponse,
-    GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError, GetSegmentsError,
-    GetTenantError, GetTenantResponse, ListDatabasesError, Metadata, MetadataValue, Segment,
-    SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError,
+    CreateTenantError, CreateTenantResponse, Database, DeleteCollectionError, DeleteDatabaseError,
+    DeleteDatabaseResponse, GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError,
+    GetSegmentsError, GetTenantError, GetTenantResponse, ListDatabasesError, Metadata,
+    MetadataValue, Segment, SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError,
 };
 use futures::TryStreamExt;
 use sea_query_binder::SqlxBinder;
@@ -407,7 +407,95 @@ impl SqliteSysDb {
         .await
     }
 
-    pub async fn get_collection_with_segments(
+    pub(crate) async fn delete_collection(
+        &self,
+        tenant: String,
+        database: String,
+        collection_id: CollectionUuid,
+        segment_ids: Vec<SegmentUuid>,
+    ) -> Result<(), DeleteCollectionError> {
+        let mut tx = self
+            .db
+            .get_conn()
+            .begin()
+            .await
+            .map_err(|e| DeleteCollectionError::Internal(e.into()))?;
+
+        let deleted_rows = sqlx::query(
+            r#"
+            DELETE FROM collections
+            WHERE id = $1
+            AND database_id = (SELECT id FROM databases WHERE name = $2 AND tenant_id = $3)
+            RETURNING id
+        "#,
+        )
+        .bind(collection_id.to_string())
+        .bind(&database)
+        .bind(&tenant)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| DeleteCollectionError::Internal(e.into()))?;
+
+        if deleted_rows.rows_affected() == 0 {
+            return Err(DeleteCollectionError::NotFound);
+        }
+
+        // Delete segments
+        let (sql, values) = sea_query::Query::delete()
+            .from_table(table::Segments::Table)
+            .and_where(
+                sea_query::Expr::col((table::Segments::Table, table::Segments::Id))
+                    .is_in(segment_ids.iter().map(|id| id.to_string())),
+            )
+            .build_sqlx(sea_query::SqliteQueryBuilder);
+
+        sqlx::query_with(&sql, values)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| DeleteCollectionError::Internal(e.into()))?;
+
+        // Delete segment metadata
+        sqlx::query(
+            r#"
+            DELETE FROM segment_metadata
+            WHERE segment_id IN (SELECT id FROM segments WHERE collection = $1)
+            "#,
+        )
+        .bind(collection_id.to_string())
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| DeleteCollectionError::Internal(e.into()))?;
+
+        // Delete collection metadata
+        sqlx::query(
+            r#"
+            DELETE FROM collection_metadata
+            WHERE collection_id = $1
+            "#,
+        )
+        .bind(collection_id.to_string())
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| DeleteCollectionError::Internal(e.into()))?;
+
+        tx.commit()
+            .await
+            .map_err(|e| DeleteCollectionError::Internal(e.into()))?;
+
+        Ok(())
+    }
+
+    pub(crate) async fn get_segments(
+        &self,
+        id: Option<SegmentUuid>,
+        r#type: Option<String>,
+        scope: Option<SegmentScope>,
+        collection: CollectionUuid,
+    ) -> Result<Vec<Segment>, GetSegmentsError> {
+        todo!()
+    }
+
+    pub(crate) async fn get_collection_with_segments(
         &self,
         collection_id: CollectionUuid,
     ) -> Result<CollectionAndSegments, GetCollectionWithSegmentsError> {
@@ -1023,6 +1111,57 @@ mod tests {
             metadata.get("key1").unwrap(),
             &MetadataValue::Str("value1".to_string())
         );
+    }
+
+    #[tokio::test]
+    async fn test_delete_collection() {
+        let db = get_new_sqlite_db().await;
+        let sysdb = SqliteSysDb::new(db);
+
+        let collection_id = CollectionUuid::new();
+        sysdb
+            .create_collection(
+                "default_tenant".to_string(),
+                "default_database".to_string(),
+                collection_id,
+                "test_collection".to_string(),
+                vec![],
+                serde_json::Value::Null,
+                None,
+                None,
+                false,
+            )
+            .await
+            .unwrap();
+
+        // Delete non-existent collection
+        let result = sysdb
+            .delete_collection(
+                "default_tenant".to_string(),
+                "default_database".to_string(),
+                CollectionUuid::new(),
+                vec![],
+            )
+            .await;
+        matches!(result, Err(DeleteCollectionError::NotFound));
+
+        // Delete collection
+        sysdb
+            .delete_collection(
+                "default_tenant".to_string(),
+                "default_database".to_string(),
+                collection_id,
+                vec![],
+            )
+            .await
+            .unwrap();
+
+        // Should no longer exist
+        let result = sysdb
+            .get_collections(Some(collection_id), None, None, None, None, 0)
+            .await
+            .unwrap();
+        assert_eq!(result.len(), 0);
     }
 
     #[tokio::test]

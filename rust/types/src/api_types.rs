@@ -38,6 +38,16 @@ pub enum GetSegmentsError {
     Internal(#[from] Box<dyn ChromaError>),
 }
 
+impl ChromaError for GetSegmentsError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GetSegmentsError::SegmentConversion(_) => ErrorCodes::Internal,
+            GetSegmentsError::UnknownScope(_) => ErrorCodes::Internal,
+            GetSegmentsError::Internal(err) => err.code(),
+        }
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum GetCollectionWithSegmentsError {
     #[error("Failed to convert proto collection")]
@@ -625,6 +635,8 @@ pub struct DeleteCollectionResponse {}
 
 #[derive(Error, Debug)]
 pub enum DeleteCollectionError {
+    #[error("Collection not found")]
+    NotFound,
     #[error(transparent)]
     Validation(#[from] ChromaValidationError),
     #[error(transparent)]
@@ -637,6 +649,7 @@ impl ChromaError for DeleteCollectionError {
     fn code(&self) -> ErrorCodes {
         match self {
             DeleteCollectionError::Validation(err) => err.code(),
+            DeleteCollectionError::NotFound => ErrorCodes::NotFound,
             DeleteCollectionError::Get(err) => err.code(),
             DeleteCollectionError::Internal(err) => err.code(),
         }

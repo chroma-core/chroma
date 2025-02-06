@@ -463,7 +463,7 @@ impl Frontend {
             .sysdb_client
             .get_segments(None, None, None, collection.collection_id)
             .await
-            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+            .map_err(|e| e.boxed())?;
 
         self.sysdb_client
             .delete_collection(
