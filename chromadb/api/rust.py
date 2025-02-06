@@ -66,6 +66,7 @@ class RustBindingsAPI(ServerAPI):
             hash_type=hash_type_bindings,
             migration_mode=migration_mode_bindings,
         )
+        print("(Sanket-temp) Using rust bindings")
 
         # Construct the Rust bindings
         self.bindings = rust_bindings.Bindings(
@@ -220,20 +221,32 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> GetResult:
-        return self.proxy_segment_api._get(  # type: ignore[no-any-return]
-            collection_id,
+        return self.bindings.get(str(collection_id),
             ids,
             where,
-            sort,
+            #sort,
             limit,
-            offset,
-            page,
-            page_size,
+            offset or 0,
+            #page,
+            #page_size,
             where_document,
             include,
             tenant,
-            database,
-        )
+            database,)
+        # return self.proxy_segment_api._get(  # type: ignore[no-any-return]
+        #     collection_id,
+        #     ids,
+        #     where,
+        #     sort,
+        #     limit,
+        #     offset,
+        #     page,
+        #     page_size,
+        #     where_document,
+        #     include,
+        #     tenant,
+        #     database,
+        # )
 
     @override
     def _add(
@@ -302,8 +315,8 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> QueryResult:
-        return self.proxy_segment_api._query(  # type: ignore[no-any-return]
-            collection_id,
+        return self.bindings.query(
+            str(collection_id),
             query_embeddings,
             n_results,
             where,
@@ -312,6 +325,16 @@ class RustBindingsAPI(ServerAPI):
             tenant,
             database,
         )
+        # return self.proxy_segment_api._query(  # type: ignore[no-any-return]
+        #     collection_id,
+        #     query_embeddings,
+        #     n_results,
+        #     where,
+        #     where_document,
+        #     include,
+        #     tenant,
+        #     database,
+        # )
 
     @override
     def _delete(

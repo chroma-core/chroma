@@ -584,7 +584,7 @@ pub const CHROMA_KEY: &str = "chroma:";
 pub const CHROMA_DOCUMENT_KEY: &str = "chroma:document";
 pub const CHROMA_URI_KEY: &str = "chroma:uri";
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct GetRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -675,7 +675,7 @@ pub struct QueryRequest {
     pub include: IncludeList,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize, Debug)]
 pub struct QueryResponse {
     ids: Vec<Vec<String>>,
     embeddings: Option<Vec<Vec<Option<Vec<f32>>>>>,

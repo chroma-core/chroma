@@ -26,6 +26,7 @@ use pyo3::{
 };
 use std::{sync::Arc, time::SystemTime};
 use tokio::runtime;
+use uuid::serde;
 
 const DEFAULT_DATABASE: &str = "default_database";
 const DEFAULT_TENANT: &str = "default_tenant";
@@ -280,24 +281,24 @@ impl Bindings {
                 .map_err(|e| PyValueError::new_err(e.to_string()))?,
         );
 
-        let res = self._runtime.block_on(async {
-            frontend_clone
-                .validate_embedding(collection_id, Some(&embeddings), true, |embedding| {
-                    Some(embedding.len())
-                })
-                .await
-        });
+        // let res = self._runtime.block_on(async {
+        //     frontend_clone
+        //         .validate_embedding(collection_id, Some(&embeddings), true, |embedding| {
+        //             Some(embedding.len())
+        //         })
+        //         .await
+        // });
 
-        // TODO: error handling
-        match res {
-            Ok(_) => (),
-            Err(e) => {
-                return Err(PyRuntimeError::new_err(format!(
-                    "Failed to validate embeddings: {}",
-                    e
-                )))
-            }
-        }
+        // // TODO: error handling
+        // match res {
+        //     Ok(_) => (),
+        //     Err(e) => {
+        //         return Err(PyRuntimeError::new_err(format!(
+        //             "Failed to validate embeddings: {}",
+        //             e
+        //         )))
+        //     }
+        // }
 
         let req = chroma_types::AddCollectionRecordsRequest {
             ids,
@@ -334,7 +335,75 @@ impl Bindings {
     }
 
     #[pyo3(
-            signature = (collection_id, ids = None, r#where = None, limit = None, offset = 0, where_document = None, _include = ["metadatas".to_string(), "documents".to_string()].to_vec(), tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
+            signature = (collection_id, query_embeddings, n_results = 10, r#where = None, where_document = None, include = ["metadatas".to_string(), "documents".to_string()].to_vec(), tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
+        )]
+    #[allow(clippy::too_many_arguments)]
+    fn query(
+        &self,
+        collection_id: String,
+        query_embeddings: Vec<PyReadonlyArray1<f32>>,
+        n_results: u32,
+        r#where: Option<String>,
+        where_document: Option<String>,
+        include: Vec<String>,
+        tenant: String,
+        database: String,
+    ) -> PyResult<()> {
+        let mut frontend_clone = self._frontend.clone();
+
+        let embeddings = py_embeddings_to_vec_f32(query_embeddings)?;
+        // println!("(Sanket-temp) Query embeddings {:?}", embeddings);
+
+        let collection_id = chroma_types::CollectionUuid(
+            uuid::Uuid::parse_str(&collection_id)
+                .map_err(|e| PyValueError::new_err(e.to_string()))?,
+        );
+
+        let include_list: IncludeList = serde_json::from_value(serde_json::json!(include))
+            .map_err(|_| PyRuntimeError::new_err("Error deserializing include"))?;
+
+        // TODO: Rethink the error handling strategy
+        let raw_where_fields =
+            chroma_types::RawWhereFields::new(r#where.into(), where_document.into());
+        let r#where = match raw_where_fields.parse() {
+            Ok(parsed) => parsed,
+            Err(e) => return Err(PyValueError::new_err(e.to_string())),
+        };
+
+        let request = chroma_types::QueryRequest {
+            collection_id,
+            embeddings,
+            n_results,
+            r#where,
+            include: include_list,
+            tenant_id: tenant,
+            database_name: database,
+            ids: None,
+        };
+
+        let res = match self
+            ._runtime
+            .block_on(async { frontend_clone.query(request).await })
+        {
+            Ok(response) => Ok(response),
+            Err(e) => match e {
+                // TODO: error handling
+                QueryError::Executor(e) => {
+                    Err(PyRuntimeError::new_err(format!("Executor Error: {}", e)))
+                }
+                QueryError::Internal(e) => {
+                    Err(PyRuntimeError::new_err(format!("Internal Error: {}", e)))
+                }
+            },
+        };
+
+        println!("{:?}", res);
+
+        Ok(())
+    }
+
+    #[pyo3(
+            signature = (collection_id, ids = None, r#where = None, limit = None, offset = 0, where_document = None, include = ["metadatas".to_string(), "documents".to_string()].to_vec(), tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
         )]
     #[allow(clippy::too_many_arguments)]
     fn get(
@@ -345,7 +414,7 @@ impl Bindings {
         limit: Option<u32>,
         offset: u32,
         where_document: Option<String>,
-        _include: Vec<String>,
+        include: Vec<String>,
         tenant: String,
         database: String,
         _py: Python<'_>,
@@ -366,6 +435,9 @@ impl Bindings {
                 .map_err(|e| PyValueError::new_err(e.to_string()))?,
         );
 
+        let include_list: IncludeList = serde_json::from_value(serde_json::json!(include))
+            .map_err(|_| PyRuntimeError::new_err("Error deserializing include"))?;
+
         // TODO: support include
         let request = chroma_types::GetRequest {
             collection_id,
@@ -373,7 +445,7 @@ impl Bindings {
             r#where,
             limit,
             offset,
-            include: IncludeList::default_get(),
+            include: include_list,
             tenant_id: tenant,
             database_name: database,
         };

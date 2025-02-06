@@ -711,6 +711,7 @@ impl Frontend {
             "Retrying get() request for collection {}",
             request.collection_id
         );
+        println!("retryable_get {:?}", request);
         let collection_and_segments = self
             .collections_with_segments_provider
             .get_collection_with_segments(request.collection_id)

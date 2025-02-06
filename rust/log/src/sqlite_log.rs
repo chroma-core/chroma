@@ -163,6 +163,7 @@ impl SqliteLog {
                 .map(ScalarEncoding::try_from)
                 .transpose()?;
             let metadata_str = row.get::<Option<&str>, _>("metadata");
+            println!("(Sanket-temp) PUll logs metadata_str: {:?}", metadata_str);
 
             // Parse embedding
             let embedding = embedding_bytes
@@ -199,6 +200,7 @@ impl SqliteLog {
                         Ok::<_, SqlitePullLogsError>((parsed, document))
                     })
                     .transpose()?;
+            println!("(Sanket-temp) PUll logs parsed_metadata_and_document: {:?}", parsed_metadata_and_document);
             let document = parsed_metadata_and_document
                 .as_ref()
                 .and_then(|(_, document)| document.clone());

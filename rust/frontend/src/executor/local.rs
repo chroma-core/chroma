@@ -37,8 +37,10 @@ impl LocalExecutor {
     }
 
     pub async fn get(&mut self, plan: Get) -> Result<GetResult, ExecutorError> {
-        let collection_and_segments = plan.scan.collection_and_segments.clone();
+        let mut collection_and_segments = plan.scan.collection_and_segments.clone();
+        collection_and_segments.collection.dimension = Some(384);
         let load_embedding = plan.proj.embedding;
+        println!("load_embedding: {load_embedding}");
         let mut result = self
             .metadata_reader
             .get(plan)
@@ -68,7 +70,9 @@ impl LocalExecutor {
     }
 
     pub async fn knn(&mut self, plan: Knn) -> Result<KnnBatchResult, ExecutorError> {
-        let collection_and_segments = plan.scan.collection_and_segments.clone();
+        // println!("knn plan : {:?}", plan);
+        let mut collection_and_segments = plan.scan.collection_and_segments.clone();
+        collection_and_segments.collection.dimension = Some(384);
         if let Some(dimensionality) = collection_and_segments.collection.dimension {
             let filter_plan = Get {
                 scan: plan.scan.clone(),
