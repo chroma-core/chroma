@@ -1285,6 +1285,8 @@ dependencies = [
 name = "chroma-error"
 version = "0.1.0"
 dependencies = [
+ "sqlx",
+ "thiserror 1.0.69",
  "tonic",
 ]
 

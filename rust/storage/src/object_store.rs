@@ -32,7 +32,7 @@ impl ObjectStore {
                     .build()
                     .map_err(|err| {
                         tracing::error! {"Failed to create object store: {:?}", err};
-                        Box::new(StorageConfigError::InvalidStorageConfig) as _
+                        StorageConfigError::InvalidStorageConfig.boxed()
                     })?;
                 let object_store = object_store::limit::LimitStore::new(
                     object_store,
@@ -50,7 +50,7 @@ impl ObjectStore {
                     .build()
                     .map_err(|err| {
                         tracing::error! {"Failed to create object store: {:?}", err};
-                        Box::new(StorageConfigError::InvalidStorageConfig) as _
+                        StorageConfigError::InvalidStorageConfig.boxed()
                     })?;
                 let object_store = object_store::limit::LimitStore::new(
                     object_store,

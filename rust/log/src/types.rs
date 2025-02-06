@@ -1,6 +1,4 @@
-use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::CollectionUuid;
-use thiserror::Error;
 
 /// CollectionInfo is a struct that contains information about a collection for the
 /// compacting process.
@@ -13,20 +11,4 @@ pub struct CollectionInfo {
     pub collection_id: CollectionUuid,
     pub first_log_offset: i64,
     pub first_log_ts: i64,
-}
-
-/// Implements `ChromaError` for `sqlx::Error`.
-#[derive(Debug, Error)]
-#[error("Database error: {0}")]
-pub struct WrappedSqlxError(pub sqlx::Error);
-
-impl ChromaError for WrappedSqlxError {
-    fn code(&self) -> chroma_error::ErrorCodes {
-        match self.0 {
-            sqlx::Error::RowNotFound => ErrorCodes::NotFound,
-            sqlx::Error::PoolTimedOut => ErrorCodes::ResourceExhausted,
-            sqlx::Error::PoolClosed => ErrorCodes::Unavailable,
-            _ => ErrorCodes::Internal,
-        }
-    }
 }
