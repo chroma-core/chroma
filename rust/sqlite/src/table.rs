@@ -46,6 +46,17 @@ pub enum Collections {
 }
 
 #[derive(Iden)]
+pub enum CollectionMetadata {
+    Table,
+    CollectionId,
+    Key,
+    StrValue,
+    IntValue,
+    FloatValue,
+    BoolValue,
+}
+
+#[derive(Iden)]
 pub enum Databases {
     Table,
     Id,

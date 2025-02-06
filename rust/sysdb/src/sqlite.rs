@@ -10,7 +10,9 @@ use chroma_types::{
 use futures::TryStreamExt;
 use sea_query_binder::SqlxBinder;
 use sqlx::error::ErrorKind;
+use sqlx::sqlite::SqliteRow;
 use sqlx::{QueryBuilder, Row};
+use std::collections::HashMap;
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -34,8 +36,6 @@ impl SqliteSysDb {
     }
 
     ////////////////////////// Database Methods ////////////////////////
-
-    // TODO: real error
     #[allow(dead_code)]
     pub(crate) async fn create_database(
         &self,
@@ -253,8 +253,17 @@ impl SqliteSysDb {
         .await
         .map_err(|e| CreateCollectionError::Internal(e.into()))?;
 
-        // sqlx::query("INSERT INTO collection_metadata ")
-        // todo: metadata
+        if let Some(metadata) = &metadata {
+            self.insert_metadata_with_conn(
+                &mut *tx,
+                metadata,
+                "collection_metadata",
+                "collection_id",
+                &collection_id.to_string(),
+            )
+            .await
+            .map_err(|e| CreateCollectionError::Internal(e.into()))?;
+        }
 
         for segment in segments {
             self.create_segment_with_tx(&mut *tx, segment)
@@ -281,13 +290,13 @@ impl SqliteSysDb {
         })
     }
 
-    async fn create_segment_with_tx<'a, C>(
+    async fn create_segment_with_tx<C>(
         &self,
-        conn: C,
+        conn: &mut C,
         segment: Segment,
     ) -> Result<(), WrappedSqlxError>
     where
-        C: sqlx::Executor<'a, Database = sqlx::Sqlite>,
+        for<'a> &'a mut C: sqlx::Executor<'a, Database = sqlx::Sqlite>,
     {
         sqlx::query(
             r#"
@@ -298,49 +307,19 @@ impl SqliteSysDb {
         .bind(String::from(segment.r#type))
         .bind(String::from(segment.scope))
         .bind(segment.collection.to_string())
-        .execute(conn)
+        .execute(&mut *conn)
         .await
         .map_err(WrappedSqlxError)?;
 
         if let Some(metadata) = segment.metadata {
-            let mut query_builder = QueryBuilder::new(
-                "INSERT INTO segment_metadata (segment_id, key, str_value, int_value, float_value, bool_value)",
-            );
-
-            query_builder.push_values(metadata.iter(), |mut builder, (key, value)| {
-                builder.push_bind(segment.id.to_string());
-                builder.push_bind(key);
-
-                if let MetadataValue::Str(str_value) = value {
-                    builder.push_bind(str_value);
-                } else {
-                    builder.push_bind::<Option<String>>(None);
-                }
-
-                if let MetadataValue::Int(int_value) = value {
-                    builder.push_bind(int_value);
-                } else {
-                    builder.push_bind::<Option<i64>>(None);
-                }
-
-                if let MetadataValue::Float(float_value) = value {
-                    builder.push_bind(float_value);
-                } else {
-                    builder.push_bind::<Option<f64>>(None);
-                }
-
-                if let MetadataValue::Bool(bool_value) = value {
-                    builder.push_bind(bool_value);
-                } else {
-                    builder.push_bind::<Option<bool>>(None);
-                }
-            });
-
-            let query = query_builder.build();
-            query
-                .execute(self.db.get_conn())
-                .await
-                .map_err(WrappedSqlxError)?;
+            self.insert_metadata_with_conn(
+                conn,
+                &metadata,
+                "segment_metadata",
+                "segment_id",
+                segment.id.to_string().as_str(),
+            )
+            .await?;
         }
 
         Ok(())
@@ -387,6 +366,14 @@ impl SqliteSysDb {
                 sea_query::Expr::col((table::Databases::Table, table::Databases::Id))
                     .equals((table::Collections::Table, table::Collections::DatabaseId)),
             )
+            .left_join(
+                table::CollectionMetadata::Table,
+                sea_query::Expr::col((
+                    table::CollectionMetadata::Table,
+                    table::CollectionMetadata::CollectionId,
+                ))
+                .equals((table::Collections::Table, table::Collections::Id)),
+            )
             .cond_where(
                 sea_query::Cond::all()
                     .add_option(name.map(|name| {
@@ -415,10 +402,18 @@ impl SqliteSysDb {
             .column((table::Collections::Table, table::Collections::Dimension))
             .column((table::Databases::Table, table::Databases::TenantId))
             .column((table::Databases::Table, table::Databases::Name))
+            .columns([
+                table::CollectionMetadata::Key,
+                table::CollectionMetadata::StrValue,
+                table::CollectionMetadata::IntValue,
+                table::CollectionMetadata::FloatValue,
+                table::CollectionMetadata::BoolValue,
+            ])
             .build_sqlx(sea_query::SqliteQueryBuilder);
 
         let mut rows = sqlx::query_with(&sql, values).fetch(conn);
-        let mut collections = Vec::new();
+        let mut rows_by_collection_id: HashMap<CollectionUuid, Vec<SqliteRow>> = HashMap::new();
+
         while let Some(row) = rows
             .try_next()
             .await
@@ -427,25 +422,129 @@ impl SqliteSysDb {
             let collection_id = CollectionUuid::from_str(row.get::<&str, _>(0))
                 .map_err(|e| GetCollectionsError::CollectionId(e))?;
 
-            let configuration_json =
-                serde_json::from_str::<serde_json::Value>(row.get::<&str, _>(2))
-                    .map_err(|e| GetCollectionsError::Configuration(e))?;
-
-            collections.push(Collection {
-                collection_id,
-                configuration_json,
-                metadata: None,                   // todo
-                total_records_post_compaction: 0, // todo
-                version: 0,                       // todo
-                log_position: 0,                  // todo
-                dimension: row.get(3),
-                name: row.get(1),
-                tenant: row.get(4),
-                database: row.get(5),
-            });
+            if let Some(entry) = rows_by_collection_id.get_mut(&collection_id) {
+                entry.push(row);
+            } else {
+                rows_by_collection_id.insert(collection_id, vec![row]);
+            }
         }
 
+        let collections = rows_by_collection_id
+            .into_iter()
+            .filter_map(|(collection_id, rows)| {
+                if rows.is_empty() {
+                    // should never happen
+                    return None;
+                }
+
+                let metadata = self.metadata_from_rows(rows.iter());
+                let first_row = rows.first().unwrap();
+
+                let configuration_json =
+                    match serde_json::from_str::<serde_json::Value>(first_row.get::<&str, _>(2))
+                        .map_err(|e| GetCollectionsError::Configuration(e))
+                    {
+                        Ok(configuration_json) => configuration_json,
+                        Err(e) => return Some(Err(e)),
+                    };
+
+                Some(Ok(Collection {
+                    collection_id,
+                    configuration_json,
+                    metadata,
+                    total_records_post_compaction: 0, // todo
+                    version: 0,                       // todo
+                    log_position: 0,                  // todo
+                    dimension: first_row.get(3),
+                    name: first_row.get(1),
+                    tenant: first_row.get(4),
+                    database: first_row.get(5),
+                }))
+            })
+            .collect::<Result<Vec<_>, GetCollectionsError>>()?;
+
         Ok(collections)
+    }
+
+    async fn insert_metadata_with_conn<'a, C>(
+        &self,
+        conn: C,
+        metadata: &Metadata,
+        table_name: &str,
+        id_column_name: &str,
+        id: &str,
+    ) -> Result<(), WrappedSqlxError>
+    where
+        C: sqlx::Executor<'a, Database = sqlx::Sqlite>,
+    {
+        let mut query_builder = QueryBuilder::new(format!(
+            "INSERT INTO {} ({}, key, str_value, int_value, float_value, bool_value)",
+            table_name, id_column_name
+        ));
+
+        query_builder.push_values(metadata.iter(), |mut builder, (key, value)| {
+            builder.push_bind(id);
+            builder.push_bind(key);
+
+            if let MetadataValue::Str(str_value) = value {
+                builder.push_bind(str_value);
+            } else {
+                builder.push_bind::<Option<String>>(None);
+            }
+
+            if let MetadataValue::Int(int_value) = value {
+                builder.push_bind(int_value);
+            } else {
+                builder.push_bind::<Option<i64>>(None);
+            }
+
+            if let MetadataValue::Float(float_value) = value {
+                builder.push_bind(float_value);
+            } else {
+                builder.push_bind::<Option<f64>>(None);
+            }
+
+            if let MetadataValue::Bool(bool_value) = value {
+                builder.push_bind(bool_value);
+            } else {
+                builder.push_bind::<Option<bool>>(None);
+            }
+        });
+
+        let query = query_builder.build();
+        query.execute(conn).await.map_err(WrappedSqlxError)?;
+
+        Ok(())
+    }
+
+    fn metadata_from_rows<'row>(
+        &self,
+        rows: impl Iterator<Item = &'row SqliteRow>,
+    ) -> Option<Metadata> {
+        let metadata: Metadata = rows
+            .map(|row| {
+                let key = row.get::<&str, _>("key");
+
+                if let Some(str_value) = row.get::<Option<String>, _>("str_value") {
+                    (key.to_string(), MetadataValue::Str(str_value))
+                } else if let Some(int_value) = row.get::<Option<i64>, _>("int_value") {
+                    (key.to_string(), MetadataValue::Int(int_value))
+                } else if let Some(float_value) = row.get::<Option<f64>, _>("float_value") {
+                    (key.to_string(), MetadataValue::Float(float_value))
+                } else if let Some(bool_value) = row.get::<Option<bool>, _>("bool_value") {
+                    (key.to_string(), MetadataValue::Bool(bool_value))
+                } else {
+                    // should never happen
+                    (key.to_string(), MetadataValue::Str("".to_string()))
+                }
+            })
+            .collect();
+
+        if metadata.is_empty() {
+            None
+        } else {
+            Some(metadata)
+        }
     }
 }
 
@@ -580,6 +679,51 @@ mod tests {
         // Get tenant
         let tenant = sysdb.get_tenant("new_tenant").await.unwrap();
         assert_eq!(tenant.name, "new_tenant");
+    }
+
+    #[tokio::test]
+    async fn test_create_collection() {
+        let db = get_new_sqlite_db().await;
+        let sysdb = SqliteSysDb::new(db);
+
+        let mut collection_metadata = Metadata::new();
+        collection_metadata.insert("key1".to_string(), MetadataValue::Str("value1".to_string()));
+        collection_metadata.insert("key2".to_string(), MetadataValue::Int(42));
+        collection_metadata.insert("key3".to_string(), MetadataValue::Float(3.14));
+        collection_metadata.insert("key4".to_string(), MetadataValue::Bool(true));
+
+        let collection_id = CollectionUuid::new();
+        let segments = vec![Segment {
+            id: SegmentUuid::new(),
+            r#type: SegmentType::BlockfileMetadata,
+            scope: SegmentScope::METADATA,
+            collection: collection_id,
+            metadata: None,
+            file_path: HashMap::new(),
+        }];
+        sysdb
+            .create_collection(
+                "default_tenant".to_string(),
+                "default_database".to_string(),
+                collection_id,
+                "test_collection".to_string(),
+                segments.clone(),
+                Some(collection_metadata.clone()),
+                None,
+                false,
+            )
+            .await
+            .unwrap();
+
+        let collections = sysdb
+            .get_collections(Some(collection_id), None, None, None, None, 0)
+            .await
+            .unwrap();
+        let collection = collections.first().unwrap();
+
+        assert_eq!(collection.name, "test_collection");
+        assert_eq!(collection.metadata.as_ref().unwrap().len(), 4);
+        assert_eq!(collection.metadata, Some(collection_metadata));
     }
 
     #[tokio::test]
