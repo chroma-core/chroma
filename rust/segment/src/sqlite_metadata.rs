@@ -49,7 +49,7 @@ pub struct SqliteMetadataWriter {
 }
 
 impl SqliteMetadataWriter {
-    fn add_embedding_stmt(
+    fn add_record_stmt(
         segment_id: SegmentUuid,
         seq_id: u64,
         user_id: String,
@@ -71,21 +71,21 @@ impl SqliteMetadataWriter {
             .to_owned())
     }
 
-    async fn add_embedding(
+    async fn add_record(
         tx: &mut Transaction<'static, Sqlite>,
         segment_id: SegmentUuid,
         seq_id: u64,
         user_id: String,
     ) -> Result<Option<u32>, SqliteMetadataError> {
-        let (add_emb_stmt, values) =
-            Self::add_embedding_stmt(segment_id, seq_id, user_id)?.build_sqlx(SqliteQueryBuilder);
-        let result = sqlx::query_with(&add_emb_stmt, values)
+        let (add_rec_stmt, values) =
+            Self::add_record_stmt(segment_id, seq_id, user_id)?.build_sqlx(SqliteQueryBuilder);
+        let result = sqlx::query_with(&add_rec_stmt, values)
             .fetch_one(&mut **tx)
             .await?;
         Ok((result.try_get::<u64, _>(1)? == seq_id).then_some(result.try_get(0)?))
     }
 
-    fn update_embedding_stmt(
+    fn update_record_stmt(
         segment_id: SegmentUuid,
         seq_id: u64,
         user_id: String,
@@ -102,26 +102,26 @@ impl SqliteMetadataWriter {
             .to_owned()
     }
 
-    async fn update_embedding(
+    async fn update_record(
         tx: &mut Transaction<'static, Sqlite>,
         segment_id: SegmentUuid,
         seq_id: u64,
         user_id: String,
     ) -> Result<u32, SqliteMetadataError> {
-        let (update_emb_stmt, values) =
-            Self::update_embedding_stmt(segment_id, seq_id, user_id).build_sqlx(SqliteQueryBuilder);
-        Ok(sqlx::query_with(&update_emb_stmt, values)
+        let (update_rec_stmt, values) =
+            Self::update_record_stmt(segment_id, seq_id, user_id).build_sqlx(SqliteQueryBuilder);
+        Ok(sqlx::query_with(&update_rec_stmt, values)
             .fetch_one(&mut **tx)
             .await?
             .try_get(0)?)
     }
 
-    fn upsert_embedding_stmt(
+    fn upsert_record_stmt(
         segment_id: SegmentUuid,
         seq_id: u64,
         user_id: String,
     ) -> Result<InsertStatement, SqliteMetadataError> {
-        Ok(Self::add_embedding_stmt(segment_id, seq_id, user_id)?
+        Ok(Self::add_record_stmt(segment_id, seq_id, user_id)?
             .on_conflict(
                 OnConflict::columns([Embeddings::SegmentId, Embeddings::EmbeddingId])
                     .update_columns([Embeddings::SeqId])
@@ -130,21 +130,21 @@ impl SqliteMetadataWriter {
             .to_owned())
     }
 
-    async fn upsert_embedding(
+    async fn upsert_record(
         tx: &mut Transaction<'static, Sqlite>,
         segment_id: SegmentUuid,
         seq_id: u64,
         user_id: String,
     ) -> Result<u32, SqliteMetadataError> {
-        let (upsert_emb_stmt, values) = Self::upsert_embedding_stmt(segment_id, seq_id, user_id)?
-            .build_sqlx(SqliteQueryBuilder);
-        Ok(sqlx::query_with(&upsert_emb_stmt, values)
+        let (upsert_rec_stmt, values) =
+            Self::upsert_record_stmt(segment_id, seq_id, user_id)?.build_sqlx(SqliteQueryBuilder);
+        Ok(sqlx::query_with(&upsert_rec_stmt, values)
             .fetch_one(&mut **tx)
             .await?
             .try_get(0)?)
     }
 
-    fn delete_embedding_stmt(segment_id: SegmentUuid, user_id: String) -> DeleteStatement {
+    fn delete_record_stmt(segment_id: SegmentUuid, user_id: String) -> DeleteStatement {
         Query::delete()
             .from_table(Embeddings::Table)
             .and_where(
@@ -156,14 +156,14 @@ impl SqliteMetadataWriter {
             .to_owned()
     }
 
-    async fn delete_embedding(
+    async fn delete_record(
         tx: &mut Transaction<'static, Sqlite>,
         segment_id: SegmentUuid,
         user_id: String,
     ) -> Result<Option<u32>, SqliteMetadataError> {
-        let (delete_emb_stmt, values) =
-            Self::delete_embedding_stmt(segment_id, user_id).build_sqlx(SqliteQueryBuilder);
-        Ok(sqlx::query_with(&delete_emb_stmt, values)
+        let (delete_rec_stmt, values) =
+            Self::delete_record_stmt(segment_id, user_id).build_sqlx(SqliteQueryBuilder);
+        Ok(sqlx::query_with(&delete_rec_stmt, values)
             .fetch_optional(&mut **tx)
             .await?
             .map(|r| r.try_get(0))
@@ -416,7 +416,7 @@ impl SqliteMetadataWriter {
             match operation {
                 Operation::Add => {
                     if let Some(offset_id) =
-                        Self::add_embedding(&mut tx, segment_id, log_offset_unsigned, id).await?
+                        Self::add_record(&mut tx, segment_id, log_offset_unsigned, id).await?
                     {
                         if let Some(meta) = metadata {
                             Self::update_metadata(&mut tx, offset_id, meta).await?;
@@ -429,8 +429,7 @@ impl SqliteMetadataWriter {
                 }
                 Operation::Update => {
                     let offset_id =
-                        Self::update_embedding(&mut tx, segment_id, log_offset_unsigned, id)
-                            .await?;
+                        Self::update_record(&mut tx, segment_id, log_offset_unsigned, id).await?;
 
                     if let Some(meta) = metadata {
                         Self::update_metadata(&mut tx, offset_id, meta).await?;
@@ -442,8 +441,7 @@ impl SqliteMetadataWriter {
                 }
                 Operation::Upsert => {
                     let offset_id =
-                        Self::upsert_embedding(&mut tx, segment_id, log_offset_unsigned, id)
-                            .await?;
+                        Self::upsert_record(&mut tx, segment_id, log_offset_unsigned, id).await?;
 
                     if let Some(meta) = metadata {
                         Self::update_metadata(&mut tx, offset_id, meta).await?;
@@ -454,8 +452,7 @@ impl SqliteMetadataWriter {
                     }
                 }
                 Operation::Delete => {
-                    if let Some(offset_id) = Self::delete_embedding(&mut tx, segment_id, id).await?
-                    {
+                    if let Some(offset_id) = Self::delete_record(&mut tx, segment_id, id).await? {
                         Self::delete_metadata(&mut tx, offset_id).await?;
                         Self::delete_document(&mut tx, offset_id).await?;
                     }
