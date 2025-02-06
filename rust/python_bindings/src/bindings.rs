@@ -14,8 +14,8 @@ use chroma_sqlite::{config::SqliteDBConfig, db::SqliteDb};
 use chroma_sysdb::{sqlite::SqliteSysDb, sysdb::SysDb};
 use chroma_system::System;
 use chroma_types::{
-    AddCollectionRecordsError, GetCollectionError, GetResponse, IncludeList, Metadata, QueryError,
-    QueryResponse, UpdateCollectionRecordsError, UpdateMetadata,
+    AddCollectionRecordsError, CreateDatabaseRequest, GetCollectionError, GetResponse, IncludeList,
+    Metadata, QueryError, QueryResponse, UpdateCollectionRecordsError, UpdateMetadata,
 };
 use numpy::PyReadonlyArray1;
 use pyo3::{
@@ -29,12 +29,12 @@ const DEFAULT_TENANT: &str = "default_tenant";
 
 #[pyclass]
 pub(crate) struct Bindings {
-    _runtime: tokio::runtime::Runtime,
+    runtime: tokio::runtime::Runtime,
     // TODO(hammadb): In order to make CI green, we proxy all
     // calls back into python.
     // We should slowly start moving the logic from python to rust
     proxy_frontend: Py<PyAny>,
-    _frontend: Frontend,
+    frontend: Frontend,
     _compaction_manager_handle: chroma_system::ComponentHandle<LocalCompactionManager>,
 }
 
@@ -171,8 +171,8 @@ impl Bindings {
 
         Ok(Bindings {
             proxy_frontend,
-            _runtime: runtime,
-            _frontend: frontend,
+            runtime,
+            frontend,
             _compaction_manager_handle: handle,
         })
     }
@@ -196,9 +196,24 @@ impl Bindings {
 
     ////////////////////////////// Admin API //////////////////////////////
 
-    fn create_database(&self, name: String, tenant: String, py: Python<'_>) -> PyResult<PyObject> {
-        self.proxy_frontend
-            .call_method1(py, "create_database", (name, tenant))
+    fn create_database(&self, name: String, tenant: String, _py: Python<'_>) -> PyResult<()> {
+        // todo: push validation logic into request struct
+        if name.len() < 3 {
+            return Err(PyValueError::new_err(
+                "Database name must be at least 3 characters long",
+            ));
+        }
+
+        let mut frontend = self.frontend.clone();
+
+        self.runtime.block_on(async {
+            frontend
+                .create_database(CreateDatabaseRequest::try_new(tenant, name).unwrap())
+                .await
+                .unwrap();
+        });
+
+        Ok(())
     }
 
     fn get_database(&self, name: String, tenant: String, py: Python<'_>) -> PyResult<PyObject> {
@@ -275,7 +290,7 @@ impl Bindings {
         tenant: String,
         database: String,
     ) -> PyResult<bool> {
-        let mut frontend_clone = self._frontend.clone();
+        let mut frontend_clone = self.frontend.clone();
 
         // TODO: move validate embeddings into this conversion
         let embeddings = py_embeddings_to_vec_f32(embeddings)?;
@@ -285,7 +300,7 @@ impl Bindings {
                 .map_err(|e| PyValueError::new_err(e.to_string()))?,
         );
 
-        let res = self._runtime.block_on(async {
+        let res = self.runtime.block_on(async {
             frontend_clone
                 .validate_embedding(collection_id, Some(&embeddings), true, |embedding| {
                     Some(embedding.len())
@@ -318,7 +333,7 @@ impl Bindings {
 
         // TODO: Error handling cleanup
         match self
-            ._runtime
+            .runtime
             .block_on(async { frontend_clone.add(req).await })
         {
             Ok(_) => Ok(true),
@@ -353,7 +368,7 @@ impl Bindings {
         tenant: String,
         database: String,
     ) -> PyResult<bool> {
-        let mut frontend_clone = self._frontend.clone();
+        let mut frontend_clone = self.frontend.clone();
 
         let embeddings = match embeddings {
             Some(embeddings) => py_embeddings_to_opt_vec_f32(Some(embeddings))?,
@@ -365,7 +380,7 @@ impl Bindings {
                 .map_err(|e| PyValueError::new_err(e.to_string()))?,
         );
 
-        let res = self._runtime.block_on(async {
+        let res = self.runtime.block_on(async {
             frontend_clone
                 .validate_embedding(collection_id, embeddings.as_ref(), false, |e| {
                     e.as_ref().map(|e| e.len())
@@ -397,7 +412,7 @@ impl Bindings {
         .map_err(|e| PyValueError::new_err(e.to_string()))?;
 
         match self
-            ._runtime
+            .runtime
             .block_on(async { frontend_clone.update(req).await })
         {
             Ok(_) => Ok(true),
@@ -455,9 +470,9 @@ impl Bindings {
         )
         .map_err(|e| PyValueError::new_err(e.to_string()))?;
 
-        let mut frontend_clone = self._frontend.clone();
-        match self
-            ._runtime
+        let mut frontend_clone = self.frontend.clone();
+        let res = match self
+            .runtime
             .block_on(async { frontend_clone.get(request).await })
         {
             Ok(response) => Ok(response),
@@ -470,7 +485,8 @@ impl Bindings {
                     Err(PyRuntimeError::new_err(format!("Internal Error: {}", e)))
                 }
             },
-        }
+        };
+        res
     }
 
     #[pyo3(
@@ -518,9 +534,9 @@ impl Bindings {
         )
         .map_err(|e| PyValueError::new_err(e.to_string()))?;
 
-        let mut frontend_clone = self._frontend.clone();
+        let mut frontend_clone = self.frontend.clone();
         match self
-            ._runtime
+            .runtime
             .block_on(async { frontend_clone.query(request).await })
         {
             Ok(response) => Ok(response),
