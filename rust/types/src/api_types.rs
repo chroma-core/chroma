@@ -765,10 +765,10 @@ pub enum ExecutorError {
     EmptyMemberlist,
     #[error(transparent)]
     Grpc(#[from] Status),
+    #[error("Internal error: {0}")]
+    Internal(Box<dyn ChromaError>),
     #[error("No client found for node: {0}")]
     NoClientFound(String),
-    #[error("Sqlite error: {0}")]
-    Sqlite(Box<dyn ChromaError>),
 }
 
 impl ChromaError for ExecutorError {
@@ -778,8 +778,8 @@ impl ChromaError for ExecutorError {
             ExecutorError::Conversion(_) => ErrorCodes::InvalidArgument,
             ExecutorError::EmptyMemberlist => ErrorCodes::Internal,
             ExecutorError::Grpc(e) => e.code().into(),
+            ExecutorError::Internal(e) => e.code(),
             ExecutorError::NoClientFound(_) => ErrorCodes::Internal,
-            ExecutorError::Sqlite(e) => e.code(),
         }
     }
 }
