@@ -24,7 +24,12 @@ import rust_bindings
 from typing import Optional, Sequence
 from overrides import override
 from uuid import UUID
+import platform
 
+if platform.system() != "Windows":
+    import resource
+elif platform.system() == "Windows":
+    import ctypes
 
 # RustBindingsAPI is an implementation of ServerAPI which shims
 # the Rust bindings to the Python API, providing a full implementation
@@ -66,12 +71,23 @@ class RustBindingsAPI(ServerAPI):
             hash_type=hash_type_bindings,
             migration_mode=migration_mode_bindings,
         )
+        if platform.system() != "Windows":
+            max_file_handles = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
+        else:
+            max_file_handles = ctypes.windll.msvcrt._getmaxstdio()  # type: ignore
+        hnsw_cache_size = (
+            max_file_handles
+            # This is integer division in Python 3, and not a comment.
+            # Each HNSW index has 4 data files and 1 metadata file
+            // 5
+        )
 
         # Construct the Rust bindings
         self.bindings = rust_bindings.Bindings(
             proxy_frontend=self.proxy_segment_api,
             sqlite_db_config=sqlite_config,
             persist_path=persist_path,
+            hnsw_cache_size=hnsw_cache_size
         )
 
     # ////////////////////////////// Admin API //////////////////////////////
