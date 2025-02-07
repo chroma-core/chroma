@@ -127,21 +127,24 @@ impl LocalHnswSegmentReader {
         Err(LocalHnswSegmentReaderError::UninitializedSegment)
     }
 
+    pub async fn get_embedding_by_offset_id(
+        &self,
+        offset_id: u32,
+    ) -> Result<Vec<f32>, LocalHnswSegmentReaderError> {
+        let guard = self.index.inner.read().await;
+        guard
+            .index
+            .get(offset_id as usize)
+            .map_err(|_| LocalHnswSegmentReaderError::GetEmbeddingError)?
+            .ok_or(LocalHnswSegmentReaderError::GetEmbeddingError)
+    }
+
     pub async fn get_embedding_by_user_id(
         &self,
         user_id: &String,
     ) -> Result<Vec<f32>, LocalHnswSegmentReaderError> {
-        let guard = self.index.inner.read().await;
-        let offset_id = guard
-            .id_map
-            .id_to_label
-            .get(user_id)
-            .ok_or(LocalHnswSegmentReaderError::IdNotFound)?;
-        guard
-            .index
-            .get(*offset_id as usize)
-            .map_err(|_| LocalHnswSegmentReaderError::GetEmbeddingError)?
-            .ok_or(LocalHnswSegmentReaderError::GetEmbeddingError)
+        let offset_id = self.get_offset_id_by_user_id(user_id).await?;
+        self.get_embedding_by_offset_id(offset_id).await
     }
 
     pub async fn get_offset_id_by_user_id(
@@ -157,16 +160,17 @@ impl LocalHnswSegmentReader {
             .ok_or(LocalHnswSegmentReaderError::IdNotFound)
     }
 
-    pub async fn get_embedding_by_offset_id(
+    pub async fn get_user_id_by_offset_id(
         &self,
         offset_id: u32,
-    ) -> Result<Vec<f32>, LocalHnswSegmentReaderError> {
+    ) -> Result<String, LocalHnswSegmentReaderError> {
         let guard = self.index.inner.read().await;
         guard
-            .index
-            .get(offset_id as usize)
-            .map_err(|_| LocalHnswSegmentReaderError::GetEmbeddingError)?
-            .ok_or(LocalHnswSegmentReaderError::GetEmbeddingError)
+            .id_map
+            .label_to_id
+            .get(&offset_id)
+            .cloned()
+            .ok_or(LocalHnswSegmentReaderError::IdNotFound)
     }
 
     pub async fn query_embedding(

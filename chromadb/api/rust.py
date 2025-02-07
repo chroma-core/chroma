@@ -295,6 +295,16 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
+        # return self.bindings.update(
+        #     str(collection_id),
+        #     ids,
+        #     embeddings,
+        #     metadatas,
+        #     documents,
+        #     uris,
+        #     tenant,
+        #     database,
+        # )
         return self.proxy_segment_api._update(
             collection_id, ids, embeddings, metadatas, documents, uris, tenant, database
         )
@@ -327,6 +337,28 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> QueryResult:
+        # rust_response = self.bindings.query(
+        #     str(collection_id),
+        #     query_embeddings,
+        #     n_results,
+        #     json.dumps(where) if where else None,
+        #     json.dumps(where_document) if where_document else None,
+        #     include,
+        #     tenant,
+        #     database,
+        # )
+
+        # return QueryResult(
+        #     ids=rust_response.ids,
+        #     embeddings=rust_response.embeddings,
+        #     documents=rust_response.documents,
+        #     uris=rust_response.uris,
+        #     included=include,
+        #     data=None,
+        #     metadatas=rust_response.metadatas,
+        #     distances=rust_response.distances,
+        # )
+
         return self.proxy_segment_api._query(  # type: ignore[no-any-return]
             collection_id,
             query_embeddings,

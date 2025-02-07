@@ -1,4 +1,4 @@
-from typing import Any, Optional, Sequence
+from typing import Any, List, Optional, Sequence
 from uuid import UUID
 from chromadb import CollectionMetadata, Embeddings, IDs
 from chromadb.api.configuration import CollectionConfigurationInternal
@@ -17,12 +17,22 @@ from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
 from enum import Enum
 
 # Result Types
+
 class GetResponse:
     ids: IDs
     embeddings: Embeddings
     documents: Documents
     uris: URIs
     metadatas: Metadatas
+    include: Include
+
+class QueryResponse:
+    ids: List[IDs]
+    embeddings: Optional[List[Embeddings]]
+    documents: Optional[List[Documents]]
+    uris: Optional[List[URIs]]
+    metadatas: Optional[List[Metadatas]]
+    distances: Optional[List[List[float]]]
     include: Include
 
 # SqliteDBConfig types
@@ -94,3 +104,25 @@ class Bindings:
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> GetResponse: ...
+    def query(
+        self,
+        collection_id: str,
+        query_embeddings: Embeddings,
+        n_results: int = 10,
+        where: Optional[str] = None,
+        where_document: Optional[str] = None,
+        include: Include = ["metadatas", "documents", "distances"],  # type: ignore[list-item]
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> QueryResponse: ...
+    def update(
+        self,
+        collection_id: str,
+        ids: IDs,
+        embeddings: Optional[Embeddings] = None,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool: ...

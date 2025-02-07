@@ -105,16 +105,12 @@ impl LocalExecutor {
                 .map_err(|err| ExecutorError::Internal(Box::new(err)))?;
 
             let mut allowed_offset_ids = Vec::new();
-            let mut oid_to_uid = HashMap::new();
-            let mut uid_to_oid = HashMap::new();
             for user_id in allowed_user_ids {
                 let offset_id = hnsw_reader
                     .get_offset_id_by_user_id(&user_id)
                     .await
                     .map_err(|err| ExecutorError::Internal(Box::new(err)))?;
                 allowed_offset_ids.push(offset_id);
-                oid_to_uid.insert(offset_id, user_id.clone());
-                uid_to_oid.insert(user_id, offset_id);
             }
 
             let mut knn_batch_results = Vec::new();
@@ -127,10 +123,10 @@ impl LocalExecutor {
 
                 let mut records = Vec::new();
                 for RecordDistance { offset_id, measure } in distances {
-                    let user_id = oid_to_uid
-                        .get(&offset_id)
-                        .cloned()
-                        .ok_or(ExecutorError::InconsistentData)?;
+                    let user_id = hnsw_reader
+                        .get_user_id_by_offset_id(offset_id)
+                        .await
+                        .map_err(|err| ExecutorError::Internal(Box::new(err)))?;
                     returned_user_ids.push(user_id.clone());
                     let knn_projection = KnnProjectionRecord {
                         record: ProjectionRecord {
