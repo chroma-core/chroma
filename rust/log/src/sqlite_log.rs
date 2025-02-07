@@ -414,7 +414,7 @@ mod tests {
     use tokio::runtime::Runtime;
 
     async fn setup_sqlite_log() -> SqliteLog {
-        let path = tempdir().unwrap().into_path().join("test.db");
+        let path = tempdir().unwrap().into_path();
         let db = SqliteDb::try_from_config(&SqliteDBConfig {
             url: path.to_str().unwrap().to_string(),
             migration_mode: chroma_sqlite::config::MigrationMode::Apply,
