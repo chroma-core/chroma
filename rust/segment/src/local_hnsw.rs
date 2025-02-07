@@ -4,11 +4,12 @@ use chroma_cache::Weighted;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::{HnswIndex, HnswIndexConfig, Index, IndexConfig, PersistentIndex};
 use chroma_sqlite::{db::SqliteDb, table::MaxSeqId};
-use chroma_types::{operator::RecordDistance, Chunk, LogRecord, Operation, Segment};
-use sea_query::{Query, SqliteQueryBuilder};
+use chroma_types::{operator::RecordDistance, Chunk, LogRecord, Operation, Segment, SegmentUuid};
+use sea_query::{Expr, Query, SqliteQueryBuilder};
 use sea_query_binder::SqlxBinder;
 use serde::{Deserialize, Serialize};
 use serde_pickle::{DeOptions, SerOptions};
+use sqlx::Row;
 use thiserror::Error;
 
 use crate::utils::{
@@ -44,6 +45,8 @@ pub enum LocalHnswSegmentReaderError {
     GetEmbeddingError,
     #[error("Error querying knn")]
     QueryError,
+    #[error("Error reading from sqlite")]
+    SqliteError(#[from] sqlx::error::Error),
 }
 
 impl ChromaError for LocalHnswSegmentReaderError {
@@ -58,6 +61,7 @@ impl ChromaError for LocalHnswSegmentReaderError {
             LocalHnswSegmentReaderError::IdNotFound => ErrorCodes::Internal,
             LocalHnswSegmentReaderError::GetEmbeddingError => ErrorCodes::Internal,
             LocalHnswSegmentReaderError::QueryError => ErrorCodes::Internal,
+            LocalHnswSegmentReaderError::SqliteError(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -67,7 +71,6 @@ impl LocalHnswSegmentReader {
         Self { index: hnsw_index }
     }
 
-    #[allow(dead_code)]
     pub async fn from_segment(
         segment: &Segment,
         dimensionality: usize,
@@ -137,6 +140,25 @@ impl LocalHnswSegmentReader {
             .get(offset_id as usize)
             .map_err(|_| LocalHnswSegmentReaderError::GetEmbeddingError)?
             .ok_or(LocalHnswSegmentReaderError::GetEmbeddingError)
+    }
+
+    pub async fn current_max_seq_id(
+        &self,
+        segment_id: &SegmentUuid,
+    ) -> Result<u64, LocalHnswSegmentReaderError> {
+        let guard = self.index.inner.read().await;
+        let (sql, values) = Query::select()
+            .column(MaxSeqId::SeqId)
+            .from(MaxSeqId::Table)
+            .and_where(Expr::col(MaxSeqId::SegmentId).eq(segment_id.to_string()))
+            .build_sqlx(SqliteQueryBuilder);
+        let row_opt = sqlx::query_with(&sql, values)
+            .fetch_optional(guard.sqlite.get_conn())
+            .await?;
+        Ok(row_opt
+            .map(|row| row.try_get::<u64, _>(0))
+            .transpose()?
+            .unwrap_or_default())
     }
 
     pub async fn get_embedding_by_user_id(
@@ -530,7 +552,6 @@ impl LocalHnswSegmentWriter {
     }
 }
 
-#[allow(dead_code)]
 async fn persist(
     guard: tokio::sync::RwLockWriteGuard<'_, Inner>,
 ) -> Result<tokio::sync::RwLockWriteGuard<'_, Inner>, LocalHnswSegmentWriterError> {

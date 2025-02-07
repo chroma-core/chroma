@@ -263,7 +263,7 @@ pub mod test_utils {
     }
 
     pub fn new_test_db_path() -> String {
-        let path = tempdir().unwrap().into_path().join("test.db");
+        let path = tempdir().unwrap().into_path();
         path.to_str().unwrap().to_string()
     }
 

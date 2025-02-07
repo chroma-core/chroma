@@ -9,10 +9,7 @@ use chroma_frontend::{
     },
 };
 use chroma_log::{LocalCompactionManager, Log};
-use chroma_segment::{
-    local_segment_manager::{LocalSegmentManager, LocalSegmentManagerConfig},
-    sqlite_metadata::SqliteMetadataWriter,
-};
+use chroma_segment::local_segment_manager::{LocalSegmentManager, LocalSegmentManagerConfig};
 use chroma_sqlite::{config::SqliteDBConfig, db::SqliteDb};
 use chroma_sysdb::{sqlite::SqliteSysDb, sysdb::SysDb};
 use chroma_system::System;
@@ -122,12 +119,9 @@ impl Bindings {
         )));
 
         // Spawn the compaction manager.
-        let metadata_writer = SqliteMetadataWriter {
-            db: sqlite_db.clone(),
-        };
         let handle = system.start_component(LocalCompactionManager::new(
             log.clone(),
-            metadata_writer,
+            sqlite_db.clone(),
             segment_manager.clone(),
             sysdb.clone(),
         ));
@@ -168,7 +162,11 @@ impl Bindings {
         // TODO: executor should NOT be exposed to the bindings module. try_from_config should work.
         // The reason this works this way right now is because try_from_config cannot share the sqlite_db
         // across the downstream components.
-        let executor = Executor::Local(LocalExecutor::new(segment_manager, sqlite_db));
+        let executor = Executor::Local(LocalExecutor::new(
+            segment_manager,
+            sqlite_db,
+            handle.clone(),
+        ));
         let frontend = Frontend::new(false, sysdb.clone(), collections_cache, log, executor);
 
         Ok(Bindings {

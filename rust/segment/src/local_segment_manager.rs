@@ -103,7 +103,6 @@ impl LocalSegmentManager {
         }
     }
 
-    #[allow(dead_code)]
     pub async fn get_hnsw_writer(
         &self,
         segment: &Segment,
@@ -123,6 +122,7 @@ impl LocalSegmentManager {
                 .await?;
                 // Open the FDs.
                 writer.index.start().await;
+                // Backfill.
                 self.hnsw_index_pool
                     .insert(index_uuid, writer.index.clone())
                     .await;

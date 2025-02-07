@@ -129,8 +129,31 @@ impl SqliteLog {
 
         let end_timestamp_ns = end_timestamp_ns.unwrap_or(i64::MAX);
 
-        let mut logs = sqlx::query(
-            r#"
+        let mut logs;
+        if batch_size < 0 {
+            logs = sqlx::query(
+                r#"
+            SELECT
+              seq_id,
+              id,
+              operation,
+              vector,
+              encoding,
+              metadata
+            FROM embeddings_queue
+            WHERE topic = ?
+            AND seq_id > ?
+            AND CAST(strftime('%s', created_at) AS INTEGER) <= (? / 1000000000)
+            ORDER BY seq_id ASC
+            "#,
+            )
+            .bind(topic)
+            .bind(offset)
+            .bind(end_timestamp_ns)
+            .fetch(self.db.get_conn());
+        } else {
+            logs = sqlx::query(
+                r#"
             SELECT
               seq_id,
               id,
@@ -145,12 +168,13 @@ impl SqliteLog {
             ORDER BY seq_id ASC
             LIMIT ?
             "#,
-        )
-        .bind(topic)
-        .bind(offset)
-        .bind(end_timestamp_ns)
-        .bind(batch_size)
-        .fetch(self.db.get_conn());
+            )
+            .bind(topic)
+            .bind(offset)
+            .bind(end_timestamp_ns)
+            .bind(batch_size)
+            .fetch(self.db.get_conn());
+        }
 
         let mut records = Vec::new();
         while let Some(row) = logs.try_next().await.map_err(WrappedSqlxError)? {
@@ -235,7 +259,7 @@ impl SqliteLog {
             .await
             .map_err(WrappedSqlxError)?;
         let start_log_offset: i64 = row.get("max_seq_id");
-        let end_log_offset = start_log_offset + records.len() as i64;
+        let total_records = records.len() as i64;
 
         let topic = get_topic_name(&self.tenant_id, &self.topic_namespace, collection_id);
 
@@ -285,7 +309,7 @@ impl SqliteLog {
             let compact_message = CompactionMessage {
                 collection_id,
                 start_offset: start_log_offset,
-                end_offset: end_log_offset,
+                total_records,
             };
             handle.request(compact_message, None).await??;
         }
@@ -390,7 +414,7 @@ mod tests {
     use tokio::runtime::Runtime;
 
     async fn setup_sqlite_log() -> SqliteLog {
-        let path = tempdir().unwrap().into_path().join("test.db");
+        let path = tempdir().unwrap().into_path();
         let db = SqliteDb::try_from_config(&SqliteDBConfig {
             url: path.to_str().unwrap().to_string(),
             migration_mode: chroma_sqlite::config::MigrationMode::Apply,
