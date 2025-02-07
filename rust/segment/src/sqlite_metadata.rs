@@ -674,7 +674,16 @@ impl SqliteMetadataReader {
         }
 
         Ok(GetResult {
-            records: records.into_values().collect(),
+            records: records
+                .into_values()
+                .map(|mut rec| match rec.metadata {
+                    Some(meta) if meta.is_empty() => {
+                        rec.metadata = None;
+                        rec
+                    }
+                    _ => rec,
+                })
+                .collect(),
         })
     }
 }
