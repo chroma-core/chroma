@@ -201,6 +201,7 @@ copyright Qdrant, licensed under the Apache 2.0 license.
 */
 
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::HnswSpace;
 use thiserror::Error;
 
 /// The distance function enum.
@@ -217,6 +218,16 @@ pub enum DistanceFunction {
     Euclidean,
     Cosine,
     InnerProduct,
+}
+
+impl From<HnswSpace> for DistanceFunction {
+    fn from(space: HnswSpace) -> Self {
+        match space {
+            HnswSpace::L2 => DistanceFunction::Euclidean,
+            HnswSpace::Cosine => DistanceFunction::Cosine,
+            HnswSpace::Ip => DistanceFunction::InnerProduct,
+        }
+    }
 }
 
 impl DistanceFunction {

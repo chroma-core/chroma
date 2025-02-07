@@ -8,4 +8,3 @@ pub mod local_segment_manager;
 pub mod sqlite_metadata;
 pub mod test;
 pub mod types;
-pub mod utils;

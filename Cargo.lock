@@ -1276,6 +1276,7 @@ name = "chroma-distance"
 version = "0.1.0"
 dependencies = [
  "chroma-error",
+ "chroma-types",
  "criterion",
  "rand",
  "thiserror 1.0.69",
@@ -1324,6 +1325,7 @@ dependencies = [
  "tower-http 0.6.2",
  "tracing",
  "uuid",
+ "validator",
 ]
 
 [[package]]
@@ -1463,6 +1465,7 @@ dependencies = [
  "sea-query-binder",
  "serde",
  "serde-pickle",
+ "serde_json",
  "shuttle",
  "sqlx",
  "tantivy",

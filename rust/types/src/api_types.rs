@@ -9,6 +9,7 @@ use crate::validators::{
 use crate::Collection;
 use crate::CollectionConversionError;
 use crate::CollectionUuid;
+use crate::HnswParametersFromSegmentError;
 use crate::Metadata;
 use crate::SegmentConversionError;
 use crate::SegmentScopeConversionError;
@@ -330,7 +331,7 @@ pub enum GetDatabaseError {
     Internal(#[from] Box<dyn ChromaError>),
     #[error("Invalid database id [{0}]")]
     InvalidID(String),
-    #[error("Database [{0}] not found")]
+    #[error("Database [{0}] not found. Are you sure it exists?")]
     NotFound(String),
 }
 
@@ -522,6 +523,8 @@ pub type CreateCollectionResponse = Collection;
 
 #[derive(Debug, Error)]
 pub enum CreateCollectionError {
+    #[error("Invalid HNSW parameters: {0}")]
+    InvalidHnswParameters(#[from] HnswParametersFromSegmentError),
     #[error("Collection [{0}] already exists")]
     AlreadyExists(String),
     #[error("Database [{0}] does not exist")]
@@ -537,6 +540,7 @@ pub enum CreateCollectionError {
 impl ChromaError for CreateCollectionError {
     fn code(&self) -> ErrorCodes {
         match self {
+            CreateCollectionError::InvalidHnswParameters(_) => ErrorCodes::InvalidArgument,
             CreateCollectionError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
             CreateCollectionError::DatabaseNotFound(_) => ErrorCodes::InvalidArgument,
             CreateCollectionError::Get(err) => err.code(),
