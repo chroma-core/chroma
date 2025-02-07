@@ -1,4 +1,4 @@
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence
 from uuid import UUID
 from chromadb import CollectionMetadata, Embeddings, IDs
 from chromadb.api.configuration import CollectionConfigurationInternal
@@ -10,14 +10,45 @@ from chromadb.api.types import (
     IDs,
     Metadatas,
     URIs,
+    Include,
 )
 from chromadb.types import Database, Tenant, Collection as CollectionModel
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
 from enum import Enum
 
+# Result Types
+class GetResponse:
+    ids: IDs
+    embeddings: Embeddings
+    documents: Documents
+    uris: URIs
+    metadatas: Metadatas
+    include: Include
+
+# SqliteDBConfig types
+class MigrationMode(Enum):
+    Apply = 0
+    Validate = 1
+
+class MigrationHash(Enum):
+    SHA256 = 0
+    MD5 = 1
+
+class SqliteDBConfig:
+    url: str
+    hash_type: MigrationHash
+    migration_mode: MigrationMode
+
+    def __init__(
+        self, url: str, hash_type: MigrationHash, migration_mode: MigrationMode
+    ) -> None: ...
+
 class Bindings:
     def __init__(
-        self, proxy_frontend: SegmentAPI, sqlite_db_config: SqliteDBConfig, persist_path: str
+        self,
+        proxy_frontend: SegmentAPI,
+        sqlite_db_config: SqliteDBConfig,
+        persist_path: str,
     ) -> None: ...
     def heartbeat(self) -> int: ...
     def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None: ...
@@ -51,20 +82,15 @@ class Bindings:
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool: ...
-
-class MigrationMode(Enum):
-    Apply = 0
-    Validate = 1
-
-class MigrationHash(Enum):
-    SHA256 = 0
-    MD5 = 1
-
-class SqliteDBConfig:
-    url: str
-    hash_type: MigrationHash
-    migration_mode: MigrationMode
-
-    def __init__(
-        self, url: str, hash_type: MigrationHash, migration_mode: MigrationMode
-    ) -> None: ...
+    def get(
+        self,
+        collection_id: str,
+        ids: Optional[IDs] = None,
+        where: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        where_document: Optional[str] = None,
+        include: Include = ["metadatas", "documents"],  # type: ignore[list-item]
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> GetResponse: ...

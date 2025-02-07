@@ -17,7 +17,7 @@ use chroma_sqlite::{config::SqliteDBConfig, db::SqliteDb};
 use chroma_sysdb::{sqlite::SqliteSysDb, sysdb::SysDb};
 use chroma_system::System;
 use chroma_types::{
-    AddCollectionRecordsError, GetCollectionError, IncludeList, Metadata, QueryError,
+    AddCollectionRecordsError, GetCollectionError, GetResponse, IncludeList, Metadata, QueryError,
 };
 use numpy::PyReadonlyArray1;
 use pyo3::{
@@ -313,7 +313,7 @@ impl Bindings {
     }
 
     #[pyo3(
-            signature = (collection_id, ids = None, r#where = None, limit = None, offset = 0, where_document = None, _include = ["metadatas".to_string(), "documents".to_string()].to_vec(), tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
+            signature = (collection_id, ids = None, r#where = None, limit = None, offset = 0, where_document = None, include = ["metadatas".to_string(), "documents".to_string()].to_vec(), tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
         )]
     #[allow(clippy::too_many_arguments)]
     fn get(
@@ -324,28 +324,27 @@ impl Bindings {
         limit: Option<u32>,
         offset: u32,
         where_document: Option<String>,
-        _include: Vec<String>,
+        include: Vec<String>,
         tenant: String,
         database: String,
-        _py: Python<'_>,
-    ) -> PyResult<()> {
-        // TODO: The way we convert where clauses into json and deserialize them is a bit clunky
-        // this could be improved
-
+    ) -> PyResult<GetResponse> {
         // TODO: Rethink the error handling strategy
-        let raw_where_fields =
-            chroma_types::RawWhereFields::new(r#where.into(), where_document.into());
-        let r#where = match raw_where_fields.parse() {
-            Ok(parsed) => parsed,
-            Err(e) => return Err(PyValueError::new_err(e.to_string())),
-        };
+        let r#where = chroma_types::RawWhereFields::from_json_str(
+            r#where.as_deref(),
+            where_document.as_deref(),
+        )
+        .map_err(|e| PyValueError::new_err(e.to_string()))?
+        .parse()
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
 
         let collection_id = chroma_types::CollectionUuid(
             uuid::Uuid::parse_str(&collection_id)
                 .map_err(|e| PyValueError::new_err(e.to_string()))?,
         );
 
-        // TODO: support include
+        let include =
+            IncludeList::try_from(include).map_err(|e| PyValueError::new_err(e.to_string()))?;
+
         let request = chroma_types::GetRequest::try_new(
             tenant,
             database,
@@ -354,12 +353,12 @@ impl Bindings {
             r#where,
             limit,
             offset,
-            IncludeList::default_get(),
+            include,
         )
         .map_err(|e| PyValueError::new_err(e.to_string()))?;
 
         let mut frontend_clone = self._frontend.clone();
-        let res = match self
+        match self
             ._runtime
             .block_on(async { frontend_clone.get(request).await })
         {
@@ -373,11 +372,7 @@ impl Bindings {
                     Err(PyRuntimeError::new_err(format!("Internal Error: {}", e)))
                 }
             },
-        };
-
-        println!("{:?}", res);
-
-        Ok(())
+        }
     }
 }
 

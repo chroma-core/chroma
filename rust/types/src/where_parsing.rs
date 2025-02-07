@@ -19,6 +19,31 @@ impl RawWhereFields {
             where_document,
         }
     }
+
+    pub fn from_json_str(
+        r#where: Option<&str>,
+        where_document: Option<&str>,
+    ) -> Result<Self, WhereValidationError> {
+        let r#where = r#where
+            .map(|r#where| {
+                serde_json::from_str(r#where).map_err(|_| WhereValidationError::WhereClause)
+            })
+            .transpose()?
+            .unwrap_or(Value::Null);
+
+        let where_document = where_document
+            .map(|where_document| {
+                serde_json::from_str(where_document)
+                    .map_err(|_| WhereValidationError::WhereDocumentClause)
+            })
+            .transpose()?
+            .unwrap_or(Value::Null);
+
+        Ok(Self {
+            r#where,
+            where_document,
+        })
+    }
 }
 
 #[derive(Error, Debug)]
@@ -374,6 +399,23 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, WhereValidationError> 
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn test_parse_where_direct_eq() {
+        let payload = json!({
+          "key1": "value1"
+        });
+        let expected_result = Where::Metadata(MetadataExpression {
+            key: "key1".to_string(),
+            comparison: crate::MetadataComparison::Primitive(
+                PrimitiveOperator::Equal,
+                crate::MetadataValue::Str("value1".to_string()),
+            ),
+        });
+
+        let result = parse_where(&payload).expect("This clause to parse successfully");
+        assert_eq!(result, expected_result);
+    }
 
     // TODO: add a proptest when there's an Arbitrary impl for Where and WhereDocument
     #[test]

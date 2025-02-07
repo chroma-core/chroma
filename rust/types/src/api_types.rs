@@ -1,5 +1,3 @@
-use std::time::SystemTimeError;
-
 use crate::error::QueryConversionError;
 use crate::operator::GetResult;
 use crate::operator::KnnBatchResult;
@@ -19,9 +17,11 @@ use crate::Where;
 use chroma_config::assignment::rendezvous_hash::AssignmentError;
 use chroma_error::ChromaValidationError;
 use chroma_error::{ChromaError, ErrorCodes};
+use pyo3::pyclass;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
+use std::time::SystemTimeError;
 use thiserror::Error;
 use tonic::Status;
 use uuid::Uuid;
@@ -656,6 +656,14 @@ impl ChromaError for DeleteCollectionError {
     }
 }
 
+////////////////////////// Metadata Key Constants //////////////////////////
+
+pub const CHROMA_KEY: &str = "chroma:";
+pub const CHROMA_DOCUMENT_KEY: &str = "chroma:document";
+pub const CHROMA_URI_KEY: &str = "chroma:uri";
+
+////////////////////////// AddCollectionRecords //////////////////////////
+
 #[non_exhaustive]
 #[derive(Debug, Validate)]
 pub struct AddCollectionRecordsRequest {
@@ -716,6 +724,8 @@ impl ChromaError for AddCollectionRecordsError {
     }
 }
 
+////////////////////////// UpdateCollectionRecords //////////////////////////
+
 #[non_exhaustive]
 #[derive(Validate)]
 pub struct UpdateCollectionRecordsRequest {
@@ -773,6 +783,8 @@ impl ChromaError for UpdateCollectionRecordsError {
     }
 }
 
+////////////////////////// UpsertCollectionRecords //////////////////////////
+
 #[non_exhaustive]
 #[derive(Validate)]
 pub struct UpsertCollectionRecordsRequest {
@@ -829,6 +841,8 @@ impl ChromaError for UpsertCollectionRecordsError {
         }
     }
 }
+
+////////////////////////// DeleteCollectionRecords //////////////////////////
 
 #[non_exhaustive]
 #[derive(Clone, Validate)]
@@ -888,6 +902,12 @@ impl ChromaError for DeleteCollectionRecordsError {
     }
 }
 
+////////////////////////// Include //////////////////////////
+
+#[derive(Error, Debug)]
+#[error("Invalid include value: {0}")]
+pub struct IncludeParsingError(String);
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum Include {
     #[serde(rename = "distances")]
@@ -902,7 +922,23 @@ pub enum Include {
     Uri,
 }
 
+impl TryFrom<&str> for Include {
+    type Error = IncludeParsingError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "distances" => Ok(Include::Distance),
+            "documents" => Ok(Include::Document),
+            "embeddings" => Ok(Include::Embedding),
+            "metadatas" => Ok(Include::Metadata),
+            "uris" => Ok(Include::Uri),
+            _ => Err(IncludeParsingError(value.to_string())),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
+#[pyclass]
 pub struct IncludeList(pub Vec<Include>);
 
 impl IncludeList {
@@ -917,6 +953,20 @@ impl IncludeList {
         Self(vec![Include::Document, Include::Metadata])
     }
 }
+
+impl TryFrom<Vec<String>> for IncludeList {
+    type Error = IncludeParsingError;
+
+    fn try_from(value: Vec<String>) -> Result<Self, Self::Error> {
+        let mut includes = Vec::new();
+        for v in value {
+            includes.push(Include::try_from(v.as_str())?);
+        }
+        Ok(IncludeList(includes))
+    }
+}
+
+////////////////////////// Count //////////////////////////
 
 #[non_exhaustive]
 #[derive(Clone, Deserialize, Serialize, Validate)]
@@ -944,9 +994,7 @@ impl CountRequest {
 
 pub type CountResponse = u32;
 
-pub const CHROMA_KEY: &str = "chroma:";
-pub const CHROMA_DOCUMENT_KEY: &str = "chroma:document";
-pub const CHROMA_URI_KEY: &str = "chroma:uri";
+////////////////////////// Get //////////////////////////
 
 #[non_exhaustive]
 #[derive(Clone, Validate)]
@@ -989,11 +1037,18 @@ impl GetRequest {
 }
 
 #[derive(Clone, Deserialize, Serialize, Debug)]
+#[pyclass]
 pub struct GetResponse {
+    #[pyo3(get)]
     ids: Vec<String>,
+    #[pyo3(get)]
     embeddings: Option<Vec<Vec<f32>>>,
+    #[pyo3(get)]
     documents: Option<Vec<Option<String>>>,
-    uri: Option<Vec<Option<String>>>,
+    #[pyo3(get)]
+    uris: Option<Vec<Option<String>>>,
+    // TODO(hammadb): Add metadata & include to the response
+    #[pyo3(get)]
     metadatas: Option<Vec<Option<Metadata>>>,
     include: Vec<Include>,
 }
@@ -1008,7 +1063,7 @@ impl From<(GetResult, IncludeList)> for GetResponse {
             documents: include_vec
                 .contains(&Include::Document)
                 .then_some(Vec::new()),
-            uri: include_vec.contains(&Include::Uri).then_some(Vec::new()),
+            uris: include_vec.contains(&Include::Uri).then_some(Vec::new()),
             metadatas: include_vec
                 .contains(&Include::Metadata)
                 .then_some(Vec::new()),
@@ -1038,7 +1093,7 @@ impl From<(GetResult, IncludeList)> for GetResponse {
                     }
                 })
             });
-            if let Some(uris) = res.uri.as_mut() {
+            if let Some(uris) = res.uris.as_mut() {
                 uris.push(uri);
             }
 
@@ -1054,6 +1109,8 @@ impl From<(GetResult, IncludeList)> for GetResponse {
         res
     }
 }
+
+////////////////////////// Query //////////////////////////
 
 #[non_exhaustive]
 #[derive(Clone, Validate)]

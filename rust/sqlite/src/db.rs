@@ -21,8 +21,10 @@ pub struct SqliteDb {
 impl SqliteDb {
     pub async fn try_from_config(config: &SqliteDBConfig) -> Result<Self, SqliteCreationError> {
         // TODO: copy all other pragmas from python and add basic tests
+        // TODO: make this file path handling more robust
+        let filename = config.url.trim_end_matches('/').to_string() + "/chroma.sqlite3";
         let options = SqliteConnectOptions::new()
-            .filename(&config.url)
+            .filename(filename)
             // Due to a bug in the python code, foreign_keys is turned off
             // The python code enabled it in a transaction, however,
             // https://www.sqlite.org/pragma.html states that foreign_keys
