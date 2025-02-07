@@ -934,16 +934,7 @@ impl Frontend {
             async move {
                 let res = self_clone.retryable_query(request_clone).await;
                 match res {
-                    Ok(res) => {
-                        metrics.query_retries_counter.add(
-                            retries.load(Ordering::Relaxed) as u64,
-                            &[KeyValue::new(
-                                "collection_id",
-                                request.collection_id.to_string(),
-                            )],
-                        );
-                        Ok(res)
-                    }
+                    Ok(res) => Ok(res),
                     Err(e) => {
                         if e.code() == ErrorCodes::NotFound {
                             tracing::info!(
@@ -951,27 +942,27 @@ impl Frontend {
                                 request.collection_id
                             );
                             cache_clone.remove(&request.collection_id).await;
-                        } else {
-                            metrics.query_retries_counter.add(
-                                retries.load(Ordering::Relaxed) as u64,
-                                &[KeyValue::new(
-                                    "collection_id",
-                                    request.collection_id.to_string(),
-                                )],
-                            );
                         }
                         Err(e)
                     }
                 }
             }
         };
-        query_to_retry
+        let res = query_to_retry
             .retry(self.collections_with_segments_provider.get_retry_backoff())
             .when(|e| e.code() == ErrorCodes::NotFound)
             .notify(|_, _| {
                 retries.fetch_add(1, Ordering::Relaxed);
             })
-            .await
+            .await;
+        metrics.query_retries_counter.add(
+            retries.load(Ordering::Relaxed) as u64,
+            &[KeyValue::new(
+                "collection_id",
+                request.collection_id.to_string(),
+            )],
+        );
+        res
     }
 
     pub async fn healthcheck(&self) -> HealthCheckResponse {
