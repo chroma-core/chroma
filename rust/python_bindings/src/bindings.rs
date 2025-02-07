@@ -198,21 +198,17 @@ impl Bindings {
     ////////////////////////////// Admin API //////////////////////////////
 
     fn create_database(&self, name: String, tenant: String, _py: Python<'_>) -> PyResult<()> {
-        // todo: push validation logic into request struct
-        if name.len() < 3 {
-            return Err(PyValueError::new_err(
-                "Database name must be at least 3 characters long",
-            ));
-        }
-
+        let request = CreateDatabaseRequest::try_new(tenant, name).map_err(|e| {
+            PyValueError::new_err(format!("Failed to create database request: {}", e))
+        })?;
         let mut frontend = self.frontend.clone();
 
         self.runtime.block_on(async {
             frontend
-                .create_database(CreateDatabaseRequest::try_new(tenant, name).unwrap())
+                .create_database(request)
                 .await
-                .unwrap();
-        });
+                .map_err(|e| PyRuntimeError::new_err(format!("Internal Error: {}", e)))
+        })?;
 
         Ok(())
     }
@@ -294,12 +290,14 @@ impl Bindings {
         let request = CreateCollectionRequest::try_new(
             tenant,
             database,
-            name,
-            metadata,
-            configuration_json,
+            name.clone(),
+            metadata.clone(),
+            configuration_json.clone(),
             get_or_create,
         )
-        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        .map_err(|e| {
+            PyValueError::new_err(format!("Failed to create collection request: {}", e))
+        })?;
 
         let mut frontend = self.frontend.clone();
         self.runtime.block_on(async {
