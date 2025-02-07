@@ -15,11 +15,12 @@ use chroma_sqlite::{config::SqliteDBConfig, db::SqliteDb};
 use chroma_sysdb::{sqlite::SqliteSysDb, sysdb::SysDb};
 use chroma_system::System;
 use chroma_types::{
-    Collection, CreateCollectionRequest, CreateDatabaseRequest, Database, GetDatabaseRequest,
-    GetResponse, HeartbeatError, IncludeList, Metadata, QueryResponse, UpdateMetadata,
+    Collection, CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest, Database,
+    DeleteDatabaseRequest, GetDatabaseRequest, GetResponse, GetTenantRequest, GetTenantResponse,
+    HeartbeatError, IncludeList, ListDatabasesRequest, Metadata, QueryResponse, UpdateMetadata,
 };
 use numpy::PyReadonlyArray1;
-use pyo3::{pyclass, pymethods, Py, PyAny, PyObject, PyResult, Python};
+use pyo3::{pyclass, pymethods, PyObject, PyResult, Python};
 use std::time::SystemTime;
 
 const DEFAULT_DATABASE: &str = "default_database";
@@ -28,10 +29,6 @@ const DEFAULT_TENANT: &str = "default_tenant";
 #[pyclass]
 pub(crate) struct Bindings {
     runtime: tokio::runtime::Runtime,
-    // TODO(hammadb): In order to make CI green, we proxy all
-    // calls back into python.
-    // We should slowly start moving the logic from python to rust
-    proxy_frontend: Py<PyAny>,
     frontend: Frontend,
     _compaction_manager_handle: chroma_system::ComponentHandle<LocalCompactionManager>,
 }
@@ -56,7 +53,6 @@ impl Bindings {
     #[new]
     #[allow(dead_code)]
     pub fn py_new(
-        proxy_frontend: Py<PyAny>,
         sqlite_db_config: SqliteDBConfig,
         persist_path: String,
         hnsw_cache_size: usize,
@@ -138,7 +134,6 @@ impl Bindings {
         let frontend = Frontend::new(false, sysdb.clone(), collections_cache, log, executor);
 
         Ok(Bindings {
-            proxy_frontend,
             runtime,
             frontend,
             _compaction_manager_handle: handle,
@@ -188,39 +183,48 @@ impl Bindings {
         Ok(database)
     }
 
-    fn delete_database(&self, name: String, tenant: String, py: Python<'_>) -> PyResult<PyObject> {
-        let result = self
-            .proxy_frontend
-            .call_method1(py, "delete_database", (name, tenant))?;
-        Ok(result)
+    fn delete_database(&self, name: String, tenant: String) -> ChromaPyResult<()> {
+        let request = DeleteDatabaseRequest::try_new(tenant, name)?;
+        let mut frontend = self.frontend.clone();
+        self.runtime
+            .block_on(async { frontend.delete_database(request).await })?;
+
+        Ok(())
     }
 
     #[pyo3(signature = (limit = None, offset = None, tenant = "DEFAULT_TENANT".to_string()))]
     fn list_databases(
         &self,
-        limit: Option<i32>,
-        offset: Option<i32>,
+        limit: Option<u32>,
+        offset: Option<u32>,
         tenant: String,
-        py: Python<'_>,
-    ) -> PyResult<PyObject> {
-        let result =
-            self.proxy_frontend
-                .call_method1(py, "list_databases", (limit, offset, tenant))?;
-        Ok(result)
+    ) -> ChromaPyResult<Vec<Database>> {
+        let request = ListDatabasesRequest::try_new(tenant, limit, offset.unwrap_or(0))?;
+        let mut frontend = self.frontend.clone();
+
+        let databases = self
+            .runtime
+            .block_on(async { frontend.list_databases(request).await })?;
+        Ok(databases)
     }
 
-    fn create_tenant(&self, name: String, py: Python<'_>) -> PyResult<PyObject> {
-        let result = self
-            .proxy_frontend
-            .call_method1(py, "create_tenant", (name,))?;
-        Ok(result)
+    fn create_tenant(&self, name: String) -> ChromaPyResult<()> {
+        let request = CreateTenantRequest::try_new(name)?;
+        let mut frontend = self.frontend.clone();
+
+        self.runtime
+            .block_on(async { frontend.create_tenant(request).await })?;
+        Ok(())
     }
 
-    fn get_tenant(&self, name: String, py: Python<'_>) -> PyResult<PyObject> {
-        let result = self
-            .proxy_frontend
-            .call_method1(py, "get_tenant", (name,))?;
-        Ok(result)
+    fn get_tenant(&self, name: String) -> ChromaPyResult<GetTenantResponse> {
+        let request = GetTenantRequest::try_new(name)?;
+        let mut frontend = self.frontend.clone();
+
+        let tenant = self
+            .runtime
+            .block_on(async { frontend.get_tenant(request).await })?;
+        Ok(tenant)
     }
 
     ////////////////////////////// Base API //////////////////////////////

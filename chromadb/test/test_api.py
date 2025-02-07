@@ -7,7 +7,7 @@ from chromadb.errors import ChromaError
 from chromadb.api.fastapi import FastAPI
 from chromadb.api.types import QueryResult, EmbeddingFunction, Document
 from chromadb.config import Settings
-from chromadb.errors import InvalidCollectionException
+from chromadb.errors import NotFoundError
 import chromadb.server.fastapi
 import pytest
 import tempfile
@@ -230,9 +230,7 @@ def test_collection_add_with_invalid_collection_throws(client):
     collection = client.create_collection("test")
     client.delete_collection("test")
 
-    with pytest.raises(
-        InvalidCollectionException, match=r"Collection .* does not exist."
-    ):
+    with pytest.raises(NotFoundError, match=r"Collection .* does not exist."):
         collection.add(**batch_records)
 
 
@@ -289,9 +287,7 @@ def test_collection_get_with_invalid_collection_throws(client):
     collection = client.create_collection("test")
     client.delete_collection("test")
 
-    with pytest.raises(
-        InvalidCollectionException, match=r"Collection .* does not exist."
-    ):
+    with pytest.raises(NotFoundError, match=r"Collection .* does not exist."):
         collection.get()
 
 
@@ -361,12 +357,14 @@ def test_delete(client):
     with pytest.raises(Exception):
         collection.delete()
 
+
 def test_delete_returns_none(client):
     client.reset()
     collection = client.create_collection("testspace")
     collection.add(**batch_records)
     assert collection.count() == 2
     assert collection.delete(ids=batch_records["ids"]) is None
+
 
 def test_delete_with_index(client):
     client.reset()
@@ -381,9 +379,7 @@ def test_collection_delete_with_invalid_collection_throws(client):
     collection = client.create_collection("test")
     client.delete_collection("test")
 
-    with pytest.raises(
-        InvalidCollectionException, match=r"Collection .* does not exist."
-    ):
+    with pytest.raises(NotFoundError, match=r"Collection .* does not exist."):
         collection.delete(ids=["id1"])
 
 
@@ -400,9 +396,7 @@ def test_collection_count_with_invalid_collection_throws(client):
     collection = client.create_collection("test")
     client.delete_collection("test")
 
-    with pytest.raises(
-        InvalidCollectionException, match=r"Collection .* does not exist."
-    ):
+    with pytest.raises(NotFoundError, match=r"Collection .* does not exist."):
         collection.count()
 
 
@@ -420,9 +414,7 @@ def test_collection_modify_with_invalid_collection_throws(client):
     collection = client.create_collection("test")
     client.delete_collection("test")
 
-    with pytest.raises(
-        InvalidCollectionException, match=r"Collection .* does not exist."
-    ):
+    with pytest.raises(NotFoundError, match=r"Collection .* does not exist."):
         collection.modify(name="test2")
 
 
@@ -585,9 +577,7 @@ def test_collection_peek_with_invalid_collection_throws(client):
     collection = client.create_collection("test")
     client.delete_collection("test")
 
-    with pytest.raises(
-        InvalidCollectionException, match=r"Collection .* does not exist."
-    ):
+    with pytest.raises(NotFoundError, match=r"Collection .* does not exist."):
         collection.peek()
 
 
@@ -596,9 +586,7 @@ def test_collection_query_with_invalid_collection_throws(client):
     collection = client.create_collection("test")
     client.delete_collection("test")
 
-    with pytest.raises(
-        InvalidCollectionException, match=r"Collection .* does not exist."
-    ):
+    with pytest.raises(NotFoundError, match=r"Collection .* does not exist."):
         collection.query(query_texts=["test"])
 
 
@@ -607,9 +595,7 @@ def test_collection_update_with_invalid_collection_throws(client):
     collection = client.create_collection("test")
     client.delete_collection("test")
 
-    with pytest.raises(
-        InvalidCollectionException, match=r"Collection .* does not exist."
-    ):
+    with pytest.raises(NotFoundError, match=r"Collection .* does not exist."):
         collection.update(ids=["id1"], documents=["test"])
 
 
@@ -1531,9 +1517,7 @@ def test_collection_upsert_with_invalid_collection_throws(client):
     collection = client.create_collection("test")
     client.delete_collection("test")
 
-    with pytest.raises(
-        InvalidCollectionException, match=r"Collection .* does not exist."
-    ):
+    with pytest.raises(NotFoundError, match=r"Collection .* does not exist."):
         collection.upsert(**initial_records)
 
 

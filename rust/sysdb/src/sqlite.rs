@@ -94,15 +94,52 @@ impl SqliteSysDb {
         database_name: String,
         tenant: String,
     ) -> Result<DeleteDatabaseResponse, DeleteDatabaseError> {
-        sqlx::query("DELETE FROM databases WHERE name = $1 AND tenant_id = $2")
+        let mut tx = self
+            .db
+            .get_conn()
+            .begin()
+            .await
+            .map_err(|e| DeleteDatabaseError::Internal(e.into()))?;
+
+        let collections = self
+            .get_collections_with_conn(
+                &mut *tx,
+                None,
+                None,
+                Some(tenant.clone()),
+                Some(database_name.clone()),
+                None,
+                0,
+            )
+            .await
+            .map_err(|e| e.boxed())?;
+
+        for collection in collections {
+            self.delete_collection_with_conn(
+                &mut *tx,
+                tenant.clone(),
+                database_name.clone(),
+                collection.collection_id,
+                vec![],
+            )
+            .await
+            .map_err(|e| e.boxed())?;
+        }
+
+        let result = sqlx::query("DELETE FROM databases WHERE name = $1 AND tenant_id = $2")
             .bind(&database_name)
             .bind(tenant)
-            .execute(self.db.get_conn())
+            .execute(&mut *tx)
             .await
-            .map_err(|e| match e {
-                sqlx::Error::RowNotFound => DeleteDatabaseError::NotFound(database_name),
-                _ => DeleteDatabaseError::Internal(e.into()),
-            })?;
+            .map_err(|e| DeleteDatabaseError::Internal(e.into()))?;
+
+        if result.rows_affected() == 0 {
+            return Err(DeleteDatabaseError::NotFound(database_name));
+        }
+
+        tx.commit()
+            .await
+            .map_err(|e| DeleteDatabaseError::Internal(e.into()))?;
 
         Ok(DeleteDatabaseResponse {})
     }
@@ -421,62 +458,13 @@ impl SqliteSysDb {
             .await
             .map_err(|e| DeleteCollectionError::Internal(e.into()))?;
 
-        let deleted_rows = sqlx::query(
-            r#"
-            DELETE FROM collections
-            WHERE id = $1
-            AND database_id = (SELECT id FROM databases WHERE name = $2 AND tenant_id = $3)
-            RETURNING id
-        "#,
-        )
-        .bind(collection_id.to_string())
-        .bind(&database)
-        .bind(&tenant)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| DeleteCollectionError::Internal(e.into()))?;
-
-        if deleted_rows.rows_affected() == 0 {
+        let was_found = self
+            .delete_collection_with_conn(&mut *tx, tenant, database, collection_id, segment_ids)
+            .await
+            .map_err(|e| e.boxed())?;
+        if !was_found {
             return Err(DeleteCollectionError::NotFound);
         }
-
-        // Delete segments
-        let (sql, values) = sea_query::Query::delete()
-            .from_table(table::Segments::Table)
-            .and_where(
-                sea_query::Expr::col((table::Segments::Table, table::Segments::Id))
-                    .is_in(segment_ids.iter().map(|id| id.to_string())),
-            )
-            .build_sqlx(sea_query::SqliteQueryBuilder);
-
-        sqlx::query_with(&sql, values)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| DeleteCollectionError::Internal(e.into()))?;
-
-        // Delete segment metadata
-        sqlx::query(
-            r#"
-            DELETE FROM segment_metadata
-            WHERE segment_id IN (SELECT id FROM segments WHERE collection = $1)
-            "#,
-        )
-        .bind(collection_id.to_string())
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| DeleteCollectionError::Internal(e.into()))?;
-
-        // Delete collection metadata
-        sqlx::query(
-            r#"
-            DELETE FROM collection_metadata
-            WHERE collection_id = $1
-            "#,
-        )
-        .bind(collection_id.to_string())
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| DeleteCollectionError::Internal(e.into()))?;
 
         tx.commit()
             .await
@@ -770,6 +758,68 @@ impl SqliteSysDb {
             .collect::<Result<Vec<_>, GetSegmentsError>>()?;
 
         Ok(segments)
+    }
+
+    /// Returns true if the collection was deleted, false if it was not found
+    async fn delete_collection_with_conn<C>(
+        &self,
+        conn: &mut C,
+        tenant: String,
+        database: String,
+        collection_id: CollectionUuid,
+        segment_ids: Vec<SegmentUuid>,
+    ) -> Result<bool, WrappedSqlxError>
+    where
+        for<'connection> &'connection mut C: sqlx::Executor<'connection, Database = sqlx::Sqlite>,
+    {
+        let deleted_rows = sqlx::query(
+            r#"
+            DELETE FROM collections
+            WHERE id = $1
+            AND database_id = (SELECT id FROM databases WHERE name = $2 AND tenant_id = $3)
+            RETURNING id
+        "#,
+        )
+        .bind(collection_id.to_string())
+        .bind(&database)
+        .bind(&tenant)
+        .execute(&mut *conn)
+        .await?;
+
+        // Delete segments
+        let (sql, values) = sea_query::Query::delete()
+            .from_table(table::Segments::Table)
+            .and_where(
+                sea_query::Expr::col((table::Segments::Table, table::Segments::Id))
+                    .is_in(segment_ids.iter().map(|id| id.to_string())),
+            )
+            .build_sqlx(sea_query::SqliteQueryBuilder);
+
+        sqlx::query_with(&sql, values).execute(&mut *conn).await?;
+
+        // Delete segment metadata
+        sqlx::query(
+            r#"
+            DELETE FROM segment_metadata
+            WHERE segment_id IN (SELECT id FROM segments WHERE collection = $1)
+            "#,
+        )
+        .bind(collection_id.to_string())
+        .execute(&mut *conn)
+        .await?;
+
+        // Delete collection metadata
+        sqlx::query(
+            r#"
+            DELETE FROM collection_metadata
+            WHERE collection_id = $1
+            "#,
+        )
+        .bind(collection_id.to_string())
+        .execute(&mut *conn)
+        .await?;
+
+        Ok(deleted_rows.rows_affected() > 0)
     }
 
     // TODO: reuse logic from metadata reader

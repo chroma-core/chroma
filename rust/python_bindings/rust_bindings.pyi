@@ -1,8 +1,7 @@
-from typing import Any, List, Optional, Sequence
+from typing import List, Optional, Sequence
 from uuid import UUID
 from chromadb import CollectionMetadata, Embeddings, IDs
 from chromadb.api.configuration import CollectionConfigurationInternal
-from chromadb.api.segment import SegmentAPI
 from chromadb.api.types import (
     CollectionMetadata,
     Documents,
@@ -12,9 +11,14 @@ from chromadb.api.types import (
     URIs,
     Include,
 )
-from chromadb.types import Database, Tenant, Collection as CollectionModel
+from chromadb.types import Tenant, Collection as CollectionModel
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
 from enum import Enum
+
+class DatabaseFromBindings:
+    id: UUID
+    name: str
+    tenant: str
 
 # Result Types
 
@@ -56,21 +60,22 @@ class SqliteDBConfig:
 class Bindings:
     def __init__(
         self,
-        proxy_frontend: SegmentAPI,
         sqlite_db_config: SqliteDBConfig,
         persist_path: str,
         hnsw_cache_size: int,
     ) -> None: ...
     def heartbeat(self) -> int: ...
     def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None: ...
-    def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> Database: ...
+    def get_database(
+        self, name: str, tenant: str = DEFAULT_TENANT
+    ) -> DatabaseFromBindings: ...
     def delete_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None: ...
     def list_databases(
         self,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
-    ) -> Sequence[Database]: ...
+    ) -> Sequence[DatabaseFromBindings]: ...
     def create_tenant(self, name: str) -> None: ...
     def get_tenant(self, name: str) -> Tenant: ...
     def create_collection(

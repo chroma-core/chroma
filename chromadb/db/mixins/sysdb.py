@@ -17,7 +17,6 @@ from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System
 from chromadb.db.base import Cursor, SqlDB, ParameterValue, get_sql
 from chromadb.db.system import SysDB
 from chromadb.errors import (
-    InvalidCollectionException,
     NotFoundError,
     UniqueConstraintError,
 )
@@ -559,9 +558,7 @@ class SqlSysDB(SqlDB, SysDB):
     ) -> CollectionAndSegments:
         collections = self.get_collections(id=collection_id)
         if len(collections) == 0:
-            raise InvalidCollectionException(
-                f"Collection {collection_id} does not exist."
-            )
+            raise NotFoundError(f"Collection {collection_id} does not exist.")
         return CollectionAndSegments(
             collection=collections[0],
             segments=self.get_segments(collection=collection_id),
