@@ -144,6 +144,36 @@ impl Drop for Stopwatch<'_> {
     }
 }
 
+///////////////////////////////////////////// ZipfCache ////////////////////////////////////////////
+
+/// Gray's zipf algorithm is a bit slow to initialize, so we cache zipf distributions that we
+/// create with more than 1k cardinality.
+struct ZipfCache {
+    #[allow(clippy::type_complexity)]
+    cache: Mutex<Vec<(u64, f64, Zipf)>>,
+}
+
+static ZIPF_CACHE: ZipfCache = ZipfCache {
+    cache: Mutex::new(vec![]),
+};
+
+impl ZipfCache {
+    // NOTE(rescrv):  I allow this wrong convention because it's the same name as the method on
+    // Zipf.
+    #[allow(clippy::wrong_self_convention)]
+    fn from_theta(&self, cardinality: u64, theta: f64) -> Zipf {
+        let mut cache = ZIPF_CACHE.cache.lock().unwrap();
+        for (n, t, zipf) in cache.iter() {
+            if *n == cardinality && (*t - theta).abs() < 0.0001 {
+                return zipf.clone();
+            }
+        }
+        let zipf = Zipf::from_theta(cardinality, theta);
+        cache.push((cardinality, theta, zipf.clone()));
+        zipf
+    }
+}
+
 ////////////////////////////////////////////// client //////////////////////////////////////////////
 
 /// Instantiate a new Chroma client.  This will use the CHROMA_HOST environment variable (or
@@ -266,8 +296,8 @@ impl Distribution {
             Distribution::Constant(n) => *n,
             Distribution::Exponential(rate) => poisson(*rate)(guac).ceil() as usize,
             Distribution::Uniform(min, max) => uniform(*min, *max)(guac),
-            Distribution::Zipf(n, alpha) => {
-                let z = Zipf::from_alpha(*n, *alpha);
+            Distribution::Zipf(n, theta) => {
+                let z = ZIPF_CACHE.from_theta(*n, *theta);
                 z.next(guac) as usize
             }
         }
@@ -309,7 +339,7 @@ impl Skew {
         match self {
             Skew::Uniform => uniform(0, cardinality)(guac),
             Skew::Zipf { theta } => {
-                let z = Zipf::from_theta(cardinality as u64, *theta);
+                let z = ZIPF_CACHE.from_theta(cardinality as u64, *theta);
                 z.next(guac) as usize
             }
         }
@@ -397,7 +427,7 @@ impl WhereMixin {
                 let word = match skew {
                     Skew::Uniform => WORDS[uniform(0, WORDS.len() as u64)(guac) as usize],
                     Skew::Zipf { theta } => {
-                        let z = Zipf::from_alpha(WORDS.len() as u64, *theta);
+                        let z = ZIPF_CACHE.from_theta(WORDS.len() as u64, *theta);
                         WORDS[z.next(guac) as usize]
                     }
                 };
