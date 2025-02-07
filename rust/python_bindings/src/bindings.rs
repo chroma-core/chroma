@@ -64,6 +64,7 @@ impl Bindings {
         proxy_frontend: Py<PyAny>,
         sqlite_db_config: SqliteDBConfig,
         persist_path: String,
+        hnsw_cache_size: usize,
     ) -> PyResult<Self> {
         // TODO: runtime config
         let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -88,7 +89,12 @@ impl Bindings {
                 }
             };
 
-        let cache_config = chroma_cache::CacheConfig::Memory(FoyerCacheConfig::default());
+        let cache_config = FoyerCacheConfig {
+            capacity: hnsw_cache_size,
+            ..Default::default()
+        };
+
+        let cache_config = chroma_cache::CacheConfig::Memory(cache_config);
         let segment_manager_config = LocalSegmentManagerConfig {
             hnsw_index_pool_cache_config: cache_config,
             persist_path: persist_path.clone(),
