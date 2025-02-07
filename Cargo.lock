@@ -5494,6 +5494,7 @@ dependencies = [
  "async-trait",
  "chroma-cache",
  "chroma-config",
+ "chroma-error",
  "chroma-frontend",
  "chroma-log",
  "chroma-segment",
@@ -5505,6 +5506,7 @@ dependencies = [
  "pyo3",
  "serde",
  "serde_json",
+ "thiserror 1.0.69",
  "tokio",
  "uuid",
 ]

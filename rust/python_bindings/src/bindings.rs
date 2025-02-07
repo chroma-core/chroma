@@ -1,3 +1,4 @@
+use crate::errors::{ChromaPyResult, WrappedPyErr, WrappedSerdeJsonError};
 use chroma_cache::FoyerCacheConfig;
 use chroma_config::Configurable;
 use chroma_frontend::{
@@ -15,13 +16,13 @@ use chroma_sysdb::{sqlite::SqliteSysDb, sysdb::SysDb};
 use chroma_system::System;
 use chroma_types::{
     AddCollectionRecordsError, Collection, CreateCollectionRequest, CreateDatabaseRequest,
-    GetCollectionError, GetResponse, IncludeList, Metadata, QueryError, QueryResponse,
-    UpdateCollectionRecordsError, UpdateMetadata,
+    Database, GetCollectionError, GetDatabaseRequest, GetResponse, IncludeList, Metadata,
+    QueryError, QueryResponse, UpdateCollectionRecordsError, UpdateMetadata,
 };
 use numpy::PyReadonlyArray1;
 use pyo3::{
     exceptions::{PyOSError, PyRuntimeError, PyValueError},
-    pyclass, pymethods, Py, PyAny, PyErr, PyObject, PyResult, Python,
+    pyclass, pymethods, Py, PyAny, PyObject, PyResult, Python,
 };
 use std::time::SystemTime;
 
@@ -197,25 +198,30 @@ impl Bindings {
 
     ////////////////////////////// Admin API //////////////////////////////
 
-    fn create_database(&self, name: String, tenant: String, _py: Python<'_>) -> PyResult<()> {
-        let request = CreateDatabaseRequest::try_new(tenant, name).map_err(|e| {
-            PyValueError::new_err(format!("Failed to create database request: {}", e))
-        })?;
+    fn create_database(&self, name: String, tenant: String, _py: Python<'_>) -> ChromaPyResult<()> {
+        let request = CreateDatabaseRequest::try_new(tenant, name)?;
         let mut frontend = self.frontend.clone();
 
-        self.runtime.block_on(async {
-            frontend
-                .create_database(request)
-                .await
-                .map_err(|e| PyRuntimeError::new_err(format!("Internal Error: {}", e)))
-        })?;
+        self.runtime
+            .block_on(async { frontend.create_database(request).await })?;
 
         Ok(())
     }
 
-    fn get_database(&self, name: String, tenant: String, py: Python<'_>) -> PyResult<PyObject> {
-        self.proxy_frontend
-            .call_method1(py, "get_database", (name, tenant))
+    fn get_database(
+        &self,
+        name: String,
+        tenant: String,
+        _py: Python<'_>,
+    ) -> ChromaPyResult<Database> {
+        let request = GetDatabaseRequest::try_new(tenant, name)?;
+
+        let mut frontend = self.frontend.clone();
+        let database = self
+            .runtime
+            .block_on(async { frontend.get_database(request).await })?;
+
+        Ok(database)
     }
 
     fn delete_database(&self, name: String, tenant: String, py: Python<'_>) -> PyResult<PyObject> {
@@ -258,30 +264,18 @@ impl Bindings {
         tenant: String,
         database: String,
         py: Python<'_>,
-    ) -> Result<Collection, PyErr> {
-        if let Some(metadata) = &metadata {
-            if metadata.is_empty() {
-                return Err(PyValueError::new_err(
-                    "Metadata cannot be empty if provided",
-                ));
-            }
-        }
-
+    ) -> ChromaPyResult<Collection> {
         let configuration_json = match configuration {
             Some(configuration) => {
                 let configuration_json_str = configuration
-                    .call_method0(py, "to_json_str")?
-                    .extract::<String>(py)?;
+                    .call_method0(py, "to_json_str")
+                    .map_err(WrappedPyErr)?
+                    .extract::<String>(py)
+                    .map_err(WrappedPyErr)?;
 
                 Some(
-                    serde_json::from_str::<serde_json::Value>(&configuration_json_str).map_err(
-                        |e| {
-                            PyValueError::new_err(format!(
-                                "Failed to parse configuration json: {}",
-                                e
-                            ))
-                        },
-                    )?,
+                    serde_json::from_str::<serde_json::Value>(&configuration_json_str)
+                        .map_err(WrappedSerdeJsonError)?,
                 )
             }
             None => None,
@@ -294,18 +288,14 @@ impl Bindings {
             metadata.clone(),
             configuration_json.clone(),
             get_or_create,
-        )
-        .map_err(|e| {
-            PyValueError::new_err(format!("Failed to create collection request: {}", e))
-        })?;
+        )?;
 
         let mut frontend = self.frontend.clone();
-        self.runtime.block_on(async {
-            frontend
-                .create_collection(request)
-                .await
-                .map_err(|e| PyRuntimeError::new_err(format!("Internal Error: {}", e)))
-        })
+        let collection = self
+            .runtime
+            .block_on(async { frontend.create_collection(request).await })?;
+
+        Ok(collection)
     }
 
     //////////////////////////// Record Methods ////////////////////////////

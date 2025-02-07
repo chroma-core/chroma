@@ -18,6 +18,7 @@ use chroma_config::assignment::rendezvous_hash::AssignmentError;
 use chroma_error::ChromaValidationError;
 use chroma_error::{ChromaError, ErrorCodes};
 use pyo3::pyclass;
+use pyo3::types::PyAnyMethods;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
@@ -237,10 +238,24 @@ impl ChromaError for CreateDatabaseError {
 }
 
 #[derive(Serialize, Debug)]
+#[pyo3::pyclass]
 pub struct Database {
     pub id: Uuid,
+    #[pyo3(get)]
     pub name: String,
+    #[pyo3(get)]
     pub tenant: String,
+}
+
+#[pyo3::pymethods]
+impl Database {
+    #[getter]
+    fn id<'py>(&self, py: pyo3::Python<'py>) -> pyo3::PyResult<pyo3::Bound<'py, pyo3::PyAny>> {
+        let res = pyo3::prelude::PyModule::import(py, "uuid")?
+            .getattr("UUID")?
+            .call1((self.id.to_string(),))?;
+        Ok(res)
+    }
 }
 
 #[non_exhaustive]
