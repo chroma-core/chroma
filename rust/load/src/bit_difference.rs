@@ -28,12 +28,12 @@
 use chromadb::collection::{CollectionEntries, GetOptions, QueryOptions};
 use chromadb::ChromaClient;
 use guacamole::combinators::*;
-use guacamole::{FromGuacamole, Guacamole, Zipf};
+use guacamole::{FromGuacamole, Guacamole};
 use siphasher::sip::SipHasher24;
 use tracing::Instrument;
 
 use crate::words::MANY_WORDS;
-use crate::{DataSet, Error, GetQuery, KeySelector, QueryQuery, Skew, UpsertQuery};
+use crate::{DataSet, Error, GetQuery, KeySelector, QueryQuery, Skew, UpsertQuery, ZIPF_CACHE};
 
 const EMBEDDING_BYTES: usize = 128;
 const EMBEDDING_SIZE: usize = 8 * EMBEDDING_BYTES;
@@ -201,7 +201,7 @@ impl SyntheticDataSet {
                 set_element(range_to(eo.num_clusters), |idx| self.cluster_by_index(idx))(guac)
             }
             Skew::Zipf { theta } => {
-                let zipf = Zipf::from_theta(eo.num_clusters as u64, theta);
+                let zipf = ZIPF_CACHE.from_theta(eo.num_clusters as u64, theta);
                 let cluster: Cluster = set_element(
                     |guac| zipf.next(guac) as usize,
                     |idx| self.cluster_by_index(idx),
