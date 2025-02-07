@@ -277,17 +277,17 @@ impl Bindings {
                 .map_err(|e| PyValueError::new_err(e.to_string()))?,
         );
 
-        let req = chroma_types::AddCollectionRecordsRequest {
-            ids,
+        let req = chroma_types::AddCollectionRecordsRequest::try_new(
+            tenant,
+            database,
             collection_id,
-            // TODO: WHY IS THIS Option for Add?
-            embeddings: Some(embeddings),
-            metadatas,
+            ids,
+            Some(embeddings),
             documents,
             uris,
-            tenant_id: tenant,
-            database_name: database,
-        };
+            metadatas,
+        )
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
 
         // TODO: Error handling cleanup
         let mut frontend_clone = self._frontend.clone();
@@ -346,16 +346,17 @@ impl Bindings {
         );
 
         // TODO: support include
-        let request = chroma_types::GetRequest {
+        let request = chroma_types::GetRequest::try_new(
+            tenant,
+            database,
             collection_id,
             ids,
             r#where,
             limit,
             offset,
-            include: IncludeList::default_get(),
-            tenant_id: tenant,
-            database_name: database,
-        };
+            IncludeList::default_get(),
+        )
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
 
         let mut frontend_clone = self._frontend.clone();
         let res = match self
