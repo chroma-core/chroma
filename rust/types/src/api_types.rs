@@ -1301,6 +1301,8 @@ pub enum ExecutorError {
     Internal(Box<dyn ChromaError>),
     #[error("No client found for node: {0}")]
     NoClientFound(String),
+    #[error("Error sending backfill request to compactor")]
+    BackfillError,
 }
 
 impl ChromaError for ExecutorError {
@@ -1313,6 +1315,7 @@ impl ChromaError for ExecutorError {
             ExecutorError::InconsistentData => ErrorCodes::Internal,
             ExecutorError::Internal(e) => e.code(),
             ExecutorError::NoClientFound(_) => ErrorCodes::Internal,
+            ExecutorError::BackfillError => ErrorCodes::Internal,
         }
     }
 }

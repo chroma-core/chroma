@@ -123,6 +123,7 @@ impl LocalSegmentManager {
                 .await?;
                 // Open the FDs.
                 writer.index.start().await;
+                // Backfill.
                 self.hnsw_index_pool
                     .insert(index_uuid, writer.index.clone())
                     .await;

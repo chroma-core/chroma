@@ -1,29 +1,39 @@
 use std::collections::HashMap;
 
+use chroma_log::{BackfillMessage, LocalCompactionManager};
 use chroma_segment::{
     local_segment_manager::LocalSegmentManager, sqlite_metadata::SqliteMetadataReader,
 };
 use chroma_sqlite::db::SqliteDb;
+use chroma_system::ComponentHandle;
 use chroma_types::{
     operator::{
         CountResult, Filter, GetResult, KnnBatchResult, KnnProjectionOutput, KnnProjectionRecord,
         Projection, ProjectionRecord, RecordDistance,
     },
     plan::{Count, Get, Knn},
-    ExecutorError,
+    CollectionAndSegments, CollectionUuid, ExecutorError,
 };
 
 #[derive(Clone, Debug)]
 pub struct LocalExecutor {
     hnsw_manager: LocalSegmentManager,
     metadata_reader: SqliteMetadataReader,
+    compactor_handle: ComponentHandle<LocalCompactionManager>,
+    backfill_status: HashMap<CollectionUuid, bool>,
 }
 
 impl LocalExecutor {
-    pub fn new(hnsw_manager: LocalSegmentManager, sqlite_db: SqliteDb) -> Self {
+    pub fn new(
+        hnsw_manager: LocalSegmentManager,
+        sqlite_db: SqliteDb,
+        compactor_handle: ComponentHandle<LocalCompactionManager>,
+    ) -> Self {
         Self {
             hnsw_manager,
             metadata_reader: SqliteMetadataReader::new(sqlite_db),
+            compactor_handle,
+            backfill_status: HashMap::new(),
         }
     }
 }
@@ -36,8 +46,32 @@ impl LocalExecutor {
             .map_err(|err| ExecutorError::Internal(Box::new(err)))
     }
 
+    pub async fn backfill_collection(
+        &mut self,
+        collection_and_segment: &CollectionAndSegments,
+    ) -> Result<(), ExecutorError> {
+        let backfill_msg = BackfillMessage {
+            collection_and_segment: collection_and_segment.clone(),
+        };
+        self.compactor_handle
+            .request(backfill_msg, None)
+            .await
+            .map_err(|_| ExecutorError::BackfillError)?
+            .map_err(|_| ExecutorError::BackfillError)?;
+        self.backfill_status
+            .insert(collection_and_segment.collection.collection_id, true);
+        Ok(())
+    }
+
     pub async fn get(&mut self, plan: Get) -> Result<GetResult, ExecutorError> {
         let collection_and_segments = plan.scan.collection_and_segments.clone();
+        if self
+            .backfill_status
+            .get(&collection_and_segments.collection.collection_id)
+            .map_or(true, |&status| !status)
+        {
+            self.backfill_collection(&collection_and_segments).await?;
+        }
         let load_embedding = plan.proj.embedding;
         let mut result = self
             .metadata_reader
@@ -69,6 +103,13 @@ impl LocalExecutor {
 
     pub async fn knn(&mut self, plan: Knn) -> Result<KnnBatchResult, ExecutorError> {
         let collection_and_segments = plan.scan.collection_and_segments.clone();
+        if self
+            .backfill_status
+            .get(&collection_and_segments.collection.collection_id)
+            .map_or(true, |&status| !status)
+        {
+            self.backfill_collection(&collection_and_segments).await?;
+        }
         if let Some(dimensionality) = collection_and_segments.collection.dimension {
             let allowed_user_ids = if plan.filter.where_clause.is_none() {
                 plan.filter.query_ids.unwrap_or_default()

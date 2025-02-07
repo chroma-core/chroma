@@ -52,6 +52,10 @@ pub struct SqliteMetadataWriter {
 }
 
 impl SqliteMetadataWriter {
+    pub fn new(db: SqliteDb) -> Self {
+        Self { db }
+    }
+
     fn add_record_stmt(
         segment_id: SegmentUuid,
         seq_id: u64,
@@ -488,6 +492,24 @@ pub struct SqliteMetadataReader {
 impl SqliteMetadataReader {
     pub fn new(db: SqliteDb) -> Self {
         Self { db }
+    }
+
+    pub async fn current_max_seq_id(
+        &self,
+        segment_id: &SegmentUuid,
+    ) -> Result<u64, SqliteMetadataError> {
+        let (sql, values) = Query::select()
+            .expr(Func::max(Expr::col(MaxSeqId::SeqId)))
+            .from(MaxSeqId::Table)
+            .and_where(Expr::col(MaxSeqId::SegmentId).eq(segment_id.to_string()))
+            .build_sqlx(SqliteQueryBuilder);
+        let row_opt = sqlx::query_with(&sql, values)
+            .fetch_optional(self.db.get_conn())
+            .await?;
+        Ok(row_opt
+            .map(|row| row.try_get::<u64, _>(0))
+            .transpose()?
+            .unwrap_or(0))
     }
 
     pub async fn count(
