@@ -10,10 +10,11 @@ use chroma_types::chroma_proto::VersionListForCollection;
 use chroma_types::{
     chroma_proto, CollectionAndSegments, CollectionMetadataUpdate, CreateCollectionError,
     CreateDatabaseError, CreateDatabaseResponse, CreateTenantError, CreateTenantResponse, Database,
-    DeleteDatabaseError, DeleteDatabaseResponse, GetCollectionWithSegmentsError,
-    GetCollectionsError, GetDatabaseError, GetDatabaseResponse, GetTenantError, GetTenantResponse,
-    ListDatabasesError, ListDatabasesResponse, Metadata, ResetError, ResetResponse,
-    SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid, UpdateCollectionError,
+    DeleteCollectionError, DeleteDatabaseError, DeleteDatabaseResponse,
+    GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError, GetDatabaseResponse,
+    GetSegmentsError, GetTenantError, GetTenantResponse, ListDatabasesError, ListDatabasesResponse,
+    Metadata, ResetError, ResetResponse, SegmentFlushInfo, SegmentFlushInfoConversionError,
+    SegmentUuid, UpdateCollectionError,
 };
 use chroma_types::{
     Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
@@ -232,8 +233,10 @@ impl SysDb {
                 grpc.delete_collection(tenant, database, collection_id, segment_ids)
                     .await
             }
-            SysDb::Sqlite(_) => {
-                todo!()
+            SysDb::Sqlite(sqlite) => {
+                sqlite
+                    .delete_collection(tenant, database, collection_id, segment_ids)
+                    .await
             }
             SysDb::Test(_) => {
                 todo!()
@@ -260,7 +263,7 @@ impl SysDb {
     ) -> Result<Vec<Segment>, GetSegmentsError> {
         match self {
             SysDb::Grpc(grpc) => grpc.get_segments(id, r#type, scope, collection).await,
-            SysDb::Sqlite(_) => todo!(),
+            SysDb::Sqlite(sqlite) => sqlite.get_segments(id, r#type, scope, collection).await,
             SysDb::Test(test) => test.get_segments(id, r#type, scope, collection).await,
         }
     }
@@ -753,7 +756,14 @@ impl GrpcSysDb {
                 id: collection_id.0.to_string(),
                 segment_ids: segment_ids.into_iter().map(|id| id.0.to_string()).collect(),
             })
-            .await?;
+            .await
+            .map_err(|e| {
+                if e.code() == Code::NotFound {
+                    DeleteCollectionError::NotFound
+                } else {
+                    DeleteCollectionError::Internal(e.into())
+                }
+            })?;
         Ok(())
     }
 
@@ -803,10 +813,10 @@ impl GrpcSysDb {
 
                 match converted_segments {
                     Ok(segments) => Ok(segments),
-                    Err(e) => Err(GetSegmentsError::ConversionError(e)),
+                    Err(e) => Err(GetSegmentsError::Internal(e.boxed())),
                 }
             }
-            Err(e) => Err(GetSegmentsError::FailedToGetSegments(e)),
+            Err(e) => Err(GetSegmentsError::Internal(e.into())),
         }
     }
 
@@ -958,39 +968,6 @@ impl GrpcSysDb {
     async fn reset(&mut self) -> Result<ResetResponse, ResetError> {
         self.client.reset_state(()).await?;
         Ok(ResetResponse {})
-    }
-}
-
-#[derive(Error, Debug)]
-pub enum DeleteCollectionError {
-    #[error("Failed to delete collection")]
-    FailedToDeleteCollection(#[from] tonic::Status),
-}
-
-impl ChromaError for DeleteCollectionError {
-    fn code(&self) -> ErrorCodes {
-        match self {
-            DeleteCollectionError::FailedToDeleteCollection(_) => ErrorCodes::Internal,
-        }
-    }
-}
-
-#[derive(Error, Debug)]
-// TODO: This should use our sysdb errors from the proto definition
-// We will have to do an error uniformization pass at some point
-pub enum GetSegmentsError {
-    #[error("Failed to fetch")]
-    FailedToGetSegments(#[from] tonic::Status),
-    #[error("Failed to convert proto segment")]
-    ConversionError(#[from] SegmentConversionError),
-}
-
-impl ChromaError for GetSegmentsError {
-    fn code(&self) -> ErrorCodes {
-        match self {
-            GetSegmentsError::FailedToGetSegments(_) => ErrorCodes::Internal,
-            GetSegmentsError::ConversionError(_) => ErrorCodes::Internal,
-        }
     }
 }
 
