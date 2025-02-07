@@ -449,11 +449,14 @@ impl Frontend {
         request: DeleteCollectionRequest,
     ) -> Result<DeleteCollectionRecordsResponse, DeleteCollectionError> {
         let collection = self
-            .get_collection(GetCollectionRequest {
-                tenant_id: request.tenant_id.clone(),
-                database_name: request.database_name.clone(),
-                collection_name: request.collection_name.clone(),
-            })
+            .get_collection(
+                GetCollectionRequest::try_new(
+                    request.tenant_id.clone(),
+                    request.database_name.clone(),
+                    request.collection_name,
+                )
+                .map_err(DeleteCollectionError::Validation)?,
+            )
             .await?;
 
         let segments = self
