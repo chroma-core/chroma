@@ -499,7 +499,7 @@ impl SqliteMetadataReader {
         segment_id: &SegmentUuid,
     ) -> Result<u64, SqliteMetadataError> {
         let (sql, values) = Query::select()
-            .expr(Func::max(Expr::col(MaxSeqId::SeqId)))
+            .column(MaxSeqId::SeqId)
             .from(MaxSeqId::Table)
             .and_where(Expr::col(MaxSeqId::SegmentId).eq(segment_id.to_string()))
             .build_sqlx(SqliteQueryBuilder);
@@ -509,7 +509,7 @@ impl SqliteMetadataReader {
         Ok(row_opt
             .map(|row| row.try_get::<u64, _>(0))
             .transpose()?
-            .unwrap_or(0))
+            .unwrap_or_default())
     }
 
     pub async fn count(

@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use chroma_log::{BackfillMessage, LocalCompactionManager};
 use chroma_segment::{
@@ -20,7 +23,7 @@ pub struct LocalExecutor {
     hnsw_manager: LocalSegmentManager,
     metadata_reader: SqliteMetadataReader,
     compactor_handle: ComponentHandle<LocalCompactionManager>,
-    backfill_status: HashMap<CollectionUuid, bool>,
+    backfilled_collections: Arc<parking_lot::Mutex<HashSet<CollectionUuid>>>,
 }
 
 impl LocalExecutor {
@@ -33,23 +36,32 @@ impl LocalExecutor {
             hnsw_manager,
             metadata_reader: SqliteMetadataReader::new(sqlite_db),
             compactor_handle,
-            backfill_status: HashMap::new(),
+            backfilled_collections: Arc::new(parking_lot::Mutex::new(HashSet::new())),
         }
     }
 }
 
 impl LocalExecutor {
     pub async fn count(&mut self, plan: Count) -> Result<CountResult, ExecutorError> {
+        self.try_backfill_collection(&plan.scan.collection_and_segments)
+            .await?;
         self.metadata_reader
             .count(plan)
             .await
             .map_err(|err| ExecutorError::Internal(Box::new(err)))
     }
 
-    pub async fn backfill_collection(
+    // If collection has already been backfilled, this function does nothing.
+    pub async fn try_backfill_collection(
         &mut self,
         collection_and_segment: &CollectionAndSegments,
     ) -> Result<(), ExecutorError> {
+        {
+            let backfill_guard = self.backfilled_collections.lock();
+            if backfill_guard.contains(&collection_and_segment.collection.collection_id) {
+                return Ok(());
+            }
+        }
         let backfill_msg = BackfillMessage {
             collection_and_segment: collection_and_segment.clone(),
         };
@@ -58,20 +70,15 @@ impl LocalExecutor {
             .await
             .map_err(|_| ExecutorError::BackfillError)?
             .map_err(|_| ExecutorError::BackfillError)?;
-        self.backfill_status
-            .insert(collection_and_segment.collection.collection_id, true);
+        let mut backfill_guard = self.backfilled_collections.lock();
+        backfill_guard.insert(collection_and_segment.collection.collection_id);
         Ok(())
     }
 
     pub async fn get(&mut self, plan: Get) -> Result<GetResult, ExecutorError> {
         let collection_and_segments = plan.scan.collection_and_segments.clone();
-        if self
-            .backfill_status
-            .get(&collection_and_segments.collection.collection_id)
-            .map_or(true, |&status| !status)
-        {
-            self.backfill_collection(&collection_and_segments).await?;
-        }
+        self.try_backfill_collection(&collection_and_segments)
+            .await?;
         let load_embedding = plan.proj.embedding;
         let mut result = self
             .metadata_reader
@@ -103,13 +110,8 @@ impl LocalExecutor {
 
     pub async fn knn(&mut self, plan: Knn) -> Result<KnnBatchResult, ExecutorError> {
         let collection_and_segments = plan.scan.collection_and_segments.clone();
-        if self
-            .backfill_status
-            .get(&collection_and_segments.collection.collection_id)
-            .map_or(true, |&status| !status)
-        {
-            self.backfill_collection(&collection_and_segments).await?;
-        }
+        self.try_backfill_collection(&collection_and_segments)
+            .await?;
         if let Some(dimensionality) = collection_and_segments.collection.dimension {
             let allowed_user_ids = if plan.filter.where_clause.is_none() {
                 plan.filter.query_ids.unwrap_or_default()

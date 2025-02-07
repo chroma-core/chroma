@@ -9,10 +9,7 @@ use chroma_frontend::{
     },
 };
 use chroma_log::{LocalCompactionManager, Log};
-use chroma_segment::{
-    local_segment_manager::{LocalSegmentManager, LocalSegmentManagerConfig},
-    sqlite_metadata::SqliteMetadataWriter,
-};
+use chroma_segment::local_segment_manager::{LocalSegmentManager, LocalSegmentManagerConfig};
 use chroma_sqlite::{config::SqliteDBConfig, db::SqliteDb};
 use chroma_sysdb::{sqlite::SqliteSysDb, sysdb::SysDb};
 use chroma_system::System;

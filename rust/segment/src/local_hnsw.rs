@@ -5,7 +5,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::{HnswIndex, HnswIndexConfig, Index, IndexConfig, PersistentIndex};
 use chroma_sqlite::{db::SqliteDb, table::MaxSeqId};
 use chroma_types::{operator::RecordDistance, Chunk, LogRecord, Operation, Segment, SegmentUuid};
-use sea_query::{Expr, Func, Query, SqliteQueryBuilder};
+use sea_query::{Expr, Query, SqliteQueryBuilder};
 use sea_query_binder::SqlxBinder;
 use serde::{Deserialize, Serialize};
 use serde_pickle::{DeOptions, SerOptions};
@@ -148,7 +148,7 @@ impl LocalHnswSegmentReader {
     ) -> Result<u64, LocalHnswSegmentReaderError> {
         let guard = self.index.inner.read().await;
         let (sql, values) = Query::select()
-            .expr(Func::max(Expr::col(MaxSeqId::SeqId)))
+            .column(MaxSeqId::SeqId)
             .from(MaxSeqId::Table)
             .and_where(Expr::col(MaxSeqId::SegmentId).eq(segment_id.to_string()))
             .build_sqlx(SqliteQueryBuilder);
@@ -158,7 +158,7 @@ impl LocalHnswSegmentReader {
         Ok(row_opt
             .map(|row| row.try_get::<u64, _>(0))
             .transpose()?
-            .unwrap_or(0))
+            .unwrap_or_default())
     }
 
     pub async fn get_embedding_by_user_id(

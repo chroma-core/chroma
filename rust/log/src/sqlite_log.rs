@@ -7,7 +7,7 @@ use chroma_types::{
     ScalarEncodingConversionError, UpdateMetadata, UpdateMetadataValue,
 };
 use futures::TryStreamExt;
-use sqlx::{Execute, QueryBuilder, Row};
+use sqlx::{QueryBuilder, Row};
 use std::{str::FromStr, sync::OnceLock};
 use thiserror::Error;
 

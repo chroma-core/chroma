@@ -185,26 +185,18 @@ impl Handler<BackfillMessage> for LocalCompactionManager {
         _: &ComponentContext<LocalCompactionManager>,
     ) -> Self::Result {
         // If collection is uninitialized, that means nothing has been written yet.
-        if message
-            .collection_and_segment
-            .collection
-            .dimension
-            .is_none()
-        {
-            return Ok(());
-        }
+        let dim = match message.collection_and_segment.collection.dimension {
+            Some(dim) => dim,
+            None => return Ok(()),
+        };
         // Get the current max seq ids.
         let metadata_reader = SqliteMetadataReader::new(self.sqlite_db.clone());
         let mt_max_seq_id = metadata_reader
             .current_max_seq_id(&message.collection_and_segment.metadata_segment.id)
             .await?;
-        // Unwrap is safe since we already checked for uninitialized collection above.
         let hnsw_reader = self
             .hnsw_segment_manager
-            .get_hnsw_reader(
-                &message.collection_and_segment.vector_segment,
-                message.collection_and_segment.collection.dimension.unwrap() as usize,
-            )
+            .get_hnsw_reader(&message.collection_and_segment.vector_segment, dim as usize)
             .await;
         let hnsw_max_seq_id = match hnsw_reader {
             Ok(reader) => {
@@ -222,7 +214,7 @@ impl Handler<BackfillMessage> for LocalCompactionManager {
             .log
             .read(
                 message.collection_and_segment.collection.collection_id,
-                std::cmp::min(mt_max_seq_id, hnsw_max_seq_id) as i64,
+                mt_max_seq_id.min(hnsw_max_seq_id) as i64,
                 -1,
                 None,
             )
@@ -264,10 +256,7 @@ impl Handler<BackfillMessage> for LocalCompactionManager {
         // Next apply it to the hnsw writer.
         let mut hnsw_writer = self
             .hnsw_segment_manager
-            .get_hnsw_writer(
-                &message.collection_and_segment.vector_segment,
-                message.collection_and_segment.collection.dimension.unwrap() as usize,
-            )
+            .get_hnsw_writer(&message.collection_and_segment.vector_segment, dim as usize)
             .await
             .map_err(|_| CompactionManagerError::GetHnswWriterFailed)?;
         hnsw_writer
