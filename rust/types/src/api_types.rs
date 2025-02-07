@@ -1153,12 +1153,19 @@ impl QueryRequest {
 }
 
 #[derive(Clone, Deserialize, Serialize)]
+#[pyclass]
 pub struct QueryResponse {
+    #[pyo3(get)]
     ids: Vec<Vec<String>>,
+    #[pyo3(get)]
     embeddings: Option<Vec<Vec<Option<Vec<f32>>>>>,
+    #[pyo3(get)]
     documents: Option<Vec<Vec<Option<String>>>>,
-    uri: Option<Vec<Vec<Option<String>>>>,
+    #[pyo3(get)]
+    uris: Option<Vec<Vec<Option<String>>>>,
+    #[pyo3(get)]
     metadatas: Option<Vec<Vec<Option<Metadata>>>>,
+    #[pyo3(get)]
     distances: Option<Vec<Vec<Option<f32>>>>,
     include: Vec<Include>,
 }
@@ -1173,7 +1180,7 @@ impl From<(KnnBatchResult, IncludeList)> for QueryResponse {
             documents: include_vec
                 .contains(&Include::Document)
                 .then_some(Vec::new()),
-            uri: include_vec.contains(&Include::Uri).then_some(Vec::new()),
+            uris: include_vec.contains(&Include::Uri).then_some(Vec::new()),
             metadatas: include_vec
                 .contains(&Include::Metadata)
                 .then_some(Vec::new()),
@@ -1232,7 +1239,7 @@ impl From<(KnnBatchResult, IncludeList)> for QueryResponse {
             if let Some(res_docs) = res.documents.as_mut() {
                 res_docs.push(documents);
             }
-            if let Some(res_uri) = res.uri.as_mut() {
+            if let Some(res_uri) = res.uris.as_mut() {
                 res_uri.push(uris);
             }
             if let Some(res_metas) = res.metadatas.as_mut() {
