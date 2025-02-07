@@ -296,9 +296,19 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
-        return self.proxy_segment_api._update(
-            collection_id, ids, embeddings, metadatas, documents, uris, tenant, database
+        return self.bindings.update(
+            str(collection_id),
+            ids,
+            embeddings,
+            metadatas,
+            documents,
+            uris,
+            tenant,
+            database,
         )
+        # return self.proxy_segment_api._update(
+        #     collection_id, ids, embeddings, metadatas, documents, uris, tenant, database
+        # )
 
     @override
     def _upsert(

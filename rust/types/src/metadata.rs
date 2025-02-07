@@ -1,5 +1,5 @@
 use chroma_error::{ChromaError, ErrorCodes};
-use pyo3::{FromPyObject, IntoPyObject};
+use pyo3::{types::PyAnyMethods, FromPyObject, IntoPyObject};
 use serde::{Deserialize, Serialize};
 use serde_json::{Number, Value};
 use std::{
@@ -18,6 +18,22 @@ pub enum UpdateMetadataValue {
     Float(f64),
     Str(String),
     None,
+}
+
+impl FromPyObject<'_> for UpdateMetadataValue {
+    fn extract_bound(ob: &pyo3::Bound<'_, pyo3::PyAny>) -> pyo3::PyResult<Self> {
+        if let Ok(value) = ob.extract::<bool>() {
+            Ok(UpdateMetadataValue::Bool(value))
+        } else if let Ok(value) = ob.extract::<i64>() {
+            Ok(UpdateMetadataValue::Int(value))
+        } else if let Ok(value) = ob.extract::<f64>() {
+            Ok(UpdateMetadataValue::Float(value))
+        } else if let Ok(value) = ob.extract::<String>() {
+            Ok(UpdateMetadataValue::Str(value))
+        } else {
+            Ok(UpdateMetadataValue::None)
+        }
+    }
 }
 
 #[derive(Error, Debug)]

@@ -18,7 +18,7 @@ use chroma_sysdb::{sqlite::SqliteSysDb, sysdb::SysDb};
 use chroma_system::System;
 use chroma_types::{
     AddCollectionRecordsError, GetCollectionError, GetResponse, IncludeList, Metadata, QueryError,
-    QueryResponse,
+    QueryResponse, UpdateCollectionRecordsError, UpdateMetadata,
 };
 use numpy::PyReadonlyArray1;
 use pyo3::{
@@ -335,6 +335,78 @@ impl Bindings {
     }
 
     #[pyo3(
+        signature = (collection_id, ids, embeddings = None, metadatas = None, documents = None, uris = None, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
+    )]
+    #[allow(clippy::too_many_arguments)]
+    fn update(
+        &self,
+        collection_id: String,
+        ids: Vec<String>,
+        embeddings: Option<Vec<PyReadonlyArray1<f32>>>,
+        metadatas: Option<Vec<Option<UpdateMetadata>>>,
+        documents: Option<Vec<Option<String>>>,
+        uris: Option<Vec<Option<String>>>,
+        tenant: String,
+        database: String,
+    ) -> PyResult<bool> {
+        let mut frontend_clone = self._frontend.clone();
+
+        let embeddings = match embeddings {
+            Some(embeddings) => py_embeddings_to_opt_vec_f32(Some(embeddings))?,
+            None => None,
+        };
+
+        let collection_id = chroma_types::CollectionUuid(
+            uuid::Uuid::parse_str(&collection_id)
+                .map_err(|e| PyValueError::new_err(e.to_string()))?,
+        );
+
+        let res = self._runtime.block_on(async {
+            frontend_clone
+                .validate_embedding(collection_id, embeddings.as_ref(), false, |e| {
+                    e.as_ref().map(|e| e.len())
+                })
+                .await
+        });
+
+        // TODO: error handling
+        match res {
+            Ok(_) => (),
+            Err(e) => {
+                return Err(PyRuntimeError::new_err(format!(
+                    "Failed to validate embeddings: {}",
+                    e
+                )))
+            }
+        }
+
+        let req = chroma_types::UpdateCollectionRecordsRequest::try_new(
+            tenant,
+            database,
+            collection_id,
+            ids,
+            embeddings,
+            documents,
+            uris,
+            metadatas,
+        )
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+
+        match self
+            ._runtime
+            .block_on(async { frontend_clone.update(req).await })
+        {
+            Ok(_) => Ok(true),
+            Err(e) => match e {
+                // TODO: How come this cannot throw collection not found?
+                UpdateCollectionRecordsError::Internal(e) => {
+                    Err(PyRuntimeError::new_err(format!("Internal Error: {}", e)))
+                }
+            },
+        }
+    }
+
+    #[pyo3(
             signature = (collection_id, ids = None, r#where = None, limit = None, offset = 0, where_document = None, include = ["metadatas".to_string(), "documents".to_string()].to_vec(), tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
         )]
     #[allow(clippy::too_many_arguments)]
@@ -481,4 +553,24 @@ fn py_embeddings_to_vec_f32(embeddings: Vec<PyReadonlyArray1<f32>>) -> PyResult<
         embeddings_vec.push(as_vec);
     }
     Ok(embeddings_vec)
+}
+
+fn py_embeddings_to_opt_vec_f32(
+    embeddings: Option<Vec<PyReadonlyArray1<f32>>>,
+) -> PyResult<Option<Vec<Option<Vec<f32>>>>> {
+    match embeddings {
+        Some(embeddings) => {
+            let mut embeddings_vec = Vec::with_capacity(embeddings.len());
+            for embedding in embeddings {
+                let e_minor = match embedding.as_slice() {
+                    Ok(e) => e,
+                    Err(e) => return Err(e.into()),
+                };
+                let as_vec = e_minor.to_vec();
+                embeddings_vec.push(Some(as_vec));
+            }
+            Ok(Some(embeddings_vec))
+        }
+        None => Ok(None),
+    }
 }
