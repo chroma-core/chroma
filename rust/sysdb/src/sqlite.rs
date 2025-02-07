@@ -94,15 +94,16 @@ impl SqliteSysDb {
         database_name: String,
         tenant: String,
     ) -> Result<DeleteDatabaseResponse, DeleteDatabaseError> {
-        sqlx::query("DELETE FROM databases WHERE name = $1 AND tenant_id = $2")
+        let result = sqlx::query("DELETE FROM databases WHERE name = $1 AND tenant_id = $2")
             .bind(&database_name)
             .bind(tenant)
             .execute(self.db.get_conn())
             .await
-            .map_err(|e| match e {
-                sqlx::Error::RowNotFound => DeleteDatabaseError::NotFound(database_name),
-                _ => DeleteDatabaseError::Internal(e.into()),
-            })?;
+            .map_err(|e| DeleteDatabaseError::Internal(e.into()))?;
+
+        if result.rows_affected() == 0 {
+            return Err(DeleteDatabaseError::NotFound(database_name));
+        }
 
         Ok(DeleteDatabaseResponse {})
     }

@@ -172,6 +172,7 @@ impl GetTenantRequest {
 }
 
 #[derive(Serialize)]
+#[pyclass]
 pub struct GetTenantResponse {
     pub name: String,
 }
@@ -346,7 +347,7 @@ impl ChromaError for GetDatabaseError {
 }
 
 #[non_exhaustive]
-#[derive(Validate)]
+#[derive(Validate, Debug)]
 pub struct DeleteDatabaseRequest {
     pub tenant_id: String,
     pub database_name: String,

@@ -56,12 +56,21 @@ class SqliteDBConfig:
 class Bindings:
     def __init__(
         self,
-        proxy_frontend: SegmentAPI,
         sqlite_db_config: SqliteDBConfig,
         persist_path: str,
         hnsw_cache_size: int,
     ) -> None: ...
     def heartbeat(self) -> int: ...
+    def count_collections(
+        self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
+    ) -> int: ...
+    def list_collections(
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> Sequence[CollectionModel]: ...
     def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None: ...
     def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> Database: ...
     def delete_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None: ...
@@ -82,6 +91,26 @@ class Bindings:
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel: ...
+    def get_collection(
+        self,
+        name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> CollectionModel: ...
+    def get_or_create_collection(
+        self,
+        name: str,
+        configuration: Optional[CollectionConfigurationInternal] = None,
+        metadata: Optional[CollectionMetadata] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> CollectionModel: ...
+    def delete_collection(
+        self,
+        name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> None: ...
     def add(
         self,
         ids: IDs,
