@@ -250,7 +250,7 @@ impl SqliteSysDb {
             serde_json::to_string(&configuration_json)
                 .map_err(CreateCollectionError::Configuration)?,
         )
-        .bind(dimension.unwrap_or_default())
+        .bind(dimension)
         .bind(database_id)
         .execute(&mut *tx)
         .await
