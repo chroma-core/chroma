@@ -42,7 +42,7 @@ const CloudSignUp: React.FC = () => {
   return (
     open && (
       <div
-        className={`absolute bottom-4 z-20 right-4 bg-white border border-black h-48 w-[400px] flex flex-col gap-0 sm:rounded-none p-0 dark:border-white dark:border dark:bg-gray-950 ${imageLoaded ? "opacity-100" : "opacity-0"}`}
+        className={`absolute bottom-4 z-20 right-4 bg-white border border-black h-48 overflow-hidden max-w-[400px] ml-4 flex flex-col gap-0 sm:rounded-none p-0 dark:border-white dark:border dark:bg-gray-950 ${imageLoaded ? "opacity-100" : "opacity-0"}`}
       >
         <div className="relative py-2 px-[3px] h-fit border-b-[1px] border-black dark:border-gray-300 dark:bg-gray-950">
           <div className="flex flex-col gap-0.5">
@@ -66,14 +66,14 @@ const CloudSignUp: React.FC = () => {
             </div>
           </div>
         </div>
-        <div className="flex gap-5 h-full">
-          <div className="flex flex-col gap-3 pt-4 pl-5 ">
+        <div className="flex justify-between gap-3 sm:gap-5 h-full">
+          <div className="flex flex-col gap-3 pt-1 pl-3 sm:pt-4 sm:pl-5">
             <div className="flex items-center gap-2 select-none">
               <ChromaIcon className="w-10 h-10" />
-              <p className="text-lg font-bold">Chroma Cloud</p>
+              <p className="text-md sm:text-lg font-bold whitespace-nowrap">Chroma Cloud</p>
             </div>
 
-            <div className="flex flex-col gap-2 text-sm">
+            <div className="flex flex-col gap-2 text-sm text-balance">
               <p>
                 Our fully managed hosted service,{" "}
                 <span className="font-bold">Chroma Cloud</span> is here.
@@ -83,7 +83,7 @@ const CloudSignUp: React.FC = () => {
               </p>
             </div>
           </div>
-          <div className="h-full flex items-start justify-end flex-shrink-0 ">
+          <div className="h-full flex items-start justify-end flex-shrink-0">
             <Image
               src="/cloud-art.svg"
               alt="Cloud Art"
