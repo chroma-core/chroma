@@ -333,13 +333,15 @@ impl From<Projection> for chroma_proto::ProjectionOperator {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ProjectionRecord {
     pub id: String,
     pub document: Option<String>,
     pub embedding: Option<Vec<f32>>,
     pub metadata: Option<Metadata>,
 }
+
+impl Eq for ProjectionRecord {}
 
 impl TryFrom<chroma_proto::ProjectionRecord> for ProjectionRecord {
     type Error = QueryConversionError;
@@ -380,7 +382,7 @@ impl TryFrom<ProjectionRecord> for chroma_proto::ProjectionRecord {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct ProjectionOutput {
     pub records: Vec<ProjectionRecord>,
 }
