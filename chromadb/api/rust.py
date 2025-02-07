@@ -49,7 +49,7 @@ class RustBindingsAPI(ServerAPI):
         persist_path = system.settings.require("persist_directory")
         # TODO: How to name this file?
         # TODO: proper path handling
-        sqlite_persist_path = persist_path + "/chroma.sqlite3"
+        sqlite_persist_path = persist_path
         hash_type = system.settings.require("migrations_hash_algorithm")
         hash_type_bindings = (
             rust_bindings.MigrationHash.MD5
