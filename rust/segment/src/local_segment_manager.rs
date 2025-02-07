@@ -103,7 +103,6 @@ impl LocalSegmentManager {
         }
     }
 
-    #[allow(dead_code)]
     pub async fn get_hnsw_writer(
         &self,
         segment: &Segment,
