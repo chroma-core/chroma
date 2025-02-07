@@ -916,8 +916,6 @@ impl Frontend {
                 .collections_with_segments_provider
                 .collections_with_segments_cache
                 .clone();
-            let metrics = Arc::clone(&self.metrics);
-            let retries = Arc::clone(&retries);
             async move {
                 let res = self_clone.retryable_query(request_clone).await;
                 match res {
@@ -942,7 +940,7 @@ impl Frontend {
                 retries.fetch_add(1, Ordering::Relaxed);
             })
             .await;
-        metrics
+        self.metrics
             .query_retries_counter
             .add(retries.load(Ordering::Relaxed) as u64, &[]);
         res
