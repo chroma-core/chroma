@@ -578,7 +578,10 @@ impl SqliteMetadataReader {
         let alias = Alias::new(SUBQ_ALIAS);
         let mut projection_query = Query::select();
         projection_query
-            .column((alias.clone(), Embeddings::EmbeddingId))
+            .columns([
+                (alias.clone(), Embeddings::Id),
+                (alias.clone(), Embeddings::EmbeddingId),
+            ])
             .from_subquery(filter_limit_query, alias.clone());
 
         if document || metadata {
@@ -609,31 +612,32 @@ impl SqliteMetadataReader {
         let mut records = BTreeMap::new();
 
         for row in rows {
-            let id: String = row.try_get(0)?;
-            let record = records.entry(id.clone()).or_insert(ProjectionRecord {
-                id,
+            let offset_id: u32 = row.try_get(0)?;
+            let user_id: String = row.try_get(1)?;
+            let record = records.entry(offset_id).or_insert(ProjectionRecord {
+                id: user_id,
                 document: None,
                 embedding: None,
                 metadata: metadata.then_some(HashMap::new()),
             });
 
             if document || metadata {
-                if let Ok(key) = row.try_get::<String, _>(1) {
+                if let Ok(key) = row.try_get::<String, _>(2) {
                     if let (true, Ok(doc)) = (
                         document && key.starts_with(CHROMA_DOCUMENT_KEY),
-                        row.try_get(2),
+                        row.try_get(3),
                     ) {
                         record.document = Some(doc);
                     }
 
                     if let Some(metadata) = record.metadata.as_mut() {
-                        if let Ok(Some(s)) = row.try_get(2) {
+                        if let Ok(Some(s)) = row.try_get(3) {
                             metadata.insert(key.clone(), MetadataValue::Str(s));
-                        } else if let Ok(Some(i)) = row.try_get(3) {
+                        } else if let Ok(Some(i)) = row.try_get(4) {
                             metadata.insert(key.clone(), MetadataValue::Int(i));
-                        } else if let Ok(Some(f)) = row.try_get(4) {
+                        } else if let Ok(Some(f)) = row.try_get(5) {
                             metadata.insert(key.clone(), MetadataValue::Float(f));
-                        } else if let Ok(Some(b)) = row.try_get(5) {
+                        } else if let Ok(Some(b)) = row.try_get(6) {
                             metadata.insert(key, MetadataValue::Bool(b));
                         }
                     }
@@ -653,21 +657,21 @@ mod tests {
     use chroma_types::{
         operator::{Filter, Limit, Projection, Scan},
         plan::{Count, Get},
-        BooleanOperator, Chunk, CollectionAndSegments, CompositeExpression, DocumentExpression,
-        LogRecord, MetadataComparison, MetadataExpression, MetadataValue, OperationRecord,
-        PrimitiveOperator, Where,
+        strategies::TestCollectionData,
+        BooleanOperator, Chunk, CompositeExpression, DocumentExpression, LogRecord,
+        MetadataComparison, MetadataExpression, MetadataValue, PrimitiveOperator, Where,
     };
     use proptest::prelude::*;
     use tokio::runtime::Runtime;
 
-    use crate::test::{TestDistributedSegment, TestReferenceSegment};
+    use crate::test::TestReferenceSegment;
 
     use super::{SqliteMetadataReader, SqliteMetadataWriter};
 
     proptest! {
         #[test]
         fn test_count(
-            operations in proptest::collection::vec(any::<OperationRecord>(), 0..100)
+            test_data in any::<TestCollectionData>()
         ) {
             let runtime = Runtime::new().expect("Should be able to start tokio runtime");
             let mut ref_seg = TestReferenceSegment::default();
@@ -675,37 +679,48 @@ mod tests {
                 db: runtime.block_on(get_new_sqlite_db())
             };
 
-            let collection_and_segments = CollectionAndSegments::test(6);
-            let seg_id = collection_and_segments.metadata_segment.id;
-
-            let logs = operations.into_iter().enumerate().map(|(i, record)| LogRecord { log_offset: (i + 1) as i64, record }).collect::<Vec<_>>();
-
-            ref_seg.apply_logs(logs.clone(), seg_id);
+            let metadata_seg_id = test_data.collection_and_segments.metadata_segment.id;
+            ref_seg.apply_logs(test_data.logs.clone(), metadata_seg_id);
             let mut tx = runtime.block_on(sqlite_seg_writer.begin()).expect("Should be able to start transaction");
-            let data: Chunk<LogRecord> = Chunk::new(logs.into());
-            runtime.block_on(sqlite_seg_writer.apply_logs(data, seg_id, &mut *tx)).expect("Should be able to apply logs");
+            let data: Chunk<LogRecord> = Chunk::new(test_data.logs.clone().into());
+            runtime.block_on(sqlite_seg_writer.apply_logs(data, metadata_seg_id, &mut *tx)).expect("Should be able to apply logs");
             runtime.block_on(tx.commit()).expect("Should be able to commit log");
 
             let sqlite_seg_reader = SqliteMetadataReader {
                 db: sqlite_seg_writer.db
             };
-            let plan = Count { scan: Scan { collection_and_segments }};
+            let plan = Count { scan: Scan { collection_and_segments: test_data.collection_and_segments.clone() }};
             let ref_count = ref_seg.count(plan.clone()).expect("Count should not fail");
             let sqlite_count = runtime.block_on(sqlite_seg_reader.count(plan)).expect("Count should not fail");
             assert_eq!(ref_count, sqlite_count);
         }
     }
 
-    #[tokio::test]
-    async fn test_get() {
-        let metadata_reader = SqliteMetadataReader {
-            db: get_new_sqlite_db().await,
-        };
+    proptest! {
+        #[test]
+        fn test_get(
+            test_data in any::<TestCollectionData>()
+        ) {
+            let runtime = Runtime::new().expect("Should be able to start tokio runtime");
+            let mut ref_seg = TestReferenceSegment::default();
+            let sqlite_seg_writer = SqliteMetadataWriter {
+                db: runtime.block_on(get_new_sqlite_db())
+            };
 
-        let _result = metadata_reader
-            .get(Get {
+            let metadata_seg_id = test_data.collection_and_segments.metadata_segment.id;
+            ref_seg.apply_logs(test_data.logs.clone(), metadata_seg_id);
+            let mut tx = runtime.block_on(sqlite_seg_writer.begin()).expect("Should be able to start transaction");
+            let data: Chunk<LogRecord> = Chunk::new(test_data.logs.clone().into());
+            runtime.block_on(sqlite_seg_writer.apply_logs(data, metadata_seg_id, &mut *tx)).expect("Should be able to apply logs");
+            runtime.block_on(tx.commit()).expect("Should be able to commit log");
+
+            let sqlite_seg_reader = SqliteMetadataReader {
+                db: sqlite_seg_writer.db
+            };
+
+            let plan = Get {
                 scan: Scan {
-                    collection_and_segments: TestDistributedSegment::default().into(),
+                    collection_and_segments: test_data.collection_and_segments.clone(),
                 },
                 filter: Filter {
                     query_ids: None,
@@ -713,30 +728,32 @@ mod tests {
                         operator: BooleanOperator::Or,
                         children: vec![
                             Where::Metadata(MetadataExpression {
-                                key: "age".into(),
+                                key: "log_offset".into(),
                                 comparison: MetadataComparison::Primitive(
                                     PrimitiveOperator::GreaterThan,
-                                    MetadataValue::Int(0),
+                                    MetadataValue::Int(54),
                                 ),
                             }),
                             Where::Document(DocumentExpression {
-                                operator: chroma_types::DocumentOperator::NotContains,
-                                text: "fish".into(),
+                                operator: chroma_types::DocumentOperator::Contains,
+                                text: "<1".into(),
                             }),
                         ],
                     })),
                 },
                 limit: Limit {
-                    skip: 0,
-                    fetch: None,
+                    skip: 3,
+                    fetch: Some(6),
                 },
                 proj: Projection {
                     document: true,
                     embedding: false,
                     metadata: true,
                 },
-            })
-            .await
-            .expect("Get should not fail");
+            };
+            let ref_get = ref_seg.get(plan.clone()).expect("Get should not fail");
+            let sqlite_get = runtime.block_on(sqlite_seg_reader.get(plan)).expect("Get should not fail");
+            assert_eq!(ref_get, sqlite_get);
+        }
     }
 }

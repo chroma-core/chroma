@@ -1,5 +1,9 @@
-use crate::{Operation, OperationRecord, ScalarEncoding, UpdateMetadata, UpdateMetadataValue};
-use proptest::prelude::*;
+use crate::{
+    Collection, CollectionAndSegments, CollectionUuid, LogRecord, Operation, OperationRecord,
+    ScalarEncoding, Segment, SegmentType, SegmentUuid, UpdateMetadata, UpdateMetadataValue,
+};
+use proptest::{collection, prelude::*};
+use serde_json::Value;
 
 /**
  * Strategy for metadata.
@@ -109,6 +113,138 @@ impl Arbitrary for OperationRecord {
                     }
                 },
             )
+            .boxed()
+    }
+}
+
+/// This will generate `4 * collection_max_size` log records containing at most `collection_max_size` elements
+pub struct TestCollectionDataStrategyParams {
+    pub collection_max_size: usize,
+}
+
+impl Default for TestCollectionDataStrategyParams {
+    fn default() -> Self {
+        Self {
+            collection_max_size: 100,
+        }
+    }
+}
+
+const PROP_TENANT: &str = "tenant_proptest";
+const PROP_DB: &str = "database_proptest";
+const PROP_COLL: &str = "collection_proptest";
+
+#[derive(Debug)]
+pub struct TestCollectionData {
+    pub collection_and_segments: CollectionAndSegments,
+    pub logs: Vec<LogRecord>,
+}
+
+impl Arbitrary for TestCollectionData {
+    type Parameters = TestCollectionDataStrategyParams;
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
+        let records = collection::vec(
+            (any::<String>(), any::<[f32; 3]>()),
+            args.collection_max_size,
+        )
+        .prop_map(|ids| {
+            ids.into_iter()
+                .flat_map(|(id, emb)| {
+                    [
+                        (
+                            id.clone(),
+                            Some(emb.into_iter().collect::<Vec<_>>()),
+                            Operation::Add,
+                        ),
+                        (id.clone(), None, Operation::Update),
+                        (id.clone(), None, Operation::Upsert),
+                        (id.clone(), None, Operation::Delete),
+                    ]
+                })
+                .collect::<Vec<_>>()
+        })
+        .prop_shuffle()
+        .prop_map(|id_ops| {
+            id_ops
+                .into_iter()
+                .enumerate()
+                .map(|(log_offset, (id, embedding, operation))| LogRecord {
+                    log_offset: log_offset as i64,
+                    record: OperationRecord {
+                        id: id.clone(),
+                        embedding,
+                        encoding: None,
+                        metadata: (!matches!(operation, Operation::Delete)).then_some(
+                            [
+                                ("id".to_string(), UpdateMetadataValue::Str(id.clone())),
+                                (
+                                    "log_offset".to_string(),
+                                    UpdateMetadataValue::Int(log_offset as i64),
+                                ),
+                                (
+                                    "modulo_7".to_string(),
+                                    UpdateMetadataValue::Int(log_offset as i64 % 7),
+                                ),
+                            ]
+                            .into_iter()
+                            .collect(),
+                        ),
+                        document: (!matches!(operation, Operation::Delete))
+                            .then_some(format!("<{id}>")),
+                        operation,
+                    },
+                })
+                .collect::<Vec<_>>()
+        });
+
+        records
+            .prop_map(move |logs| {
+                let collection_id = CollectionUuid::new();
+                let collection_and_segments = CollectionAndSegments {
+                    collection: Collection {
+                        collection_id,
+                        name: PROP_COLL.to_string(),
+                        configuration_json: Value::Null,
+                        metadata: None,
+                        dimension: Some(3),
+                        tenant: PROP_TENANT.to_string(),
+                        database: PROP_DB.to_string(),
+                        log_position: 0,
+                        version: 0,
+                        total_records_post_compaction: 0,
+                    },
+                    metadata_segment: Segment {
+                        id: SegmentUuid::new(),
+                        r#type: SegmentType::Sqlite,
+                        scope: crate::SegmentScope::METADATA,
+                        collection: collection_id,
+                        metadata: None,
+                        file_path: Default::default(),
+                    },
+                    record_segment: Segment {
+                        id: SegmentUuid::new(),
+                        r#type: SegmentType::Sqlite,
+                        scope: crate::SegmentScope::METADATA,
+                        collection: collection_id,
+                        metadata: None,
+                        file_path: Default::default(),
+                    },
+                    vector_segment: Segment {
+                        id: SegmentUuid::new(),
+                        r#type: SegmentType::HnswLocalMemory,
+                        scope: crate::SegmentScope::VECTOR,
+                        collection: collection_id,
+                        metadata: None,
+                        file_path: Default::default(),
+                    },
+                };
+                TestCollectionData {
+                    collection_and_segments,
+                    logs,
+                }
+            })
             .boxed()
     }
 }
