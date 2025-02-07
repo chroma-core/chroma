@@ -89,7 +89,7 @@ impl Bindings {
         let sqlite_sysdb = SqliteSysDb::new(sqlite_db.clone());
         let sysdb = Box::new(SysDb::Sqlite(sqlite_sysdb));
         // TODO: get the log configuration from the config sysdb
-        let log = Box::new(Log::Sqlite(chroma_log::sqlite_log::SqliteLog::new(
+        let mut log = Box::new(Log::Sqlite(chroma_log::sqlite_log::SqliteLog::new(
             sqlite_db.clone(),
             "default".to_string(),
             "default".to_string(),
@@ -131,7 +131,23 @@ impl Bindings {
             sqlite_db,
             handle.clone(),
         ));
-        let frontend = Frontend::new(false, sysdb.clone(), collections_cache, log, executor);
+        let max_batch_size = match runtime.block_on(log.get_max_batch_size()) {
+            Ok(max_batch_size) => max_batch_size,
+            Err(e) => {
+                return Err(PyOSError::new_err(format!(
+                    "Failed to get max batch size: {}",
+                    e
+                )))
+            }
+        };
+        let frontend = Frontend::new(
+            false,
+            sysdb.clone(),
+            collections_cache,
+            log,
+            executor,
+            max_batch_size,
+        );
 
         Ok(Bindings {
             runtime,
@@ -148,6 +164,11 @@ impl Bindings {
             .duration_since(SystemTime::UNIX_EPOCH)
             .map_err(HeartbeatError::CouldNotGetTime)?;
         Ok(duration_since_epoch.as_nanos())
+    }
+
+    #[allow(dead_code)]
+    fn get_max_batch_size(&self) -> u32 {
+        self._frontend.clone().get_max_batch_size()
     }
 
     // TODO(hammadb): Determine our pattern for optional arguments in python
@@ -285,14 +306,24 @@ impl Bindings {
         &self,
         ids: Vec<String>,
         collection_id: String,
-        embeddings: Vec<PyReadonlyArray1<f32>>,
+        embeddings: Vec<Vec<f32>>,
         metadatas: Option<Vec<Option<Metadata>>>,
         documents: Option<Vec<Option<String>>>,
         uris: Option<Vec<Option<String>>>,
         tenant: String,
         database: String,
     ) -> ChromaPyResult<bool> {
-        let embeddings = py_embeddings_to_vec_f32(embeddings).map_err(WrappedPyErr)?;
+        // TODO: move validate embeddings into this conversion
+        // let embeddings = py_embeddings_to_vec_f32(embeddings).map_err(WrappedPyErr)?;
+        let mut frontend_clone = self._frontend.clone();
+
+        if self.get_max_batch_size() < ids.len() as u32 {
+            return Err(PyValueError::new_err(format!(
+                "Batch size of {} is greater than max batch size of {}",
+                ids.len(),
+                self.get_max_batch_size()
+            )));
+        }
 
         let collection_id = chroma_types::CollectionUuid(
             uuid::Uuid::parse_str(&collection_id).map_err(WrappedUuidError)?,
@@ -431,7 +462,7 @@ impl Bindings {
     fn query(
         &self,
         collection_id: String,
-        query_embeddings: Vec<PyReadonlyArray1<f32>>,
+        query_embeddings: Vec<Vec<f32>>,
         n_results: u32,
         r#where: Option<String>,
         where_document: Option<String>,
@@ -439,7 +470,7 @@ impl Bindings {
         tenant: String,
         database: String,
     ) -> ChromaPyResult<QueryResponse> {
-        let query_embeddings = py_embeddings_to_vec_f32(query_embeddings).map_err(WrappedPyErr)?;
+        // let query_embeddings = py_embeddings_to_vec_f32(query_embeddings).map_err(WrappedPyErr)?;
 
         let r#where = chroma_types::RawWhereFields::from_json_str(
             r#where.as_deref(),

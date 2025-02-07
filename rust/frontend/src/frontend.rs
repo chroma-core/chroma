@@ -118,6 +118,7 @@ pub struct Frontend {
     log_client: Box<chroma_log::Log>,
     sysdb_client: Box<sysdb::SysDb>,
     collections_with_segments_provider: CollectionsWithSegmentsProvider,
+    max_batch_size: u32,
 }
 
 impl Frontend {
@@ -127,6 +128,7 @@ impl Frontend {
         collections_with_segments_provider: CollectionsWithSegmentsProvider,
         log_client: Box<chroma_log::Log>,
         executor: Executor,
+        max_batch_size: u32,
     ) -> Self {
         Frontend {
             allow_reset,
@@ -134,6 +136,7 @@ impl Frontend {
             log_client,
             sysdb_client,
             collections_with_segments_provider,
+            max_batch_size,
         }
     }
 
@@ -141,6 +144,10 @@ impl Frontend {
         Ok(HeartbeatResponse {
             nanosecond_heartbeat: SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos(),
         })
+    }
+
+    pub fn get_max_batch_size(&mut self) -> u32 {
+        self.max_batch_size
     }
 
     async fn get_collection_dimension(
@@ -891,7 +898,7 @@ impl Configurable<(FrontendConfig, System)> for Frontend {
         (config, system): &(FrontendConfig, System),
     ) -> Result<Self, Box<dyn ChromaError>> {
         let sysdb_client = chroma_sysdb::from_config(&config.sysdb).await?;
-        let log_client = chroma_log::from_config(&config.log).await?;
+        let mut log_client = chroma_log::from_config(&config.log).await?;
 
         let collections_with_segments_provider =
             CollectionsWithSegmentsProvider::try_from_config(&(
@@ -902,12 +909,14 @@ impl Configurable<(FrontendConfig, System)> for Frontend {
 
         let executor =
             Executor::try_from_config(&(config.executor.clone(), system.clone())).await?;
+        let max_batch_size = log_client.get_max_batch_size().await?;
         Ok(Frontend::new(
             config.allow_reset,
             sysdb_client,
             collections_with_segments_provider,
             log_client,
             executor,
+            max_batch_size,
         ))
     }
 }

@@ -3,9 +3,11 @@ use std::{
     sync::Arc,
 };
 
+use chroma_distance::{normalize, DistanceFunction};
 use chroma_log::{BackfillMessage, LocalCompactionManager};
 use chroma_segment::{
     local_segment_manager::LocalSegmentManager, sqlite_metadata::SqliteMetadataReader,
+    utils::distance_function_from_segment,
 };
 use chroma_sqlite::db::SqliteDb;
 use chroma_system::ComponentHandle;
@@ -156,11 +158,23 @@ impl LocalExecutor {
                 allowed_offset_ids.push(offset_id);
             }
 
+            let distance_function =
+                distance_function_from_segment(&plan.scan.collection_and_segments.vector_segment)
+                    .map_err(|err| ExecutorError::Internal(err))?;
             let mut knn_batch_results = Vec::new();
             let mut returned_user_ids = Vec::new();
             for embedding in plan.knn.embeddings {
+                let query_embedding = if let DistanceFunction::Cosine = distance_function {
+                    normalize(&embedding)
+                } else {
+                    embedding
+                };
                 let distances = hnsw_reader
-                    .query_embedding(allowed_offset_ids.as_slice(), embedding, plan.knn.fetch)
+                    .query_embedding(
+                        allowed_offset_ids.as_slice(),
+                        query_embedding,
+                        plan.knn.fetch,
+                    )
                     .await
                     .map_err(|err| ExecutorError::Internal(Box::new(err)))?;
 

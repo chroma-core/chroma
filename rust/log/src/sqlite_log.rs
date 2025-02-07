@@ -66,6 +66,8 @@ impl ChromaError for SqlitePushLogsError {
     }
 }
 
+const VARIABLE_PER_RECORD: u32 = 6;
+
 #[derive(Error, Debug)]
 pub enum SqliteGetCollectionsWithNewDataError {
     #[error("Query error: {0}")]
@@ -403,6 +405,24 @@ impl SqliteLog {
 
         Ok(())
     }
+
+    pub async fn get_max_batch_size(&self) -> Result<u32, SqliteGetMaxBatchSizeError> {
+        let rows = sqlx::query("PRAGMA compile_options")
+            .fetch_all(self.db.get_conn())
+            .await
+            .map_err(WrappedSqlxError)?;
+        let mut max_variable_number = 999;
+        for row in rows {
+            let row_parsed = row.try_get::<String, _>(0)?;
+            if row_parsed.starts_with("MAX_VARIABLE_NUMBER") {
+                let contents: Vec<&str> = row_parsed.split("=").collect();
+                if contents.len() == 2 {
+                    max_variable_number = contents[1].parse::<u32>().unwrap();
+                }
+            }
+        }
+        Ok(max_variable_number / VARIABLE_PER_RECORD)
+    }
 }
 
 #[derive(Error, Debug)]
@@ -415,6 +435,23 @@ impl ChromaError for SqlitePurgeLogsError {
     fn code(&self) -> ErrorCodes {
         match self {
             SqlitePurgeLogsError::DeleteQueryError(err) => err.code(),
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum SqliteGetMaxBatchSizeError {
+    #[error("Error getting compile time options from sqlite: {0}")]
+    PragmaQueryError(#[from] WrappedSqlxError),
+    #[error("Error parsing row from sqlx: {0}")]
+    RowParsingError(#[from] sqlx::Error),
+}
+
+impl ChromaError for SqliteGetMaxBatchSizeError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            SqliteGetMaxBatchSizeError::PragmaQueryError(err) => err.code(),
+            SqliteGetMaxBatchSizeError::RowParsingError(_) => ErrorCodes::Internal,
         }
     }
 }

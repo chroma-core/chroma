@@ -30,6 +30,7 @@ if platform.system() != "Windows":
     import resource
 elif platform.system() == "Windows":
     import ctypes
+import json
 
 
 # RustBindingsAPI is an implementation of ServerAPI which shims
@@ -260,42 +261,42 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> GetResult:
-        # rust_response = self.bindings.get(
-        #     str(collection_id),
-        #     ids,
-        #     json.dumps(where) if where else None,
-        #     limit,
-        #     offset or 0,
-        #     json.dumps(where_document) if where_document else None,
-        #     include,
-        #     tenant,
-        #     database,
-        # )
-        # # TODO: The data field is missing from rust?
-        # return GetResult(
-        #     ids=rust_response.ids,
-        #     embeddings=rust_response.embeddings,
-        #     documents=rust_response.documents,
-        #     uris=rust_response.uris,
-        #     included=include,
-        #     data=None,
-        #     metadatas=rust_response.metadatas,
-        # )
-
-        return self.proxy_segment_api._get(  # type: ignore[no-any-return]
-            collection_id,
+        rust_response = self.bindings.get(
+            str(collection_id),
             ids,
-            where,
-            sort,
+            json.dumps(where) if where else None,
             limit,
-            offset,
-            page,
-            page_size,
-            where_document,
+            offset or 0,
+            json.dumps(where_document) if where_document else None,
             include,
             tenant,
             database,
         )
+        # TODO: The data field is missing from rust?
+        return GetResult(
+            ids=rust_response.ids,
+            embeddings=rust_response.embeddings,
+            documents=rust_response.documents,
+            uris=rust_response.uris,
+            included=include,
+            data=None,
+            metadatas=rust_response.metadatas,
+        )
+
+        # return self.proxy_segment_api._get(  # type: ignore[no-any-return]
+        #     collection_id,
+        #     ids,
+        #     where,
+        #     sort,
+        #     limit,
+        #     offset,
+        #     page,
+        #     page_size,
+        #     where_document,
+        #     include,
+        #     tenant,
+        #     database,
+        # )
 
     @override
     def _add(
@@ -309,19 +310,19 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
-        # return self.bindings.add(
-        #     ids,
-        #     str(collection_id),
-        #     embeddings,
-        #     metadatas,
-        #     documents,
-        #     uris,
-        #     tenant,
-        #     database,
-        # )
-        return self.proxy_segment_api._add(
-            ids, collection_id, embeddings, metadatas, documents, uris, tenant, database
+        return self.bindings.add(
+            ids,
+            str(collection_id),
+            embeddings,
+            metadatas,
+            documents,
+            uris,
+            tenant,
+            database,
         )
+        # return self.proxy_segment_api._add(
+        #     ids, collection_id, embeddings, metadatas, documents, uris, tenant, database
+        # )
 
     @override
     def _update(
@@ -377,38 +378,38 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> QueryResult:
-        # rust_response = self.bindings.query(
-        #     str(collection_id),
-        #     query_embeddings,
-        #     n_results,
-        #     json.dumps(where) if where else None,
-        #     json.dumps(where_document) if where_document else None,
-        #     include,
-        #     tenant,
-        #     database,
-        # )
-
-        # return QueryResult(
-        #     ids=rust_response.ids,
-        #     embeddings=rust_response.embeddings,
-        #     documents=rust_response.documents,
-        #     uris=rust_response.uris,
-        #     included=include,
-        #     data=None,
-        #     metadatas=rust_response.metadatas,
-        #     distances=rust_response.distances,
-        # )
-
-        return self.proxy_segment_api._query(  # type: ignore[no-any-return]
-            collection_id,
+        rust_response = self.bindings.query(
+            str(collection_id),
             query_embeddings,
             n_results,
-            where,
-            where_document,
+            json.dumps(where) if where else None,
+            json.dumps(where_document) if where_document else None,
             include,
             tenant,
             database,
         )
+
+        return QueryResult(
+            ids=rust_response.ids,
+            embeddings=rust_response.embeddings,
+            documents=rust_response.documents,
+            uris=rust_response.uris,
+            included=include,
+            data=None,
+            metadatas=rust_response.metadatas,
+            distances=rust_response.distances,
+        )
+
+        # return self.proxy_segment_api._query(  # type: ignore[no-any-return]
+        #     collection_id,
+        #     query_embeddings,
+        #     n_results,
+        #     where,
+        #     where_document,
+        #     include,
+        #     tenant,
+        #     database,
+        # )
 
     @override
     def _delete(
@@ -438,7 +439,8 @@ class RustBindingsAPI(ServerAPI):
 
     @override
     def get_max_batch_size(self) -> int:
-        return self.proxy_segment_api.get_max_batch_size()
+        max_size = self.bindings.get_max_batch_size()
+        return max_size
 
     @override
     def get_user_identity(self) -> UserIdentity:
