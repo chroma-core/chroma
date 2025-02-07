@@ -18,7 +18,7 @@ use chroma_types::{
     SetOperator, UpdateMetadataValue, Where, CHROMA_DOCUMENT_KEY,
 };
 use sea_query::{
-    Alias, DeleteStatement, Expr, Func, InsertStatement, OnConflict, Query, SimpleExpr,
+    Alias, DeleteStatement, Expr, ExprTrait, Func, InsertStatement, OnConflict, Query, SimpleExpr,
     SqliteQueryBuilder, UpdateStatement,
 };
 use sea_query_binder::SqlxBinder;
@@ -417,20 +417,19 @@ impl IntoSqliteExpr for DocumentExpression {
             EmbeddingFulltextSearch::Table,
             EmbeddingFulltextSearch::StringValue,
         ));
+        let doc_contains = doc_col.like(format!("%{}%", self.text)).is(true);
         match self.operator {
-            DocumentOperator::Contains => doc_col.like(format!("%{}%", self.text)),
-            DocumentOperator::NotContains => doc_col
-                .clone()
-                .not_like(format!("%{}%", self.text))
-                .or(doc_col.is_null()),
+            DocumentOperator::Contains => doc_contains,
+            DocumentOperator::NotContains => doc_contains.not(),
         }
     }
 }
 
 impl IntoSqliteExpr for MetadataExpression {
     fn eval(&self) -> SimpleExpr {
-        let key_cond =
-            Expr::col((EmbeddingMetadata::Table, EmbeddingMetadata::Key)).eq(self.key.to_string());
+        let key_cond = Expr::col((EmbeddingMetadata::Table, EmbeddingMetadata::Key))
+            .eq(self.key.to_string())
+            .is(true);
         match &self.comparison {
             MetadataComparison::Primitive(op, val) => {
                 let (col, sval) = match val {
@@ -441,17 +440,23 @@ impl IntoSqliteExpr for MetadataExpression {
                 };
                 let scol = Expr::col((EmbeddingMetadata::Table, col));
                 match op {
-                    PrimitiveOperator::Equal => Expr::expr(key_cond.and(scol.eq(sval))).max(),
+                    PrimitiveOperator::Equal => {
+                        Expr::expr(key_cond.and(scol.eq(sval).is(true))).max()
+                    }
                     PrimitiveOperator::NotEqual => {
-                        Expr::expr(key_cond.and(scol.eq(sval)).not()).min()
+                        Expr::expr(key_cond.and(scol.eq(sval).is(true)).not()).min()
                     }
-                    PrimitiveOperator::GreaterThan => Expr::expr(key_cond.and(scol.gt(sval))).max(),
+                    PrimitiveOperator::GreaterThan => {
+                        Expr::expr(key_cond.and(scol.gt(sval).is(true))).max()
+                    }
                     PrimitiveOperator::GreaterThanOrEqual => {
-                        Expr::expr(key_cond.and(scol.gte(sval))).max()
+                        Expr::expr(key_cond.and(scol.gte(sval).is(true))).max()
                     }
-                    PrimitiveOperator::LessThan => Expr::expr(key_cond.and(scol.lt(sval))).max(),
+                    PrimitiveOperator::LessThan => {
+                        Expr::expr(key_cond.and(scol.lt(sval).is(true))).max()
+                    }
                     PrimitiveOperator::LessThanOrEqual => {
-                        Expr::expr(key_cond.and(scol.lte(sval))).max()
+                        Expr::expr(key_cond.and(scol.lte(sval).is(true))).max()
                     }
                 }
             }
@@ -475,9 +480,10 @@ impl IntoSqliteExpr for MetadataExpression {
                     ),
                 };
                 let scol = Expr::col((EmbeddingMetadata::Table, col));
+                let val_in = scol.is_in(svals).is(true);
                 match op {
-                    SetOperator::In => Expr::expr(scol.is_in(svals)).max(),
-                    SetOperator::NotIn => Expr::expr(scol.is_in(svals).not()).min(),
+                    SetOperator::In => Expr::expr(val_in).max(),
+                    SetOperator::NotIn => Expr::expr(val_in.not()).min(),
                 }
             }
         }
@@ -668,7 +674,16 @@ impl SqliteMetadataReader {
         }
 
         Ok(GetResult {
-            records: records.into_values().collect(),
+            records: records
+                .into_values()
+                .map(|mut rec| match rec.metadata {
+                    Some(meta) if meta.is_empty() => {
+                        rec.metadata = None;
+                        rec
+                    }
+                    _ => rec,
+                })
+                .collect(),
         })
     }
 }

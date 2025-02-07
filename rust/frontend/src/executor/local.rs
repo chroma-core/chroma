@@ -132,7 +132,7 @@ impl LocalExecutor {
                     .collect::<Vec<_>>();
 
                 if allowed_uids.is_empty() {
-                    return Ok(Vec::new());
+                    return Ok(vec![Default::default(); plan.knn.embeddings.len()]);
                 }
 
                 allowed_uids
@@ -237,7 +237,7 @@ impl LocalExecutor {
             Ok(knn_batch_results)
         } else {
             // Collection is unintialized
-            Ok(Vec::new())
+            Ok(vec![Default::default(); plan.knn.embeddings.len()])
         }
     }
 }
