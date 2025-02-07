@@ -188,16 +188,10 @@ impl Bindings {
         Ok(database)
     }
 
-    fn delete_database(
-        &self,
-        name: String,
-        tenant: String,
-        py: Python<'_>,
-    ) -> ChromaPyResult<PyObject> {
+    fn delete_database(&self, name: String, tenant: String, py: Python<'_>) -> PyResult<PyObject> {
         let result = self
             .proxy_frontend
-            .call_method1(py, "delete_database", (name, tenant))
-            .map_err(WrappedPyErr)?;
+            .call_method1(py, "delete_database", (name, tenant))?;
         Ok(result)
     }
 
@@ -208,27 +202,24 @@ impl Bindings {
         offset: Option<i32>,
         tenant: String,
         py: Python<'_>,
-    ) -> ChromaPyResult<PyObject> {
-        let result = self
-            .proxy_frontend
-            .call_method1(py, "list_databases", (limit, offset, tenant))
-            .map_err(WrappedPyErr)?;
+    ) -> PyResult<PyObject> {
+        let result =
+            self.proxy_frontend
+                .call_method1(py, "list_databases", (limit, offset, tenant))?;
         Ok(result)
     }
 
-    fn create_tenant(&self, name: String, py: Python<'_>) -> ChromaPyResult<PyObject> {
+    fn create_tenant(&self, name: String, py: Python<'_>) -> PyResult<PyObject> {
         let result = self
             .proxy_frontend
-            .call_method1(py, "create_tenant", (name,))
-            .map_err(WrappedPyErr)?;
+            .call_method1(py, "create_tenant", (name,))?;
         Ok(result)
     }
 
-    fn get_tenant(&self, name: String, py: Python<'_>) -> ChromaPyResult<PyObject> {
+    fn get_tenant(&self, name: String, py: Python<'_>) -> PyResult<PyObject> {
         let result = self
             .proxy_frontend
-            .call_method1(py, "get_tenant", (name,))
-            .map_err(WrappedPyErr)?;
+            .call_method1(py, "get_tenant", (name,))?;
         Ok(result)
     }
 

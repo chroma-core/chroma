@@ -153,9 +153,20 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
-        return self.bindings.create_collection(
+        collection = self.bindings.create_collection(
             name, configuration, metadata, get_or_create, tenant, database
         )
+        collection = CollectionModel(
+            id=collection.id,
+            name=collection.name,
+            configuration=collection.configuration,  # type: ignore
+            metadata=collection.metadata,
+            dimension=collection.dimension,
+            tenant=collection.tenant,
+            database=collection.database,
+        )
+
+        return collection
 
     @override
     def get_collection(
