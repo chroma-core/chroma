@@ -35,7 +35,6 @@ use chroma_types::{
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
-use opentelemetry::KeyValue;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -726,13 +725,9 @@ impl Frontend {
                 retries.fetch_add(1, Ordering::Relaxed);
             })
             .await;
-        self.metrics.delete_retries_counter.add(
-            retries.load(Ordering::Relaxed) as u64,
-            &[KeyValue::new(
-                "collection_id",
-                request.collection_id.to_string(),
-            )],
-        );
+        self.metrics
+            .delete_retries_counter
+            .add(retries.load(Ordering::Relaxed) as u64, &[]);
         res
     }
 
@@ -792,13 +787,9 @@ impl Frontend {
                 retries.fetch_add(1, Ordering::Relaxed);
             })
             .await;
-        self.metrics.count_retries_counter.add(
-            retries.load(Ordering::Relaxed) as u64,
-            &[KeyValue::new(
-                "collection_id",
-                request.collection_id.to_string(),
-            )],
-        );
+        self.metrics
+            .count_retries_counter
+            .add(retries.load(Ordering::Relaxed) as u64, &[]);
         res
     }
 
@@ -869,13 +860,9 @@ impl Frontend {
                 retries.fetch_add(1, Ordering::Relaxed);
             })
             .await;
-        self.metrics.get_retries_counter.add(
-            retries.load(Ordering::Relaxed) as u64,
-            &[KeyValue::new(
-                "collection_id",
-                request.collection_id.to_string(),
-            )],
-        );
+        self.metrics
+            .get_retries_counter
+            .add(retries.load(Ordering::Relaxed) as u64, &[]);
         res
     }
 
@@ -955,13 +942,9 @@ impl Frontend {
                 retries.fetch_add(1, Ordering::Relaxed);
             })
             .await;
-        metrics.query_retries_counter.add(
-            retries.load(Ordering::Relaxed) as u64,
-            &[KeyValue::new(
-                "collection_id",
-                request.collection_id.to_string(),
-            )],
-        );
+        metrics
+            .query_retries_counter
+            .add(retries.load(Ordering::Relaxed) as u64, &[]);
         res
     }
 
