@@ -82,6 +82,8 @@ pub enum CompactionManagerError {
     HnswReaderError(#[from] LocalHnswSegmentReaderError),
     #[error("Error constructing hnsw segment reader")]
     HnswReaderConstructionError(#[from] LocalSegmentManagerError),
+    #[error("Error purging logs")]
+    PurgeLogsFailure,
 }
 
 impl ChromaError for CompactionManagerError {
@@ -96,6 +98,7 @@ impl ChromaError for CompactionManagerError {
             CompactionManagerError::MetadataReaderError(e) => e.code(),
             CompactionManagerError::HnswReaderError(e) => e.code(),
             CompactionManagerError::HnswReaderConstructionError(e) => e.code(),
+            CompactionManagerError::PurgeLogsFailure => ErrorCodes::Internal,
         }
     }
 }
@@ -105,6 +108,11 @@ pub struct CompactionMessage {
     pub collection_id: CollectionUuid,
     pub start_offset: i64,
     pub total_records: i64,
+}
+
+#[derive(Clone, Debug)]
+pub struct PurgeLogsMessage {
+    pub collection_id: CollectionUuid,
 }
 
 #[derive(Clone, Debug)]
@@ -264,5 +272,50 @@ impl Handler<BackfillMessage> for LocalCompactionManager {
             .await
             .map_err(|_| CompactionManagerError::HnswApplyLogsError)?;
         Ok(())
+    }
+}
+
+#[async_trait]
+impl Handler<PurgeLogsMessage> for LocalCompactionManager {
+    type Result = Result<(), CompactionManagerError>;
+
+    async fn handle(
+        &mut self,
+        message: PurgeLogsMessage,
+        _: &ComponentContext<LocalCompactionManager>,
+    ) -> Self::Result {
+        let collection_segments = self
+            .sysdb
+            .get_collection_with_segments(message.collection_id)
+            .await?;
+        // If dimension is None, that means nothing has been written yet.
+        let dim = match collection_segments.collection.dimension {
+            Some(dim) => dim,
+            None => return Ok(()),
+        };
+        let metadata_reader = SqliteMetadataReader::new(self.sqlite_db.clone());
+        let mt_max_seq_id = metadata_reader
+            .current_max_seq_id(&collection_segments.metadata_segment.id)
+            .await?;
+        let hnsw_reader = self
+            .hnsw_segment_manager
+            .get_hnsw_reader(&collection_segments.vector_segment, dim as usize)
+            .await;
+        let hnsw_max_seq_id = match hnsw_reader {
+            Ok(reader) => {
+                reader
+                    .current_max_seq_id(&collection_segments.vector_segment.id)
+                    .await?
+            }
+            Err(LocalSegmentManagerError::LocalHnswSegmentReaderError(
+                LocalHnswSegmentReaderError::UninitializedSegment,
+            )) => 0,
+            Err(e) => return Err(CompactionManagerError::HnswReaderConstructionError(e)),
+        };
+        let max_seq_id = mt_max_seq_id.min(hnsw_max_seq_id);
+        self.log
+            .purge_logs(message.collection_id, max_seq_id)
+            .await
+            .map_err(|_| CompactionManagerError::PurgeLogsFailure)
     }
 }
