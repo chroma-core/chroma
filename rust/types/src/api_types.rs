@@ -923,6 +923,12 @@ impl ChromaError for DeleteCollectionRecordsError {
 #[error("Invalid include value: {0}")]
 pub struct IncludeParsingError(String);
 
+impl ChromaError for IncludeParsingError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::InvalidArgument
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum Include {
     #[serde(rename = "distances")]

@@ -60,3 +60,13 @@ impl ChromaError for WrappedSerdeJsonError {
         chroma_error::ErrorCodes::InvalidArgument
     }
 }
+
+#[derive(Error, Debug)]
+#[error(transparent)]
+pub(crate) struct WrappedUuidError(#[from] pub uuid::Error);
+
+impl ChromaError for WrappedUuidError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::InvalidArgument
+    }
+}
