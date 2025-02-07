@@ -1,5 +1,5 @@
 use chroma_error::{ChromaError, ErrorCodes};
-use pyo3::FromPyObject;
+use pyo3::{FromPyObject, IntoPyObject};
 use serde::{Deserialize, Serialize};
 use serde_json::{Number, Value};
 use std::{
@@ -101,7 +101,9 @@ MetadataValue
 ===========================================
 */
 
-#[derive(Clone, Debug, Deserialize, PartialEq, PartialOrd, Serialize, FromPyObject)]
+#[derive(
+    Clone, Debug, Deserialize, PartialEq, PartialOrd, Serialize, FromPyObject, IntoPyObject,
+)]
 #[serde(untagged)]
 pub enum MetadataValue {
     Bool(bool),

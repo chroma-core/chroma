@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use std::time::SystemTimeError;
 
 use crate::error::QueryConversionError;
@@ -15,6 +16,8 @@ use crate::UpdateMetadata;
 use crate::Where;
 use chroma_config::assignment::rendezvous_hash::AssignmentError;
 use chroma_error::{ChromaError, ErrorCodes};
+use pyo3::pyclass;
+use pyo3::pymethods;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
@@ -430,6 +433,14 @@ impl ChromaError for DeleteCollectionError {
     }
 }
 
+////////////////////////// Metadata Key Constants //////////////////////////
+
+pub const CHROMA_KEY: &str = "chroma:";
+pub const CHROMA_DOCUMENT_KEY: &str = "chroma:document";
+pub const CHROMA_URI_KEY: &str = "chroma:uri";
+
+////////////////////////// AddCollectionRecords //////////////////////////
+
 #[derive(Debug)]
 pub struct AddCollectionRecordsRequest {
     pub tenant_id: String,
@@ -462,6 +473,8 @@ impl ChromaError for AddCollectionRecordsError {
     }
 }
 
+////////////////////////// UpdateCollectionRecords //////////////////////////
+
 pub struct UpdateCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -490,6 +503,8 @@ impl ChromaError for UpdateCollectionRecordsError {
     }
 }
 
+////////////////////////// UpsertCollectionRecords //////////////////////////
+
 pub struct UpsertCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -517,6 +532,8 @@ impl ChromaError for UpsertCollectionRecordsError {
         }
     }
 }
+
+////////////////////////// DeleteCollectionRecords //////////////////////////
 
 #[derive(Clone)]
 pub struct DeleteCollectionRecordsRequest {
@@ -547,6 +564,8 @@ impl ChromaError for DeleteCollectionRecordsError {
     }
 }
 
+////////////////////////// Include //////////////////////////
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum Include {
     #[serde(rename = "distances")]
@@ -561,7 +580,20 @@ pub enum Include {
     Uri,
 }
 
+impl Display for Include {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Include::Distance => write!(f, "distances"),
+            Include::Document => write!(f, "documents"),
+            Include::Embedding => write!(f, "embeddings"),
+            Include::Metadata => write!(f, "metadatas"),
+            Include::Uri => write!(f, "uris"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
+#[pyclass]
 pub struct IncludeList(pub Vec<Include>);
 
 impl IncludeList {
@@ -577,6 +609,8 @@ impl IncludeList {
     }
 }
 
+////////////////////////// Count //////////////////////////
+
 #[derive(Clone, Deserialize, Serialize)]
 pub struct CountRequest {
     pub tenant_id: String,
@@ -586,9 +620,7 @@ pub struct CountRequest {
 
 pub type CountResponse = u32;
 
-pub const CHROMA_KEY: &str = "chroma:";
-pub const CHROMA_DOCUMENT_KEY: &str = "chroma:document";
-pub const CHROMA_URI_KEY: &str = "chroma:uri";
+////////////////////////// Get //////////////////////////
 
 #[derive(Clone)]
 pub struct GetRequest {
@@ -603,11 +635,18 @@ pub struct GetRequest {
 }
 
 #[derive(Clone, Deserialize, Serialize, Debug)]
+#[pyclass]
 pub struct GetResponse {
+    #[pyo3(get)]
     ids: Vec<String>,
+    #[pyo3(get)]
     embeddings: Option<Vec<Vec<f32>>>,
+    #[pyo3(get)]
     documents: Option<Vec<Option<String>>>,
-    uri: Option<Vec<Option<String>>>,
+    #[pyo3(get)]
+    uris: Option<Vec<Option<String>>>,
+    // TODO(hammadb): Add metadata & include to the response
+    #[pyo3(get)]
     metadatas: Option<Vec<Option<Metadata>>>,
     include: Vec<Include>,
 }
@@ -622,7 +661,7 @@ impl From<(GetResult, IncludeList)> for GetResponse {
             documents: include_vec
                 .contains(&Include::Document)
                 .then_some(Vec::new()),
-            uri: include_vec.contains(&Include::Uri).then_some(Vec::new()),
+            uris: include_vec.contains(&Include::Uri).then_some(Vec::new()),
             metadatas: include_vec
                 .contains(&Include::Metadata)
                 .then_some(Vec::new()),
@@ -652,7 +691,7 @@ impl From<(GetResult, IncludeList)> for GetResponse {
                     }
                 })
             });
-            if let Some(uris) = res.uri.as_mut() {
+            if let Some(uris) = res.uris.as_mut() {
                 uris.push(uri);
             }
 
@@ -668,6 +707,8 @@ impl From<(GetResult, IncludeList)> for GetResponse {
         res
     }
 }
+
+////////////////////////// Query //////////////////////////
 
 #[derive(Clone)]
 pub struct QueryRequest {

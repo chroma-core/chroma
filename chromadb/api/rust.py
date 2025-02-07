@@ -69,7 +69,9 @@ class RustBindingsAPI(ServerAPI):
 
         # Construct the Rust bindings
         self.bindings = rust_bindings.Bindings(
-            proxy_frontend=self.proxy_segment_api, sqlite_db_config=sqlite_config, persist_path=persist_path
+            proxy_frontend=self.proxy_segment_api,
+            sqlite_db_config=sqlite_config,
+            persist_path=persist_path,
         )
 
     # ////////////////////////////// Admin API //////////////////////////////
@@ -218,6 +220,28 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> GetResult:
+        # rust_response = self.bindings.get(
+        #     str(collection_id),
+        #     ids,
+        #     json.dumps(where) if where else None,
+        #     limit,
+        #     offset or 0,
+        #     json.dumps(where_document) if where_document else None,
+        #     include,
+        #     tenant,
+        #     database,
+        # )
+        # # TODO: The data field is missing from rust?
+        # return GetResult(
+        #     ids=rust_response.ids,
+        #     embeddings=rust_response.embeddings,
+        #     documents=rust_response.documents,
+        #     uris=rust_response.uris,
+        #     included=include,
+        #     # TODO: populate these fields
+        #     data=None,
+        #     metadatas=rust_response.metadatas,
+        # )
         return self.proxy_segment_api._get(  # type: ignore[no-any-return]
             collection_id,
             ids,
@@ -245,7 +269,6 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
-        # TODO: This is an example
         # self.bindings.add(
         #     ids,
         #     str(collection_id),
