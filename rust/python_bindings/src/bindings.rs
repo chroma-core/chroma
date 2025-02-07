@@ -496,7 +496,7 @@ impl Bindings {
         .map_err(|e| PyValueError::new_err(e.to_string()))?;
 
         let mut frontend_clone = self.frontend.clone();
-        let res = match self
+        match self
             .runtime
             .block_on(async { frontend_clone.get(request).await })
         {
@@ -510,8 +510,7 @@ impl Bindings {
                     Err(PyRuntimeError::new_err(format!("Internal Error: {}", e)))
                 }
             },
-        };
-        res
+        }
     }
 
     #[pyo3(
