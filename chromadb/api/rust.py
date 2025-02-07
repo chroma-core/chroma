@@ -239,7 +239,6 @@ class RustBindingsAPI(ServerAPI):
             documents=rust_response.documents,
             uris=rust_response.uris,
             included=include,
-            # TODO: populate these fields
             data=None,
             metadatas=rust_response.metadatas,
         )

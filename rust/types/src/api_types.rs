@@ -1,6 +1,3 @@
-use std::fmt::Display;
-use std::time::SystemTimeError;
-
 use crate::error::QueryConversionError;
 use crate::operator::GetResult;
 use crate::operator::KnnBatchResult;
@@ -24,6 +21,7 @@ use pyo3::pyclass;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
+use std::time::SystemTimeError;
 use thiserror::Error;
 use tonic::Status;
 use uuid::Uuid;
@@ -893,6 +891,10 @@ impl ChromaError for DeleteCollectionRecordsError {
 
 ////////////////////////// Include //////////////////////////
 
+#[derive(Error, Debug)]
+#[error("Invalid include value: {0}")]
+pub struct IncludeParsingError(String);
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum Include {
     #[serde(rename = "distances")]
@@ -907,14 +909,17 @@ pub enum Include {
     Uri,
 }
 
-impl Display for Include {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Include::Distance => write!(f, "distances"),
-            Include::Document => write!(f, "documents"),
-            Include::Embedding => write!(f, "embeddings"),
-            Include::Metadata => write!(f, "metadatas"),
-            Include::Uri => write!(f, "uris"),
+impl TryFrom<&str> for Include {
+    type Error = IncludeParsingError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "distances" => Ok(Include::Distance),
+            "documents" => Ok(Include::Document),
+            "embeddings" => Ok(Include::Embedding),
+            "metadatas" => Ok(Include::Metadata),
+            "uris" => Ok(Include::Uri),
+            _ => Err(IncludeParsingError(value.to_string())),
         }
     }
 }
@@ -933,6 +938,18 @@ impl IncludeList {
     }
     pub fn default_get() -> Self {
         Self(vec![Include::Document, Include::Metadata])
+    }
+}
+
+impl TryFrom<Vec<String>> for IncludeList {
+    type Error = IncludeParsingError;
+
+    fn try_from(value: Vec<String>) -> Result<Self, Self::Error> {
+        let mut includes = Vec::new();
+        for v in value {
+            includes.push(Include::try_from(v.as_str())?);
+        }
+        Ok(IncludeList(includes))
     }
 }
 

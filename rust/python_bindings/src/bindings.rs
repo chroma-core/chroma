@@ -313,7 +313,7 @@ impl Bindings {
     }
 
     #[pyo3(
-            signature = (collection_id, ids = None, r#where = None, limit = None, offset = 0, where_document = None, _include = ["metadatas".to_string(), "documents".to_string()].to_vec(), tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
+            signature = (collection_id, ids = None, r#where = None, limit = None, offset = 0, where_document = None, include = ["metadatas".to_string(), "documents".to_string()].to_vec(), tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
         )]
     #[allow(clippy::too_many_arguments)]
     fn get(
@@ -324,7 +324,7 @@ impl Bindings {
         limit: Option<u32>,
         offset: u32,
         where_document: Option<String>,
-        _include: Vec<String>,
+        include: Vec<String>,
         tenant: String,
         database: String,
     ) -> PyResult<GetResponse> {
@@ -342,7 +342,9 @@ impl Bindings {
                 .map_err(|e| PyValueError::new_err(e.to_string()))?,
         );
 
-        // TODO: support include
+        let include =
+            IncludeList::try_from(include).map_err(|e| PyValueError::new_err(e.to_string()))?;
+
         let request = chroma_types::GetRequest::try_new(
             tenant,
             database,
@@ -351,7 +353,7 @@ impl Bindings {
             r#where,
             limit,
             offset,
-            IncludeList::default_get(),
+            include,
         )
         .map_err(|e| PyValueError::new_err(e.to_string()))?;
 
