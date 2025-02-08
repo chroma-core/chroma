@@ -322,7 +322,6 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
     @trace_method("SqlEmbeddingsQueue.max_batch_size", OpenTelemetryGranularity.ALL)
     @override
     def max_batch_size(self) -> int:
-        return 100
         if self._max_batch_size is None:
             with self.tx() as cur:
                 cur.execute("PRAGMA compile_options;")

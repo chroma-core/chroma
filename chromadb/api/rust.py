@@ -24,13 +24,13 @@ import rust_bindings
 from typing import Optional, Sequence
 from overrides import override
 from uuid import UUID
+import json
 import platform
 
 if platform.system() != "Windows":
     import resource
 elif platform.system() == "Windows":
     import ctypes
-import json
 
 
 # RustBindingsAPI is an implementation of ServerAPI which shims
@@ -439,8 +439,7 @@ class RustBindingsAPI(ServerAPI):
 
     @override
     def get_max_batch_size(self) -> int:
-        max_size = self.bindings.get_max_batch_size()
-        return max_size
+        return self.bindings.get_max_batch_size()
 
     @override
     def get_user_identity(self) -> UserIdentity:

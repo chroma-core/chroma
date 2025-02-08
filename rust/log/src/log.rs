@@ -127,8 +127,8 @@ impl Log {
                 .get_max_batch_size()
                 .await
                 .map_err(|err| Box::new(err) as Box<dyn ChromaError>),
-            Log::Grpc(log) => Ok(100),
-            Log::InMemory(log) => todo!(),
+            Log::Grpc(_) => Ok(100),
+            Log::InMemory(_) => todo!(),
         }
     }
 }

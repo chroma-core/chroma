@@ -899,6 +899,7 @@ impl Configurable<(FrontendConfig, System)> for Frontend {
     ) -> Result<Self, Box<dyn ChromaError>> {
         let sysdb_client = chroma_sysdb::from_config(&config.sysdb).await?;
         let mut log_client = chroma_log::from_config(&config.log).await?;
+        let max_batch_size = log_client.get_max_batch_size().await?;
 
         let collections_with_segments_provider =
             CollectionsWithSegmentsProvider::try_from_config(&(
@@ -909,7 +910,6 @@ impl Configurable<(FrontendConfig, System)> for Frontend {
 
         let executor =
             Executor::try_from_config(&(config.executor.clone(), system.clone())).await?;
-        let max_batch_size = log_client.get_max_batch_size().await?;
         Ok(Frontend::new(
             config.allow_reset,
             sysdb_client,

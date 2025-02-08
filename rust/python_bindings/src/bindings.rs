@@ -94,6 +94,15 @@ impl Bindings {
             "default".to_string(),
             "default".to_string(),
         )));
+        let max_batch_size = match runtime.block_on(log.get_max_batch_size()) {
+            Ok(max_batch_size) => max_batch_size,
+            Err(e) => {
+                return Err(PyOSError::new_err(format!(
+                    "Failed to get max batch size: {}",
+                    e
+                )))
+            }
+        };
 
         // Spawn the compaction manager.
         let handle = system.start_component(LocalCompactionManager::new(
@@ -131,15 +140,6 @@ impl Bindings {
             sqlite_db,
             handle.clone(),
         ));
-        let max_batch_size = match runtime.block_on(log.get_max_batch_size()) {
-            Ok(max_batch_size) => max_batch_size,
-            Err(e) => {
-                return Err(PyOSError::new_err(format!(
-                    "Failed to get max batch size: {}",
-                    e
-                )))
-            }
-        };
         let frontend = Frontend::new(
             false,
             sysdb.clone(),
@@ -508,6 +508,7 @@ impl Bindings {
 /// Converts a Vec<PyReadonlyArray1<f32>> to a Vec<Vec<f32>>
 /// # Note
 /// - We cannot impl TryFrom etc because we don't own the types or the trait
+#[allow(dead_code)]
 fn py_embeddings_to_vec_f32(embeddings: Vec<PyReadonlyArray1<f32>>) -> PyResult<Vec<Vec<f32>>> {
     let mut embeddings_vec = Vec::with_capacity(embeddings.len());
     for embedding in embeddings {

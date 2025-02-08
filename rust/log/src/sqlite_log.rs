@@ -66,6 +66,8 @@ impl ChromaError for SqlitePushLogsError {
     }
 }
 
+const DEFAULT_VAR_OPT: u32 = 32766;
+const PRAGMA_MAX_VAR_OPT: &str = "MAX_VARIABLE_NUMBER";
 const VARIABLE_PER_RECORD: u32 = 6;
 
 #[derive(Error, Debug)]
@@ -407,20 +409,24 @@ impl SqliteLog {
     }
 
     pub async fn get_max_batch_size(&self) -> Result<u32, SqliteGetMaxBatchSizeError> {
-        let rows = sqlx::query("PRAGMA compile_options")
+        let opt_strs = sqlx::query("PRAGMA compile_options")
             .fetch_all(self.db.get_conn())
             .await
-            .map_err(WrappedSqlxError)?;
-        let mut max_variable_number = 999;
-        for row in rows {
-            let row_parsed = row.try_get::<String, _>(0)?;
-            if row_parsed.starts_with("MAX_VARIABLE_NUMBER") {
-                let contents: Vec<&str> = row_parsed.split("=").collect();
-                if contents.len() == 2 {
-                    max_variable_number = contents[1].parse::<u32>().unwrap();
+            .map_err(WrappedSqlxError)?
+            .into_iter()
+            .map(|row| row.try_get::<String, _>(0))
+            .collect::<Result<Vec<_>, _>>()?;
+        let max_variable_number = opt_strs
+            .into_iter()
+            .filter_map(|opt_str| {
+                let mut opt_val = opt_str.split("=");
+                if let Some(PRAGMA_MAX_VAR_OPT) = opt_val.next() {
+                    opt_val.next().and_then(|val_str| val_str.parse().ok())
+                } else {
+                    None
                 }
-            }
-        }
+            })
+            .fold(DEFAULT_VAR_OPT, |_, opt| opt);
         Ok(max_variable_number / VARIABLE_PER_RECORD)
     }
 }
