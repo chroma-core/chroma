@@ -24,7 +24,6 @@ import rust_bindings
 from typing import Optional, Sequence
 from overrides import override
 from uuid import UUID
-import json
 import platform
 
 if platform.system() != "Windows":
