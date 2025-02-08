@@ -1,7 +1,10 @@
-use crate::{CollectionInfo, CompactionManagerError, CompactionMessage, LocalCompactionManager};
+use crate::{
+    CollectionInfo, CompactionManagerError, CompactionMessage, LocalCompactionManager,
+    PurgeLogsMessage,
+};
 use chroma_error::{ChromaError, ErrorCodes, WrappedSqlxError};
 use chroma_sqlite::db::SqliteDb;
-use chroma_system::{ComponentHandle, RequestError};
+use chroma_system::{ChannelError, ComponentHandle, RequestError};
 use chroma_types::{
     CollectionUuid, LogRecord, Operation, OperationRecord, ScalarEncoding,
     ScalarEncodingConversionError, UpdateMetadata, UpdateMetadataValue,
@@ -44,6 +47,8 @@ pub enum SqlitePushLogsError {
     InvalidMetadata(#[from] serde_json::Error),
     #[error("Error sending message to compactor")]
     MessageSendingError(#[from] RequestError),
+    #[error("Error sending purge log msg to compactor")]
+    PurgeLogSendingFailure(#[from] ChannelError),
     #[error("Query error: {0}")]
     QueryError(#[from] WrappedSqlxError),
 }
@@ -56,6 +61,7 @@ impl ChromaError for SqlitePushLogsError {
             SqlitePushLogsError::InvalidMetadata(_) => ErrorCodes::Internal,
             SqlitePushLogsError::MessageSendingError(e) => e.code(),
             SqlitePushLogsError::QueryError(err) => err.code(),
+            SqlitePushLogsError::PurgeLogSendingFailure(e) => e.code(),
         }
     }
 }
@@ -312,6 +318,8 @@ impl SqliteLog {
                 total_records,
             };
             handle.request(compact_message, None).await??;
+            let purge_log_msg = PurgeLogsMessage { collection_id };
+            handle.clone().send(purge_log_msg, None).await?;
         }
 
         Ok(())
@@ -377,6 +385,37 @@ impl SqliteLog {
         .map_err(WrappedSqlxError)?;
 
         Ok(())
+    }
+
+    pub async fn purge_logs(
+        &mut self,
+        collection_id: CollectionUuid,
+        seq_id: u64,
+    ) -> Result<(), SqlitePurgeLogsError> {
+        let topic = get_topic_name(&self.tenant_id, &self.topic_namespace, collection_id);
+
+        sqlx::query("DELETE FROM embeddings_queue WHERE topic = ? AND seq_id < ?")
+            .bind(topic)
+            .bind(seq_id as i64)
+            .execute(self.db.get_conn())
+            .await
+            .map_err(WrappedSqlxError)?;
+
+        Ok(())
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum SqlitePurgeLogsError {
+    #[error("Delete query error: {0}")]
+    DeleteQueryError(#[from] WrappedSqlxError),
+}
+
+impl ChromaError for SqlitePurgeLogsError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            SqlitePurgeLogsError::DeleteQueryError(err) => err.code(),
+        }
     }
 }
 
