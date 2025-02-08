@@ -77,7 +77,7 @@ pub enum ResetError {
     #[error(transparent)]
     Cache(Box<dyn ChromaError>),
     #[error(transparent)]
-    Internal(#[from] Status),
+    Internal(#[from] Box<dyn ChromaError>),
     #[error("Reset is disabled by config")]
     NotAllowed,
 }
@@ -86,7 +86,7 @@ impl ChromaError for ResetError {
     fn code(&self) -> ErrorCodes {
         match self {
             ResetError::Cache(err) => err.code(),
-            ResetError::Internal(status) => status.code().into(),
+            ResetError::Internal(err) => err.code(),
             ResetError::NotAllowed => ErrorCodes::PermissionDenied,
         }
     }

@@ -4,6 +4,7 @@ use std::{
 };
 
 use chroma_distance::normalize;
+use chroma_error::ChromaError;
 use chroma_log::{BackfillMessage, LocalCompactionManager};
 use chroma_segment::{
     local_segment_manager::LocalSegmentManager, sqlite_metadata::SqliteMetadataReader,
@@ -254,5 +255,10 @@ impl LocalExecutor {
             // Collection is unintialized
             Ok(vec![Default::default(); plan.knn.embeddings.len()])
         }
+    }
+
+    pub async fn reset(&mut self) -> Result<(), Box<dyn ChromaError>> {
+        self.hnsw_manager.reset().await.map_err(|err| err.boxed())?;
+        Ok(())
     }
 }

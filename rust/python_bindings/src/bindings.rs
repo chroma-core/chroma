@@ -55,6 +55,7 @@ impl Bindings {
     #[new]
     #[allow(dead_code)]
     pub fn py_new(
+        allow_reset: bool,
         sqlite_db_config: SqliteDBConfig,
         persist_path: String,
         hnsw_cache_size: usize,
@@ -139,7 +140,7 @@ impl Bindings {
             handle.clone(),
         ));
         let frontend = Frontend::new(
-            false,
+            allow_reset,
             sysdb.clone(),
             collections_cache,
             log,
@@ -550,6 +551,12 @@ impl Bindings {
             .runtime
             .block_on(async { frontend_clone.query(request).await })?;
         Ok(response)
+    }
+
+    fn reset(&self) -> ChromaPyResult<bool> {
+        let mut frontend = self.frontend.clone();
+        self.runtime.block_on(async { frontend.reset().await })?;
+        Ok(true)
     }
 }
 

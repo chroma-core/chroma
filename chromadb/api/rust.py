@@ -85,6 +85,7 @@ class RustBindingsAPI(ServerAPI):
 
         # Construct the Rust bindings
         self.bindings = rust_bindings.Bindings(
+            allow_reset=system.settings.require("allow_reset"),
             sqlite_db_config=sqlite_config,
             persist_path=persist_path,
             hnsw_cache_size=hnsw_cache_size,
@@ -448,7 +449,7 @@ class RustBindingsAPI(ServerAPI):
 
     @override
     def reset(self) -> bool:
-        return self.proxy_segment_api.reset()
+        return self.bindings.reset()
 
     @override
     def get_version(self) -> str:

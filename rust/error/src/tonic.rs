@@ -52,7 +52,7 @@ impl From<tonic::Code> for ErrorCodes {
 
 #[derive(Debug, Error)]
 #[error("Tonic error: {0}")]
-pub struct TonicError(#[from] tonic::Status);
+pub struct TonicError(#[from] pub tonic::Status);
 
 impl ChromaError for TonicError {
     fn code(&self) -> ErrorCodes {

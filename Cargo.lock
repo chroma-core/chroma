@@ -1483,6 +1483,7 @@ version = "0.1.0"
 dependencies = [
  "chroma-error",
  "chroma-types",
+ "futures",
  "md5",
  "pyo3",
  "regex",

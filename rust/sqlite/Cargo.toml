@@ -15,5 +15,6 @@ tempfile = { workspace = true }
 pyo3 = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+futures = { workspace = true }
 chroma-error = { workspace = true, features = ["sqlx"] }
 chroma-types = { workspace = true }
