@@ -453,7 +453,7 @@ class RustBindingsAPI(ServerAPI):
 
     @override
     def get_version(self) -> str:
-        return self.proxy_segment_api.get_version()
+        return self.bindings.get_version()
 
     @override
     def get_settings(self) -> Settings:

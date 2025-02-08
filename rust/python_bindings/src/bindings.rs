@@ -22,7 +22,9 @@ use chroma_types::{
     QueryResponse, UpdateMetadata,
 };
 use numpy::PyReadonlyArray1;
-use pyo3::{exceptions::PyValueError, pyclass, pymethods, PyObject, PyResult, Python};
+use pyo3::{
+    exceptions::PyValueError, pyclass, pymethods, types::PyAnyMethods, PyObject, PyResult, Python,
+};
 use std::time::SystemTime;
 
 const DEFAULT_DATABASE: &str = "default_database";
@@ -557,6 +559,17 @@ impl Bindings {
         let mut frontend = self.frontend.clone();
         self.runtime.block_on(async { frontend.reset().await })?;
         Ok(true)
+    }
+
+    fn get_version(&self, py: Python<'_>) -> ChromaPyResult<String> {
+        let version = py
+            .import("chromadb")
+            .map_err(WrappedPyErr)?
+            .getattr("__version__")
+            .map_err(WrappedPyErr)?
+            .extract::<String>()
+            .map_err(WrappedPyErr)?;
+        Ok(version)
     }
 }
 
