@@ -15,11 +15,12 @@ use chroma_sqlite::{config::SqliteDBConfig, db::SqliteDb};
 use chroma_sysdb::{sqlite::SqliteSysDb, sysdb::SysDb};
 use chroma_system::System;
 use chroma_types::{
-    Collection, CountCollectionsRequest, CountResponse, CreateCollectionRequest,
-    CreateDatabaseRequest, CreateTenantRequest, Database, DeleteCollectionRequest,
-    DeleteDatabaseRequest, GetCollectionRequest, GetDatabaseRequest, GetResponse, GetTenantRequest,
-    GetTenantResponse, HeartbeatError, IncludeList, ListCollectionsRequest, ListDatabasesRequest,
-    Metadata, QueryResponse, UpdateMetadata,
+    Collection, CollectionMetadataUpdate, CountCollectionsRequest, CountResponse,
+    CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest, Database,
+    DeleteCollectionRequest, DeleteDatabaseRequest, GetCollectionRequest, GetDatabaseRequest,
+    GetResponse, GetTenantRequest, GetTenantResponse, HeartbeatError, IncludeList,
+    ListCollectionsRequest, ListDatabasesRequest, Metadata, QueryResponse, UpdateCollectionRequest,
+    UpdateMetadata,
 };
 use pyo3::{exceptions::PyValueError, pyclass, pymethods, types::PyAnyMethods, PyObject, Python};
 use std::time::SystemTime;
