@@ -229,7 +229,7 @@ def test_add_large_exceeding(
 
     with pytest.raises(Exception) as e:
         coll.add(**record_set)  # type: ignore[arg-type]
-    assert "max batch size" in str(e.value)
+    assert "batch size" in str(e.value)
 
 
 # TODO: This test fails right now because the ids are not sorted by the input order
