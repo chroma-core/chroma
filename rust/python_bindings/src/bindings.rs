@@ -15,16 +15,13 @@ use chroma_sqlite::{config::SqliteDBConfig, db::SqliteDb};
 use chroma_sysdb::{sqlite::SqliteSysDb, sysdb::SysDb};
 use chroma_system::System;
 use chroma_types::{
-    Collection, CollectionMetadataUpdate, CountCollectionsRequest, CreateCollectionRequest,
+    Collection, CountCollectionsRequest, CountResponse, CreateCollectionRequest,
     CreateDatabaseRequest, CreateTenantRequest, Database, DeleteCollectionRequest,
     DeleteDatabaseRequest, GetCollectionRequest, GetDatabaseRequest, GetResponse, GetTenantRequest,
     GetTenantResponse, HeartbeatError, IncludeList, ListCollectionsRequest, ListDatabasesRequest,
-    Metadata, QueryResponse, UpdateCollectionRequest, UpdateMetadata,
+    Metadata, QueryResponse, UpdateMetadata,
 };
-use numpy::PyReadonlyArray1;
-use pyo3::{
-    exceptions::PyValueError, pyclass, pymethods, types::PyAnyMethods, PyObject, PyResult, Python,
-};
+use pyo3::{exceptions::PyValueError, pyclass, pymethods, types::PyAnyMethods, PyObject, Python};
 use std::time::SystemTime;
 
 const DEFAULT_DATABASE: &str = "default_database";
@@ -393,8 +390,7 @@ impl Bindings {
         tenant: String,
         database: String,
     ) -> ChromaPyResult<bool> {
-        // TODO: move validate embeddings into this conversion
-        // let embeddings = py_embeddings_to_vec_f32(embeddings).map_err(WrappedPyErr)?;
+        // TODO: Create proper error type for this
         if self.get_max_batch_size() < ids.len() as u32 {
             return Err(WrappedPyErr::from(PyValueError::new_err(format!(
                 "Batch size of {} is greater than max batch size of {}",
@@ -442,21 +438,24 @@ impl Bindings {
         &self,
         collection_id: String,
         ids: Vec<String>,
-        embeddings: Option<Vec<PyReadonlyArray1<f32>>>,
+        embeddings: Option<Vec<Option<Vec<f32>>>>,
         metadatas: Option<Vec<Option<UpdateMetadata>>>,
         documents: Option<Vec<Option<String>>>,
         uris: Option<Vec<Option<String>>>,
         tenant: String,
         database: String,
     ) -> ChromaPyResult<bool> {
-        let mut frontend_clone = self.frontend.clone();
+        // TODO: Create proper error type for this
+        if self.get_max_batch_size() < ids.len() as u32 {
+            return Err(WrappedPyErr::from(PyValueError::new_err(format!(
+                "Batch size of {} is greater than max batch size of {}",
+                ids.len(),
+                self.get_max_batch_size()
+            )))
+            .into());
+        }
 
-        let embeddings = match embeddings {
-            Some(embeddings) => {
-                py_embeddings_to_opt_vec_f32(Some(embeddings)).map_err(WrappedPyErr)?
-            }
-            None => None,
-        };
+        let mut frontend_clone = self.frontend.clone();
 
         let collection_id = chroma_types::CollectionUuid(
             uuid::Uuid::parse_str(&collection_id).map_err(WrappedUuidError)?,
@@ -488,8 +487,121 @@ impl Bindings {
     }
 
     #[pyo3(
-            signature = (collection_id, ids = None, r#where = None, limit = None, offset = 0, where_document = None, include = ["metadatas".to_string(), "documents".to_string()].to_vec(), tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
-        )]
+        signature = (collection_id, ids, embeddings = None, metadatas = None, documents = None, uris = None, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
+    )]
+    #[allow(clippy::too_many_arguments)]
+    fn upsert(
+        &self,
+        collection_id: String,
+        ids: Vec<String>,
+        embeddings: Option<Vec<Vec<f32>>>,
+        metadatas: Option<Vec<Option<UpdateMetadata>>>,
+        documents: Option<Vec<Option<String>>>,
+        uris: Option<Vec<Option<String>>>,
+        tenant: String,
+        database: String,
+    ) -> ChromaPyResult<bool> {
+        // TODO: Create proper error type for this
+        if self.get_max_batch_size() < ids.len() as u32 {
+            return Err(WrappedPyErr::from(PyValueError::new_err(format!(
+                "Batch size of {} is greater than max batch size of {}",
+                ids.len(),
+                self.get_max_batch_size()
+            )))
+            .into());
+        }
+
+        let mut frontend_clone = self.frontend.clone();
+
+        let collection_id = chroma_types::CollectionUuid(
+            uuid::Uuid::parse_str(&collection_id).map_err(WrappedUuidError)?,
+        );
+
+        self.runtime.block_on(async {
+            frontend_clone
+                .validate_embedding(collection_id, embeddings.as_ref(), false, |e| Some(e.len()))
+                .await
+        })?;
+
+        let req = chroma_types::UpsertCollectionRecordsRequest::try_new(
+            tenant,
+            database,
+            collection_id,
+            ids,
+            embeddings,
+            documents,
+            uris,
+            metadatas,
+        )?;
+
+        self.runtime
+            .block_on(async { frontend_clone.upsert(req).await })?;
+        Ok(true)
+    }
+
+    #[pyo3(
+        signature = (collection_id, ids = None, r#where = None, where_document = None, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
+    )]
+    #[allow(clippy::too_many_arguments)]
+    fn delete(
+        &self,
+        collection_id: String,
+        ids: Option<Vec<String>>,
+        r#where: Option<String>,
+        where_document: Option<String>,
+        tenant: String,
+        database: String,
+    ) -> ChromaPyResult<()> {
+        // TODO: Rethink the error handling strategy
+        let r#where = chroma_types::RawWhereFields::from_json_str(
+            r#where.as_deref(),
+            where_document.as_deref(),
+        )?
+        .parse()?;
+
+        let collection_id = chroma_types::CollectionUuid(
+            uuid::Uuid::parse_str(&collection_id).map_err(WrappedUuidError)?,
+        );
+
+        let request = chroma_types::DeleteCollectionRecordsRequest::try_new(
+            tenant,
+            database,
+            collection_id,
+            ids,
+            r#where,
+        )?;
+
+        let mut frontend_clone = self.frontend.clone();
+        self.runtime
+            .block_on(async { frontend_clone.delete(request).await })?;
+        Ok(())
+    }
+
+    #[pyo3(
+        signature = (collection_id, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
+    )]
+    fn count(
+        &self,
+        collection_id: String,
+        tenant: String,
+        database: String,
+    ) -> ChromaPyResult<CountResponse> {
+        let collection_id = chroma_types::CollectionUuid(
+            uuid::Uuid::parse_str(&collection_id).map_err(WrappedUuidError)?,
+        );
+
+        let request = chroma_types::CountRequest::try_new(tenant, database, collection_id)?;
+
+        let mut frontend_clone = self.frontend.clone();
+        let result = self
+            .runtime
+            .block_on(async { frontend_clone.count(request).await })?;
+        Ok(result)
+    }
+
+    #[pyo3(
+        signature = (collection_id, ids = None, r#where = None, limit = None, offset = 0, where_document = None, include = ["metadatas".to_string(), "documents".to_string()].to_vec(), tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
+    )]
     #[allow(clippy::too_many_arguments)]
     fn get(
         &self,
@@ -596,49 +708,5 @@ impl Bindings {
             .extract::<String>()
             .map_err(WrappedPyErr)?;
         Ok(version)
-    }
-}
-
-///////////////////// Data Transformation Functions /////////////////
-
-/// Converts a Vec<PyReadonlyArray1<f32>> to a Vec<Vec<f32>>
-/// # Note
-/// - We cannot impl TryFrom etc because we don't own the types or the trait
-#[allow(dead_code)]
-fn py_embeddings_to_vec_f32(embeddings: Vec<PyReadonlyArray1<f32>>) -> PyResult<Vec<Vec<f32>>> {
-    let mut embeddings_vec = Vec::with_capacity(embeddings.len());
-    for embedding in embeddings {
-        // We have to copy the data from the PyReadonlyArray1 to a Vec<f32>
-        // due to how the incoming python data is owned by the caller
-        // We can't assume we can take ownership of the data
-        // There are clever ways to avoid this copy, but they are not worth the complexity
-        // at this time
-        let e_minor = match embedding.as_slice() {
-            Ok(e) => e,
-            Err(e) => return Err(e.into()),
-        };
-        let as_vec = e_minor.to_vec();
-        embeddings_vec.push(as_vec);
-    }
-    Ok(embeddings_vec)
-}
-
-fn py_embeddings_to_opt_vec_f32(
-    embeddings: Option<Vec<PyReadonlyArray1<f32>>>,
-) -> PyResult<Option<Vec<Option<Vec<f32>>>>> {
-    match embeddings {
-        Some(embeddings) => {
-            let mut embeddings_vec = Vec::with_capacity(embeddings.len());
-            for embedding in embeddings {
-                let e_minor = match embedding.as_slice() {
-                    Ok(e) => e,
-                    Err(e) => return Err(e.into()),
-                };
-                let as_vec = e_minor.to_vec();
-                embeddings_vec.push(Some(as_vec));
-            }
-            Ok(Some(embeddings_vec))
-        }
-        None => Ok(None),
     }
 }

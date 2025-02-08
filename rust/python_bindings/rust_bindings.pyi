@@ -127,6 +127,43 @@ class Bindings:
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool: ...
+    def update(
+        self,
+        collection_id: str,
+        ids: IDs,
+        embeddings: Optional[Embeddings] = None,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool: ...
+    def upsert(
+        self,
+        collection_id: str,
+        ids: IDs,
+        embeddings: Optional[Embeddings] = None,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool: ...
+    def delete(
+        self,
+        collection_id: str,
+        ids: Optional[IDs] = None,
+        where: Optional[str] = None,
+        where_document: Optional[str] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> None: ...
+    def count(
+        self,
+        collection_id: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> int: ...
     def get(
         self,
         collection_id: str,
@@ -150,16 +187,5 @@ class Bindings:
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> QueryResponse: ...
-    def update(
-        self,
-        collection_id: str,
-        ids: IDs,
-        embeddings: Optional[Embeddings] = None,
-        metadatas: Optional[Metadatas] = None,
-        documents: Optional[Documents] = None,
-        uris: Optional[URIs] = None,
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
-    ) -> bool: ...
     def reset(self) -> bool: ...
     def get_version(self) -> str: ...

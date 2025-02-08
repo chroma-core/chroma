@@ -39,7 +39,7 @@ impl ChromaError for SqlitePullLogsError {
 
 #[derive(Error, Debug)]
 pub enum SqlitePushLogsError {
-    #[error("Error in compaction")]
+    #[error("Error in compaction: {0}")]
     CompactionError(#[from] CompactionManagerError),
     #[error("Error setting compactor handle")]
     CompactorHandleSetError,

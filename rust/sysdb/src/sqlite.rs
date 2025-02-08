@@ -370,9 +370,7 @@ impl SqliteSysDb {
                 .await
                 .map_err(|e| UpdateCollectionError::Internal(e.into()))?;
             if result.rows_affected() == 0 {
-                return Err(UpdateCollectionError::CollectionNotFound(
-                    collection_id.to_string(),
-                ));
+                return Err(UpdateCollectionError::NotFound(collection_id.to_string()));
             }
         }
 
@@ -473,7 +471,7 @@ impl SqliteSysDb {
             .await
             .map_err(|e| e.boxed())?;
         if !was_found {
-            return Err(DeleteCollectionError::NotFound);
+            return Err(DeleteCollectionError::NotFound(collection_id.to_string()));
         }
 
         tx.commit()
@@ -512,7 +510,9 @@ impl SqliteSysDb {
             .map_err(|e| e.boxed())?;
         let collection = collections
             .first()
-            .ok_or(GetCollectionWithSegmentsError::NotFound)?;
+            .ok_or(GetCollectionWithSegmentsError::NotFound(
+                collection_id.to_string(),
+            ))?;
 
         let segments = self
             .get_segments_with_conn(self.db.get_conn(), collection_id, None, None, None)
@@ -1260,7 +1260,8 @@ mod tests {
                 vec![],
             )
             .await;
-        matches!(result, Err(DeleteCollectionError::NotFound));
+
+        assert!(result.is_err());
 
         // Delete collection
         sysdb
