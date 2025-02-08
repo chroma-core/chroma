@@ -20,7 +20,7 @@ use chroma_types::{
     HeartbeatError, IncludeList, ListDatabasesRequest, Metadata, QueryResponse, UpdateMetadata,
 };
 use numpy::PyReadonlyArray1;
-use pyo3::{pyclass, pymethods, PyObject, PyResult, Python};
+use pyo3::{exceptions::PyValueError, pyclass, pymethods, PyObject, PyResult, Python};
 use std::time::SystemTime;
 
 const DEFAULT_DATABASE: &str = "default_database";
@@ -94,15 +94,7 @@ impl Bindings {
             "default".to_string(),
             "default".to_string(),
         )));
-        let max_batch_size = match runtime.block_on(log.get_max_batch_size()) {
-            Ok(max_batch_size) => max_batch_size,
-            Err(e) => {
-                return Err(PyOSError::new_err(format!(
-                    "Failed to get max batch size: {}",
-                    e
-                )))
-            }
-        };
+        let max_batch_size = runtime.block_on(log.get_max_batch_size())?;
 
         // Spawn the compaction manager.
         let handle = system.start_component(LocalCompactionManager::new(
@@ -168,7 +160,7 @@ impl Bindings {
 
     #[allow(dead_code)]
     fn get_max_batch_size(&self) -> u32 {
-        self._frontend.clone().get_max_batch_size()
+        self.frontend.clone().get_max_batch_size()
     }
 
     // TODO(hammadb): Determine our pattern for optional arguments in python
@@ -315,14 +307,13 @@ impl Bindings {
     ) -> ChromaPyResult<bool> {
         // TODO: move validate embeddings into this conversion
         // let embeddings = py_embeddings_to_vec_f32(embeddings).map_err(WrappedPyErr)?;
-        let mut frontend_clone = self._frontend.clone();
-
         if self.get_max_batch_size() < ids.len() as u32 {
-            return Err(PyValueError::new_err(format!(
+            return Err(WrappedPyErr::from(PyValueError::new_err(format!(
                 "Batch size of {} is greater than max batch size of {}",
                 ids.len(),
                 self.get_max_batch_size()
-            )));
+            )))
+            .into());
         }
 
         let collection_id = chroma_types::CollectionUuid(

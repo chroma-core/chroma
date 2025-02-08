@@ -3,11 +3,10 @@ use std::{
     sync::Arc,
 };
 
-use chroma_distance::{normalize, DistanceFunction};
+use chroma_distance::normalize;
 use chroma_log::{BackfillMessage, LocalCompactionManager};
 use chroma_segment::{
     local_segment_manager::LocalSegmentManager, sqlite_metadata::SqliteMetadataReader,
-    utils::distance_function_from_segment,
 };
 use chroma_sqlite::db::SqliteDb;
 use chroma_system::ComponentHandle;
@@ -17,7 +16,7 @@ use chroma_types::{
         Projection, ProjectionRecord, RecordDistance,
     },
     plan::{Count, Get, Knn},
-    CollectionAndSegments, CollectionUuid, ExecutorError,
+    CollectionAndSegments, CollectionUuid, ExecutorError, HnswSpace, SingleNodeHnswParameters,
 };
 
 #[derive(Clone, Debug)]
@@ -158,13 +157,18 @@ impl LocalExecutor {
                 allowed_offset_ids.push(offset_id);
             }
 
-            let distance_function =
-                distance_function_from_segment(&plan.scan.collection_and_segments.vector_segment)
-                    .map_err(|err| ExecutorError::Internal(err))?;
+            // let distance_function =
+            //     distance_function_from_segment(&plan.scan.collection_and_segments.vector_segment)
+            //         .map_err(|err| ExecutorError::Internal(err))?;
+            let distance_function = SingleNodeHnswParameters::try_from(
+                &plan.scan.collection_and_segments.vector_segment,
+            )
+            .map_err(|err| ExecutorError::Internal(Box::new(err)))?
+            .space;
             let mut knn_batch_results = Vec::new();
             let mut returned_user_ids = Vec::new();
             for embedding in plan.knn.embeddings {
-                let query_embedding = if let DistanceFunction::Cosine = distance_function {
+                let query_embedding = if let HnswSpace::Cosine = distance_function {
                     normalize(&embedding)
                 } else {
                     embedding
