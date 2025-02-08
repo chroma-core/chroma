@@ -3,15 +3,14 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;
-use chroma_segment::{
-    distributed_hnsw::{DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentReader},
-    utils::distance_function_from_segment,
+use chroma_segment::distributed_hnsw::{
+    DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentReader,
 };
 use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
     PanicError, TaskError, TaskMessage, TaskResult,
 };
-use chroma_types::{CollectionAndSegments, Segment};
+use chroma_types::{CollectionAndSegments, DistributedHnswParameters, Segment};
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 
@@ -269,12 +268,13 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
             Some(dim) => dim as u32,
             None => return,
         };
-        let distance_function = match self.ok_or_terminate(
-            distance_function_from_segment(&self.collection_and_segments.vector_segment)
+
+        let hnsw_configuration = match self.ok_or_terminate(
+            DistributedHnswParameters::try_from(&self.collection_and_segments.vector_segment)
                 .map_err(|_| KnnError::InvalidDistanceFunction),
             ctx,
         ) {
-            Some(distance_function) => distance_function,
+            Some(hnsw_configuration) => hnsw_configuration,
             None => return,
         };
         let hnsw_reader = match DistributedHNSWSegmentReader::from_segment(
@@ -299,7 +299,7 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
                 .fetched_logs
                 .take()
                 .expect("FetchLogOperator should have finished already"),
-            distance_function,
+            distance_function: hnsw_configuration.space.into(),
             filter_output: output,
             hnsw_reader,
             record_segment: self.collection_and_segments.record_segment.clone(),

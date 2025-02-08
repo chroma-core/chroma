@@ -18,7 +18,7 @@ use chroma_types::{
     SetOperator, UpdateMetadataValue, Where, CHROMA_DOCUMENT_KEY,
 };
 use sea_query::{
-    Alias, DeleteStatement, Expr, Func, InsertStatement, OnConflict, Query, SimpleExpr,
+    Alias, DeleteStatement, Expr, ExprTrait, Func, InsertStatement, OnConflict, Query, SimpleExpr,
     SqliteQueryBuilder, UpdateStatement,
 };
 use sea_query_binder::SqlxBinder;
@@ -417,20 +417,19 @@ impl IntoSqliteExpr for DocumentExpression {
             EmbeddingFulltextSearch::Table,
             EmbeddingFulltextSearch::StringValue,
         ));
+        let doc_contains = doc_col.like(format!("%{}%", self.text)).is(true);
         match self.operator {
-            DocumentOperator::Contains => doc_col.like(format!("%{}%", self.text)),
-            DocumentOperator::NotContains => doc_col
-                .clone()
-                .not_like(format!("%{}%", self.text))
-                .or(doc_col.is_null()),
+            DocumentOperator::Contains => doc_contains,
+            DocumentOperator::NotContains => doc_contains.not(),
         }
     }
 }
 
 impl IntoSqliteExpr for MetadataExpression {
     fn eval(&self) -> SimpleExpr {
-        let key_cond =
-            Expr::col((EmbeddingMetadata::Table, EmbeddingMetadata::Key)).eq(self.key.to_string());
+        let key_cond = Expr::col((EmbeddingMetadata::Table, EmbeddingMetadata::Key))
+            .eq(self.key.to_string())
+            .is(true);
         match &self.comparison {
             MetadataComparison::Primitive(op, val) => {
                 let (col, sval) = match val {
@@ -441,17 +440,23 @@ impl IntoSqliteExpr for MetadataExpression {
                 };
                 let scol = Expr::col((EmbeddingMetadata::Table, col));
                 match op {
-                    PrimitiveOperator::Equal => Expr::expr(key_cond.and(scol.eq(sval))).max(),
+                    PrimitiveOperator::Equal => {
+                        Expr::expr(key_cond.and(scol.eq(sval).is(true))).max()
+                    }
                     PrimitiveOperator::NotEqual => {
-                        Expr::expr(key_cond.and(scol.eq(sval)).not()).min()
+                        Expr::expr(key_cond.and(scol.eq(sval).is(true)).not()).min()
                     }
-                    PrimitiveOperator::GreaterThan => Expr::expr(key_cond.and(scol.gt(sval))).max(),
+                    PrimitiveOperator::GreaterThan => {
+                        Expr::expr(key_cond.and(scol.gt(sval).is(true))).max()
+                    }
                     PrimitiveOperator::GreaterThanOrEqual => {
-                        Expr::expr(key_cond.and(scol.gte(sval))).max()
+                        Expr::expr(key_cond.and(scol.gte(sval).is(true))).max()
                     }
-                    PrimitiveOperator::LessThan => Expr::expr(key_cond.and(scol.lt(sval))).max(),
+                    PrimitiveOperator::LessThan => {
+                        Expr::expr(key_cond.and(scol.lt(sval).is(true))).max()
+                    }
                     PrimitiveOperator::LessThanOrEqual => {
-                        Expr::expr(key_cond.and(scol.lte(sval))).max()
+                        Expr::expr(key_cond.and(scol.lte(sval).is(true))).max()
                     }
                 }
             }
@@ -475,9 +480,10 @@ impl IntoSqliteExpr for MetadataExpression {
                     ),
                 };
                 let scol = Expr::col((EmbeddingMetadata::Table, col));
+                let val_in = key_cond.and(scol.is_in(svals).is(true));
                 match op {
-                    SetOperator::In => Expr::expr(scol.is_in(svals)).max(),
-                    SetOperator::NotIn => Expr::expr(scol.is_in(svals).not()).min(),
+                    SetOperator::In => Expr::expr(val_in).max(),
+                    SetOperator::NotIn => Expr::expr(val_in.not()).min(),
                 }
             }
         }
@@ -640,18 +646,11 @@ impl SqliteMetadataReader {
                 id: user_id,
                 document: None,
                 embedding: None,
-                metadata: metadata.then_some(HashMap::new()),
+                metadata: (document || metadata).then_some(HashMap::new()),
             });
 
             if document || metadata {
                 if let Ok(key) = row.try_get::<String, _>(2) {
-                    if let (true, Ok(doc)) = (
-                        document && key.starts_with(CHROMA_DOCUMENT_KEY),
-                        row.try_get(3),
-                    ) {
-                        record.document = Some(doc);
-                    }
-
                     if let Some(metadata) = record.metadata.as_mut() {
                         if let Ok(Some(s)) = row.try_get(3) {
                             metadata.insert(key.clone(), MetadataValue::Str(s));
@@ -668,7 +667,20 @@ impl SqliteMetadataReader {
         }
 
         Ok(GetResult {
-            records: records.into_values().collect(),
+            records: records
+                .into_values()
+                .map(|mut rec| {
+                    if let Some(mut meta) = rec.metadata.take() {
+                        if let Some(MetadataValue::Str(doc)) = meta.remove(CHROMA_DOCUMENT_KEY) {
+                            rec.document = Some(doc);
+                        }
+                        if !meta.is_empty() {
+                            rec.metadata = Some(meta)
+                        }
+                    }
+                    rec
+                })
+                .collect(),
         })
     }
 }
@@ -714,7 +726,7 @@ mod tests {
             let plan = Count { scan: Scan { collection_and_segments: test_data.collection_and_segments.clone() }};
             let ref_count = ref_seg.count(plan.clone()).expect("Count should not fail");
             let sqlite_count = runtime.block_on(sqlite_seg_reader.count(plan)).expect("Count should not fail");
-            assert_eq!(ref_count, sqlite_count);
+            assert_eq!(sqlite_count, ref_count);
         }
     }
 
@@ -775,7 +787,7 @@ mod tests {
             };
             let ref_get = ref_seg.get(plan.clone()).expect("Get should not fail");
             let sqlite_get = runtime.block_on(sqlite_seg_reader.get(plan)).expect("Get should not fail");
-            assert_eq!(ref_get, sqlite_get);
+            assert_eq!(sqlite_get, ref_get);
         }
     }
 }

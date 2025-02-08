@@ -8,10 +8,6 @@ use thiserror::Error;
 use tracing::instrument;
 
 pub const DEFAULT_MAX_ELEMENTS: usize = 10000;
-pub const DEFAULT_HNSW_M: usize = 16;
-pub const DEFAULT_HNSW_EF_CONSTRUCTION: usize = 100;
-pub const DEFAULT_HNSW_EF_SEARCH: usize = 10;
-pub const DEFAULT_SYNC_THRESHOLD: usize = 64;
 
 // https://doc.rust-lang.org/nomicon/ffi.html#representing-opaque-structs
 #[repr(C)]

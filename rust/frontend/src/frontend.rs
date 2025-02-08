@@ -16,16 +16,17 @@ use chroma_types::{
     CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantError, CreateTenantRequest,
     CreateTenantResponse, DeleteCollectionError, DeleteCollectionRecordsError,
     DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, DeleteCollectionRequest,
-    DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse, GetCollectionError,
-    GetCollectionRequest, GetCollectionResponse, GetCollectionsError, GetDatabaseError,
-    GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantError,
-    GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError, HeartbeatResponse,
-    Include, ListCollectionsRequest, ListCollectionsResponse, ListDatabasesError,
-    ListDatabasesRequest, ListDatabasesResponse, Metadata, Operation, OperationRecord, QueryError,
-    QueryRequest, QueryResponse, ResetError, ResetResponse, ScalarEncoding, Segment, SegmentScope,
-    SegmentType, SegmentUuid, UpdateCollectionError, UpdateCollectionRecordsError,
-    UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateCollectionRequest,
-    UpdateCollectionResponse, UpdateMetadata, UpdateMetadataValue, UpsertCollectionRecordsError,
+    DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse, DistributedHnswParameters,
+    GetCollectionError, GetCollectionRequest, GetCollectionResponse, GetCollectionsError,
+    GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
+    GetTenantError, GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError,
+    HeartbeatResponse, Include, ListCollectionsRequest, ListCollectionsResponse,
+    ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse, Metadata, Operation,
+    OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
+    ScalarEncoding, Segment, SegmentScope, SegmentType, SegmentUuid, SingleNodeHnswParameters,
+    UpdateCollectionError, UpdateCollectionRecordsError, UpdateCollectionRecordsRequest,
+    UpdateCollectionRecordsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
+    UpdateMetadata, UpdateMetadataValue, UpsertCollectionRecordsError,
     UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, CHROMA_DOCUMENT_KEY,
     CHROMA_URI_KEY,
 };
@@ -117,6 +118,7 @@ pub struct Frontend {
     log_client: Box<chroma_log::Log>,
     sysdb_client: Box<sysdb::SysDb>,
     collections_with_segments_provider: CollectionsWithSegmentsProvider,
+    max_batch_size: u32,
 }
 
 impl Frontend {
@@ -126,6 +128,7 @@ impl Frontend {
         collections_with_segments_provider: CollectionsWithSegmentsProvider,
         log_client: Box<chroma_log::Log>,
         executor: Executor,
+        max_batch_size: u32,
     ) -> Self {
         Frontend {
             allow_reset,
@@ -133,6 +136,7 @@ impl Frontend {
             log_client,
             sysdb_client,
             collections_with_segments_provider,
+            max_batch_size,
         }
     }
 
@@ -140,6 +144,10 @@ impl Frontend {
         Ok(HeartbeatResponse {
             nanosecond_heartbeat: SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos(),
         })
+    }
+
+    pub fn get_max_batch_size(&mut self) -> u32 {
+        self.max_batch_size
     }
 
     async fn get_collection_dimension(
@@ -230,6 +238,7 @@ impl Frontend {
             .clear()
             .await
             .map_err(|err| ResetError::Cache(Box::new(err)))?;
+        self.executor.reset().await.map_err(|err| err.boxed())?;
         self.sysdb_client.reset().await
     }
 
@@ -345,59 +354,62 @@ impl Frontend {
         &mut self,
         request: CreateCollectionRequest,
     ) -> Result<CreateCollectionResponse, CreateCollectionError> {
-        let hnsw_metadata = request.metadata.as_ref().map(|m| {
-            m.iter()
-                .filter(|(k, _)| k.starts_with("hnsw:"))
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect::<Metadata>()
-        });
-
         let collection_id = CollectionUuid::new();
         let segments = match self.executor {
-            Executor::Distributed(_) => vec![
-                Segment {
-                    id: SegmentUuid::new(),
-                    r#type: SegmentType::HnswDistributed,
-                    scope: SegmentScope::VECTOR,
-                    collection: collection_id,
-                    metadata: hnsw_metadata,
-                    file_path: Default::default(),
-                },
-                Segment {
-                    id: SegmentUuid::new(),
-                    r#type: SegmentType::BlockfileMetadata,
-                    scope: SegmentScope::METADATA,
-                    collection: collection_id,
-                    metadata: None,
-                    file_path: Default::default(),
-                },
-                Segment {
-                    id: SegmentUuid::new(),
-                    r#type: SegmentType::BlockfileRecord,
-                    scope: SegmentScope::RECORD,
-                    collection: collection_id,
-                    metadata: None,
-                    file_path: Default::default(),
-                },
-            ],
-            Executor::Local(_) => vec![
-                Segment {
-                    id: SegmentUuid::new(),
-                    r#type: SegmentType::HnswLocalPersisted,
-                    scope: SegmentScope::VECTOR,
-                    collection: collection_id,
-                    metadata: hnsw_metadata,
-                    file_path: Default::default(),
-                },
-                Segment {
-                    id: SegmentUuid::new(),
-                    r#type: SegmentType::Sqlite,
-                    scope: SegmentScope::METADATA,
-                    collection: collection_id,
-                    metadata: None,
-                    file_path: Default::default(),
-                },
-            ],
+            Executor::Distributed(_) => {
+                let hnsw_metadata =
+                    Metadata::try_from(DistributedHnswParameters::try_from(&request.metadata)?)?;
+
+                vec![
+                    Segment {
+                        id: SegmentUuid::new(),
+                        r#type: SegmentType::HnswDistributed,
+                        scope: SegmentScope::VECTOR,
+                        collection: collection_id,
+                        metadata: Some(hnsw_metadata),
+                        file_path: Default::default(),
+                    },
+                    Segment {
+                        id: SegmentUuid::new(),
+                        r#type: SegmentType::BlockfileMetadata,
+                        scope: SegmentScope::METADATA,
+                        collection: collection_id,
+                        metadata: None,
+                        file_path: Default::default(),
+                    },
+                    Segment {
+                        id: SegmentUuid::new(),
+                        r#type: SegmentType::BlockfileRecord,
+                        scope: SegmentScope::RECORD,
+                        collection: collection_id,
+                        metadata: None,
+                        file_path: Default::default(),
+                    },
+                ]
+            }
+            Executor::Local(_) => {
+                let hnsw_metadata =
+                    Metadata::try_from(SingleNodeHnswParameters::try_from(&request.metadata)?)?;
+
+                vec![
+                    Segment {
+                        id: SegmentUuid::new(),
+                        r#type: SegmentType::HnswLocalPersisted,
+                        scope: SegmentScope::VECTOR,
+                        collection: collection_id,
+                        metadata: Some(hnsw_metadata),
+                        file_path: Default::default(),
+                    },
+                    Segment {
+                        id: SegmentUuid::new(),
+                        r#type: SegmentType::Sqlite,
+                        scope: SegmentScope::METADATA,
+                        collection: collection_id,
+                        metadata: None,
+                        file_path: Default::default(),
+                    },
+                ]
+            }
         };
 
         let collection = self
@@ -887,7 +899,8 @@ impl Configurable<(FrontendConfig, System)> for Frontend {
         (config, system): &(FrontendConfig, System),
     ) -> Result<Self, Box<dyn ChromaError>> {
         let sysdb_client = chroma_sysdb::from_config(&config.sysdb).await?;
-        let log_client = chroma_log::from_config(&config.log).await?;
+        let mut log_client = chroma_log::from_config(&config.log).await?;
+        let max_batch_size = log_client.get_max_batch_size().await?;
 
         let collections_with_segments_provider =
             CollectionsWithSegmentsProvider::try_from_config(&(
@@ -904,6 +917,7 @@ impl Configurable<(FrontendConfig, System)> for Frontend {
             collections_with_segments_provider,
             log_client,
             executor,
+            max_batch_size,
         ))
     }
 }

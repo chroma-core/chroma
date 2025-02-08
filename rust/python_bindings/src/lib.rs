@@ -1,4 +1,5 @@
 mod bindings;
+mod errors;
 
 use bindings::{Bindings, PythonBindingsConfig};
 use pyo3::prelude::*;

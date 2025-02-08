@@ -239,7 +239,7 @@ mod tests {
 
     fn assert_approx_eq(a: u64, b: u64, epsilon: f64) {
         assert!(
-            (a as f64 - b as f64).abs() < epsilon,
+            (a as f64 - b as f64).abs() <= epsilon,
             "{} != {} ± {}",
             a,
             b,

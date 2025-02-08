@@ -1,6 +1,6 @@
 use crate::table::MetadataTable;
 use chroma_error::{ChromaError, WrappedSqlxError};
-use chroma_types::{Metadata, MetadataValue, UpdateMetadata};
+use chroma_types::{CollectionUuid, Metadata, MetadataValue, UpdateMetadata};
 use sea_query::{Expr, Iden, InsertStatement, OnConflict, SimpleExpr, SqliteQueryBuilder};
 use sea_query::{Nullable, Query};
 use sea_query_binder::SqlxBinder;
@@ -163,4 +163,15 @@ where
         .map_err(WrappedSqlxError)?;
 
     Ok(())
+}
+
+pub fn get_embeddings_queue_topic_name(
+    log_tenant: &str,
+    log_topic_namespace: &str,
+    collection_id: CollectionUuid,
+) -> String {
+    format!(
+        "persistent://{}/{}/{}",
+        log_tenant, log_topic_namespace, collection_id
+    )
 }

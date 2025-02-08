@@ -1,7 +1,10 @@
-use crate::{CollectionInfo, CompactionManagerError, CompactionMessage, LocalCompactionManager};
+use crate::{
+    CollectionInfo, CompactionManagerError, CompactionMessage, LocalCompactionManager,
+    PurgeLogsMessage,
+};
 use chroma_error::{ChromaError, ErrorCodes, WrappedSqlxError};
-use chroma_sqlite::db::SqliteDb;
-use chroma_system::{ComponentHandle, RequestError};
+use chroma_sqlite::{db::SqliteDb, helpers::get_embeddings_queue_topic_name};
+use chroma_system::{ChannelError, ComponentHandle, RequestError};
 use chroma_types::{
     CollectionUuid, LogRecord, Operation, OperationRecord, ScalarEncoding,
     ScalarEncodingConversionError, UpdateMetadata, UpdateMetadataValue,
@@ -36,7 +39,7 @@ impl ChromaError for SqlitePullLogsError {
 
 #[derive(Error, Debug)]
 pub enum SqlitePushLogsError {
-    #[error("Error in compaction")]
+    #[error("Error in compaction: {0}")]
     CompactionError(#[from] CompactionManagerError),
     #[error("Error setting compactor handle")]
     CompactorHandleSetError,
@@ -44,6 +47,8 @@ pub enum SqlitePushLogsError {
     InvalidMetadata(#[from] serde_json::Error),
     #[error("Error sending message to compactor")]
     MessageSendingError(#[from] RequestError),
+    #[error("Error sending purge log msg to compactor")]
+    PurgeLogSendingFailure(#[from] ChannelError),
     #[error("Query error: {0}")]
     QueryError(#[from] WrappedSqlxError),
 }
@@ -56,9 +61,14 @@ impl ChromaError for SqlitePushLogsError {
             SqlitePushLogsError::InvalidMetadata(_) => ErrorCodes::Internal,
             SqlitePushLogsError::MessageSendingError(e) => e.code(),
             SqlitePushLogsError::QueryError(err) => err.code(),
+            SqlitePushLogsError::PurgeLogSendingFailure(e) => e.code(),
         }
     }
 }
+
+const DEFAULT_VAR_OPT: u32 = 32766;
+const PRAGMA_MAX_VAR_OPT: &str = "MAX_VARIABLE_NUMBER";
+const VARIABLE_PER_RECORD: u32 = 6;
 
 #[derive(Error, Debug)]
 pub enum SqliteGetCollectionsWithNewDataError {
@@ -125,7 +135,8 @@ impl SqliteLog {
         batch_size: i32,
         end_timestamp_ns: Option<i64>,
     ) -> Result<Vec<LogRecord>, SqlitePullLogsError> {
-        let topic = get_topic_name(&self.tenant_id, &self.topic_namespace, collection_id);
+        let topic =
+            get_embeddings_queue_topic_name(&self.tenant_id, &self.topic_namespace, collection_id);
 
         let end_timestamp_ns = end_timestamp_ns.unwrap_or(i64::MAX);
 
@@ -261,7 +272,8 @@ impl SqliteLog {
         let start_log_offset: i64 = row.get("max_seq_id");
         let total_records = records.len() as i64;
 
-        let topic = get_topic_name(&self.tenant_id, &self.topic_namespace, collection_id);
+        let topic =
+            get_embeddings_queue_topic_name(&self.tenant_id, &self.topic_namespace, collection_id);
 
         let records_and_serialized_metadatas = records
             .into_iter()
@@ -312,6 +324,8 @@ impl SqliteLog {
                 total_records,
             };
             handle.request(compact_message, None).await??;
+            let purge_log_msg = PurgeLogsMessage { collection_id };
+            handle.clone().request(purge_log_msg, None).await??;
         }
 
         Ok(())
@@ -378,10 +392,77 @@ impl SqliteLog {
 
         Ok(())
     }
+
+    pub async fn purge_logs(
+        &mut self,
+        collection_id: CollectionUuid,
+        seq_id: u64,
+    ) -> Result<(), SqlitePurgeLogsError> {
+        let topic =
+            get_embeddings_queue_topic_name(&self.tenant_id, &self.topic_namespace, collection_id);
+
+        sqlx::query("DELETE FROM embeddings_queue WHERE topic = ? AND seq_id < ?")
+            .bind(topic)
+            .bind(seq_id as i64)
+            .execute(self.db.get_conn())
+            .await
+            .map_err(WrappedSqlxError)?;
+
+        Ok(())
+    }
+
+    pub async fn get_max_batch_size(&self) -> Result<u32, SqliteGetMaxBatchSizeError> {
+        let opt_strs = sqlx::query("PRAGMA compile_options")
+            .fetch_all(self.db.get_conn())
+            .await
+            .map_err(WrappedSqlxError)?
+            .into_iter()
+            .map(|row| row.try_get::<String, _>(0))
+            .collect::<Result<Vec<_>, _>>()?;
+        let max_variable_number = opt_strs
+            .into_iter()
+            .filter_map(|opt_str| {
+                let mut opt_val = opt_str.split("=");
+                if let Some(PRAGMA_MAX_VAR_OPT) = opt_val.next() {
+                    opt_val.next().and_then(|val_str| val_str.parse().ok())
+                } else {
+                    None
+                }
+            })
+            .fold(DEFAULT_VAR_OPT, |_, opt| opt);
+        Ok(max_variable_number / VARIABLE_PER_RECORD)
+    }
 }
 
-fn get_topic_name(tenant: &str, namespace: &str, collection_id: CollectionUuid) -> String {
-    format!("persistent://{}/{}/{}", tenant, namespace, collection_id)
+#[derive(Error, Debug)]
+pub enum SqlitePurgeLogsError {
+    #[error("Delete query error: {0}")]
+    DeleteQueryError(#[from] WrappedSqlxError),
+}
+
+impl ChromaError for SqlitePurgeLogsError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            SqlitePurgeLogsError::DeleteQueryError(err) => err.code(),
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum SqliteGetMaxBatchSizeError {
+    #[error("Error getting compile time options from sqlite: {0}")]
+    PragmaQueryError(#[from] WrappedSqlxError),
+    #[error("Error parsing row from sqlx: {0}")]
+    RowParsingError(#[from] sqlx::Error),
+}
+
+impl ChromaError for SqliteGetMaxBatchSizeError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            SqliteGetMaxBatchSizeError::PragmaQueryError(err) => err.code(),
+            SqliteGetMaxBatchSizeError::RowParsingError(_) => ErrorCodes::Internal,
+        }
+    }
 }
 
 fn operation_from_code(code: u32) -> Operation {

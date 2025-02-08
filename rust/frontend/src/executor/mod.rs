@@ -45,4 +45,13 @@ impl Executor {
             Executor::Local(_local_executor) => todo!(),
         }
     }
+    pub async fn reset(&mut self) -> Result<(), ExecutorError> {
+        match self {
+            Executor::Distributed(_) => Ok(()),
+            Executor::Local(local_executor) => local_executor
+                .reset()
+                .await
+                .map_err(ExecutorError::Internal),
+        }
+    }
 }

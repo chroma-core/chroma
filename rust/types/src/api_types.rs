@@ -9,6 +9,7 @@ use crate::validators::{
 use crate::Collection;
 use crate::CollectionConversionError;
 use crate::CollectionUuid;
+use crate::HnswParametersFromSegmentError;
 use crate::Metadata;
 use crate::SegmentConversionError;
 use crate::SegmentScopeConversionError;
@@ -18,6 +19,7 @@ use chroma_config::assignment::rendezvous_hash::AssignmentError;
 use chroma_error::ChromaValidationError;
 use chroma_error::{ChromaError, ErrorCodes};
 use pyo3::pyclass;
+use pyo3::types::PyAnyMethods;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
@@ -62,10 +64,31 @@ pub enum GetCollectionWithSegmentsError {
     FailedToGetSegments(#[from] tonic::Status),
     #[error("Failed to get segments")]
     GetSegmentsError(#[from] GetSegmentsError),
-    #[error("Collection not found")]
-    NotFound,
+    #[error("Collection [{0}] does not exists.")]
+    NotFound(String),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
+}
+
+impl ChromaError for GetCollectionWithSegmentsError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GetCollectionWithSegmentsError::CollectionConversionError(
+                collection_conversion_error,
+            ) => collection_conversion_error.code(),
+            GetCollectionWithSegmentsError::DuplicateSegment => ErrorCodes::FailedPrecondition,
+            GetCollectionWithSegmentsError::Field(_) => ErrorCodes::FailedPrecondition,
+            GetCollectionWithSegmentsError::SegmentConversionError(segment_conversion_error) => {
+                segment_conversion_error.code()
+            }
+            GetCollectionWithSegmentsError::FailedToGetSegments(status) => status.code().into(),
+            GetCollectionWithSegmentsError::GetSegmentsError(get_segments_error) => {
+                get_segments_error.code()
+            }
+            GetCollectionWithSegmentsError::NotFound(_) => ErrorCodes::NotFound,
+            GetCollectionWithSegmentsError::Internal(err) => err.code(),
+        }
+    }
 }
 
 pub struct ResetResponse {}
@@ -75,7 +98,7 @@ pub enum ResetError {
     #[error(transparent)]
     Cache(Box<dyn ChromaError>),
     #[error(transparent)]
-    Internal(#[from] Status),
+    Internal(#[from] Box<dyn ChromaError>),
     #[error("Reset is disabled by config")]
     NotAllowed,
 }
@@ -84,7 +107,7 @@ impl ChromaError for ResetError {
     fn code(&self) -> ErrorCodes {
         match self {
             ResetError::Cache(err) => err.code(),
-            ResetError::Internal(status) => status.code().into(),
+            ResetError::Internal(err) => err.code(),
             ResetError::NotAllowed => ErrorCodes::PermissionDenied,
         }
     }
@@ -170,6 +193,7 @@ impl GetTenantRequest {
 }
 
 #[derive(Serialize)]
+#[pyclass]
 pub struct GetTenantResponse {
     pub name: String,
 }
@@ -237,10 +261,24 @@ impl ChromaError for CreateDatabaseError {
 }
 
 #[derive(Serialize, Debug)]
+#[pyo3::pyclass]
 pub struct Database {
     pub id: Uuid,
+    #[pyo3(get)]
     pub name: String,
+    #[pyo3(get)]
     pub tenant: String,
+}
+
+#[pyo3::pymethods]
+impl Database {
+    #[getter]
+    fn id<'py>(&self, py: pyo3::Python<'py>) -> pyo3::PyResult<pyo3::Bound<'py, pyo3::PyAny>> {
+        let res = pyo3::prelude::PyModule::import(py, "uuid")?
+            .getattr("UUID")?
+            .call1((self.id.to_string(),))?;
+        Ok(res)
+    }
 }
 
 #[non_exhaustive]
@@ -315,7 +353,7 @@ pub enum GetDatabaseError {
     Internal(#[from] Box<dyn ChromaError>),
     #[error("Invalid database id [{0}]")]
     InvalidID(String),
-    #[error("Database [{0}] not found")]
+    #[error("Database [{0}] not found. Are you sure it exists?")]
     NotFound(String),
 }
 
@@ -374,7 +412,7 @@ impl ChromaError for DeleteDatabaseError {
 }
 
 #[non_exhaustive]
-#[derive(Validate)]
+#[derive(Validate, Debug)]
 pub struct ListCollectionsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -455,7 +493,7 @@ pub type GetCollectionResponse = Collection;
 pub enum GetCollectionError {
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
-    #[error("Collection [{0}] does not exist")]
+    #[error("Collection [{0}] does not exists")]
     NotFound(String),
 }
 
@@ -507,6 +545,8 @@ pub type CreateCollectionResponse = Collection;
 
 #[derive(Debug, Error)]
 pub enum CreateCollectionError {
+    #[error("Invalid HNSW parameters: {0}")]
+    InvalidHnswParameters(#[from] HnswParametersFromSegmentError),
     #[error("Collection [{0}] already exists")]
     AlreadyExists(String),
     #[error("Database [{0}] does not exist")]
@@ -522,6 +562,7 @@ pub enum CreateCollectionError {
 impl ChromaError for CreateCollectionError {
     fn code(&self) -> ErrorCodes {
         match self {
+            CreateCollectionError::InvalidHnswParameters(_) => ErrorCodes::InvalidArgument,
             CreateCollectionError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
             CreateCollectionError::DatabaseNotFound(_) => ErrorCodes::InvalidArgument,
             CreateCollectionError::Get(err) => err.code(),
@@ -551,14 +592,14 @@ impl ChromaError for GetCollectionsError {
     }
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize, Debug)]
 pub enum CollectionMetadataUpdate {
     ResetMetadata,
     UpdateMetadata(UpdateMetadata),
 }
 
 #[non_exhaustive]
-#[derive(Clone, Validate)]
+#[derive(Clone, Validate, Debug)]
 pub struct UpdateCollectionRequest {
     pub collection_id: CollectionUuid,
     #[validate(custom(function = "validate_name"))]
@@ -588,8 +629,8 @@ pub struct UpdateCollectionResponse {}
 
 #[derive(Error, Debug)]
 pub enum UpdateCollectionError {
-    #[error("Collection does not exist")]
-    CollectionNotFound,
+    #[error("Collection [{0}] does not exists")]
+    NotFound(String),
     #[error("Metadata reset unsupported")]
     MetadataResetUnsupported,
     #[error(transparent)]
@@ -599,7 +640,7 @@ pub enum UpdateCollectionError {
 impl ChromaError for UpdateCollectionError {
     fn code(&self) -> ErrorCodes {
         match self {
-            UpdateCollectionError::CollectionNotFound => ErrorCodes::NotFound,
+            UpdateCollectionError::NotFound(_) => ErrorCodes::NotFound,
             UpdateCollectionError::MetadataResetUnsupported => ErrorCodes::InvalidArgument,
             UpdateCollectionError::Internal(err) => err.code(),
         }
@@ -635,8 +676,8 @@ pub struct DeleteCollectionResponse {}
 
 #[derive(Error, Debug)]
 pub enum DeleteCollectionError {
-    #[error("Collection not found")]
-    NotFound,
+    #[error("Collection [{0}] does not exists")]
+    NotFound(String),
     #[error(transparent)]
     Validation(#[from] ChromaValidationError),
     #[error(transparent)]
@@ -649,7 +690,7 @@ impl ChromaError for DeleteCollectionError {
     fn code(&self) -> ErrorCodes {
         match self {
             DeleteCollectionError::Validation(err) => err.code(),
-            DeleteCollectionError::NotFound => ErrorCodes::NotFound,
+            DeleteCollectionError::NotFound(_) => ErrorCodes::NotFound,
             DeleteCollectionError::Get(err) => err.code(),
             DeleteCollectionError::Internal(err) => err.code(),
         }
@@ -908,6 +949,12 @@ impl ChromaError for DeleteCollectionRecordsError {
 #[error("Invalid include value: {0}")]
 pub struct IncludeParsingError(String);
 
+impl ChromaError for IncludeParsingError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::InvalidArgument
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum Include {
     #[serde(rename = "distances")]
@@ -960,6 +1007,12 @@ impl TryFrom<Vec<String>> for IncludeList {
     fn try_from(value: Vec<String>) -> Result<Self, Self::Error> {
         let mut includes = Vec::new();
         for v in value {
+            // "data" is only used by single node Chroma
+            if v == "data" {
+                includes.push(Include::Metadata);
+                continue;
+            }
+
             includes.push(Include::try_from(v.as_str())?);
         }
         Ok(IncludeList(includes))

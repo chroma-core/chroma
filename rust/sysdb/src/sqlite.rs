@@ -1,6 +1,6 @@
 use chroma_error::{ChromaError, WrappedSqlxError};
 use chroma_sqlite::db::SqliteDb;
-use chroma_sqlite::helpers::update_metadata;
+use chroma_sqlite::helpers::{delete_metadata, get_embeddings_queue_topic_name, update_metadata};
 use chroma_sqlite::table;
 use chroma_types::{
     Collection, CollectionAndSegments, CollectionMetadataUpdate, CollectionUuid,
@@ -8,7 +8,8 @@ use chroma_types::{
     CreateTenantError, CreateTenantResponse, Database, DeleteCollectionError, DeleteDatabaseError,
     DeleteDatabaseResponse, GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError,
     GetSegmentsError, GetTenantError, GetTenantResponse, ListDatabasesError, Metadata,
-    MetadataValue, Segment, SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError,
+    MetadataValue, ResetError, ResetResponse, Segment, SegmentScope, SegmentType, SegmentUuid,
+    UpdateCollectionError,
 };
 use futures::TryStreamExt;
 use sea_query_binder::SqlxBinder;
@@ -30,12 +31,18 @@ use uuid::Uuid;
 ///     without having divergent state
 pub struct SqliteSysDb {
     db: SqliteDb,
+    log_topic_namespace: String,
+    log_tenant: String,
 }
 
 impl SqliteSysDb {
     #[allow(dead_code)]
-    pub fn new(db: SqliteDb) -> Self {
-        Self { db }
+    pub fn new(db: SqliteDb, log_tenant: String, log_topic_namespace: String) -> Self {
+        Self {
+            db,
+            log_topic_namespace,
+            log_tenant,
+        }
     }
 
     ////////////////////////// Database Methods ////////////////////////
@@ -94,15 +101,52 @@ impl SqliteSysDb {
         database_name: String,
         tenant: String,
     ) -> Result<DeleteDatabaseResponse, DeleteDatabaseError> {
-        sqlx::query("DELETE FROM databases WHERE name = $1 AND tenant_id = $2")
+        let mut tx = self
+            .db
+            .get_conn()
+            .begin()
+            .await
+            .map_err(|e| DeleteDatabaseError::Internal(e.into()))?;
+
+        let collections = self
+            .get_collections_with_conn(
+                &mut *tx,
+                None,
+                None,
+                Some(tenant.clone()),
+                Some(database_name.clone()),
+                None,
+                0,
+            )
+            .await
+            .map_err(|e| e.boxed())?;
+
+        for collection in collections {
+            self.delete_collection_with_conn(
+                &mut *tx,
+                tenant.clone(),
+                database_name.clone(),
+                collection.collection_id,
+                vec![],
+            )
+            .await
+            .map_err(|e| e.boxed())?;
+        }
+
+        let result = sqlx::query("DELETE FROM databases WHERE name = $1 AND tenant_id = $2")
             .bind(&database_name)
             .bind(tenant)
-            .execute(self.db.get_conn())
+            .execute(&mut *tx)
             .await
-            .map_err(|e| match e {
-                sqlx::Error::RowNotFound => DeleteDatabaseError::NotFound(database_name),
-                _ => DeleteDatabaseError::Internal(e.into()),
-            })?;
+            .map_err(|e| DeleteDatabaseError::Internal(e.into()))?;
+
+        if result.rows_affected() == 0 {
+            return Err(DeleteDatabaseError::NotFound(database_name));
+        }
+
+        tx.commit()
+            .await
+            .map_err(|e| DeleteDatabaseError::Internal(e.into()))?;
 
         Ok(DeleteDatabaseResponse {})
     }
@@ -250,7 +294,7 @@ impl SqliteSysDb {
             serde_json::to_string(&configuration_json)
                 .map_err(CreateCollectionError::Configuration)?,
         )
-        .bind(dimension.unwrap_or_default())
+        .bind(dimension)
         .bind(database_id)
         .execute(&mut *tx)
         .await
@@ -297,22 +341,6 @@ impl SqliteSysDb {
         metadata: Option<CollectionMetadataUpdate>,
         dimension: Option<u32>,
     ) -> Result<(), UpdateCollectionError> {
-        let mut query = sea_query::Query::update();
-        let mut query = query.table(table::Collections::Table).and_where(
-            sea_query::Expr::col((table::Collections::Table, table::Collections::Id))
-                .eq(collection_id.to_string()),
-        );
-
-        if let Some(name) = name {
-            query = query.value(table::Collections::Name, name.to_string());
-        }
-
-        if let Some(dimension) = dimension {
-            query = query.value(table::Collections::Dimension, dimension);
-        }
-
-        let (sql, values) = query.build_sqlx(sea_query::SqliteQueryBuilder);
-
         let mut tx = self
             .db
             .get_conn()
@@ -320,28 +348,45 @@ impl SqliteSysDb {
             .await
             .map_err(|e| UpdateCollectionError::Internal(e.into()))?;
 
-        let result = sqlx::query_with(&sql, values)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| UpdateCollectionError::Internal(e.into()))?;
-        if result.rows_affected() == 0 {
-            return Err(UpdateCollectionError::CollectionNotFound);
+        if name.is_some() || dimension.is_some() {
+            let mut query = sea_query::Query::update();
+            let mut query = query.table(table::Collections::Table).cond_where(
+                sea_query::Expr::col((table::Collections::Table, table::Collections::Id))
+                    .eq(collection_id.to_string()),
+            );
+
+            if let Some(name) = name {
+                query = query.value(table::Collections::Name, name.to_string());
+            }
+
+            if let Some(dimension) = dimension {
+                query = query.value(table::Collections::Dimension, dimension);
+            }
+
+            let (sql, values) = query.build_sqlx(sea_query::SqliteQueryBuilder);
+
+            let result = sqlx::query_with(&sql, values)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| UpdateCollectionError::Internal(e.into()))?;
+            if result.rows_affected() == 0 {
+                return Err(UpdateCollectionError::NotFound(collection_id.to_string()));
+            }
         }
 
         if let Some(metadata) = metadata {
-            match metadata {
-                CollectionMetadataUpdate::ResetMetadata => {
-                    return Err(UpdateCollectionError::MetadataResetUnsupported);
-                }
-                CollectionMetadataUpdate::UpdateMetadata(metadata) => {
-                    update_metadata::<table::CollectionMetadata, _, _>(
-                        &mut *tx,
-                        collection_id.to_string(),
-                        metadata,
-                    )
-                    .await
-                    .map_err(|e| e.boxed())?;
-                }
+            delete_metadata::<table::CollectionMetadata, _, _>(&mut *tx, collection_id.to_string())
+                .await
+                .map_err(|e| e.boxed())?;
+
+            if let CollectionMetadataUpdate::UpdateMetadata(metadata) = metadata {
+                update_metadata::<table::CollectionMetadata, _, _>(
+                    &mut *tx,
+                    collection_id.to_string(),
+                    metadata,
+                )
+                .await
+                .map_err(|e| e.boxed())?;
             }
         }
 
@@ -421,62 +466,13 @@ impl SqliteSysDb {
             .await
             .map_err(|e| DeleteCollectionError::Internal(e.into()))?;
 
-        let deleted_rows = sqlx::query(
-            r#"
-            DELETE FROM collections
-            WHERE id = $1
-            AND database_id = (SELECT id FROM databases WHERE name = $2 AND tenant_id = $3)
-            RETURNING id
-        "#,
-        )
-        .bind(collection_id.to_string())
-        .bind(&database)
-        .bind(&tenant)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| DeleteCollectionError::Internal(e.into()))?;
-
-        if deleted_rows.rows_affected() == 0 {
-            return Err(DeleteCollectionError::NotFound);
-        }
-
-        // Delete segments
-        let (sql, values) = sea_query::Query::delete()
-            .from_table(table::Segments::Table)
-            .and_where(
-                sea_query::Expr::col((table::Segments::Table, table::Segments::Id))
-                    .is_in(segment_ids.iter().map(|id| id.to_string())),
-            )
-            .build_sqlx(sea_query::SqliteQueryBuilder);
-
-        sqlx::query_with(&sql, values)
-            .execute(&mut *tx)
+        let was_found = self
+            .delete_collection_with_conn(&mut *tx, tenant, database, collection_id, segment_ids)
             .await
-            .map_err(|e| DeleteCollectionError::Internal(e.into()))?;
-
-        // Delete segment metadata
-        sqlx::query(
-            r#"
-            DELETE FROM segment_metadata
-            WHERE segment_id IN (SELECT id FROM segments WHERE collection = $1)
-            "#,
-        )
-        .bind(collection_id.to_string())
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| DeleteCollectionError::Internal(e.into()))?;
-
-        // Delete collection metadata
-        sqlx::query(
-            r#"
-            DELETE FROM collection_metadata
-            WHERE collection_id = $1
-            "#,
-        )
-        .bind(collection_id.to_string())
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| DeleteCollectionError::Internal(e.into()))?;
+            .map_err(|e| e.boxed())?;
+        if !was_found {
+            return Err(DeleteCollectionError::NotFound(collection_id.to_string()));
+        }
 
         tx.commit()
             .await
@@ -514,7 +510,9 @@ impl SqliteSysDb {
             .map_err(|e| e.boxed())?;
         let collection = collections
             .first()
-            .ok_or(GetCollectionWithSegmentsError::NotFound)?;
+            .ok_or(GetCollectionWithSegmentsError::NotFound(
+                collection_id.to_string(),
+            ))?;
 
         let segments = self
             .get_segments_with_conn(self.db.get_conn(), collection_id, None, None, None)
@@ -542,6 +540,11 @@ impl SqliteSysDb {
         })
     }
 
+    pub(crate) async fn reset(&self) -> Result<ResetResponse, ResetError> {
+        self.db.reset().await.map_err(|e| e.boxed())?;
+        Ok(ResetResponse {})
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn get_collections_with_conn<'a, C>(
         &self,
@@ -556,20 +559,18 @@ impl SqliteSysDb {
     where
         C: sqlx::Executor<'a, Database = sqlx::Sqlite>,
     {
-        let (sql, values) = sea_query::Query::select()
+        let mut collections_query = sea_query::Query::select();
+        let collections_query = collections_query
             .from(table::Collections::Table)
+            .column((table::Collections::Table, table::Collections::Id))
+            .column((table::Collections::Table, table::Collections::Name))
+            .column((table::Collections::Table, table::Collections::ConfigJsonStr))
+            .column((table::Collections::Table, table::Collections::Dimension))
+            .column((table::Collections::Table, table::Collections::DatabaseId))
             .inner_join(
                 table::Databases::Table,
                 sea_query::Expr::col((table::Databases::Table, table::Databases::Id))
                     .equals((table::Collections::Table, table::Collections::DatabaseId)),
-            )
-            .left_join(
-                table::CollectionMetadata::Table,
-                sea_query::Expr::col((
-                    table::CollectionMetadata::Table,
-                    table::CollectionMetadata::CollectionId,
-                ))
-                .equals((table::Collections::Table, table::Collections::Id)),
             )
             .cond_where(
                 sea_query::Cond::all()
@@ -591,8 +592,28 @@ impl SqliteSysDb {
                             .eq(collection_id.to_string())
                     })),
             )
+            .order_by(
+                (table::Collections::Table, table::Collections::Id),
+                sea_query::Order::Asc,
+            )
             .limit(limit.unwrap_or(u32::MAX).into()) // SQLite requires that limit is always set if offset is provided
-            .offset(offset.into())
+            .offset(offset.into());
+
+        let (sql, values) = sea_query::Query::select()
+            .from_subquery(collections_query.take(), table::Collections::Table)
+            .left_join(
+                table::CollectionMetadata::Table,
+                sea_query::Expr::col((
+                    table::CollectionMetadata::Table,
+                    table::CollectionMetadata::CollectionId,
+                ))
+                .equals((table::Collections::Table, table::Collections::Id)),
+            )
+            .inner_join(
+                table::Databases::Table,
+                sea_query::Expr::col((table::Databases::Table, table::Databases::Id))
+                    .equals((table::Collections::Table, table::Collections::DatabaseId)),
+            )
             .column((table::Collections::Table, table::Collections::Id))
             .column((table::Collections::Table, table::Collections::Name))
             .column((table::Collections::Table, table::Collections::ConfigJsonStr))
@@ -626,7 +647,7 @@ impl SqliteSysDb {
             }
         }
 
-        let collections = rows_by_collection_id
+        let mut collections = rows_by_collection_id
             .into_iter()
             .filter_map(|(collection_id, rows)| {
                 if rows.is_empty() {
@@ -659,6 +680,8 @@ impl SqliteSysDb {
                 }))
             })
             .collect::<Result<Vec<_>, GetCollectionsError>>()?;
+
+        collections.sort_unstable_by_key(|c| c.collection_id);
 
         Ok(collections)
     }
@@ -772,26 +795,101 @@ impl SqliteSysDb {
         Ok(segments)
     }
 
+    /// Returns true if the collection was deleted, false if it was not found
+    async fn delete_collection_with_conn<C>(
+        &self,
+        conn: &mut C,
+        tenant: String,
+        database: String,
+        collection_id: CollectionUuid,
+        segment_ids: Vec<SegmentUuid>,
+    ) -> Result<bool, WrappedSqlxError>
+    where
+        for<'connection> &'connection mut C: sqlx::Executor<'connection, Database = sqlx::Sqlite>,
+    {
+        let deleted_rows = sqlx::query(
+            r#"
+            DELETE FROM collections
+            WHERE id = $1
+            AND database_id = (SELECT id FROM databases WHERE name = $2 AND tenant_id = $3)
+            RETURNING id
+        "#,
+        )
+        .bind(collection_id.to_string())
+        .bind(&database)
+        .bind(&tenant)
+        .execute(&mut *conn)
+        .await?;
+
+        // Delete segments
+        let (sql, values) = sea_query::Query::delete()
+            .from_table(table::Segments::Table)
+            .and_where(
+                sea_query::Expr::col((table::Segments::Table, table::Segments::Id))
+                    .is_in(segment_ids.iter().map(|id| id.to_string())),
+            )
+            .build_sqlx(sea_query::SqliteQueryBuilder);
+
+        sqlx::query_with(&sql, values).execute(&mut *conn).await?;
+
+        // Delete segment metadata
+        sqlx::query(
+            r#"
+            DELETE FROM segment_metadata
+            WHERE segment_id IN (SELECT id FROM segments WHERE collection = $1)
+            "#,
+        )
+        .bind(collection_id.to_string())
+        .execute(&mut *conn)
+        .await?;
+
+        // Delete collection metadata
+        sqlx::query(
+            r#"
+            DELETE FROM collection_metadata
+            WHERE collection_id = $1
+            "#,
+        )
+        .bind(collection_id.to_string())
+        .execute(&mut *conn)
+        .await?;
+
+        // Delete logs
+        sqlx::query(
+            r#"
+            DELETE FROM embeddings_queue
+            WHERE topic = $1
+            "#,
+        )
+        .bind(get_embeddings_queue_topic_name(
+            &self.log_tenant,
+            &self.log_topic_namespace,
+            collection_id,
+        ))
+        .execute(&mut *conn)
+        .await?;
+
+        Ok(deleted_rows.rows_affected() > 0)
+    }
+
     // TODO: reuse logic from metadata reader
     fn metadata_from_rows<'row>(
         &self,
         rows: impl Iterator<Item = &'row SqliteRow>,
     ) -> Option<Metadata> {
         let metadata: Metadata = rows
-            .map(|row| {
+            .filter_map(|row| {
                 let key = row.get::<&str, _>("key");
 
                 if let Some(str_value) = row.get::<Option<String>, _>("str_value") {
-                    (key.to_string(), MetadataValue::Str(str_value))
+                    Some((key.to_string(), MetadataValue::Str(str_value)))
                 } else if let Some(int_value) = row.get::<Option<i64>, _>("int_value") {
-                    (key.to_string(), MetadataValue::Int(int_value))
+                    Some((key.to_string(), MetadataValue::Int(int_value)))
                 } else if let Some(float_value) = row.get::<Option<f64>, _>("float_value") {
-                    (key.to_string(), MetadataValue::Float(float_value))
-                } else if let Some(bool_value) = row.get::<Option<bool>, _>("bool_value") {
-                    (key.to_string(), MetadataValue::Bool(bool_value))
+                    Some((key.to_string(), MetadataValue::Float(float_value)))
                 } else {
-                    // should never happen
-                    (key.to_string(), MetadataValue::Str("".to_string()))
+                    row.get::<Option<bool>, _>("bool_value")
+                        .map(|bool_value| (key.to_string(), MetadataValue::Bool(bool_value)))
                 }
             })
             .collect();
@@ -817,7 +915,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_database() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db);
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
         let db_id = uuid::Uuid::new_v4();
         sysdb
             .create_database(db_id, "test", "default_tenant")
@@ -835,7 +933,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_database() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db);
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
 
         // Get non-existent database
         let result = sysdb.get_database("test", "default_tenant").await;
@@ -854,7 +952,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete_database() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db);
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
 
         // Delete non-existent database
         let result = sysdb
@@ -878,7 +976,7 @@ mod tests {
     #[tokio::test]
     async fn test_list_database() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db);
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
 
         // List default databases
         let databases = sysdb
@@ -912,7 +1010,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_tenant() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db);
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
 
         // Create tenant
         sysdb.create_tenant("new_tenant".to_string()).await.unwrap();
@@ -925,7 +1023,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_tenant() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db);
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
 
         // Get non-existent tenant
         let result = sysdb.get_tenant("test").await;
@@ -942,7 +1040,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_collection() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db);
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
 
         let mut collection_metadata = Metadata::new();
         collection_metadata.insert("key1".to_string(), MetadataValue::Str("value1".to_string()));
@@ -988,7 +1086,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_collection_fails_for_duplicate_name() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db);
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
 
         let collection_id = CollectionUuid::new();
         let segments = vec![Segment {
@@ -1035,7 +1133,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_collection_get_or_create() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db);
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
 
         let collection_id = CollectionUuid::new();
         let segments = vec![Segment {
@@ -1083,7 +1181,7 @@ mod tests {
     #[tokio::test]
     async fn test_update_collection() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db);
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
 
         let collection_id = CollectionUuid::new();
         sysdb
@@ -1135,7 +1233,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete_collection() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db);
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
 
         let collection_id = CollectionUuid::new();
         sysdb
@@ -1162,7 +1260,8 @@ mod tests {
                 vec![],
             )
             .await;
-        matches!(result, Err(DeleteCollectionError::NotFound));
+
+        assert!(result.is_err());
 
         // Delete collection
         sysdb
@@ -1186,7 +1285,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_collection_with_segments() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db);
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
 
         let mut collection_metadata = Metadata::new();
         collection_metadata.insert("key1".to_string(), MetadataValue::Str("value1".to_string()));
@@ -1246,7 +1345,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_segments() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db);
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
 
         let mut collection_metadata = Metadata::new();
         collection_metadata.insert("key1".to_string(), MetadataValue::Str("value1".to_string()));

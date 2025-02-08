@@ -1,19 +1,17 @@
+use super::blockfile_record::ApplyMaterializedLogError;
 use super::blockfile_record::RecordSegmentReader;
 use super::types::{
     BorrowedMaterializedLogRecord, HydratedMaterializedLogRecord, MaterializeLogsResult,
 };
-use super::{
-    blockfile_record::ApplyMaterializedLogError,
-    utils::{distance_function_from_segment, hnsw_params_from_segment},
-};
 use chroma_blockstore::provider::BlockfileProvider;
-use chroma_distance::DistanceFunctionError;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::spann::types::{
     SpannIndexFlusher, SpannIndexReader, SpannIndexReaderError, SpannIndexWriterError, SpannPosting,
 };
 use chroma_index::IndexUuid;
 use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::SpannIndexWriter};
+use chroma_types::DistributedHnswParameters;
+use chroma_types::HnswParametersFromSegmentError;
 use chroma_types::SegmentUuid;
 use chroma_types::{MaterializedLogOperation, Segment, SegmentScope, SegmentType};
 use std::collections::HashMap;
@@ -36,8 +34,8 @@ pub(crate) struct SpannSegmentWriter {
 pub enum SpannSegmentWriterError {
     #[error("Invalid argument")]
     InvalidArgument,
-    #[error("Segment metadata does not contain distance function {0}")]
-    DistanceFunctionNotFound(#[from] DistanceFunctionError),
+    #[error("Could not parse HNSW configuration: {0}")]
+    InvalidHnswConfiguration(#[from] HnswParametersFromSegmentError),
     #[error("Error parsing index uuid from string")]
     IndexIdParsingError,
     #[error("Invalid file path for HNSW index")]
@@ -65,7 +63,7 @@ impl ChromaError for SpannSegmentWriterError {
         match self {
             Self::InvalidArgument => ErrorCodes::InvalidArgument,
             Self::IndexIdParsingError => ErrorCodes::Internal,
-            Self::DistanceFunctionNotFound(e) => e.code(),
+            Self::InvalidHnswConfiguration(_) => ErrorCodes::Internal,
             Self::HnswInvalidFilePath => ErrorCodes::Internal,
             Self::VersionMapInvalidFilePath => ErrorCodes::Internal,
             Self::PostingListInvalidFilePath => ErrorCodes::Internal,
@@ -90,12 +88,8 @@ impl SpannSegmentWriter {
         if segment.r#type != SegmentType::Spann || segment.scope != SegmentScope::VECTOR {
             return Err(SpannSegmentWriterError::InvalidArgument);
         }
-        let distance_function = match distance_function_from_segment(segment) {
-            Ok(distance_function) => distance_function,
-            Err(e) => {
-                return Err(SpannSegmentWriterError::DistanceFunctionNotFound(*e));
-            }
-        };
+        let hnsw_configuration = DistributedHnswParameters::try_from(segment)?;
+
         let (hnsw_id, m, ef_construction, ef_search) = match segment.file_path.get(HNSW_PATH) {
             Some(hnsw_path) => match hnsw_path.first() {
                 Some(index_id) => {
@@ -111,15 +105,12 @@ impl SpannSegmentWriter {
                     return Err(SpannSegmentWriterError::HnswInvalidFilePath);
                 }
             },
-            None => {
-                let hnsw_params = hnsw_params_from_segment(segment);
-                (
-                    None,
-                    Some(hnsw_params.m),
-                    Some(hnsw_params.ef_construction),
-                    Some(hnsw_params.ef_search),
-                )
-            }
+            None => (
+                None,
+                Some(hnsw_configuration.m),
+                Some(hnsw_configuration.construction_ef),
+                Some(hnsw_configuration.search_ef),
+            ),
         };
         let versions_map_id = match segment.file_path.get(VERSION_MAP_PATH) {
             Some(version_map_path) => match version_map_path.first() {
@@ -184,7 +175,7 @@ impl SpannSegmentWriter {
             ef_construction,
             ef_search,
             &segment.collection,
-            distance_function,
+            hnsw_configuration.space.into(),
             dimensionality,
             blockfile_provider,
         )
@@ -330,8 +321,8 @@ impl SpannSegmentFlusher {
 pub enum SpannSegmentReaderError {
     #[error("Invalid argument")]
     InvalidArgument,
-    #[error("Segment metadata does not contain distance function")]
-    DistanceFunctionNotFound,
+    #[error("Could not parse HNSW configuration: {0}")]
+    InvalidHnswConfiguration(#[from] HnswParametersFromSegmentError),
     #[error("Error parsing index uuid from string")]
     IndexIdParsingError,
     #[error("Invalid file path for HNSW index")]
@@ -353,7 +344,7 @@ impl ChromaError for SpannSegmentReaderError {
         match self {
             Self::InvalidArgument => ErrorCodes::InvalidArgument,
             Self::IndexIdParsingError => ErrorCodes::Internal,
-            Self::DistanceFunctionNotFound => ErrorCodes::Internal,
+            Self::InvalidHnswConfiguration(_) => ErrorCodes::Internal,
             Self::HnswInvalidFilePath => ErrorCodes::Internal,
             Self::VersionMapInvalidFilePath => ErrorCodes::Internal,
             Self::PostingListInvalidFilePath => ErrorCodes::Internal,
@@ -390,12 +381,7 @@ impl<'me> SpannSegmentReader<'me> {
         if segment.r#type != SegmentType::Spann || segment.scope != SegmentScope::VECTOR {
             return Err(SpannSegmentReaderError::InvalidArgument);
         }
-        let distance_function = match distance_function_from_segment(segment) {
-            Ok(distance_function) => distance_function,
-            Err(_) => {
-                return Err(SpannSegmentReaderError::DistanceFunctionNotFound);
-            }
-        };
+        let hnsw_configuration = DistributedHnswParameters::try_from(segment)?;
         let hnsw_id = match segment.file_path.get(HNSW_PATH) {
             Some(hnsw_path) => match hnsw_path.first() {
                 Some(index_id) => {
@@ -452,7 +438,7 @@ impl<'me> SpannSegmentReader<'me> {
             hnsw_id.as_ref(),
             hnsw_provider,
             &segment.collection,
-            distance_function,
+            hnsw_configuration.space.into(),
             dimensionality,
             posting_list_id.as_ref(),
             versions_map_id.as_ref(),

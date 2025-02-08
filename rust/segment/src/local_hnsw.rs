@@ -4,17 +4,16 @@ use chroma_cache::Weighted;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::{HnswIndex, HnswIndexConfig, Index, IndexConfig, PersistentIndex};
 use chroma_sqlite::{db::SqliteDb, table::MaxSeqId};
-use chroma_types::{operator::RecordDistance, Chunk, LogRecord, Operation, Segment, SegmentUuid};
+use chroma_types::{
+    operator::RecordDistance, Chunk, HnswParametersFromSegmentError, LogRecord, Operation, Segment,
+    SegmentUuid, SingleNodeHnswParameters,
+};
 use sea_query::{Expr, Query, SqliteQueryBuilder};
 use sea_query_binder::SqlxBinder;
 use serde::{Deserialize, Serialize};
 use serde_pickle::{DeOptions, SerOptions};
 use sqlx::Row;
 use thiserror::Error;
-
-use crate::utils::{
-    distance_function_from_segment, hnsw_params_from_segment, sync_threshold_from_segment,
-};
 
 #[allow(dead_code)]
 const METADATA_FILE: &str = "index_metadata.pickle";
@@ -35,8 +34,8 @@ pub enum LocalHnswSegmentReaderError {
     HnswIndexLoadError,
     #[error("Nothing found on disk")]
     UninitializedSegment,
-    #[error("Cannot obtain hnsw distance function from segment")]
-    DistanceFunctionError(#[from] Box<chroma_distance::DistanceFunctionError>),
+    #[error("Could not parse HNSW configuration: {0}")]
+    InvalidHnswConfiguration(#[from] HnswParametersFromSegmentError),
     #[error("Error serializing path to string")]
     PersistPathError,
     #[error("Error finding id")]
@@ -56,7 +55,7 @@ impl ChromaError for LocalHnswSegmentReaderError {
             LocalHnswSegmentReaderError::PickleFileDeserializeError(_) => ErrorCodes::Internal,
             LocalHnswSegmentReaderError::HnswIndexLoadError => ErrorCodes::Internal,
             LocalHnswSegmentReaderError::UninitializedSegment => ErrorCodes::Internal,
-            LocalHnswSegmentReaderError::DistanceFunctionError(e) => e.code(),
+            LocalHnswSegmentReaderError::InvalidHnswConfiguration(err) => err.code(),
             LocalHnswSegmentReaderError::PersistPathError => ErrorCodes::Internal,
             LocalHnswSegmentReaderError::IdNotFound => ErrorCodes::Internal,
             LocalHnswSegmentReaderError::GetEmbeddingError => ErrorCodes::Internal,
@@ -97,9 +96,9 @@ impl LocalHnswSegmentReader {
             let id_map: IdMap = serde_pickle::from_reader(file, DeOptions::new())?;
             if !id_map.id_to_label.is_empty() {
                 // Load hnsw index.
-                let distance_function = distance_function_from_segment(segment)?;
-                let sync_threshold = sync_threshold_from_segment(segment);
-                let index_config = IndexConfig::new(dimensionality as i32, distance_function);
+                let hnsw_configuration = SingleNodeHnswParameters::try_from(segment)?;
+                let index_config =
+                    IndexConfig::new(dimensionality as i32, hnsw_configuration.space.into());
                 let index = HnswIndex::load(
                     index_folder_str,
                     &index_config,
@@ -115,7 +114,7 @@ impl LocalHnswSegmentReader {
                             index_init: true,
                             allow_reset: false,
                             num_elements_since_last_persist: 0,
-                            sync_threshold,
+                            sync_threshold: hnsw_configuration.sync_threshold,
                             persist_path: index_folder_str.to_string(),
                             sqlite: sql_db,
                         })),
@@ -281,8 +280,8 @@ pub enum LocalHnswSegmentWriterError {
     HnswIndexLoadError,
     #[error("Nothing found on disk")]
     UninitializedSegment,
-    #[error("Cannot obtain hnsw distance function from segment")]
-    DistanceFunctionError(#[from] Box<chroma_distance::DistanceFunctionError>),
+    #[error("Could not parse HNSW configuration: {0}")]
+    InvalidHnswConfiguration(#[from] HnswParametersFromSegmentError),
     #[error("Error creating hnsw index")]
     HnswIndexInitError,
     #[error("Error persisting hnsw index")]
@@ -311,7 +310,7 @@ impl ChromaError for LocalHnswSegmentWriterError {
             LocalHnswSegmentWriterError::PickleFileDeserializeError(_) => ErrorCodes::Internal,
             LocalHnswSegmentWriterError::HnswIndexLoadError => ErrorCodes::Internal,
             LocalHnswSegmentWriterError::UninitializedSegment => ErrorCodes::Internal,
-            LocalHnswSegmentWriterError::DistanceFunctionError(e) => e.code(),
+            LocalHnswSegmentWriterError::InvalidHnswConfiguration(err) => err.code(),
             LocalHnswSegmentWriterError::HnswIndexInitError => ErrorCodes::Internal,
             LocalHnswSegmentWriterError::HnswIndexPersistError => ErrorCodes::Internal,
             LocalHnswSegmentWriterError::EmbeddingNotFound => ErrorCodes::InvalidArgument,
@@ -345,6 +344,7 @@ impl LocalHnswSegmentWriter {
             Some(path) => path,
             None => return Err(LocalHnswSegmentWriterError::PersistPathError),
         };
+        let hnsw_configuration = SingleNodeHnswParameters::try_from(segment)?;
         let pickle_file_path = persist_path
             .join(segment.id.to_string())
             .join(METADATA_FILE);
@@ -356,9 +356,8 @@ impl LocalHnswSegmentWriter {
             let id_map: IdMap = serde_pickle::from_reader(file, DeOptions::new())?;
             if !id_map.id_to_label.is_empty() {
                 // Load hnsw index.
-                let distance_function = distance_function_from_segment(segment)?;
-                let index_config = IndexConfig::new(dimensionality as i32, distance_function);
-                let sync_threshold = sync_threshold_from_segment(segment);
+                let index_config =
+                    IndexConfig::new(dimensionality as i32, hnsw_configuration.space.into());
                 let index = HnswIndex::load(
                     index_folder_str,
                     &index_config,
@@ -374,7 +373,7 @@ impl LocalHnswSegmentWriter {
                             index_init: true,
                             allow_reset: false,
                             num_elements_since_last_persist: 0,
-                            sync_threshold,
+                            sync_threshold: hnsw_configuration.sync_threshold,
                             persist_path: index_folder_str.to_string(),
                             sqlite: sql_db,
                         })),
@@ -383,14 +382,11 @@ impl LocalHnswSegmentWriter {
             }
         }
         // Initialize index.
-        let distance_function = distance_function_from_segment(segment)?;
-        let hnsw_params = hnsw_params_from_segment(segment);
-        let sync_threshold = sync_threshold_from_segment(segment);
-        let index_config = IndexConfig::new(dimensionality as i32, distance_function);
+        let index_config = IndexConfig::new(dimensionality as i32, hnsw_configuration.space.into());
         let hnsw_config = HnswIndexConfig::new(
-            hnsw_params.m,
-            hnsw_params.ef_construction,
-            hnsw_params.ef_search,
+            hnsw_configuration.m,
+            hnsw_configuration.construction_ef,
+            hnsw_configuration.search_ef,
             &index_folder,
         )?;
 
@@ -410,7 +406,7 @@ impl LocalHnswSegmentWriter {
                     index_init: true,
                     allow_reset: false,
                     num_elements_since_last_persist: 0,
-                    sync_threshold,
+                    sync_threshold: hnsw_configuration.sync_threshold,
                     persist_path: index_folder_str.to_string(),
                     sqlite: sql_db,
                 })),

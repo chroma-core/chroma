@@ -22,7 +22,7 @@ pub enum MigrationMode {
 /// The hash function to use for the migration files
 /// - SHA256: Use SHA256 hash
 /// - MD5: Use MD5 hash
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 #[pyclass(eq, eq_int)]
 pub enum MigrationHash {
     SHA256,

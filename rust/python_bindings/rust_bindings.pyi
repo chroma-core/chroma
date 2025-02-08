@@ -1,8 +1,7 @@
-from typing import Any, List, Optional, Sequence
+from typing import List, Optional, Sequence
 from uuid import UUID
 from chromadb import CollectionMetadata, Embeddings, IDs
 from chromadb.api.configuration import CollectionConfigurationInternal
-from chromadb.api.segment import SegmentAPI
 from chromadb.api.types import (
     CollectionMetadata,
     Documents,
@@ -12,9 +11,14 @@ from chromadb.api.types import (
     URIs,
     Include,
 )
-from chromadb.types import Database, Tenant, Collection as CollectionModel
+from chromadb.types import Tenant, Collection as CollectionModel
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
 from enum import Enum
+
+class DatabaseFromBindings:
+    id: UUID
+    name: str
+    tenant: str
 
 # Result Types
 
@@ -56,23 +60,35 @@ class SqliteDBConfig:
 class Bindings:
     def __init__(
         self,
-        proxy_frontend: SegmentAPI,
+        allow_reset: bool,
         sqlite_db_config: SqliteDBConfig,
         persist_path: str,
         hnsw_cache_size: int,
     ) -> None: ...
     def heartbeat(self) -> int: ...
     def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None: ...
-    def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> Database: ...
+    def get_database(
+        self, name: str, tenant: str = DEFAULT_TENANT
+    ) -> DatabaseFromBindings: ...
     def delete_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None: ...
     def list_databases(
         self,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
-    ) -> Sequence[Database]: ...
+    ) -> Sequence[DatabaseFromBindings]: ...
     def create_tenant(self, name: str) -> None: ...
     def get_tenant(self, name: str) -> Tenant: ...
+    def count_collections(
+        self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
+    ) -> int: ...
+    def list_collections(
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> Sequence[CollectionModel]: ...
     def create_collection(
         self,
         name: str,
@@ -82,6 +98,24 @@ class Bindings:
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel: ...
+    def get_collection(
+        self,
+        name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> CollectionModel: ...
+    def update_collection(
+        self,
+        id: str,
+        new_name: Optional[str] = None,
+        new_metadata: Optional[CollectionMetadata] = None,
+    ) -> None: ...
+    def delete_collection(
+        self,
+        name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> None: ...
     def add(
         self,
         ids: IDs,
@@ -93,6 +127,43 @@ class Bindings:
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool: ...
+    def update(
+        self,
+        collection_id: str,
+        ids: IDs,
+        embeddings: Optional[Embeddings] = None,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool: ...
+    def upsert(
+        self,
+        collection_id: str,
+        ids: IDs,
+        embeddings: Optional[Embeddings] = None,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool: ...
+    def delete(
+        self,
+        collection_id: str,
+        ids: Optional[IDs] = None,
+        where: Optional[str] = None,
+        where_document: Optional[str] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> None: ...
+    def count(
+        self,
+        collection_id: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> int: ...
     def get(
         self,
         collection_id: str,
@@ -116,14 +187,5 @@ class Bindings:
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> QueryResponse: ...
-    def update(
-        self,
-        collection_id: str,
-        ids: IDs,
-        embeddings: Optional[Embeddings] = None,
-        metadatas: Optional[Metadatas] = None,
-        documents: Optional[Documents] = None,
-        uris: Optional[URIs] = None,
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
-    ) -> bool: ...
+    def reset(self) -> bool: ...
+    def get_version(self) -> str: ...

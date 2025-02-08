@@ -22,7 +22,7 @@ from chromadb.types import Collection as CollectionModel
 from chromadb import __version__
 from chromadb.errors import (
     InvalidDimensionException,
-    InvalidCollectionException,
+    NotFoundError,
     VersionMismatchError,
 )
 from chromadb.api.types import (
@@ -313,7 +313,7 @@ class SegmentAPI(ServerAPI):
         if existing:
             return existing[0]
         else:
-            raise InvalidCollectionException(f"Collection {name} does not exist.")
+            raise NotFoundError(f"Collection {name} does not exist.")
 
     @trace_method("SegmentAPI.list_collection", OpenTelemetryGranularity.OPERATION)
     @override
@@ -906,9 +906,7 @@ class SegmentAPI(ServerAPI):
     def _get_collection(self, collection_id: UUID) -> t.Collection:
         collections = self._sysdb.get_collections(id=collection_id)
         if not collections or len(collections) == 0:
-            raise InvalidCollectionException(
-                f"Collection {collection_id} does not exist."
-            )
+            raise NotFoundError(f"Collection {collection_id} does not exist.")
         return collections[0]
 
     @trace_method("SegmentAPI._scan", OpenTelemetryGranularity.OPERATION)
