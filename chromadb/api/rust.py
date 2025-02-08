@@ -44,24 +44,38 @@ class RustBindingsAPI(ServerAPI):
     bindings: rust_bindings.Bindings
     # NOTE(hammadb) We proxy all calls to this instance of the Segment API
     proxy_segment_api: SegmentAPI
+    hnsw_cache_size: int
 
     def __init__(self, system: System):
         super().__init__(system)
         self.proxy_segment_api = system.require(SegmentAPI)
 
+        if platform.system() != "Windows":
+            max_file_handles = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
+        else:
+            max_file_handles = ctypes.windll.msvcrt._getmaxstdio()  # type: ignore
+        self.hnsw_cache_size = (
+            max_file_handles
+            # This is integer division in Python 3, and not a comment.
+            # Each HNSW index has 4 data files and 1 metadata file
+            // 5
+        )
+
+    @override
+    def start(self) -> None:
         # Construct the SqliteConfig
         # TOOD: We should add a "config converter"
-        persist_path = system.settings.require("persist_directory")
+        persist_path = self._system.settings.require("persist_directory")
         # TODO: How to name this file?
         # TODO: proper path handling
         sqlite_persist_path = persist_path
-        hash_type = system.settings.require("migrations_hash_algorithm")
+        hash_type = self._system.settings.require("migrations_hash_algorithm")
         hash_type_bindings = (
             rust_bindings.MigrationHash.MD5
             if hash_type == "md5"
             else rust_bindings.MigrationHash.SHA256
         )
-        migration_mode = system.settings.require("migrations")
+        migration_mode = self._system.settings.require("migrations")
         migration_mode_bindings = (
             rust_bindings.MigrationMode.Apply
             if migration_mode == "apply"
@@ -72,24 +86,17 @@ class RustBindingsAPI(ServerAPI):
             hash_type=hash_type_bindings,
             migration_mode=migration_mode_bindings,
         )
-        if platform.system() != "Windows":
-            max_file_handles = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
-        else:
-            max_file_handles = ctypes.windll.msvcrt._getmaxstdio()  # type: ignore
-        hnsw_cache_size = (
-            max_file_handles
-            # This is integer division in Python 3, and not a comment.
-            # Each HNSW index has 4 data files and 1 metadata file
-            // 5
-        )
 
-        # Construct the Rust bindings
         self.bindings = rust_bindings.Bindings(
-            allow_reset=system.settings.require("allow_reset"),
+            allow_reset=self._system.settings.require("allow_reset"),
             sqlite_db_config=sqlite_config,
             persist_path=persist_path,
-            hnsw_cache_size=hnsw_cache_size,
+            hnsw_cache_size=self.hnsw_cache_size,
         )
+
+    @override
+    def stop(self) -> None:
+        del self.bindings
 
     # ////////////////////////////// Admin API //////////////////////////////
 
