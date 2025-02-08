@@ -480,7 +480,7 @@ impl IntoSqliteExpr for MetadataExpression {
                     ),
                 };
                 let scol = Expr::col((EmbeddingMetadata::Table, col));
-                let val_in = scol.is_in(svals).is(true);
+                let val_in = key_cond.and(scol.is_in(svals).is(true));
                 match op {
                     SetOperator::In => Expr::expr(val_in).max(),
                     SetOperator::NotIn => Expr::expr(val_in.not()).min(),
