@@ -271,7 +271,8 @@ class RustBindingsAPI(ServerAPI):
         #     tenant,
         #     database,
         # )
-        # # TODO: The data field is missing from rust?
+        
+        # TODO: The data field is missing from rust?
         # return GetResult(
         #     ids=rust_response.ids,
         #     embeddings=rust_response.embeddings,
@@ -438,7 +439,7 @@ class RustBindingsAPI(ServerAPI):
 
     @override
     def get_max_batch_size(self) -> int:
-        return self.proxy_segment_api.get_max_batch_size()
+        return self.bindings.get_max_batch_size()
 
     @override
     def get_user_identity(self) -> UserIdentity:

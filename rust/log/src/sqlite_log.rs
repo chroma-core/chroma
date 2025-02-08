@@ -66,6 +66,10 @@ impl ChromaError for SqlitePushLogsError {
     }
 }
 
+const DEFAULT_VAR_OPT: u32 = 32766;
+const PRAGMA_MAX_VAR_OPT: &str = "MAX_VARIABLE_NUMBER";
+const VARIABLE_PER_RECORD: u32 = 6;
+
 #[derive(Error, Debug)]
 pub enum SqliteGetCollectionsWithNewDataError {
     #[error("Query error: {0}")]
@@ -403,6 +407,28 @@ impl SqliteLog {
 
         Ok(())
     }
+
+    pub async fn get_max_batch_size(&self) -> Result<u32, SqliteGetMaxBatchSizeError> {
+        let opt_strs = sqlx::query("PRAGMA compile_options")
+            .fetch_all(self.db.get_conn())
+            .await
+            .map_err(WrappedSqlxError)?
+            .into_iter()
+            .map(|row| row.try_get::<String, _>(0))
+            .collect::<Result<Vec<_>, _>>()?;
+        let max_variable_number = opt_strs
+            .into_iter()
+            .filter_map(|opt_str| {
+                let mut opt_val = opt_str.split("=");
+                if let Some(PRAGMA_MAX_VAR_OPT) = opt_val.next() {
+                    opt_val.next().and_then(|val_str| val_str.parse().ok())
+                } else {
+                    None
+                }
+            })
+            .fold(DEFAULT_VAR_OPT, |_, opt| opt);
+        Ok(max_variable_number / VARIABLE_PER_RECORD)
+    }
 }
 
 #[derive(Error, Debug)]
@@ -415,6 +441,23 @@ impl ChromaError for SqlitePurgeLogsError {
     fn code(&self) -> ErrorCodes {
         match self {
             SqlitePurgeLogsError::DeleteQueryError(err) => err.code(),
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum SqliteGetMaxBatchSizeError {
+    #[error("Error getting compile time options from sqlite: {0}")]
+    PragmaQueryError(#[from] WrappedSqlxError),
+    #[error("Error parsing row from sqlx: {0}")]
+    RowParsingError(#[from] sqlx::Error),
+}
+
+impl ChromaError for SqliteGetMaxBatchSizeError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            SqliteGetMaxBatchSizeError::PragmaQueryError(err) => err.code(),
+            SqliteGetMaxBatchSizeError::RowParsingError(_) => ErrorCodes::Internal,
         }
     }
 }

@@ -120,4 +120,15 @@ impl Log {
             Log::InMemory(_) => unimplemented!(),
         }
     }
+
+    pub async fn get_max_batch_size(&mut self) -> Result<u32, Box<dyn ChromaError>> {
+        match self {
+            Log::Sqlite(log) => log
+                .get_max_batch_size()
+                .await
+                .map_err(|err| Box::new(err) as Box<dyn ChromaError>),
+            Log::Grpc(_) => Ok(100),
+            Log::InMemory(_) => todo!(),
+        }
+    }
 }

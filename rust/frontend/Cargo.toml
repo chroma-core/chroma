@@ -30,6 +30,7 @@ validator = { workspace = true }
 
 chroma-cache = { workspace = true }
 chroma-config = { workspace = true }
+chroma-distance = { workspace = true }
 chroma-error = { workspace = true, features = ["validator"] }
 chroma-log = { workspace = true }
 chroma-memberlist = { workspace = true }

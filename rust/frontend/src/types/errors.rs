@@ -29,15 +29,15 @@ pub enum ValidationError {
 }
 
 impl ChromaError for ValidationError {
-    fn code(&self) -> chroma_error::ErrorCodes {
+    fn code(&self) -> ErrorCodes {
         match self {
-            ValidationError::CollectionId => chroma_error::ErrorCodes::InvalidArgument,
-            ValidationError::DimensionInconsistent => chroma_error::ErrorCodes::InvalidArgument,
-            ValidationError::DimensionMismatch(_, _) => chroma_error::ErrorCodes::InvalidArgument,
-            ValidationError::EmptyDelete => chroma_error::ErrorCodes::InvalidArgument,
-            ValidationError::EmptyMetadata => chroma_error::ErrorCodes::InvalidArgument,
+            ValidationError::CollectionId => ErrorCodes::InvalidArgument,
+            ValidationError::DimensionInconsistent => ErrorCodes::InvalidArgument,
+            ValidationError::DimensionMismatch(_, _) => ErrorCodes::InvalidArgument,
+            ValidationError::EmptyDelete => ErrorCodes::InvalidArgument,
+            ValidationError::EmptyMetadata => ErrorCodes::InvalidArgument,
             ValidationError::GetCollection(err) => err.code(),
-            ValidationError::Name(_) => chroma_error::ErrorCodes::InvalidArgument,
+            ValidationError::Name(_) => ErrorCodes::InvalidArgument,
             ValidationError::UpdateCollection(err) => err.code(),
         }
     }

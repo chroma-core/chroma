@@ -1301,6 +1301,7 @@ dependencies = [
  "backon",
  "chroma-cache",
  "chroma-config",
+ "chroma-distance",
  "chroma-error",
  "chroma-log",
  "chroma-memberlist",

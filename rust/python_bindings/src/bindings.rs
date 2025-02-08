@@ -20,7 +20,7 @@ use chroma_types::{
     HeartbeatError, IncludeList, ListDatabasesRequest, Metadata, QueryResponse, UpdateMetadata,
 };
 use numpy::PyReadonlyArray1;
-use pyo3::{pyclass, pymethods, PyObject, PyResult, Python};
+use pyo3::{exceptions::PyValueError, pyclass, pymethods, PyObject, PyResult, Python};
 use std::time::SystemTime;
 
 const DEFAULT_DATABASE: &str = "default_database";
@@ -89,11 +89,12 @@ impl Bindings {
         let sqlite_sysdb = SqliteSysDb::new(sqlite_db.clone());
         let sysdb = Box::new(SysDb::Sqlite(sqlite_sysdb));
         // TODO: get the log configuration from the config sysdb
-        let log = Box::new(Log::Sqlite(chroma_log::sqlite_log::SqliteLog::new(
+        let mut log = Box::new(Log::Sqlite(chroma_log::sqlite_log::SqliteLog::new(
             sqlite_db.clone(),
             "default".to_string(),
             "default".to_string(),
         )));
+        let max_batch_size = runtime.block_on(log.get_max_batch_size())?;
 
         // Spawn the compaction manager.
         let handle = system.start_component(LocalCompactionManager::new(
@@ -131,7 +132,14 @@ impl Bindings {
             sqlite_db,
             handle.clone(),
         ));
-        let frontend = Frontend::new(false, sysdb.clone(), collections_cache, log, executor);
+        let frontend = Frontend::new(
+            false,
+            sysdb.clone(),
+            collections_cache,
+            log,
+            executor,
+            max_batch_size,
+        );
 
         Ok(Bindings {
             runtime,
@@ -148,6 +156,11 @@ impl Bindings {
             .duration_since(SystemTime::UNIX_EPOCH)
             .map_err(HeartbeatError::CouldNotGetTime)?;
         Ok(duration_since_epoch.as_nanos())
+    }
+
+    #[allow(dead_code)]
+    fn get_max_batch_size(&self) -> u32 {
+        self.frontend.clone().get_max_batch_size()
     }
 
     // TODO(hammadb): Determine our pattern for optional arguments in python
@@ -285,14 +298,23 @@ impl Bindings {
         &self,
         ids: Vec<String>,
         collection_id: String,
-        embeddings: Vec<PyReadonlyArray1<f32>>,
+        embeddings: Vec<Vec<f32>>,
         metadatas: Option<Vec<Option<Metadata>>>,
         documents: Option<Vec<Option<String>>>,
         uris: Option<Vec<Option<String>>>,
         tenant: String,
         database: String,
     ) -> ChromaPyResult<bool> {
-        let embeddings = py_embeddings_to_vec_f32(embeddings).map_err(WrappedPyErr)?;
+        // TODO: move validate embeddings into this conversion
+        // let embeddings = py_embeddings_to_vec_f32(embeddings).map_err(WrappedPyErr)?;
+        if self.get_max_batch_size() < ids.len() as u32 {
+            return Err(WrappedPyErr::from(PyValueError::new_err(format!(
+                "Batch size of {} is greater than max batch size of {}",
+                ids.len(),
+                self.get_max_batch_size()
+            )))
+            .into());
+        }
 
         let collection_id = chroma_types::CollectionUuid(
             uuid::Uuid::parse_str(&collection_id).map_err(WrappedUuidError)?,
@@ -431,7 +453,7 @@ impl Bindings {
     fn query(
         &self,
         collection_id: String,
-        query_embeddings: Vec<PyReadonlyArray1<f32>>,
+        query_embeddings: Vec<Vec<f32>>,
         n_results: u32,
         r#where: Option<String>,
         where_document: Option<String>,
@@ -439,7 +461,7 @@ impl Bindings {
         tenant: String,
         database: String,
     ) -> ChromaPyResult<QueryResponse> {
-        let query_embeddings = py_embeddings_to_vec_f32(query_embeddings).map_err(WrappedPyErr)?;
+        // let query_embeddings = py_embeddings_to_vec_f32(query_embeddings).map_err(WrappedPyErr)?;
 
         let r#where = chroma_types::RawWhereFields::from_json_str(
             r#where.as_deref(),
@@ -477,6 +499,7 @@ impl Bindings {
 /// Converts a Vec<PyReadonlyArray1<f32>> to a Vec<Vec<f32>>
 /// # Note
 /// - We cannot impl TryFrom etc because we don't own the types or the trait
+#[allow(dead_code)]
 fn py_embeddings_to_vec_f32(embeddings: Vec<PyReadonlyArray1<f32>>) -> PyResult<Vec<Vec<f32>>> {
     let mut embeddings_vec = Vec::with_capacity(embeddings.len());
     for embedding in embeddings {

@@ -12,8 +12,7 @@ use chroma_types::{
     test_segment, BooleanOperator, Chunk, Collection, CollectionAndSegments, CompositeExpression,
     DocumentExpression, DocumentOperator, LogRecord, Metadata, MetadataComparison,
     MetadataExpression, MetadataSetValue, MetadataValue, Operation, OperationRecord,
-    PrimitiveOperator, Segment, SegmentScope, SegmentUuid, SetOperator, UpdateMetadata,
-    UpdateMetadataValue, Where, CHROMA_DOCUMENT_KEY,
+    PrimitiveOperator, Segment, SegmentScope, SegmentUuid, SetOperator, UpdateMetadata, Where,
 };
 use thiserror::Error;
 
@@ -184,20 +183,12 @@ impl TestReferenceSegment {
                     id,
                     embedding,
                     encoding: _,
-                    mut metadata,
+                    metadata,
                     document,
                     operation,
                 },
         } in logs
         {
-            if let Some(doc) = document.as_ref() {
-                let mut doc_embedded_meta = metadata.unwrap_or_default();
-                doc_embedded_meta.insert(
-                    CHROMA_DOCUMENT_KEY.to_string(),
-                    UpdateMetadataValue::Str(doc.clone()),
-                );
-                metadata = Some(doc_embedded_meta);
-            }
             let mut record = ProjectionRecord {
                 id: id.clone(),
                 document,
@@ -287,7 +278,7 @@ impl TestReferenceSegment {
                     if !embedding {
                         rec.embedding = None;
                     }
-                    if !metadata {
+                    if !metadata || rec.metadata.as_ref().is_some_and(|meta| meta.is_empty()) {
                         rec.metadata = None;
                     }
                     rec
