@@ -16,16 +16,17 @@ use chroma_types::{
     CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantError, CreateTenantRequest,
     CreateTenantResponse, DeleteCollectionError, DeleteCollectionRecordsError,
     DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, DeleteCollectionRequest,
-    DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse, GetCollectionError,
-    GetCollectionRequest, GetCollectionResponse, GetCollectionsError, GetDatabaseError,
-    GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantError,
-    GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError, HeartbeatResponse,
-    Include, ListCollectionsRequest, ListCollectionsResponse, ListDatabasesError,
-    ListDatabasesRequest, ListDatabasesResponse, Metadata, Operation, OperationRecord, QueryError,
-    QueryRequest, QueryResponse, ResetError, ResetResponse, ScalarEncoding, Segment, SegmentScope,
-    SegmentType, SegmentUuid, UpdateCollectionError, UpdateCollectionRecordsError,
-    UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateCollectionRequest,
-    UpdateCollectionResponse, UpdateMetadata, UpdateMetadataValue, UpsertCollectionRecordsError,
+    DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse, DistributedHnswParameters,
+    GetCollectionError, GetCollectionRequest, GetCollectionResponse, GetCollectionsError,
+    GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
+    GetTenantError, GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError,
+    HeartbeatResponse, Include, ListCollectionsRequest, ListCollectionsResponse,
+    ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse, Metadata, Operation,
+    OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
+    ScalarEncoding, Segment, SegmentScope, SegmentType, SegmentUuid, SingleNodeHnswParameters,
+    UpdateCollectionError, UpdateCollectionRecordsError, UpdateCollectionRecordsRequest,
+    UpdateCollectionRecordsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
+    UpdateMetadata, UpdateMetadataValue, UpsertCollectionRecordsError,
     UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, CHROMA_DOCUMENT_KEY,
     CHROMA_URI_KEY,
 };
@@ -345,59 +346,62 @@ impl Frontend {
         &mut self,
         request: CreateCollectionRequest,
     ) -> Result<CreateCollectionResponse, CreateCollectionError> {
-        let hnsw_metadata = request.metadata.as_ref().map(|m| {
-            m.iter()
-                .filter(|(k, _)| k.starts_with("hnsw:"))
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect::<Metadata>()
-        });
-
         let collection_id = CollectionUuid::new();
         let segments = match self.executor {
-            Executor::Distributed(_) => vec![
-                Segment {
-                    id: SegmentUuid::new(),
-                    r#type: SegmentType::HnswDistributed,
-                    scope: SegmentScope::VECTOR,
-                    collection: collection_id,
-                    metadata: hnsw_metadata,
-                    file_path: Default::default(),
-                },
-                Segment {
-                    id: SegmentUuid::new(),
-                    r#type: SegmentType::BlockfileMetadata,
-                    scope: SegmentScope::METADATA,
-                    collection: collection_id,
-                    metadata: None,
-                    file_path: Default::default(),
-                },
-                Segment {
-                    id: SegmentUuid::new(),
-                    r#type: SegmentType::BlockfileRecord,
-                    scope: SegmentScope::RECORD,
-                    collection: collection_id,
-                    metadata: None,
-                    file_path: Default::default(),
-                },
-            ],
-            Executor::Local(_) => vec![
-                Segment {
-                    id: SegmentUuid::new(),
-                    r#type: SegmentType::HnswLocalPersisted,
-                    scope: SegmentScope::VECTOR,
-                    collection: collection_id,
-                    metadata: hnsw_metadata,
-                    file_path: Default::default(),
-                },
-                Segment {
-                    id: SegmentUuid::new(),
-                    r#type: SegmentType::Sqlite,
-                    scope: SegmentScope::METADATA,
-                    collection: collection_id,
-                    metadata: None,
-                    file_path: Default::default(),
-                },
-            ],
+            Executor::Distributed(_) => {
+                let hnsw_metadata =
+                    Metadata::try_from(DistributedHnswParameters::try_from(&request.metadata)?)?;
+
+                vec![
+                    Segment {
+                        id: SegmentUuid::new(),
+                        r#type: SegmentType::HnswDistributed,
+                        scope: SegmentScope::VECTOR,
+                        collection: collection_id,
+                        metadata: Some(hnsw_metadata),
+                        file_path: Default::default(),
+                    },
+                    Segment {
+                        id: SegmentUuid::new(),
+                        r#type: SegmentType::BlockfileMetadata,
+                        scope: SegmentScope::METADATA,
+                        collection: collection_id,
+                        metadata: None,
+                        file_path: Default::default(),
+                    },
+                    Segment {
+                        id: SegmentUuid::new(),
+                        r#type: SegmentType::BlockfileRecord,
+                        scope: SegmentScope::RECORD,
+                        collection: collection_id,
+                        metadata: None,
+                        file_path: Default::default(),
+                    },
+                ]
+            }
+            Executor::Local(_) => {
+                let hnsw_metadata =
+                    Metadata::try_from(SingleNodeHnswParameters::try_from(&request.metadata)?)?;
+
+                vec![
+                    Segment {
+                        id: SegmentUuid::new(),
+                        r#type: SegmentType::HnswLocalPersisted,
+                        scope: SegmentScope::VECTOR,
+                        collection: collection_id,
+                        metadata: Some(hnsw_metadata),
+                        file_path: Default::default(),
+                    },
+                    Segment {
+                        id: SegmentUuid::new(),
+                        r#type: SegmentType::Sqlite,
+                        scope: SegmentScope::METADATA,
+                        collection: collection_id,
+                        metadata: None,
+                        file_path: Default::default(),
+                    },
+                ]
+            }
         };
 
         let collection = self

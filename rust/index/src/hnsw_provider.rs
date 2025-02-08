@@ -592,11 +592,10 @@ pub enum HnswIndexProviderFileError {
 
 #[cfg(test)]
 mod tests {
-    use crate::{DEFAULT_HNSW_EF_CONSTRUCTION, DEFAULT_HNSW_EF_SEARCH, DEFAULT_HNSW_M};
-
     use super::*;
     use chroma_cache::new_non_persistent_cache_for_test;
     use chroma_storage::local::LocalStorage;
+    use chroma_types::DistributedHnswParameters;
 
     #[tokio::test]
     async fn test_fork() {
@@ -614,12 +613,13 @@ mod tests {
 
         let dimensionality = 128;
         let distance_function = DistanceFunction::Euclidean;
+        let default_hnsw_params = DistributedHnswParameters::default();
         let created_index = provider
             .create(
                 &collection_id,
-                DEFAULT_HNSW_M,
-                DEFAULT_HNSW_EF_CONSTRUCTION,
-                DEFAULT_HNSW_EF_SEARCH,
+                default_hnsw_params.m,
+                default_hnsw_params.construction_ef,
+                default_hnsw_params.search_ef,
                 dimensionality,
                 distance_function.clone(),
             )

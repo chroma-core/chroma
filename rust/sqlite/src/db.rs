@@ -1,5 +1,6 @@
 use crate::config::{MigrationMode, SqliteDBConfig};
 use crate::migrations::{GetSourceMigrationsError, Migration, MigrationDir, MIGRATION_DIRS};
+use chroma_error::ChromaError;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool};
 use sqlx::{Executor, Row};
 use thiserror::Error;
@@ -238,6 +239,20 @@ pub enum SqliteCreationError {
     MigrationsTableNotInitialized,
     #[error("Unapplied migrations found")]
     UnappliedMigrationsFound,
+}
+
+impl ChromaError for SqliteCreationError {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        match self {
+            SqliteCreationError::SqlxError(_) => chroma_error::ErrorCodes::Internal,
+            SqliteCreationError::GetSourceMigrationsError(_) => chroma_error::ErrorCodes::Internal,
+            SqliteCreationError::MigrationValidationError(_) => chroma_error::ErrorCodes::Internal,
+            SqliteCreationError::MigrationsTableNotInitialized => {
+                chroma_error::ErrorCodes::Internal
+            }
+            SqliteCreationError::UnappliedMigrationsFound => chroma_error::ErrorCodes::Internal,
+        }
+    }
 }
 
 #[derive(Error, Debug)]

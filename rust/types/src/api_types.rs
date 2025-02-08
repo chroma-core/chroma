@@ -9,6 +9,7 @@ use crate::validators::{
 use crate::Collection;
 use crate::CollectionConversionError;
 use crate::CollectionUuid;
+use crate::HnswParametersFromSegmentError;
 use crate::Metadata;
 use crate::SegmentConversionError;
 use crate::SegmentScopeConversionError;
@@ -18,6 +19,7 @@ use chroma_config::assignment::rendezvous_hash::AssignmentError;
 use chroma_error::ChromaValidationError;
 use chroma_error::{ChromaError, ErrorCodes};
 use pyo3::pyclass;
+use pyo3::types::PyAnyMethods;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
@@ -237,10 +239,24 @@ impl ChromaError for CreateDatabaseError {
 }
 
 #[derive(Serialize, Debug)]
+#[pyo3::pyclass]
 pub struct Database {
     pub id: Uuid,
+    #[pyo3(get)]
     pub name: String,
+    #[pyo3(get)]
     pub tenant: String,
+}
+
+#[pyo3::pymethods]
+impl Database {
+    #[getter]
+    fn id<'py>(&self, py: pyo3::Python<'py>) -> pyo3::PyResult<pyo3::Bound<'py, pyo3::PyAny>> {
+        let res = pyo3::prelude::PyModule::import(py, "uuid")?
+            .getattr("UUID")?
+            .call1((self.id.to_string(),))?;
+        Ok(res)
+    }
 }
 
 #[non_exhaustive]
@@ -315,7 +331,7 @@ pub enum GetDatabaseError {
     Internal(#[from] Box<dyn ChromaError>),
     #[error("Invalid database id [{0}]")]
     InvalidID(String),
-    #[error("Database [{0}] not found")]
+    #[error("Database [{0}] not found. Are you sure it exists?")]
     NotFound(String),
 }
 
@@ -507,6 +523,8 @@ pub type CreateCollectionResponse = Collection;
 
 #[derive(Debug, Error)]
 pub enum CreateCollectionError {
+    #[error("Invalid HNSW parameters: {0}")]
+    InvalidHnswParameters(#[from] HnswParametersFromSegmentError),
     #[error("Collection [{0}] already exists")]
     AlreadyExists(String),
     #[error("Database [{0}] does not exist")]
@@ -522,6 +540,7 @@ pub enum CreateCollectionError {
 impl ChromaError for CreateCollectionError {
     fn code(&self) -> ErrorCodes {
         match self {
+            CreateCollectionError::InvalidHnswParameters(_) => ErrorCodes::InvalidArgument,
             CreateCollectionError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
             CreateCollectionError::DatabaseNotFound(_) => ErrorCodes::InvalidArgument,
             CreateCollectionError::Get(err) => err.code(),
@@ -907,6 +926,12 @@ impl ChromaError for DeleteCollectionRecordsError {
 #[derive(Error, Debug)]
 #[error("Invalid include value: {0}")]
 pub struct IncludeParsingError(String);
+
+impl ChromaError for IncludeParsingError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::InvalidArgument
+    }
+}
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum Include {

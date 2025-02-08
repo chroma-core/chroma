@@ -1,3 +1,4 @@
+use crate::errors::{ChromaPyResult, WrappedPyErr, WrappedSerdeJsonError, WrappedUuidError};
 use chroma_cache::FoyerCacheConfig;
 use chroma_config::Configurable;
 use chroma_frontend::{
@@ -14,14 +15,11 @@ use chroma_sqlite::{config::SqliteDBConfig, db::SqliteDb};
 use chroma_sysdb::{sqlite::SqliteSysDb, sysdb::SysDb};
 use chroma_system::System;
 use chroma_types::{
-    AddCollectionRecordsError, GetCollectionError, GetResponse, IncludeList, Metadata, QueryError,
-    QueryResponse, UpdateCollectionRecordsError, UpdateMetadata,
+    Collection, CreateCollectionRequest, CreateDatabaseRequest, Database, GetDatabaseRequest,
+    GetResponse, HeartbeatError, IncludeList, Metadata, QueryResponse, UpdateMetadata,
 };
 use numpy::PyReadonlyArray1;
-use pyo3::{
-    exceptions::{PyOSError, PyRuntimeError, PyValueError},
-    pyclass, pymethods, Py, PyAny, PyObject, PyResult, Python,
-};
+use pyo3::{pyclass, pymethods, Py, PyAny, PyObject, PyResult, Python};
 use std::time::SystemTime;
 
 const DEFAULT_DATABASE: &str = "default_database";
@@ -29,12 +27,12 @@ const DEFAULT_TENANT: &str = "default_tenant";
 
 #[pyclass]
 pub(crate) struct Bindings {
-    _runtime: tokio::runtime::Runtime,
+    runtime: tokio::runtime::Runtime,
     // TODO(hammadb): In order to make CI green, we proxy all
     // calls back into python.
     // We should slowly start moving the logic from python to rust
     proxy_frontend: Py<PyAny>,
-    _frontend: Frontend,
+    frontend: Frontend,
     _compaction_manager_handle: chroma_system::ComponentHandle<LocalCompactionManager>,
 }
 
@@ -62,7 +60,7 @@ impl Bindings {
         sqlite_db_config: SqliteDBConfig,
         persist_path: String,
         hnsw_cache_size: usize,
-    ) -> PyResult<Self> {
+    ) -> ChromaPyResult<Self> {
         // TODO: runtime config
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let _guard = runtime.enter();
@@ -75,16 +73,7 @@ impl Bindings {
         // TODO(hammadb): Clean up this code - this is just to unblock us in short term
         // TODO: clean up this construction
         let sqlite_db =
-            match runtime.block_on(async { SqliteDb::try_from_config(&sqlite_db_config).await }) {
-                Ok(db) => db,
-                Err(e) => {
-                    // TODO: error
-                    return Err(PyOSError::new_err(format!(
-                        "Failed to create sqlite db: {}",
-                        e
-                    )));
-                }
-            };
+            runtime.block_on(async { SqliteDb::try_from_config(&sqlite_db_config).await })?;
 
         let cache_config = FoyerCacheConfig {
             capacity: hnsw_cache_size,
@@ -97,18 +86,10 @@ impl Bindings {
             persist_path: persist_path.clone(),
         };
         // Create the hnsw segment manager.
-        let segment_manager = match runtime.block_on(LocalSegmentManager::try_from_config(&(
+        let segment_manager = runtime.block_on(LocalSegmentManager::try_from_config(&(
             segment_manager_config,
             sqlite_db.clone(),
-        ))) {
-            Ok(sm) => sm,
-            Err(e) => {
-                return Err(PyOSError::new_err(format!(
-                    "Failed to create segment manager: {}",
-                    e
-                )))
-            }
-        };
+        )))?;
         let sqlite_sysdb = SqliteSysDb::new(sqlite_db.clone());
         let sysdb = Box::new(SysDb::Sqlite(sqlite_sysdb));
         // TODO: get the log configuration from the config sysdb
@@ -126,11 +107,7 @@ impl Bindings {
             sysdb.clone(),
         ));
         if let Log::Sqlite(sqlite_log) = log.as_ref() {
-            if sqlite_log.init_compactor_handle(handle.clone()).is_err() {
-                return Err(PyOSError::new_err(
-                    "Unable to set compactor handle for sqlite log service",
-                ));
-            };
+            sqlite_log.init_compactor_handle(handle.clone())?;
         }
 
         // TODO: clean up the cache configuration and decide the source of truth owner
@@ -142,22 +119,13 @@ impl Bindings {
             cache: chroma_cache::CacheConfig::Nop,
         };
 
-        let collections_cache = match runtime.block_on(async {
+        let collections_cache = runtime.block_on(async {
             CollectionsWithSegmentsProvider::try_from_config(&(
                 collection_cache_config,
                 sysdb.clone(),
             ))
             .await
-        }) {
-            Ok(cache) => cache,
-            Err(e) => {
-                // TODO: error type
-                return Err(PyOSError::new_err(format!(
-                    "Failed to create collections cache: {}",
-                    e
-                )));
-            }
-        };
+        })?;
 
         // TODO: executor should NOT be exposed to the bindings module. try_from_config should work.
         // The reason this works this way right now is because try_from_config cannot share the sqlite_db
@@ -171,8 +139,8 @@ impl Bindings {
 
         Ok(Bindings {
             proxy_frontend,
-            _runtime: runtime,
-            _frontend: frontend,
+            runtime,
+            frontend,
             _compaction_manager_handle: handle,
         })
     }
@@ -180,12 +148,10 @@ impl Bindings {
     /// Returns the current eopch time in ns
     /// TODO(hammadb): This should proxy to ServerAPI
     #[allow(dead_code)]
-    fn heartbeat(&self) -> PyResult<u128> {
-        let duration_since_epoch =
-            match std::time::SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
-                Ok(duration) => duration,
-                Err(_) => return Err(PyOSError::new_err("Failed to get system time")),
-            };
+    fn heartbeat(&self) -> ChromaPyResult<u128> {
+        let duration_since_epoch = std::time::SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(HeartbeatError::CouldNotGetTime)?;
         Ok(duration_since_epoch.as_nanos())
     }
 
@@ -196,19 +162,37 @@ impl Bindings {
 
     ////////////////////////////// Admin API //////////////////////////////
 
-    fn create_database(&self, name: String, tenant: String, py: Python<'_>) -> PyResult<PyObject> {
-        self.proxy_frontend
-            .call_method1(py, "create_database", (name, tenant))
+    fn create_database(&self, name: String, tenant: String, _py: Python<'_>) -> ChromaPyResult<()> {
+        let request = CreateDatabaseRequest::try_new(tenant, name)?;
+        let mut frontend = self.frontend.clone();
+
+        self.runtime
+            .block_on(async { frontend.create_database(request).await })?;
+
+        Ok(())
     }
 
-    fn get_database(&self, name: String, tenant: String, py: Python<'_>) -> PyResult<PyObject> {
-        self.proxy_frontend
-            .call_method1(py, "get_database", (name, tenant))
+    fn get_database(
+        &self,
+        name: String,
+        tenant: String,
+        _py: Python<'_>,
+    ) -> ChromaPyResult<Database> {
+        let request = GetDatabaseRequest::try_new(tenant, name)?;
+
+        let mut frontend = self.frontend.clone();
+        let database = self
+            .runtime
+            .block_on(async { frontend.get_database(request).await })?;
+
+        Ok(database)
     }
 
     fn delete_database(&self, name: String, tenant: String, py: Python<'_>) -> PyResult<PyObject> {
-        self.proxy_frontend
-            .call_method1(py, "delete_database", (name, tenant))
+        let result = self
+            .proxy_frontend
+            .call_method1(py, "delete_database", (name, tenant))?;
+        Ok(result)
     }
 
     #[pyo3(signature = (limit = None, offset = None, tenant = "DEFAULT_TENANT".to_string()))]
@@ -219,43 +203,72 @@ impl Bindings {
         tenant: String,
         py: Python<'_>,
     ) -> PyResult<PyObject> {
-        self.proxy_frontend
-            .call_method1(py, "list_databases", (limit, offset, tenant))
+        let result =
+            self.proxy_frontend
+                .call_method1(py, "list_databases", (limit, offset, tenant))?;
+        Ok(result)
     }
 
     fn create_tenant(&self, name: String, py: Python<'_>) -> PyResult<PyObject> {
-        self.proxy_frontend
-            .call_method1(py, "create_tenant", (name,))
+        let result = self
+            .proxy_frontend
+            .call_method1(py, "create_tenant", (name,))?;
+        Ok(result)
     }
 
     fn get_tenant(&self, name: String, py: Python<'_>) -> PyResult<PyObject> {
-        self.proxy_frontend.call_method1(py, "get_tenant", (name,))
+        let result = self
+            .proxy_frontend
+            .call_method1(py, "get_tenant", (name,))?;
+        Ok(result)
     }
 
     ////////////////////////////// Base API //////////////////////////////
     #[allow(clippy::too_many_arguments)]
+    #[pyo3(
+        signature = (name, configuration, metadata = None, get_or_create = false, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
+    )]
     fn create_collection(
         &self,
         name: String,
-        configuration: PyObject,
-        metadata: PyObject,
+        configuration: Option<PyObject>,
+        metadata: Option<Metadata>,
         get_or_create: bool,
         tenant: String,
         database: String,
         py: Python<'_>,
-    ) -> PyResult<PyObject> {
-        self.proxy_frontend.call_method1(
-            py,
-            "create_collection",
-            (
-                name,
-                configuration,
-                metadata,
-                get_or_create,
-                tenant,
-                database,
-            ),
-        )
+    ) -> ChromaPyResult<Collection> {
+        let configuration_json = match configuration {
+            Some(configuration) => {
+                let configuration_json_str = configuration
+                    .call_method0(py, "to_json_str")
+                    .map_err(WrappedPyErr)?
+                    .extract::<String>(py)
+                    .map_err(WrappedPyErr)?;
+
+                Some(
+                    serde_json::from_str::<serde_json::Value>(&configuration_json_str)
+                        .map_err(WrappedSerdeJsonError)?,
+                )
+            }
+            None => None,
+        };
+
+        let request = CreateCollectionRequest::try_new(
+            tenant,
+            database,
+            name,
+            metadata,
+            configuration_json,
+            get_or_create,
+        )?;
+
+        let mut frontend = self.frontend.clone();
+        let collection = self
+            .runtime
+            .block_on(async { frontend.create_collection(request).await })?;
+
+        Ok(collection)
     }
 
     //////////////////////////// Record Methods ////////////////////////////
@@ -274,35 +287,21 @@ impl Bindings {
         uris: Option<Vec<Option<String>>>,
         tenant: String,
         database: String,
-    ) -> PyResult<bool> {
-        let mut frontend_clone = self._frontend.clone();
-
-        // TODO: move validate embeddings into this conversion
-        let embeddings = py_embeddings_to_vec_f32(embeddings)?;
+    ) -> ChromaPyResult<bool> {
+        let embeddings = py_embeddings_to_vec_f32(embeddings).map_err(WrappedPyErr)?;
 
         let collection_id = chroma_types::CollectionUuid(
-            uuid::Uuid::parse_str(&collection_id)
-                .map_err(|e| PyValueError::new_err(e.to_string()))?,
+            uuid::Uuid::parse_str(&collection_id).map_err(WrappedUuidError)?,
         );
 
-        let res = self._runtime.block_on(async {
+        let mut frontend_clone = self.frontend.clone();
+        self.runtime.block_on(async {
             frontend_clone
                 .validate_embedding(collection_id, Some(&embeddings), true, |embedding| {
                     Some(embedding.len())
                 })
                 .await
-        });
-
-        // TODO: error handling
-        match res {
-            Ok(_) => (),
-            Err(e) => {
-                return Err(PyRuntimeError::new_err(format!(
-                    "Failed to validate embeddings: {}",
-                    e
-                )))
-            }
-        }
+        })?;
 
         let req = chroma_types::AddCollectionRecordsRequest::try_new(
             tenant,
@@ -313,29 +312,12 @@ impl Bindings {
             documents,
             uris,
             metadatas,
-        )
-        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        )?;
 
-        // TODO: Error handling cleanup
-        match self
-            ._runtime
-            .block_on(async { frontend_clone.add(req).await })
-        {
-            Ok(_) => Ok(true),
-            Err(e) => match e {
-                AddCollectionRecordsError::Collection(e) => match e {
-                    GetCollectionError::NotFound(_) => {
-                        Err(PyValueError::new_err("Collection not found"))
-                    }
-                    GetCollectionError::Internal(e) => {
-                        Err(PyRuntimeError::new_err(format!("Internal Error: {}", e)))
-                    }
-                },
-                AddCollectionRecordsError::Internal(e) => {
-                    Err(PyRuntimeError::new_err(format!("Internal Error: {}", e)))
-                }
-            },
-        }
+        let mut frontend_clone = self.frontend.clone();
+        self.runtime
+            .block_on(async { frontend_clone.add(req).await })?;
+        Ok(true)
     }
 
     #[pyo3(
@@ -352,37 +334,27 @@ impl Bindings {
         uris: Option<Vec<Option<String>>>,
         tenant: String,
         database: String,
-    ) -> PyResult<bool> {
-        let mut frontend_clone = self._frontend.clone();
+    ) -> ChromaPyResult<bool> {
+        let mut frontend_clone = self.frontend.clone();
 
         let embeddings = match embeddings {
-            Some(embeddings) => py_embeddings_to_opt_vec_f32(Some(embeddings))?,
+            Some(embeddings) => {
+                py_embeddings_to_opt_vec_f32(Some(embeddings)).map_err(WrappedPyErr)?
+            }
             None => None,
         };
 
         let collection_id = chroma_types::CollectionUuid(
-            uuid::Uuid::parse_str(&collection_id)
-                .map_err(|e| PyValueError::new_err(e.to_string()))?,
+            uuid::Uuid::parse_str(&collection_id).map_err(WrappedUuidError)?,
         );
 
-        let res = self._runtime.block_on(async {
+        self.runtime.block_on(async {
             frontend_clone
                 .validate_embedding(collection_id, embeddings.as_ref(), false, |e| {
                     e.as_ref().map(|e| e.len())
                 })
                 .await
-        });
-
-        // TODO: error handling
-        match res {
-            Ok(_) => (),
-            Err(e) => {
-                return Err(PyRuntimeError::new_err(format!(
-                    "Failed to validate embeddings: {}",
-                    e
-                )))
-            }
-        }
+        })?;
 
         let req = chroma_types::UpdateCollectionRecordsRequest::try_new(
             tenant,
@@ -393,21 +365,12 @@ impl Bindings {
             documents,
             uris,
             metadatas,
-        )
-        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        )?;
 
-        match self
-            ._runtime
-            .block_on(async { frontend_clone.update(req).await })
-        {
-            Ok(_) => Ok(true),
-            Err(e) => match e {
-                // TODO: How come this cannot throw collection not found?
-                UpdateCollectionRecordsError::Internal(e) => {
-                    Err(PyRuntimeError::new_err(format!("Internal Error: {}", e)))
-                }
-            },
-        }
+        self.runtime
+            .block_on(async { frontend_clone.update(req).await })?;
+
+        Ok(true)
     }
 
     #[pyo3(
@@ -425,23 +388,19 @@ impl Bindings {
         include: Vec<String>,
         tenant: String,
         database: String,
-    ) -> PyResult<GetResponse> {
+    ) -> ChromaPyResult<GetResponse> {
         // TODO: Rethink the error handling strategy
         let r#where = chroma_types::RawWhereFields::from_json_str(
             r#where.as_deref(),
             where_document.as_deref(),
-        )
-        .map_err(|e| PyValueError::new_err(e.to_string()))?
-        .parse()
-        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        )?
+        .parse()?;
 
         let collection_id = chroma_types::CollectionUuid(
-            uuid::Uuid::parse_str(&collection_id)
-                .map_err(|e| PyValueError::new_err(e.to_string()))?,
+            uuid::Uuid::parse_str(&collection_id).map_err(WrappedUuidError)?,
         );
 
-        let include =
-            IncludeList::try_from(include).map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let include = IncludeList::try_from(include)?;
 
         let request = chroma_types::GetRequest::try_new(
             tenant,
@@ -452,25 +411,13 @@ impl Bindings {
             limit,
             offset,
             include,
-        )
-        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        )?;
 
-        let mut frontend_clone = self._frontend.clone();
-        match self
-            ._runtime
-            .block_on(async { frontend_clone.get(request).await })
-        {
-            Ok(response) => Ok(response),
-            Err(e) => match e {
-                // TODO: error handling
-                QueryError::Executor(e) => {
-                    Err(PyRuntimeError::new_err(format!("Executor Error: {}", e)))
-                }
-                QueryError::Internal(e) => {
-                    Err(PyRuntimeError::new_err(format!("Internal Error: {}", e)))
-                }
-            },
-        }
+        let mut frontend_clone = self.frontend.clone();
+        let result = self
+            .runtime
+            .block_on(async { frontend_clone.get(request).await })?;
+        Ok(result)
     }
 
     #[pyo3(
@@ -487,24 +434,20 @@ impl Bindings {
         include: Vec<String>,
         tenant: String,
         database: String,
-    ) -> PyResult<QueryResponse> {
-        let query_embeddings = py_embeddings_to_vec_f32(query_embeddings)?;
+    ) -> ChromaPyResult<QueryResponse> {
+        let query_embeddings = py_embeddings_to_vec_f32(query_embeddings).map_err(WrappedPyErr)?;
 
         let r#where = chroma_types::RawWhereFields::from_json_str(
             r#where.as_deref(),
             where_document.as_deref(),
-        )
-        .map_err(|e| PyValueError::new_err(e.to_string()))?
-        .parse()
-        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        )?
+        .parse()?;
 
         let collection_id = chroma_types::CollectionUuid(
-            uuid::Uuid::parse_str(&collection_id)
-                .map_err(|e| PyValueError::new_err(e.to_string()))?,
+            uuid::Uuid::parse_str(&collection_id).map_err(WrappedUuidError)?,
         );
 
-        let include =
-            IncludeList::try_from(include).map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let include = IncludeList::try_from(include)?;
 
         let request = chroma_types::QueryRequest::try_new(
             tenant,
@@ -515,24 +458,13 @@ impl Bindings {
             query_embeddings,
             n_results,
             include,
-        )
-        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        )?;
 
-        let mut frontend_clone = self._frontend.clone();
-        match self
-            ._runtime
-            .block_on(async { frontend_clone.query(request).await })
-        {
-            Ok(response) => Ok(response),
-            Err(e) => match e {
-                QueryError::Executor(e) => {
-                    Err(PyRuntimeError::new_err(format!("Executor Error: {}", e)))
-                }
-                QueryError::Internal(e) => {
-                    Err(PyRuntimeError::new_err(format!("Internal Error: {}", e)))
-                }
-            },
-        }
+        let mut frontend_clone = self.frontend.clone();
+        let response = self
+            .runtime
+            .block_on(async { frontend_clone.query(request).await })?;
+        Ok(response)
     }
 }
 
