@@ -563,6 +563,7 @@ def test_peek(client):
 
     # peek
     peek = collection.peek()
+    print(peek)
     for key in peek.keys():
         if key in ["embeddings", "documents", "metadatas"] or key == "ids":
             assert len(peek[key]) == 2
@@ -852,7 +853,7 @@ def test_dimensionality_validation_add(client):
 
     with pytest.raises(Exception) as e:
         collection.add(**bad_dimensionality_records)
-    assert "dimensionality" in str(e.value)
+    assert "dimension" in str(e.value)
 
 
 def test_dimensionality_validation_query(client):
@@ -862,7 +863,7 @@ def test_dimensionality_validation_query(client):
 
     with pytest.raises(Exception) as e:
         collection.query(**bad_dimensionality_query)
-    assert "dimensionality" in str(e.value)
+    assert "dimension" in str(e.value)
 
 
 def test_query_document_valid_operators(client):
@@ -1574,7 +1575,7 @@ def test_dimensionality_exception_update(client):
 
     with pytest.raises(Exception) as e:
         collection.update(**bad_dimensionality_records)
-    assert "dimensionality" in str(e.value)
+    assert "dimension" in str(e.value)
 
 
 # test to make sure upsert shows exception for bad dimensionality
@@ -1587,7 +1588,7 @@ def test_dimensionality_exception_upsert(client):
 
     with pytest.raises(Exception) as e:
         collection.upsert(**bad_dimensionality_records)
-    assert "dimensionality" in str(e.value)
+    assert "dimension" in str(e.value)
 
 
 def test_ssl_self_signed(client_ssl):

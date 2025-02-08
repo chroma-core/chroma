@@ -39,7 +39,7 @@ impl ChromaError for SqlitePullLogsError {
 
 #[derive(Error, Debug)]
 pub enum SqlitePushLogsError {
-    #[error("Error in compaction")]
+    #[error("Error in compaction: {0}")]
     CompactionError(#[from] CompactionManagerError),
     #[error("Error setting compactor handle")]
     CompactorHandleSetError,
@@ -325,7 +325,7 @@ impl SqliteLog {
             };
             handle.request(compact_message, None).await??;
             let purge_log_msg = PurgeLogsMessage { collection_id };
-            handle.clone().send(purge_log_msg, None).await?;
+            handle.clone().request(purge_log_msg, None).await??;
         }
 
         Ok(())

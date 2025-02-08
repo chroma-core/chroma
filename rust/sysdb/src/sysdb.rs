@@ -733,7 +733,7 @@ impl GrpcSysDb {
 
         self.client.update_collection(req).await.map_err(|e| {
             if e.code() == Code::NotFound {
-                UpdateCollectionError::CollectionNotFound(collection_id.to_string())
+                UpdateCollectionError::NotFound(collection_id.to_string())
             } else {
                 UpdateCollectionError::Internal(e.into())
             }
@@ -759,7 +759,7 @@ impl GrpcSysDb {
             .await
             .map_err(|e| {
                 if e.code() == Code::NotFound {
-                    DeleteCollectionError::NotFound
+                    DeleteCollectionError::NotFound(collection_id.to_string())
                 } else {
                     DeleteCollectionError::Internal(e.into())
                 }

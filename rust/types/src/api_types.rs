@@ -64,10 +64,31 @@ pub enum GetCollectionWithSegmentsError {
     FailedToGetSegments(#[from] tonic::Status),
     #[error("Failed to get segments")]
     GetSegmentsError(#[from] GetSegmentsError),
-    #[error("Collection not found")]
-    NotFound,
+    #[error("Collection [{0}] does not exists.")]
+    NotFound(String),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
+}
+
+impl ChromaError for GetCollectionWithSegmentsError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GetCollectionWithSegmentsError::CollectionConversionError(
+                collection_conversion_error,
+            ) => collection_conversion_error.code(),
+            GetCollectionWithSegmentsError::DuplicateSegment => ErrorCodes::FailedPrecondition,
+            GetCollectionWithSegmentsError::Field(_) => ErrorCodes::FailedPrecondition,
+            GetCollectionWithSegmentsError::SegmentConversionError(segment_conversion_error) => {
+                segment_conversion_error.code()
+            }
+            GetCollectionWithSegmentsError::FailedToGetSegments(status) => status.code().into(),
+            GetCollectionWithSegmentsError::GetSegmentsError(get_segments_error) => {
+                get_segments_error.code()
+            }
+            GetCollectionWithSegmentsError::NotFound(_) => ErrorCodes::NotFound,
+            GetCollectionWithSegmentsError::Internal(err) => err.code(),
+        }
+    }
 }
 
 pub struct ResetResponse {}
@@ -472,7 +493,7 @@ pub type GetCollectionResponse = Collection;
 pub enum GetCollectionError {
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
-    #[error("Collection [{0}] does not exist")]
+    #[error("Collection [{0}] does not exists")]
     NotFound(String),
 }
 
@@ -608,8 +629,8 @@ pub struct UpdateCollectionResponse {}
 
 #[derive(Error, Debug)]
 pub enum UpdateCollectionError {
-    #[error("Collection {0} does not exist.")]
-    CollectionNotFound(String),
+    #[error("Collection [{0}] does not exists")]
+    NotFound(String),
     #[error("Metadata reset unsupported")]
     MetadataResetUnsupported,
     #[error(transparent)]
@@ -619,7 +640,7 @@ pub enum UpdateCollectionError {
 impl ChromaError for UpdateCollectionError {
     fn code(&self) -> ErrorCodes {
         match self {
-            UpdateCollectionError::CollectionNotFound(_) => ErrorCodes::NotFound,
+            UpdateCollectionError::NotFound(_) => ErrorCodes::NotFound,
             UpdateCollectionError::MetadataResetUnsupported => ErrorCodes::InvalidArgument,
             UpdateCollectionError::Internal(err) => err.code(),
         }
@@ -655,8 +676,8 @@ pub struct DeleteCollectionResponse {}
 
 #[derive(Error, Debug)]
 pub enum DeleteCollectionError {
-    #[error("Collection not found")]
-    NotFound,
+    #[error("Collection [{0}] does not exists")]
+    NotFound(String),
     #[error(transparent)]
     Validation(#[from] ChromaValidationError),
     #[error(transparent)]
@@ -669,7 +690,7 @@ impl ChromaError for DeleteCollectionError {
     fn code(&self) -> ErrorCodes {
         match self {
             DeleteCollectionError::Validation(err) => err.code(),
-            DeleteCollectionError::NotFound => ErrorCodes::NotFound,
+            DeleteCollectionError::NotFound(_) => ErrorCodes::NotFound,
             DeleteCollectionError::Get(err) => err.code(),
             DeleteCollectionError::Internal(err) => err.code(),
         }
@@ -986,6 +1007,12 @@ impl TryFrom<Vec<String>> for IncludeList {
     fn try_from(value: Vec<String>) -> Result<Self, Self::Error> {
         let mut includes = Vec::new();
         for v in value {
+            // "data" is only used by single node Chroma
+            if v == "data" {
+                includes.push(Include::Metadata);
+                continue;
+            }
+
             includes.push(Include::try_from(v.as_str())?);
         }
         Ok(IncludeList(includes))
