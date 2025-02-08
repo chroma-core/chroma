@@ -31,6 +31,7 @@ if platform.system() != "Windows":
 elif platform.system() == "Windows":
     import ctypes
 
+
 # RustBindingsAPI is an implementation of ServerAPI which shims
 # the Rust bindings to the Python API, providing a full implementation
 # of the API. It could be that bindings was a direct implementation of
@@ -84,10 +85,9 @@ class RustBindingsAPI(ServerAPI):
 
         # Construct the Rust bindings
         self.bindings = rust_bindings.Bindings(
-            proxy_frontend=self.proxy_segment_api,
             sqlite_db_config=sqlite_config,
             persist_path=persist_path,
-            hnsw_cache_size=hnsw_cache_size
+            hnsw_cache_size=hnsw_cache_size,
         )
 
     # ////////////////////////////// Admin API //////////////////////////////
@@ -98,7 +98,12 @@ class RustBindingsAPI(ServerAPI):
 
     @override
     def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> Database:
-        return self.bindings.get_database(name, tenant)
+        database = self.bindings.get_database(name, tenant)
+        return {
+            "id": database.id,
+            "name": database.name,
+            "tenant": database.tenant,
+        }
 
     @override
     def delete_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
@@ -111,7 +116,15 @@ class RustBindingsAPI(ServerAPI):
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
     ) -> Sequence[Database]:
-        return self.bindings.list_databases(limit, offset, tenant)
+        databases = self.bindings.list_databases(limit, offset, tenant)
+        return [
+            {
+                "id": database.id,
+                "name": database.name,
+                "tenant": database.tenant,
+            }
+            for database in databases
+        ]
 
     @override
     def create_tenant(self, name: str) -> None:

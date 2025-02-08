@@ -172,6 +172,7 @@ impl GetTenantRequest {
 }
 
 #[derive(Serialize)]
+#[pyclass]
 pub struct GetTenantResponse {
     pub name: String,
 }
