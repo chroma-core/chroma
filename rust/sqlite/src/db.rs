@@ -1,6 +1,7 @@
-use crate::config::{MigrationMode, SqliteDBConfig};
+use crate::config::{MigrationHash, MigrationMode, SqliteDBConfig};
 use crate::migrations::{GetSourceMigrationsError, Migration, MigrationDir, MIGRATION_DIRS};
-use chroma_error::ChromaError;
+use chroma_error::{ChromaError, ErrorCodes};
+use futures::TryStreamExt;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool};
 use sqlx::{Executor, Row};
 use thiserror::Error;
@@ -17,6 +18,7 @@ use thiserror::Error;
 ///     pool. The pool is Send/Sync.
 pub struct SqliteDb {
     conn: SqlitePool,
+    migration_hash_type: MigrationHash,
 }
 
 impl SqliteDb {
@@ -38,46 +40,18 @@ impl SqliteDb {
             .await
             .map_err(SqliteCreationError::SqlxError)?;
 
-        let db = Self { conn };
+        let db = Self {
+            conn,
+            migration_hash_type: config.hash_type,
+        };
 
         db.initialize_migrations_table().await?;
         match config.migration_mode {
             MigrationMode::Apply => {
-                let mut all_unapplied_migrations = Vec::new();
-                for dir in MIGRATION_DIRS.iter() {
-                    let applied_migrations = db.get_existing_migrations(dir).await;
-                    let source_migrations = dir
-                        .get_source_migrations(&config.hash_type)
-                        .map_err(SqliteCreationError::GetSourceMigrationsError)?;
-                    let unapplied = db
-                        .validate_migrations_and_get_unapplied(
-                            applied_migrations,
-                            source_migrations,
-                        )
-                        .map_err(SqliteCreationError::MigrationValidationError)?;
-                    all_unapplied_migrations.extend(unapplied);
-                }
-                db.apply_migrations(all_unapplied_migrations).await?;
+                db.apply_all_migration().await?;
             }
             MigrationMode::Validate => {
-                // This should realistically never happen, since we just initialized the migrations table
-                // above in an idempotent way. This is defensive.
-                if !db.has_initialized_migrations().await {
-                    return Err(SqliteCreationError::MigrationsTableNotInitialized);
-                }
-                for dir in MIGRATION_DIRS.iter() {
-                    let applied_migrations = db.get_existing_migrations(dir).await;
-                    let source_migrations = dir
-                        .get_source_migrations(&config.hash_type)
-                        .map_err(SqliteCreationError::GetSourceMigrationsError)?;
-                    let unapplied = db.validate_migrations_and_get_unapplied(
-                        applied_migrations,
-                        source_migrations,
-                    )?;
-                    if !unapplied.is_empty() {
-                        return Err(SqliteCreationError::UnappliedMigrationsFound);
-                    }
-                }
+                db.validate_all_migrations().await?;
             }
         }
         Ok(db)
@@ -87,7 +61,61 @@ impl SqliteDb {
         &self.conn
     }
 
+    pub async fn reset(&self) -> Result<(), SqliteMigrationError> {
+        let query = r#"
+            SELECT name FROM sqlite_master
+            WHERE type='table'
+        "#;
+        let mut rows = sqlx::query(query).fetch(&self.conn);
+        while let Some(row) = rows.try_next().await? {
+            let name: String = row.get("name");
+            let query = format!("DROP TABLE IF EXISTS {}", name);
+            sqlx::query(&query).execute(&self.conn).await?;
+        }
+
+        self.initialize_migrations_table().await?;
+        self.apply_all_migration().await?;
+
+        Ok(())
+    }
+
     //////////////////////// Migrations ////////////////////////
+
+    async fn apply_all_migration(&self) -> Result<(), SqliteMigrationError> {
+        let mut all_unapplied_migrations = Vec::new();
+        for dir in MIGRATION_DIRS.iter() {
+            let applied_migrations = self.get_existing_migrations(dir).await;
+            let source_migrations = dir
+                .get_source_migrations(&self.migration_hash_type)
+                .map_err(SqliteMigrationError::GetSourceMigrationsError)?;
+            let unapplied = self
+                .validate_migrations_and_get_unapplied(applied_migrations, source_migrations)
+                .map_err(SqliteMigrationError::MigrationValidationError)?;
+            all_unapplied_migrations.extend(unapplied);
+        }
+        self.apply_migrations(all_unapplied_migrations).await?;
+
+        Ok(())
+    }
+
+    async fn validate_all_migrations(&self) -> Result<(), SqliteMigrationError> {
+        if !self.has_initialized_migrations().await {
+            return Err(SqliteMigrationError::MigrationsTableNotInitialized);
+        }
+        for dir in MIGRATION_DIRS.iter() {
+            let applied_migrations = self.get_existing_migrations(dir).await;
+            let source_migrations = dir
+                .get_source_migrations(&self.migration_hash_type)
+                .map_err(SqliteMigrationError::GetSourceMigrationsError)?;
+            let unapplied =
+                self.validate_migrations_and_get_unapplied(applied_migrations, source_migrations)?;
+            if !unapplied.is_empty() {
+                return Err(SqliteMigrationError::UnappliedMigrationsFound);
+            }
+        }
+
+        Ok(())
+    }
 
     /// Apply all migrations in a transaction
     /// Arguments:
@@ -228,7 +256,7 @@ impl SqliteDb {
 //////////////////////// Error Types ////////////////////////
 
 #[derive(Error, Debug)]
-pub enum SqliteCreationError {
+pub enum SqliteMigrationError {
     #[error(transparent)]
     SqlxError(#[from] sqlx::Error),
     #[error(transparent)]
@@ -241,16 +269,31 @@ pub enum SqliteCreationError {
     UnappliedMigrationsFound,
 }
 
+impl ChromaError for SqliteMigrationError {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        match self {
+            SqliteMigrationError::SqlxError(_) => chroma_error::ErrorCodes::Internal,
+            SqliteMigrationError::GetSourceMigrationsError(_) => chroma_error::ErrorCodes::Internal,
+            SqliteMigrationError::MigrationValidationError(_) => chroma_error::ErrorCodes::Internal,
+            SqliteMigrationError::MigrationsTableNotInitialized => ErrorCodes::Internal,
+            SqliteMigrationError::UnappliedMigrationsFound => chroma_error::ErrorCodes::Internal,
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum SqliteCreationError {
+    #[error(transparent)]
+    SqlxError(#[from] sqlx::Error),
+    #[error(transparent)]
+    MigrationError(#[from] SqliteMigrationError),
+}
+
 impl ChromaError for SqliteCreationError {
     fn code(&self) -> chroma_error::ErrorCodes {
         match self {
-            SqliteCreationError::SqlxError(_) => chroma_error::ErrorCodes::Internal,
-            SqliteCreationError::GetSourceMigrationsError(_) => chroma_error::ErrorCodes::Internal,
-            SqliteCreationError::MigrationValidationError(_) => chroma_error::ErrorCodes::Internal,
-            SqliteCreationError::MigrationsTableNotInitialized => {
-                chroma_error::ErrorCodes::Internal
-            }
-            SqliteCreationError::UnappliedMigrationsFound => chroma_error::ErrorCodes::Internal,
+            SqliteCreationError::SqlxError(_) => ErrorCodes::Internal,
+            SqliteCreationError::MigrationError(err) => err.code(),
         }
     }
 }
@@ -426,8 +469,10 @@ mod tests {
         let result = SqliteDb::try_from_config(&config).await;
         match result {
             Ok(_) => panic!("Expect it to fail"),
-            Err(SqliteCreationError::MigrationValidationError(
-                MigrationValidationError::InconsistentHash(_, _),
+            Err(SqliteCreationError::MigrationError(
+                SqliteMigrationError::MigrationValidationError(
+                    MigrationValidationError::InconsistentHash(_, _),
+                ),
             )) => {}
             Err(_) => panic!("Expect it to be a MigrationValidationError"),
         }
@@ -476,10 +521,52 @@ mod tests {
         let result = SqliteDb::try_from_config(&config).await;
         match result {
             Ok(_) => panic!("Expect it to fail"),
-            Err(SqliteCreationError::MigrationValidationError(
-                MigrationValidationError::InconsistentVersion(_, _),
+            Err(SqliteCreationError::MigrationError(
+                SqliteMigrationError::MigrationValidationError(
+                    MigrationValidationError::InconsistentVersion(_, _),
+                ),
             )) => {}
             Err(_) => panic!("Expect it to be a MigrationValidationError"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_reset() {
+        let test_db_path = new_test_db_path();
+        let config = SqliteDBConfig {
+            url: test_db_path.clone(),
+            hash_type: MigrationHash::MD5,
+            migration_mode: MigrationMode::Apply,
+        };
+        let db = SqliteDb::try_from_config(&config)
+            .await
+            .expect("Expect it to be created");
+
+        // Insert a tenant
+        sqlx::query(
+            r#"
+            INSERT INTO tenants (id)
+            VALUES ($1)
+        "#,
+        )
+        .bind("test_tenant")
+        .execute(&db.conn)
+        .await
+        .expect("Expect it to be executed");
+
+        // Reset the db
+        db.reset().await.expect("Expect it to reset without error");
+
+        // Tenant should no longer exist
+        let result = sqlx::query(
+            r#"
+            SELECT id FROM tenants WHERE id = $1
+        "#,
+        )
+        .bind("test_tenant")
+        .fetch_all(&db.conn)
+        .await
+        .expect("Expect it to be executed");
+        assert!(result.is_empty());
     }
 }

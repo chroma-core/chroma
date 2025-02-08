@@ -130,4 +130,9 @@ impl LocalSegmentManager {
             }
         }
     }
+
+    pub async fn reset(&self) -> Result<(), LocalSegmentManagerError> {
+        self.hnsw_index_pool.clear().await?;
+        Ok(())
+    }
 }

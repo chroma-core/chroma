@@ -4,7 +4,7 @@ use super::config::SysDbConfig;
 use super::test_sysdb::TestSysDb;
 use async_trait::async_trait;
 use chroma_config::Configurable;
-use chroma_error::{ChromaError, ErrorCodes, TonicMissingFieldError};
+use chroma_error::{ChromaError, ErrorCodes, TonicError, TonicMissingFieldError};
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
 use chroma_types::chroma_proto::VersionListForCollection;
 use chroma_types::{
@@ -373,7 +373,7 @@ impl SysDb {
     pub async fn reset(&mut self) -> Result<ResetResponse, ResetError> {
         match self {
             SysDb::Grpc(grpc) => grpc.reset().await,
-            SysDb::Sqlite(_) => todo!(),
+            SysDb::Sqlite(sqlite) => sqlite.reset().await,
             SysDb::Test(_) => todo!(),
         }
     }
@@ -966,7 +966,10 @@ impl GrpcSysDb {
     }
 
     async fn reset(&mut self) -> Result<ResetResponse, ResetError> {
-        self.client.reset_state(()).await?;
+        self.client
+            .reset_state(())
+            .await
+            .map_err(|e| TonicError(e).boxed())?;
         Ok(ResetResponse {})
     }
 }

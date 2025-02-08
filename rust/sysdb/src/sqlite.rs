@@ -8,7 +8,8 @@ use chroma_types::{
     CreateTenantError, CreateTenantResponse, Database, DeleteCollectionError, DeleteDatabaseError,
     DeleteDatabaseResponse, GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError,
     GetSegmentsError, GetTenantError, GetTenantResponse, ListDatabasesError, Metadata,
-    MetadataValue, Segment, SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError,
+    MetadataValue, ResetError, ResetResponse, Segment, SegmentScope, SegmentType, SegmentUuid,
+    UpdateCollectionError,
 };
 use futures::TryStreamExt;
 use sea_query_binder::SqlxBinder;
@@ -534,6 +535,11 @@ impl SqliteSysDb {
             vector_segment: vector_segment.clone(),
             record_segment: metadata_segment.clone(), // single node Chroma does not have a record segment
         })
+    }
+
+    pub(crate) async fn reset(&self) -> Result<ResetResponse, ResetError> {
+        self.db.reset().await.map_err(|e| e.boxed())?;
+        Ok(ResetResponse {})
     }
 
     #[allow(clippy::too_many_arguments)]

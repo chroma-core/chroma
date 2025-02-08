@@ -60,6 +60,7 @@ class SqliteDBConfig:
 class Bindings:
     def __init__(
         self,
+        allow_reset: bool,
         sqlite_db_config: SqliteDBConfig,
         persist_path: str,
         hnsw_cache_size: int,
@@ -154,3 +155,4 @@ class Bindings:
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool: ...
+    def reset(self) -> bool: ...
