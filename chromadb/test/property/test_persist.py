@@ -46,9 +46,11 @@ configurations = [
         chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
         allow_reset=True,
         is_persistent=True,
-        persist_directory=tempfile.mkdtemp(),
     ),
-    Settings(
+]
+
+if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ:
+    configurations.append(Settings(
         chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
         chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
         chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
@@ -56,9 +58,7 @@ configurations = [
         chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
         allow_reset=True,
         is_persistent=True,
-        persist_directory=tempfile.mkdtemp(),
-    ),
-]
+    ))
 
 
 @pytest.fixture(scope="module", params=configurations)
