@@ -157,9 +157,6 @@ impl LocalExecutor {
                 allowed_offset_ids.push(offset_id);
             }
 
-            // let distance_function =
-            //     distance_function_from_segment(&plan.scan.collection_and_segments.vector_segment)
-            //         .map_err(|err| ExecutorError::Internal(err))?;
             let distance_function = SingleNodeHnswParameters::try_from(
                 &plan.scan.collection_and_segments.vector_segment,
             )
