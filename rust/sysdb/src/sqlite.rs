@@ -1,6 +1,6 @@
 use chroma_error::{ChromaError, WrappedSqlxError};
 use chroma_sqlite::db::SqliteDb;
-use chroma_sqlite::helpers::update_metadata;
+use chroma_sqlite::helpers::{get_embeddings_queue_topic_name, update_metadata};
 use chroma_sqlite::table;
 use chroma_types::{
     Collection, CollectionAndSegments, CollectionMetadataUpdate, CollectionUuid,
@@ -30,12 +30,18 @@ use uuid::Uuid;
 ///     without having divergent state
 pub struct SqliteSysDb {
     db: SqliteDb,
+    log_topic_namespace: String,
+    log_tenant: String,
 }
 
 impl SqliteSysDb {
     #[allow(dead_code)]
-    pub fn new(db: SqliteDb) -> Self {
-        Self { db }
+    pub fn new(db: SqliteDb, log_tenant: String, log_topic_namespace: String) -> Self {
+        Self {
+            db,
+            log_topic_namespace,
+            log_tenant,
+        }
     }
 
     ////////////////////////// Database Methods ////////////////////////
@@ -544,20 +550,18 @@ impl SqliteSysDb {
     where
         C: sqlx::Executor<'a, Database = sqlx::Sqlite>,
     {
-        let (sql, values) = sea_query::Query::select()
+        let mut collections_query = sea_query::Query::select();
+        let collections_query = collections_query
             .from(table::Collections::Table)
+            .column((table::Collections::Table, table::Collections::Id))
+            .column((table::Collections::Table, table::Collections::Name))
+            .column((table::Collections::Table, table::Collections::ConfigJsonStr))
+            .column((table::Collections::Table, table::Collections::Dimension))
+            .column((table::Collections::Table, table::Collections::DatabaseId))
             .inner_join(
                 table::Databases::Table,
                 sea_query::Expr::col((table::Databases::Table, table::Databases::Id))
                     .equals((table::Collections::Table, table::Collections::DatabaseId)),
-            )
-            .left_join(
-                table::CollectionMetadata::Table,
-                sea_query::Expr::col((
-                    table::CollectionMetadata::Table,
-                    table::CollectionMetadata::CollectionId,
-                ))
-                .equals((table::Collections::Table, table::Collections::Id)),
             )
             .cond_where(
                 sea_query::Cond::all()
@@ -579,8 +583,28 @@ impl SqliteSysDb {
                             .eq(collection_id.to_string())
                     })),
             )
+            .order_by(
+                (table::Collections::Table, table::Collections::Id),
+                sea_query::Order::Asc,
+            )
             .limit(limit.unwrap_or(u32::MAX).into()) // SQLite requires that limit is always set if offset is provided
-            .offset(offset.into())
+            .offset(offset.into());
+
+        let (sql, values) = sea_query::Query::select()
+            .from_subquery(collections_query.take(), table::Collections::Table)
+            .left_join(
+                table::CollectionMetadata::Table,
+                sea_query::Expr::col((
+                    table::CollectionMetadata::Table,
+                    table::CollectionMetadata::CollectionId,
+                ))
+                .equals((table::Collections::Table, table::Collections::Id)),
+            )
+            .inner_join(
+                table::Databases::Table,
+                sea_query::Expr::col((table::Databases::Table, table::Databases::Id))
+                    .equals((table::Collections::Table, table::Collections::DatabaseId)),
+            )
             .column((table::Collections::Table, table::Collections::Id))
             .column((table::Collections::Table, table::Collections::Name))
             .column((table::Collections::Table, table::Collections::ConfigJsonStr))
@@ -614,7 +638,7 @@ impl SqliteSysDb {
             }
         }
 
-        let collections = rows_by_collection_id
+        let mut collections = rows_by_collection_id
             .into_iter()
             .filter_map(|(collection_id, rows)| {
                 if rows.is_empty() {
@@ -647,6 +671,8 @@ impl SqliteSysDb {
                 }))
             })
             .collect::<Result<Vec<_>, GetCollectionsError>>()?;
+
+        collections.sort_unstable_by_key(|c| c.collection_id);
 
         Ok(collections)
     }
@@ -819,6 +845,21 @@ impl SqliteSysDb {
         .execute(&mut *conn)
         .await?;
 
+        // Delete logs
+        sqlx::query(
+            r#"
+            DELETE FROM embeddings_queue
+            WHERE topic = $1
+            "#,
+        )
+        .bind(get_embeddings_queue_topic_name(
+            &self.log_tenant,
+            &self.log_topic_namespace,
+            collection_id,
+        ))
+        .execute(&mut *conn)
+        .await?;
+
         Ok(deleted_rows.rows_affected() > 0)
     }
 
@@ -828,20 +869,18 @@ impl SqliteSysDb {
         rows: impl Iterator<Item = &'row SqliteRow>,
     ) -> Option<Metadata> {
         let metadata: Metadata = rows
-            .map(|row| {
+            .filter_map(|row| {
                 let key = row.get::<&str, _>("key");
 
                 if let Some(str_value) = row.get::<Option<String>, _>("str_value") {
-                    (key.to_string(), MetadataValue::Str(str_value))
+                    Some((key.to_string(), MetadataValue::Str(str_value)))
                 } else if let Some(int_value) = row.get::<Option<i64>, _>("int_value") {
-                    (key.to_string(), MetadataValue::Int(int_value))
+                    Some((key.to_string(), MetadataValue::Int(int_value)))
                 } else if let Some(float_value) = row.get::<Option<f64>, _>("float_value") {
-                    (key.to_string(), MetadataValue::Float(float_value))
-                } else if let Some(bool_value) = row.get::<Option<bool>, _>("bool_value") {
-                    (key.to_string(), MetadataValue::Bool(bool_value))
+                    Some((key.to_string(), MetadataValue::Float(float_value)))
                 } else {
-                    // should never happen
-                    (key.to_string(), MetadataValue::Str("".to_string()))
+                    row.get::<Option<bool>, _>("bool_value")
+                        .map(|bool_value| (key.to_string(), MetadataValue::Bool(bool_value)))
                 }
             })
             .collect();
@@ -867,7 +906,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_database() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db);
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
         let db_id = uuid::Uuid::new_v4();
         sysdb
             .create_database(db_id, "test", "default_tenant")
@@ -885,7 +924,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_database() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db);
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
 
         // Get non-existent database
         let result = sysdb.get_database("test", "default_tenant").await;
@@ -904,7 +943,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete_database() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db);
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
 
         // Delete non-existent database
         let result = sysdb
@@ -928,7 +967,7 @@ mod tests {
     #[tokio::test]
     async fn test_list_database() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db);
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
 
         // List default databases
         let databases = sysdb
@@ -962,7 +1001,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_tenant() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db);
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
 
         // Create tenant
         sysdb.create_tenant("new_tenant".to_string()).await.unwrap();
@@ -975,7 +1014,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_tenant() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db);
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
 
         // Get non-existent tenant
         let result = sysdb.get_tenant("test").await;
@@ -992,7 +1031,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_collection() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db);
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
 
         let mut collection_metadata = Metadata::new();
         collection_metadata.insert("key1".to_string(), MetadataValue::Str("value1".to_string()));
@@ -1038,7 +1077,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_collection_fails_for_duplicate_name() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db);
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
 
         let collection_id = CollectionUuid::new();
         let segments = vec![Segment {
@@ -1085,7 +1124,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_collection_get_or_create() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db);
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
 
         let collection_id = CollectionUuid::new();
         let segments = vec![Segment {
@@ -1133,7 +1172,7 @@ mod tests {
     #[tokio::test]
     async fn test_update_collection() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db);
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
 
         let collection_id = CollectionUuid::new();
         sysdb
@@ -1185,7 +1224,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete_collection() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db);
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
 
         let collection_id = CollectionUuid::new();
         sysdb
@@ -1236,7 +1275,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_collection_with_segments() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db);
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
 
         let mut collection_metadata = Metadata::new();
         collection_metadata.insert("key1".to_string(), MetadataValue::Str("value1".to_string()));
@@ -1296,7 +1335,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_segments() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db);
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
 
         let mut collection_metadata = Metadata::new();
         collection_metadata.insert("key1".to_string(), MetadataValue::Str("value1".to_string()));

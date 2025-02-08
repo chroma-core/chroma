@@ -15,9 +15,11 @@ use chroma_sqlite::{config::SqliteDBConfig, db::SqliteDb};
 use chroma_sysdb::{sqlite::SqliteSysDb, sysdb::SysDb};
 use chroma_system::System;
 use chroma_types::{
-    Collection, CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest, Database,
-    DeleteDatabaseRequest, GetDatabaseRequest, GetResponse, GetTenantRequest, GetTenantResponse,
-    HeartbeatError, IncludeList, ListDatabasesRequest, Metadata, QueryResponse, UpdateMetadata,
+    Collection, CountCollectionsRequest, CreateCollectionRequest, CreateDatabaseRequest,
+    CreateTenantRequest, Database, DeleteCollectionRequest, DeleteDatabaseRequest,
+    GetCollectionRequest, GetDatabaseRequest, GetResponse, GetTenantRequest, GetTenantResponse,
+    HeartbeatError, IncludeList, ListCollectionsRequest, ListDatabasesRequest, Metadata,
+    QueryResponse, UpdateMetadata,
 };
 use numpy::PyReadonlyArray1;
 use pyo3::{exceptions::PyValueError, pyclass, pymethods, PyObject, PyResult, Python};
@@ -86,7 +88,11 @@ impl Bindings {
             segment_manager_config,
             sqlite_db.clone(),
         )))?;
-        let sqlite_sysdb = SqliteSysDb::new(sqlite_db.clone());
+        let sqlite_sysdb = SqliteSysDb::new(
+            sqlite_db.clone(),
+            "default".to_string(),
+            "default".to_string(),
+        );
         let sysdb = Box::new(SysDb::Sqlite(sqlite_sysdb));
         // TODO: get the log configuration from the config sysdb
         let mut log = Box::new(Log::Sqlite(chroma_log::sqlite_log::SqliteLog::new(
@@ -241,6 +247,32 @@ impl Bindings {
     }
 
     ////////////////////////////// Base API //////////////////////////////
+    fn count_collections(&self, tenant: String, database: String) -> ChromaPyResult<u32> {
+        let request = CountCollectionsRequest::try_new(tenant, database)?;
+        let mut frontend = self.frontend.clone();
+        let count = self
+            .runtime
+            .block_on(async { frontend.count_collections(request).await })?;
+        Ok(count)
+    }
+
+    #[pyo3(signature = (limit = None, offset = 0, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string()))]
+    fn list_collections(
+        &self,
+        limit: Option<u32>,
+        offset: Option<u32>,
+        tenant: String,
+        database: String,
+    ) -> ChromaPyResult<Vec<Collection>> {
+        let request =
+            ListCollectionsRequest::try_new(tenant, database, limit, offset.unwrap_or(0))?;
+        let mut frontend = self.frontend.clone();
+        let collections = self
+            .runtime
+            .block_on(async { frontend.list_collections(request).await })?;
+        Ok(collections)
+    }
+
     #[allow(clippy::too_many_arguments)]
     #[pyo3(
         signature = (name, configuration, metadata = None, get_or_create = false, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
@@ -286,6 +318,33 @@ impl Bindings {
             .block_on(async { frontend.create_collection(request).await })?;
 
         Ok(collection)
+    }
+
+    fn get_collection(
+        &self,
+        name: String,
+        tenant: String,
+        database: String,
+    ) -> ChromaPyResult<Collection> {
+        let request = GetCollectionRequest::try_new(tenant, database, name)?;
+        let mut frontend = self.frontend.clone();
+        let collection = self
+            .runtime
+            .block_on(async { frontend.get_collection(request).await })?;
+        Ok(collection)
+    }
+
+    fn delete_collection(
+        &self,
+        name: String,
+        tenant: String,
+        database: String,
+    ) -> ChromaPyResult<()> {
+        let request = DeleteCollectionRequest::try_new(tenant, database, name)?;
+        let mut frontend = self.frontend.clone();
+        self.runtime
+            .block_on(async { frontend.delete_collection(request).await })?;
+        Ok(())
     }
 
     //////////////////////////// Record Methods ////////////////////////////
