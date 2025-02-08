@@ -144,7 +144,7 @@ class RustBindingsAPI(ServerAPI):
     def count_collections(
         self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
     ) -> int:
-        return self.proxy_segment_api.count_collections(tenant, database)
+        return self.bindings.count_collections(tenant, database)
 
     @override
     def list_collections(
@@ -154,7 +154,19 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Sequence[CollectionModel]:
-        return self.proxy_segment_api.list_collections(limit, offset, tenant, database)
+        collections = self.bindings.list_collections(limit, offset, tenant, database)
+        return [
+            CollectionModel(
+                id=collection.id,
+                name=collection.name,
+                configuration=collection.configuration,  # type: ignore
+                metadata=collection.metadata,
+                dimension=collection.dimension,
+                tenant=collection.tenant,
+                database=collection.database,
+            )
+            for collection in collections
+        ]
 
     @override
     def create_collection(
@@ -188,7 +200,16 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
-        return self.proxy_segment_api.get_collection(name, tenant, database)
+        collection = self.bindings.get_collection(name, tenant, database)
+        return CollectionModel(
+            id=collection.id,
+            name=collection.name,
+            configuration=collection.configuration,  # type: ignore
+            metadata=collection.metadata,
+            dimension=collection.dimension,
+            tenant=collection.tenant,
+            database=collection.database,
+        )
 
     @override
     def get_or_create_collection(
@@ -199,8 +220,8 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
-        return self.proxy_segment_api.get_or_create_collection(
-            name, configuration, metadata, tenant, database
+        return self.create_collection(
+            name, configuration, metadata, True, tenant, database
         )
 
     @override
@@ -210,7 +231,7 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
-        return self.proxy_segment_api.delete_collection(name, tenant, database)
+        self.bindings.delete_collection(name, tenant, database)
 
     @override
     def _modify(
@@ -271,7 +292,7 @@ class RustBindingsAPI(ServerAPI):
         #     tenant,
         #     database,
         # )
-        
+
         # TODO: The data field is missing from rust?
         # return GetResult(
         #     ids=rust_response.ids,
@@ -439,7 +460,7 @@ class RustBindingsAPI(ServerAPI):
 
     @override
     def get_max_batch_size(self) -> int:
-        return self.bindings.get_max_batch_size()
+        return self.proxy_segment_api.get_max_batch_size()
 
     @override
     def get_user_identity(self) -> UserIdentity:

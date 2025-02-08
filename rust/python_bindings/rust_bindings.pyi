@@ -78,6 +78,16 @@ class Bindings:
     ) -> Sequence[DatabaseFromBindings]: ...
     def create_tenant(self, name: str) -> None: ...
     def get_tenant(self, name: str) -> Tenant: ...
+    def count_collections(
+        self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
+    ) -> int: ...
+    def list_collections(
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> Sequence[CollectionModel]: ...
     def create_collection(
         self,
         name: str,
@@ -87,6 +97,18 @@ class Bindings:
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel: ...
+    def get_collection(
+        self,
+        name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> CollectionModel: ...
+    def delete_collection(
+        self,
+        name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> None: ...
     def add(
         self,
         ids: IDs,

@@ -3,7 +3,7 @@ use crate::{
     PurgeLogsMessage,
 };
 use chroma_error::{ChromaError, ErrorCodes, WrappedSqlxError};
-use chroma_sqlite::db::SqliteDb;
+use chroma_sqlite::{db::SqliteDb, helpers::get_embeddings_queue_topic_name};
 use chroma_system::{ChannelError, ComponentHandle, RequestError};
 use chroma_types::{
     CollectionUuid, LogRecord, Operation, OperationRecord, ScalarEncoding,
@@ -135,7 +135,8 @@ impl SqliteLog {
         batch_size: i32,
         end_timestamp_ns: Option<i64>,
     ) -> Result<Vec<LogRecord>, SqlitePullLogsError> {
-        let topic = get_topic_name(&self.tenant_id, &self.topic_namespace, collection_id);
+        let topic =
+            get_embeddings_queue_topic_name(&self.tenant_id, &self.topic_namespace, collection_id);
 
         let end_timestamp_ns = end_timestamp_ns.unwrap_or(i64::MAX);
 
@@ -271,7 +272,8 @@ impl SqliteLog {
         let start_log_offset: i64 = row.get("max_seq_id");
         let total_records = records.len() as i64;
 
-        let topic = get_topic_name(&self.tenant_id, &self.topic_namespace, collection_id);
+        let topic =
+            get_embeddings_queue_topic_name(&self.tenant_id, &self.topic_namespace, collection_id);
 
         let records_and_serialized_metadatas = records
             .into_iter()
@@ -396,7 +398,8 @@ impl SqliteLog {
         collection_id: CollectionUuid,
         seq_id: u64,
     ) -> Result<(), SqlitePurgeLogsError> {
-        let topic = get_topic_name(&self.tenant_id, &self.topic_namespace, collection_id);
+        let topic =
+            get_embeddings_queue_topic_name(&self.tenant_id, &self.topic_namespace, collection_id);
 
         sqlx::query("DELETE FROM embeddings_queue WHERE topic = ? AND seq_id < ?")
             .bind(topic)
@@ -460,10 +463,6 @@ impl ChromaError for SqliteGetMaxBatchSizeError {
             SqliteGetMaxBatchSizeError::RowParsingError(_) => ErrorCodes::Internal,
         }
     }
-}
-
-fn get_topic_name(tenant: &str, namespace: &str, collection_id: CollectionUuid) -> String {
-    format!("persistent://{}/{}/{}", tenant, namespace, collection_id)
 }
 
 fn operation_from_code(code: u32) -> Operation {

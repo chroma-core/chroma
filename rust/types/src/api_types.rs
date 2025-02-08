@@ -391,7 +391,7 @@ impl ChromaError for DeleteDatabaseError {
 }
 
 #[non_exhaustive]
-#[derive(Validate)]
+#[derive(Validate, Debug)]
 pub struct ListCollectionsRequest {
     pub tenant_id: String,
     pub database_name: String,
