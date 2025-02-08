@@ -15,11 +15,11 @@ use chroma_sqlite::{config::SqliteDBConfig, db::SqliteDb};
 use chroma_sysdb::{sqlite::SqliteSysDb, sysdb::SysDb};
 use chroma_system::System;
 use chroma_types::{
-    Collection, CountCollectionsRequest, CreateCollectionRequest, CreateDatabaseRequest,
-    CreateTenantRequest, Database, DeleteCollectionRequest, DeleteDatabaseRequest,
-    GetCollectionRequest, GetDatabaseRequest, GetResponse, GetTenantRequest, GetTenantResponse,
-    HeartbeatError, IncludeList, ListCollectionsRequest, ListDatabasesRequest, Metadata,
-    QueryResponse, UpdateMetadata,
+    Collection, CollectionMetadataUpdate, CountCollectionsRequest, CreateCollectionRequest,
+    CreateDatabaseRequest, CreateTenantRequest, Database, DeleteCollectionRequest,
+    DeleteDatabaseRequest, GetCollectionRequest, GetDatabaseRequest, GetResponse, GetTenantRequest,
+    GetTenantResponse, HeartbeatError, IncludeList, ListCollectionsRequest, ListDatabasesRequest,
+    Metadata, QueryResponse, UpdateCollectionRequest, UpdateMetadata,
 };
 use numpy::PyReadonlyArray1;
 use pyo3::{
@@ -335,6 +335,32 @@ impl Bindings {
             .runtime
             .block_on(async { frontend.get_collection(request).await })?;
         Ok(collection)
+    }
+
+    #[pyo3(
+        signature = (collection_id, new_name = None, new_metadata = None)
+    )]
+    fn update_collection(
+        &self,
+        collection_id: String,
+        new_name: Option<String>,
+        new_metadata: Option<UpdateMetadata>,
+    ) -> ChromaPyResult<()> {
+        let collection_id = chroma_types::CollectionUuid(
+            uuid::Uuid::parse_str(&collection_id).map_err(WrappedUuidError)?,
+        );
+
+        let request = UpdateCollectionRequest::try_new(
+            collection_id,
+            new_name,
+            new_metadata.map(CollectionMetadataUpdate::UpdateMetadata),
+        )?;
+
+        let mut frontend = self.frontend.clone();
+        self.runtime
+            .block_on(async { frontend.update_collection(request).await })?;
+
+        Ok(())
     }
 
     fn delete_collection(

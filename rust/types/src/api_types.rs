@@ -571,14 +571,14 @@ impl ChromaError for GetCollectionsError {
     }
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize, Debug)]
 pub enum CollectionMetadataUpdate {
     ResetMetadata,
     UpdateMetadata(UpdateMetadata),
 }
 
 #[non_exhaustive]
-#[derive(Clone, Validate)]
+#[derive(Clone, Validate, Debug)]
 pub struct UpdateCollectionRequest {
     pub collection_id: CollectionUuid,
     #[validate(custom(function = "validate_name"))]
@@ -608,8 +608,8 @@ pub struct UpdateCollectionResponse {}
 
 #[derive(Error, Debug)]
 pub enum UpdateCollectionError {
-    #[error("Collection does not exist")]
-    CollectionNotFound,
+    #[error("Collection {0} does not exist.")]
+    CollectionNotFound(String),
     #[error("Metadata reset unsupported")]
     MetadataResetUnsupported,
     #[error(transparent)]
@@ -619,7 +619,7 @@ pub enum UpdateCollectionError {
 impl ChromaError for UpdateCollectionError {
     fn code(&self) -> ErrorCodes {
         match self {
-            UpdateCollectionError::CollectionNotFound => ErrorCodes::NotFound,
+            UpdateCollectionError::CollectionNotFound(_) => ErrorCodes::NotFound,
             UpdateCollectionError::MetadataResetUnsupported => ErrorCodes::InvalidArgument,
             UpdateCollectionError::Internal(err) => err.code(),
         }

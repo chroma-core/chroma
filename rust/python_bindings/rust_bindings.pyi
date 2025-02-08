@@ -104,6 +104,12 @@ class Bindings:
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel: ...
+    def update_collection(
+        self,
+        id: str,
+        new_name: Optional[str] = None,
+        new_metadata: Optional[CollectionMetadata] = None,
+    ) -> None: ...
     def delete_collection(
         self,
         name: str,

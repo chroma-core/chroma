@@ -1,6 +1,6 @@
 use chroma_error::{ChromaError, WrappedSqlxError};
 use chroma_sqlite::db::SqliteDb;
-use chroma_sqlite::helpers::{get_embeddings_queue_topic_name, update_metadata};
+use chroma_sqlite::helpers::{delete_metadata, get_embeddings_queue_topic_name, update_metadata};
 use chroma_sqlite::table;
 use chroma_types::{
     Collection, CollectionAndSegments, CollectionMetadataUpdate, CollectionUuid,
@@ -341,22 +341,6 @@ impl SqliteSysDb {
         metadata: Option<CollectionMetadataUpdate>,
         dimension: Option<u32>,
     ) -> Result<(), UpdateCollectionError> {
-        let mut query = sea_query::Query::update();
-        let mut query = query.table(table::Collections::Table).and_where(
-            sea_query::Expr::col((table::Collections::Table, table::Collections::Id))
-                .eq(collection_id.to_string()),
-        );
-
-        if let Some(name) = name {
-            query = query.value(table::Collections::Name, name.to_string());
-        }
-
-        if let Some(dimension) = dimension {
-            query = query.value(table::Collections::Dimension, dimension);
-        }
-
-        let (sql, values) = query.build_sqlx(sea_query::SqliteQueryBuilder);
-
         let mut tx = self
             .db
             .get_conn()
@@ -364,28 +348,47 @@ impl SqliteSysDb {
             .await
             .map_err(|e| UpdateCollectionError::Internal(e.into()))?;
 
-        let result = sqlx::query_with(&sql, values)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| UpdateCollectionError::Internal(e.into()))?;
-        if result.rows_affected() == 0 {
-            return Err(UpdateCollectionError::CollectionNotFound);
+        if name.is_some() || dimension.is_some() {
+            let mut query = sea_query::Query::update();
+            let mut query = query.table(table::Collections::Table).cond_where(
+                sea_query::Expr::col((table::Collections::Table, table::Collections::Id))
+                    .eq(collection_id.to_string()),
+            );
+
+            if let Some(name) = name {
+                query = query.value(table::Collections::Name, name.to_string());
+            }
+
+            if let Some(dimension) = dimension {
+                query = query.value(table::Collections::Dimension, dimension);
+            }
+
+            let (sql, values) = query.build_sqlx(sea_query::SqliteQueryBuilder);
+
+            let result = sqlx::query_with(&sql, values)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| UpdateCollectionError::Internal(e.into()))?;
+            if result.rows_affected() == 0 {
+                return Err(UpdateCollectionError::CollectionNotFound(
+                    collection_id.to_string(),
+                ));
+            }
         }
 
         if let Some(metadata) = metadata {
-            match metadata {
-                CollectionMetadataUpdate::ResetMetadata => {
-                    return Err(UpdateCollectionError::MetadataResetUnsupported);
-                }
-                CollectionMetadataUpdate::UpdateMetadata(metadata) => {
-                    update_metadata::<table::CollectionMetadata, _, _>(
-                        &mut *tx,
-                        collection_id.to_string(),
-                        metadata,
-                    )
-                    .await
-                    .map_err(|e| e.boxed())?;
-                }
+            delete_metadata::<table::CollectionMetadata, _, _>(&mut *tx, collection_id.to_string())
+                .await
+                .map_err(|e| e.boxed())?;
+
+            if let CollectionMetadataUpdate::UpdateMetadata(metadata) = metadata {
+                update_metadata::<table::CollectionMetadata, _, _>(
+                    &mut *tx,
+                    collection_id.to_string(),
+                    metadata,
+                )
+                .await
+                .map_err(|e| e.boxed())?;
             }
         }
 
