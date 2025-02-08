@@ -646,7 +646,7 @@ impl SqliteMetadataReader {
                 id: user_id,
                 document: None,
                 embedding: None,
-                metadata: metadata.then_some(HashMap::new()),
+                metadata: (document || metadata).then_some(HashMap::new()),
             });
 
             if document || metadata {
