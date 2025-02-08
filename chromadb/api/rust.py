@@ -250,9 +250,7 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
-        return self.proxy_segment_api._modify(
-            id, new_name, new_metadata, tenant, database
-        )
+        self.bindings.update_collection(str(id), new_name, new_metadata)
 
     @override
     def _count(
