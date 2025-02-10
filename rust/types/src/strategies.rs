@@ -1,6 +1,7 @@
 use crate::{
-    Collection, CollectionAndSegments, CollectionUuid, LogRecord, Operation, OperationRecord,
-    ScalarEncoding, Segment, SegmentType, SegmentUuid, UpdateMetadata, UpdateMetadataValue,
+    Collection, CollectionAndSegments, CollectionUuid, DocumentExpression, DocumentOperator,
+    LogRecord, MetadataExpression, MetadataValue, Operation, OperationRecord, PrimitiveOperator,
+    ScalarEncoding, Segment, SegmentType, SegmentUuid, UpdateMetadata, UpdateMetadataValue, Where,
 };
 use proptest::{collection, prelude::*};
 use serde_json::Value;
@@ -117,12 +118,12 @@ impl Arbitrary for OperationRecord {
     }
 }
 
-/// This will generate `4 * collection_max_size` log records containing at most `collection_max_size` elements
-pub struct TestCollectionDataStrategyParams {
+/// This will generate `4 * collection_max_size` log records for `collection_max_size` elements
+pub struct TestCollectionDataParams {
     pub collection_max_size: usize,
 }
 
-impl Default for TestCollectionDataStrategyParams {
+impl Default for TestCollectionDataParams {
     fn default() -> Self {
         Self {
             collection_max_size: 100,
@@ -141,7 +142,7 @@ pub struct TestCollectionData {
 }
 
 impl Arbitrary for TestCollectionData {
-    type Parameters = TestCollectionDataStrategyParams;
+    type Parameters = TestCollectionDataParams;
     type Strategy = BoxedStrategy<Self>;
 
     fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
@@ -159,7 +160,11 @@ impl Arbitrary for TestCollectionData {
                             Operation::Add,
                         ),
                         (id.clone(), None, Operation::Update),
-                        (id.clone(), None, Operation::Upsert),
+                        (
+                            id.clone(),
+                            Some(emb.into_iter().collect::<Vec<_>>()),
+                            Operation::Upsert,
+                        ),
                         (id.clone(), None, Operation::Delete),
                     ]
                 })
@@ -192,7 +197,7 @@ impl Arbitrary for TestCollectionData {
                             .collect(),
                         ),
                         document: (!matches!(operation, Operation::Delete))
-                            .then_some(format!("<{id}>")),
+                            .then_some(format!("<{id}>-<{log_offset}>")),
                         operation,
                     },
                 })
@@ -246,5 +251,71 @@ impl Arbitrary for TestCollectionData {
                 }
             })
             .boxed()
+    }
+}
+
+#[derive(Debug)]
+pub struct TestWhereFilterParams {
+    pub depth: u32,
+    pub branch: u32,
+    pub leaf: u32,
+}
+
+impl Default for TestWhereFilterParams {
+    fn default() -> Self {
+        Self {
+            depth: 4,
+            branch: 4,
+            leaf: 32,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct TestWhereFilter {
+    pub clause: Where,
+}
+
+impl Arbitrary for TestWhereFilter {
+    type Parameters = TestWhereFilterParams;
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
+        let doc_expr = (0..30).prop_map(|roll| {
+            let digit: i32 = roll % 10;
+            let operator = match roll % 3 {
+                0 => DocumentOperator::Contains,
+                _ => DocumentOperator::NotContains,
+            };
+            Where::Document(DocumentExpression {
+                operator,
+                text: digit.to_string(),
+            })
+        });
+        let meta_expr = (0..42).prop_map(|roll| {
+            let val = MetadataValue::Int(roll as i64 % 7);
+            let op = match roll % 6 {
+                0 => PrimitiveOperator::Equal,
+                1 => PrimitiveOperator::GreaterThan,
+                2 => PrimitiveOperator::GreaterThanOrEqual,
+                3 => PrimitiveOperator::LessThan,
+                4 => PrimitiveOperator::LessThanOrEqual,
+                _ => PrimitiveOperator::NotEqual,
+            };
+            Where::Metadata(MetadataExpression {
+                key: "modulo_7".to_string(),
+                comparison: crate::MetadataComparison::Primitive(op, val),
+            })
+        });
+        let leaf = prop_oneof![doc_expr, meta_expr];
+        let max_branch = args.branch as usize;
+        leaf.prop_recursive(args.depth, args.leaf, args.branch, move |inner| {
+            prop_oneof![
+                collection::vec(inner.clone(), 0..max_branch).prop_map(Where::conjunction),
+                collection::vec(inner, 0..max_branch).prop_map(Where::disjunction)
+            ]
+        })
+        .prop_map(|clause| TestWhereFilter { clause })
+        .boxed()
     }
 }
