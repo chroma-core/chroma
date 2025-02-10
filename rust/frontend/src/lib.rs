@@ -41,10 +41,10 @@ pub async fn frontend_service_entrypoint() {
     };
     chroma_tracing::init_otel_tracing(&config.service_name, &config.otel_endpoint);
     let system = System::new();
-    // TODO: Initialize tracing.
+
     let frontend = Frontend::try_from_config(&(config.clone(), system))
         .await
-        .expect("Error creating SegmentApi from config");
+        .expect("Error creating Frontend Config");
     fn rule_to_rule(rule: &ScorecardRule) -> Result<Rule, ScorecardRuleError> {
         let patterns = rule
             .patterns

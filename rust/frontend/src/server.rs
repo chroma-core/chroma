@@ -1,13 +1,7 @@
-use std::str::FromStr;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
-
 use axum::{
     extract::{DefaultBodyLimit, Path, Query, State},
     http::StatusCode,
-    response::IntoResponse,
+    response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router, ServiceExt,
 };
@@ -29,13 +23,18 @@ use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Meter};
 use opentelemetry::KeyValue;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use uuid::Uuid;
 
 use crate::{
     ac::AdmissionControlledService,
     frontend::Frontend,
     tower_tracing::add_tracing_middleware,
-    types::errors::{ServerError, ValidationError},
+    types::errors::{ErrorResponse, ServerError, ValidationError},
     FrontendConfig,
 };
 
@@ -141,7 +140,7 @@ impl FrontendServer {
         let circuit_breaker_config = server.config.circuit_breaker.clone();
         let app = Router::new()
             // `GET /` goes to `root`
-            .route("/api/v2", get(root))
+            .route("/api/v1/*any", get(v1_deprecation_notice).put(v1_deprecation_notice).patch(v1_deprecation_notice).delete(v1_deprecation_notice).head(v1_deprecation_notice).options(v1_deprecation_notice))
             .route("/api/v2/healthcheck", get(healthcheck))
             .route("/api/v2/heartbeat", get(heartbeat))
             .route("/api/v2/pre-flight-checks", get(pre_flight_checks))
@@ -228,11 +227,6 @@ impl FrontendServer {
 // These handlers simply proxy the call and the relevant inputs into
 // the appropriate method on the `FrontendServer` struct.
 
-// Dummy implementation for now
-async fn root() -> &'static str {
-    "Chroma Rust Frontend"
-}
-
 async fn healthcheck(State(server): State<FrontendServer>) -> impl IntoResponse {
     server.metrics.healthcheck.add(1, &[]);
     let res = server.frontend.healthcheck().await;
@@ -272,7 +266,7 @@ async fn version(State(server): State<FrontendServer>) -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
-// Dummy implementation for now
+// TOOD: Dummy implementation for now
 async fn get_user_identity(State(server): State<FrontendServer>) -> Json<GetUserIdentityResponse> {
     server.metrics.version.add(1, &[]);
     Json(GetUserIdentityResponse {
@@ -838,4 +832,12 @@ async fn collection_query(
     let res = server.frontend.query(request).await?;
 
     Ok(Json(res))
+}
+
+async fn v1_deprecation_notice() -> Response {
+    let err_response = ErrorResponse::new(
+        "Unimplemented".to_string(),
+        "The v1 API is deprecated. Please use /v2 apis".to_string(),
+    );
+    (StatusCode::GONE, Json(err_response)).into_response()
 }

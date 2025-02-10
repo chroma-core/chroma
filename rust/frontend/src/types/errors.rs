@@ -53,9 +53,15 @@ impl<E: ChromaError + 'static> From<E> for ServerError {
 }
 
 #[derive(Serialize)]
-struct ErrorResponse {
+pub struct ErrorResponse {
     error: String,
     message: String,
+}
+
+impl ErrorResponse {
+    pub fn new(error: String, message: String) -> Self {
+        Self { error, message }
+    }
 }
 
 impl IntoResponse for ServerError {
