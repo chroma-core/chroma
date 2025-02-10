@@ -401,7 +401,10 @@ impl IntoSqliteExpr for Where {
                                 MetadataValue::Float(*i as f64),
                             ),
                         };
-                        expr.eval().or(alt.eval())
+                        match op {
+                            PrimitiveOperator::NotEqual => expr.eval().and(alt.eval()),
+                            _ => expr.eval().or(alt.eval()),
+                        }
                     }
                     MetadataComparison::Primitive(op, MetadataValue::Float(f)) => {
                         let alt = MetadataExpression {
@@ -411,7 +414,10 @@ impl IntoSqliteExpr for Where {
                                 MetadataValue::Int(*f as i64),
                             ),
                         };
-                        expr.eval().or(alt.eval())
+                        match op {
+                            PrimitiveOperator::NotEqual => expr.eval().and(alt.eval()),
+                            _ => expr.eval().or(alt.eval()),
+                        }
                     }
                     MetadataComparison::Set(op, MetadataSetValue::Int(is)) => {
                         let alt = MetadataExpression {
@@ -423,7 +429,10 @@ impl IntoSqliteExpr for Where {
                                 ),
                             ),
                         };
-                        expr.eval().or(alt.eval())
+                        match op {
+                            SetOperator::In => expr.eval().or(alt.eval()),
+                            SetOperator::NotIn => expr.eval().and(alt.eval()),
+                        }
                     }
                     MetadataComparison::Set(op, MetadataSetValue::Float(fs)) => {
                         let alt = MetadataExpression {
@@ -435,7 +444,10 @@ impl IntoSqliteExpr for Where {
                                 ),
                             ),
                         };
-                        expr.eval().or(alt.eval())
+                        match op {
+                            SetOperator::In => expr.eval().or(alt.eval()),
+                            SetOperator::NotIn => expr.eval().and(alt.eval()),
+                        }
                     }
                     _ => expr.eval(),
                 }

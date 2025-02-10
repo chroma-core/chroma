@@ -456,16 +456,15 @@ impl Bindings {
             .into());
         }
 
-        let mut frontend_clone = self.frontend.clone();
-
         let collection_id = chroma_types::CollectionUuid(
             uuid::Uuid::parse_str(&collection_id).map_err(WrappedUuidError)?,
         );
 
+        let mut frontend_clone = self.frontend.clone();
         self.runtime.block_on(async {
             frontend_clone
-                .validate_embedding(collection_id, embeddings.as_ref(), false, |e| {
-                    e.as_ref().map(|e| e.len())
+                .validate_embedding(collection_id, embeddings.as_ref(), true, |embedding| {
+                    embedding.as_ref().map(|emb| emb.len())
                 })
                 .await
         })?;
@@ -512,15 +511,16 @@ impl Bindings {
             .into());
         }
 
-        let mut frontend_clone = self.frontend.clone();
-
         let collection_id = chroma_types::CollectionUuid(
             uuid::Uuid::parse_str(&collection_id).map_err(WrappedUuidError)?,
         );
 
+        let mut frontend_clone = self.frontend.clone();
         self.runtime.block_on(async {
             frontend_clone
-                .validate_embedding(collection_id, embeddings.as_ref(), false, |e| Some(e.len()))
+                .validate_embedding(collection_id, embeddings.as_ref(), true, |embedding| {
+                    Some(embedding.len())
+                })
                 .await
         })?;
 
@@ -675,6 +675,15 @@ impl Bindings {
         );
 
         let include = IncludeList::try_from(include)?;
+
+        let mut frontend_clone = self.frontend.clone();
+        self.runtime.block_on(async {
+            frontend_clone
+                .validate_embedding(collection_id, Some(&query_embeddings), true, |embedding| {
+                    Some(embedding.len())
+                })
+                .await
+        })?;
 
         let request = chroma_types::QueryRequest::try_new(
             tenant,
