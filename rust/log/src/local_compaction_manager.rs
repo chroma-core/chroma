@@ -91,7 +91,7 @@ impl ChromaError for CompactionManagerError {
             CompactionManagerError::MetadataApplyLogsFailed => ErrorCodes::Internal,
             CompactionManagerError::GetHnswWriterFailed => ErrorCodes::Internal,
             CompactionManagerError::HnswApplyLogsError => ErrorCodes::Internal,
-            CompactionManagerError::GetCollectionWithSegmentsError(_) => ErrorCodes::Internal,
+            CompactionManagerError::GetCollectionWithSegmentsError(e) => e.code(),
             CompactionManagerError::MetadataReaderError(e) => e.code(),
             CompactionManagerError::HnswReaderError(e) => e.code(),
             CompactionManagerError::HnswReaderConstructionError(e) => e.code(),

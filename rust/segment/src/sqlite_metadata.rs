@@ -390,7 +390,68 @@ impl IntoSqliteExpr for Where {
         match self {
             Where::Composite(expr) => expr.eval(),
             Where::Document(expr) => expr.eval(),
-            Where::Metadata(expr) => expr.eval(),
+            Where::Metadata(expr) => {
+                // Local chroma is mixing the usage of int and float
+                match &expr.comparison {
+                    MetadataComparison::Primitive(op, MetadataValue::Int(i)) => {
+                        let alt = MetadataExpression {
+                            key: expr.key.clone(),
+                            comparison: MetadataComparison::Primitive(
+                                op.clone(),
+                                MetadataValue::Float(*i as f64),
+                            ),
+                        };
+                        match op {
+                            PrimitiveOperator::NotEqual => expr.eval().and(alt.eval()),
+                            _ => expr.eval().or(alt.eval()),
+                        }
+                    }
+                    MetadataComparison::Primitive(op, MetadataValue::Float(f)) => {
+                        let alt = MetadataExpression {
+                            key: expr.key.clone(),
+                            comparison: MetadataComparison::Primitive(
+                                op.clone(),
+                                MetadataValue::Int(*f as i64),
+                            ),
+                        };
+                        match op {
+                            PrimitiveOperator::NotEqual => expr.eval().and(alt.eval()),
+                            _ => expr.eval().or(alt.eval()),
+                        }
+                    }
+                    MetadataComparison::Set(op, MetadataSetValue::Int(is)) => {
+                        let alt = MetadataExpression {
+                            key: expr.key.clone(),
+                            comparison: MetadataComparison::Set(
+                                op.clone(),
+                                MetadataSetValue::Float(
+                                    is.iter().cloned().map(|i| i as f64).collect(),
+                                ),
+                            ),
+                        };
+                        match op {
+                            SetOperator::In => expr.eval().or(alt.eval()),
+                            SetOperator::NotIn => expr.eval().and(alt.eval()),
+                        }
+                    }
+                    MetadataComparison::Set(op, MetadataSetValue::Float(fs)) => {
+                        let alt = MetadataExpression {
+                            key: expr.key.clone(),
+                            comparison: MetadataComparison::Set(
+                                op.clone(),
+                                MetadataSetValue::Int(
+                                    fs.iter().cloned().map(|f| f as i64).collect(),
+                                ),
+                            ),
+                        };
+                        match op {
+                            SetOperator::In => expr.eval().or(alt.eval()),
+                            SetOperator::NotIn => expr.eval().and(alt.eval()),
+                        }
+                    }
+                    _ => expr.eval(),
+                }
+            }
         }
     }
 }
