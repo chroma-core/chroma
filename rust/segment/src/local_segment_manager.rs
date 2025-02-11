@@ -18,7 +18,7 @@ pub struct LocalSegmentManagerConfig {
     // TODO(Sanket): Estimate the max number of FDs that can be kept open and
     // use that as a capacity in the cache.
     pub hnsw_index_pool_cache_config: CacheConfig,
-    pub persist_path: String,
+    pub persist_path: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -27,7 +27,7 @@ pub struct LocalSegmentManager {
     #[allow(dead_code)]
     eviction_callback_task_handle: Option<Arc<tokio::task::JoinHandle<()>>>,
     sqlite: SqliteDb,
-    persist_path: String,
+    persist_path: Option<String>,
 }
 
 #[async_trait::async_trait]
