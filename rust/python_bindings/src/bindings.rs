@@ -463,7 +463,7 @@ impl Bindings {
         let mut frontend_clone = self.frontend.clone();
         self.runtime.block_on(async {
             frontend_clone
-                .validate_embedding(collection_id, embeddings.as_ref(), true, |embedding| {
+                .validate_embedding(collection_id, embeddings.as_ref(), false, |embedding| {
                     embedding.as_ref().map(|emb| emb.len())
                 })
                 .await
@@ -679,7 +679,7 @@ impl Bindings {
         let mut frontend_clone = self.frontend.clone();
         self.runtime.block_on(async {
             frontend_clone
-                .validate_embedding(collection_id, Some(&query_embeddings), true, |embedding| {
+                .validate_embedding(collection_id, Some(&query_embeddings), false, |embedding| {
                     Some(embedding.len())
                 })
                 .await

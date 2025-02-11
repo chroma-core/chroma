@@ -330,6 +330,7 @@ impl CheckRecord for DocumentExpression {
 
 impl CheckRecord for MetadataExpression {
     fn eval(&self, record: &ProjectionRecord) -> bool {
+        // TODO: Allow mixed usage of int and float?
         let stored = record.metadata.as_ref().and_then(|m| m.get(&self.key));
         match &self.comparison {
             MetadataComparison::Primitive(primitive_operator, metadata_value) => {

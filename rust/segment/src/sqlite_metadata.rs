@@ -752,9 +752,8 @@ mod tests {
     use chroma_types::{
         operator::{Filter, Limit, Projection, Scan},
         plan::{Count, Get},
-        strategies::TestCollectionData,
-        BooleanOperator, Chunk, CompositeExpression, DocumentExpression, LogRecord,
-        MetadataComparison, MetadataExpression, MetadataValue, PrimitiveOperator, Where,
+        strategies::{TestCollectionData, TestWhereFilter},
+        Chunk, LogRecord,
     };
     use proptest::prelude::*;
     use tokio::runtime::Runtime;
@@ -794,7 +793,8 @@ mod tests {
     proptest! {
         #[test]
         fn test_get(
-            test_data in any::<TestCollectionData>()
+            test_data in any::<TestCollectionData>(),
+            where_clause in any::<TestWhereFilter>()
         ) {
             let runtime = Runtime::new().expect("Should be able to start tokio runtime");
             let mut ref_seg = TestReferenceSegment::default();
@@ -819,22 +819,7 @@ mod tests {
                 },
                 filter: Filter {
                     query_ids: None,
-                    where_clause: Some(Where::Composite(CompositeExpression {
-                        operator: BooleanOperator::Or,
-                        children: vec![
-                            Where::Metadata(MetadataExpression {
-                                key: "log_offset".into(),
-                                comparison: MetadataComparison::Primitive(
-                                    PrimitiveOperator::GreaterThan,
-                                    MetadataValue::Int(54),
-                                ),
-                            }),
-                            Where::Document(DocumentExpression {
-                                operator: chroma_types::DocumentOperator::Contains,
-                                text: "<1".into(),
-                            }),
-                        ],
-                    })),
+                    where_clause: Some(where_clause.clause),
                 },
                 limit: Limit {
                     skip: 3,
