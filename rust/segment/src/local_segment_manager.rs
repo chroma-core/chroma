@@ -2,11 +2,15 @@ use std::path::Path;
 use std::sync::Arc;
 
 use chroma_cache::{Cache, CacheConfig, CacheError};
-use chroma_config::Configurable;
+use chroma_config::{
+    registry::{Injectable, Registry},
+    Configurable,
+};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::IndexUuid;
 use chroma_sqlite::db::SqliteDb;
 use chroma_types::Segment;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::local_hnsw::{
@@ -14,6 +18,7 @@ use crate::local_hnsw::{
     LocalHnswSegmentWriterError,
 };
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LocalSegmentManagerConfig {
     // TODO(Sanket): Estimate the max number of FDs that can be kept open and
     // use that as a capacity in the cache.
@@ -30,15 +35,19 @@ pub struct LocalSegmentManager {
     persist_path: String,
 }
 
+impl Injectable for LocalSegmentManager {}
+
 #[async_trait::async_trait]
-impl Configurable<(LocalSegmentManagerConfig, SqliteDb)> for LocalSegmentManager {
+impl Configurable<LocalSegmentManagerConfig> for LocalSegmentManager {
     async fn try_from_config(
-        (config, sql_db): &(LocalSegmentManagerConfig, SqliteDb),
+        config: &LocalSegmentManagerConfig,
+        registry: &Registry,
     ) -> Result<Self, Box<dyn chroma_error::ChromaError>> {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let hnsw_index_pool: Box<dyn Cache<IndexUuid, LocalHnswIndex>> =
             chroma_cache::from_config_with_event_listener(&config.hnsw_index_pool_cache_config, tx)
                 .await?;
+        let sqldb = registry.get::<SqliteDb>().map_err(|e| e.boxed())?;
         // TODO(Sanket): Might need tokio runtime to be passed here to spawn the task.
         let handle = tokio::spawn(async move {
             while let Some((_, index)) = rx.recv().await {
@@ -46,12 +55,14 @@ impl Configurable<(LocalSegmentManagerConfig, SqliteDb)> for LocalSegmentManager
                 index.close().await;
             }
         });
-        Ok(Self {
+        let res = Self {
             hnsw_index_pool: hnsw_index_pool.into(),
             eviction_callback_task_handle: Some(Arc::new(handle)),
-            sqlite: sql_db.clone(),
+            sqlite: sqldb,
             persist_path: config.persist_path.clone(),
-        })
+        };
+        registry.register(res.clone());
+        Ok(res)
     }
 }
 

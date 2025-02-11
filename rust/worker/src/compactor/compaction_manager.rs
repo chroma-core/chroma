@@ -8,7 +8,8 @@ use crate::execution::orchestration::CompactOrchestrator;
 use crate::execution::orchestration::CompactionResponse;
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
-use chroma_config::assignment;
+use chroma_config::assignment::assignment_policy::AssignmentPolicy;
+use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;
@@ -38,8 +39,8 @@ pub(crate) struct CompactionManager {
     system: Option<System>,
     scheduler: Scheduler,
     // Dependencies
-    log: Box<Log>,
-    sysdb: Box<SysDb>,
+    log: Log,
+    sysdb: SysDb,
     #[allow(dead_code)]
     storage: Storage,
     blockfile_provider: BlockfileProvider,
@@ -73,8 +74,8 @@ impl CompactionManager {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         scheduler: Scheduler,
-        log: Box<Log>,
-        sysdb: Box<SysDb>,
+        log: Log,
+        sysdb: SysDb,
         storage: Storage,
         blockfile_provider: BlockfileProvider,
         hnsw_index_provider: HnswIndexProvider,
@@ -192,23 +193,24 @@ impl CompactionManager {
 impl Configurable<CompactionServiceConfig> for CompactionManager {
     async fn try_from_config(
         config: &crate::config::CompactionServiceConfig,
+        registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let log_config = &config.log;
-        let log = match chroma_log::from_config(log_config).await {
+        let log = match Log::try_from_config(log_config, registry).await {
             Ok(log) => log,
             Err(err) => {
                 return Err(err);
             }
         };
         let sysdb_config = &config.sysdb;
-        let sysdb = match chroma_sysdb::from_config(sysdb_config).await {
+        let sysdb = match SysDb::try_from_config(sysdb_config, registry).await {
             Ok(sysdb) => sysdb,
             Err(err) => {
                 return Err(err);
             }
         };
 
-        let storage = match chroma_storage::from_config(&config.storage).await {
+        let storage = match Storage::try_from_config(&config.storage, registry).await {
             Ok(storage) => storage,
             Err(err) => {
                 return Err(err);
@@ -230,12 +232,9 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
         }
 
         let assignment_policy_config = &config.assignment_policy;
-        let assignment_policy = match assignment::from_config(assignment_policy_config).await {
-            Ok(assignment_policy) => assignment_policy,
-            Err(err) => {
-                return Err(err);
-            }
-        };
+        let assignment_policy =
+            Box::<dyn AssignmentPolicy>::try_from_config(assignment_policy_config, registry)
+                .await?;
         let scheduler = Scheduler::new(
             my_ip,
             log.clone(),
@@ -247,15 +246,17 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
             disabled_collections,
         );
 
-        let blockfile_provider = BlockfileProvider::try_from_config(&(
-            config.blockfile_provider.clone(),
-            storage.clone(),
-        ))
+        let blockfile_provider = BlockfileProvider::try_from_config(
+            &(config.blockfile_provider.clone(), storage.clone()),
+            registry,
+        )
         .await?;
 
-        let hnsw_index_provider =
-            HnswIndexProvider::try_from_config(&(config.hnsw_provider.clone(), storage.clone()))
-                .await?;
+        let hnsw_index_provider = HnswIndexProvider::try_from_config(
+            &(config.hnsw_provider.clone(), storage.clone()),
+            registry,
+        )
+        .await?;
 
         Ok(CompactionManager::new(
             scheduler,
@@ -354,10 +355,9 @@ impl Handler<Memberlist> for CompactionManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use assignment::assignment_policy::AssignmentPolicy;
-    use assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
     use chroma_blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES;
     use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
+    use chroma_config::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
     use chroma_log::in_memory_log::{InMemoryLog, InternalLogRecord};
     use chroma_memberlist::memberlist_provider::Member;
     use chroma_storage::local::LocalStorage;
@@ -372,8 +372,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_compaction_manager() {
-        let mut log = Box::new(Log::InMemory(InMemoryLog::new()));
-        let in_memory_log = match *log {
+        let mut log = Log::InMemory(InMemoryLog::new());
+        let in_memory_log = match log {
             Log::InMemory(ref mut log) => log,
             _ => panic!("Expected InMemoryLog"),
         };
@@ -424,7 +424,7 @@ mod tests {
             },
         );
 
-        let mut sysdb = Box::new(SysDb::Test(TestSysDb::new()));
+        let mut sysdb = SysDb::Test(TestSysDb::new());
 
         let tenant_1 = "tenant_1".to_string();
         let collection_1 = Collection {
@@ -453,7 +453,7 @@ mod tests {
             version: 0,
             total_records_post_compaction: 0,
         };
-        match *sysdb {
+        match sysdb {
             SysDb::Test(ref mut sysdb) => {
                 sysdb.add_collection(collection_1);
                 sysdb.add_collection(collection_2);
@@ -515,7 +515,7 @@ mod tests {
             file_path: HashMap::new(),
         };
 
-        match *sysdb {
+        match sysdb {
             SysDb::Test(ref mut sysdb) => {
                 sysdb.add_segment(collection_1_record_segment);
                 sysdb.add_segment(collection_2_record_segment);

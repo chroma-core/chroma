@@ -13,5 +13,6 @@ async-trait = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 parking_lot = { workspace = true }
+figment = { workspace = true }
 
 chroma-error = { workspace = true }

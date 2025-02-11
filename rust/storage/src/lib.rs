@@ -3,7 +3,8 @@ use std::sync::Arc;
 use self::config::StorageConfig;
 use self::s3::S3GetError;
 use admissioncontrolleds3::AdmissionControlledS3StorageError;
-use chroma_config::Configurable;
+use async_trait::async_trait;
+use chroma_config::{registry::Registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
 
 pub mod admissioncontrolleds3;
@@ -209,18 +210,29 @@ impl Storage {
     }
 }
 
-pub async fn from_config(config: &StorageConfig) -> Result<Storage, Box<dyn ChromaError>> {
-    match &config {
-        StorageConfig::ObjectStore(config) => Ok(Storage::ObjectStore(
-            object_store::ObjectStore::try_from_config(config).await?,
-        )),
-        StorageConfig::S3(_) => Ok(Storage::S3(s3::S3Storage::try_from_config(config).await?)),
-        StorageConfig::Local(_) => Ok(Storage::Local(
-            local::LocalStorage::try_from_config(config).await?,
-        )),
-        StorageConfig::AdmissionControlledS3(_) => Ok(Storage::AdmissionControlledS3(
-            admissioncontrolleds3::AdmissionControlledS3Storage::try_from_config(config).await?,
-        )),
+#[async_trait]
+impl Configurable<StorageConfig> for Storage {
+    async fn try_from_config(
+        config: &StorageConfig,
+        registry: &Registry,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        match &config {
+            StorageConfig::ObjectStore(config) => Ok(Storage::ObjectStore(
+                object_store::ObjectStore::try_from_config(config).await?,
+            )),
+            StorageConfig::S3(_) => Ok(Storage::S3(
+                s3::S3Storage::try_from_config(config, registry).await?,
+            )),
+            StorageConfig::Local(_) => Ok(Storage::Local(
+                local::LocalStorage::try_from_config(config, registry).await?,
+            )),
+            StorageConfig::AdmissionControlledS3(_) => Ok(Storage::AdmissionControlledS3(
+                admissioncontrolleds3::AdmissionControlledS3Storage::try_from_config(
+                    config, registry,
+                )
+                .await?,
+            )),
+        }
     }
 }
 

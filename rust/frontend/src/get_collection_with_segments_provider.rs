@@ -2,7 +2,7 @@ use backon::ConstantBuilder;
 use chroma_cache::{AysncPartitionedMutex, Cache, CacheError};
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_sysdb::{sysdb, SysDb};
+use chroma_sysdb::SysDb;
 use chroma_types::{CollectionAndSegments, CollectionUuid, GetCollectionWithSegmentsError};
 use serde::{Deserialize, Serialize};
 use std::{sync::Arc, time::Duration};
@@ -41,11 +41,10 @@ pub struct CollectionsWithSegmentsProviderConfig {
 }
 
 #[async_trait::async_trait]
-impl Configurable<(CollectionsWithSegmentsProviderConfig, Box<SysDb>)>
-    for CollectionsWithSegmentsProvider
-{
+impl Configurable<CollectionsWithSegmentsProviderConfig> for CollectionsWithSegmentsProvider {
     async fn try_from_config(
-        (config, sysdb_client): &(CollectionsWithSegmentsProviderConfig, Box<SysDb>),
+        config: &CollectionsWithSegmentsProviderConfig,
+        registry: &chroma_config::registry::Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let collections_with_segments_cache =
             chroma_cache::from_config::<CollectionUuid, CollectionAndSegments>(&config.cache)
@@ -59,8 +58,12 @@ impl Configurable<(CollectionsWithSegmentsProviderConfig, Box<SysDb>)>
             ))
             .with_max_times(config.cache_invalidation_retry_policy.max_retries as usize);
 
+        let sysdb = registry
+            .get::<SysDb>()
+            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+
         Ok(Self {
-            sysdb_client: sysdb_client.clone(),
+            sysdb_client: sysdb,
             collections_with_segments_cache: collections_with_segments_cache.into(),
             sysdb_rpc_lock,
             retry_backoff,
@@ -70,7 +73,7 @@ impl Configurable<(CollectionsWithSegmentsProviderConfig, Box<SysDb>)>
 
 #[derive(Clone, Debug)]
 pub struct CollectionsWithSegmentsProvider {
-    pub(crate) sysdb_client: Box<sysdb::SysDb>,
+    pub(crate) sysdb_client: SysDb,
     pub(crate) collections_with_segments_cache:
         Arc<dyn Cache<CollectionUuid, CollectionAndSegments>>,
     pub(crate) sysdb_rpc_lock: chroma_cache::AysncPartitionedMutex<CollectionUuid>,

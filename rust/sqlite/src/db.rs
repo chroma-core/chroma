@@ -2,7 +2,7 @@ use crate::config::{MigrationHash, MigrationMode, SqliteDBConfig};
 use crate::migrations::{GetSourceMigrationsError, Migration, MigrationDir, MIGRATION_DIRS};
 use chroma_error::{ChromaError, ErrorCodes};
 use futures::TryStreamExt;
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePool};
+use sqlx::sqlite::SqlitePool;
 use sqlx::{Executor, Row};
 use thiserror::Error;
 
@@ -22,39 +22,11 @@ pub struct SqliteDb {
 }
 
 impl SqliteDb {
-    pub async fn try_from_config(config: &SqliteDBConfig) -> Result<Self, SqliteCreationError> {
-        // TODO: copy all other pragmas from python and add basic tests
-        // TODO: make this file path handling more robust
-        let filename = config.url.trim_end_matches('/').to_string() + "/chroma.sqlite3";
-        let options = SqliteConnectOptions::new()
-            .filename(filename)
-            // Due to a bug in the python code, foreign_keys is turned off
-            // The python code enabled it in a transaction, however,
-            // https://www.sqlite.org/pragma.html states that foreign_keys
-            // is a no-op in a transaction. In order to be able to run our migrations
-            // we turn it off
-            .pragma("foreign_keys", "OFF")
-            .pragma("case_sensitive_like", "ON")
-            .create_if_missing(true);
-        let conn = SqlitePool::connect_with(options)
-            .await
-            .map_err(SqliteCreationError::SqlxError)?;
-
-        let db = Self {
+    pub(crate) fn new(conn: SqlitePool, migration_hash_type: MigrationHash) -> Self {
+        Self {
             conn,
-            migration_hash_type: config.hash_type,
-        };
-
-        db.initialize_migrations_table().await?;
-        match config.migration_mode {
-            MigrationMode::Apply => {
-                db.apply_all_migration().await?;
-            }
-            MigrationMode::Validate => {
-                db.validate_all_migrations().await?;
-            }
+            migration_hash_type,
         }
-        Ok(db)
     }
 
     pub fn get_conn(&self) -> &SqlitePool {
@@ -81,7 +53,7 @@ impl SqliteDb {
 
     //////////////////////// Migrations ////////////////////////
 
-    async fn apply_all_migration(&self) -> Result<(), SqliteMigrationError> {
+    pub(crate) async fn apply_all_migration(&self) -> Result<(), SqliteMigrationError> {
         let mut all_unapplied_migrations = Vec::new();
         for dir in MIGRATION_DIRS.iter() {
             let applied_migrations = self.get_existing_migrations(dir).await;
@@ -98,7 +70,7 @@ impl SqliteDb {
         Ok(())
     }
 
-    async fn validate_all_migrations(&self) -> Result<(), SqliteMigrationError> {
+    pub(crate) async fn validate_all_migrations(&self) -> Result<(), SqliteMigrationError> {
         if !self.has_initialized_migrations().await {
             return Err(SqliteMigrationError::MigrationsTableNotInitialized);
         }
@@ -188,7 +160,7 @@ impl SqliteDb {
     /// Initialize the migrations table
     /// Note:
     /// - This function is idempotent
-    async fn initialize_migrations_table(&self) -> Result<(), sqlx::Error> {
+    pub(crate) async fn initialize_migrations_table(&self) -> Result<(), sqlx::Error> {
         let query = r#"
             CREATE TABLE IF NOT EXISTS migrations (
                 dir TEXT NOT NULL,
@@ -311,6 +283,7 @@ pub enum MigrationValidationError {
 pub mod test_utils {
     use super::*;
     use crate::config::MigrationHash;
+    use chroma_config::{registry::Registry, Configurable};
     use std::path::PathBuf;
     use tempfile::tempdir;
 
@@ -331,7 +304,8 @@ pub mod test_utils {
             hash_type: MigrationHash::MD5,
             migration_mode: MigrationMode::Apply,
         };
-        SqliteDb::try_from_config(&config)
+        let registry = Registry::new();
+        SqliteDb::try_from_config(&config, &registry)
             .await
             .expect("Expect it to be created")
     }
@@ -343,6 +317,8 @@ mod tests {
     use super::*;
     use crate::config::MigrationHash;
     use crate::db::test_utils::{new_test_db_path, test_migration_dir};
+    use chroma_config::registry::Registry;
+    use chroma_config::Configurable;
     use sqlx::Row;
 
     //////////////////////// SqliteDb ////////////////////////
@@ -354,7 +330,8 @@ mod tests {
             hash_type: MigrationHash::MD5,
             migration_mode: MigrationMode::Apply,
         };
-        let db = SqliteDb::try_from_config(&config)
+        let registry = Registry::new();
+        let db = SqliteDb::try_from_config(&config, &registry)
             .await
             .expect("Expect it to be created");
 
@@ -377,7 +354,8 @@ mod tests {
             hash_type: MigrationHash::MD5,
             migration_mode: MigrationMode::Apply,
         };
-        let db = SqliteDb::try_from_config(&config)
+        let registry = Registry::new();
+        let db = SqliteDb::try_from_config(&config, &registry)
             .await
             .expect("Expect it to be created");
 
@@ -401,7 +379,8 @@ mod tests {
             hash_type: MigrationHash::MD5,
             migration_mode: MigrationMode::Apply,
         };
-        let db = SqliteDb::try_from_config(&config)
+        let registry = Registry::new();
+        let db = SqliteDb::try_from_config(&config, &registry)
             .await
             .expect("Expect it to be created");
 
@@ -422,8 +401,8 @@ mod tests {
             hash_type: MigrationHash::MD5,
             migration_mode: MigrationMode::Validate,
         };
-
-        let _ = SqliteDb::try_from_config(&config)
+        let registry = Registry::new();
+        let _ = SqliteDb::try_from_config(&config, &registry)
             .await
             .expect("Expect it to be created & validated");
     }
@@ -436,7 +415,8 @@ mod tests {
             hash_type: MigrationHash::MD5,
             migration_mode: MigrationMode::Apply,
         };
-        let db = SqliteDb::try_from_config(&config)
+        let registry = Registry::new();
+        let db = SqliteDb::try_from_config(&config, &registry)
             .await
             .expect("Expect it to be created");
 
@@ -466,15 +446,12 @@ mod tests {
             migration_mode: MigrationMode::Validate,
         };
 
-        let result = SqliteDb::try_from_config(&config).await;
+        let result = SqliteDb::try_from_config(&config, &registry).await;
         match result {
             Ok(_) => panic!("Expect it to fail"),
-            Err(SqliteCreationError::MigrationError(
-                SqliteMigrationError::MigrationValidationError(
-                    MigrationValidationError::InconsistentHash(_, _),
-                ),
-            )) => {}
-            Err(_) => panic!("Expect it to be a MigrationValidationError"),
+            Err(e) => {
+                assert!(e.to_string().contains("Inconsistent hash"))
+            }
         }
     }
 
@@ -486,7 +463,7 @@ mod tests {
             hash_type: MigrationHash::MD5,
             migration_mode: MigrationMode::Apply,
         };
-        let db = SqliteDb::try_from_config(&config)
+        let db = SqliteDb::try_from_config(&config, &Registry::new())
             .await
             .expect("Expect it to be created");
 
@@ -518,15 +495,12 @@ mod tests {
             migration_mode: MigrationMode::Validate,
         };
 
-        let result = SqliteDb::try_from_config(&config).await;
+        let result = SqliteDb::try_from_config(&config, &Registry::new()).await;
         match result {
             Ok(_) => panic!("Expect it to fail"),
-            Err(SqliteCreationError::MigrationError(
-                SqliteMigrationError::MigrationValidationError(
-                    MigrationValidationError::InconsistentVersion(_, _),
-                ),
-            )) => {}
-            Err(_) => panic!("Expect it to be a MigrationValidationError"),
+            Err(e) => {
+                assert!(e.to_string().contains("Inconsistent version"))
+            }
         }
     }
 
@@ -538,7 +512,7 @@ mod tests {
             hash_type: MigrationHash::MD5,
             migration_mode: MigrationMode::Apply,
         };
-        let db = SqliteDb::try_from_config(&config)
+        let db = SqliteDb::try_from_config(&config, &Registry::new())
             .await
             .expect("Expect it to be created");
 

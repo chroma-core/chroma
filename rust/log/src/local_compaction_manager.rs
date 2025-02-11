@@ -1,6 +1,9 @@
 use std::fmt::{Debug, Formatter};
 
+use crate::Log;
 use async_trait::async_trait;
+use chroma_config::registry::Registry;
+use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::local_hnsw::LocalHnswSegmentReaderError;
 use chroma_segment::local_segment_manager::{LocalSegmentManager, LocalSegmentManagerError};
@@ -14,31 +17,37 @@ use chroma_system::{Component, ComponentContext};
 use chroma_types::{
     Chunk, CollectionAndSegments, CollectionUuid, GetCollectionWithSegmentsError, LogRecord,
 };
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::Log;
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LocalCompactionManagerConfig {}
 
 pub struct LocalCompactionManager {
-    log: Box<Log>,
+    log: Log,
     sqlite_db: SqliteDb,
     hnsw_segment_manager: LocalSegmentManager,
-    sysdb: Box<SysDb>,
-    // TODO(Sanket): config
+    sysdb: SysDb,
 }
 
-impl LocalCompactionManager {
-    pub fn new(
-        log: Box<Log>,
-        sqlite_db: SqliteDb,
-        hnsw_segment_manager: LocalSegmentManager,
-        sysdb: Box<SysDb>,
-    ) -> Self {
-        LocalCompactionManager {
+#[async_trait]
+impl Configurable<LocalCompactionManagerConfig> for LocalCompactionManager {
+    async fn try_from_config(
+        _config: &LocalCompactionManagerConfig,
+        registry: &Registry,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        let log = registry.get::<Log>().map_err(|e| e.boxed())?;
+        let sqlite_db = registry.get::<SqliteDb>().map_err(|e| e.boxed())?;
+        let hnsw_segment_manager = registry
+            .get::<LocalSegmentManager>()
+            .map_err(|e| e.boxed())?;
+        let sysdb = registry.get::<SysDb>().map_err(|e| e.boxed())?;
+        Ok(Self {
             log,
             sqlite_db,
             hnsw_segment_manager,
             sysdb,
-        }
+        })
     }
 }
 

@@ -1,5 +1,6 @@
 use crate::{executor::config::ExecutorConfig, CollectionsWithSegmentsProviderConfig};
 use chroma_log::config::LogConfig;
+use chroma_sqlite::config::SqliteDBConfig;
 use chroma_sysdb::SysDbConfig;
 use figment::providers::{Env, Format, Yaml};
 use mdac::CircuitBreakerConfig;
@@ -15,6 +16,7 @@ pub struct ScorecardRule {
 pub struct FrontendConfig {
     #[serde(default)]
     pub allow_reset: bool,
+    pub sqlitedb: Option<SqliteDBConfig>,
     pub sysdb: SysDbConfig,
     #[serde(default = "CircuitBreakerConfig::default")]
     pub circuit_breaker: CircuitBreakerConfig,
@@ -56,12 +58,17 @@ impl FrontendConfig {
 mod tests {
     use crate::config::FrontendConfig;
     use chroma_cache::CacheConfig;
-    use chroma_sysdb::SysDbConfig::Grpc;
 
     #[test]
     fn test_load_config() {
         let config = FrontendConfig::load();
-        let Grpc(sysdb_config) = config.sysdb;
+        let sysdb_config = config.sysdb;
+        let sysdb_config = match sysdb_config {
+            chroma_sysdb::SysDbConfig::Grpc(grpc_sys_db_config) => grpc_sys_db_config,
+            chroma_sysdb::SysDbConfig::Sqlite(_) => {
+                panic!("Expected grpc sysdb config, got sqlite sysdb config")
+            }
+        };
         assert_eq!(sysdb_config.host, "sysdb.chroma");
         assert_eq!(sysdb_config.port, 50051);
         assert_eq!(sysdb_config.connect_timeout_ms, 60000);

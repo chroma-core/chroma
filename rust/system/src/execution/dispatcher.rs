@@ -7,6 +7,7 @@ use super::{operator::TaskMessage, worker_thread::WorkerThread};
 use crate::execution::config::DispatcherConfig;
 use crate::{Component, ComponentContext, Handler, ReceiverForMessage, System};
 use async_trait::async_trait;
+use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use std::fmt::Debug;
@@ -174,7 +175,10 @@ impl Dispatcher {
 
 #[async_trait]
 impl Configurable<DispatcherConfig> for Dispatcher {
-    async fn try_from_config(config: &DispatcherConfig) -> Result<Self, Box<dyn ChromaError>> {
+    async fn try_from_config(
+        config: &DispatcherConfig,
+        _registry: &Registry,
+    ) -> Result<Self, Box<dyn ChromaError>> {
         Ok(Dispatcher::new(config.clone()))
     }
 }

@@ -13,7 +13,7 @@ pub struct DeleteVersionsAtSysDbOperator {}
 pub struct DeleteVersionsAtSysDbInput {
     pub version_file: CollectionVersionFile,
     pub epoch_id: i64,
-    pub sysdb_client: Box<SysDb>,
+    pub sysdb_client: SysDb,
     pub versions_to_delete: VersionListForCollection,
     pub unused_s3_files: HashSet<String>,
 }
@@ -77,7 +77,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_versions_success() {
-        let sysdb = Box::new(SysDb::Test(TestSysDb::new()));
+        let sysdb = SysDb::Test(TestSysDb::new());
         let version_file = CollectionVersionFile::default();
         let versions_to_delete = VersionListForCollection {
             collection_id: "test_collection".to_string(),
@@ -105,7 +105,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_versions_empty_list() {
-        let sysdb = Box::new(SysDb::Test(TestSysDb::new()));
+        let sysdb = SysDb::Test(TestSysDb::new());
         let version_file = CollectionVersionFile::default();
         let versions_to_delete = VersionListForCollection {
             collection_id: "test_collection".to_string(),

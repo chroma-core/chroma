@@ -6,6 +6,7 @@ use crate::{
 use async_trait::async_trait;
 use aws_sdk_s3::primitives::{ByteStream, Length};
 use bytes::Bytes;
+use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use futures::future::BoxFuture;
@@ -359,14 +360,20 @@ impl AdmissionControlledS3Storage {
 
 #[async_trait]
 impl Configurable<StorageConfig> for AdmissionControlledS3Storage {
-    async fn try_from_config(config: &StorageConfig) -> Result<Self, Box<dyn ChromaError>> {
+    async fn try_from_config(
+        config: &StorageConfig,
+        registry: &Registry,
+    ) -> Result<Self, Box<dyn ChromaError>> {
         match &config {
             StorageConfig::AdmissionControlledS3(nacconfig) => {
-                let s3_storage =
-                    S3Storage::try_from_config(&StorageConfig::S3(nacconfig.s3_config.clone()))
-                        .await?;
+                let s3_storage = S3Storage::try_from_config(
+                    &StorageConfig::S3(nacconfig.s3_config.clone()),
+                    registry,
+                )
+                .await?;
                 let policy =
-                    RateLimitPolicy::try_from_config(&nacconfig.rate_limiting_policy).await?;
+                    RateLimitPolicy::try_from_config(&nacconfig.rate_limiting_policy, registry)
+                        .await?;
                 return Ok(Self::new(s3_storage, policy));
             }
             _ => {
@@ -413,7 +420,10 @@ impl CountBasedPolicy {
 
 #[async_trait]
 impl Configurable<RateLimitingConfig> for RateLimitPolicy {
-    async fn try_from_config(config: &RateLimitingConfig) -> Result<Self, Box<dyn ChromaError>> {
+    async fn try_from_config(
+        config: &RateLimitingConfig,
+        _registry: &Registry,
+    ) -> Result<Self, Box<dyn ChromaError>> {
         match &config {
             RateLimitingConfig::CountBasedPolicy(count_policy) => {
                 return Ok(RateLimitPolicy::CountBasedPolicy(CountBasedPolicy::new(

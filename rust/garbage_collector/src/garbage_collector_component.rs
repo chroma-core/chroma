@@ -1,7 +1,7 @@
 use std::{collections::HashSet, fmt::Debug, fmt::Formatter, str::FromStr, time::Duration};
 
 use async_trait::async_trait;
-use chroma_config::Configurable;
+use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
 use chroma_storage::Storage;
 use chroma_sysdb::{SysDb, SysDbConfig};
@@ -23,7 +23,7 @@ pub(crate) struct GarbageCollector {
     cutoff_time_hours: u32,
     max_collections_to_gc: u32,
     disabled_collections: HashSet<CollectionUuid>,
-    sysdb_client: Box<SysDb>,
+    sysdb_client: SysDb,
     storage: Storage,
     dispatcher: Option<ComponentHandle<Dispatcher>>,
     system: Option<chroma_system::System>,
@@ -41,7 +41,7 @@ impl GarbageCollector {
         cutoff_time_hours: u32,
         max_collections_to_gc: u32,
         disabled_collections: HashSet<CollectionUuid>,
-        sysdb_client: Box<SysDb>,
+        sysdb_client: SysDb,
         storage: Storage,
     ) -> Self {
         Self {
@@ -171,11 +171,11 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
 impl Configurable<GarbageCollectorConfig> for GarbageCollector {
     async fn try_from_config(
         config: &GarbageCollectorConfig,
+        registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let sysdb_config = SysDbConfig::Grpc(config.sysdb_config.clone());
-        let sysdb_client = chroma_sysdb::from_config(&sysdb_config).await?;
-
-        let storage = chroma_storage::from_config(&config.storage_config).await?;
+        let sysdb_client = SysDb::try_from_config(&sysdb_config, registry).await?;
+        let storage = Storage::try_from_config(&config.storage_config, registry).await?;
 
         let mut disabled_collections = HashSet::new();
         for collection_id_str in config.disallow_collections.iter() {

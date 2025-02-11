@@ -1,8 +1,11 @@
+use chroma_error::ChromaError;
 use parking_lot::Mutex;
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
+    sync::Arc,
 };
+use thiserror::Error;
 
 pub trait Injectable: Any + Send + Sync + Clone {}
 
@@ -13,28 +16,42 @@ pub trait Injectable: Any + Send + Sync + Clone {}
 /// Therefore, it is recommended to store types that are cheap to clone and
 /// also that are "Shareable" - i.e cloning them results in non-divergent state
 /// upon Mutation. (Commonly implemented via Arc<Inner> pattern)
-struct Registry {
-    storage: Mutex<HashMap<TypeId, Box<dyn Any + Send + Sync>>>,
+#[derive(Default)]
+pub struct Registry {
+    storage: Arc<Mutex<HashMap<TypeId, Box<dyn Any + Send + Sync>>>>,
+}
+
+#[derive(Debug, Error)]
+pub enum RegistryError {
+    #[error("Type not found in the registry")]
+    TypeNotFound,
+}
+
+impl ChromaError for RegistryError {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        chroma_error::ErrorCodes::Internal
+    }
 }
 
 impl Registry {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
-            storage: Mutex::new(HashMap::new()),
+            storage: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    fn insert<T: Injectable>(&self, value: Box<T>) {
+    pub fn register<T: Injectable>(&self, value: T) {
         let mut storage = self.storage.lock();
-        storage.insert(TypeId::of::<T>(), value);
+        storage.insert(TypeId::of::<T>(), Box::new(value));
     }
 
-    fn get<T: Injectable>(&self) -> Option<T> {
+    pub fn get<T: Injectable>(&self) -> Result<T, RegistryError> {
         let storage = self.storage.lock();
         storage
             .get(&TypeId::of::<T>())
             .and_then(|boxed| boxed.downcast_ref::<T>())
             .cloned()
+            .ok_or(RegistryError::TypeNotFound)
     }
 }
 
@@ -54,8 +71,8 @@ mod tests {
     #[test]
     fn test_registry_returns_same() {
         let registry = Registry::new();
-        let injectable = Box::new(TestInjectable::default());
-        registry.insert(injectable);
+        let injectable = TestInjectable::default();
+        registry.register(injectable);
         let retrieved_1 = registry
             .get::<TestInjectable>()
             .expect("To be able to get the TestInjectable");
