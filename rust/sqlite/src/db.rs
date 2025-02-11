@@ -2,7 +2,7 @@ use crate::config::{MigrationHash, MigrationMode, SqliteDBConfig};
 use crate::migrations::{GetSourceMigrationsError, Migration, MigrationDir, MIGRATION_DIRS};
 use chroma_error::{ChromaError, ErrorCodes};
 use futures::TryStreamExt;
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePool};
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use sqlx::{Executor, Row};
 use thiserror::Error;
 
@@ -24,7 +24,7 @@ pub struct SqliteDb {
 impl SqliteDb {
     pub async fn try_from_config(config: &SqliteDBConfig) -> Result<Self, SqliteCreationError> {
         // TODO: copy all other pragmas from python and add basic tests
-        let mut options = SqliteConnectOptions::new()
+        let conn_options = SqliteConnectOptions::new()
             // Due to a bug in the python code, foreign_keys is turned off
             // The python code enabled it in a transaction, however,
             // https://www.sqlite.org/pragma.html states that foreign_keys
@@ -32,14 +32,18 @@ impl SqliteDb {
             // we turn it off
             .pragma("foreign_keys", "OFF")
             .pragma("case_sensitive_like", "ON");
-        options = if let Some(url) = &config.url {
-            options.filename(url).create_if_missing(true)
+        let conn = if let Some(url) = &config.url {
+            SqlitePoolOptions::new()
+                .connect_with(conn_options.filename(url).create_if_missing(true))
+                .await
+                .map_err(SqliteCreationError::SqlxError)?
         } else {
-            options.in_memory(true)
+            SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect_with(conn_options.in_memory(true).shared_cache(true))
+                .await
+                .map_err(SqliteCreationError::SqlxError)?
         };
-        let conn = SqlitePool::connect_with(options)
-            .await
-            .map_err(SqliteCreationError::SqlxError)?;
 
         let db = Self {
             conn,
