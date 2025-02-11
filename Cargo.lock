@@ -1266,6 +1266,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chroma-error",
+ "figment",
  "murmur3",
  "parking_lot",
  "serde",
@@ -1482,6 +1483,8 @@ dependencies = [
 name = "chroma-sqlite"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "chroma-config",
  "chroma-error",
  "chroma-types",
  "futures",
@@ -1491,6 +1494,7 @@ dependencies = [
  "rust-embed",
  "sea-query",
  "sea-query-binder",
+ "serde",
  "sha2",
  "sqlx",
  "tempfile",
@@ -5518,6 +5522,7 @@ dependencies = [
  "chroma-sysdb",
  "chroma-system",
  "chroma-types",
+ "mdac",
  "numpy",
  "pyo3",
  "serde",
