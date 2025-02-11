@@ -67,7 +67,7 @@ pub struct AuthzResource {
 
 #[derive(thiserror::Error, Debug)]
 #[error("Permission denied.")]
-pub struct AuthError(StatusCode);
+pub struct AuthError(pub StatusCode);
 
 impl chroma_error::ChromaError for AuthError {
     fn code(&self) -> chroma_error::ErrorCodes {
