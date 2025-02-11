@@ -68,40 +68,40 @@ class RustBindingsAPI(ServerAPI):
         # TOOD: We should add a "config converter"
         # TODO: How to name this file?
         # TODO: proper path handling
-        if self._system.settings.require("is_persistent"):
-            persist_path = self._system.settings.require("persist_directory")
-            sqlite_persist_path = persist_path + "/chroma.sqlite3"
-        else:
-            persist_path = None
-            sqlite_persist_path = None
-        hash_type = self._system.settings.require("migrations_hash_algorithm")
-        hash_type_bindings = (
-            rust_bindings.MigrationHash.MD5
-            if hash_type == "md5"
-            else rust_bindings.MigrationHash.SHA256
-        )
-        migration_mode = self._system.settings.require("migrations")
-        migration_mode_bindings = (
-            rust_bindings.MigrationMode.Apply
-            if migration_mode == "apply"
-            else rust_bindings.MigrationMode.Validate
-        )
-        sqlite_config = rust_bindings.SqliteDBConfig(
-            hash_type=hash_type_bindings,
-            migration_mode=migration_mode_bindings,
-            url=sqlite_persist_path,
-        )
+        if not hasattr(self, "bindings"):
+            if self._system.settings.require("is_persistent"):
+                persist_path = self._system.settings.require("persist_directory")
+                sqlite_persist_path = persist_path + "/chroma.sqlite3"
+            else:
+                persist_path = None
+                sqlite_persist_path = None
+            hash_type = self._system.settings.require("migrations_hash_algorithm")
+            hash_type_bindings = (
+                rust_bindings.MigrationHash.MD5
+                if hash_type == "md5"
+                else rust_bindings.MigrationHash.SHA256
+            )
+            migration_mode = self._system.settings.require("migrations")
+            migration_mode_bindings = (
+                rust_bindings.MigrationMode.Apply
+                if migration_mode == "apply"
+                else rust_bindings.MigrationMode.Validate
+            )
+            sqlite_config = rust_bindings.SqliteDBConfig(
+                hash_type=hash_type_bindings,
+                migration_mode=migration_mode_bindings,
+                url=sqlite_persist_path,
+            )
+            self.bindings = rust_bindings.Bindings(
+                allow_reset=self._system.settings.require("allow_reset"),
+                sqlite_db_config=sqlite_config,
+                persist_path=persist_path,
+                hnsw_cache_size=self.hnsw_cache_size,
+            )
 
-        self.bindings = rust_bindings.Bindings(
-            allow_reset=self._system.settings.require("allow_reset"),
-            sqlite_db_config=sqlite_config,
-            persist_path=persist_path,
-            hnsw_cache_size=self.hnsw_cache_size,
-        )
-
-    @override
-    def stop(self) -> None:
-        del self.bindings
+    # @override
+    # def stop(self) -> None:
+    #     del self.bindings
 
     # ////////////////////////////// Admin API //////////////////////////////
 
