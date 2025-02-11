@@ -1,4 +1,5 @@
 pub mod assignment;
+pub mod registry;
 
 use async_trait::async_trait;
 use chroma_error::ChromaError;
@@ -10,7 +11,7 @@ use chroma_error::ChromaError;
 /// Components that need to be configured from the config object should implement this trait.
 #[async_trait]
 pub trait Configurable<T> {
-    async fn try_from_config(worker_config: &T) -> Result<Self, Box<dyn ChromaError>>
+    async fn try_from_config(config: &T) -> Result<Self, Box<dyn ChromaError>>
     where
         Self: Sized;
 }

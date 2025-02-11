@@ -1267,6 +1267,7 @@ dependencies = [
  "async-trait",
  "chroma-error",
  "murmur3",
+ "parking_lot",
  "serde",
  "thiserror 1.0.69",
 ]
