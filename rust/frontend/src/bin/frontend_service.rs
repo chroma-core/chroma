@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use chroma_frontend::frontend_service_entrypoint;
 
 #[tokio::main]
