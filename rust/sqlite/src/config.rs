@@ -7,7 +7,7 @@ use chroma_config::{
 use chroma_error::ChromaError;
 use pyo3::{pyclass, pymethods};
 use serde::{Deserialize, Serialize};
-use sqlx::{sqlite::SqliteConnectOptions, SqlitePool};
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 
 #[derive(Serialize, Deserialize, Clone)]
 #[pyclass]
@@ -81,13 +81,13 @@ impl Configurable<SqliteDBConfig> for SqliteDb {
             SqlitePoolOptions::new()
                 .connect_with(conn_options.filename(url).create_if_missing(true))
                 .await
-                .map_err(SqliteCreationError::SqlxError)?
+                .map_err(|err| SqliteCreationError::SqlxError(err).boxed())?
         } else {
             SqlitePoolOptions::new()
                 .max_connections(1)
                 .connect_with(conn_options.in_memory(true).shared_cache(true))
                 .await
-                .map_err(SqliteCreationError::SqlxError)?
+                .map_err(|err| SqliteCreationError::SqlxError(err).boxed())?
         };
 
         let db = SqliteDb::new(conn, config.hash_type);
@@ -113,14 +113,15 @@ impl Configurable<SqliteDBConfig> for SqliteDb {
 
 #[cfg(test)]
 mod tests {
+    use crate::db::test_utils::new_test_db_persist_path;
+
     use super::*;
-    use crate::db::test_utils::new_test_db_path;
     use chroma_config::registry::Registry;
 
     #[tokio::test]
     async fn test_sqlite_db_config_registry() {
         let config = SqliteDBConfig {
-            url: new_test_db_path(),
+            url: new_test_db_persist_path(),
             hash_type: MigrationHash::SHA256,
             migration_mode: MigrationMode::Apply,
         };

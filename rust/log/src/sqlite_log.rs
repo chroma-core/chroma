@@ -506,16 +506,16 @@ impl Configurable<SqliteLogConfig> for SqliteLog {
 mod tests {
     use super::*;
     use chroma_config::{registry::Registry, Configurable};
-    use chroma_sqlite::config::SqliteDBConfig;
+    use chroma_sqlite::{config::SqliteDBConfig, db::test_utils::new_test_db_persist_path};
     use chroma_types::{are_metadatas_close_to_equal, CollectionUuid};
     use proptest::prelude::*;
+
     use tokio::runtime::Runtime;
 
     async fn setup_sqlite_log() -> SqliteLog {
-        let path = tempdir().unwrap().into_path();
         let db = SqliteDb::try_from_config(
             &SqliteDBConfig {
-                url: path.to_str().unwrap().to_string(),
+                url: new_test_db_persist_path(),
                 migration_mode: chroma_sqlite::config::MigrationMode::Apply,
                 hash_type: chroma_sqlite::config::MigrationHash::SHA256,
             },
