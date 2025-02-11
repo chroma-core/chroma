@@ -50,7 +50,7 @@ type S3MetaStoreConfig struct {
 
 type S3MetaStoreInterface interface {
 	GetVersionFile(tenantID, collectionID string, version int64, fileName string) (*coordinatorpb.CollectionVersionFile, error)
-	PutVersionFile(tenantID, collectionID, fileName string, file *coordinatorpb.CollectionVersionFile) error
+	PutVersionFile(tenantID, collectionID, fileName string, file *coordinatorpb.CollectionVersionFile) (string, error)
 	HasObjectWithPrefix(ctx context.Context, prefix string) (bool, error)
 	DeleteVersionFile(tenantID, collectionID, fileName string) error
 }
@@ -126,8 +126,8 @@ func NewS3MetaStore(config S3MetaStoreConfig) (*S3MetaStore, error) {
 
 // Get the version file from S3. Return the protobuf.
 func (store *S3MetaStore) GetVersionFile(tenantID, collectionID string, version int64, versionFileName string) (*coordinatorpb.CollectionVersionFile, error) {
-	path := store.GetVersionFilePath(tenantID, collectionID, versionFileName)
-
+	// path := store.GetVersionFilePath(tenantID, collectionID, versionFileName)
+	path := versionFileName
 	log.Info("getting version file from S3", zap.String("path", path))
 
 	input := &s3.GetObjectInput{
@@ -155,12 +155,12 @@ func (store *S3MetaStore) GetVersionFile(tenantID, collectionID string, version 
 }
 
 // Put the version file to S3. Serialize the protobuf to bytes.
-func (store *S3MetaStore) PutVersionFile(tenantID, collectionID string, versionFileName string, versionFile *coordinatorpb.CollectionVersionFile) error {
+func (store *S3MetaStore) PutVersionFile(tenantID, collectionID string, versionFileName string, versionFile *coordinatorpb.CollectionVersionFile) (string, error) {
 	path := store.GetVersionFilePath(tenantID, collectionID, versionFileName)
 
 	data, err := proto.Marshal(versionFile)
 	if err != nil {
-		return fmt.Errorf("failed to marshal version file: %w", err)
+		return "", fmt.Errorf("failed to marshal version file: %w", err)
 	}
 
 	log.Info("putting version file", zap.String("path", path))
@@ -173,7 +173,7 @@ func (store *S3MetaStore) PutVersionFile(tenantID, collectionID string, versionF
 
 	output, err := store.S3.PutObject(input)
 	log.Info("put object output", zap.Any("output", output), zap.Error(err))
-	return err
+	return path, err
 }
 
 // GetVersionFilePath constructs the S3 path for a version file

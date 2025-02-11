@@ -23,12 +23,17 @@ impl ObjectStore {
     ) -> Result<Self, Box<dyn ChromaError>> {
         match &config.bucket.r#type {
             super::config::ObjectStoreType::Minio => {
+                tracing::info!(
+                    "Creating Minio object store with bucket: {}",
+                    config.bucket.name
+                );
                 let object_store = object_store::aws::AmazonS3Builder::new()
                     .with_region("us-east-1")
-                    .with_endpoint("http://minio.chroma:9000")
+                    .with_endpoint("http://localhost:9000")
                     .with_bucket_name(&config.bucket.name)
                     .with_access_key_id("minio")
                     .with_secret_access_key("minio123")
+                    .with_allow_http(true)
                     .build()
                     .map_err(|err| {
                         tracing::error! {"Failed to create object store: {:?}", err};
@@ -45,6 +50,10 @@ impl ObjectStore {
                 })
             }
             super::config::ObjectStoreType::S3 => {
+                tracing::info!(
+                    "Creating S3 object store with bucket: {}",
+                    config.bucket.name
+                );
                 let object_store = object_store::aws::AmazonS3Builder::from_env()
                     .with_bucket_name(&config.bucket.name)
                     .build()
@@ -66,6 +75,7 @@ impl ObjectStore {
     }
 
     pub async fn get(&self, key: &str) -> Result<Arc<Vec<u8>>, GetError> {
+        // tracing::info!("ObjectStore::get called with key: {}", key);
         Ok(self
             .object_store
             .get_opts(&Path::from(key), GetOptions::default())
@@ -157,6 +167,7 @@ impl ObjectStore {
     }
 
     pub async fn put_bytes(&self, key: &str, bytes: Vec<u8>) -> Result<(), PutError> {
+        // tracing::warn!("put_bytes key: {}, path: {:?}", key, Path::from(key));
         self.object_store
             .put_opts(&Path::from(key), bytes.into(), PutOptions::default())
             .await?;

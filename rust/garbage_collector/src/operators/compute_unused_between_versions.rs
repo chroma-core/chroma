@@ -17,29 +17,88 @@ pub struct ComputeUnusedBetweenVersionsOperator {
 
 impl ComputeUnusedBetweenVersionsOperator {
     pub fn new(storage: Storage) -> Self {
+        tracing::debug!("Creating new ComputeUnusedBetweenVersionsOperator");
         Self { storage }
     }
 
-    /// Extract S3 file references from a sparse index file content
-    async fn extract_s3_files(&self, content: &[u8]) -> Result<HashSet<String>, String> {
+    /// Extract S3 file references from all sparse index files for a version
+    async fn extract_s3_files_from_version(
+        &self,
+        version_files: &HashMap<String, Vec<u8>>,
+    ) -> Result<HashSet<String>, String> {
+        tracing::info!(
+            num_files = version_files.len(),
+            files = ?version_files.keys().collect::<Vec<_>>(),
+            "Starting to extract S3 files from version"
+        );
+
+        let mut all_s3_files = HashSet::new();
         let root_manager = RootManager::new(self.storage.clone(), Box::new(NopCache));
 
-        // Parse the content as a UUID since sparse index files are stored as sparse_index/<uuid>
-        let id = Uuid::from_slice(content).map_err(|e| format!("Failed to parse UUID: {}", e))?;
+        for (file_path, _content) in version_files {
+            tracing::info!(file_path = %file_path, "Processing sparse index file");
 
-        // Get all block IDs from the root
-        let block_ids = root_manager
-            .get_all_block_ids(&id)
-            .await
-            .map_err(|e| format!("Failed to get block IDs: {}", e))?;
+            // Extract UUID from the file path since it's in the format "sparse_index/<uuid>"
+            let id = match Uuid::parse_str(file_path) {
+                Ok(id) => {
+                    tracing::debug!(uuid = %id, "Successfully parsed UUID from file path");
+                    id
+                }
+                Err(e) => {
+                    tracing::error!(
+                        error = %e,
+                        file_path = %file_path,
+                        "Failed to parse UUID from file path"
+                    );
+                    return Err(format!(
+                        "Failed to parse UUID from file path {}: {}",
+                        file_path, e
+                    ));
+                }
+            };
 
-        // Convert block IDs to S3 paths
-        let s3_files = block_ids
-            .into_iter()
-            .map(|id| format!("sparse_index/{}", id))
-            .collect();
+            // Use RootManager to get block IDs
+            let block_ids = match root_manager.get_all_block_ids(&id).await {
+                Ok(ids) => {
+                    tracing::debug!(
+                        uuid = %id,
+                        num_blocks = ids.len(),
+                        block_ids = ?ids,
+                        "Successfully retrieved block IDs"
+                    );
+                    ids
+                }
+                Err(e) => {
+                    tracing::error!(
+                        error = %e,
+                        uuid = %id,
+                        "Failed to get block IDs"
+                    );
+                    return Err(format!("Failed to get block IDs for {}: {}", file_path, e));
+                }
+            };
 
-        Ok(s3_files)
+            // Convert block IDs to S3 paths and add them to the set
+            let s3_paths: Vec<String> = block_ids
+                .into_iter()
+                .map(|id| format!("block/{}", id))
+                .collect();
+
+            tracing::info!(
+                file_path = %file_path,
+                num_paths = s3_paths.len(),
+                paths = ?s3_paths,
+                "Found S3 paths for sparse index file"
+            );
+            all_s3_files.extend(s3_paths);
+        }
+
+        tracing::info!(
+            total_s3_files = all_s3_files.len(),
+            all_files = ?all_s3_files,
+            "Completed extracting all S3 files from version"
+        );
+        Ok(all_s3_files)
     }
 
     /// Compare two versions and return files that are in older_version but not in newer_version
@@ -47,10 +106,32 @@ impl ComputeUnusedBetweenVersionsOperator {
         older_files: &HashSet<String>,
         newer_files: &HashSet<String>,
     ) -> HashSet<String> {
-        older_files
+        tracing::info!(
+            older_count = older_files.len(),
+            newer_count = newer_files.len(),
+            "Computing unused files between versions"
+        );
+
+        tracing::info!(
+            older_files = ?older_files,
+            "Files in older version"
+        );
+        tracing::info!(
+            newer_files = ?newer_files,
+            "Files in newer version"
+        );
+
+        let unused = older_files
             .difference(newer_files)
             .cloned()
-            .collect::<HashSet<_>>()
+            .collect::<HashSet<_>>();
+
+        tracing::info!(
+            unused_count = unused.len(),
+            unused_files = ?unused,
+            "Found unused files between versions"
+        );
+        unused
     }
 }
 
@@ -67,7 +148,8 @@ pub struct ComputeUnusedBetweenVersionsInput {
     pub epoch_id: i64,
     pub sysdb_client: SysDb,
     pub versions_to_delete: VersionListForCollection,
-    pub version_to_content: HashMap<i64, Vec<u8>>,
+    pub version_to_content: HashMap<i64, HashMap<String, Vec<u8>>>,
+    pub oldest_version_to_keep: i64,
 }
 
 #[derive(Debug)]
@@ -77,6 +159,7 @@ pub struct ComputeUnusedBetweenVersionsOutput {
     pub sysdb_client: SysDb,
     pub versions_to_delete: VersionListForCollection,
     pub unused_s3_files: HashSet<String>,
+    pub oldest_version_to_keep: i64,
 }
 
 #[derive(Error, Debug)]
@@ -110,37 +193,131 @@ impl Operator<ComputeUnusedBetweenVersionsInput, ComputeUnusedBetweenVersionsOut
         &self,
         input: &ComputeUnusedBetweenVersionsInput,
     ) -> Result<ComputeUnusedBetweenVersionsOutput, ComputeUnusedBetweenVersionsError> {
+        tracing::info!(
+            num_versions = input.versions_to_delete.versions.len(),
+            oldest_to_keep = input.oldest_version_to_keep,
+            "Starting to compute unused files between versions"
+        );
+
         let mut unused_s3_files = HashSet::new();
         let mut versions = input.versions_to_delete.versions.clone();
-        versions.sort_unstable(); // Sort versions to ensure we compare them in order
+        versions.sort_unstable();
+
+        tracing::info!(
+            versions = ?versions,
+            "Processing versions in order"
+        );
 
         // Process each pair of consecutive versions
         for versions_window in versions.windows(2) {
             let older_version = versions_window[0];
             let newer_version = versions_window[1];
 
+            tracing::info!(
+                older = older_version,
+                newer = newer_version,
+                "Comparing consecutive versions"
+            );
+
             // Get content for both versions
-            let older_content = input.version_to_content.get(&older_version).ok_or(
-                ComputeUnusedBetweenVersionsError::MissingContent(older_version),
-            )?;
-            let newer_content = input.version_to_content.get(&newer_version).ok_or(
-                ComputeUnusedBetweenVersionsError::MissingContent(newer_version),
-            )?;
+            let older_files = input
+                .version_to_content
+                .get(&older_version)
+                .ok_or_else(|| {
+                    tracing::error!(version = older_version, "Missing content for older version");
+                    ComputeUnusedBetweenVersionsError::MissingContent(older_version)
+                })?;
+            let newer_files = input
+                .version_to_content
+                .get(&newer_version)
+                .ok_or_else(|| {
+                    tracing::error!(version = newer_version, "Missing content for newer version");
+                    ComputeUnusedBetweenVersionsError::MissingContent(newer_version)
+                })?;
 
             // Extract S3 files from both versions
-            let older_files = self
-                .extract_s3_files(older_content)
+            let older_s3_files = self
+                .extract_s3_files_from_version(older_files)
                 .await
-                .map_err(|e| ComputeUnusedBetweenVersionsError::ParseError(older_version, e))?;
-            let newer_files = self
-                .extract_s3_files(newer_content)
+                .map_err(|e| {
+                    tracing::error!(
+                        error = %e,
+                        version = older_version,
+                        "Failed to extract S3 files from older version"
+                    );
+                    ComputeUnusedBetweenVersionsError::ParseError(older_version, e)
+                })?;
+            let newer_s3_files = self
+                .extract_s3_files_from_version(newer_files)
                 .await
-                .map_err(|e| ComputeUnusedBetweenVersionsError::ParseError(newer_version, e))?;
+                .map_err(|e| {
+                    tracing::error!(
+                        error = %e,
+                        version = newer_version,
+                        "Failed to extract S3 files from newer version"
+                    );
+                    ComputeUnusedBetweenVersionsError::ParseError(newer_version, e)
+                })?;
 
             // Find files that are in older version but not in newer version
-            let unused_in_this_pair = Self::compute_unused_files(&older_files, &newer_files);
+            let unused_in_this_pair = Self::compute_unused_files(&older_s3_files, &newer_s3_files);
             unused_s3_files.extend(unused_in_this_pair);
         }
+
+        // Special case: Compare last version to be deleted with oldest version to keep
+        if let Some(last_version) = versions.last() {
+            tracing::info!(
+                last_version,
+                oldest_to_keep = input.oldest_version_to_keep,
+                "Comparing last version to delete with oldest version to keep"
+            );
+
+            let last_files = input.version_to_content.get(last_version).ok_or_else(|| {
+                tracing::error!(version = last_version, "Missing content for last version");
+                ComputeUnusedBetweenVersionsError::MissingContent(*last_version)
+            })?;
+            let keep_files = input
+                .version_to_content
+                .get(&input.oldest_version_to_keep)
+                .ok_or_else(|| {
+                    tracing::error!(
+                        version = input.oldest_version_to_keep,
+                        "Missing content for version to keep"
+                    );
+                    ComputeUnusedBetweenVersionsError::MissingContent(input.oldest_version_to_keep)
+                })?;
+
+            let last_s3_files = self
+                .extract_s3_files_from_version(last_files)
+                .await
+                .map_err(|e| {
+                    tracing::error!(
+                        error = %e,
+                        version = last_version,
+                        "Failed to extract S3 files from last version"
+                    );
+                    ComputeUnusedBetweenVersionsError::ParseError(*last_version, e)
+                })?;
+            let keep_s3_files = self
+                .extract_s3_files_from_version(keep_files)
+                .await
+                .map_err(|e| {
+                    tracing::error!(
+                        error = %e,
+                        version = input.oldest_version_to_keep,
+                        "Failed to extract S3 files from version to keep"
+                    );
+                    ComputeUnusedBetweenVersionsError::ParseError(input.oldest_version_to_keep, e)
+                })?;
+
+            let unused_in_last = Self::compute_unused_files(&last_s3_files, &keep_s3_files);
+            unused_s3_files.extend(unused_in_last);
+        }
+
+        tracing::info!(
+            total_unused = unused_s3_files.len(),
+            "Completed computing all unused files"
+        );
 
         Ok(ComputeUnusedBetweenVersionsOutput {
             version_file: input.version_file.clone(),
@@ -148,6 +325,7 @@ impl Operator<ComputeUnusedBetweenVersionsInput, ComputeUnusedBetweenVersionsOut
             sysdb_client: input.sysdb_client.clone(),
             versions_to_delete: input.versions_to_delete.clone(),
             unused_s3_files,
+            oldest_version_to_keep: input.oldest_version_to_keep,
         })
     }
 }
@@ -215,11 +393,30 @@ mod tests {
         )
         .await;
 
-        // Create input for the operator
+        // Create input for the operator with multiple files per version
         let mut version_to_content = HashMap::new();
-        version_to_content.insert(1, version1_id.as_bytes().to_vec());
-        version_to_content.insert(2, version2_id.as_bytes().to_vec());
-        version_to_content.insert(3, version3_id.as_bytes().to_vec());
+
+        let mut v1_files = HashMap::new();
+        v1_files.insert(
+            format!("sparse_index/{}", version1_id),
+            version1_id.as_bytes().to_vec(),
+        );
+
+        let mut v2_files = HashMap::new();
+        v2_files.insert(
+            format!("sparse_index/{}", version2_id),
+            version2_id.as_bytes().to_vec(),
+        );
+
+        let mut v3_files = HashMap::new();
+        v3_files.insert(
+            format!("sparse_index/{}", version3_id),
+            version3_id.as_bytes().to_vec(),
+        );
+
+        version_to_content.insert(1, v1_files);
+        version_to_content.insert(2, v2_files);
+        version_to_content.insert(3, v3_files);
 
         let input = ComputeUnusedBetweenVersionsInput {
             version_file: CollectionVersionFile::default(),
@@ -232,6 +429,7 @@ mod tests {
                 tenant_id: "test_tenant".to_string(),
             },
             version_to_content,
+            oldest_version_to_keep: 1,
         };
 
         // Run the operator
@@ -266,6 +464,7 @@ mod tests {
                 tenant_id: "test_tenant".to_string(),
             },
             version_to_content: HashMap::new(), // Empty content map
+            oldest_version_to_keep: 1,
         };
 
         let result = operator.run(&input).await;

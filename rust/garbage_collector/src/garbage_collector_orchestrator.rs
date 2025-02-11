@@ -72,6 +72,8 @@ use crate::operators::mark_versions_at_sysdb::{
     MarkVersionsAtSysDbOutput,
 };
 
+use chroma_storage::config::StorageConfig;
+use chroma_storage::from_config;
 use prost::Message;
 
 pub struct GarbageCollectorOrchestrator {
@@ -173,6 +175,11 @@ impl Orchestrator for GarbageCollectorOrchestrator {
     }
 
     fn initial_tasks(&self, ctx: &ComponentContext<Self>) -> Vec<TaskMessage> {
+        tracing::info!(
+            path = %self.version_file_path,
+            "Creating initial fetch version file task"
+        );
+
         vec![wrap(
             Box::new(FetchVersionFileOperator {}),
             FetchVersionFileInput {
@@ -210,27 +217,46 @@ impl Handler<TaskResult<FetchVersionFileOutput, FetchVersionFileError>>
         message: TaskResult<FetchVersionFileOutput, FetchVersionFileError>,
         ctx: &ComponentContext<GarbageCollectorOrchestrator>,
     ) {
+        tracing::info!("Processing FetchVersionFile result");
+
         // Stage 1: Process fetched version file and initiate version computation
         let output = match self.ok_or_terminate(message.into_inner(), ctx) {
-            Some(output) => output,
-            None => return,
+            Some(output) => {
+                tracing::info!(
+                    content_size = output.version_file_content().len(),
+                    "Successfully got version file content"
+                );
+                output
+            }
+            None => {
+                tracing::error!("Failed to get version file output");
+                return;
+            }
         };
 
         let cutoff_time = Utc::now() - Duration::hours(self.cutoff_time_hours as i64);
+        tracing::info!(
+            cutoff_time = ?cutoff_time,
+            "Computed cutoff time for version deletion"
+        );
 
-        let version_file =
-            match CollectionVersionFile::decode(output.version_file_content().as_bytes()) {
-                Ok(file) => file,
-                Err(e) => {
-                    let result: Result<FetchVersionFileOutput, GarbageCollectorError> =
-                        Err(GarbageCollectorError::ComputeVersionsToDelete(
-                            ComputeVersionsToDeleteError::ParseError(e),
-                        ));
-                    self.ok_or_terminate(result, ctx);
-                    return;
-                }
-            };
+        let version_file = match CollectionVersionFile::decode(output.version_file_content()) {
+            Ok(file) => {
+                tracing::info!("Successfully decoded version file");
+                file
+            }
+            Err(e) => {
+                tracing::error!(error = ?e, "Failed to decode version file");
+                let result: Result<FetchVersionFileOutput, GarbageCollectorError> =
+                    Err(GarbageCollectorError::ComputeVersionsToDelete(
+                        ComputeVersionsToDeleteError::ParseError(e),
+                    ));
+                self.ok_or_terminate(result, ctx);
+                return;
+            }
+        };
 
+        tracing::info!("Creating compute versions task");
         let compute_task = wrap(
             Box::new(ComputeVersionsToDeleteOperator {}),
             ComputeVersionsToDeleteInput {
@@ -241,10 +267,13 @@ impl Handler<TaskResult<FetchVersionFileOutput, FetchVersionFileError>>
             ctx.receiver(),
         );
 
+        tracing::info!("Sending compute versions task to dispatcher");
         if let Err(e) = self.dispatcher().send(compute_task, None).await {
+            tracing::error!(error = ?e, "Failed to send compute task to dispatcher");
             self.terminate_with_result(Err(GarbageCollectorError::Channel(e)), ctx);
             return;
         }
+        tracing::info!("Successfully sent compute versions task");
     }
 }
 
@@ -265,6 +294,19 @@ impl Handler<TaskResult<ComputeVersionsToDeleteOutput, ComputeVersionsToDeleteEr
             None => return,
         };
 
+        // If no versions to delete, terminate early with success
+        if output.versions_to_delete.versions.is_empty() {
+            tracing::info!("No versions to delete, terminating garbage collection early");
+            let response = GarbageCollectorResponse {
+                collection_id: self.collection_id,
+                version_file_path: self.version_file_path.clone(),
+            };
+            tracing::info!(?response, "Garbage collection completed early");
+            self.terminate_with_result(Ok(response), ctx);
+            // Signal the dispatcher to shut down
+            return;
+        }
+
         let mark_task = wrap(
             Box::new(MarkVersionsAtSysDbOperator {}),
             MarkVersionsAtSysDbInput {
@@ -272,12 +314,14 @@ impl Handler<TaskResult<ComputeVersionsToDeleteOutput, ComputeVersionsToDeleteEr
                 versions_to_delete: output.versions_to_delete,
                 sysdb_client: self.sysdb_client.clone(),
                 epoch_id: 0,
+                oldest_version_to_keep: output.oldest_version_to_keep,
             },
             ctx.receiver(),
         );
 
         if let Err(e) = self.dispatcher().send(mark_task, None).await {
             self.terminate_with_result(Err(GarbageCollectorError::Channel(e)), ctx);
+            // Signal the dispatcher to shut down
             return;
         }
     }
@@ -309,6 +353,7 @@ impl Handler<TaskResult<MarkVersionsAtSysDbOutput, MarkVersionsAtSysDbError>>
                 epoch_id: output.epoch_id,
                 sysdb_client: output.sysdb_client,
                 versions_to_delete: output.versions_to_delete,
+                oldest_version_to_keep: output.oldest_version_to_keep,
             },
             ctx.receiver(),
         );
@@ -343,6 +388,7 @@ impl Handler<TaskResult<FetchSparseIndexFilesOutput, FetchSparseIndexFilesError>
             sysdb_client: self.sysdb_client.clone(),
             versions_to_delete: output.versions_to_delete,
             version_to_content: output.version_to_content,
+            oldest_version_to_keep: output.oldest_version_to_keep,
         };
 
         let compute_task = wrap(
@@ -424,12 +470,18 @@ impl Handler<TaskResult<DeleteVersionsAtSysDbOutput, DeleteVersionsAtSysDbError>
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::helper::ChromaGrpcClients;
-    use chroma_types::chroma_proto::ListCollectionVersionsRequest;
+    use chroma_storage::config::{
+        ObjectStoreBucketConfig, ObjectStoreConfig, ObjectStoreType, StorageConfig,
+    };
+    use chroma_sysdb::{from_config as sysdb_from_config, GrpcSysDbConfig, SysDbConfig};
+    use chroma_system::System;
+    use std::str::FromStr;
     use std::time::Duration;
+    use tokio::sync::oneshot;
     use tracing_subscriber;
 
-    // Add this helper function inside the tests module
     async fn wait_for_new_version(
         clients: &mut ChromaGrpcClients,
         collection_id: &str,
@@ -465,7 +517,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_direct_service_calls() -> Result<(), Box<dyn std::error::Error>> {
-        tracing_subscriber::fmt::init();
+        // Initialize tracing subscriber once at the start of the test
+        let _ = tracing_subscriber::fmt::try_init();
+
+        tracing::info!("Starting direct service calls test");
         let mut clients = ChromaGrpcClients::new().await.map_err(|e| {
             tracing::error!(error = ?e, "Failed to create ChromaGrpcClients");
             e
@@ -551,19 +606,46 @@ mod tests {
                 ids[11..].to_vec(),
             )
             .await?;
-
-        // Get current version count and wait for it to increase
-        let mid_versions = clients
-            .list_collection_versions(&collection_id, &tenant_id, Some(100), None, None)
-            .await?;
+        // Wait for new version after first batch
         wait_for_new_version(
             &mut clients,
             &collection_id,
             &tenant_id,
-            mid_versions.versions.len(),
+            initial_version_count + 1,
             10,
         )
         .await?;
+
+        // After adding second batch and waiting for version, add a third batch
+        tracing::info!("Adding third batch of embeddings (modified records)");
+        let mut modified_embeddings = embeddings.clone();
+        let mut modified_ids = ids.clone();
+        // Modify the embeddings slightly to ensure a new version is created
+        for embedding in modified_embeddings.iter_mut() {
+            for value in embedding.iter_mut() {
+                *value += 0.1;
+            }
+        }
+
+        clients
+            .add_embeddings(&collection_id, modified_embeddings, modified_ids)
+            .await?;
+
+        wait_for_new_version(
+            &mut clients,
+            &collection_id,
+            &tenant_id,
+            initial_version_count + 2,
+            10,
+        )
+        .await?;
+
+        // Get version count before GC
+        let versions_before_gc = clients
+            .list_collection_versions(&collection_id, &tenant_id, Some(100), None, None)
+            .await?;
+        let version_count_before_gc = versions_before_gc.versions.len();
+        tracing::info!(count = version_count_before_gc, "Version count before GC");
 
         // Get records from the collection
         tracing::info!(collection_id = %collection_id, "Getting records from collection");
@@ -656,6 +738,110 @@ mod tests {
         tracing::info!(
             is_truncated = versions_response.list_is_truncated,
             "Version list complete"
+        );
+
+        // After creating versions and verifying records, add garbage collection:
+        tracing::info!("Starting garbage collection process");
+
+        // Create system first
+        let system = System::new();
+
+        // Create dispatcher and handle
+        let dispatcher = Dispatcher::new(chroma_system::DispatcherConfig::default());
+        let dispatcher_handle = system.start_component(dispatcher);
+
+        // Create storage config
+        let storage_config = StorageConfig::ObjectStore(ObjectStoreConfig {
+            bucket: ObjectStoreBucketConfig {
+                name: "chroma-storage".to_string(),
+                r#type: ObjectStoreType::Minio,
+            },
+            upload_part_size_bytes: 1024 * 1024,   // 1MB
+            download_part_size_bytes: 1024 * 1024, // 1MB
+            max_concurrent_requests: 10,
+        });
+        let storage = from_config(&storage_config).await?;
+
+        // Create sysdb config and client
+        let sysdb_config = SysDbConfig::Grpc(GrpcSysDbConfig {
+            host: "localhost".to_string(),
+            port: 50051,
+            connect_timeout_ms: 5000,
+            request_timeout_ms: 10000,
+            num_channels: 1,
+        });
+        let mut sysdb = sysdb_from_config(&sysdb_config).await?;
+
+        // Get collection info for GC from sysdb
+        let collections_to_gc = sysdb.get_collections_to_gc().await?;
+        let collection_info = collections_to_gc
+            .iter()
+            .find(|c| c.id.0.to_string() == collection_id)
+            .expect("Collection should be available for GC");
+
+        tracing::info!(
+            "Collection info: {:?} {:?}",
+            collection_info.id,
+            collection_info.version_file_path
+        );
+
+        // Verify the version file exists before proceeding by attempting to get it
+        let version_file_exists = storage
+            .get(&collection_info.version_file_path)
+            .await
+            .is_ok();
+
+        if !version_file_exists {
+            tracing::error!(
+                path = ?collection_info.version_file_path,
+                "Version file does not exist"
+            );
+            return Err("Version file not found".into());
+        }
+
+        // Create orchestrator with correct version file path
+        let mut orchestrator = GarbageCollectorOrchestrator::new(
+            CollectionUuid::from_str(&collection_id)?,
+            collection_info.version_file_path.clone(),
+            0,     // cutoff_time_hours: immediately expire versions
+            sysdb, // sysdb is already a SysDb, will be boxed by new()
+            dispatcher_handle,
+            storage.clone(), // Clone storage since we'll use it again
+        );
+
+        // Create channel for receiving result
+        let (sender, receiver) = oneshot::channel();
+        orchestrator.set_result_channel(sender);
+
+        tracing::info!("Running orchestrator");
+        // Run orchestrator with system
+        orchestrator.run(system).await?;
+        // let gc_result = receiver.await?;  // Waiting here is giving error.
+
+        // tracing::info!(?gc_result, "Garbage collection completed successfully");
+
+        // After running GC and waiting for result, verify versions were deleted
+        tokio::time::sleep(Duration::from_secs(5)).await; // Give some time for GC to complete
+
+        let versions_after_gc = clients
+            .list_collection_versions(&collection_id, &tenant_id, Some(100), None, None)
+            .await?;
+        let version_count_after_gc = versions_after_gc.versions.len();
+
+        tracing::info!(
+            before = version_count_before_gc,
+            after = version_count_after_gc,
+            "Version counts before and after GC"
+        );
+
+        assert!(
+            version_count_after_gc < version_count_before_gc,
+            "Expected fewer versions after garbage collection"
+        );
+
+        assert!(
+            version_count_after_gc >= 2,
+            "Expected at least 2 versions to remain after garbage collection (min_versions_to_keep)"
         );
 
         Ok(())

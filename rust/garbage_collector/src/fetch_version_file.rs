@@ -1,10 +1,16 @@
 use std::fmt::{Debug, Formatter};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_storage::config::{
+    ObjectStoreBucketConfig, ObjectStoreConfig, ObjectStoreType, StorageConfig,
+};
+use chroma_storage::from_config;
 use chroma_storage::{GetError, Storage};
 use chroma_system::{Operator, OperatorType};
 use thiserror::Error;
+use tracing_subscriber;
 
 #[derive(Clone, Debug)]
 pub struct FetchVersionFileOperator {}
@@ -23,29 +29,37 @@ impl Debug for FetchVersionFileInput {
 #[allow(dead_code)]
 #[derive(Debug)]
 pub struct FetchVersionFileOutput {
-    // TODO(Sanket):  Use a more appropriate type for the version file content.
-    version_file_content: String,
+    version_file_content: Vec<u8>,
 }
 
 impl FetchVersionFileOutput {
-    pub fn version_file_content(&self) -> &str {
+    pub fn new(content: Arc<Vec<u8>>) -> Self {
+        Self {
+            version_file_content: (*content).clone(),
+        }
+    }
+
+    pub fn version_file_content(&self) -> &[u8] {
         &self.version_file_content
     }
 }
 
 #[derive(Error, Debug)]
 pub enum FetchVersionFileError {
-    #[error("Error fetching version file")]
-    S3ReadError(#[from] GetError),
+    #[error("Error fetching version file: {0}")]
+    StorageError(#[from] GetError),
     #[error("Error parsing version file")]
     ParseError,
+    #[error("Invalid storage configuration: {0}")]
+    StorageConfigError(String),
 }
 
 impl ChromaError for FetchVersionFileError {
     fn code(&self) -> ErrorCodes {
         match self {
-            FetchVersionFileError::S3ReadError(e) => e.code(),
+            FetchVersionFileError::StorageError(e) => e.code(),
             FetchVersionFileError::ParseError => ErrorCodes::Internal,
+            FetchVersionFileError::StorageConfigError(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -62,17 +76,134 @@ impl Operator<FetchVersionFileInput, FetchVersionFileOutput> for FetchVersionFil
         &self,
         input: &FetchVersionFileInput,
     ) -> Result<FetchVersionFileOutput, FetchVersionFileError> {
-        let file_contents = match input.storage.get_parallel(&input.version_file_path).await {
-            Ok(contents) => contents,
-            Err(e) => return Err(FetchVersionFileError::S3ReadError(e)),
+        tracing::info!(
+            path = %input.version_file_path,
+            "Starting to fetch version file"
+        );
+
+        let content = input
+            .storage
+            .get(&input.version_file_path)
+            .await
+            .map_err(|e| {
+                tracing::error!(
+                    error = ?e,
+                    path = %input.version_file_path,
+                    "Failed to fetch version file"
+                );
+                FetchVersionFileError::StorageError(e)
+            })?;
+
+        tracing::info!(
+            path = %input.version_file_path,
+            size = content.len(),
+            "Successfully fetched version file"
+        );
+
+        let output = FetchVersionFileOutput::new(content);
+        tracing::info!(
+            path = %input.version_file_path,
+            output_size = output.version_file_content().len(),
+            "Created FetchVersionFileOutput"
+        );
+
+        Ok(output)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chroma_storage::config::{
+        ObjectStoreBucketConfig, ObjectStoreConfig, ObjectStoreType, StorageConfig,
+    };
+    use chroma_storage::from_config;
+
+    async fn setup_test_storage() -> Storage {
+        // Create storage config for Minio
+        let storage_config = StorageConfig::ObjectStore(ObjectStoreConfig {
+            bucket: ObjectStoreBucketConfig {
+                name: "chroma-storage".to_string(),
+                r#type: ObjectStoreType::Minio,
+            },
+            upload_part_size_bytes: 1024 * 1024,
+            download_part_size_bytes: 1024 * 1024,
+            max_concurrent_requests: 10,
+        });
+
+        // Add more detailed logging
+        tracing::info!("Setting up test storage with config: {:?}", storage_config);
+
+        match from_config(&storage_config).await {
+            Ok(storage) => storage,
+            Err(e) => {
+                tracing::error!("Failed to create storage: {:?}", e);
+                panic!(
+                    "Failed to create storage. Is Minio running on localhost:9000? Error: {:?}",
+                    e
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fetch_version_file() {
+        // Initialize tracing subscriber with more verbose output
+        let _subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .with_test_writer()
+            .try_init();
+
+        let storage = setup_test_storage().await;
+        let test_content = vec![1, 2, 3, 4, 5];
+        let test_file_path = "test_version_file.txt";
+
+        // Add more detailed error handling for the put operation
+        match storage
+            .put_bytes(test_file_path, test_content.clone())
+            .await
+        {
+            Ok(_) => tracing::info!("Successfully wrote test file"),
+            Err(e) => {
+                tracing::error!("Failed to write test file: {:?}", e);
+                panic!("Failed to write test file: {:?}", e);
+            }
+        }
+
+        // Create operator and input
+        let operator = FetchVersionFileOperator {};
+        let input = FetchVersionFileInput {
+            version_file_path: test_file_path.to_string(),
+            storage: storage.clone(),
         };
-        // TODO(Sanket): Convert bytes to proto.
-        let data = match String::from_utf8(file_contents.to_vec()) {
-            Ok(data) => data,
-            Err(_) => return Err(FetchVersionFileError::ParseError),
+
+        // Run the operator
+        let result = operator.run(&input).await.expect("Failed to run operator");
+
+        // Verify the content
+        assert_eq!(result.version_file_content(), &test_content);
+
+        // Cleanup - Note: object_store doesn't have a delete method,
+        // but the test bucket should be cleaned up between test runs
+    }
+
+    #[tokio::test]
+    async fn test_fetch_nonexistent_file() {
+        // Initialize tracing subscriber once at the start of the test
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let storage = setup_test_storage().await;
+        let operator = FetchVersionFileOperator {};
+        let input = FetchVersionFileInput {
+            version_file_path: "nonexistent_file.txt".to_string(),
+            storage,
         };
-        Ok(FetchVersionFileOutput {
-            version_file_content: data,
-        })
+
+        // Run the operator and expect an error
+        let result = operator.run(&input).await;
+        assert!(matches!(
+            result,
+            Err(FetchVersionFileError::StorageError(_))
+        ));
     }
 }

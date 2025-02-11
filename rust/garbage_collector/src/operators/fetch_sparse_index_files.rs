@@ -23,6 +23,7 @@ pub struct FetchSparseIndexFilesInput {
     pub epoch_id: i64,
     pub sysdb_client: SysDb,
     pub versions_to_delete: VersionListForCollection,
+    pub oldest_version_to_keep: i64,
 }
 
 #[derive(Debug)]
@@ -31,7 +32,8 @@ pub struct FetchSparseIndexFilesOutput {
     pub epoch_id: i64,
     pub sysdb_client: SysDb,
     pub versions_to_delete: VersionListForCollection,
-    pub version_to_content: HashMap<i64, Vec<u8>>,
+    pub version_to_content: HashMap<i64, HashMap<String, Vec<u8>>>,
+    pub oldest_version_to_keep: i64,
 }
 
 #[derive(Error, Debug)]
@@ -67,8 +69,24 @@ impl Operator<FetchSparseIndexFilesInput, FetchSparseIndexFilesOutput>
     ) -> Result<FetchSparseIndexFilesOutput, FetchSparseIndexFilesError> {
         let mut version_to_content = HashMap::new();
 
+        tracing::info!(
+            num_versions = input.versions_to_delete.versions.len(),
+            oldest_to_keep = input.oldest_version_to_keep,
+            "Starting to fetch files for versions to delete plus oldest to keep"
+        );
+
+        // Combine versions to delete with the oldest version to keep
+        let mut versions_to_fetch = input.versions_to_delete.versions.clone();
+        versions_to_fetch.push(input.oldest_version_to_keep);
+
+        println!(
+            "Starting to fetch files for {} versions to delete",
+            versions_to_fetch.len()
+        );
+
         // Extract file paths from CollectionVersionFile for the versions we want to delete
-        for version in &input.versions_to_delete.versions {
+        for version in &versions_to_fetch {
+            println!("\n=== Processing version {} ===", version);
             if let Some(version_info) = input
                 .version_file
                 .version_history
@@ -77,32 +95,70 @@ impl Operator<FetchSparseIndexFilesInput, FetchSparseIndexFilesOutput>
             {
                 // Get segment info from the version
                 if let Some(segment_info) = &version_info.segment_info {
-                    for segment_compaction_info in &segment_info.segment_compaction_info {
+                    let mut version_files = HashMap::new();
+                    let mut total_files_fetched = 0;
+                    let mut total_bytes_fetched = 0;
+
+                    for (idx, segment_compaction_info) in
+                        segment_info.segment_compaction_info.iter().enumerate()
+                    {
+                        println!("  Processing Segment {}", idx);
                         // Iterate through file paths for each segment
-                        for file_paths in segment_compaction_info.file_paths.values() {
+                        for (file_type, file_paths) in &segment_compaction_info.file_paths {
+                            println!("    File type: {}", file_type);
+                            // Skip hnsw_index files
+                            if file_type == "hnsw_index" {
+                                println!("    ⚠ Skipping hnsw_index files");
+                                continue;
+                            }
                             // Attempt to fetch each file
                             for file_path in &file_paths.paths {
-                                match self.storage.get(file_path).await {
+                                let prefixed_path = format!("sparse_index/{}", file_path);
+                                match self.storage.get(&prefixed_path).await {
                                     Ok(content) => {
-                                        version_to_content.insert(*version, (*content).to_vec());
+                                        total_files_fetched += 1;
+                                        total_bytes_fetched += content.len();
+                                        println!(
+                                            "      ✓ Fetched: {} ({} bytes)",
+                                            prefixed_path,
+                                            content.len()
+                                        );
+                                        version_files
+                                            .insert(file_path.clone(), (*content).to_vec());
                                     }
                                     Err(e) => {
+                                        println!("      ✗ Failed to fetch: {}", prefixed_path);
                                         return Err(FetchSparseIndexFilesError::S3Error(format!(
-                                            "Failed to fetch file for version {}: {}",
-                                            version, e
+                                            "Failed to fetch file {} for version {}: {}",
+                                            prefixed_path, version, e
                                         )));
                                     }
                                 }
                             }
                         }
                     }
+
+                    // Summary for this version
+                    println!("  === Version {} Summary ===", version);
+                    println!("    Total files fetched: {}", total_files_fetched);
+                    println!("    Total bytes fetched: {} bytes", total_bytes_fetched);
+
+                    // Only insert if we found any files
+                    if !version_files.is_empty() {
+                        version_to_content.insert(*version, version_files);
+                    }
                 } else {
+                    println!("  ✗ No segment info found for version {}", version);
                     return Err(FetchSparseIndexFilesError::FileNotFound(*version));
                 }
             } else {
+                println!("  ✗ Version {} not found in version history", version);
                 return Err(FetchSparseIndexFilesError::FileNotFound(*version));
             }
         }
+
+        println!("\nFetch operation completed successfully");
+        println!("Total versions processed: {}", version_to_content.len());
 
         Ok(FetchSparseIndexFilesOutput {
             version_file: input.version_file.clone(),
@@ -110,6 +166,7 @@ impl Operator<FetchSparseIndexFilesInput, FetchSparseIndexFilesOutput>
             sysdb_client: input.sysdb_client.clone(),
             versions_to_delete: input.versions_to_delete.clone(),
             version_to_content,
+            oldest_version_to_keep: input.oldest_version_to_keep,
         })
     }
 }

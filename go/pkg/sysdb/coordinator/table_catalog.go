@@ -722,11 +722,11 @@ func (tc *Catalog) createFirstVersionFile(ctx context.Context, createCollection 
 	}
 	// Construct the version file name.
 	versionFileName := "0"
-	err := tc.s3Store.PutVersionFile(createCollection.TenantID, createCollection.ID.String(), versionFileName, collectionVersionFilePb)
+	fullFilePath, err := tc.s3Store.PutVersionFile(createCollection.TenantID, createCollection.ID.String(), versionFileName, collectionVersionFilePb)
 	if err != nil {
 		return "", err
 	}
-	return versionFileName, nil
+	return fullFilePath, nil
 }
 
 func (tc *Catalog) CreateCollectionAndSegments(ctx context.Context, createCollection *model.CreateCollection, createSegments []*model.CreateSegment, ts types.Timestamp) (*model.Collection, bool, error) {
@@ -1024,12 +1024,12 @@ func (tc *Catalog) updateVersionFileInS3(ctx context.Context, existingVersionFil
 	// Format of version file name: <version>_<uuid>_flush
 	// The version should be left padded with 0s upto 6 digits.
 	newVersionFileName := fmt.Sprintf("%06d_%s_flush", flushCollectionCompaction.CurrentCollectionVersion+1, uuid.New().String())
-	err := tc.s3Store.PutVersionFile(flushCollectionCompaction.TenantID, flushCollectionCompaction.ID.String(), newVersionFileName, existingVersionFilePb)
+	fullFilePath, err := tc.s3Store.PutVersionFile(flushCollectionCompaction.TenantID, flushCollectionCompaction.ID.String(), newVersionFileName, existingVersionFilePb)
 	if err != nil {
 		return "", err
 	}
 
-	return newVersionFileName, nil
+	return fullFilePath, nil
 }
 
 func (tc *Catalog) FlushCollectionCompaction(ctx context.Context, flushCollectionCompaction *model.FlushCollectionCompaction) (*model.FlushCollectionInfo, error) {
@@ -1383,14 +1383,14 @@ func (tc *Catalog) markVersionForDeletionInSingleCollection(
 			collectionEntry.Version,
 			uuid.New().String(),
 		)
-		err = tc.s3Store.PutVersionFile(tenantID, collectionID, newVersionFileName, versionFilePb)
+		newVerFileFullPath, err := tc.s3Store.PutVersionFile(tenantID, collectionID, newVersionFileName, versionFilePb)
 		if err != nil {
 			return err
 		}
 
 		// Update the version file name in Postgres table as a CAS operation.
 		// TODO(rohit): Investigate if we really need a Tx here.
-		rowsAffected, err := tc.metaDomain.CollectionDb(ctx).UpdateVersionFileName(collectionID, existingVersionFileName, newVersionFileName)
+		rowsAffected, err := tc.metaDomain.CollectionDb(ctx).UpdateVersionFileName(collectionID, existingVersionFileName, newVerFileFullPath)
 		if err != nil {
 			// Delete the newly created version file from S3 since it is not needed.
 			tc.s3Store.DeleteVersionFile(tenantID, collectionID, newVersionFileName)
@@ -1487,13 +1487,13 @@ func (tc *Catalog) DeleteVersionEntriesForCollection(ctx context.Context, tenant
 			collectionEntry.Version,
 			uuid.New().String(),
 		)
-		err = tc.s3Store.PutVersionFile(tenantID, collectionID, newVersionFileName, versionFilePb)
+		newVerFileFullPath, err := tc.s3Store.PutVersionFile(tenantID, collectionID, newVersionFileName, versionFilePb)
 		if err != nil {
 			return err
 		}
 
 		// Update the version file name in Postgres table as a CAS operation
-		rowsAffected, err := tc.metaDomain.CollectionDb(ctx).UpdateVersionFileName(collectionID, existingVersionFileName, newVersionFileName)
+		rowsAffected, err := tc.metaDomain.CollectionDb(ctx).UpdateVersionFileName(collectionID, existingVersionFileName, newVerFileFullPath)
 		if err != nil {
 			// Delete the newly created version file from S3 since it is not needed
 			tc.s3Store.DeleteVersionFile(tenantID, collectionID, newVersionFileName)

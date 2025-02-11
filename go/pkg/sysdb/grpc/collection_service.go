@@ -407,12 +407,20 @@ func (s *Server) ListCollectionsToGc(ctx context.Context, req *coordinatorpb.Lis
 // NOTE about concurrency:
 // This method updates the version file which can concurrently with FlushCollectionCompaction.
 func (s *Server) MarkVersionForDeletion(ctx context.Context, req *coordinatorpb.MarkVersionForDeletionRequest) (*coordinatorpb.MarkVersionForDeletionResponse, error) {
-	return nil, nil
+	res, err := s.coordinator.MarkVersionForDeletion(ctx, req)
+	if err != nil {
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+	return res, nil
 }
 
 // Delete the versions from the version file. Refer to comments in MarkVersionForDeletion.
 // NOTE about concurrency:
 // This method updates the version file which can concurrently with FlushCollectionCompaction.
 func (s *Server) DeleteCollectionVersion(ctx context.Context, req *coordinatorpb.DeleteCollectionVersionRequest) (*coordinatorpb.DeleteCollectionVersionResponse, error) {
-	return nil, nil
+	res, err := s.coordinator.DeleteCollectionVersion(ctx, req)
+	if err != nil {
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+	return res, nil
 }

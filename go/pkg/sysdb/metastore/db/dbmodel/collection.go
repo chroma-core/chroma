@@ -23,9 +23,10 @@ type Collection struct {
 }
 
 type CollectionToGc struct {
-	ID      string `gorm:"id;primaryKey"`
-	Name    string `gorm:"name;not null;index:idx_name,unique;"`
-	Version int32  `gorm:"version;default:0"`
+	ID              string `gorm:"id;primaryKey"`
+	Name            string `gorm:"name;not null;index:idx_name,unique;"`
+	Version         int32  `gorm:"version;default:0"`
+	VersionFileName string `gorm:"version_file_name"`
 }
 
 func (v Collection) TableName() string {

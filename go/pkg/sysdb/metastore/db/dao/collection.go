@@ -52,14 +52,14 @@ func (s *collectionDb) GetCollections(id *string, name *string, tenantID string,
 }
 
 func (s *collectionDb) ListCollectionsToGc() ([]*dbmodel.CollectionToGc, error) {
-	// TODO(Sanket): Read version file path.
 	var collections []*dbmodel.CollectionToGc
 	// Use the read replica for this so as to not overwhelm the writer.
 	// Skip collections that have not been compacted even once.
-	err := s.read_db.Table("collections").Select("id, name, version").Find(&collections).Where("version > 0").Error
+	err := s.read_db.Table("collections").Select("id, name, version, version_file_name").Find(&collections).Where("version > 0").Error
 	if err != nil {
 		return nil, err
 	}
+	log.Info("collections to gc", zap.Any("collections", collections))
 	return collections, nil
 }
 
