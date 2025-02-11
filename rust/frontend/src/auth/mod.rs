@@ -71,7 +71,11 @@ pub struct AuthError(StatusCode);
 
 impl chroma_error::ChromaError for AuthError {
     fn code(&self) -> chroma_error::ErrorCodes {
-        chroma_error::ErrorCodes::PermissionDenied
+        match self.0 {
+            StatusCode::UNAUTHORIZED => chroma_error::ErrorCodes::Unauthenticated,
+            StatusCode::FORBIDDEN => chroma_error::ErrorCodes::PermissionDenied,
+            _ => chroma_error::ErrorCodes::Internal,
+        }
     }
 }
 
