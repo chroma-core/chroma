@@ -12,10 +12,11 @@ use sqlx::{sqlite::SqliteConnectOptions, SqlitePool};
 #[derive(Serialize, Deserialize, Clone)]
 #[pyclass]
 pub struct SqliteDBConfig {
-    // The SQLite database URL
-    pub url: String,
     pub hash_type: MigrationHash,
     pub migration_mode: MigrationMode,
+    // The SQLite database URL
+    // If unspecified, then the database is in memory only
+    pub url: Option<String>,
 }
 
 /// Migration mode for the database
@@ -43,11 +44,16 @@ pub enum MigrationHash {
 #[pymethods]
 impl SqliteDBConfig {
     #[new]
-    pub fn py_new(url: String, hash_type: MigrationHash, migration_mode: MigrationMode) -> Self {
+    #[pyo3(signature = (hash_type, migration_mode, url=None))]
+    pub fn py_new(
+        hash_type: MigrationHash,
+        migration_mode: MigrationMode,
+        url: Option<String>,
+    ) -> Self {
         SqliteDBConfig {
-            url,
             hash_type,
             migration_mode,
+            url,
         }
     }
 }
@@ -63,21 +69,26 @@ impl Configurable<SqliteDBConfig> for SqliteDb {
         registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
         // TODO: copy all other pragmas from python and add basic tests
-        // TODO: make this file path handling more robust
-        let filename = config.url.trim_end_matches('/').to_string() + "/chroma.sqlite3";
-        let options = SqliteConnectOptions::new()
-            .filename(filename)
+        let conn_options = SqliteConnectOptions::new()
             // Due to a bug in the python code, foreign_keys is turned off
             // The python code enabled it in a transaction, however,
             // https://www.sqlite.org/pragma.html states that foreign_keys
             // is a no-op in a transaction. In order to be able to run our migrations
             // we turn it off
             .pragma("foreign_keys", "OFF")
-            .pragma("case_sensitive_like", "ON")
-            .create_if_missing(true);
-        let conn = SqlitePool::connect_with(options)
-            .await
-            .map_err(|e| Box::new(SqliteCreationError::SqlxError(e)) as Box<dyn ChromaError>)?;
+            .pragma("case_sensitive_like", "ON");
+        let conn = if let Some(url) = &config.url {
+            SqlitePoolOptions::new()
+                .connect_with(conn_options.filename(url).create_if_missing(true))
+                .await
+                .map_err(SqliteCreationError::SqlxError)?
+        } else {
+            SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect_with(conn_options.in_memory(true).shared_cache(true))
+                .await
+                .map_err(SqliteCreationError::SqlxError)?
+        };
 
         let db = SqliteDb::new(conn, config.hash_type);
 

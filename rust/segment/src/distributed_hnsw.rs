@@ -394,7 +394,7 @@ pub mod test {
         };
 
         let hnsw_configuration = DistributedHnswParameters::try_from(&segment).unwrap();
-        let config = HnswIndexConfig::new(
+        let config = HnswIndexConfig::new_persistent(
             hnsw_configuration.m,
             hnsw_configuration.construction_ef,
             hnsw_configuration.search_ef,
@@ -409,7 +409,10 @@ pub mod test {
         assert_eq!(config.ef_construction, default_hnsw_params.construction_ef);
         assert_eq!(config.ef_search, default_hnsw_params.search_ef);
         assert_eq!(config.random_seed, 0);
-        assert_eq!(config.persist_path, persist_path.to_str().unwrap());
+        assert_eq!(
+            config.persist_path,
+            Some(persist_path.to_str().unwrap().to_string())
+        );
 
         // Try partial metadata
         let mut metadata = HashMap::new();
@@ -425,7 +428,7 @@ pub mod test {
         };
 
         let hnsw_params = DistributedHnswParameters::try_from(&segment).unwrap();
-        let config = HnswIndexConfig::new(
+        let config = HnswIndexConfig::new_persistent(
             hnsw_params.m,
             hnsw_params.construction_ef,
             hnsw_params.search_ef,
@@ -438,6 +441,9 @@ pub mod test {
         assert_eq!(config.ef_construction, default_hnsw_params.construction_ef);
         assert_eq!(config.ef_search, default_hnsw_params.search_ef);
         assert_eq!(config.random_seed, 0);
-        assert_eq!(config.persist_path, persist_path.to_str().unwrap());
+        assert_eq!(
+            config.persist_path,
+            Some(persist_path.to_str().unwrap().to_string())
+        );
     }
 }

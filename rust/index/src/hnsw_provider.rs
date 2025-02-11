@@ -386,13 +386,17 @@ impl HnswIndexProvider {
 
         let index_config = IndexConfig::new(dimensionality, distance_function);
 
-        let hnsw_config =
-            match HnswIndexConfig::new(m, ef_construction, ef_search, &index_storage_path) {
-                Ok(hnsw_config) => hnsw_config,
-                Err(e) => {
-                    return Err(Box::new(HnswIndexProviderCreateError::HnswConfigError(*e)));
-                }
-            };
+        let hnsw_config = match HnswIndexConfig::new_persistent(
+            m,
+            ef_construction,
+            ef_search,
+            &index_storage_path,
+        ) {
+            Ok(hnsw_config) => hnsw_config,
+            Err(e) => {
+                return Err(Box::new(HnswIndexProviderCreateError::HnswConfigError(*e)));
+            }
+        };
 
         // HnswIndex init is not thread safe. We should not call it from multiple threads
         let index = HnswIndex::init(&index_config, Some(&hnsw_config), id)

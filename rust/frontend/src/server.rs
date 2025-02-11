@@ -1,5 +1,6 @@
 use axum::{
     extract::{DefaultBodyLimit, Path, Query, State},
+    http::header::HeaderMap,
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -32,6 +33,7 @@ use uuid::Uuid;
 
 use crate::{
     ac::AdmissionControlledService,
+    auth::{AuthenticateAndAuthorize, AuthzAction, AuthzResource},
     frontend::Frontend,
     tower_tracing::add_tracing_middleware,
     types::errors::{ErrorResponse, ServerError, ValidationError},
@@ -116,10 +118,16 @@ pub(crate) struct FrontendServer {
     scorecard_enabled: Arc<AtomicBool>,
     scorecard: Arc<Scorecard<'static>>,
     metrics: Arc<Metrics>,
+    auth: Arc<dyn AuthenticateAndAuthorize>,
 }
 
 impl FrontendServer {
-    pub fn new(config: FrontendConfig, frontend: Frontend, rules: Vec<Rule>) -> FrontendServer {
+    pub fn new(
+        config: FrontendConfig,
+        frontend: Frontend,
+        rules: Vec<Rule>,
+        auth: Arc<dyn AuthenticateAndAuthorize>,
+    ) -> FrontendServer {
         // NOTE(rescrv):  Assume statically no more than 128 threads because we won't deploy on
         // hardware with that many threads anytime soon for frontends, if ever.
         let scorecard_enabled = Arc::new(AtomicBool::new(config.scorecard_enabled));
@@ -132,6 +140,7 @@ impl FrontendServer {
             scorecard_enabled,
             scorecard,
             metrics,
+            auth,
         }
     }
 
@@ -223,6 +232,20 @@ impl FrontendServer {
     }
 }
 
+impl FrontendServer {
+    async fn authenticate_and_authorize(
+        &self,
+        headers: &HeaderMap,
+        action: AuthzAction,
+        resource: AuthzResource,
+    ) -> Result<(), ServerError> {
+        Ok(self
+            .auth
+            .authenticate_and_authorize(headers, action, resource)
+            .await?)
+    }
+}
+
 ////////////////////////// Method Handlers //////////////////////////
 // These handlers simply proxy the call and the relevant inputs into
 // the appropriate method on the `FrontendServer` struct.
@@ -277,11 +300,23 @@ async fn get_user_identity(State(server): State<FrontendServer>) -> Json<GetUser
 }
 
 async fn create_tenant(
+    headers: HeaderMap,
     State(mut server): State<FrontendServer>,
     Json(request): Json<CreateTenantRequest>,
 ) -> Result<Json<CreateTenantResponse>, ServerError> {
     server.metrics.create_tenant.add(1, &[]);
     tracing::info!("Creating tenant [{}]", request.name);
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::CreateTenant,
+            AuthzResource {
+                tenant: Some(request.name.clone()),
+                database: None,
+                collection: None,
+            },
+        )
+        .await?;
     Ok(Json(server.frontend.create_tenant(request).await?))
 }
 
@@ -301,12 +336,24 @@ struct CreateDatabasePayload {
 }
 
 async fn create_database(
+    headers: HeaderMap,
     Path(tenant_id): Path<String>,
     State(mut server): State<FrontendServer>,
     Json(CreateDatabasePayload { name }): Json<CreateDatabasePayload>,
 ) -> Result<Json<CreateDatabaseResponse>, ServerError> {
     server.metrics.create_database.add(1, &[]);
     tracing::info!("Creating database [{}] for tenant [{}]", name, tenant_id);
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::CreateDatabase,
+            AuthzResource {
+                tenant: Some(tenant_id.clone()),
+                database: Some(name.clone()),
+                collection: None,
+            },
+        )
+        .await?;
     let _guard = server.scorecard_request(&[
         "op:create_database",
         format!("tenant:{}", tenant_id).as_str(),
@@ -326,12 +373,24 @@ struct ListDatabasesPayload {
 }
 
 async fn list_databases(
+    headers: HeaderMap,
     Path(tenant_id): Path<String>,
     State(mut server): State<FrontendServer>,
     Json(ListDatabasesPayload { limit, offset }): Json<ListDatabasesPayload>,
 ) -> Result<Json<ListDatabasesResponse>, ServerError> {
     server.metrics.list_databases.add(1, &[]);
     tracing::info!("Listing database for tenant [{}]", tenant_id);
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::ListDatabases,
+            AuthzResource {
+                tenant: Some(tenant_id.clone()),
+                database: None,
+                collection: None,
+            },
+        )
+        .await?;
     let _guard = server.scorecard_request(&[
         "op:list_databases",
         format!("tenant:{}", tenant_id).as_str(),
@@ -342,6 +401,7 @@ async fn list_databases(
 }
 
 async fn get_database(
+    headers: HeaderMap,
     Path((tenant_id, database_name)): Path<(String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<GetDatabaseResponse>, ServerError> {
@@ -351,6 +411,17 @@ async fn get_database(
         database_name,
         tenant_id
     );
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::GetDatabase,
+            AuthzResource {
+                tenant: Some(tenant_id.clone()),
+                database: Some(database_name.clone()),
+                collection: None,
+            },
+        )
+        .await?;
     let _guard =
         server.scorecard_request(&["op:get_database", format!("tenant:{}", tenant_id).as_str()]);
     let request = GetDatabaseRequest::try_new(tenant_id, database_name)?;
@@ -359,6 +430,7 @@ async fn get_database(
 }
 
 async fn delete_database(
+    headers: HeaderMap,
     Path((tenant_id, database_name)): Path<(String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<DeleteDatabaseResponse>, ServerError> {
@@ -368,6 +440,17 @@ async fn delete_database(
         database_name,
         tenant_id
     );
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::DeleteDatabase,
+            AuthzResource {
+                tenant: Some(tenant_id.clone()),
+                database: Some(database_name.clone()),
+                collection: None,
+            },
+        )
+        .await?;
     let _guard = server.scorecard_request(&[
         "op:delete_database",
         format!("tenant:{}", tenant_id).as_str(),
@@ -384,6 +467,7 @@ struct ListCollectionsParams {
 }
 
 async fn list_collections(
+    headers: HeaderMap,
     Path((tenant_id, database_name)): Path<(String, String)>,
     Query(ListCollectionsParams { limit, offset }): Query<ListCollectionsParams>,
     State(mut server): State<FrontendServer>,
@@ -396,6 +480,17 @@ async fn list_collections(
         limit,
         offset
     );
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::ListCollections,
+            AuthzResource {
+                tenant: Some(tenant_id.clone()),
+                database: Some(database_name.clone()),
+                collection: None,
+            },
+        )
+        .await?;
     let _guard = server.scorecard_request(&[
         "op:list_collections",
         format!("tenant:{}", tenant_id).as_str(),
@@ -431,12 +526,24 @@ pub struct CreateCollectionPayload {
 }
 
 async fn create_collection(
+    headers: HeaderMap,
     Path((tenant_id, database_name)): Path<(String, String)>,
     State(mut server): State<FrontendServer>,
     Json(payload): Json<CreateCollectionPayload>,
 ) -> Result<Json<Collection>, ServerError> {
     server.metrics.create_collection.add(1, &[]);
     tracing::info!("Creating collection in database [{database_name}] for tenant [{tenant_id}]");
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::CreateCollection,
+            AuthzResource {
+                tenant: Some(tenant_id.clone()),
+                database: Some(database_name.clone()),
+                collection: Some(payload.name.clone()),
+            },
+        )
+        .await?;
     let _guard = server.scorecard_request(&[
         "op:create_collection",
         format!("tenant:{}", tenant_id).as_str(),
@@ -476,12 +583,24 @@ pub struct UpdateCollectionPayload {
 }
 
 async fn update_collection(
+    headers: HeaderMap,
     Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
     Json(payload): Json<UpdateCollectionPayload>,
 ) -> Result<Json<UpdateCollectionResponse>, ServerError> {
     server.metrics.update_collection.add(1, &[]);
     tracing::info!("Updating collection [{collection_id}] in database [{database_name}] for tenant [{tenant_id}]");
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::UpdateCollection,
+            AuthzResource {
+                tenant: Some(tenant_id.clone()),
+                database: Some(database_name.clone()),
+                collection: Some(collection_id.clone()),
+            },
+        )
+        .await?;
     let _guard = server.scorecard_request(&[
         "op:update_collection",
         format!("tenant:{}", tenant_id).as_str(),
@@ -528,11 +647,23 @@ pub struct AddCollectionRecordsPayload {
 }
 
 async fn collection_add(
+    headers: HeaderMap,
     Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
     Json(payload): Json<AddCollectionRecordsPayload>,
 ) -> Result<Json<AddCollectionRecordsResponse>, ServerError> {
     server.metrics.collection_add.add(1, &[]);
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::Add,
+            AuthzResource {
+                tenant: Some(tenant_id.clone()),
+                database: Some(database_name.clone()),
+                collection: Some(collection_id.clone()),
+            },
+        )
+        .await?;
     let _guard = server.scorecard_request(&[
         "op:write",
         format!("tenant:{}", tenant_id).as_str(),
@@ -577,11 +708,23 @@ pub struct UpdateCollectionRecordsPayload {
 }
 
 async fn collection_update(
+    headers: HeaderMap,
     Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
     Json(payload): Json<UpdateCollectionRecordsPayload>,
 ) -> Result<Json<UpdateCollectionRecordsResponse>, ServerError> {
     server.metrics.collection_update.add(1, &[]);
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::Update,
+            AuthzResource {
+                tenant: Some(tenant_id.clone()),
+                database: Some(database_name.clone()),
+                collection: Some(collection_id.clone()),
+            },
+        )
+        .await?;
     let collection_id =
         CollectionUuid(Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?);
     let _guard = server.scorecard_request(&[
@@ -624,11 +767,23 @@ pub struct UpsertCollectionRecordsPayload {
 }
 
 async fn collection_upsert(
+    headers: HeaderMap,
     Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
     Json(payload): Json<UpsertCollectionRecordsPayload>,
 ) -> Result<Json<UpsertCollectionRecordsResponse>, ServerError> {
     server.metrics.collection_upsert.add(1, &[]);
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::Update,
+            AuthzResource {
+                tenant: Some(tenant_id.clone()),
+                database: Some(database_name.clone()),
+                collection: Some(collection_id.clone()),
+            },
+        )
+        .await?;
     let collection_id =
         CollectionUuid(Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?);
     let _guard = server.scorecard_request(&[
@@ -669,11 +824,23 @@ pub struct DeleteCollectionRecordsPayload {
 }
 
 async fn collection_delete(
+    headers: HeaderMap,
     Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
     Json(payload): Json<DeleteCollectionRecordsPayload>,
 ) -> Result<Json<DeleteCollectionRecordsResponse>, ServerError> {
     server.metrics.collection_delete.add(1, &[]);
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::Delete,
+            AuthzResource {
+                tenant: Some(tenant_id.clone()),
+                database: Some(database_name.clone()),
+                collection: Some(collection_id.clone()),
+            },
+        )
+        .await?;
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
     let _guard = server.scorecard_request(&[
@@ -739,6 +906,7 @@ pub struct GetRequestPayload {
 }
 
 async fn collection_get(
+    headers: HeaderMap,
     Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
     Json(payload): Json<GetRequestPayload>,
@@ -750,6 +918,17 @@ async fn collection_get(
             KeyValue::new("collection_id", collection_id.clone()),
         ],
     );
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::Get,
+            AuthzResource {
+                tenant: Some(tenant_id.clone()),
+                database: Some(database_name.clone()),
+                collection: Some(collection_id.clone()),
+            },
+        )
+        .await?;
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
     tracing::info!(
@@ -786,6 +965,7 @@ pub struct QueryRequestPayload {
 }
 
 async fn collection_query(
+    headers: HeaderMap,
     Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
     Json(payload): Json<QueryRequestPayload>,
@@ -797,6 +977,17 @@ async fn collection_query(
             KeyValue::new("collection_id", collection_id.clone()),
         ],
     );
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::Query,
+            AuthzResource {
+                tenant: Some(tenant_id.clone()),
+                database: Some(database_name.clone()),
+                collection: Some(collection_id.clone()),
+            },
+        )
+        .await?;
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
     tracing::info!(

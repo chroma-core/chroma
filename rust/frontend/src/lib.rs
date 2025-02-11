@@ -1,4 +1,7 @@
+use std::sync::Arc;
+
 mod ac;
+pub mod auth;
 pub mod config;
 #[allow(dead_code)]
 pub mod executor;
@@ -34,7 +37,7 @@ impl ChromaError for ScorecardRuleError {
     }
 }
 
-pub async fn frontend_service_entrypoint() {
+pub async fn frontend_service_entrypoint(auth: Arc<dyn auth::AuthenticateAndAuthorize>) {
     let config = match std::env::var(CONFIG_PATH_ENV_VAR) {
         Ok(config_path) => FrontendConfig::load_from_path(&config_path),
         Err(_) => FrontendConfig::load(),
@@ -63,6 +66,6 @@ pub async fn frontend_service_entrypoint() {
         .map(rule_to_rule)
         .collect::<Result<Vec<_>, ScorecardRuleError>>()
         .expect("error creating scorecard");
-    let server = FrontendServer::new(config, frontend, rules);
+    let server = FrontendServer::new(config, frontend, rules, auth);
     FrontendServer::run(server).await;
 }

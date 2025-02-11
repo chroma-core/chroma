@@ -509,7 +509,6 @@ mod tests {
     use chroma_sqlite::config::SqliteDBConfig;
     use chroma_types::{are_metadatas_close_to_equal, CollectionUuid};
     use proptest::prelude::*;
-    use tempfile::tempdir;
     use tokio::runtime::Runtime;
 
     async fn setup_sqlite_log() -> SqliteLog {
