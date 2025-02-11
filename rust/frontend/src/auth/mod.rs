@@ -3,6 +3,7 @@ use std::future::{ready, Future};
 use std::pin::Pin;
 
 use axum::http::HeaderMap;
+use axum::http::StatusCode;
 
 #[derive(Clone, Copy, Debug)]
 pub enum AuthzAction {
@@ -66,7 +67,7 @@ pub struct AuthzResource {
 
 #[derive(thiserror::Error, Debug)]
 #[error("Permission denied.")]
-pub struct AuthError;
+pub struct AuthError(StatusCode);
 
 impl chroma_error::ChromaError for AuthError {
     fn code(&self) -> chroma_error::ErrorCodes {
