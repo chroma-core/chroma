@@ -159,6 +159,35 @@ def PersistentClient(
     return ClientCreator(tenant=tenant, database=database, settings=settings)
 
 
+def RustClient(
+    path: str | None = None,
+    settings: Optional[Settings] = None,
+    tenant: str = DEFAULT_TENANT,
+    database: str = DEFAULT_DATABASE,
+) -> ClientAPI:
+    """
+    Creates a persistent instance of Chroma that saves to disk. This is useful for
+    testing and development, but not recommended for production use.
+
+    Args:
+        path: The directory to save Chroma's data to. Defaults to "./chroma".
+        tenant: The tenant to use for this client. Defaults to the default tenant.
+        database: The database to use for this client. Defaults to the default database.
+    """
+    if settings is None:
+        settings = Settings()
+
+    settings.chroma_api_impl = "chromadb.api.rust.RustBindingsAPI"
+    settings.is_persistent = path is not None
+    settings.persist_directory = path or ""
+
+    # Make sure paramaters are the correct types -- users can pass anything.
+    tenant = str(tenant)
+    database = str(database)
+
+    return ClientCreator(tenant=tenant, database=database, settings=settings)
+
+
 def HttpClient(
     host: str = "localhost",
     port: int = 8000,
