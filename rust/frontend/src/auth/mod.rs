@@ -4,6 +4,7 @@ use std::pin::Pin;
 
 use axum::http::HeaderMap;
 
+#[derive(Clone, Copy, Debug)]
 pub enum AuthzAction {
     Reset,
     CreateTenant,
@@ -56,6 +57,7 @@ impl Display for AuthzAction {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct AuthzResource {
     pub tenant: Option<String>,
     pub database: Option<String>,
