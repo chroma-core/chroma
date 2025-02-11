@@ -2,7 +2,7 @@ use crate::config::{MigrationHash, MigrationMode, SqliteDBConfig};
 use crate::migrations::{GetSourceMigrationsError, Migration, MigrationDir, MIGRATION_DIRS};
 use chroma_error::{ChromaError, ErrorCodes};
 use futures::TryStreamExt;
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePool};
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use sqlx::{Executor, Row};
 use thiserror::Error;
 
@@ -24,21 +24,26 @@ pub struct SqliteDb {
 impl SqliteDb {
     pub async fn try_from_config(config: &SqliteDBConfig) -> Result<Self, SqliteCreationError> {
         // TODO: copy all other pragmas from python and add basic tests
-        // TODO: make this file path handling more robust
-        let filename = config.url.trim_end_matches('/').to_string() + "/chroma.sqlite3";
-        let options = SqliteConnectOptions::new()
-            .filename(filename)
+        let conn_options = SqliteConnectOptions::new()
             // Due to a bug in the python code, foreign_keys is turned off
             // The python code enabled it in a transaction, however,
             // https://www.sqlite.org/pragma.html states that foreign_keys
             // is a no-op in a transaction. In order to be able to run our migrations
             // we turn it off
             .pragma("foreign_keys", "OFF")
-            .pragma("case_sensitive_like", "ON")
-            .create_if_missing(true);
-        let conn = SqlitePool::connect_with(options)
-            .await
-            .map_err(SqliteCreationError::SqlxError)?;
+            .pragma("case_sensitive_like", "ON");
+        let conn = if let Some(url) = &config.url {
+            SqlitePoolOptions::new()
+                .connect_with(conn_options.filename(url).create_if_missing(true))
+                .await
+                .map_err(SqliteCreationError::SqlxError)?
+        } else {
+            SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect_with(conn_options.in_memory(true).shared_cache(true))
+                .await
+                .map_err(SqliteCreationError::SqlxError)?
+        };
 
         let db = Self {
             conn,
@@ -320,14 +325,14 @@ pub mod test_utils {
         PathBuf::from(migration_dir)
     }
 
-    pub fn new_test_db_path() -> String {
+    pub fn new_test_db_persist_path() -> Option<String> {
         let path = tempdir().unwrap().into_path();
-        path.to_str().unwrap().to_string()
+        Some(path.to_str().unwrap().to_string() + "/chroma.sqlite3")
     }
 
     pub async fn get_new_sqlite_db() -> SqliteDb {
         let config = SqliteDBConfig {
-            url: new_test_db_path(),
+            url: new_test_db_persist_path(),
             hash_type: MigrationHash::MD5,
             migration_mode: MigrationMode::Apply,
         };
@@ -342,7 +347,7 @@ pub mod test_utils {
 mod tests {
     use super::*;
     use crate::config::MigrationHash;
-    use crate::db::test_utils::{new_test_db_path, test_migration_dir};
+    use crate::db::test_utils::{new_test_db_persist_path, test_migration_dir};
     use sqlx::Row;
 
     //////////////////////// SqliteDb ////////////////////////
@@ -350,7 +355,7 @@ mod tests {
     #[tokio::test]
     async fn test_sqlite_db() {
         let config = SqliteDBConfig {
-            url: new_test_db_path(),
+            url: new_test_db_persist_path(),
             hash_type: MigrationHash::MD5,
             migration_mode: MigrationMode::Apply,
         };
@@ -373,7 +378,7 @@ mod tests {
     #[tokio::test]
     async fn test_it_initializes_and_validates() {
         let config: SqliteDBConfig = SqliteDBConfig {
-            url: new_test_db_path(),
+            url: new_test_db_persist_path(),
             hash_type: MigrationHash::MD5,
             migration_mode: MigrationMode::Apply,
         };
@@ -395,7 +400,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_migrations_get_applied_on_new_db() {
-        let test_db_path = new_test_db_path();
+        let test_db_path = new_test_db_persist_path();
         let config = SqliteDBConfig {
             url: test_db_path.clone(),
             hash_type: MigrationHash::MD5,
@@ -430,7 +435,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_migrations_tampered() {
-        let test_db_path = new_test_db_path();
+        let test_db_path = new_test_db_persist_path();
         let config = SqliteDBConfig {
             url: test_db_path.clone(),
             hash_type: MigrationHash::MD5,
@@ -480,7 +485,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_migrations_reorder() {
-        let test_db_path = new_test_db_path();
+        let test_db_path = new_test_db_persist_path();
         let config = SqliteDBConfig {
             url: test_db_path.clone(),
             hash_type: MigrationHash::MD5,
@@ -532,7 +537,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_reset() {
-        let test_db_path = new_test_db_path();
+        let test_db_path = new_test_db_persist_path();
         let config = SqliteDBConfig {
             url: test_db_path.clone(),
             hash_type: MigrationHash::MD5,

@@ -53,12 +53,12 @@ impl PythonBindingsConfig {
 #[pymethods]
 impl Bindings {
     #[new]
-    #[allow(dead_code)]
+    #[pyo3(signature = (allow_reset, sqlite_db_config, hnsw_cache_size, persist_path=None))]
     pub fn py_new(
         allow_reset: bool,
         sqlite_db_config: SqliteDBConfig,
-        persist_path: String,
         hnsw_cache_size: usize,
+        persist_path: Option<String>,
     ) -> ChromaPyResult<Self> {
         // TODO: runtime config
         let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -82,7 +82,7 @@ impl Bindings {
         let cache_config = chroma_cache::CacheConfig::Memory(cache_config);
         let segment_manager_config = LocalSegmentManagerConfig {
             hnsw_index_pool_cache_config: cache_config,
-            persist_path: persist_path.clone(),
+            persist_path,
         };
         // Create the hnsw segment manager.
         let segment_manager = runtime.block_on(LocalSegmentManager::try_from_config(&(

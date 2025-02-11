@@ -1,4 +1,3 @@
-use std::path::Path;
 use std::sync::Arc;
 
 use chroma_cache::{Cache, CacheConfig, CacheError};
@@ -18,7 +17,7 @@ pub struct LocalSegmentManagerConfig {
     // TODO(Sanket): Estimate the max number of FDs that can be kept open and
     // use that as a capacity in the cache.
     pub hnsw_index_pool_cache_config: CacheConfig,
-    pub persist_path: String,
+    pub persist_path: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -27,7 +26,7 @@ pub struct LocalSegmentManager {
     #[allow(dead_code)]
     eviction_callback_task_handle: Option<Arc<tokio::task::JoinHandle<()>>>,
     sqlite: SqliteDb,
-    persist_path: String,
+    persist_root: Option<String>,
 }
 
 #[async_trait::async_trait]
@@ -50,7 +49,7 @@ impl Configurable<(LocalSegmentManagerConfig, SqliteDb)> for LocalSegmentManager
             hnsw_index_pool: hnsw_index_pool.into(),
             eviction_callback_task_handle: Some(Arc::new(handle)),
             sqlite: sql_db.clone(),
-            persist_path: config.persist_path.clone(),
+            persist_root: config.persist_path.clone(),
         })
     }
 }
@@ -81,7 +80,6 @@ impl LocalSegmentManager {
         segment: &Segment,
         dimensionality: usize,
     ) -> Result<LocalHnswSegmentReader, LocalSegmentManagerError> {
-        let persist_path = Path::new(&self.persist_path);
         let index_uuid = IndexUuid(segment.id.0);
         match self.hnsw_index_pool.get(&IndexUuid(segment.id.0)).await? {
             Some(hnsw_index) => Ok(LocalHnswSegmentReader::from_index(hnsw_index)),
@@ -89,7 +87,7 @@ impl LocalSegmentManager {
                 let reader = LocalHnswSegmentReader::from_segment(
                     segment,
                     dimensionality,
-                    persist_path,
+                    self.persist_root.clone(),
                     self.sqlite.clone(),
                 )
                 .await?;
@@ -108,7 +106,6 @@ impl LocalSegmentManager {
         segment: &Segment,
         dimensionality: usize,
     ) -> Result<LocalHnswSegmentWriter, LocalSegmentManagerError> {
-        let persist_path = Path::new(&self.persist_path);
         let index_uuid = IndexUuid(segment.id.0);
         match self.hnsw_index_pool.get(&IndexUuid(segment.id.0)).await? {
             Some(hnsw_index) => Ok(LocalHnswSegmentWriter::from_index(hnsw_index)?),
@@ -116,7 +113,7 @@ impl LocalSegmentManager {
                 let writer = LocalHnswSegmentWriter::from_segment(
                     segment,
                     dimensionality,
-                    persist_path,
+                    self.persist_root.clone(),
                     self.sqlite.clone(),
                 )
                 .await?;

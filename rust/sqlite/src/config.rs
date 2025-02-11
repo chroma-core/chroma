@@ -3,10 +3,11 @@ use pyo3::{pyclass, pymethods};
 #[derive(Clone)]
 #[pyclass]
 pub struct SqliteDBConfig {
-    // The SQLite database URL
-    pub url: String,
     pub hash_type: MigrationHash,
     pub migration_mode: MigrationMode,
+    // The SQLite database URL
+    // If unspecified, then the database is in memory only
+    pub url: Option<String>,
 }
 
 /// Migration mode for the database
@@ -34,11 +35,16 @@ pub enum MigrationHash {
 #[pymethods]
 impl SqliteDBConfig {
     #[new]
-    pub fn py_new(url: String, hash_type: MigrationHash, migration_mode: MigrationMode) -> Self {
+    #[pyo3(signature = (hash_type, migration_mode, url=None))]
+    pub fn py_new(
+        hash_type: MigrationHash,
+        migration_mode: MigrationMode,
+        url: Option<String>,
+    ) -> Self {
         SqliteDBConfig {
-            url,
             hash_type,
             migration_mode,
+            url,
         }
     }
 }
