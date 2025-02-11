@@ -2,8 +2,6 @@ import {
   expect,
   test,
   describe,
-  beforeAll,
-  afterAll,
   beforeEach,
 } from "@jest/globals";
 import { DOCUMENTS, EMBEDDINGS, IDS } from "./data";
@@ -11,10 +9,9 @@ import { METADATAS } from "./data";
 import { IncludeEnum } from "../src/types";
 import { OpenAIEmbeddingFunction } from "../src/embeddings/OpenAIEmbeddingFunction";
 import { CohereEmbeddingFunction } from "../src/embeddings/CohereEmbeddingFunction";
-import { OllamaEmbeddingFunction } from "../src/embeddings/OllamaEmbeddingFunction";
 import { VoyageAIEmbeddingFunction } from "../src/embeddings/VoyageAIEmbeddingFunction";
-import { InvalidCollectionError } from "../src/Errors";
 import { ChromaClient } from "../src/ChromaClient";
+import { ChromaNotFoundError } from "../src/Errors";
 
 describe("add collections", () => {
   // connects to the unauthenticated chroma instance started in
@@ -188,7 +185,7 @@ describe("add collections", () => {
     await client.deleteCollection({ name: "test" });
     await expect(async () => {
       await collection.add({ ids: IDS, embeddings: EMBEDDINGS });
-    }).rejects.toThrow(InvalidCollectionError);
+    }).rejects.toThrow(ChromaNotFoundError);
   });
 
   test("It should return an error when inserting duplicate IDs in the same batch", async () => {

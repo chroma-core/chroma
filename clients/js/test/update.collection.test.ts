@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, test } from "@jest/globals";
 import { IncludeEnum } from "../src/types";
 import { IDS, DOCUMENTS, EMBEDDINGS, METADATAS } from "./data";
-import { InvalidCollectionError } from "../src/Errors";
 import { ChromaClient } from "../src/ChromaClient";
+import { ChromaNotFoundError } from "../src/Errors";
 
 describe("update records", () => {
   // connects to the unauthenticated chroma instance started in
@@ -68,7 +68,7 @@ describe("update records", () => {
         metadatas: [{ test: "meta1" }],
         documents: ["doc1"],
       });
-    }).rejects.toThrow(InvalidCollectionError);
+    }).rejects.toThrow(ChromaNotFoundError);
   });
 
   test("should support updating records without a document or an embedding", async () => {
