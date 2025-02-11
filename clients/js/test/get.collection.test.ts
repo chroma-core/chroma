@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from "@jest/globals";
 import { DOCUMENTS, EMBEDDINGS, IDS, METADATAS } from "./data";
-import { InvalidArgumentError, InvalidCollectionError } from "../src/Errors";
+import { ChromaNotFoundError, InvalidArgumentError } from "../src/Errors";
 import { DefaultEmbeddingFunction } from "../src/embeddings/DefaultEmbeddingFunction";
 import { ChromaClient } from "../src/ChromaClient";
 
@@ -109,7 +109,7 @@ describe("get collections", () => {
     await client.deleteCollection({ name: "test" });
     await expect(async () => {
       await collection.get({ ids: IDS });
-    }).rejects.toThrow(InvalidCollectionError);
+    }).rejects.toThrow(ChromaNotFoundError);
   });
 
   test("it should throw an error if the collection does not exist", async () => {
