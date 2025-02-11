@@ -1,8 +1,6 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
-
+use super::config::LocalExecutorConfig;
+use async_trait::async_trait;
+use chroma_config::{registry::Registry, Configurable};
 use chroma_distance::normalize;
 use chroma_error::ChromaError;
 use chroma_log::{BackfillMessage, LocalCompactionManager};
@@ -18,6 +16,10 @@ use chroma_types::{
     },
     plan::{Count, Get, Knn},
     CollectionAndSegments, CollectionUuid, ExecutorError, HnswSpace, SingleNodeHnswParameters,
+};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
 };
 
 #[derive(Clone, Debug)]
@@ -260,5 +262,22 @@ impl LocalExecutor {
     pub async fn reset(&mut self) -> Result<(), Box<dyn ChromaError>> {
         self.hnsw_manager.reset().await.map_err(|err| err.boxed())?;
         Ok(())
+    }
+}
+
+#[async_trait]
+impl Configurable<LocalExecutorConfig> for LocalExecutor {
+    async fn try_from_config(
+        _config: &LocalExecutorConfig,
+        registry: &Registry,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        let hnsw_manager = registry
+            .get::<LocalSegmentManager>()
+            .map_err(|err| err.boxed())?;
+        let sqlite_db = registry.get::<SqliteDb>().map_err(|err| err.boxed())?;
+        let compactor_handle = registry
+            .get::<ComponentHandle<LocalCompactionManager>>()
+            .map_err(|err| err.boxed())?;
+        Ok(Self::new(hnsw_manager, sqlite_db, compactor_handle.clone()))
     }
 }

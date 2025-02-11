@@ -16,8 +16,8 @@ use crate::compactor::types::CompactionJob;
 
 pub(crate) struct Scheduler {
     my_member_id: String,
-    log: Box<Log>,
-    sysdb: Box<SysDb>,
+    log: Log,
+    sysdb: SysDb,
     policy: Box<dyn SchedulerPolicy>,
     job_queue: Vec<CompactionJob>,
     max_concurrent_jobs: usize,
@@ -37,8 +37,8 @@ impl Scheduler {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         my_ip: String,
-        log: Box<Log>,
-        sysdb: Box<SysDb>,
+        log: Log,
+        sysdb: SysDb,
         policy: Box<dyn SchedulerPolicy>,
         max_concurrent_jobs: usize,
         min_compaction_size: usize,
@@ -290,8 +290,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_scheduler() {
-        let mut log = Box::new(Log::InMemory(InMemoryLog::new()));
-        let in_memory_log = match *log {
+        let mut log = Log::InMemory(InMemoryLog::new());
+        let in_memory_log = match log {
             Log::InMemory(ref mut in_memory_log) => in_memory_log,
             _ => panic!("Invalid log type"),
         };
@@ -340,7 +340,7 @@ mod tests {
             },
         );
 
-        let mut sysdb = Box::new(SysDb::Test(TestSysDb::new()));
+        let mut sysdb = SysDb::Test(TestSysDb::new());
 
         let tenant_1 = "tenant_1".to_string();
         let collection_1 = Collection {
@@ -369,7 +369,7 @@ mod tests {
             version: 0,
             total_records_post_compaction: 0,
         };
-        match *sysdb {
+        match sysdb {
             SysDb::Test(ref mut sysdb) => {
                 sysdb.add_collection(collection_1);
                 sysdb.add_collection(collection_2);
@@ -423,7 +423,7 @@ mod tests {
         assert_eq!(jobs[0].collection_id, collection_uuid_1,);
 
         // Add last compaction time for tenant_2
-        match *sysdb {
+        match sysdb {
             SysDb::Test(ref mut sysdb) => {
                 let last_compaction_time_2 = 1;
                 sysdb.add_tenant_last_compaction_time(tenant_2, last_compaction_time_2);
@@ -494,8 +494,8 @@ mod tests {
         expected = "offset in sysdb is less than offset in log, this should not happen!"
     )]
     async fn test_scheduler_panic() {
-        let mut log = Box::new(Log::InMemory(InMemoryLog::new()));
-        let in_memory_log = match *log {
+        let mut log = Log::InMemory(InMemoryLog::new());
+        let in_memory_log = match log {
             Log::InMemory(ref mut in_memory_log) => in_memory_log,
             _ => panic!("Invalid log type"),
         };
@@ -580,7 +580,7 @@ mod tests {
         );
         let _ = log.update_collection_log_offset(collection_uuid_1, 2).await;
 
-        let mut sysdb = Box::new(SysDb::Test(TestSysDb::new()));
+        let mut sysdb = SysDb::Test(TestSysDb::new());
 
         let tenant_1 = "tenant_1".to_string();
         let collection_1 = Collection {
@@ -596,7 +596,7 @@ mod tests {
             total_records_post_compaction: 0,
         };
 
-        match *sysdb {
+        match sysdb {
             SysDb::Test(ref mut sysdb) => {
                 sysdb.add_collection(collection_1);
                 let last_compaction_time_1 = 2;

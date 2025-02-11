@@ -2,7 +2,7 @@ use super::{
     config::{AssignmentPolicyConfig, HasherType},
     rendezvous_hash::{AssignmentError, Hasher, Murmur3Hasher},
 };
-use crate::Configurable;
+use crate::{registry::Registry, Configurable};
 use async_trait::async_trait;
 use chroma_error::ChromaError;
 use std::fmt::Debug;
@@ -71,6 +71,7 @@ impl Default for RendezvousHashingAssignmentPolicy {
 impl Configurable<AssignmentPolicyConfig> for RendezvousHashingAssignmentPolicy {
     async fn try_from_config(
         config: &AssignmentPolicyConfig,
+        _registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let AssignmentPolicyConfig::RendezvousHashing(assignment_policy_config) = config;
         let hasher = match assignment_policy_config.hasher {

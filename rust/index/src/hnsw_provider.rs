@@ -6,6 +6,7 @@ use super::{HnswIndex, HnswIndexConfig, Index, IndexConfig, IndexUuid};
 use async_trait::async_trait;
 use chroma_cache::AysncPartitionedMutex;
 use chroma_cache::{Cache, Weighted};
+use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_distance::DistanceFunction;
 use chroma_error::ChromaError;
@@ -73,6 +74,7 @@ impl Debug for HnswIndexProvider {
 impl Configurable<(HnswProviderConfig, Storage)> for HnswIndexProvider {
     async fn try_from_config(
         config: &(HnswProviderConfig, Storage),
+        _registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let (hnsw_config, storage) = config;
         // TODO(rescrv):  Long-term we should migrate this to the component API.

@@ -15,7 +15,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use chroma_cache::{CacheError, PersistentCache};
-use chroma_config::Configurable;
+use chroma_config::{registry::Registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::Storage;
 use futures::{stream::FuturesUnordered, StreamExt};
@@ -181,6 +181,7 @@ impl ArrowBlockfileProvider {
 impl Configurable<(ArrowBlockfileProviderConfig, Storage)> for ArrowBlockfileProvider {
     async fn try_from_config(
         config: &(ArrowBlockfileProviderConfig, Storage),
+        _registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let (blockfile_config, storage) = config;
         let block_cache = match chroma_cache::from_config_persistent(

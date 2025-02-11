@@ -1,5 +1,9 @@
-use crate::{GrpcSysDb, SysDb};
-use chroma_config::Configurable;
+use crate::{sqlite::SqliteSysDb, GrpcSysDb, SysDb};
+use async_trait::async_trait;
+use chroma_config::{
+    registry::{Injectable, Registry},
+    Configurable,
+};
 use chroma_error::ChromaError;
 use serde::{Deserialize, Serialize};
 
@@ -53,11 +57,20 @@ impl Default for GrpcSysDbConfig {
     }
 }
 
+//////////////////////// SQLITE SYSDB CONFIG ////////////////////////
+
+#[derive(Deserialize, Debug, Clone, Serialize)]
+pub struct SqliteSysDbConfig {
+    pub log_topic_namespace: String,
+    pub log_tenant: String,
+}
+
 //////////////////////// SYSDB CONFIG ////////////////////////
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
 pub enum SysDbConfig {
     Grpc(GrpcSysDbConfig),
+    Sqlite(SqliteSysDbConfig),
 }
 
 impl Default for SysDbConfig {
@@ -66,10 +79,24 @@ impl Default for SysDbConfig {
     }
 }
 
-pub async fn from_config(config: &SysDbConfig) -> Result<Box<SysDb>, Box<dyn ChromaError>> {
-    match &config {
-        SysDbConfig::Grpc(_) => Ok(Box::new(SysDb::Grpc(
-            GrpcSysDb::try_from_config(config).await?,
-        ))),
+impl Injectable for SysDb {}
+
+#[async_trait]
+impl Configurable<SysDbConfig> for SysDb {
+    async fn try_from_config(
+        config: &SysDbConfig,
+        registry: &Registry,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        let out = match &config {
+            SysDbConfig::Grpc(grpc_config) => {
+                SysDb::Grpc(GrpcSysDb::try_from_config(grpc_config, registry).await?)
+            }
+            SysDbConfig::Sqlite(sqlite_config) => {
+                SysDb::Sqlite(SqliteSysDb::try_from_config(sqlite_config, registry).await?)
+            }
+        };
+
+        registry.register(out.clone());
+        Ok(out)
     }
 }

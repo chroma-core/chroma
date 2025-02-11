@@ -3,10 +3,8 @@ use super::{client_manager::ClientManager, config};
 use async_trait::async_trait;
 use backon::ExponentialBuilder;
 use backon::Retryable;
-use chroma_config::{
-    assignment::{self, assignment_policy::AssignmentPolicy},
-    Configurable,
-};
+use chroma_config::registry;
+use chroma_config::{assignment::assignment_policy::AssignmentPolicy, Configurable};
 use chroma_error::ChromaError;
 use chroma_memberlist::{
     config::MemberlistProviderConfig,
@@ -47,8 +45,10 @@ pub struct DistributedExecutor {
 impl Configurable<(config::DistributedExecutorConfig, System)> for DistributedExecutor {
     async fn try_from_config(
         (config, system): &(config::DistributedExecutorConfig, System),
+        registry: &registry::Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
-        let assignment_policy = assignment::from_config(&config.assignment).await?;
+        let assignment_policy =
+            Box::<dyn AssignmentPolicy>::try_from_config(&config.assignment, registry).await?;
         let node_name_to_client = NodeNameToClient::default();
         let client_manager = ClientManager::new(
             node_name_to_client.clone(),
@@ -60,8 +60,11 @@ impl Configurable<(config::DistributedExecutorConfig, System)> for DistributedEx
 
         let mut memberlist_provider = match &config.memberlist_provider {
             MemberlistProviderConfig::CustomResource(_memberlist_provider_config) => {
-                CustomResourceMemberlistProvider::try_from_config(&config.memberlist_provider)
-                    .await?
+                CustomResourceMemberlistProvider::try_from_config(
+                    &config.memberlist_provider,
+                    registry,
+                )
+                .await?
             }
         };
         memberlist_provider.subscribe(client_manager_handle.receiver());

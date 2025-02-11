@@ -1,8 +1,8 @@
-use crate::sqlite::SqliteSysDb;
-
-use super::config::SysDbConfig;
 use super::test_sysdb::TestSysDb;
+use crate::sqlite::SqliteSysDb;
+use crate::GrpcSysDbConfig;
 use async_trait::async_trait;
+use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes, TonicError, TonicMissingFieldError};
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
@@ -402,33 +402,31 @@ impl ChromaError for GrpcSysDbError {
 }
 
 #[async_trait]
-impl Configurable<SysDbConfig> for GrpcSysDb {
-    async fn try_from_config(config: &SysDbConfig) -> Result<Self, Box<dyn ChromaError>> {
-        match &config {
-            SysDbConfig::Grpc(my_config) => {
-                let host = &my_config.host;
-                let port = &my_config.port;
-                println!("Connecting to sysdb at {}:{}", host, port);
-                let connection_string = format!("http://{}:{}", host, port);
-                let endpoint = match Endpoint::from_shared(connection_string) {
-                    Ok(endpoint) => endpoint,
-                    Err(e) => {
-                        return Err(Box::new(GrpcSysDbError::FailedToConnect(e)));
-                    }
-                };
-                let endpoint = endpoint
-                    .connect_timeout(Duration::from_millis(my_config.connect_timeout_ms))
-                    .timeout(Duration::from_millis(my_config.request_timeout_ms));
-
-                let channel =
-                    Channel::balance_list((0..my_config.num_channels).map(|_| endpoint.clone()));
-                let channel = ServiceBuilder::new()
-                    .layer(chroma_tracing::GrpcTraceLayer)
-                    .service(channel);
-                let client = SysDbClient::new(channel);
-                Ok(GrpcSysDb { client })
+impl Configurable<GrpcSysDbConfig> for GrpcSysDb {
+    async fn try_from_config(
+        my_config: &GrpcSysDbConfig,
+        _registry: &Registry,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        let host = &my_config.host;
+        let port = &my_config.port;
+        println!("Connecting to sysdb at {}:{}", host, port);
+        let connection_string = format!("http://{}:{}", host, port);
+        let endpoint = match Endpoint::from_shared(connection_string) {
+            Ok(endpoint) => endpoint,
+            Err(e) => {
+                return Err(Box::new(GrpcSysDbError::FailedToConnect(e)));
             }
-        }
+        };
+        let endpoint = endpoint
+            .connect_timeout(Duration::from_millis(my_config.connect_timeout_ms))
+            .timeout(Duration::from_millis(my_config.request_timeout_ms));
+
+        let channel = Channel::balance_list((0..my_config.num_channels).map(|_| endpoint.clone()));
+        let channel = ServiceBuilder::new()
+            .layer(chroma_tracing::GrpcTraceLayer)
+            .service(channel);
+        let client = SysDbClient::new(channel);
+        Ok(GrpcSysDb { client })
     }
 }
 

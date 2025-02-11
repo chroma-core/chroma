@@ -1,9 +1,9 @@
 use std::time::Duration;
 
-use super::{distributed::DistributedExecutor, Executor};
+use super::{distributed::DistributedExecutor, local::LocalExecutor, Executor};
 use async_trait::async_trait;
 use backon::ExponentialBuilder;
-use chroma_config::Configurable;
+use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
 use chroma_system::System;
 use serde::{Deserialize, Serialize};
@@ -29,28 +29,35 @@ pub struct DistributedExecutorConfig {
 }
 
 #[derive(Deserialize, Clone, Serialize)]
+pub struct LocalExecutorConfig {}
+
+#[derive(Deserialize, Clone, Serialize)]
 pub enum ExecutorConfig {
     Distributed(DistributedExecutorConfig),
-    Local,
+    Local(LocalExecutorConfig),
 }
 
 #[async_trait]
 impl Configurable<(ExecutorConfig, System)> for Executor {
     async fn try_from_config(
         (config, system): &(ExecutorConfig, System),
+        registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
         match config {
             ExecutorConfig::Distributed(distributed_config) => {
-                let distributed_executor = DistributedExecutor::try_from_config(&(
-                    distributed_config.clone(),
-                    system.clone(),
-                ))
+                let distributed_executor = DistributedExecutor::try_from_config(
+                    &(distributed_config.clone(), system.clone()),
+                    registry,
+                )
                 .await?;
                 Ok(Executor::Distributed(distributed_executor))
             }
             // TODO(hammadb): WE cannot use this since we cannot inject the sysdb into the local executor
             // use ::new() instead for now
-            ExecutorConfig::Local => unimplemented!(),
+            ExecutorConfig::Local(local_config) => {
+                let local_executor = LocalExecutor::try_from_config(local_config, registry).await?;
+                Ok(Executor::Local(local_executor))
+            }
         }
     }
 }

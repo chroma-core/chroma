@@ -1,5 +1,6 @@
 use super::{scheduler::Scheduler, ChannelError, RequestError, WrappedMessage};
 use async_trait::async_trait;
+use chroma_config::registry::Injectable;
 use core::panic;
 use futures::Stream;
 use parking_lot::Mutex;
@@ -186,6 +187,9 @@ pub struct ComponentHandle<C: Component + Debug> {
     join_handle: Option<ConsumableJoinHandle>,
     sender: ComponentSender<C>,
 }
+
+// Blanket implementation for all components of the Injectable trait
+impl<C> Injectable for ComponentHandle<C> where C: Component {}
 
 // Implemented manually because of https://github.com/rust-lang/rust/issues/26925.
 impl<C: Component> Clone for ComponentHandle<C> {

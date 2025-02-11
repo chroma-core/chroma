@@ -53,7 +53,7 @@ pub async fn sift1m_segments() -> TestDistributedSegment {
 
 pub fn empty_fetch_log(collection_uuid: CollectionUuid) -> FetchLogOperator {
     FetchLogOperator {
-        log_client: Log::InMemory(InMemoryLog::default()).into(),
+        log_client: Log::InMemory(InMemoryLog::default()),
         batch_size: 100,
         start_log_offset_id: 0,
         maximum_fetch_count: Some(0),

@@ -13,7 +13,7 @@ pub struct ComputeUnusedBetweenVersionsOperator {}
 pub struct ComputeUnusedBetweenVersionsInput {
     pub version_file: CollectionVersionFile,
     pub epoch_id: i64,
-    pub sysdb_client: Box<SysDb>,
+    pub sysdb_client: SysDb,
     pub versions_to_delete: VersionListForCollection,
     pub version_to_content: HashMap<i64, Vec<u8>>,
 }
@@ -22,7 +22,7 @@ pub struct ComputeUnusedBetweenVersionsInput {
 pub struct ComputeUnusedBetweenVersionsOutput {
     pub version_file: CollectionVersionFile,
     pub epoch_id: i64,
-    pub sysdb_client: Box<SysDb>,
+    pub sysdb_client: SysDb,
     pub versions_to_delete: VersionListForCollection,
     pub unused_s3_files: HashSet<String>,
 }

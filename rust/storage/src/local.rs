@@ -1,6 +1,7 @@
 use super::config::StorageConfig;
 use super::StorageConfigError;
 use async_trait::async_trait;
+use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use std::sync::Arc;
@@ -51,7 +52,10 @@ impl LocalStorage {
 
 #[async_trait]
 impl Configurable<StorageConfig> for LocalStorage {
-    async fn try_from_config(config: &StorageConfig) -> Result<Self, Box<dyn ChromaError>> {
+    async fn try_from_config(
+        config: &StorageConfig,
+        _registry: &Registry,
+    ) -> Result<Self, Box<dyn ChromaError>> {
         match &config {
             StorageConfig::Local(local_config) => {
                 let storage = LocalStorage::new(&local_config.root);

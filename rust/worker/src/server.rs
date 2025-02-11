@@ -2,10 +2,11 @@ use std::iter::once;
 
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
-use chroma_config::Configurable;
+use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
 use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_log::Log;
+use chroma_storage::Storage;
 use chroma_sysdb::SysDb;
 use chroma_system::{ComponentHandle, Dispatcher, Orchestrator, System};
 use chroma_tracing::util::wrap_span_with_parent_context;
@@ -41,8 +42,8 @@ pub struct WorkerServer {
     // Component dependencies
     dispatcher: Option<ComponentHandle<Dispatcher>>,
     // Service dependencies
-    log: Box<Log>,
-    _sysdb: Box<SysDb>,
+    log: Log,
+    _sysdb: SysDb,
     hnsw_index_provider: HnswIndexProvider,
     blockfile_provider: BlockfileProvider,
     port: u16,
@@ -50,39 +51,23 @@ pub struct WorkerServer {
 
 #[async_trait]
 impl Configurable<QueryServiceConfig> for WorkerServer {
-    async fn try_from_config(config: &QueryServiceConfig) -> Result<Self, Box<dyn ChromaError>> {
-        let sysdb_config = &config.sysdb;
-        let sysdb = match chroma_sysdb::from_config(sysdb_config).await {
-            Ok(sysdb) => sysdb,
-            Err(err) => {
-                tracing::error!("Failed to create sysdb component: {:?}", err);
-                return Err(err);
-            }
-        };
-        let log_config = &config.log;
-        let log = match chroma_log::from_config(log_config).await {
-            Ok(log) => log,
-            Err(err) => {
-                tracing::error!("Failed to create log component: {:?}", err);
-                return Err(err);
-            }
-        };
-        let storage = match chroma_storage::from_config(&config.storage).await {
-            Ok(storage) => storage,
-            Err(err) => {
-                tracing::error!("Failed to create storage component: {:?}", err);
-                return Err(err);
-            }
-        };
-
-        let blockfile_provider = BlockfileProvider::try_from_config(&(
-            config.blockfile_provider.clone(),
-            storage.clone(),
-        ))
+    async fn try_from_config(
+        config: &QueryServiceConfig,
+        registry: &Registry,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        let sysdb = SysDb::try_from_config(&config.sysdb, registry).await?;
+        let log = Log::try_from_config(&config.log, registry).await?;
+        let storage = Storage::try_from_config(&config.storage, registry).await?;
+        let blockfile_provider = BlockfileProvider::try_from_config(
+            &(config.blockfile_provider.clone(), storage.clone()),
+            registry,
+        )
         .await?;
-        let hnsw_index_provider =
-            HnswIndexProvider::try_from_config(&(config.hnsw_provider.clone(), storage.clone()))
-                .await?;
+        let hnsw_index_provider = HnswIndexProvider::try_from_config(
+            &(config.hnsw_provider.clone(), storage.clone()),
+            registry,
+        )
+        .await?;
         Ok(WorkerServer {
             dispatcher: None,
             system: None,
@@ -418,8 +403,8 @@ mod tests {
         let mut server = WorkerServer {
             dispatcher: None,
             system: None,
-            _sysdb: Box::new(SysDb::Test(sysdb)),
-            log: Box::new(Log::InMemory(log)),
+            _sysdb: SysDb::Test(sysdb),
+            log: Log::InMemory(log),
             hnsw_index_provider: test_hnsw_index_provider(),
             blockfile_provider: segments.blockfile_provider,
             port,

@@ -78,7 +78,7 @@ pub struct GarbageCollectorOrchestrator {
     collection_id: CollectionUuid,
     version_file_path: String,
     cutoff_time_hours: u32,
-    sysdb_client: Box<SysDb>,
+    sysdb_client: SysDb,
     dispatcher: ComponentHandle<Dispatcher>,
     // Result Channel
     result_channel: Option<Sender<Result<GarbageCollectorResponse, GarbageCollectorError>>>,
@@ -103,7 +103,7 @@ impl GarbageCollectorOrchestrator {
         collection_id: CollectionUuid,
         version_file_path: String,
         cutoff_time_hours: u32,
-        sysdb_client: Box<SysDb>,
+        sysdb_client: SysDb,
         dispatcher: ComponentHandle<Dispatcher>,
         storage: Storage,
     ) -> Self {
