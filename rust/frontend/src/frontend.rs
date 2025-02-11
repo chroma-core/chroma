@@ -5,7 +5,8 @@ use crate::{
 use backon::Retryable;
 use chroma_config::{registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_log::Log;
+use chroma_log::{LocalCompactionManager, LocalCompactionManagerConfig, Log};
+use chroma_segment::local_segment_manager::LocalSegmentManager;
 use chroma_sqlite::db::SqliteDb;
 use chroma_sysdb::SysDb;
 use chroma_system::System;
@@ -902,13 +903,31 @@ impl Configurable<(FrontendConfig, System)> for Frontend {
         registry: &registry::Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
         // Create sqlitedb if configured
-        if let Some(sqlitedb) = &config.sqlitedb {
-            SqliteDb::try_from_config(sqlitedb, registry).await?;
-        }
+        if let Some(sqlite_conf) = &config.sqlitedb {
+            SqliteDb::try_from_config(sqlite_conf, registry).await?;
+        };
+
+        // Create segment manager if configured
+        if let Some(segment_manager_conf) = &config.segment_manager {
+            LocalSegmentManager::try_from_config(segment_manager_conf, registry).await?;
+        };
 
         let sysdb = SysDb::try_from_config(&config.sysdb, registry).await?;
         let mut log = Log::try_from_config(&config.log, registry).await?;
         let max_batch_size = log.get_max_batch_size().await?;
+
+        // Create compation manager and pass handle to log service if configured
+        if let Log::Sqlite(sqlite_log) = &log {
+            let compaction_manager =
+                LocalCompactionManager::try_from_config(&LocalCompactionManagerConfig {}, registry)
+                    .await?;
+            // TODO: Move this inside LocalCompactionManager::try_from_config, when system is stored in registry
+            let handle = system.start_component(compaction_manager);
+            sqlite_log
+                .init_compactor_handle(handle.clone())
+                .map_err(|e| e.boxed())?;
+            registry.register(handle);
+        }
 
         let collections_with_segments_provider = CollectionsWithSegmentsProvider::try_from_config(
             &config.collections_with_segments_provider.clone(),
@@ -918,6 +937,7 @@ impl Configurable<(FrontendConfig, System)> for Frontend {
 
         let executor =
             Executor::try_from_config(&(config.executor.clone(), system.clone()), registry).await?;
+
         Ok(Frontend::new(
             config.allow_reset,
             sysdb,

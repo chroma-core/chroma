@@ -1,7 +1,7 @@
 use chroma_error::ChromaError;
 use parking_lot::Mutex;
 use std::{
-    any::{Any, TypeId},
+    any::{type_name, Any, TypeId},
     collections::HashMap,
     sync::Arc,
 };
@@ -23,8 +23,8 @@ pub struct Registry {
 
 #[derive(Debug, Error)]
 pub enum RegistryError {
-    #[error("Type not found in the registry")]
-    TypeNotFound,
+    #[error("Type [{0}] not found in the registry")]
+    TypeNotFound(String),
 }
 
 impl ChromaError for RegistryError {
@@ -51,7 +51,7 @@ impl Registry {
             .get(&TypeId::of::<T>())
             .and_then(|boxed| boxed.downcast_ref::<T>())
             .cloned()
-            .ok_or(RegistryError::TypeNotFound)
+            .ok_or(RegistryError::TypeNotFound(type_name::<T>().to_string()))
     }
 }
 

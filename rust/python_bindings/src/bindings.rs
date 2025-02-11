@@ -1,21 +1,18 @@
 use crate::errors::{ChromaPyResult, WrappedPyErr, WrappedSerdeJsonError, WrappedUuidError};
+use chroma_cache::FoyerCacheConfig;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_frontend::{
     executor::config::{ExecutorConfig, LocalExecutorConfig},
     frontend::Frontend,
     get_collection_with_segments_provider::{
-        CacheInvalidationRetryConfig, CollectionsWithSegmentsProvider,
-        CollectionsWithSegmentsProviderConfig,
+        CacheInvalidationRetryConfig, CollectionsWithSegmentsProviderConfig,
     },
     FrontendConfig,
 };
-use chroma_log::{
-    config::{LogConfig, SqliteLogConfig},
-    LocalCompactionManager, Log,
-};
-use chroma_segment::local_segment_manager::{LocalSegmentManager, LocalSegmentManagerConfig};
-use chroma_sqlite::{config::SqliteDBConfig, db::SqliteDb};
-use chroma_sysdb::{sqlite::SqliteSysDb, sysdb::SysDb, SqliteSysDbConfig, SysDbConfig};
+use chroma_log::config::{LogConfig, SqliteLogConfig};
+use chroma_segment::local_segment_manager::LocalSegmentManagerConfig;
+use chroma_sqlite::config::SqliteDBConfig;
+use chroma_sysdb::{SqliteSysDbConfig, SysDbConfig};
 use chroma_system::System;
 use chroma_types::{
     Collection, CollectionMetadataUpdate, CountCollectionsRequest, CountResponse,
@@ -71,6 +68,16 @@ impl Bindings {
 
         //////////////////////////// Frontend Setup ////////////////////////////
 
+        let cache_config = FoyerCacheConfig {
+            capacity: hnsw_cache_size,
+            ..Default::default()
+        };
+        let cache_config = chroma_cache::CacheConfig::Memory(cache_config);
+        let segment_manager_config = LocalSegmentManagerConfig {
+            hnsw_index_pool_cache_config: cache_config,
+            persist_path: persist_path.clone(),
+        };
+
         // TOOD(hammadb): HAMMAD BEFORE MERGING REGISTRY: persist path and hsnw cache size
         // TODO: consume the log configuration from the input python
         let sysdb_config = SysDbConfig::Sqlite(SqliteSysDbConfig {
@@ -94,6 +101,7 @@ impl Bindings {
 
         let frontend_config = FrontendConfig {
             allow_reset,
+            segment_manager: Some(segment_manager_config),
             sqlitedb: Some(sqlite_db_config),
             sysdb: sysdb_config,
             // TODO: Move circuit breaker config to the server config, it has nothing
@@ -110,90 +118,10 @@ impl Bindings {
             // TODO: scorecard should be removed from the frontend config and moved to the server config
             scorecard: vec![],
         };
+
         let frontend = runtime.block_on(async {
             Frontend::try_from_config(&(frontend_config, system), &registry).await
         })?;
-
-        // This set up code is extremely janky, I've left comments
-        // on the parts that need to be cleaned up.
-        // TODO(hammadb): Clean up this code - this is just to unblock us in short term
-        // TODO: clean up this construction
-        // let sqlite_db =
-        //     runtime.block_on(async { SqliteDb::try_from_config(&sqlite_db_config).await })?;
-
-        // let cache_config = FoyerCacheConfig {
-        //     capacity: hnsw_cache_size,
-        //     ..Default::default()
-        // };
-
-        // let cache_config = chroma_cache::CacheConfig::Memory(cache_config);
-        // let segment_manager_config = LocalSegmentManagerConfig {
-        //     hnsw_index_pool_cache_config: cache_config,
-        //     persist_path: persist_path.clone(),
-        // };
-        // // Create the hnsw segment manager.
-        // let segment_manager = runtime.block_on(LocalSegmentManager::try_from_config(&(
-        //     segment_manager_config,
-        //     sqlite_db.clone(),
-        // )))?;
-        // let sqlite_sysdb = SqliteSysDb::new(
-        //     sqlite_db.clone(),
-        //     "default".to_string(),
-        //     "default".to_string(),
-        // );
-        // let sysdb = Box::new(SysDb::Sqlite(sqlite_sysdb));
-        // // TODO: get the log configuration from the config sysdb
-        // let mut log = Box::new(Log::Sqlite(chroma_log::sqlite_log::SqliteLog::new(
-        //     sqlite_db.clone(),
-        //     "default".to_string(),
-        //     "default".to_string(),
-        // )));
-        // let max_batch_size = runtime.block_on(log.get_max_batch_size())?;
-
-        // // Spawn the compaction manager.
-        // let handle = system.start_component(LocalCompactionManager::new(
-        //     log.clone(),
-        //     sqlite_db.clone(),
-        //     segment_manager.clone(),
-        //     sysdb.clone(),
-        // ));
-        // if let Log::Sqlite(sqlite_log) = log.as_ref() {
-        //     sqlite_log.init_compactor_handle(handle.clone())?;
-        // }
-
-        // // TODO: clean up the cache configuration and decide the source of truth owner
-        // // make cache not a no-op
-        // let collection_cache_config = CollectionsWithSegmentsProviderConfig {
-        //     // No retry to sysdb on local chroma
-        //     cache_invalidation_retry_policy: CacheInvalidationRetryConfig::new(0, 0),
-        //     permitted_parallelism: 32,
-        //     cache: chroma_cache::CacheConfig::Nop,
-        // };
-
-        // let collections_cache = runtime.block_on(async {
-        //     CollectionsWithSegmentsProvider::try_from_config(&(
-        //         collection_cache_config,
-        //         sysdb.clone(),
-        //     ))
-        //     .await
-        // })?;
-
-        // // TODO: executor should NOT be exposed to the bindings module. try_from_config should work.
-        // // The reason this works this way right now is because try_from_config cannot share the sqlite_db
-        // // across the downstream components.
-        // let executor = Executor::Local(LocalExecutor::new(
-        //     segment_manager,
-        //     sqlite_db,
-        //     handle.clone(),
-        // ));
-        // let frontend = Frontend::new(
-        //     allow_reset,
-        //     sysdb.clone(),
-        //     collections_cache,
-        //     log,
-        //     executor,
-        //     max_batch_size,
-        // );
 
         Ok(Bindings { runtime, frontend })
     }

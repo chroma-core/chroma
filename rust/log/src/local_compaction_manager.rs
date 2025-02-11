@@ -2,7 +2,7 @@ use std::fmt::{Debug, Formatter};
 
 use crate::Log;
 use async_trait::async_trait;
-use chroma_config::registry::Registry;
+use chroma_config::registry::{Injectable, Registry};
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::local_hnsw::LocalHnswSegmentReaderError;
@@ -23,12 +23,15 @@ use thiserror::Error;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocalCompactionManagerConfig {}
 
+#[derive(Clone)]
 pub struct LocalCompactionManager {
     log: Log,
     sqlite_db: SqliteDb,
     hnsw_segment_manager: LocalSegmentManager,
     sysdb: SysDb,
 }
+
+impl Injectable for LocalCompactionManager {}
 
 #[async_trait]
 impl Configurable<LocalCompactionManagerConfig> for LocalCompactionManager {
@@ -42,12 +45,14 @@ impl Configurable<LocalCompactionManagerConfig> for LocalCompactionManager {
             .get::<LocalSegmentManager>()
             .map_err(|e| e.boxed())?;
         let sysdb = registry.get::<SysDb>().map_err(|e| e.boxed())?;
-        Ok(Self {
+        let res = Self {
             log,
             sqlite_db,
             hnsw_segment_manager,
             sysdb,
-        })
+        };
+        registry.register(res.clone());
+        Ok(res)
     }
 }
 

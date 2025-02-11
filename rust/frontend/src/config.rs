@@ -1,5 +1,6 @@
 use crate::{executor::config::ExecutorConfig, CollectionsWithSegmentsProviderConfig};
 use chroma_log::config::LogConfig;
+use chroma_segment::local_segment_manager::LocalSegmentManagerConfig;
 use chroma_sqlite::config::SqliteDBConfig;
 use chroma_sysdb::SysDbConfig;
 use figment::providers::{Env, Format, Yaml};
@@ -17,6 +18,7 @@ pub struct FrontendConfig {
     #[serde(default)]
     pub allow_reset: bool,
     pub sqlitedb: Option<SqliteDBConfig>,
+    pub segment_manager: Option<LocalSegmentManagerConfig>,
     pub sysdb: SysDbConfig,
     #[serde(default = "CircuitBreakerConfig::default")]
     pub circuit_breaker: CircuitBreakerConfig,
