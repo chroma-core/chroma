@@ -69,7 +69,7 @@ class RustBindingsAPI(ServerAPI):
         persist_path = self._system.settings.require("persist_directory")
         # TODO: How to name this file?
         # TODO: proper path handling
-        sqlite_persist_path = persist_path
+        sqlite_persist_path = persist_path + "/chroma.sqlite3"
         hash_type = self._system.settings.require("migrations_hash_algorithm")
         hash_type_bindings = (
             rust_bindings.MigrationHash.MD5
@@ -83,9 +83,9 @@ class RustBindingsAPI(ServerAPI):
             else rust_bindings.MigrationMode.Validate
         )
         sqlite_config = rust_bindings.SqliteDBConfig(
-            url=sqlite_persist_path,
             hash_type=hash_type_bindings,
             migration_mode=migration_mode_bindings,
+            url=sqlite_persist_path,
         )
 
         self.bindings = rust_bindings.Bindings(

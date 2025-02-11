@@ -73,60 +73,98 @@ impl LocalHnswSegmentReader {
     pub async fn from_segment(
         segment: &Segment,
         dimensionality: usize,
-        persist_path: &Path,
+        persist_root: Option<String>,
         sql_db: SqliteDb,
     ) -> Result<Self, LocalHnswSegmentReaderError> {
-        let index_folder = persist_path.join(segment.id.to_string());
-        if !index_folder.exists() {
-            // Return uninitialized reader.
-            return Err(LocalHnswSegmentReaderError::UninitializedSegment);
-        }
-        let index_folder_str = match index_folder.to_str() {
-            Some(path) => path,
-            None => return Err(LocalHnswSegmentReaderError::PersistPathError),
-        };
-        let pickle_file_path = persist_path
-            .join(segment.id.to_string())
-            .join(METADATA_FILE);
-        if pickle_file_path.exists() {
-            let file = tokio::fs::File::open(pickle_file_path)
-                .await?
-                .into_std()
-                .await;
-            let id_map: IdMap = serde_pickle::from_reader(file, DeOptions::new())?;
-            if !id_map.id_to_label.is_empty() {
-                // Load hnsw index.
+        match persist_root {
+            Some(path_str) => {
+                let path = Path::new(&path_str);
+                let index_folder = path.join(segment.id.to_string());
+                if !index_folder.exists() {
+                    // Return uninitialized reader.
+                    return Err(LocalHnswSegmentReaderError::UninitializedSegment);
+                }
+                let index_folder_str = match index_folder.to_str() {
+                    Some(path) => path,
+                    None => return Err(LocalHnswSegmentReaderError::PersistPathError),
+                };
+                let pickle_file_path = path.join(segment.id.to_string()).join(METADATA_FILE);
+                if pickle_file_path.exists() {
+                    let file = tokio::fs::File::open(pickle_file_path)
+                        .await?
+                        .into_std()
+                        .await;
+                    let id_map: IdMap = serde_pickle::from_reader(file, DeOptions::new())?;
+                    if !id_map.id_to_label.is_empty() {
+                        // Load hnsw index.
+                        let hnsw_configuration = SingleNodeHnswParameters::try_from(segment)?;
+                        let index_config = IndexConfig::new(
+                            dimensionality as i32,
+                            hnsw_configuration.space.into(),
+                        );
+                        let index = HnswIndex::load(
+                            index_folder_str,
+                            &index_config,
+                            chroma_index::IndexUuid(segment.id.0),
+                        )
+                        .map_err(|_| LocalHnswSegmentReaderError::HnswIndexLoadError)?;
+                        // TODO(Sanket): Set allow reset appropriately.
+                        return Ok(Self {
+                            index: LocalHnswIndex {
+                                inner: Arc::new(tokio::sync::RwLock::new(Inner {
+                                    index,
+                                    id_map,
+                                    index_init: true,
+                                    allow_reset: false,
+                                    num_elements_since_last_persist: 0,
+                                    sync_threshold: hnsw_configuration.sync_threshold,
+                                    persist_path: Some(index_folder_str.to_string()),
+                                    sqlite: sql_db,
+                                })),
+                            },
+                        });
+                    } else {
+                        // An empty reader.
+                        return Err(LocalHnswSegmentReaderError::UninitializedSegment);
+                    }
+                }
+                // Return uninitialized reader.
+                Err(LocalHnswSegmentReaderError::UninitializedSegment)
+            }
+            None => {
                 let hnsw_configuration = SingleNodeHnswParameters::try_from(segment)?;
                 let index_config =
                     IndexConfig::new(dimensionality as i32, hnsw_configuration.space.into());
-                let index = HnswIndex::load(
-                    index_folder_str,
+                let hnsw_config = HnswIndexConfig::new_ephemeral(
+                    hnsw_configuration.m,
+                    hnsw_configuration.construction_ef,
+                    hnsw_configuration.search_ef,
+                );
+
+                // TODO(Sanket): HnswIndex init is not thread safe. We should not call it from multiple threads
+                let index = HnswIndex::init(
                     &index_config,
+                    Some(&hnsw_config),
                     chroma_index::IndexUuid(segment.id.0),
                 )
                 .map_err(|_| LocalHnswSegmentReaderError::HnswIndexLoadError)?;
-                // TODO(Sanket): Set allow reset appropriately.
-                return Ok(Self {
+
+                Ok(Self {
                     index: LocalHnswIndex {
                         inner: Arc::new(tokio::sync::RwLock::new(Inner {
                             index,
-                            id_map,
+                            id_map: Default::default(),
                             index_init: true,
                             allow_reset: false,
                             num_elements_since_last_persist: 0,
-                            sync_threshold: hnsw_configuration.sync_threshold,
-                            persist_path: index_folder_str.to_string(),
+                            sync_threshold: usize::MAX,
+                            persist_path: None,
                             sqlite: sql_db,
                         })),
                     },
-                });
-            } else {
-                // An empty reader.
-                return Err(LocalHnswSegmentReaderError::UninitializedSegment);
+                })
             }
         }
-        // Return uninitialized reader.
-        Err(LocalHnswSegmentReaderError::UninitializedSegment)
     }
 
     pub async fn get_embedding_by_offset_id(
@@ -239,7 +277,7 @@ pub struct Inner {
     allow_reset: bool,
     num_elements_since_last_persist: u64,
     sync_threshold: usize,
-    persist_path: String,
+    persist_path: Option<String>,
     sqlite: SqliteDb,
 }
 
@@ -329,89 +367,125 @@ impl LocalHnswSegmentWriter {
         Ok(Self { index: hnsw_index })
     }
 
-    #[allow(dead_code)]
     pub async fn from_segment(
         segment: &Segment,
         dimensionality: usize,
-        persist_path: &Path,
+        persist_root: Option<String>,
         sql_db: SqliteDb,
     ) -> Result<Self, LocalHnswSegmentWriterError> {
-        let index_folder = persist_path.join(segment.id.to_string());
-        if !index_folder.exists() {
-            tokio::fs::create_dir_all(&index_folder).await?;
-        }
-        let index_folder_str = match index_folder.to_str() {
-            Some(path) => path,
-            None => return Err(LocalHnswSegmentWriterError::PersistPathError),
-        };
         let hnsw_configuration = SingleNodeHnswParameters::try_from(segment)?;
-        let pickle_file_path = persist_path
-            .join(segment.id.to_string())
-            .join(METADATA_FILE);
-        if pickle_file_path.exists() {
-            let file = tokio::fs::File::open(pickle_file_path)
-                .await?
-                .into_std()
-                .await;
-            let id_map: IdMap = serde_pickle::from_reader(file, DeOptions::new())?;
-            if !id_map.id_to_label.is_empty() {
-                // Load hnsw index.
+        match persist_root {
+            Some(path_str) => {
+                let path = Path::new(&path_str);
+                let index_folder = path.join(segment.id.to_string());
+                if !index_folder.exists() {
+                    tokio::fs::create_dir_all(&index_folder).await?;
+                }
+                let index_folder_str = match index_folder.to_str() {
+                    Some(path) => path,
+                    None => return Err(LocalHnswSegmentWriterError::PersistPathError),
+                };
+                let pickle_file_path = path.join(segment.id.to_string()).join(METADATA_FILE);
+                if pickle_file_path.exists() {
+                    let file = tokio::fs::File::open(pickle_file_path)
+                        .await?
+                        .into_std()
+                        .await;
+                    let id_map: IdMap = serde_pickle::from_reader(file, DeOptions::new())?;
+                    if !id_map.id_to_label.is_empty() {
+                        // Load hnsw index.
+                        let index_config = IndexConfig::new(
+                            dimensionality as i32,
+                            hnsw_configuration.space.into(),
+                        );
+                        let index = HnswIndex::load(
+                            index_folder_str,
+                            &index_config,
+                            chroma_index::IndexUuid(segment.id.0),
+                        )
+                        .map_err(|_| LocalHnswSegmentWriterError::HnswIndexLoadError)?;
+                        // TODO(Sanket): Set allow reset appropriately.
+                        return Ok(Self {
+                            index: LocalHnswIndex {
+                                inner: Arc::new(tokio::sync::RwLock::new(Inner {
+                                    index,
+                                    id_map,
+                                    index_init: true,
+                                    allow_reset: false,
+                                    num_elements_since_last_persist: 0,
+                                    sync_threshold: hnsw_configuration.sync_threshold,
+                                    persist_path: Some(index_folder_str.to_string()),
+                                    sqlite: sql_db,
+                                })),
+                            },
+                        });
+                    }
+                }
+                // Initialize index.
                 let index_config =
                     IndexConfig::new(dimensionality as i32, hnsw_configuration.space.into());
-                let index = HnswIndex::load(
-                    index_folder_str,
+                let hnsw_config = HnswIndexConfig::new_persistent(
+                    hnsw_configuration.m,
+                    hnsw_configuration.construction_ef,
+                    hnsw_configuration.search_ef,
+                    &index_folder,
+                )?;
+
+                // TODO(Sanket): HnswIndex init is not thread safe. We should not call it from multiple threads
+                let index = HnswIndex::init(
                     &index_config,
+                    Some(&hnsw_config),
                     chroma_index::IndexUuid(segment.id.0),
                 )
-                .map_err(|_| LocalHnswSegmentWriterError::HnswIndexLoadError)?;
-                // TODO(Sanket): Set allow reset appropriately.
-                return Ok(Self {
+                .map_err(|_| LocalHnswSegmentWriterError::HnswIndexInitError)?;
+                // Return uninitialized reader.
+                Ok(Self {
                     index: LocalHnswIndex {
                         inner: Arc::new(tokio::sync::RwLock::new(Inner {
                             index,
-                            id_map,
+                            id_map: IdMap::default(),
                             index_init: true,
                             allow_reset: false,
                             num_elements_since_last_persist: 0,
                             sync_threshold: hnsw_configuration.sync_threshold,
-                            persist_path: index_folder_str.to_string(),
+                            persist_path: Some(index_folder_str.to_string()),
                             sqlite: sql_db,
                         })),
                     },
-                });
+                })
+            }
+            None => {
+                let index_config =
+                    IndexConfig::new(dimensionality as i32, hnsw_configuration.space.into());
+                let hnsw_config = HnswIndexConfig::new_ephemeral(
+                    hnsw_configuration.m,
+                    hnsw_configuration.construction_ef,
+                    hnsw_configuration.search_ef,
+                );
+
+                // TODO(Sanket): HnswIndex init is not thread safe. We should not call it from multiple threads
+                let index = HnswIndex::init(
+                    &index_config,
+                    Some(&hnsw_config),
+                    chroma_index::IndexUuid(segment.id.0),
+                )
+                .map_err(|_| LocalHnswSegmentWriterError::HnswIndexInitError)?;
+                Ok(Self {
+                    index: LocalHnswIndex {
+                        inner: Arc::new(tokio::sync::RwLock::new(Inner {
+                            index,
+                            id_map: Default::default(),
+                            index_init: true,
+                            allow_reset: false,
+                            num_elements_since_last_persist: 0,
+                            sync_threshold: usize::MAX,
+                            persist_path: None,
+                            sqlite: sql_db,
+                        })),
+                    },
+                })
             }
         }
-        // Initialize index.
-        let index_config = IndexConfig::new(dimensionality as i32, hnsw_configuration.space.into());
-        let hnsw_config = HnswIndexConfig::new(
-            hnsw_configuration.m,
-            hnsw_configuration.construction_ef,
-            hnsw_configuration.search_ef,
-            &index_folder,
-        )?;
-
-        // TODO(Sanket): HnswIndex init is not thread safe. We should not call it from multiple threads
-        let index = HnswIndex::init(
-            &index_config,
-            Some(&hnsw_config),
-            chroma_index::IndexUuid(segment.id.0),
-        )
-        .map_err(|_| LocalHnswSegmentWriterError::HnswIndexInitError)?;
-        // Return uninitialized reader.
-        Ok(Self {
-            index: LocalHnswIndex {
-                inner: Arc::new(tokio::sync::RwLock::new(Inner {
-                    index,
-                    id_map: IdMap::default(),
-                    index_init: true,
-                    allow_reset: false,
-                    num_elements_since_last_persist: 0,
-                    sync_threshold: hnsw_configuration.sync_threshold,
-                    persist_path: index_folder_str.to_string(),
-                    sqlite: sql_db,
-                })),
-            },
-        })
     }
 
     // Returns the updated log seq id.
@@ -551,17 +625,19 @@ impl LocalHnswSegmentWriter {
 async fn persist(
     guard: tokio::sync::RwLockWriteGuard<'_, Inner>,
 ) -> Result<tokio::sync::RwLockWriteGuard<'_, Inner>, LocalHnswSegmentWriterError> {
-    // Persist hnsw index.
-    guard
-        .index
-        .save()
-        .map_err(|_| LocalHnswSegmentWriterError::HnswIndexPersistError)?;
-    // Persist id map.
-    let metadata_file_path = Path::new(&guard.persist_path).join(METADATA_FILE);
-    let mut file = tokio::fs::File::create(metadata_file_path)
-        .await?
-        .into_std()
-        .await;
-    serde_pickle::to_writer(&mut file, &guard.id_map, SerOptions::new())?;
+    if let Some(path) = guard.persist_path.as_ref() {
+        // Persist hnsw index.
+        guard
+            .index
+            .save()
+            .map_err(|_| LocalHnswSegmentWriterError::HnswIndexPersistError)?;
+        // Persist id map.
+        let metadata_file_path = Path::new(path).join(METADATA_FILE);
+        let mut file = tokio::fs::File::create(metadata_file_path)
+            .await?
+            .into_std()
+            .await;
+        serde_pickle::to_writer(&mut file, &guard.id_map, SerOptions::new())?;
+    }
     Ok(guard)
 }
