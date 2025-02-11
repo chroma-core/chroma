@@ -160,17 +160,17 @@ def PersistentClient(
 
 
 def RustClient(
-    path: str | None = None,
+    path: Optional[str] = None,
     settings: Optional[Settings] = None,
     tenant: str = DEFAULT_TENANT,
     database: str = DEFAULT_DATABASE,
 ) -> ClientAPI:
     """
-    Creates a persistent instance of Chroma that saves to disk. This is useful for
-    testing and development, but not recommended for production use.
+    Creates an ephemeral or persistance instance of Chroma that saves to disk.
+    This is useful for testing and development, but not recommended for production use.
 
     Args:
-        path: The directory to save Chroma's data to. Defaults to "./chroma".
+        path: An optional directory to save Chroma's data to. The client is ephemeral if a None value is provided. Defaults to None.
         tenant: The tenant to use for this client. Defaults to the default tenant.
         database: The database to use for this client. Defaults to the default database.
     """
