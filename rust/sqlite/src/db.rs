@@ -172,7 +172,34 @@ impl SqliteDb {
             )
         "#;
         sqlx::query(query).execute(&self.conn).await?;
+        // HACK(hammadb) - https://github.com/launchbadge/sqlx/issues/481#issuecomment-2224913791
+        // This is really not great, and ideally we'd write out own pool, like we have
+        // in python, but for now this is the best we can do
+        let lock_table = r#"
+            CREATE TABLE IF NOT EXISTS acquire_write (
+                id INTEGER PRIMARY KEY,
+                lock_status INTEGER NOT NULL
+            )
+        "#;
+        sqlx::query(lock_table).execute(&self.conn).await?;
+        let insert_lock = r#"
+            INSERT INTO acquire_write (lock_status) VALUES (TRUE)
+        "#;
+        sqlx::query(insert_lock).execute(&self.conn).await?;
         Ok(())
+    }
+
+    pub async fn begin_immediate<'tx, C>(&self, tx: C) -> Result<(), sqlx::Error>
+    where
+        C: sqlx::Executor<'tx, Database = sqlx::Sqlite>,
+    {
+        let query = r#"
+            UPDATE acquire_write SET lock_status = TRUE WHERE id = 1
+        "#;
+        match tx.execute(query).await {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e),
+        }
     }
 
     /// Check if the migrations table has been initialized
