@@ -33,7 +33,7 @@ jobs:
           override: true
 
       - name: Build Linux binary
-        run: cargo build --release
+        run: cargo build --bin chroma --release
 
       - name: Rename binary artifact for Linux
         run: mv target/release/chroma ../chroma-linux
@@ -64,7 +64,7 @@ jobs:
           override: true
 
       - name: Build Windows binary
-        run: cargo build --release
+        run: cargo build --bin chroma --release
 
       - name: Rename binary artifact for Windows
         shell: powershell
@@ -102,10 +102,10 @@ jobs:
         run: rustup target add aarch64-apple-darwin
 
       - name: Build macOS Intel binary
-        run: cargo build --release
+        run: cargo build --bin chroma --release
 
       - name: Build macOS ARM64 binary
-        run: cargo build --release --target aarch64-apple-darwin
+        run: cargo build --bin chroma --release --target aarch64-apple-darwin
 
       - name: Rename macOS binaries
         run: |
