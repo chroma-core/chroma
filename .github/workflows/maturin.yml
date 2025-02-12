@@ -14,14 +14,7 @@ jobs:
       matrix:
         platform:
           - { os: linux, runner: depot-ubuntu-22.04, target: x86_64, manylinux: auto }
-          - { os: linux, runner: depot-ubuntu-22.04, target: x86, manylinux: auto }
           - { os: linux, runner: depot-ubuntu-22.04-arm, target: aarch64, manylinux: auto }
-          - { os: linux, runner: depot-ubuntu-22.04, target: armv7, manylinux: auto }
-          - { os: linux, runner: depot-ubuntu-22.04, target: ppc64le, manylinux: auto }
-          - { os: musllinux, runner: depot-ubuntu-22.04, target: x86_64, manylinux: musllinux_1_2 }
-          - { os: musllinux, runner: depot-ubuntu-22.04, target: x86, manylinux: musllinux_1_2 }
-          - { os: musllinux, runner: depot-ubuntu-22.04-arm, target: aarch64, manylinux: musllinux_1_2 }
-          - { os: musllinux, runner: depot-ubuntu-22.04, target: armv7, manylinux: musllinux_1_2 }
           - { os: windows, runner: windows-latest, target: x64, manylinux: '' }
           - { os: windows, runner: windows-latest, target: x86, manylinux: '' }
           - { os: macos, runner: depot-macos-14, target: x86_64, manylinux: '' }
@@ -39,9 +32,6 @@ jobs:
         run: cp -r "$(pwd)/hnswlib" ../hnswlib
 
       - name: Install Protoc
-        # Linux builds using manylinux container images, so the host version of protoc is not used.
-        # But we need to install it for Windows and macOS.
-        if: ${{ matrix.platform.os != 'linux' && matrix.platform.os != 'musllinux' }}
         uses: arduino/setup-protoc@v2
 
       # On Windows, we want to set up Python with the correct architecture
@@ -64,36 +54,8 @@ jobs:
           target: ${{ matrix.platform.target }}
           args: --release --out dist
           sccache: 'true'
-          manylinux: ${{ matrix.platform.manylinux }}
           working-directory: rust/python_bindings
-          before-script-linux: |
-            curl -o eget.sh https://zyedidia.github.io/eget.sh
-            echo "0e64b8a3c13f531da005096cc364ac77835bda54276fedef6c62f3dbdc1ee919 eget.sh" | sha256sum -c -
-            bash eget.sh
-            ./eget --tag v28.2 --to=/usr/local/bin protocolbuffers/protobuf
-
-      - name: Build free-threaded wheels
-        uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.platform.target }}
-          args: --release --out dist -i python3.13t
-          sccache: 'true'
-          manylinux: ${{ matrix.platform.manylinux }}
-          working-directory: rust/python_bindings
-          before-script-linux: |
-            if command -v apt-get &>/dev/null; then
-                apt-get update -y
-                apt-get install -y wget unzip
-            elif command -v yum &>/dev/null; then
-                yum update -y
-                yum install -y wget unzip
-            else
-                echo "Neither apt-get nor yum found."
-                exit 1
-            fi
-            wget https://github.com/protocolbuffers/protobuf/releases/download/v28.2/protoc-28.2-linux-x86_64.zip
-            unzip protoc-28.2-linux-x86_64.zip -d /usr/local/
-            rm protoc-28.2-linux-x86_64.zip
+          container: "off"
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
