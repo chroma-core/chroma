@@ -31,21 +31,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v2
+
       # On Windows, we want to set up Python with the correct architecture
       - name: Set up Python on Windows
         if: ${{ matrix.platform.os == 'windows' }}
-        uses: ./.github/actions/python
+        uses: actions/setup-python@v5
         with:
           python-version: 3.x
           architecture: ${{ matrix.platform.target }}
-          install-dependencies: false
 
       - name: Set up Python on non-Windows
         if: ${{ matrix.platform.os != 'windows' }}
-        uses: ./.github/actions/python
+        uses: actions/setup-python@v5
         with:
           python-version: 3.x
-          install-dependencies: false
 
       - name: Build wheels
         uses: PyO3/maturin-action@v1
