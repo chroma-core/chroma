@@ -13,11 +13,11 @@ jobs:
       fail-fast: false
       matrix:
         platform:
-          - { os: linux, runner: depot-ubuntu-22.04, target: x86_64, manylinux: auto }
-          - { os: linux, runner: depot-ubuntu-22.04-arm, target: aarch64, manylinux: auto }
-          - { os: windows, runner: windows-latest, target: x64, manylinux: '' }
-          - { os: macos, runner: depot-macos-14, target: x86_64, manylinux: '' }
-          - { os: macos, runner: depot-macos-14, target: aarch64, manylinux: '' }
+          - { os: linux, runner: depot-ubuntu-22.04, target: x86_64 }
+          - { os: linux, runner: depot-ubuntu-22.04-arm, target: aarch64 }
+          - { os: windows, runner: windows-latest, target: x64 }
+          - { os: macos, runner: depot-macos-14, target: x86_64 }
+          - { os: macos, runner: depot-macos-14, target: aarch64 }
 
     steps:
       - uses: actions/checkout@v4
@@ -27,8 +27,8 @@ jobs:
           repository: chroma-core/hnswlib
           path: hnswlib
       # (actions/checkout doesn't allow cloning above the workspace root)
-      - name: Copy hnswlib to parent
-        run: cp -r "$(pwd)/hnswlib" ../hnswlib
+      - name: Symlink hnswlib to parent
+        run: ln -s "$(pwd)/hnswlib" ../hnswlib
 
       - name: Install Protoc
         uses: arduino/setup-protoc@v3
@@ -53,8 +53,8 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: --zig --release --out ../../dist
-          sccache: ${{ matrix.platform.os != 'macos' }} # does not work on macOS for some reason
+          args: ${{ matrix.platform.os == 'linux' && '--zig' || '' }} --release --out ../../dist
+          sccache: "true"
           working-directory: rust/python_bindings
           container: "off"
 
