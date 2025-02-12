@@ -11,10 +11,11 @@ use chroma_types::{
     chroma_proto, CollectionAndSegments, CollectionMetadataUpdate, CountCollectionsError,
     CreateCollectionError, CreateDatabaseError, CreateDatabaseResponse, CreateTenantError,
     CreateTenantResponse, Database, DeleteCollectionError, DeleteDatabaseError,
-    DeleteDatabaseResponse, GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError,
-    GetDatabaseResponse, GetSegmentsError, GetTenantError, GetTenantResponse, ListDatabasesError,
-    ListDatabasesResponse, Metadata, ResetError, ResetResponse, SegmentFlushInfo,
-    SegmentFlushInfoConversionError, SegmentUuid, UpdateCollectionError,
+    DeleteDatabaseResponse, GetCollectionSizeError, GetCollectionWithSegmentsError,
+    GetCollectionsError, GetDatabaseError, GetDatabaseResponse, GetSegmentsError, GetTenantError,
+    GetTenantResponse, ListDatabasesError, ListDatabasesResponse, Metadata, ResetError,
+    ResetResponse, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
+    UpdateCollectionError,
 };
 use chroma_types::{
     Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
