@@ -824,6 +824,7 @@ impl ChromaError for DeleteCollectionError {
     }
 }
 
+<<<<<<< HEAD
 #[non_exhaustive]
 #[derive(Clone, Validate, Serialize, ToSchema)]
 pub struct ForkCollectionRequest {
@@ -918,6 +919,8 @@ impl ChromaError for CountForksError {
     }
 }
 
+=======
+>>>>>>> c3f0d0424 ([ENH] Implement GetCollectionSize in rust sysdb client (#3773))
 #[derive(Debug, Error)]
 pub enum GetCollectionSizeError {
     #[error(transparent)]
@@ -935,6 +938,7 @@ impl ChromaError for GetCollectionSizeError {
     }
 }
 
+<<<<<<< HEAD
 #[derive(Error, Debug)]
 pub enum ListCollectionVersionsError {
     #[error(transparent)]
@@ -952,6 +956,8 @@ impl ChromaError for ListCollectionVersionsError {
     }
 }
 
+=======
+>>>>>>> c3f0d0424 ([ENH] Implement GetCollectionSize in rust sysdb client (#3773))
 ////////////////////////// Metadata Key Constants //////////////////////////
 
 pub const CHROMA_KEY: &str = "chroma:";

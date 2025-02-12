@@ -8,9 +8,14 @@ use chroma_error::{ChromaError, ErrorCodes, TonicError, TonicMissingFieldError};
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
 use chroma_types::chroma_proto::VersionListForCollection;
 use chroma_types::{
+<<<<<<< HEAD
     chroma_proto, chroma_proto::CollectionVersionInfo, CollectionAndSegments,
     CollectionMetadataUpdate, CountCollectionsError, CreateCollectionError, CreateDatabaseError,
     CreateDatabaseResponse, CreateTenantError, CreateTenantResponse, Database,
+=======
+    chroma_proto, CollectionAndSegments, CollectionMetadataUpdate, CreateCollectionError,
+    CreateDatabaseError, CreateDatabaseResponse, CreateTenantError, CreateTenantResponse, Database,
+>>>>>>> c3f0d0424 ([ENH] Implement GetCollectionSize in rust sysdb client (#3773))
     DeleteCollectionError, DeleteDatabaseError, DeleteDatabaseResponse, GetCollectionSizeError,
     GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError, GetDatabaseResponse,
     GetSegmentsError, GetTenantError, GetTenantResponse, InternalCollectionConfiguration,
@@ -185,6 +190,17 @@ impl SysDb {
             SysDb::Grpc(grpc) => grpc.get_collection_size(collection_id).await,
             SysDb::Sqlite(_) => unimplemented!(),
             SysDb::Test(test) => test.get_collection_size(collection_id).await,
+        }
+    }
+
+    pub async fn get_collection_size(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<usize, GetCollectionSizeError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.get_collection_size(collection_id).await,
+            SysDb::Sqlite(_) => unimplemented!(),
+            SysDb::Test(_) => unimplemented!(),
         }
     }
 
@@ -884,6 +900,7 @@ impl GrpcSysDb {
         }
     }
 
+<<<<<<< HEAD
     async fn count_collections(
         &mut self,
         tenant: String,
@@ -897,6 +914,8 @@ impl GrpcSysDb {
         }
     }
 
+=======
+>>>>>>> c3f0d0424 ([ENH] Implement GetCollectionSize in rust sysdb client (#3773))
     async fn get_collection_size(
         &mut self,
         collection_id: CollectionUuid,
