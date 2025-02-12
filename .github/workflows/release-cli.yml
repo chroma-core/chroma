@@ -25,6 +25,7 @@ jobs:
           path: hnswlib
 
       - name: Symlink hnswlib to parent
+        working-directory: ${{ github.workspace }}
         run: ln -s "$(pwd)/hnswlib" ../hnswlib
         shell: bash
 
