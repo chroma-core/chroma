@@ -17,7 +17,6 @@ jobs:
           - { os: linux, runner: depot-ubuntu-22.04, target: x86, manylinux: auto }
           - { os: linux, runner: depot-ubuntu-22.04-arm, target: aarch64, manylinux: auto }
           - { os: linux, runner: depot-ubuntu-22.04, target: armv7, manylinux: auto }
-          - { os: linux, runner: depot-ubuntu-22.04, target: s390x, manylinux: auto }
           - { os: linux, runner: depot-ubuntu-22.04, target: ppc64le, manylinux: auto }
           - { os: musllinux, runner: depot-ubuntu-22.04, target: x86_64, manylinux: musllinux_1_2 }
           - { os: musllinux, runner: depot-ubuntu-22.04, target: x86, manylinux: musllinux_1_2 }
@@ -30,6 +29,14 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+      - name: Checkout chroma-hnswlib
+        uses: actions/checkout@v4
+        with:
+          repository: chroma-core/hnswlib
+          path: hnswlib
+      # (actions/checkout doesn't allow cloning above the workspace root)
+      - name: Symlink hnswlib to parent
+        run: ln -s "$(pwd)/hnswlib" ../hnswlib
 
       - name: Install Protoc
         # Linux builds using manylinux container images, so the host version of protoc is not used.
@@ -60,11 +67,11 @@ jobs:
           manylinux: ${{ matrix.platform.manylinux }}
           working-directory: rust/python_bindings
           before-script-linux: |
-            sudo apt-get update
-            sudo apt-get install -y wget unzip
+            apt-get update
+            apt-get install -y wget unzip
             wget https://github.com/protocolbuffers/protobuf/releases/download/v28.2/protoc-28.2-linux-x86_64.zip
-            sudo unzip protoc-28.2-linux-x86_64.zip -d /usr/local/
-            sudo rm protoc-28.2-linux-x86_64.zip
+            unzip protoc-28.2-linux-x86_64.zip -d /usr/local/
+            rm protoc-28.2-linux-x86_64.zip
 
       - name: Build free-threaded wheels
         uses: PyO3/maturin-action@v1
@@ -75,11 +82,11 @@ jobs:
           manylinux: ${{ matrix.platform.manylinux }}
           working-directory: rust/python_bindings
           before-script-linux: |
-            sudo apt-get update
-            sudo apt-get install -y wget unzip
+            apt-get update
+            apt-get install -y wget unzip
             wget https://github.com/protocolbuffers/protobuf/releases/download/v28.2/protoc-28.2-linux-x86_64.zip
-            sudo unzip protoc-28.2-linux-x86_64.zip -d /usr/local/
-            sudo rm protoc-28.2-linux-x86_64.zip
+            unzip protoc-28.2-linux-x86_64.zip -d /usr/local/
+            rm protoc-28.2-linux-x86_64.zip
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
