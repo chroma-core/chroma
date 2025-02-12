@@ -8,6 +8,10 @@ inputs:
   python-architecture:
     description: "The target architecture (x86, x64, arm64) of the Python or PyPy interpreter."
     required: false
+  install-dependencies:
+    description: "Whether to install dependencies"
+    required: false
+    default: "true"
 
 runs:
   using: "composite"
@@ -42,6 +46,7 @@ runs:
         cache-dependency-path: "requirements*.txt"
         architecture: ${{ inputs.python-architecture }}
     - name: Install dependencies
+      if: inputs.install-dependencies == 'true'
       run: |
         python -m pip install -r requirements.txt && python -m pip install -r requirements_dev.txt
       shell: bash

@@ -38,12 +38,14 @@ jobs:
         with:
           python-version: 3.x
           architecture: ${{ matrix.platform.target }}
+          install-dependencies: false
 
       - name: Set up Python on non-Windows
         if: ${{ matrix.platform.os != 'windows' }}
         uses: ./.github/actions/python
         with:
           python-version: 3.x
+          install-dependencies: false
 
       - name: Build wheels
         uses: PyO3/maturin-action@v1
@@ -52,6 +54,7 @@ jobs:
           args: --release --out dist
           sccache: 'true'
           manylinux: ${{ matrix.platform.manylinux }}
+          working-directory: rust/python_bindings
 
       - name: Build free-threaded wheels
         uses: PyO3/maturin-action@v1
@@ -60,6 +63,7 @@ jobs:
           args: --release --out dist -i python3.13t
           sccache: 'true'
           manylinux: ${{ matrix.platform.manylinux }}
+          working-directory: rust/python_bindings
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
@@ -76,6 +80,7 @@ jobs:
         with:
           command: sdist
           args: --out dist
+          working-directory: rust/python_bindings
       - name: Upload sdist
         uses: actions/upload-artifact@v4
         with:
