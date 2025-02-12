@@ -28,8 +28,8 @@ jobs:
         run: ln -s "$(pwd)/hnswlib" ../hnswlib
         shell: bash
 
-        - name: Checkout repository
-          uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
       - name: Install Protocol Buffers Compiler
         run: |
