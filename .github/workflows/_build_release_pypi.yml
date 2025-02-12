@@ -75,18 +75,24 @@ jobs:
           fi
 
       - name: Set version in pyproject.toml
-        uses: ciiiii/toml-editor@1.0.0
-        with:
-          file: "pyproject.toml"
-          key: "package.version"
-          value: "${{ env.VERSION }}"
+        shell: bash
+        run: |
+          python -c "
+          import os
+          import toml
 
-      - name: Version is not dynamic in pyproject.toml
-        uses: ciiiii/toml-editor@1.0.0
-        with:
-          file: "pyproject.toml"
-          key: "package.dynamic"
-          value: "[]"
+          file_path = 'pyproject.toml'
+          data = toml.load(file_path)
+
+          # Set the package version to the VERSION env variable
+          data['package']['version'] = os.environ['VERSION']
+
+          # Set package.dynamic to an empty list
+          data['package']['dynamic'] = []
+
+          with open(file_path, 'w') as f:
+              toml.dump(data, f)
+          "
 
       - name: Build wheels
         uses: PyO3/maturin-action@v1
