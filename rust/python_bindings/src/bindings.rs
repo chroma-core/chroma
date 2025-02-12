@@ -78,7 +78,6 @@ impl Bindings {
             persist_path,
         };
 
-        // TOOD(hammadb): HAMMAD BEFORE MERGING REGISTRY: persist path and hsnw cache size
         // TODO: consume the log configuration from the input python
         let sysdb_config = SysDbConfig::Sqlite(SqliteSysDbConfig {
             log_topic_namespace: "default".to_string(),

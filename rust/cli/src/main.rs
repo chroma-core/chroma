@@ -1,10 +1,13 @@
+use std::sync::Arc;
+
+use chroma_frontend::{config::FrontendConfig, frontend_service_entrypoint_with_config};
 use clap::{Parser, Subcommand};
 
 #[derive(Subcommand, Debug)]
 enum Command {
     Docs,
     Run,
-    Support
+    Support,
 }
 
 #[derive(Parser, Debug)]
@@ -14,6 +17,16 @@ enum Command {
 struct Cli {
     #[command(subcommand)]
     command: Command,
+}
+
+impl Cli {
+    fn run() {
+        let runtime = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
+        let default_config = FrontendConfig::single_node_default();
+        runtime.block_on(async {
+            frontend_service_entrypoint_with_config(Arc::new(()), default_config).await;
+        });
+    }
 }
 
 fn main() {
@@ -27,7 +40,8 @@ fn main() {
             }
         }
         Command::Run => {
-            println!("run");
+            // TODO: Allow user to specify a config file
+            Cli::run();
         }
         Command::Support => {
             let url = "https://discord.gg/MMeYNTmh3x";

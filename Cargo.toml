@@ -46,6 +46,7 @@ pyo3 = { version = "0.23.3", features = ["abi3-py39"] }
 tower-http = { version = "0.6.2", features = ["trace"] }
 bytemuck = "1.21.0"
 validator = { version = "0.19", features = ["derive"] }
+rust-embed = { version = "8.5.0", features = ["include-exclude"] }
 
 chroma-benchmark = { path = "rust/benchmark" }
 chroma-blockstore = { path = "rust/blockstore" }
