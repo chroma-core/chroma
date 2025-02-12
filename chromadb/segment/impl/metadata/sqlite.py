@@ -89,7 +89,7 @@ class SqliteMetadataSegment(MetadataReader):
             if result is None:
                 return self._consumer.min_seqid()
             else:
-                return self._db.decode_seq_id(result[0])
+                return cast(int, result[0])
 
     @trace_method("SqliteMetadataSegment.count", OpenTelemetryGranularity.ALL)
     @override
@@ -283,7 +283,7 @@ class SqliteMetadataSegment(MetadataReader):
         ).insert(
             ParameterValue(self._db.uuid_to_db(self._id)),
             ParameterValue(record["record"]["id"]),
-            ParameterValue(self._db.encode_seq_id(record["log_offset"])),
+            ParameterValue(record["log_offset"]),
         )
         sql, params = get_sql(q)
         sql = sql + "RETURNING id"
@@ -474,7 +474,7 @@ class SqliteMetadataSegment(MetadataReader):
         q = (
             self._db.querybuilder()
             .update(t)
-            .set(t.seq_id, ParameterValue(self._db.encode_seq_id(record["log_offset"])))
+            .set(t.seq_id, ParameterValue(record["log_offset"]))
             .where(t.segment_id == ParameterValue(self._db.uuid_to_db(self._id)))
             .where(t.embedding_id == ParameterValue(record["record"]["id"]))
         )
@@ -511,7 +511,7 @@ class SqliteMetadataSegment(MetadataReader):
                 .columns("segment_id", "seq_id")
                 .insert(
                     ParameterValue(self._db.uuid_to_db(self._id)),
-                    ParameterValue(self._db.encode_seq_id(record["log_offset"])),
+                    ParameterValue(record["log_offset"]),
                 )
             )
             sql, params = get_sql(q)
