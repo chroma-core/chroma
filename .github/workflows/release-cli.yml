@@ -25,7 +25,8 @@ jobs:
           override: true
 
       - name: Build Linux binary
-        run: cargo build --release --manifest-path=rust/cli/Cargo.toml
+        working-directory: rust/cli
+        run: cargo build --release
 
       - name: Rename binary artifact for Linux
         run: mv rust/cli/target/release/chroma chroma-linux
@@ -50,7 +51,8 @@ jobs:
           override: true
 
       - name: Build Windows binary
-        run: cargo build --release --manifest-path=rust/cli/Cargo.toml
+        working-directory: rust/cli
+        run: cargo build --release
 
       - name: Rename binary artifact for Windows
         shell: powershell
@@ -78,13 +80,16 @@ jobs:
           override: true
 
       - name: Add ARM64 target for macOS
+        working-directory: rust/cli
         run: rustup target add aarch64-apple-darwin
 
       - name: Build macOS Intel binary
-        run: cargo build --release --manifest-path=rust/cli/Cargo.toml
+        working-directory: rust/cli
+        run: cargo build --release
 
       - name: Build macOS ARM64 binary
-        run: cargo build --release --manifest-path=rust/cli/Cargo.toml --target aarch64-apple-darwin
+        working-directory: rust/cli
+        run: cargo build --release --target aarch64-apple-darwin
 
       - name: Rename macOS binaries
         run: |
