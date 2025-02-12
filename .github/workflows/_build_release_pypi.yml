@@ -1,0 +1,158 @@
+name: Build & publish package to PyPI
+
+on:
+  workflow_call:
+    inputs:
+      publish_to_test_pypi:
+        description: 'Publish to test PyPI'
+        required: false
+        default: false
+        type: boolean
+      publish_to_pypi:
+        description: 'Publish to PyPI'
+        required: false
+        default: false
+        type: boolean
+      version:
+        description: 'Version to publish'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - { os: linux, runner: depot-ubuntu-22.04, target: x86_64 }
+          - { os: linux, runner: depot-ubuntu-22.04-arm, target: aarch64 }
+          - { os: windows, runner: windows-latest, target: x64 }
+          - { os: macos, runner: depot-macos-14, target: x86_64 }
+          - { os: macos, runner: depot-macos-14, target: aarch64 }
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout chroma-hnswlib
+        uses: actions/checkout@v4
+        with:
+          repository: chroma-core/hnswlib
+          path: hnswlib
+      # (actions/checkout doesn't allow cloning above the workspace root)
+      - name: Symlink hnswlib to parent
+        run: ln -s "$(pwd)/hnswlib" ../hnswlib
+
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # On Windows, we want to set up Python with the correct architecture
+      - name: Set up Python on Windows
+        if: ${{ matrix.platform.os == 'windows' }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.x
+          architecture: ${{ matrix.platform.target }}
+
+      - name: Set up Python on non-Windows
+        if: ${{ matrix.platform.os != 'windows' }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.x
+
+      - name: Resolve version
+        shell: bash
+        run: |
+          pip install setuptools_scm
+          if [ -z "${{ inputs.version }}" ]; then
+            echo "VERSION=$(python -m setuptools_scm)" >> $GITHUB_ENV
+          else
+            echo "VERSION=${{ inputs.version }}" >> $GITHUB_ENV
+          fi
+
+      - name: Set version in pyproject.toml
+        uses: ciiiii/toml-editor@1.0.0
+        with:
+          file: "pyproject.toml"
+          key: "package.version"
+          value: "${{ env.VERSION }}"
+
+      - name: Version is not dynamic in pyproject.toml
+        uses: ciiiii/toml-editor@1.0.0
+        with:
+          file: "pyproject.toml"
+          key: "package.dynamic"
+          value: "[]"
+
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.platform.target }}
+          args: ${{ matrix.platform.os == 'linux' && '--zig' || '' }} --release --out dist
+          sccache: "true"
+          container: "off"
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.platform.os }}-${{ matrix.platform.target }}
+          path: dist
+
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+      - name: Upload sdist
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-sdist
+          path: dist
+
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    # if: ${{ startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' }}
+    if: ${{ inputs.publish_to_pypi || inputs.publish_to_test_pypi }}
+    needs: [build, sdist]
+    permissions:
+      # Use to sign the release artifacts
+      id-token: write
+      # Used to upload release artifacts
+      contents: write
+      # Used to generate artifact attestation
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@v4
+
+      - name: Generate artifact attestation
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: 'wheels-*/*'
+
+      - name: Publish to test PyPI
+        if: ${{ inputs.publish_to_pypi }}
+        uses: PyO3/maturin-action@v1
+        env:
+          MATURIN_PYPI_TOKEN: ${{ secrets.TEST_PYPI_API_TOKEN }}
+          MATURIN_REPOSITORY_URL: https://test.pypi.org/legacy/
+        with:
+          command: upload
+          args: --non-interactive wheels-*/*
+
+      - name: Publish to PyPI
+        if: ${{ inputs.publish_to_pypi }}
+        uses: PyO3/maturin-action@v1
+        env:
+          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        with:
+          command: upload
+          args: --non-interactive wheels-*/*
