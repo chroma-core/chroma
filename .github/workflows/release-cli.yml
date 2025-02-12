@@ -24,15 +24,15 @@ jobs:
           repository: chroma-core/hnswlib
           path: hnswlib
 
-      - name: List parent directory of repository root
-        working-directory: ${{ github.workspace }}
-        run: |
-          ls -la ..
-
       - name: Symlink hnswlib to parent
         working-directory: ${{ github.workspace }}
         run: ln -s "$(pwd)/hnswlib" ../hnswlib
         shell: bash
+
+      - name: List parent directory of repository root
+        working-directory: ${{ github.workspace }}
+        run: |
+          ls -la ..
 
       - name: Checkout repository
         uses: actions/checkout@v3
