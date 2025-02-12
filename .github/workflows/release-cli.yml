@@ -42,8 +42,14 @@ jobs:
       - name: Build Linux binary
         run: cargo build --bin chroma --release --manifest-path rust/cli/Cargo.toml
 
+      - name: List release directory contents
+        run: ls -al rust/cli/target/release
+
+      - name: List release directory contents
+        run: ls -al rust/target/release
+
       - name: Rename binary artifact for Linux
-        run: mv rust/cli/target/release/chroma ./chroma-linux
+        run: mv rust/target/release/chroma ./chroma-linux
 
       - name: Upload Linux binary artifact
         uses: actions/upload-artifact@v4
