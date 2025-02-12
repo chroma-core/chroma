@@ -4,7 +4,7 @@ use std::{
 };
 
 use chroma_error::ChromaError;
-use chroma_types::{CollectionMetadataUpdate, CollectionUuid, Metadata, UpdateMetadata, Where};
+use chroma_types::{CollectionUuid, Metadata, UpdateMetadata, Where};
 use thiserror::Error;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
