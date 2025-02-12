@@ -40,9 +40,10 @@
 use std::fmt::{Debug, Formatter};
 
 use async_trait::async_trait;
+use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::Storage;
-use chroma_sysdb::SysDb;
+use chroma_sysdb::{GrpcSysDbConfig, SysDb, SysDbConfig};
 use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
     PanicError, TaskError, TaskMessage, TaskResult,
@@ -542,7 +543,7 @@ mod tests {
     use chroma_storage::config::{
         ObjectStoreBucketConfig, ObjectStoreConfig, ObjectStoreType, StorageConfig,
     };
-    use chroma_sysdb::{from_config as sysdb_from_config, GrpcSysDbConfig, SysDbConfig};
+    use chroma_sysdb::{GrpcSysDbConfig, SysDbConfig};
     use chroma_system::System;
     use std::env;
     use std::str::FromStr;
@@ -848,7 +849,12 @@ mod tests {
             request_timeout_ms: 10000,
             num_channels: 1,
         });
-        let mut sysdb = sysdb_from_config(&sysdb_config).await?;
+
+        // Create registry for configuration
+        let registry = chroma_config::registry::Registry::new();
+
+        // Initialize sysdb client using config
+        let sysdb = SysDb::try_from_config(&sysdb_config, &registry).await?;
 
         // Get collection info for GC from sysdb
         let collections_to_gc = sysdb.get_collections_to_gc().await?;

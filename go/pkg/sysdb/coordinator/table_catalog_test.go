@@ -230,8 +230,9 @@ func TestCatalog_FlushCollectionCompactionForVersionedCollection(t *testing.T) {
 			},
 		},
 	}
-	err := mockS3Store.PutVersionFile(tenantID, collectionID.String(), "version_1.pb", initialVersionFile)
+	fileName, err := mockS3Store.PutVersionFile(tenantID, collectionID.String(), "version_1.pb", initialVersionFile)
 	assert.NoError(t, err)
+	assert.Equal(t, "version_1.pb", fileName)
 
 	// Setup mock collection entry
 	mockCollectionEntry := &dbmodel.Collection{
