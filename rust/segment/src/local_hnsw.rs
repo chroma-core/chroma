@@ -8,7 +8,7 @@ use chroma_types::{
     operator::RecordDistance, Chunk, HnswParametersFromSegmentError, LogRecord, Operation, Segment,
     SegmentUuid, SingleNodeHnswParameters,
 };
-use sea_query::{Expr, Query, SqliteQueryBuilder};
+use sea_query::{Expr, OnConflict, Query, SqliteQueryBuilder};
 use sea_query_binder::SqlxBinder;
 use serde::{Deserialize, Serialize};
 use serde_pickle::{DeOptions, SerOptions};
@@ -262,7 +262,9 @@ impl LocalHnswSegmentReader {
 struct IdMap {
     dimensionality: Option<usize>,
     total_elements_added: u32,
-    max_seq_id: u64,
+    /// The max_seq_id field is deprecated in favor of the sqlite table
+    #[serde(default)]
+    max_seq_id: Option<u64>,
     id_to_label: HashMap<String, u32>,
     label_to_id: HashMap<u32, String>,
     id_to_seq_id: HashMap<String, u32>,
@@ -393,6 +395,24 @@ impl LocalHnswSegmentWriter {
                         .await;
                     let id_map: IdMap = serde_pickle::from_reader(file, DeOptions::new())?;
                     if !id_map.id_to_label.is_empty() {
+                        // Migrate legacy max_seq_id if present
+                        if let Some(max_seq_id) = id_map.max_seq_id {
+                            let id = segment.id.to_string().into();
+                            let max_id = max_seq_id.into();
+                            let (query, values) = Query::insert()
+                                .into_table(MaxSeqId::Table)
+                                .columns([MaxSeqId::SegmentId, MaxSeqId::SeqId])
+                                .values([id, max_id])?
+                                .on_conflict(
+                                    OnConflict::column(MaxSeqId::SegmentId)
+                                        .do_nothing()
+                                        .to_owned(),
+                                )
+                                .build_sqlx(SqliteQueryBuilder);
+                            let _ = sqlx::query_with(&query, values)
+                                .execute(sql_db.get_conn())
+                                .await?;
+                        }
                         // Load hnsw index.
                         let index_config = IndexConfig::new(
                             dimensionality as i32,
@@ -496,9 +516,13 @@ impl LocalHnswSegmentWriter {
     ) -> Result<u32, LocalHnswSegmentWriterError> {
         let mut guard = self.index.inner.write().await;
         let mut next_label = guard.id_map.total_elements_added + 1;
+        if log_chunk.is_empty() {
+            return Ok(next_label);
+        }
+        let mut max_seq_id = u64::MIN;
         for (log, _) in log_chunk.iter() {
             guard.num_elements_since_last_persist += 1;
-            guard.id_map.max_seq_id = std::cmp::max(guard.id_map.max_seq_id, log.log_offset as u64);
+            max_seq_id = max_seq_id.max(log.log_offset as u64);
             match log.record.operation {
                 Operation::Add => {
                     // only update if the id is not already present
@@ -604,7 +628,7 @@ impl LocalHnswSegmentWriter {
         if guard.num_elements_since_last_persist >= guard.sync_threshold as u64 {
             guard = persist(guard).await?;
             let id = guard.index.id.to_string().into();
-            let max_id = guard.id_map.max_seq_id.into();
+            let max_id = max_seq_id.into();
             // Persist max_seq_id to sqlite.
             let (query, values) = Query::insert()
                 .into_table(MaxSeqId::Table)

@@ -669,7 +669,7 @@ impl SqliteSysDb {
                         Ok(configuration_json) => configuration_json,
                         Err(e) => return Some(Err(e)),
                     },
-                    None => serde_json::Value::Null,
+                    None => serde_json::Value::Object(Default::default()),
                 };
 
                 Some(Ok(Collection {
