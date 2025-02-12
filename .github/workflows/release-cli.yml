@@ -28,8 +28,8 @@ jobs:
           path: hnswlib
 
       - name: Symlink hnswlib to parent directory
-        working-directory: ${{ github.workspace }}/chroma
-        run: ln -s "$(pwd)/../hnswlib" ../hnswlib
+        working-directory: ${{ github.workspace }}
+        run: ln -s "$(pwd)/hnswlib" ../hnswlib
         shell: bash
 
       - name: List parent directory of repository root
