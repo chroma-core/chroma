@@ -1656,6 +1656,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "chromadb_rust_bindings"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chroma-cache",
+ "chroma-config",
+ "chroma-error",
+ "chroma-frontend",
+ "chroma-log",
+ "chroma-segment",
+ "chroma-sqlite",
+ "chroma-sysdb",
+ "chroma-system",
+ "chroma-types",
+ "numpy",
+ "pyo3",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "chrono"
 version = "0.4.38"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5607,30 +5631,6 @@ checksum = "e46a2036019fdb888131db7a4c847a1063a7493f971ed94ea82c67eada63ca54"
 dependencies = [
  "serde",
  "serde_derive",
-]
-
-[[package]]
-name = "rust_bindings"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chroma-cache",
- "chroma-config",
- "chroma-error",
- "chroma-frontend",
- "chroma-log",
- "chroma-segment",
- "chroma-sqlite",
- "chroma-sysdb",
- "chroma-system",
- "chroma-types",
- "numpy",
- "pyo3",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "uuid",
 ]
 
 [[package]]
