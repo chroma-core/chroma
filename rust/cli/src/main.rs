@@ -1,12 +1,17 @@
-use std::sync::Arc;
-
 use chroma_frontend::{config::FrontendConfig, frontend_service_entrypoint_with_config};
 use clap::{Parser, Subcommand};
+use std::sync::Arc;
+
+#[derive(Parser, Debug)]
+struct RunArgs {
+    #[clap(name = "config", default_value = None)]
+    config: Option<String>,
+}
 
 #[derive(Subcommand, Debug)]
 enum Command {
     Docs,
-    Run,
+    Run(RunArgs),
     Support,
 }
 
@@ -19,14 +24,16 @@ struct Cli {
     command: Command,
 }
 
-impl Cli {
-    fn run() {
-        let runtime = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
-        let default_config = FrontendConfig::single_node_default();
-        runtime.block_on(async {
-            frontend_service_entrypoint_with_config(Arc::new(()), default_config).await;
-        });
-    }
+fn run(args: RunArgs) {
+    let config = match &args.config {
+        Some(path) => FrontendConfig::load_from_path(path),
+        None => FrontendConfig::single_node_default(),
+    };
+
+    let runtime = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
+    runtime.block_on(async {
+        frontend_service_entrypoint_with_config(Arc::new(()), config).await;
+    });
 }
 
 fn main() {
@@ -39,9 +46,8 @@ fn main() {
                 eprintln!("Error: Failed to open the browser. Visit {}.", url);
             }
         }
-        Command::Run => {
-            // TODO: Allow user to specify a config file
-            Cli::run();
+        Command::Run(args) => {
+            run(args);
         }
         Command::Support => {
             let url = "https://discord.gg/MMeYNTmh3x";
