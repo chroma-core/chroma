@@ -35,7 +35,7 @@ use crate::{
     ac::AdmissionControlledService,
     auth::{AuthenticateAndAuthorize, AuthzAction, AuthzResource},
     frontend::Frontend,
-    quota::{Action, QuotaEnforcer, QuotaPayload},
+    quota::{Action, QuotaEnforcer, QuotaEnforcerError, QuotaPayload},
     tower_tracing::add_tracing_middleware,
     types::errors::{ErrorResponse, ServerError, ValidationError},
     FrontendConfig,
@@ -359,7 +359,13 @@ async fn create_database(
         )
         .await?;
     // Enforce quota.
-    let mut quota_payload = QuotaPayload::new(Action::CreateDatabase, tenant_id.clone());
+    let api_token = headers
+        .get("x-chroma-token")
+        .ok_or(QuotaEnforcerError::ApiKeyMissing)?
+        .to_str()
+        .map_err(|_| QuotaEnforcerError::ApiKeyMissing)?
+        .to_string();
+    let mut quota_payload = QuotaPayload::new(Action::CreateDatabase, tenant_id.clone(), api_token);
     quota_payload = quota_payload.with_collection_name(&name);
     server.quota_enforcer.enforce(&quota_payload).await?;
     let _guard = server.scorecard_request(&[
@@ -499,7 +505,14 @@ async fn list_collections(
             },
         )
         .await?;
-    let mut quota_payload = QuotaPayload::new(Action::ListCollections, tenant_id.clone());
+    let api_token = headers
+        .get("x-chroma-token")
+        .ok_or(QuotaEnforcerError::ApiKeyMissing)?
+        .to_str()
+        .map_err(|_| QuotaEnforcerError::ApiKeyMissing)?
+        .to_string();
+    let mut quota_payload =
+        QuotaPayload::new(Action::ListCollections, tenant_id.clone(), api_token);
     if let Some(limit) = limit {
         quota_payload = quota_payload.with_limit(limit);
     }
@@ -557,7 +570,14 @@ async fn create_collection(
             },
         )
         .await?;
-    let mut quota_payload = QuotaPayload::new(Action::CreateCollection, tenant_id.clone());
+    let api_token = headers
+        .get("x-chroma-token")
+        .ok_or(QuotaEnforcerError::ApiKeyMissing)?
+        .to_str()
+        .map_err(|_| QuotaEnforcerError::ApiKeyMissing)?
+        .to_string();
+    let mut quota_payload =
+        QuotaPayload::new(Action::CreateCollection, tenant_id.clone(), api_token);
     quota_payload = quota_payload.with_collection_name(&payload.name);
     if let Some(metadata) = &payload.metadata {
         quota_payload = quota_payload.with_create_collection_metadata(metadata);
@@ -620,7 +640,14 @@ async fn update_collection(
             },
         )
         .await?;
-    let mut quota_payload = QuotaPayload::new(Action::UpdateCollection, tenant_id.clone());
+    let api_token = headers
+        .get("x-chroma-token")
+        .ok_or(QuotaEnforcerError::ApiKeyMissing)?
+        .to_str()
+        .map_err(|_| QuotaEnforcerError::ApiKeyMissing)?
+        .to_string();
+    let mut quota_payload =
+        QuotaPayload::new(Action::UpdateCollection, tenant_id.clone(), api_token);
     if let Some(new_name) = &payload.new_name {
         quota_payload = quota_payload.with_collection_new_name(new_name);
     }
@@ -693,7 +720,13 @@ async fn collection_add(
         .await?;
     let collection_id =
         CollectionUuid(Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?);
-    let mut quota_payload = QuotaPayload::new(Action::Add, tenant_id.clone());
+    let api_token = headers
+        .get("x-chroma-token")
+        .ok_or(QuotaEnforcerError::ApiKeyMissing)?
+        .to_str()
+        .map_err(|_| QuotaEnforcerError::ApiKeyMissing)?
+        .to_string();
+    let mut quota_payload = QuotaPayload::new(Action::Add, tenant_id.clone(), api_token);
     quota_payload = quota_payload.with_ids(&payload.ids);
     if let Some(embeddings) = &payload.embeddings {
         quota_payload = quota_payload.with_add_embeddings(embeddings);
@@ -770,7 +803,13 @@ async fn collection_update(
         .await?;
     let collection_id =
         CollectionUuid(Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?);
-    let mut quota_payload = QuotaPayload::new(Action::Update, tenant_id.clone());
+    let api_token = headers
+        .get("x-chroma-token")
+        .ok_or(QuotaEnforcerError::ApiKeyMissing)?
+        .to_str()
+        .map_err(|_| QuotaEnforcerError::ApiKeyMissing)?
+        .to_string();
+    let mut quota_payload = QuotaPayload::new(Action::Update, tenant_id.clone(), api_token);
     quota_payload = quota_payload.with_ids(&payload.ids);
     if let Some(embeddings) = &payload.embeddings {
         quota_payload = quota_payload.with_update_embeddings(embeddings);
@@ -844,7 +883,13 @@ async fn collection_upsert(
         .await?;
     let collection_id =
         CollectionUuid(Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?);
-    let mut quota_payload = QuotaPayload::new(Action::Upsert, tenant_id.clone());
+    let api_token = headers
+        .get("x-chroma-token")
+        .ok_or(QuotaEnforcerError::ApiKeyMissing)?
+        .to_str()
+        .map_err(|_| QuotaEnforcerError::ApiKeyMissing)?
+        .to_string();
+    let mut quota_payload = QuotaPayload::new(Action::Upsert, tenant_id.clone(), api_token);
     quota_payload = quota_payload.with_ids(&payload.ids);
     if let Some(embeddings) = &payload.embeddings {
         quota_payload = quota_payload.with_add_embeddings(embeddings);
@@ -918,7 +963,13 @@ async fn collection_delete(
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
     let r#where = payload.where_fields.parse()?;
-    let mut quota_payload = QuotaPayload::new(Action::Delete, tenant_id.clone());
+    let api_token = headers
+        .get("x-chroma-token")
+        .ok_or(QuotaEnforcerError::ApiKeyMissing)?
+        .to_str()
+        .map_err(|_| QuotaEnforcerError::ApiKeyMissing)?
+        .to_string();
+    let mut quota_payload = QuotaPayload::new(Action::Delete, tenant_id.clone(), api_token);
     if let Some(ids) = &payload.ids {
         quota_payload = quota_payload.with_ids(ids);
     }
@@ -1013,7 +1064,13 @@ async fn collection_get(
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
     let parsed_where = payload.where_fields.parse()?;
-    let mut quota_payload = QuotaPayload::new(Action::Get, tenant_id.clone());
+    let api_token = headers
+        .get("x-chroma-token")
+        .ok_or(QuotaEnforcerError::ApiKeyMissing)?
+        .to_str()
+        .map_err(|_| QuotaEnforcerError::ApiKeyMissing)?
+        .to_string();
+    let mut quota_payload = QuotaPayload::new(Action::Get, tenant_id.clone(), api_token);
     if let Some(ids) = &payload.ids {
         quota_payload = quota_payload.with_ids(ids);
     }
@@ -1084,7 +1141,13 @@ async fn collection_query(
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
     let parsed_where = payload.where_fields.parse()?;
-    let mut quota_payload = QuotaPayload::new(Action::Query, tenant_id.clone());
+    let api_token = headers
+        .get("x-chroma-token")
+        .ok_or(QuotaEnforcerError::ApiKeyMissing)?
+        .to_str()
+        .map_err(|_| QuotaEnforcerError::ApiKeyMissing)?
+        .to_string();
+    let mut quota_payload = QuotaPayload::new(Action::Query, tenant_id.clone(), api_token);
     if let Some(ids) = &payload.ids {
         quota_payload = quota_payload.with_ids(ids);
     }

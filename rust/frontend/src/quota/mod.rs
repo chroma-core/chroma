@@ -46,6 +46,8 @@ pub struct QuotaPayload<'other> {
     action: Action,
     #[allow(dead_code)]
     tenant: String,
+    #[allow(dead_code)]
+    api_token: String,
     create_collection_metadata: Option<&'other Metadata>,
     update_collection_metadata: Option<&'other UpdateMetadata>,
     ids: Option<&'other [String]>,
@@ -66,10 +68,11 @@ pub struct QuotaPayload<'other> {
 }
 
 impl<'other> QuotaPayload<'other> {
-    pub fn new(action: Action, tenant: String) -> Self {
+    pub fn new(action: Action, tenant: String, api_token: String) -> Self {
         Self {
             action,
             tenant,
+            api_token,
             create_collection_metadata: None,
             update_collection_metadata: None,
             ids: None,
@@ -192,12 +195,18 @@ impl<'other> QuotaPayload<'other> {
 pub enum QuotaEnforcerError {
     #[error("Quota exceeded")]
     QuotaExceeded,
+    #[error("Missing API key in the request header")]
+    ApiKeyMissing,
+    #[error("Unauthorized")]
+    Unauthorized,
 }
 
 impl ChromaError for QuotaEnforcerError {
     fn code(&self) -> chroma_error::ErrorCodes {
         match self {
             QuotaEnforcerError::QuotaExceeded => chroma_error::ErrorCodes::ResourceExhausted,
+            QuotaEnforcerError::ApiKeyMissing => chroma_error::ErrorCodes::InvalidArgument,
+            QuotaEnforcerError::Unauthorized => chroma_error::ErrorCodes::PermissionDenied,
         }
     }
 }
