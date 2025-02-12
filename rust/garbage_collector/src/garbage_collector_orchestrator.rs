@@ -589,7 +589,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_direct_service_calls() -> Result<(), Box<dyn std::error::Error>> {
+    async fn test_k8s_integration_check_end_to_end() -> Result<(), Box<dyn std::error::Error>> {
         if !should_run_cluster_tests() {
             tracing::info!("Skipping cluster test as CHROMA_CLUSTER_TEST_ONLY is not set");
             return Ok(());
