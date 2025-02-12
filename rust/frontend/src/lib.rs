@@ -41,7 +41,7 @@ impl ChromaError for ScorecardRuleError {
 
 pub async fn frontend_service_entrypoint(
     auth: Arc<dyn auth::AuthenticateAndAuthorize>,
-    quota_enforcer: Arc<dyn QuotaEnforcer>,
+    enforcer: Arc<dyn QuotaEnforcer>,
 ) {
     let config = match std::env::var(CONFIG_PATH_ENV_VAR) {
         Ok(config_path) => FrontendConfig::load_from_path(&config_path),
@@ -78,6 +78,6 @@ pub async fn frontend_service_entrypoint_with_config(
         .map(rule_to_rule)
         .collect::<Result<Vec<_>, ScorecardRuleError>>()
         .expect("error creating scorecard");
-    let server = FrontendServer::new(config, frontend, rules, auth, quota_enforcer);
+    let server = FrontendServer::new(config, frontend, rules, auth, enforcer);
     FrontendServer::run(server).await;
 }
