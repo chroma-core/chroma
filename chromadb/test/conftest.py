@@ -613,8 +613,7 @@ def sqlite_persistent_fixture() -> Generator[System, None, None]:
 @pytest.fixture
 def sqlite_persistent() -> Generator[System, None, None]:
     if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ:
-        # yield from rust_system(persistent=True)
-        yield from sqlite_persistent_fixture()
+        yield from rust_system()
     else:
         yield from sqlite_persistent_fixture()
 
