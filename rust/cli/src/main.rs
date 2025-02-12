@@ -24,7 +24,8 @@ impl Cli {
         let runtime = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
         let default_config = FrontendConfig::single_node_default();
         runtime.block_on(async {
-            frontend_service_entrypoint_with_config(Arc::new(()), default_config).await;
+            frontend_service_entrypoint_with_config(Arc::new(()), Arc::new(()), default_config)
+                .await;
         });
     }
 }
