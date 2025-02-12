@@ -120,7 +120,7 @@ pub(crate) struct FrontendServer {
     scorecard: Arc<Scorecard<'static>>,
     metrics: Arc<Metrics>,
     auth: Arc<dyn AuthenticateAndAuthorize>,
-    enforcer: Arc<dyn QuotaEnforcer>,
+    quota_enforcer: Arc<dyn QuotaEnforcer>,
 }
 
 impl FrontendServer {
@@ -129,7 +129,7 @@ impl FrontendServer {
         frontend: Frontend,
         rules: Vec<Rule>,
         auth: Arc<dyn AuthenticateAndAuthorize>,
-        enforcer: Arc<dyn QuotaEnforcer>,
+        quota_enforcer: Arc<dyn QuotaEnforcer>,
     ) -> FrontendServer {
         // NOTE(rescrv):  Assume statically no more than 128 threads because we won't deploy on
         // hardware with that many threads anytime soon for frontends, if ever.
@@ -144,7 +144,7 @@ impl FrontendServer {
             scorecard,
             metrics,
             auth,
-            enforcer,
+            quota_enforcer,
         }
     }
 
@@ -367,7 +367,7 @@ async fn create_database(
         .to_string();
     let mut quota_payload = QuotaPayload::new(Action::CreateDatabase, tenant_id.clone(), api_token);
     quota_payload = quota_payload.with_collection_name(&name);
-    server.enforcer.enforce(&quota_payload).await?;
+    server.quota_enforcer.enforce(&quota_payload).await?;
     let _guard = server.scorecard_request(&[
         "op:create_database",
         format!("tenant:{}", tenant_id).as_str(),
@@ -516,7 +516,7 @@ async fn list_collections(
     if let Some(limit) = limit {
         quota_payload = quota_payload.with_limit(limit);
     }
-    server.enforcer.enforce(&quota_payload).await?;
+    server.quota_enforcer.enforce(&quota_payload).await?;
     let _guard = server.scorecard_request(&[
         "op:list_collections",
         format!("tenant:{}", tenant_id).as_str(),
@@ -582,7 +582,7 @@ async fn create_collection(
     if let Some(metadata) = &payload.metadata {
         quota_payload = quota_payload.with_create_collection_metadata(metadata);
     }
-    server.enforcer.enforce(&quota_payload).await?;
+    server.quota_enforcer.enforce(&quota_payload).await?;
     let _guard = server.scorecard_request(&[
         "op:create_collection",
         format!("tenant:{}", tenant_id).as_str(),
@@ -654,7 +654,7 @@ async fn update_collection(
     if let Some(new_metadata) = &payload.new_metadata {
         quota_payload = quota_payload.with_update_collection_metadata(new_metadata);
     }
-    server.enforcer.enforce(&quota_payload).await?;
+    server.quota_enforcer.enforce(&quota_payload).await?;
     let _guard = server.scorecard_request(&[
         "op:update_collection",
         format!("tenant:{}", tenant_id).as_str(),
@@ -741,7 +741,7 @@ async fn collection_add(
         quota_payload = quota_payload.with_uris(uris);
     }
     quota_payload = quota_payload.with_collection_uuid(collection_id);
-    server.enforcer.enforce(&quota_payload).await?;
+    server.quota_enforcer.enforce(&quota_payload).await?;
     let _guard = server.scorecard_request(&[
         "op:write",
         format!("tenant:{}", tenant_id).as_str(),
@@ -823,7 +823,7 @@ async fn collection_update(
     if let Some(uris) = &payload.uris {
         quota_payload = quota_payload.with_uris(uris);
     }
-    server.enforcer.enforce(&quota_payload).await?;
+    server.quota_enforcer.enforce(&quota_payload).await?;
     let _guard = server.scorecard_request(&[
         "op:write",
         format!("tenant:{}", tenant_id).as_str(),
@@ -904,7 +904,7 @@ async fn collection_upsert(
         quota_payload = quota_payload.with_uris(uris);
     }
     quota_payload = quota_payload.with_collection_uuid(collection_id);
-    server.enforcer.enforce(&quota_payload).await?;
+    server.quota_enforcer.enforce(&quota_payload).await?;
     let _guard = server.scorecard_request(&[
         "op:write",
         format!("tenant:{}", tenant_id).as_str(),
@@ -976,7 +976,7 @@ async fn collection_delete(
     if let Some(r#where) = &r#where {
         quota_payload = quota_payload.with_where(r#where);
     }
-    server.enforcer.enforce(&quota_payload).await?;
+    server.quota_enforcer.enforce(&quota_payload).await?;
     let _guard = server.scorecard_request(&[
         "op:write",
         format!("tenant:{}", tenant_id).as_str(),
@@ -1080,7 +1080,7 @@ async fn collection_get(
     if let Some(limit) = payload.limit {
         quota_payload = quota_payload.with_limit(limit);
     }
-    server.enforcer.enforce(&quota_payload).await?;
+    server.quota_enforcer.enforce(&quota_payload).await?;
     tracing::info!(
         "Getting records from collection [{collection_id}] in database [{database_name}] for tenant [{tenant_id}]",
     );
@@ -1158,7 +1158,7 @@ async fn collection_query(
     if let Some(n_results) = payload.n_results {
         quota_payload = quota_payload.with_n_results(n_results);
     }
-    server.enforcer.enforce(&quota_payload).await?;
+    server.quota_enforcer.enforce(&quota_payload).await?;
     tracing::info!(
         "Querying records from collection [{collection_id}] in database [{database_name}] for tenant [{tenant_id}]",
     );
