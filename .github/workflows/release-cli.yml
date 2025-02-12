@@ -32,7 +32,12 @@ jobs:
       - name: List parent directory of repository root
         working-directory: ${{ github.workspace }}
         run: |
-          ls -R ../hnswlib
+          ls -la ..
+
+      - name: List parent directory of repository root 2
+        working-directory: ${{ github.workspace }}
+        run: |
+          ls -R ..
 
       - name: Checkout repository
         uses: actions/checkout@v3
