@@ -41,3 +41,4 @@ chroma-system = { workspace = true }
 chroma-tracing = { workspace = true }
 chroma-types = { workspace = true }
 chroma-sqlite = { workspace = true }
+aide = { version = "0.14.1", features = ["axum"] }

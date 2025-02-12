@@ -1,11 +1,20 @@
 use axum::{
-    extract::{DefaultBodyLimit, Path, Query, State},
-    http::header::HeaderMap,
+    Json, ServiceExt,
     http::StatusCode,
-    response::{IntoResponse, Response},
-    routing::{get, post},
-    Json, Router, ServiceExt,
+    http::header::HeaderMap,
+    extract::{DefaultBodyLimit, Path, Query, State},
+    response::IntoResponse,
+    response::Response,
 };
+use aide::{
+    axum::ApiRouter,
+    axum::routing::{get, post},
+    openapi::{OpenApi, Tag},
+    transform::TransformOpenApi,
+    axum::IntoApiResponse,
+};
+
+
 use chroma_types::RawWhereFields;
 use chroma_types::{
     AddCollectionRecordsResponse, ChecklistResponse, Collection, CollectionMetadataUpdate,
@@ -39,7 +48,10 @@ use crate::{
     tower_tracing::add_tracing_middleware,
     types::errors::{ErrorResponse, ServerError, ValidationError},
     FrontendConfig,
+
 };
+
+
 
 struct ScorecardGuard {
     scorecard: Arc<Scorecard<'static>>,
@@ -150,75 +162,77 @@ impl FrontendServer {
 
     #[allow(dead_code)]
     pub async fn run(server: FrontendServer) {
-        let circuit_breaker_config = server.config.circuit_breaker.clone();
-        let app = Router::new()
-            // `GET /` goes to `root`
-            .route("/api/v1/*any", get(v1_deprecation_notice).put(v1_deprecation_notice).patch(v1_deprecation_notice).delete(v1_deprecation_notice).head(v1_deprecation_notice).options(v1_deprecation_notice))
-            .route("/api/v2/healthcheck", get(healthcheck))
-            .route("/api/v2/heartbeat", get(heartbeat))
-            .route("/api/v2/pre-flight-checks", get(pre_flight_checks))
-            .route("/api/v2/reset", post(reset))
-            .route("/api/v2/version", get(version))
-            .route("/api/v2/auth/identity", get(get_user_identity))
-            .route("/api/v2/tenants", post(create_tenant))
-            .route("/api/v2/tenants/:tenant_name", get(get_tenant))
-            .route("/api/v2/tenants/:tenant_id/databases", get(list_databases).post(create_database))
-            .route("/api/v2/tenants/:tenant_id/databases/:name", get(get_database).delete(delete_database))
-            .route(
-                "/api/v2/tenants/:tenant_id/databases/:database_name/collections",
-               post(create_collection).get(list_collections),
-            )
-            .route(
-                "/api/v2/tenants/:tenant_id/databases/:database_name/collections_count",
-                get(count_collections),
-            )
-            .route(
-                "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_id",
-                get(get_collection).put(update_collection).delete(delete_collection),
-            )
-            .route(
-                "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/add",
-                post(collection_add),
-            )
-            .route(
-                "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/update",
-                post(collection_update),
-            )
-            .route(
-                "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/upsert",
-                post(collection_upsert),
-            )
-            .route(
-                "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/delete",
-                post(collection_delete),
-            )
-            .route(
-                "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_id/count",
-                get(collection_count),
-            )
-            .route(
-                "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_id/get",
-                post(collection_get),
-            )
-            .route(
-                "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_id/query",
-                post(collection_query),
-            )
-            .with_state(server)
-            .layer(DefaultBodyLimit::max(6000000)); // TODO: add to server configuration
-        let app = add_tracing_middleware(app);
+        let mut api = OpenApi::default();
 
-        // TODO: configuration for this
-        // TODO: tracing
-        let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
-        if circuit_breaker_config.enabled() {
-            let service = AdmissionControlledService::new(circuit_breaker_config, app);
-            axum::serve(listener, service.into_make_service())
-                .await
-                .unwrap();
-        } else {
-            axum::serve(listener, app).await.unwrap();
-        };
+        let circuit_breaker_config = server.config.circuit_breaker.clone();
+        let app = ApiRouter::new()
+            // `GET /` goes to `root`
+            //.route("/api/v1/*any", get(v1_deprecation_notice).put(v1_deprecation_notice).patch(v1_deprecation_notice).delete(v1_deprecation_notice).head(v1_deprecation_notice).options(v1_deprecation_notice))
+            .route("/api/v2/healthcheck", get(healthcheck))
+            // .route("/api/v2/heartbeat", get(heartbeat))
+            // .route("/api/v2/pre-flight-checks", get(pre_flight_checks))
+            // .route("/api/v2/reset", post(reset))
+            // .route("/api/v2/version", get(version))
+            // .route("/api/v2/auth/identity", get(get_user_identity))
+            // .route("/api/v2/tenants", post(create_tenant))
+            // .route("/api/v2/tenants/:tenant_name", get(get_tenant))
+            // .route("/api/v2/tenants/:tenant_id/databases", get(list_databases).post(create_database))
+            // .route("/api/v2/tenants/:tenant_id/databases/:name", get(get_database).delete(delete_database))
+            // .route(
+            //     "/api/v2/tenants/:tenant_id/databases/:database_name/collections",
+            //    post(create_collection).get(list_collections),
+            // )
+            // .route(
+            //     "/api/v2/tenants/:tenant_id/databases/:database_name/collections_count",
+            //     get(count_collections),
+            // )
+            // .route(
+            //     "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_id",
+            //     get(get_collection).put(update_collection).delete(delete_collection),
+            // )
+            // .route(
+            //     "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/add",
+            //     post(collection_add),
+            // )
+            // .route(
+            //     "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/update",
+            //     post(collection_update),
+            // )
+            // .route(
+            //     "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/upsert",
+            //     post(collection_upsert),
+            // )
+            // .route(
+            //     "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/delete",
+            //     post(collection_delete),
+            // )
+            // .route(
+            //     "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_id/count",
+            //     get(collection_count),
+            // )
+            // .route(
+            //     "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_id/get",
+            //     post(collection_get),
+            // )
+            // .route(
+            //     "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_id/query",
+            //     post(collection_query),
+            // )
+            .with_state(server);
+           // .layer(DefaultBodyLimit::max(6000000)); // TODO: add to server configuration
+        // let app = add_tracing_middleware(app);
+
+        // // TODO: configuration for this
+        // // TODO: tracing
+        // let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+        // if circuit_breaker_config.enabled() {
+        //     let service = AdmissionControlledService::new(circuit_breaker_config, app);
+        //     axum::serve(listener, service.into_make_service())
+        //         .await
+        //         .unwrap();
+        // } else {
+        //     axum::serve(listener, app).await.unwrap();
+        // };
     }
 
     fn scorecard_request(&self, tags: &[&str]) -> Option<ScorecardGuard> {
@@ -254,7 +268,7 @@ impl FrontendServer {
 // These handlers simply proxy the call and the relevant inputs into
 // the appropriate method on the `FrontendServer` struct.
 
-async fn healthcheck(State(server): State<FrontendServer>) -> impl IntoResponse {
+async fn healthcheck(State(server): State<FrontendServer>) -> impl IntoApiResponse {
     server.metrics.healthcheck.add(1, &[]);
     let res = server.frontend.healthcheck().await;
     let code = match res.get_status_code() {
@@ -262,7 +276,7 @@ async fn healthcheck(State(server): State<FrontendServer>) -> impl IntoResponse 
         _ => StatusCode::SERVICE_UNAVAILABLE,
     };
 
-    (code, Json(res))
+    Json(res)
 }
 
 async fn heartbeat(
