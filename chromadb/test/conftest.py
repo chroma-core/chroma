@@ -619,7 +619,7 @@ def sqlite_persistent() -> Generator[System, None, None]:
         yield from sqlite_persistent_fixture()
 
 
-def rust_system(persistent: bool = False) -> Generator[System, None, None]:
+def rust_system(persistent: bool = True) -> Generator[System, None, None]:
     """Fixture generator for system using Rust bindings"""
     save_path = tempfile.TemporaryDirectory()
     settings = Settings(
