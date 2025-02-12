@@ -1,20 +1,14 @@
 use super::{Index, IndexConfig, IndexUuid, PersistentIndex};
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_hnswlib::HnswIndexPtrFFI;
+use std::ffi::c_int;
 use std::ffi::CString;
-use std::ffi::{c_char, c_int};
 use std::path::Path;
 use std::str::Utf8Error;
 use thiserror::Error;
 use tracing::instrument;
 
 pub const DEFAULT_MAX_ELEMENTS: usize = 10000;
-
-// https://doc.rust-lang.org/nomicon/ffi.html#representing-opaque-structs
-#[repr(C)]
-struct IndexPtrFFI {
-    _data: [u8; 0],
-    _marker: core::marker::PhantomData<(*mut u8, core::marker::PhantomPinned)>,
-}
 
 // TODO: Make this config:
 // - Watchable - for dynamic updates
@@ -89,7 +83,7 @@ impl HnswIndexConfig {
 /// This struct is not thread safe for concurrent reads and writes. Callers should
 /// synchronize access to the index between reads and writes.
 pub struct HnswIndex {
-    ffi_ptr: *const IndexPtrFFI,
+    ffi_ptr: *const HnswIndexPtrFFI,
     dimensionality: i32,
     pub id: IndexUuid,
 }
@@ -154,8 +148,9 @@ impl Index<HnswIndexConfig> for HnswIndex {
                     }
                 };
 
-                let ffi_ptr =
-                    unsafe { create_index(space_name.as_ptr(), index_config.dimensionality) };
+                let ffi_ptr = unsafe {
+                    chroma_hnswlib::create_index(space_name.as_ptr(), index_config.dimensionality)
+                };
                 read_and_return_hnsw_error(ffi_ptr)?;
 
                 let path = match CString::new(config.persist_path.clone().unwrap_or_default()) {
@@ -164,7 +159,7 @@ impl Index<HnswIndexConfig> for HnswIndex {
                 };
 
                 unsafe {
-                    init_index(
+                    chroma_hnswlib::init_index(
                         ffi_ptr,
                         config.max_elements,
                         config.m,
@@ -189,12 +184,12 @@ impl Index<HnswIndexConfig> for HnswIndex {
     }
 
     fn add(&self, id: usize, vector: &[f32]) -> Result<(), Box<dyn ChromaError>> {
-        unsafe { add_item(self.ffi_ptr, vector.as_ptr(), id, true) }
+        unsafe { chroma_hnswlib::add_item(self.ffi_ptr, vector.as_ptr(), id, true) }
         read_and_return_hnsw_error(self.ffi_ptr)
     }
 
     fn delete(&self, id: usize) -> Result<(), Box<dyn ChromaError>> {
-        unsafe { mark_deleted(self.ffi_ptr, id) }
+        unsafe { chroma_hnswlib::mark_deleted(self.ffi_ptr, id) }
         read_and_return_hnsw_error(self.ffi_ptr)
     }
 
@@ -209,7 +204,7 @@ impl Index<HnswIndexConfig> for HnswIndex {
         let mut ids = vec![0usize; actual_k];
         let mut distance = vec![0.0f32; actual_k];
         let total_result = unsafe {
-            knn_query(
+            chroma_hnswlib::knn_query(
                 self.ffi_ptr,
                 vector.as_ptr(),
                 k,
@@ -233,7 +228,7 @@ impl Index<HnswIndexConfig> for HnswIndex {
     fn get(&self, id: usize) -> Result<Option<Vec<f32>>, Box<dyn ChromaError>> {
         unsafe {
             let mut data: Vec<f32> = vec![0.0f32; self.dimensionality as usize];
-            get_item(self.ffi_ptr, id, data.as_mut_ptr());
+            chroma_hnswlib::get_item(self.ffi_ptr, id, data.as_mut_ptr());
             read_and_return_hnsw_error(self.ffi_ptr)?;
             Ok(Some(data))
         }
@@ -241,7 +236,7 @@ impl Index<HnswIndexConfig> for HnswIndex {
 
     fn get_all_ids_sizes(&self) -> Result<Vec<usize>, Box<dyn ChromaError>> {
         let mut sizes = vec![0usize; 2];
-        unsafe { get_all_ids_sizes(self.ffi_ptr, sizes.as_mut_ptr()) };
+        unsafe { chroma_hnswlib::get_all_ids_sizes(self.ffi_ptr, sizes.as_mut_ptr()) };
         read_and_return_hnsw_error(self.ffi_ptr)?;
         Ok(sizes)
     }
@@ -251,7 +246,7 @@ impl Index<HnswIndexConfig> for HnswIndex {
         let mut non_deleted_ids = vec![0usize; sizes[0]];
         let mut deleted_ids = vec![0usize; sizes[1]];
         unsafe {
-            get_all_ids(
+            chroma_hnswlib::get_all_ids(
                 self.ffi_ptr,
                 non_deleted_ids.as_mut_ptr(),
                 deleted_ids.as_mut_ptr(),
@@ -264,7 +259,7 @@ impl Index<HnswIndexConfig> for HnswIndex {
 
 impl PersistentIndex<HnswIndexConfig> for HnswIndex {
     fn save(&self) -> Result<(), Box<dyn ChromaError>> {
-        unsafe { persist_dirty(self.ffi_ptr) };
+        unsafe { chroma_hnswlib::persist_dirty(self.ffi_ptr) };
         read_and_return_hnsw_error(self.ffi_ptr)?;
         Ok(())
     }
@@ -284,7 +279,9 @@ impl PersistentIndex<HnswIndexConfig> for HnswIndex {
                 )))
             }
         };
-        let ffi_ptr = unsafe { create_index(space_name.as_ptr(), index_config.dimensionality) };
+        let ffi_ptr = unsafe {
+            chroma_hnswlib::create_index(space_name.as_ptr(), index_config.dimensionality)
+        };
         read_and_return_hnsw_error(ffi_ptr)?;
 
         let path = match CString::new(path.to_string()) {
@@ -292,7 +289,7 @@ impl PersistentIndex<HnswIndexConfig> for HnswIndex {
             Err(e) => return Err(Box::new(HnswIndexInitError::InvalidPath(e.to_string()))),
         };
         unsafe {
-            load_index(ffi_ptr, path.as_ptr(), true, true, DEFAULT_MAX_ELEMENTS);
+            chroma_hnswlib::load_index(ffi_ptr, path.as_ptr(), true, true, DEFAULT_MAX_ELEMENTS);
         }
         read_and_return_hnsw_error(ffi_ptr)?;
 
@@ -307,17 +304,17 @@ impl PersistentIndex<HnswIndexConfig> for HnswIndex {
 
 impl HnswIndex {
     fn set_ef(&self, ef: usize) -> Result<(), Box<dyn ChromaError>> {
-        unsafe { set_ef(self.ffi_ptr, ef as c_int) }
+        unsafe { chroma_hnswlib::set_ef(self.ffi_ptr, ef as c_int) }
         read_and_return_hnsw_error(self.ffi_ptr)
     }
 
     pub fn len(&self) -> usize {
-        unsafe { len(self.ffi_ptr) as usize }
+        unsafe { chroma_hnswlib::len(self.ffi_ptr) as usize }
         // Does not return an error
     }
 
     pub fn len_with_deleted(&self) -> usize {
-        unsafe { len_with_deleted(self.ffi_ptr) as usize }
+        unsafe { chroma_hnswlib::len_with_deleted(self.ffi_ptr) as usize }
         // Does not return an error
     }
 
@@ -330,27 +327,27 @@ impl HnswIndex {
     }
 
     pub fn capacity(&self) -> usize {
-        unsafe { capacity(self.ffi_ptr) as usize }
+        unsafe { chroma_hnswlib::capacity(self.ffi_ptr) as usize }
         // Does not return an error
     }
 
     pub fn resize(&mut self, new_size: usize) -> Result<(), Box<dyn ChromaError>> {
-        unsafe { resize_index(self.ffi_ptr, new_size) }
+        unsafe { chroma_hnswlib::resize_index(self.ffi_ptr, new_size) }
         read_and_return_hnsw_error(self.ffi_ptr)
     }
 
     pub fn open_fd(&self) {
-        unsafe { open_fd(self.ffi_ptr) }
+        unsafe { chroma_hnswlib::open_fd(self.ffi_ptr) }
     }
 
     pub fn close_fd(&self) {
-        unsafe { close_fd(self.ffi_ptr) }
+        unsafe { chroma_hnswlib::close_fd(self.ffi_ptr) }
     }
 
     #[cfg(test)]
     fn get_ef(&self) -> Result<usize, Box<dyn ChromaError>> {
         let ret_val;
-        unsafe { ret_val = get_ef(self.ffi_ptr) as usize }
+        unsafe { ret_val = chroma_hnswlib::get_ef(self.ffi_ptr) as usize }
         read_and_return_hnsw_error(self.ffi_ptr)?;
         Ok(ret_val)
     }
@@ -358,12 +355,12 @@ impl HnswIndex {
 
 impl Drop for HnswIndex {
     fn drop(&mut self) {
-        unsafe { free_index(self.ffi_ptr) }
+        unsafe { chroma_hnswlib::free_index(self.ffi_ptr) }
     }
 }
 
-fn read_and_return_hnsw_error(ffi_ptr: *const IndexPtrFFI) -> Result<(), Box<dyn ChromaError>> {
-    let err = unsafe { get_last_error(ffi_ptr) };
+fn read_and_return_hnsw_error(ffi_ptr: *const HnswIndexPtrFFI) -> Result<(), Box<dyn ChromaError>> {
+    let err = unsafe { chroma_hnswlib::get_last_error(ffi_ptr) };
     if !err.is_null() {
         match unsafe { std::ffi::CStr::from_ptr(err).to_str() } {
             Ok(err_str) => return Err(Box::new(HnswError::FFIException(err_str.to_string()))),
@@ -371,62 +368,6 @@ fn read_and_return_hnsw_error(ffi_ptr: *const IndexPtrFFI) -> Result<(), Box<dyn
         }
     }
     Ok(())
-}
-
-#[link(name = "bindings", kind = "static")]
-extern "C" {
-    fn create_index(space_name: *const c_char, dim: c_int) -> *const IndexPtrFFI;
-
-    fn free_index(index: *const IndexPtrFFI);
-
-    fn init_index(
-        index: *const IndexPtrFFI,
-        max_elements: usize,
-        M: usize,
-        ef_construction: usize,
-        random_seed: usize,
-        allow_replace_deleted: bool,
-        is_persistent: bool,
-        path: *const c_char,
-    );
-
-    fn load_index(
-        index: *const IndexPtrFFI,
-        path: *const c_char,
-        allow_replace_deleted: bool,
-        is_persistent_index: bool,
-        max_elements: usize,
-    );
-
-    fn persist_dirty(index: *const IndexPtrFFI);
-
-    fn add_item(index: *const IndexPtrFFI, data: *const f32, id: usize, replace_deleted: bool);
-    fn mark_deleted(index: *const IndexPtrFFI, id: usize);
-    fn get_item(index: *const IndexPtrFFI, id: usize, data: *mut f32);
-    fn get_all_ids_sizes(index: *const IndexPtrFFI, sizes: *mut usize);
-    fn get_all_ids(index: *const IndexPtrFFI, non_deleted_ids: *mut usize, deleted_ids: *mut usize);
-    fn knn_query(
-        index: *const IndexPtrFFI,
-        query_vector: *const f32,
-        k: usize,
-        ids: *mut usize,
-        distance: *mut f32,
-        allowed_ids: *const usize,
-        allowed_ids_length: usize,
-        disallowed_ids: *const usize,
-        disallowed_ids_length: usize,
-    ) -> c_int;
-    fn open_fd(index: *const IndexPtrFFI);
-    fn close_fd(index: *const IndexPtrFFI);
-
-    #[cfg(test)]
-    fn get_ef(index: *const IndexPtrFFI) -> c_int;
-    fn set_ef(index: *const IndexPtrFFI, ef: c_int);
-    fn len(index: *const IndexPtrFFI) -> c_int;
-    fn len_with_deleted(index: *const IndexPtrFFI) -> c_int;
-    fn capacity(index: *const IndexPtrFFI) -> c_int;
-    fn resize_index(index: *const IndexPtrFFI, new_size: usize);
-    fn get_last_error(index: *const IndexPtrFFI) -> *const c_char;
 }
 
 #[cfg(test)]

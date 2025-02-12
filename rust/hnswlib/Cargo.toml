@@ -1,0 +1,9 @@
+[package]
+name = "chroma-hnswlib"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[build-dependencies]
+cc = "1.2"

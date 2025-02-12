@@ -28,6 +28,7 @@ chroma-cache = { workspace = true }
 chroma-config = { workspace = true }
 chroma-storage = { workspace = true }
 chroma-distance = { workspace = true }
+chroma-hnswlib = { workspace = true }
 itertools = { workspace = true }
 
 [dev-dependencies]

@@ -1360,6 +1360,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "chroma-hnswlib"
+version = "0.0.0"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "chroma-index"
 version = "0.1.0"
 dependencies = [
@@ -1373,6 +1380,7 @@ dependencies = [
  "chroma-config",
  "chroma-distance",
  "chroma-error",
+ "chroma-hnswlib",
  "chroma-storage",
  "chroma-types",
  "criterion",
