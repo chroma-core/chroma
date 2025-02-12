@@ -10,10 +10,11 @@ cleanup() {
 
 trap cleanup EXIT
 
+cargo build --bin chroma
 cargo run --bin chroma -- run bin/rust_single_node_integration_test_config.yaml &
 
 echo "Waiting for Chroma server to be available..."
-for i in {1..240}; do
+for i in {1..60}; do
     if curl -s http://localhost:3000/api/v2/heartbeat > /dev/null; then
         echo "Chroma server is up!"
         break
