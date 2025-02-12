@@ -85,7 +85,7 @@ jobs:
           sccache: true
       - name: Install built wheel
         shell: bash
-        run: pip install --find-links target/wheels/ rust_bindings
+        run: pip install --no-index --find-links target/wheels/ chromadb
       - name: Test
         run: python -m pytest ${{ matrix.test-globs }}
         shell: bash
