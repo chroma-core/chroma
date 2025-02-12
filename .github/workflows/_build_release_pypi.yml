@@ -30,7 +30,7 @@ jobs:
         platform:
           - { os: linux, runner: depot-ubuntu-22.04, target: x86_64 }
           - { os: linux, runner: depot-ubuntu-22.04-arm, target: aarch64 }
-          - { os: windows, runner: windows-latest, target: x64 }
+          # - { os: windows, runner: windows-latest, target: x64 }
           - { os: macos, runner: depot-macos-14, target: x86_64 }
           - { os: macos, runner: depot-macos-14, target: aarch64 }
 
@@ -144,7 +144,7 @@ jobs:
           subject-path: 'wheels-*/*'
 
       - name: Publish to test PyPI
-        if: ${{ inputs.publish_to_pypi }}
+        if: ${{ inputs.publish_to_test_pypi }}
         uses: PyO3/maturin-action@v1
         env:
           MATURIN_PYPI_TOKEN: ${{ secrets.TEST_PYPI_API_TOKEN }}
