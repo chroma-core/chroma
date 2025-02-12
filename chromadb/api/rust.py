@@ -99,9 +99,10 @@ class RustBindingsAPI(ServerAPI):
                 hnsw_cache_size=self.hnsw_cache_size,
             )
 
-    # @override
-    # def stop(self) -> None:
-    #     del self.bindings
+    @override
+    def stop(self) -> None:
+        if hasattr(self, "bindings"):
+            del self.bindings
 
     # ////////////////////////////// Admin API //////////////////////////////
 

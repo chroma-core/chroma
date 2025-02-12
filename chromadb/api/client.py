@@ -61,6 +61,7 @@ class Client(SharedSystemClient, ClientAPI):
 
         # Get the root system component we want to interact with
         self._server = self._system.instance(ServerAPI)
+        self._server.start()
 
         user_identity = self.get_user_identity()
 
