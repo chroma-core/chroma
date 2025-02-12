@@ -205,7 +205,7 @@ impl FrontendServer {
                 post(collection_query),
             )
             .with_state(server)
-            .layer(DefaultBodyLimit::max(6000000)); // TODO: add to server configuration
+            .layer(DefaultBodyLimit::max(6000000*8)); // TODO: add to server configuration
         let app = add_tracing_middleware(app);
 
         // TODO: configuration for this
