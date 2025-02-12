@@ -32,6 +32,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Protoc
+        # Linux builds using manylinux container images, so the host version of protoc is not used.
+        # But we need to install it for Windows and macOS.
+        if: ${{ matrix.platform.os != 'linux' && matrix.platform.os != 'musllinux' }}
         uses: arduino/setup-protoc@v2
 
       # On Windows, we want to set up Python with the correct architecture
@@ -56,6 +59,9 @@ jobs:
           sccache: 'true'
           manylinux: ${{ matrix.platform.manylinux }}
           working-directory: rust/python_bindings
+          before-script-linux: |
+            apt-get update
+            apt install -y protobuf-compiler
 
       - name: Build free-threaded wheels
         uses: PyO3/maturin-action@v1
@@ -65,6 +71,9 @@ jobs:
           sccache: 'true'
           manylinux: ${{ matrix.platform.manylinux }}
           working-directory: rust/python_bindings
+          before-script-linux: |
+            apt-get update
+            apt install -y protobuf-compiler
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
