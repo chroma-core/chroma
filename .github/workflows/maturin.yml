@@ -60,8 +60,11 @@ jobs:
           manylinux: ${{ matrix.platform.manylinux }}
           working-directory: rust/python_bindings
           before-script-linux: |
-            apt-get update
-            apt install -y protobuf-compiler
+            sudo apt-get update
+            sudo apt-get install -y wget unzip
+            wget https://github.com/protocolbuffers/protobuf/releases/download/v28.2/protoc-28.2-linux-x86_64.zip
+            sudo unzip protoc-28.2-linux-x86_64.zip -d /usr/local/
+            sudo rm protoc-28.2-linux-x86_64.zip
 
       - name: Build free-threaded wheels
         uses: PyO3/maturin-action@v1
@@ -72,8 +75,11 @@ jobs:
           manylinux: ${{ matrix.platform.manylinux }}
           working-directory: rust/python_bindings
           before-script-linux: |
-            apt-get update
-            apt install -y protobuf-compiler
+            sudo apt-get update
+            sudo apt-get install -y wget unzip
+            wget https://github.com/protocolbuffers/protobuf/releases/download/v28.2/protoc-28.2-linux-x86_64.zip
+            sudo unzip protoc-28.2-linux-x86_64.zip -d /usr/local/
+            sudo rm protoc-28.2-linux-x86_64.zip
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
