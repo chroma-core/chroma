@@ -35,6 +35,7 @@ use crate::{
     ac::AdmissionControlledService,
     auth::{AuthenticateAndAuthorize, AuthzAction, AuthzResource},
     frontend::Frontend,
+    quota::{Action, QuotaEnforcer, QuotaPayload},
     tower_tracing::add_tracing_middleware,
     types::errors::{ErrorResponse, ServerError, ValidationError},
     FrontendConfig,
@@ -119,6 +120,7 @@ pub(crate) struct FrontendServer {
     scorecard: Arc<Scorecard<'static>>,
     metrics: Arc<Metrics>,
     auth: Arc<dyn AuthenticateAndAuthorize>,
+    quota_enforcer: Arc<dyn QuotaEnforcer>,
 }
 
 impl FrontendServer {
@@ -127,6 +129,7 @@ impl FrontendServer {
         frontend: Frontend,
         rules: Vec<Rule>,
         auth: Arc<dyn AuthenticateAndAuthorize>,
+        quota_enforcer: Arc<dyn QuotaEnforcer>,
     ) -> FrontendServer {
         // NOTE(rescrv):  Assume statically no more than 128 threads because we won't deploy on
         // hardware with that many threads anytime soon for frontends, if ever.
@@ -141,6 +144,7 @@ impl FrontendServer {
             scorecard,
             metrics,
             auth,
+            quota_enforcer,
         }
     }
 
@@ -360,6 +364,14 @@ async fn create_database(
             },
         )
         .await?;
+    // Enforce quota.
+    let api_token = headers
+        .get("x-chroma-token")
+        .map(|val| val.to_str().unwrap_or_default())
+        .map(|val| val.to_string());
+    let mut quota_payload = QuotaPayload::new(Action::CreateDatabase, tenant_id.clone(), api_token);
+    quota_payload = quota_payload.with_collection_name(&name);
+    server.quota_enforcer.enforce(&quota_payload).await?;
     let _guard = server.scorecard_request(&[
         "op:create_database",
         format!("tenant:{}", tenant_id).as_str(),
@@ -497,6 +509,16 @@ async fn list_collections(
             },
         )
         .await?;
+    let api_token = headers
+        .get("x-chroma-token")
+        .map(|val| val.to_str().unwrap_or_default())
+        .map(|val| val.to_string());
+    let mut quota_payload =
+        QuotaPayload::new(Action::ListCollections, tenant_id.clone(), api_token);
+    if let Some(limit) = limit {
+        quota_payload = quota_payload.with_limit(limit);
+    }
+    server.quota_enforcer.enforce(&quota_payload).await?;
     let _guard = server.scorecard_request(&[
         "op:list_collections",
         format!("tenant:{}", tenant_id).as_str(),
@@ -550,6 +572,17 @@ async fn create_collection(
             },
         )
         .await?;
+    let api_token = headers
+        .get("x-chroma-token")
+        .map(|val| val.to_str().unwrap_or_default())
+        .map(|val| val.to_string());
+    let mut quota_payload =
+        QuotaPayload::new(Action::CreateCollection, tenant_id.clone(), api_token);
+    quota_payload = quota_payload.with_collection_name(&payload.name);
+    if let Some(metadata) = &payload.metadata {
+        quota_payload = quota_payload.with_create_collection_metadata(metadata);
+    }
+    server.quota_enforcer.enforce(&quota_payload).await?;
     let _guard = server.scorecard_request(&[
         "op:create_collection",
         format!("tenant:{}", tenant_id).as_str(),
@@ -607,6 +640,19 @@ async fn update_collection(
             },
         )
         .await?;
+    let api_token = headers
+        .get("x-chroma-token")
+        .map(|val| val.to_str().unwrap_or_default())
+        .map(|val| val.to_string());
+    let mut quota_payload =
+        QuotaPayload::new(Action::UpdateCollection, tenant_id.clone(), api_token);
+    if let Some(new_name) = &payload.new_name {
+        quota_payload = quota_payload.with_collection_new_name(new_name);
+    }
+    if let Some(new_metadata) = &payload.new_metadata {
+        quota_payload = quota_payload.with_update_collection_metadata(new_metadata);
+    }
+    server.quota_enforcer.enforce(&quota_payload).await?;
     let _guard = server.scorecard_request(&[
         "op:update_collection",
         format!("tenant:{}", tenant_id).as_str(),
@@ -670,13 +716,33 @@ async fn collection_add(
             },
         )
         .await?;
+    let collection_id =
+        CollectionUuid(Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?);
+    let api_token = headers
+        .get("x-chroma-token")
+        .map(|val| val.to_str().unwrap_or_default())
+        .map(|val| val.to_string());
+    let mut quota_payload = QuotaPayload::new(Action::Add, tenant_id.clone(), api_token);
+    quota_payload = quota_payload.with_ids(&payload.ids);
+    if let Some(embeddings) = &payload.embeddings {
+        quota_payload = quota_payload.with_add_embeddings(embeddings);
+    }
+    if let Some(metadatas) = &payload.metadatas {
+        quota_payload = quota_payload.with_metadatas(metadatas);
+    }
+    if let Some(documents) = &payload.documents {
+        quota_payload = quota_payload.with_documents(documents);
+    }
+    if let Some(uris) = &payload.uris {
+        quota_payload = quota_payload.with_uris(uris);
+    }
+    quota_payload = quota_payload.with_collection_uuid(collection_id);
+    server.quota_enforcer.enforce(&quota_payload).await?;
     let _guard = server.scorecard_request(&[
         "op:write",
         format!("tenant:{}", tenant_id).as_str(),
         format!("collection:{}", collection_id).as_str(),
     ]);
-    let collection_id =
-        CollectionUuid(Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?);
 
     server
         .frontend
@@ -733,6 +799,25 @@ async fn collection_update(
         .await?;
     let collection_id =
         CollectionUuid(Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?);
+    let api_token = headers
+        .get("x-chroma-token")
+        .map(|val| val.to_str().unwrap_or_default())
+        .map(|val| val.to_string());
+    let mut quota_payload = QuotaPayload::new(Action::Update, tenant_id.clone(), api_token);
+    quota_payload = quota_payload.with_ids(&payload.ids);
+    if let Some(embeddings) = &payload.embeddings {
+        quota_payload = quota_payload.with_update_embeddings(embeddings);
+    }
+    if let Some(metadatas) = &payload.metadatas {
+        quota_payload = quota_payload.with_update_metadatas(metadatas);
+    }
+    if let Some(documents) = &payload.documents {
+        quota_payload = quota_payload.with_documents(documents);
+    }
+    if let Some(uris) = &payload.uris {
+        quota_payload = quota_payload.with_uris(uris);
+    }
+    server.quota_enforcer.enforce(&quota_payload).await?;
     let _guard = server.scorecard_request(&[
         "op:write",
         format!("tenant:{}", tenant_id).as_str(),
@@ -792,6 +877,26 @@ async fn collection_upsert(
         .await?;
     let collection_id =
         CollectionUuid(Uuid::parse_str(&collection_id).map_err(|_| ValidationError::CollectionId)?);
+    let api_token = headers
+        .get("x-chroma-token")
+        .map(|val| val.to_str().unwrap_or_default())
+        .map(|val| val.to_string());
+    let mut quota_payload = QuotaPayload::new(Action::Upsert, tenant_id.clone(), api_token);
+    quota_payload = quota_payload.with_ids(&payload.ids);
+    if let Some(embeddings) = &payload.embeddings {
+        quota_payload = quota_payload.with_add_embeddings(embeddings);
+    }
+    if let Some(metadatas) = &payload.metadatas {
+        quota_payload = quota_payload.with_update_metadatas(metadatas);
+    }
+    if let Some(documents) = &payload.documents {
+        quota_payload = quota_payload.with_documents(documents);
+    }
+    if let Some(uris) = &payload.uris {
+        quota_payload = quota_payload.with_uris(uris);
+    }
+    quota_payload = quota_payload.with_collection_uuid(collection_id);
+    server.quota_enforcer.enforce(&quota_payload).await?;
     let _guard = server.scorecard_request(&[
         "op:write",
         format!("tenant:{}", tenant_id).as_str(),
@@ -849,13 +954,24 @@ async fn collection_delete(
         .await?;
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
+    let r#where = payload.where_fields.parse()?;
+    let api_token = headers
+        .get("x-chroma-token")
+        .map(|val| val.to_str().unwrap_or_default())
+        .map(|val| val.to_string());
+    let mut quota_payload = QuotaPayload::new(Action::Delete, tenant_id.clone(), api_token);
+    if let Some(ids) = &payload.ids {
+        quota_payload = quota_payload.with_ids(ids);
+    }
+    if let Some(r#where) = &r#where {
+        quota_payload = quota_payload.with_where(r#where);
+    }
+    server.quota_enforcer.enforce(&quota_payload).await?;
     let _guard = server.scorecard_request(&[
         "op:write",
         format!("tenant:{}", tenant_id).as_str(),
         format!("collection:{}", collection_id).as_str(),
     ]);
-
-    let r#where = payload.where_fields.parse()?;
 
     let request = chroma_types::DeleteCollectionRecordsRequest::try_new(
         tenant_id,
@@ -937,6 +1053,22 @@ async fn collection_get(
         .await?;
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
+    let parsed_where = payload.where_fields.parse()?;
+    let api_token = headers
+        .get("x-chroma-token")
+        .map(|val| val.to_str().unwrap_or_default())
+        .map(|val| val.to_string());
+    let mut quota_payload = QuotaPayload::new(Action::Get, tenant_id.clone(), api_token);
+    if let Some(ids) = &payload.ids {
+        quota_payload = quota_payload.with_ids(ids);
+    }
+    if let Some(r#where) = &parsed_where {
+        quota_payload = quota_payload.with_where(r#where);
+    }
+    if let Some(limit) = payload.limit {
+        quota_payload = quota_payload.with_limit(limit);
+    }
+    server.quota_enforcer.enforce(&quota_payload).await?;
     tracing::info!(
         "Getting records from collection [{collection_id}] in database [{database_name}] for tenant [{tenant_id}]",
     );
@@ -950,7 +1082,7 @@ async fn collection_get(
         database_name,
         collection_id,
         payload.ids,
-        payload.where_fields.parse()?,
+        parsed_where,
         payload.limit,
         payload.offset.unwrap_or(0),
         payload.include,
@@ -996,6 +1128,23 @@ async fn collection_query(
         .await?;
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
+    let parsed_where = payload.where_fields.parse()?;
+    let api_token = headers
+        .get("x-chroma-token")
+        .map(|val| val.to_str().unwrap_or_default())
+        .map(|val| val.to_string());
+    let mut quota_payload = QuotaPayload::new(Action::Query, tenant_id.clone(), api_token);
+    if let Some(ids) = &payload.ids {
+        quota_payload = quota_payload.with_ids(ids);
+    }
+    if let Some(r#where) = &parsed_where {
+        quota_payload = quota_payload.with_where(r#where);
+    }
+    quota_payload = quota_payload.with_query_embeddings(&payload.query_embeddings);
+    if let Some(n_results) = payload.n_results {
+        quota_payload = quota_payload.with_n_results(n_results);
+    }
+    server.quota_enforcer.enforce(&quota_payload).await?;
     tracing::info!(
         "Querying records from collection [{collection_id}] in database [{database_name}] for tenant [{tenant_id}]",
     );
@@ -1020,7 +1169,7 @@ async fn collection_query(
         database_name,
         collection_id,
         payload.ids,
-        payload.where_fields.parse()?,
+        parsed_where,
         payload.query_embeddings,
         payload.n_results.unwrap_or(10),
         payload.include,
