@@ -42,6 +42,13 @@ pub async fn frontend_service_entrypoint(auth: Arc<dyn auth::AuthenticateAndAuth
         Ok(config_path) => FrontendConfig::load_from_path(&config_path),
         Err(_) => FrontendConfig::load(),
     };
+    frontend_service_entrypoint_with_config(auth, config).await;
+}
+
+pub async fn frontend_service_entrypoint_with_config(
+    auth: Arc<dyn auth::AuthenticateAndAuthorize>,
+    config: FrontendConfig,
+) {
     chroma_tracing::init_otel_tracing(&config.service_name, &config.otel_endpoint);
     let system = System::new();
     let registry = Registry::new();

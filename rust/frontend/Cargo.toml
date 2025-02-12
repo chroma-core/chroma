@@ -27,6 +27,7 @@ tower = { version = "0.4.13", features = ["discover"] }
 mdac = { workspace = true }
 opentelemetry.workspace = true
 validator = { workspace = true }
+rust-embed = { workspace = true }
 
 chroma-cache = { workspace = true }
 chroma-config = { workspace = true }

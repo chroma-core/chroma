@@ -6,6 +6,9 @@ edition = "2021"
 [dependencies]
 clap = { version = "4.5.28", features = ["derive"] }
 webbrowser = "1.0.3"
+tokio = { workspace = true }
+
+chroma-frontend = { workspace = true }
 
 [[bin]]
 name = "chroma"

@@ -1346,6 +1346,7 @@ dependencies = [
  "parking_lot",
  "rand",
  "regex",
+ "rust-embed",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -1746,7 +1747,9 @@ checksum = "f46ad14479a25103f283c0f10005961cf086d8dc42205bb44c46ac563475dca6"
 name = "cli"
 version = "0.1.0"
 dependencies = [
+ "chroma-frontend",
  "clap",
+ "tokio",
  "webbrowser",
 ]
 
