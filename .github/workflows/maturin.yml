@@ -35,9 +35,6 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install Zig (for linking)
-        uses: mlugg/setup-zig@v1
-
       # On Windows, we want to set up Python with the correct architecture
       - name: Set up Python on Windows
         if: ${{ matrix.platform.os == 'windows' }}
@@ -57,7 +54,7 @@ jobs:
         with:
           target: ${{ matrix.platform.target }}
           args: --zig --release --out ../../dist
-          # sccache: 'true'
+          sccache: ${{ matrix.platform.os != 'macos' }} # does not work on macOS for some reason
           working-directory: rust/python_bindings
           container: "off"
 
