@@ -47,7 +47,7 @@ pub struct QuotaPayload<'other> {
     #[allow(dead_code)]
     tenant: String,
     #[allow(dead_code)]
-    api_token: String,
+    api_token: Option<String>,
     create_collection_metadata: Option<&'other Metadata>,
     update_collection_metadata: Option<&'other UpdateMetadata>,
     ids: Option<&'other [String]>,
@@ -68,7 +68,7 @@ pub struct QuotaPayload<'other> {
 }
 
 impl<'other> QuotaPayload<'other> {
-    pub fn new(action: Action, tenant: String, api_token: String) -> Self {
+    pub fn new(action: Action, tenant: String, api_token: Option<String>) -> Self {
         Self {
             action,
             tenant,
