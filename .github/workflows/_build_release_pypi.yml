@@ -28,8 +28,8 @@ jobs:
       fail-fast: false
       matrix:
         platform:
-          - { os: linux, runner: depot-ubuntu-22.04, target: x86_64 }
-          - { os: linux, runner: depot-ubuntu-22.04-arm, target: aarch64 }
+          # - { os: linux, runner: depot-ubuntu-22.04, target: x86_64 }
+          # - { os: linux, runner: depot-ubuntu-22.04-arm, target: aarch64 }
           # - { os: windows, runner: windows-latest, target: x64 }
           - { os: macos, runner: depot-macos-14, target: x86_64 }
           - { os: macos, runner: depot-macos-14, target: aarch64 }
@@ -111,6 +111,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Set version in pyproject.toml
+        shell: bash
+        run: |
+          pip install toml
+          python -c "
+          import os
+          import toml
+
+          file_path = 'pyproject.toml'
+          data = toml.load(file_path)
+
+          # Set the package version to the VERSION env variable
+          data['project']['version'] = os.environ['VERSION']
+          data['project']['dynamic'] = []
+
+          with open(file_path, 'w') as f:
+              toml.dump(data, f)
+          "
       - name: Build sdist
         uses: PyO3/maturin-action@v1
         with:
