@@ -212,12 +212,6 @@ impl ChromaError for QuotaEnforcerError {
 }
 
 pub trait QuotaEnforcer: Send + Sync {
-    fn set_context(
-        &self,
-        tenant: &str,
-        context: &str,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + Sync>>;
-
     fn enforce(
         &self,
         payload: &QuotaPayload<'_>,
@@ -225,10 +219,6 @@ pub trait QuotaEnforcer: Send + Sync {
 }
 
 impl QuotaEnforcer for () {
-    fn set_context(&self, _: &str, _: &str) -> Pin<Box<dyn Future<Output = ()> + Send + Sync>> {
-        Box::pin(ready(()))
-    }
-
     fn enforce(
         &self,
         _: &QuotaPayload<'_>,
