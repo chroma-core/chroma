@@ -130,7 +130,6 @@ jobs:
         ENV_FILE: ${{ matrix.env-file }}
         PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
 
-    # todo: break out stress integration tests
   test-rust-single-node-integration:
     strategy:
       fail-fast: false
@@ -139,8 +138,6 @@ jobs:
         platform: [depot-ubuntu-22.04, windows-latest]
         test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore='chromadb/test/test_cli.py' --ignore-glob 'chromadb/test/distributed/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
                    "chromadb/test/property/test_add.py",
-                   "chromadb/test/test_cli.py",
-                   "chromadb/test/auth/test_simple_rbac_authz.py",
                    "chromadb/test/property/test_collections.py",
                    "chromadb/test/property/test_collections_with_database_tenant.py",
                    "chromadb/test/property/test_cross_version_persist.py",
