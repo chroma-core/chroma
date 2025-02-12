@@ -35,8 +35,8 @@ jobs:
           repository: chroma-core/hnswlib
           path: hnswlib
       # (actions/checkout doesn't allow cloning above the workspace root)
-      - name: Symlink hnswlib to parent
-        run: ln -s "$(pwd)/hnswlib" ../hnswlib
+      - name: Copy hnswlib to parent
+        run: cp -r "$(pwd)/hnswlib" ../hnswlib
 
       - name: Install Protoc
         # Linux builds using manylinux container images, so the host version of protoc is not used.
@@ -67,8 +67,16 @@ jobs:
           manylinux: ${{ matrix.platform.manylinux }}
           working-directory: rust/python_bindings
           before-script-linux: |
-            apt-get update
-            apt-get install -y wget unzip
+            if command -v apt-get &>/dev/null; then
+                apt-get update -y
+                apt-get install -y wget unzip
+            elif command -v yum &>/dev/null; then
+                yum update -y
+                yum install -y wget unzip
+            else
+                echo "Neither apt-get nor yum found."
+                exit 1
+            fi
             wget https://github.com/protocolbuffers/protobuf/releases/download/v28.2/protoc-28.2-linux-x86_64.zip
             unzip protoc-28.2-linux-x86_64.zip -d /usr/local/
             rm protoc-28.2-linux-x86_64.zip
@@ -82,8 +90,16 @@ jobs:
           manylinux: ${{ matrix.platform.manylinux }}
           working-directory: rust/python_bindings
           before-script-linux: |
-            apt-get update
-            apt-get install -y wget unzip
+            if command -v apt-get &>/dev/null; then
+                apt-get update -y
+                apt-get install -y wget unzip
+            elif command -v yum &>/dev/null; then
+                yum update -y
+                yum install -y wget unzip
+            else
+                echo "Neither apt-get nor yum found."
+                exit 1
+            fi
             wget https://github.com/protocolbuffers/protobuf/releases/download/v28.2/protoc-28.2-linux-x86_64.zip
             unzip protoc-28.2-linux-x86_64.zip -d /usr/local/
             rm protoc-28.2-linux-x86_64.zip
