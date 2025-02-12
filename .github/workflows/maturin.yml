@@ -67,19 +67,10 @@ jobs:
           manylinux: ${{ matrix.platform.manylinux }}
           working-directory: rust/python_bindings
           before-script-linux: |
-            if command -v apt-get &>/dev/null; then
-                apt-get update -y
-                apt-get install -y wget unzip
-            elif command -v yum &>/dev/null; then
-                yum update -y
-                yum install -y wget unzip
-            else
-                echo "Neither apt-get nor yum found."
-                exit 1
-            fi
-            wget https://github.com/protocolbuffers/protobuf/releases/download/v28.2/protoc-28.2-linux-x86_64.zip
-            unzip protoc-28.2-linux-x86_64.zip -d /usr/local/
-            rm protoc-28.2-linux-x86_64.zip
+            curl -o eget.sh https://zyedidia.github.io/eget.sh
+            echo "0e64b8a3c13f531da005096cc364ac77835bda54276fedef6c62f3dbdc1ee919 eget.sh" | sha256sum -c -
+            bash eget.sh
+            ./eget --tag v28.2 --to=/usr/local/bin protocolbuffers/protobuf
 
       - name: Build free-threaded wheels
         uses: PyO3/maturin-action@v1
