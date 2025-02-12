@@ -91,6 +91,7 @@ class RustBindingsAPI(ServerAPI):
             migration_mode=migration_mode_bindings,
             url=sqlite_persist_path,
         )
+
         self.bindings = rust_bindings.Bindings(
             allow_reset=self._system.settings.require("allow_reset"),
             sqlite_db_config=sqlite_config,

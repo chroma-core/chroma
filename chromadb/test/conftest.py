@@ -613,13 +613,15 @@ def sqlite_persistent_fixture() -> Generator[System, None, None]:
 @pytest.fixture
 def sqlite_persistent() -> Generator[System, None, None]:
     if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ:
-        yield from rust_system(persistent=True)
+        # yield from rust_system(persistent=True)
+        yield from sqlite_persistent_fixture()
     else:
         yield from sqlite_persistent_fixture()
 
 
 def rust_system(persistent: bool = False) -> Generator[System, None, None]:
     """Fixture generator for system using Rust bindings"""
+    save_path = tempfile.TemporaryDirectory()
     settings = Settings(
         chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
         chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
@@ -628,7 +630,7 @@ def rust_system(persistent: bool = False) -> Generator[System, None, None]:
         chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
         is_persistent=persistent,
         allow_reset=True,
-        persist_directory=tempfile.TemporaryDirectory().name if persistent else "",
+        persist_directory=save_path.name if persistent else "",
     )
     system = System(settings)
     system.start()

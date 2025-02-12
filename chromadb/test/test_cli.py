@@ -88,10 +88,9 @@ def test_vacuum(sqlite_persistent: System) -> None:
         assert rows[0][2] == "vacuum"
 
     # Automatic pruning should have been enabled
-    if hasattr(sqlite, "config"):
-        del (
-            sqlite.config
-        )  # the CLI will end up starting a new instance of sqlite, so we need to force-refresh the cached config here
+    del (
+        sqlite.config
+    )  # the CLI will end up starting a new instance of sqlite, so we need to force-refresh the cached config here
     assert sqlite.config.get_parameter("automatically_purge").value
 
     # Log should be clean
