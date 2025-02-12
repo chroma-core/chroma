@@ -18,15 +18,18 @@ jobs:
       run:
         working-directory: rust/cli
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
       - name: Checkout chroma-hnswlib
         uses: actions/checkout@v4
         with:
           repository: chroma-core/hnswlib
           path: hnswlib
 
-      - name: Symlink hnswlib to parent
-        working-directory: ${{ github.workspace }}
-        run: ln -s "$(pwd)/hnswlib" ../hnswlib
+      - name: Symlink hnswlib to parent directory
+        working-directory: ${{ github.workspace }}/chroma
+        run: ln -s "$(pwd)/../hnswlib" ../hnswlib
         shell: bash
 
       - name: List parent directory of repository root
@@ -38,9 +41,6 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: |
           ls -R ..
-
-      - name: Checkout repository
-        uses: actions/checkout@v3
 
       - name: Install Protocol Buffers Compiler
         run: |
