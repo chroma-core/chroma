@@ -32,16 +32,6 @@ jobs:
         run: ln -s "$(pwd)/hnswlib" ../hnswlib
         shell: bash
 
-      - name: List parent directory of repository root
-        working-directory: ${{ github.workspace }}
-        run: |
-          ls -la ..
-
-      - name: List parent directory of repository root 2
-        working-directory: ${{ github.workspace }}
-        run: |
-          ls -R ..
-
       - name: Install Protocol Buffers Compiler
         run: |
           sudo apt-get update
@@ -57,7 +47,7 @@ jobs:
         run: cargo build --bin chroma --release
 
       - name: Rename binary artifact for Linux
-        run: mv target/release/chroma ../chroma-linux
+        run: mv ../../target/release/chroma ./chroma-linux
 
       - name: Upload Linux binary artifact
         uses: actions/upload-artifact@v4
@@ -74,6 +64,17 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
+
+      - name: Checkout chroma-hnswlib
+        uses: actions/checkout@v4
+        with:
+          repository: chroma-core/hnswlib
+          path: hnswlib
+
+      - name: Symlink hnswlib to parent directory
+        working-directory: ${{ github.workspace }}
+        run: ln -s "$(pwd)/hnswlib" ../hnswlib
+        shell: bash
 
       - name: Install Protocol Buffers Compiler
         run: choco install protoc -y
@@ -109,6 +110,17 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
+
+      - name: Checkout chroma-hnswlib
+        uses: actions/checkout@v4
+        with:
+          repository: chroma-core/hnswlib
+          path: hnswlib
+
+      - name: Symlink hnswlib to parent directory
+        working-directory: ${{ github.workspace }}
+        run: ln -s "$(pwd)/hnswlib" ../hnswlib
+        shell: bash
 
       - name: Install Protocol Buffers Compiler
         run: brew install protobuf
