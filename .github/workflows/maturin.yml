@@ -57,7 +57,7 @@ jobs:
         with:
           target: ${{ matrix.platform.target }}
           args: --zig --release --out ../../dist
-          sccache: 'true'
+          # sccache: 'true'
           working-directory: rust/python_bindings
           container: "off"
 
