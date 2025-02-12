@@ -77,6 +77,7 @@ jobs:
       - name: Set version in pyproject.toml
         shell: bash
         run: |
+          pip install toml
           python -c "
           import os
           import toml
@@ -85,10 +86,8 @@ jobs:
           data = toml.load(file_path)
 
           # Set the package version to the VERSION env variable
-          data['package']['version'] = os.environ['VERSION']
-
-          # Set package.dynamic to an empty list
-          data['package']['dynamic'] = []
+          data['project']['version'] = os.environ['VERSION']
+          data['project']['dynamic'] = []
 
           with open(file_path, 'w') as f:
               toml.dump(data, f)
