@@ -43,28 +43,28 @@ impl TryFrom<&str> for Action {
 
 pub struct QuotaPayload<'other> {
     #[allow(dead_code)]
-    action: Action,
+    pub action: Action,
     #[allow(dead_code)]
-    tenant: String,
+    pub tenant: String,
     #[allow(dead_code)]
-    api_token: Option<String>,
-    create_collection_metadata: Option<&'other Metadata>,
-    update_collection_metadata: Option<&'other UpdateMetadata>,
-    ids: Option<&'other [String]>,
-    add_embeddings: Option<&'other [Vec<f32>]>,
-    update_embeddings: Option<&'other [Option<Vec<f32>>]>,
-    documents: Option<&'other [Option<String>]>,
-    uris: Option<&'other [Option<String>]>,
-    metadatas: Option<&'other [Option<Metadata>]>,
-    update_metadatas: Option<&'other [Option<UpdateMetadata>]>,
-    r#where: Option<&'other Where>,
-    collection_name: Option<&'other String>,
-    collection_new_name: Option<&'other String>,
-    limit: Option<u32>,
-    offset: Option<u32>,
-    n_results: Option<u32>,
-    query_embeddings: Option<&'other [Vec<f32>]>,
-    collection_uuid: Option<CollectionUuid>,
+    pub api_token: Option<String>,
+    pub create_collection_metadata: Option<&'other Metadata>,
+    pub update_collection_metadata: Option<&'other UpdateMetadata>,
+    pub ids: Option<&'other [String]>,
+    pub add_embeddings: Option<&'other [Vec<f32>]>,
+    pub update_embeddings: Option<&'other [Option<Vec<f32>>]>,
+    pub documents: Option<&'other [Option<String>]>,
+    pub uris: Option<&'other [Option<String>]>,
+    pub metadatas: Option<&'other [Option<Metadata>]>,
+    pub update_metadatas: Option<&'other [Option<UpdateMetadata>]>,
+    pub r#where: Option<&'other Where>,
+    pub collection_name: Option<&'other str>,
+    pub collection_new_name: Option<&'other str>,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+    pub n_results: Option<u32>,
+    pub query_embeddings: Option<&'other [Vec<f32>]>,
+    pub collection_uuid: Option<CollectionUuid>,
 }
 
 impl<'other> QuotaPayload<'other> {
@@ -155,12 +155,12 @@ impl<'other> QuotaPayload<'other> {
         self
     }
 
-    pub fn with_collection_name(mut self, collection_name: &'other String) -> Self {
+    pub fn with_collection_name(mut self, collection_name: &'other str) -> Self {
         self.collection_name = Some(collection_name);
         self
     }
 
-    pub fn with_collection_new_name(mut self, collection_new_name: &'other String) -> Self {
+    pub fn with_collection_new_name(mut self, collection_new_name: &'other str) -> Self {
         self.collection_new_name = Some(collection_new_name);
         self
     }
@@ -199,6 +199,8 @@ pub enum QuotaEnforcerError {
     ApiKeyMissing,
     #[error("Unauthorized")]
     Unauthorized,
+    #[error("Initialization failed")]
+    InitializationFailed,
 }
 
 impl ChromaError for QuotaEnforcerError {
@@ -207,22 +209,23 @@ impl ChromaError for QuotaEnforcerError {
             QuotaEnforcerError::QuotaExceeded => chroma_error::ErrorCodes::ResourceExhausted,
             QuotaEnforcerError::ApiKeyMissing => chroma_error::ErrorCodes::InvalidArgument,
             QuotaEnforcerError::Unauthorized => chroma_error::ErrorCodes::PermissionDenied,
+            QuotaEnforcerError::InitializationFailed => chroma_error::ErrorCodes::Internal,
         }
     }
 }
 
 pub trait QuotaEnforcer: Send + Sync {
-    fn enforce(
-        &self,
-        payload: &QuotaPayload<'_>,
-    ) -> Pin<Box<dyn Future<Output = Result<(), QuotaEnforcerError>> + Send + Sync>>;
+    fn enforce<'other>(
+        &'other self,
+        payload: &'other QuotaPayload<'other>,
+    ) -> Pin<Box<dyn Future<Output = Result<(), QuotaEnforcerError>> + Send + 'other>>;
 }
 
 impl QuotaEnforcer for () {
     fn enforce(
         &self,
         _: &QuotaPayload<'_>,
-    ) -> Pin<Box<dyn Future<Output = Result<(), QuotaEnforcerError>> + Send + Sync>> {
+    ) -> Pin<Box<dyn Future<Output = Result<(), QuotaEnforcerError>> + Send>> {
         Box::pin(ready(Ok(())))
     }
 }
