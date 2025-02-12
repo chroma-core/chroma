@@ -7,161 +7,64 @@ permissions:
   contents: read
 
 jobs:
-  linux:
+  build:
     runs-on: ${{ matrix.platform.runner }}
     strategy:
       fail-fast: false
       matrix:
         platform:
-          - runner: depot-ubuntu-22.04
-            target: x86_64
-          - runner: depot-ubuntu-22.04
-            target: x86
-          - runner: depot-ubuntu-22.04-arm
-            target: aarch64
-          - runner: depot-ubuntu-22.04
-            target: armv7
-          - runner: depot-ubuntu-22.04
-            target: s390x
-          - runner: depot-ubuntu-22.04
-            target: ppc64le
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: 3.x
-      - name: Build wheels
-        uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.platform.target }}
-          args: --release --out dist
-          sccache: 'true'
-          manylinux: auto
-          working-directory: rust/python_bindings
-      - name: Build free-threaded wheels
-        uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.platform.target }}
-          args: --release --out dist -i python3.13t
-          sccache: 'true'
-          manylinux: auto
-          working-directory: rust/python_bindings
-      - name: Upload wheels
-        uses: actions/upload-artifact@v4
-        with:
-          name: wheels-linux-${{ matrix.platform.target }}
-          path: dist
+          - { os: linux, runner: depot-ubuntu-22.04, target: x86_64, manylinux: auto }
+          - { os: linux, runner: depot-ubuntu-22.04, target: x86, manylinux: auto }
+          - { os: linux, runner: depot-ubuntu-22.04-arm, target: aarch64, manylinux: auto }
+          - { os: linux, runner: depot-ubuntu-22.04, target: armv7, manylinux: auto }
+          - { os: linux, runner: depot-ubuntu-22.04, target: s390x, manylinux: auto }
+          - { os: linux, runner: depot-ubuntu-22.04, target: ppc64le, manylinux: auto }
+          - { os: musllinux, runner: depot-ubuntu-22.04, target: x86_64, manylinux: musllinux_1_2 }
+          - { os: musllinux, runner: depot-ubuntu-22.04, target: x86, manylinux: musllinux_1_2 }
+          - { os: musllinux, runner: depot-ubuntu-22.04-arm, target: aarch64, manylinux: musllinux_1_2 }
+          - { os: musllinux, runner: depot-ubuntu-22.04, target: armv7, manylinux: musllinux_1_2 }
+          - { os: windows, runner: windows-latest, target: x64, manylinux: '' }
+          - { os: windows, runner: windows-latest, target: x86, manylinux: '' }
+          - { os: macos, runner: depot-macos-14, target: x86_64, manylinux: '' }
+          - { os: macos, runner: depot-macos-14, target: aarch64, manylinux: '' }
 
-  musllinux:
-    runs-on: ${{ matrix.platform.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        platform:
-          - runner: depot-ubuntu-22.04
-            target: x86_64
-          - runner: depot-ubuntu-22.04
-            target: x86
-          - runner: depot-ubuntu-22.04-arm
-            target: aarch64
-          - runner: depot-ubuntu-22.04
-            target: armv7
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: 3.x
-      - name: Build wheels
-        uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.platform.target }}
-          args: --release --out dist
-          sccache: 'true'
-          manylinux: musllinux_1_2
-          working-directory: rust/python_bindings
-      - name: Build free-threaded wheels
-        uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.platform.target }}
-          args: --release --out dist -i python3.13t
-          sccache: 'true'
-          manylinux: musllinux_1_2
-          working-directory: rust/python_bindings
-      - name: Upload wheels
-        uses: actions/upload-artifact@v4
-        with:
-          name: wheels-musllinux-${{ matrix.platform.target }}
-          path: dist
 
-  windows:
-    runs-on: ${{ matrix.platform.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        platform:
-          - runner: windows-latest
-            target: x64
-          - runner: windows-latest
-            target: x86
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      # On Windows, we want to set up Python with the correct architecture
+      - name: Set up Python on Windows
+        if: ${{ matrix.platform.os == 'windows' }}
+        uses: ./.github/actions/python
         with:
           python-version: 3.x
           architecture: ${{ matrix.platform.target }}
-      - name: Build wheels
-        uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.platform.target }}
-          args: --release --out dist
-          sccache: 'true'
-          working-directory: rust/python_bindings
-      - name: Build free-threaded wheels
-        uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.platform.target }}
-          args: --release --out dist -i python3.13t
-          sccache: 'true'
-          working-directory: rust/python_bindings
-      - name: Upload wheels
-        uses: actions/upload-artifact@v4
-        with:
-          name: wheels-windows-${{ matrix.platform.target }}
-          path: dist
 
-  macos:
-    runs-on: ${{ matrix.platform.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        platform:
-          - runner: depot-macos-13
-            target: x86_64
-          - runner: depot-macos-14
-            target: aarch64
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Set up Python on non-Windows
+        if: ${{ matrix.platform.os != 'windows' }}
+        uses: ./.github/actions/python
         with:
           python-version: 3.x
+
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
           args: --release --out dist
           sccache: 'true'
-          working-directory: rust/python_bindings
+          manylinux: ${{ matrix.platform.manylinux }}
+
       - name: Build free-threaded wheels
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
           args: --release --out dist -i python3.13t
           sccache: 'true'
-          working-directory: rust/python_bindings
+          manylinux: ${{ matrix.platform.manylinux }}
+
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-macos-${{ matrix.platform.target }}
+          name: wheels-${{ matrix.platform.os }}-${{ matrix.platform.target }}
           path: dist
 
   sdist:
@@ -173,7 +76,6 @@ jobs:
         with:
           command: sdist
           args: --out dist
-          working-directory: rust/python_bindings
       - name: Upload sdist
         uses: actions/upload-artifact@v4
         with:
@@ -184,7 +86,7 @@ jobs:
   #   name: Release
   #   runs-on: ubuntu-latest
   #   if: ${{ startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' }}
-  #   needs: [linux, musllinux, windows, macos, sdist]
+  #   needs: [build, sdist]  # We now only have 'build' for all platforms + 'sdist'
   #   permissions:
   #     # Use to sign the release artifacts
   #     id-token: write
@@ -194,10 +96,12 @@ jobs:
   #     attestations: write
   #   steps:
   #     - uses: actions/download-artifact@v4
+
   #     - name: Generate artifact attestation
   #       uses: actions/attest-build-provenance@v1
   #       with:
   #         subject-path: 'wheels-*/*'
+
   #     - name: Publish to PyPI
   #       if: ${{ startsWith(github.ref, 'refs/tags/') }}
   #       uses: PyO3/maturin-action@v1
