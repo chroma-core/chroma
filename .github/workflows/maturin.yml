@@ -53,9 +53,8 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: ${{ matrix.platform.os == 'linux' && '--zig' || '' }} --release --out ../../dist
+          args: ${{ matrix.platform.os == 'linux' && '--zig' || '' }} --release --out dist
           sccache: "true"
-          working-directory: rust/python_bindings
           container: "off"
 
       - name: Upload wheels
@@ -72,8 +71,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           command: sdist
-          args: --out ../../dist
-          working-directory: rust/python_bindings
+          args: --out dist
       - name: Upload sdist
         uses: actions/upload-artifact@v4
         with:

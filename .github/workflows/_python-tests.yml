@@ -82,7 +82,6 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           command: build
-          working-directory: rust/python_bindings
           sccache: true
       - name: Install built wheel
         shell: bash
