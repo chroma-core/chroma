@@ -7,6 +7,7 @@ pub mod config;
 pub mod executor;
 pub mod frontend;
 pub mod get_collection_with_segments_provider;
+pub mod quota;
 mod server;
 mod tower_tracing;
 mod types;
@@ -17,6 +18,7 @@ use chroma_system::System;
 use frontend::Frontend;
 use get_collection_with_segments_provider::*;
 use mdac::{Pattern, Rule};
+use quota::QuotaEnforcer;
 use server::FrontendServer;
 
 pub use config::{FrontendConfig, ScorecardRule};
@@ -37,7 +39,10 @@ impl ChromaError for ScorecardRuleError {
     }
 }
 
-pub async fn frontend_service_entrypoint(auth: Arc<dyn auth::AuthenticateAndAuthorize>) {
+pub async fn frontend_service_entrypoint(
+    auth: Arc<dyn auth::AuthenticateAndAuthorize>,
+    quota: Arc<dyn QuotaEnforcer>,
+) {
     let config = match std::env::var(CONFIG_PATH_ENV_VAR) {
         Ok(config_path) => FrontendConfig::load_from_path(&config_path),
         Err(_) => FrontendConfig::load(),
@@ -73,6 +78,6 @@ pub async fn frontend_service_entrypoint_with_config(
         .map(rule_to_rule)
         .collect::<Result<Vec<_>, ScorecardRuleError>>()
         .expect("error creating scorecard");
-    let server = FrontendServer::new(config, frontend, rules, auth);
+    let server = FrontendServer::new(config, frontend, rules, auth, quota);
     FrontendServer::run(server).await;
 }
