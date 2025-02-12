@@ -1,0 +1,60 @@
+name: Test hnswlib
+
+on:
+  workflow_call:
+
+jobs:
+  test_cpp:
+    runs-on: ${{matrix.os}}
+    strategy:
+      matrix:
+        os: [depot-ubuntu-22.0, windows-latest]
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Build
+        run: |
+          mkdir build
+          cd build
+          cmake ../rust/hnswlib/cpp
+          if [ "$RUNNER_OS" == "Linux" ]; then
+            make
+          elif [ "$RUNNER_OS" == "Windows" ]; then
+            cmake --build ./ --config Release
+          fi
+        shell: bash
+
+      - name: Prepare test data
+        run: |
+          pip install numpy
+          cd rust/hnswlib/cpp/tests/cpp
+          python update_gen_data.py
+          cd -
+          cp -r rust/hnswlib/cpp/tests . # copy generated data
+        shell: bash
+
+      - name: Test
+        timeout-minutes: 15
+        run: |
+          cd build
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            cp ./Release/* ./
+          fi
+          ./example_search
+          ./example_filter
+          ./example_replace_deleted
+          ./example_mt_search
+          ./example_mt_filter
+          ./example_mt_replace_deleted
+          ./searchKnnCloserFirst_test
+          ./searchKnnWithFilter_test
+          ./multiThreadLoad_test
+          ./multiThread_replace_test
+          ./getUnormalized_test
+          ./test_updates
+          ./test_updates update
+          ./persistent_test
+        shell: bash
