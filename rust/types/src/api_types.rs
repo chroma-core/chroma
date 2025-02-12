@@ -1372,3 +1372,20 @@ impl ChromaError for ExecutorError {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_create_database_min_length() {
+        let request = CreateDatabaseRequest::try_new("default_tenant".to_string(), "a".to_string());
+        assert!(request.is_err());
+    }
+
+    #[test]
+    fn test_create_tenant_min_length() {
+        let request = CreateTenantRequest::try_new("a".to_string());
+        assert!(request.is_err());
+    }
+}

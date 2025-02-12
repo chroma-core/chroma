@@ -299,10 +299,15 @@ async fn get_user_identity(State(server): State<FrontendServer>) -> Json<GetUser
     })
 }
 
+#[derive(Deserialize, Debug)]
+struct CreateTenantPayload {
+    name: String,
+}
+
 async fn create_tenant(
     headers: HeaderMap,
     State(mut server): State<FrontendServer>,
-    Json(request): Json<CreateTenantRequest>,
+    Json(request): Json<CreateTenantPayload>,
 ) -> Result<Json<CreateTenantResponse>, ServerError> {
     server.metrics.create_tenant.add(1, &[]);
     tracing::info!("Creating tenant [{}]", request.name);
@@ -317,6 +322,7 @@ async fn create_tenant(
             },
         )
         .await?;
+    let request = CreateTenantRequest::try_new(request.name)?;
     Ok(Json(server.frontend.create_tenant(request).await?))
 }
 
