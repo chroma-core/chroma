@@ -1,6 +1,7 @@
-use super::config::LogConfig;
+use crate::config::GrpcLogConfig;
 use crate::types::CollectionInfo;
 use async_trait::async_trait;
+use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::chroma_proto::log_service_client::LogServiceClient;
@@ -109,34 +110,33 @@ impl ChromaError for GrpcLogError {
 }
 
 #[async_trait]
-impl Configurable<LogConfig> for GrpcLog {
-    async fn try_from_config(config: &LogConfig) -> Result<Self, Box<dyn ChromaError>> {
-        match &config {
-            LogConfig::Grpc(my_config) => {
-                let host = &my_config.host;
-                let port = &my_config.port;
-                tracing::info!("Connecting to log service at {}:{}", host, port);
-                let connection_string = format!("http://{}:{}", host, port);
-                let endpoint_res = match Endpoint::from_shared(connection_string) {
-                    Ok(endpoint) => endpoint,
-                    Err(e) => return Err(Box::new(GrpcLogError::FailedToConnect(e))),
-                };
-                let endpoint_res = endpoint_res
-                    .connect_timeout(Duration::from_millis(my_config.connect_timeout_ms))
-                    .timeout(Duration::from_millis(my_config.request_timeout_ms));
-                let client = endpoint_res.connect().await;
-                match client {
-                    Ok(client) => {
-                        let channel = ServiceBuilder::new()
-                            .layer(chroma_tracing::GrpcTraceLayer)
-                            .service(client);
+impl Configurable<GrpcLogConfig> for GrpcLog {
+    async fn try_from_config(
+        my_config: &GrpcLogConfig,
+        _registry: &Registry,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        let host = &my_config.host;
+        let port = &my_config.port;
+        tracing::info!("Connecting to log service at {}:{}", host, port);
+        let connection_string = format!("http://{}:{}", host, port);
+        let endpoint_res = match Endpoint::from_shared(connection_string) {
+            Ok(endpoint) => endpoint,
+            Err(e) => return Err(Box::new(GrpcLogError::FailedToConnect(e))),
+        };
+        let endpoint_res = endpoint_res
+            .connect_timeout(Duration::from_millis(my_config.connect_timeout_ms))
+            .timeout(Duration::from_millis(my_config.request_timeout_ms));
+        let client = endpoint_res.connect().await;
+        match client {
+            Ok(client) => {
+                let channel = ServiceBuilder::new()
+                    .layer(chroma_tracing::GrpcTraceLayer)
+                    .service(client);
 
-                        return Ok(GrpcLog::new(LogServiceClient::new(channel)));
-                    }
-                    Err(e) => {
-                        return Err(Box::new(GrpcLogError::FailedToConnect(e)));
-                    }
-                }
+                return Ok(GrpcLog::new(LogServiceClient::new(channel)));
+            }
+            Err(e) => {
+                return Err(Box::new(GrpcLogError::FailedToConnect(e)));
             }
         }
     }

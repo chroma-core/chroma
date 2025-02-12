@@ -2,6 +2,7 @@ mod compactor;
 mod server;
 mod utils;
 
+use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_memberlist::memberlist_provider::{
     CustomResourceMemberlistProvider, MemberlistProvider,
@@ -26,19 +27,21 @@ pub async fn query_service_entrypoint() {
     };
 
     let config = config.query_service;
+    let registry = Registry::new();
 
     chroma_tracing::init_otel_tracing(&config.service_name, &config.otel_endpoint);
 
     let system = chroma_system::System::new();
-    let dispatcher = match chroma_system::Dispatcher::try_from_config(&config.dispatcher).await {
-        Ok(dispatcher) => dispatcher,
-        Err(err) => {
-            println!("Failed to create dispatcher component: {:?}", err);
-            return;
-        }
-    };
+    let dispatcher =
+        match chroma_system::Dispatcher::try_from_config(&config.dispatcher, &registry).await {
+            Ok(dispatcher) => dispatcher,
+            Err(err) => {
+                println!("Failed to create dispatcher component: {:?}", err);
+                return;
+            }
+        };
     let mut dispatcher_handle = system.start_component(dispatcher);
-    let mut worker_server = match server::WorkerServer::try_from_config(&config).await {
+    let mut worker_server = match server::WorkerServer::try_from_config(&config, &registry).await {
         Ok(worker_server) => worker_server,
         Err(err) => {
             println!("Failed to create worker server component: {:?}", err);
@@ -83,6 +86,7 @@ pub async fn compaction_service_entrypoint() {
     };
 
     let config = config.compaction_service;
+    let registry = Registry::new();
 
     chroma_tracing::init_otel_tracing(&config.service_name, &config.otel_endpoint);
 
@@ -90,6 +94,7 @@ pub async fn compaction_service_entrypoint() {
 
     let mut memberlist = match CustomResourceMemberlistProvider::try_from_config(
         &config.memberlist_provider,
+        &registry,
     )
     .await
     {
@@ -100,16 +105,17 @@ pub async fn compaction_service_entrypoint() {
         }
     };
 
-    let dispatcher = match chroma_system::Dispatcher::try_from_config(&config.dispatcher).await {
-        Ok(dispatcher) => dispatcher,
-        Err(err) => {
-            println!("Failed to create dispatcher component: {:?}", err);
-            return;
-        }
-    };
+    let dispatcher =
+        match chroma_system::Dispatcher::try_from_config(&config.dispatcher, &registry).await {
+            Ok(dispatcher) => dispatcher,
+            Err(err) => {
+                println!("Failed to create dispatcher component: {:?}", err);
+                return;
+            }
+        };
     let mut dispatcher_handle = system.start_component(dispatcher);
     let mut compaction_manager =
-        match crate::compactor::CompactionManager::try_from_config(&config).await {
+        match crate::compactor::CompactionManager::try_from_config(&config, &registry).await {
             Ok(compaction_manager) => compaction_manager,
             Err(err) => {
                 println!("Failed to create compaction manager component: {:?}", err);

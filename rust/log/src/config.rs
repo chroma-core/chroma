@@ -42,8 +42,15 @@ impl Default for GrpcLogConfig {
 }
 
 #[derive(Deserialize, Clone, Serialize)]
+pub struct SqliteLogConfig {
+    pub tenant_id: String,
+    pub topic_namespace: String,
+}
+
+#[derive(Deserialize, Clone, Serialize)]
 pub enum LogConfig {
     Grpc(GrpcLogConfig),
+    Sqlite(SqliteLogConfig),
 }
 
 impl Default for LogConfig {

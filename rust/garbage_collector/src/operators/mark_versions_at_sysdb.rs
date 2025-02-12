@@ -12,7 +12,7 @@ pub struct MarkVersionsAtSysDbOperator {}
 pub struct MarkVersionsAtSysDbInput {
     pub version_file: CollectionVersionFile,
     pub versions_to_delete: VersionListForCollection,
-    pub sysdb_client: Box<SysDb>,
+    pub sysdb_client: SysDb,
     pub epoch_id: i64,
 }
 
@@ -20,7 +20,7 @@ pub struct MarkVersionsAtSysDbInput {
 pub struct MarkVersionsAtSysDbOutput {
     pub version_file: CollectionVersionFile,
     pub epoch_id: i64,
-    pub sysdb_client: Box<SysDb>,
+    pub sysdb_client: SysDb,
     pub versions_to_delete: VersionListForCollection,
 }
 
@@ -74,7 +74,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mark_versions_success() {
-        let sysdb = Box::new(SysDb::Test(TestSysDb::new()));
+        let sysdb = SysDb::Test(TestSysDb::new());
         let version_file = CollectionVersionFile::default();
         let versions_to_delete = VersionListForCollection {
             collection_id: "test_collection".to_string(),
@@ -100,7 +100,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mark_versions_empty_list() {
-        let sysdb = Box::new(SysDb::Test(TestSysDb::new()));
+        let sysdb = SysDb::Test(TestSysDb::new());
         let version_file = CollectionVersionFile::default();
         let versions_to_delete = VersionListForCollection {
             collection_id: "test_collection".to_string(),
@@ -126,7 +126,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mark_versions_error() {
-        let sysdb = Box::new(SysDb::Test(TestSysDb::new()));
+        let sysdb = SysDb::Test(TestSysDb::new());
         let version_file = CollectionVersionFile::default();
         let versions_to_delete = VersionListForCollection {
             collection_id: "test_collection".to_string(),

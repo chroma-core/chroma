@@ -1293,7 +1293,9 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chroma-error",
+ "figment",
  "murmur3",
+ "parking_lot",
  "serde",
  "thiserror 1.0.69",
 ]
@@ -1344,6 +1346,7 @@ dependencies = [
  "parking_lot",
  "rand",
  "regex",
+ "rust-embed",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -1508,6 +1511,8 @@ dependencies = [
 name = "chroma-sqlite"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "chroma-config",
  "chroma-error",
  "chroma-types",
  "futures",
@@ -1517,6 +1522,7 @@ dependencies = [
  "rust-embed",
  "sea-query",
  "sea-query-binder",
+ "serde",
  "sha2",
  "sqlx",
  "tempfile",
@@ -1670,6 +1676,7 @@ dependencies = [
  "chroma-sysdb",
  "chroma-system",
  "chroma-types",
+ "mdac",
  "numpy",
  "pyo3",
  "serde",
@@ -1765,7 +1772,9 @@ checksum = "f46ad14479a25103f283c0f10005961cf086d8dc42205bb44c46ac563475dca6"
 name = "cli"
 version = "0.1.0"
 dependencies = [
+ "chroma-frontend",
  "clap",
+ "tokio",
  "webbrowser",
 ]
 

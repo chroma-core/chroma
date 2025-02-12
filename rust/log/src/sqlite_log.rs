@@ -1,7 +1,9 @@
 use crate::{
-    CollectionInfo, CompactionManagerError, CompactionMessage, LocalCompactionManager,
-    PurgeLogsMessage,
+    config::SqliteLogConfig, CollectionInfo, CompactionManagerError, CompactionMessage,
+    LocalCompactionManager, PurgeLogsMessage,
 };
+use async_trait::async_trait;
+use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes, WrappedSqlxError};
 use chroma_sqlite::{db::SqliteDb, helpers::get_embeddings_queue_topic_name};
 use chroma_system::{ChannelError, ComponentHandle, RequestError};
@@ -485,20 +487,40 @@ fn operation_to_code(operation: Operation) -> u32 {
     }
 }
 
+#[async_trait]
+impl Configurable<SqliteLogConfig> for SqliteLog {
+    async fn try_from_config(
+        config: &SqliteLogConfig,
+        registry: &chroma_config::registry::Registry,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        let sqlite_db = registry.get::<SqliteDb>().map_err(|e| e.boxed())?;
+        Ok(Self::new(
+            sqlite_db,
+            config.tenant_id.clone(),
+            config.topic_namespace.clone(),
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chroma_config::{registry::Registry, Configurable};
     use chroma_sqlite::{config::SqliteDBConfig, db::test_utils::new_test_db_persist_path};
     use chroma_types::{are_metadatas_close_to_equal, CollectionUuid};
     use proptest::prelude::*;
+
     use tokio::runtime::Runtime;
 
     async fn setup_sqlite_log() -> SqliteLog {
-        let db = SqliteDb::try_from_config(&SqliteDBConfig {
-            url: new_test_db_persist_path(),
-            migration_mode: chroma_sqlite::config::MigrationMode::Apply,
-            hash_type: chroma_sqlite::config::MigrationHash::SHA256,
-        })
+        let db = SqliteDb::try_from_config(
+            &SqliteDBConfig {
+                url: new_test_db_persist_path(),
+                migration_mode: chroma_sqlite::config::MigrationMode::Apply,
+                hash_type: chroma_sqlite::config::MigrationHash::SHA256,
+            },
+            &Registry::new(),
+        )
         .await
         .unwrap();
 

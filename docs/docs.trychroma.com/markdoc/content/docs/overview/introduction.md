@@ -44,7 +44,7 @@ In JavaScript, use the Chroma JS/TS Client to connect to a Chroma server. Instal
 
 {% Tab label="yarn" %}
 ```terminal
-yarn install chromadb chromadb-default-embed 
+yarn add chromadb chromadb-default-embed 
 ```
 {% /Tab %}
 

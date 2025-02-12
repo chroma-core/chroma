@@ -3,9 +3,12 @@ use crate::{
     CollectionsWithSegmentsProvider,
 };
 use backon::Retryable;
-use chroma_config::Configurable;
+use chroma_config::{registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_sysdb::sysdb;
+use chroma_log::{LocalCompactionManager, LocalCompactionManagerConfig, Log};
+use chroma_segment::local_segment_manager::LocalSegmentManager;
+use chroma_sqlite::db::SqliteDb;
+use chroma_sysdb::SysDb;
 use chroma_system::System;
 use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
@@ -115,8 +118,8 @@ fn to_records<
 pub struct Frontend {
     allow_reset: bool,
     executor: Executor,
-    log_client: Box<chroma_log::Log>,
-    sysdb_client: Box<sysdb::SysDb>,
+    log_client: Log,
+    sysdb_client: SysDb,
     collections_with_segments_provider: CollectionsWithSegmentsProvider,
     max_batch_size: u32,
 }
@@ -124,9 +127,9 @@ pub struct Frontend {
 impl Frontend {
     pub fn new(
         allow_reset: bool,
-        sysdb_client: Box<sysdb::SysDb>,
+        sysdb_client: SysDb,
         collections_with_segments_provider: CollectionsWithSegmentsProvider,
-        log_client: Box<chroma_log::Log>,
+        log_client: Log,
         executor: Executor,
         max_batch_size: u32,
     ) -> Self {
@@ -897,25 +900,49 @@ impl Frontend {
 impl Configurable<(FrontendConfig, System)> for Frontend {
     async fn try_from_config(
         (config, system): &(FrontendConfig, System),
+        registry: &registry::Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
-        let sysdb_client = chroma_sysdb::from_config(&config.sysdb).await?;
-        let mut log_client = chroma_log::from_config(&config.log).await?;
-        let max_batch_size = log_client.get_max_batch_size().await?;
+        // Create sqlitedb if configured
+        if let Some(sqlite_conf) = &config.sqlitedb {
+            SqliteDb::try_from_config(sqlite_conf, registry).await?;
+        };
 
-        let collections_with_segments_provider =
-            CollectionsWithSegmentsProvider::try_from_config(&(
-                config.collections_with_segments_provider.clone(),
-                sysdb_client.clone(),
-            ))
-            .await?;
+        // Create segment manager if configured
+        if let Some(segment_manager_conf) = &config.segment_manager {
+            LocalSegmentManager::try_from_config(segment_manager_conf, registry).await?;
+        };
+
+        let sysdb = SysDb::try_from_config(&config.sysdb, registry).await?;
+        let mut log = Log::try_from_config(&config.log, registry).await?;
+        let max_batch_size = log.get_max_batch_size().await?;
+
+        // Create compation manager and pass handle to log service if configured
+        if let Log::Sqlite(sqlite_log) = &log {
+            let compaction_manager =
+                LocalCompactionManager::try_from_config(&LocalCompactionManagerConfig {}, registry)
+                    .await?;
+            // TODO: Move this inside LocalCompactionManager::try_from_config, when system is stored in registry
+            let handle = system.start_component(compaction_manager);
+            sqlite_log
+                .init_compactor_handle(handle.clone())
+                .map_err(|e| e.boxed())?;
+            registry.register(handle);
+        }
+
+        let collections_with_segments_provider = CollectionsWithSegmentsProvider::try_from_config(
+            &config.collections_with_segments_provider.clone(),
+            registry,
+        )
+        .await?;
 
         let executor =
-            Executor::try_from_config(&(config.executor.clone(), system.clone())).await?;
+            Executor::try_from_config(&(config.executor.clone(), system.clone()), registry).await?;
+
         Ok(Frontend::new(
             config.allow_reset,
-            sysdb_client,
+            sysdb,
             collections_with_segments_provider,
-            log_client,
+            log,
             executor,
             max_batch_size,
         ))

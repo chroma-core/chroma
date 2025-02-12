@@ -11,7 +11,7 @@ mod server;
 mod tower_tracing;
 mod types;
 
-use chroma_config::Configurable;
+use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
 use chroma_system::System;
 use frontend::Frontend;
@@ -42,10 +42,18 @@ pub async fn frontend_service_entrypoint(auth: Arc<dyn auth::AuthenticateAndAuth
         Ok(config_path) => FrontendConfig::load_from_path(&config_path),
         Err(_) => FrontendConfig::load(),
     };
+    frontend_service_entrypoint_with_config(auth, config).await;
+}
+
+pub async fn frontend_service_entrypoint_with_config(
+    auth: Arc<dyn auth::AuthenticateAndAuthorize>,
+    config: FrontendConfig,
+) {
     chroma_tracing::init_otel_tracing(&config.service_name, &config.otel_endpoint);
     let system = System::new();
+    let registry = Registry::new();
 
-    let frontend = Frontend::try_from_config(&(config.clone(), system))
+    let frontend = Frontend::try_from_config(&(config.clone(), system), &registry)
         .await
         .expect("Error creating Frontend Config");
     fn rule_to_rule(rule: &ScorecardRule) -> Result<Rule, ScorecardRuleError> {

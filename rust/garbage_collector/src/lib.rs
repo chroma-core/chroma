@@ -23,8 +23,10 @@ pub async fn garbage_collector_service_entrypoint() {
     // Enable OTEL tracing.
     init_otel_tracing(&config.service_name, &config.otel_endpoint);
 
+    let registry = chroma_config::registry::Registry::new();
+
     // Setup the dispatcher and the pool of workers.
-    let dispatcher = Dispatcher::try_from_config(&config.dispatcher_config)
+    let dispatcher = Dispatcher::try_from_config(&config.dispatcher_config, &registry)
         .await
         .expect("Failed to create dispatcher from config");
 
@@ -34,7 +36,7 @@ pub async fn garbage_collector_service_entrypoint() {
     // Start a background task to periodically check for garbage.
     // Garbage collector is a component that gets notified every
     // gc_interval_mins to check for garbage.
-    let mut garbage_collector_component = GarbageCollector::try_from_config(&config)
+    let mut garbage_collector_component = GarbageCollector::try_from_config(&config, &registry)
         .await
         .expect("Failed to create garbage collector component");
     garbage_collector_component.set_dispatcher(dispatcher_handle);

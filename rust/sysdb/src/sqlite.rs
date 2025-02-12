@@ -1,3 +1,7 @@
+use crate::SqliteSysDbConfig;
+use async_trait::async_trait;
+use chroma_config::registry::Registry;
+use chroma_config::Configurable;
 use chroma_error::{ChromaError, WrappedSqlxError};
 use chroma_sqlite::db::SqliteDb;
 use chroma_sqlite::helpers::{delete_metadata, get_embeddings_queue_topic_name, update_metadata};
@@ -899,6 +903,24 @@ impl SqliteSysDb {
         } else {
             Some(metadata)
         }
+    }
+}
+
+//////////////////////// Configurable Implementation ////////////////////////
+
+#[async_trait]
+impl Configurable<SqliteSysDbConfig> for SqliteSysDb {
+    async fn try_from_config(
+        config: &SqliteSysDbConfig,
+        registry: &Registry,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        // Assume the registry has a sqlite db
+        let db = registry.get::<SqliteDb>().map_err(|e| e.boxed())?;
+        Ok(Self::new(
+            db,
+            config.log_tenant.clone(),
+            config.log_topic_namespace.clone(),
+        ))
     }
 }
 

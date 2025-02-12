@@ -113,8 +113,8 @@ pub struct CompactOrchestrator {
     // Component Execution
     collection_id: CollectionUuid,
     // Dependencies
-    log: Box<Log>,
-    sysdb: Box<SysDb>,
+    log: Log,
+    sysdb: SysDb,
     blockfile_provider: BlockfileProvider,
     hnsw_index_provider: HnswIndexProvider,
     // State we hold across the execution
@@ -239,8 +239,8 @@ impl CompactOrchestrator {
     pub fn new(
         compaction_job: CompactionJob,
         collection_id: CollectionUuid,
-        log: Box<Log>,
-        sysdb: Box<SysDb>,
+        log: Log,
+        sysdb: SysDb,
         blockfile_provider: BlockfileProvider,
         hnsw_index_provider: HnswIndexProvider,
         dispatcher: ComponentHandle<Dispatcher>,

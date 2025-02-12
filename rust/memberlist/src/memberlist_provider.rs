@@ -1,5 +1,6 @@
 use super::config::MemberlistProviderConfig;
 use async_trait::async_trait;
+use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_system::{Component, ComponentContext, Handler, ReceiverForMessage, StreamHandler};
@@ -91,6 +92,7 @@ impl ChromaError for CustomResourceMemberlistProviderConfigurationError {
 impl Configurable<MemberlistProviderConfig> for CustomResourceMemberlistProvider {
     async fn try_from_config(
         config: &MemberlistProviderConfig,
+        _registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let MemberlistProviderConfig::CustomResource(my_config) = &config;
         let kube_client = match Client::try_default().await {
