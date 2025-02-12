@@ -27,7 +27,12 @@
 //!    - Input: Version file, version contents
 //!    - Output: Set of unused S3 file paths
 //!
-//! 6. Delete Versions (DeleteVersionsAtSysDbOperator)
+//! 6. Delete Unused Files (DeleteUnusedFilesOperator)
+//!    - Deletes unused S3 files
+//!    - Input: Set of unused S3 file paths
+//!    - Output: Deletion confirmation
+//!
+//! 7. Delete Versions (DeleteVersionsAtSysDbOperator)
 //!    - Permanently deletes marked versions from the system database
 //!    - Input: Version file, versions to delete, unused S3 files
 //!    - Output: Deletion confirmation
@@ -48,9 +53,6 @@ use chrono::{Duration, Utc};
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 
-use crate::fetch_version_file::{
-    FetchVersionFileError, FetchVersionFileInput, FetchVersionFileOperator, FetchVersionFileOutput,
-};
 use crate::operators::compute_unused_between_versions::{
     ComputeUnusedBetweenVersionsError, ComputeUnusedBetweenVersionsInput,
     ComputeUnusedBetweenVersionsOperator, ComputeUnusedBetweenVersionsOutput,
@@ -58,6 +60,10 @@ use crate::operators::compute_unused_between_versions::{
 use crate::operators::compute_versions_to_delete::{
     ComputeVersionsToDeleteError, ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOperator,
     ComputeVersionsToDeleteOutput,
+};
+use crate::operators::delete_unused_files::{
+    DeleteUnusedFilesError, DeleteUnusedFilesInput, DeleteUnusedFilesOperator,
+    DeleteUnusedFilesOutput,
 };
 use crate::operators::delete_versions_at_sysdb::{
     DeleteVersionsAtSysDbError, DeleteVersionsAtSysDbInput, DeleteVersionsAtSysDbOperator,
@@ -67,6 +73,9 @@ use crate::operators::fetch_sparse_index_files::{
     FetchSparseIndexFilesError, FetchSparseIndexFilesInput, FetchSparseIndexFilesOperator,
     FetchSparseIndexFilesOutput,
 };
+use crate::operators::fetch_version_file::{
+    FetchVersionFileError, FetchVersionFileInput, FetchVersionFileOperator, FetchVersionFileOutput,
+};
 use crate::operators::mark_versions_at_sysdb::{
     MarkVersionsAtSysDbError, MarkVersionsAtSysDbInput, MarkVersionsAtSysDbOperator,
     MarkVersionsAtSysDbOutput,
@@ -75,6 +84,7 @@ use crate::operators::mark_versions_at_sysdb::{
 use chroma_storage::config::StorageConfig;
 use chroma_storage::from_config;
 use prost::Message;
+use std::env;
 
 pub struct GarbageCollectorOrchestrator {
     collection_id: CollectionUuid,
@@ -84,6 +94,9 @@ pub struct GarbageCollectorOrchestrator {
     dispatcher: ComponentHandle<Dispatcher>,
     storage: Storage,
     result_channel: Option<Sender<Result<GarbageCollectorResponse, GarbageCollectorError>>>,
+    pending_version_file: Option<CollectionVersionFile>,
+    pending_versions_to_delete: Option<chroma_types::chroma_proto::VersionListForCollection>,
+    pending_epoch_id: Option<i64>,
 }
 
 impl Debug for GarbageCollectorOrchestrator {
@@ -116,6 +129,9 @@ impl GarbageCollectorOrchestrator {
             dispatcher,
             storage,
             result_channel: None,
+            pending_version_file: None,
+            pending_versions_to_delete: None,
+            pending_epoch_id: None,
         }
     }
 }
@@ -144,6 +160,8 @@ pub enum GarbageCollectorError {
     DeleteVersionsAtSysDb(#[from] DeleteVersionsAtSysDbError),
     #[error("The task was aborted because resources were exhausted")]
     Aborted,
+    #[error("DeleteUnusedFiles error: {0}")]
+    DeleteUnusedFiles(#[from] DeleteUnusedFilesError),
 }
 
 impl ChromaError for GarbageCollectorError {
@@ -417,25 +435,77 @@ impl Handler<TaskResult<ComputeUnusedBetweenVersionsOutput, ComputeUnusedBetween
         message: TaskResult<ComputeUnusedBetweenVersionsOutput, ComputeUnusedBetweenVersionsError>,
         ctx: &ComponentContext<GarbageCollectorOrchestrator>,
     ) {
-        // Stage 5: After identifying unused files, initiate version deletion
+        // Stage 5: After identifying unused files, delete them
         let output = match self.ok_or_terminate(message.into_inner(), ctx) {
             Some(output) => output,
             None => return,
         };
 
         let delete_task = wrap(
-            Box::new(DeleteVersionsAtSysDbOperator {}),
-            DeleteVersionsAtSysDbInput {
-                version_file: output.version_file,
+            Box::new(DeleteUnusedFilesOperator::new(self.storage.clone(), true)), // Using soft delete mode
+            DeleteUnusedFilesInput {
+                unused_s3_files: output.unused_s3_files.clone(),
                 epoch_id: output.epoch_id,
-                sysdb_client: self.sysdb_client.clone(),
-                versions_to_delete: output.versions_to_delete,
-                unused_s3_files: output.unused_s3_files,
             },
             ctx.receiver(),
         );
 
         if let Err(e) = self.dispatcher().send(delete_task, None).await {
+            self.terminate_with_result(Err(GarbageCollectorError::Channel(e)), ctx);
+            return;
+        }
+
+        // Store state needed for final deletion
+        self.pending_version_file = Some(output.version_file);
+        self.pending_versions_to_delete = Some(output.versions_to_delete);
+        self.pending_epoch_id = Some(output.epoch_id);
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<DeleteUnusedFilesOutput, DeleteUnusedFilesError>>
+    for GarbageCollectorOrchestrator
+{
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<DeleteUnusedFilesOutput, DeleteUnusedFilesError>,
+        ctx: &ComponentContext<GarbageCollectorOrchestrator>,
+    ) {
+        // Stage 6: After deleting unused files, delete the versions
+        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+            Some(output) => output,
+            None => return,
+        };
+
+        // Get stored state
+        let version_file = self
+            .pending_version_file
+            .take()
+            .expect("Version file should be set");
+        let versions_to_delete = self
+            .pending_versions_to_delete
+            .take()
+            .expect("Versions to delete should be set");
+        let epoch_id = self
+            .pending_epoch_id
+            .take()
+            .expect("Epoch ID should be set");
+
+        let delete_versions_task = wrap(
+            Box::new(DeleteVersionsAtSysDbOperator {}),
+            DeleteVersionsAtSysDbInput {
+                version_file,
+                epoch_id,
+                sysdb_client: self.sysdb_client.clone(),
+                versions_to_delete,
+                unused_s3_files: output.deleted_files,
+            },
+            ctx.receiver(),
+        );
+
+        if let Err(e) = self.dispatcher().send(delete_versions_task, None).await {
             self.terminate_with_result(Err(GarbageCollectorError::Channel(e)), ctx);
             return;
         }
@@ -482,6 +552,11 @@ mod tests {
     use tokio::sync::oneshot;
     use tracing_subscriber;
 
+    // Helper function to check if cluster tests should run
+    fn should_run_cluster_tests() -> bool {
+        env::var("CHROMA_CLUSTER_TEST_ONLY").is_ok()
+    }
+
     async fn wait_for_new_version(
         clients: &mut ChromaGrpcClients,
         collection_id: &str,
@@ -517,6 +592,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_direct_service_calls() -> Result<(), Box<dyn std::error::Error>> {
+        if !should_run_cluster_tests() {
+            tracing::info!("Skipping cluster test as CHROMA_CLUSTER_TEST_ONLY is not set");
+            return Ok(());
+        }
+
         // Initialize tracing subscriber once at the start of the test
         let _ = tracing_subscriber::fmt::try_init();
 
@@ -818,8 +898,6 @@ mod tests {
         orchestrator.run(system).await?;
         // let gc_result = receiver.await?;  // Waiting here is giving error.
 
-        // tracing::info!(?gc_result, "Garbage collection completed successfully");
-
         // After running GC and waiting for result, verify versions were deleted
         tokio::time::sleep(Duration::from_secs(5)).await; // Give some time for GC to complete
 
@@ -843,6 +921,64 @@ mod tests {
             version_count_after_gc >= 2,
             "Expected at least 2 versions to remain after garbage collection (min_versions_to_keep)"
         );
+
+        tracing::info!("Verifying records are still accessible after GC");
+        let results_after_gc = clients
+            .get_records(
+                &collection_id,
+                None,
+                true,  // include embeddings
+                false, // include metadata
+                false, // include documents
+            )
+            .await
+            .map_err(|e| {
+                tracing::error!(error = ?e, collection_id = %collection_id, "Failed to get records after GC");
+                e
+            })?;
+
+        // Verify results count matches pre-GC
+        assert_eq!(
+            results_after_gc.ids.len(),
+            results.ids.len(),
+            "Expected same number of results after GC"
+        );
+
+        // Verify all IDs are still present
+        for i in 0..22 {
+            let expected_id = format!("id{}", i);
+            assert!(
+                results_after_gc.ids.contains(&expected_id),
+                "Expected to find {} after GC",
+                expected_id
+            );
+        }
+
+        // Verify embeddings are unchanged
+        if let Some(returned_embeddings) = results_after_gc.embeddings {
+            assert_eq!(
+                returned_embeddings.len(),
+                22,
+                "Expected 22 embeddings after GC"
+            );
+
+            // Compare with original embeddings
+            for (i, embedding) in returned_embeddings.iter().enumerate() {
+                let expected_index = ids
+                    .iter()
+                    .position(|id| id == &format!("id{}", i))
+                    .expect("ID should exist");
+                assert_eq!(
+                    embedding, &embeddings[expected_index],
+                    "Embedding mismatch for id{} after GC",
+                    i
+                );
+            }
+        } else {
+            panic!("Expected embeddings in results after GC");
+        }
+
+        tracing::info!("Successfully verified all records are accessible after GC");
 
         Ok(())
     }

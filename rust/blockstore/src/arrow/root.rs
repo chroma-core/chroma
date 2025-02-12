@@ -70,7 +70,7 @@ impl TryFrom<&str> for Version {
 // ================
 
 #[derive(Debug, Clone)]
-pub struct RootWriter {
+pub(super) struct RootWriter {
     pub(super) sparse_index: SparseIndexWriter,
     // Metadata
     pub(super) id: Uuid,
@@ -237,7 +237,7 @@ impl chroma_cache::Weighted for RootReader {
 }
 
 #[derive(Error, Debug)]
-pub enum FromBytesError {
+pub(super) enum FromBytesError {
     #[error("Error parsing UUID: {0}")]
     UuidParseError(#[from] uuid::Error),
     #[error("Error parsing version: {0}")]

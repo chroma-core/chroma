@@ -173,6 +173,51 @@ impl ObjectStore {
             .await?;
         Ok(())
     }
+
+    pub async fn delete(&self, key: &str) -> Result<(), PutError> {
+        tracing::info!(key = %key, "Deleting object");
+
+        match self.object_store.delete(&Path::from(key)).await {
+            Ok(_) => {
+                tracing::info!(key = %key, "Successfully deleted object");
+                Ok(())
+            }
+            Err(e) => {
+                tracing::error!(error = %e, key = %key, "Failed to delete object");
+                Err(e.into())
+            }
+        }
+    }
+
+    pub async fn rename(&self, src_key: &str, dst_key: &str) -> Result<(), PutError> {
+        tracing::info!(src = %src_key, dst = %dst_key, "Renaming object");
+
+        // Copy the object
+        match self
+            .object_store
+            .copy(&Path::from(src_key), &Path::from(dst_key))
+            .await
+        {
+            Ok(_) => {
+                tracing::info!(src = %src_key, dst = %dst_key, "Successfully copied object");
+                // After successful copy, delete the original
+                match self.delete(src_key).await {
+                    Ok(_) => {
+                        tracing::info!(src = %src_key, dst = %dst_key, "Successfully renamed object");
+                        Ok(())
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, src = %src_key, "Failed to delete source object after copy");
+                        Err(e)
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!(error = %e, src = %src_key, dst = %dst_key, "Failed to copy object");
+                Err(e.into())
+            }
+        }
+    }
 }
 
 #[cfg(test)]

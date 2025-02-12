@@ -1,12 +1,17 @@
+//! Operator for GC. Fetches the collection version file from S3.
+//!
+//! Input:
+//! - Version file path. Full file path without the bucket name.
+//! - Storage
+//!
+//! Output:
+//! - Version file content Vec<u8>
+
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_storage::config::{
-    ObjectStoreBucketConfig, ObjectStoreConfig, ObjectStoreType, StorageConfig,
-};
-use chroma_storage::from_config;
 use chroma_storage::{GetError, Storage};
 use chroma_system::{Operator, OperatorType};
 use thiserror::Error;
@@ -22,7 +27,9 @@ pub struct FetchVersionFileInput {
 
 impl Debug for FetchVersionFileInput {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("FetchVersionFileInput").finish()
+        f.debug_struct("FetchVersionFileInput")
+            .field("version_file_path", &self.version_file_path)
+            .finish()
     }
 }
 
@@ -101,12 +108,6 @@ impl Operator<FetchVersionFileInput, FetchVersionFileOutput> for FetchVersionFil
         );
 
         let output = FetchVersionFileOutput::new(content);
-        tracing::info!(
-            path = %input.version_file_path,
-            output_size = output.version_file_content().len(),
-            "Created FetchVersionFileOutput"
-        );
-
         Ok(output)
     }
 }

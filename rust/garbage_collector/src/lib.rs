@@ -5,7 +5,6 @@ use garbage_collector_component::GarbageCollector;
 use opentelemetry_config::init_otel_tracing;
 
 mod config;
-mod fetch_version_file;
 mod garbage_collector_component;
 pub mod garbage_collector_orchestrator;
 pub mod helper;
