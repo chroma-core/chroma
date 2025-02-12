@@ -179,12 +179,12 @@ func (m *mockS3MetaStore) GetVersionFile(tenantID, collectionID string, version 
 	}, nil
 }
 
-func (m *mockS3MetaStore) PutVersionFile(tenantID, collectionID, fileName string, file *coordinatorpb.CollectionVersionFile) error {
+func (m *mockS3MetaStore) PutVersionFile(tenantID, collectionID, fileName string, file *coordinatorpb.CollectionVersionFile) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	m.files[fileName] = file
-	return nil
+	return fileName, nil
 }
 
 func (m *mockS3MetaStore) HasObjectWithPrefix(ctx context.Context, prefix string) (bool, error) {

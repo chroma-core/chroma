@@ -81,10 +81,7 @@ use crate::operators::mark_versions_at_sysdb::{
     MarkVersionsAtSysDbOutput,
 };
 
-use chroma_storage::config::StorageConfig;
-use chroma_storage::from_config;
 use prost::Message;
-use std::env;
 
 pub struct GarbageCollectorOrchestrator {
     collection_id: CollectionUuid,
@@ -547,6 +544,7 @@ mod tests {
     };
     use chroma_sysdb::{from_config as sysdb_from_config, GrpcSysDbConfig, SysDbConfig};
     use chroma_system::System;
+    use std::env;
     use std::str::FromStr;
     use std::time::Duration;
     use tokio::sync::oneshot;
@@ -840,7 +838,7 @@ mod tests {
             download_part_size_bytes: 1024 * 1024, // 1MB
             max_concurrent_requests: 10,
         });
-        let storage = from_config(&storage_config).await?;
+        let storage = chroma_storage::from_config(&storage_config).await?;
 
         // Create sysdb config and client
         let sysdb_config = SysDbConfig::Grpc(GrpcSysDbConfig {
