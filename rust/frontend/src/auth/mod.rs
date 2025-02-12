@@ -85,7 +85,7 @@ pub trait AuthenticateAndAuthorize: Send + Sync {
         _headers: &HeaderMap,
         action: AuthzAction,
         resource: AuthzResource,
-    ) -> Pin<Box<dyn Future<Output = Result<(), AuthError>> + Send + Sync>>;
+    ) -> Pin<Box<dyn Future<Output = Result<(), AuthError>> + Send>>;
 }
 
 impl AuthenticateAndAuthorize for () {
@@ -94,7 +94,7 @@ impl AuthenticateAndAuthorize for () {
         _headers: &HeaderMap,
         _action: AuthzAction,
         _resource: AuthzResource,
-    ) -> Pin<Box<dyn Future<Output = Result<(), AuthError>> + Send + Sync>> {
+    ) -> Pin<Box<dyn Future<Output = Result<(), AuthError>> + Send>> {
         Box::pin(ready(Ok::<(), AuthError>(())))
     }
 }
