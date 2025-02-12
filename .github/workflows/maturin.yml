@@ -16,7 +16,6 @@ jobs:
           - { os: linux, runner: depot-ubuntu-22.04, target: x86_64, manylinux: auto }
           - { os: linux, runner: depot-ubuntu-22.04-arm, target: aarch64, manylinux: auto }
           - { os: windows, runner: windows-latest, target: x64, manylinux: '' }
-          - { os: windows, runner: windows-latest, target: x86, manylinux: '' }
           - { os: macos, runner: depot-macos-14, target: x86_64, manylinux: '' }
           - { os: macos, runner: depot-macos-14, target: aarch64, manylinux: '' }
 
@@ -32,7 +31,9 @@ jobs:
         run: cp -r "$(pwd)/hnswlib" ../hnswlib
 
       - name: Install Protoc
-        uses: arduino/setup-protoc@v2
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       # On Windows, we want to set up Python with the correct architecture
       - name: Set up Python on Windows
@@ -52,7 +53,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --out dist
+          args: --release --out ../../dist
           sccache: 'true'
           working-directory: rust/python_bindings
           container: "off"
@@ -71,7 +72,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           command: sdist
-          args: --out dist
+          args: --out ../../dist
           working-directory: rust/python_bindings
       - name: Upload sdist
         uses: actions/upload-artifact@v4
