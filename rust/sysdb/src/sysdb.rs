@@ -446,6 +446,7 @@ pub struct CollectionToGcInfo {
     pub id: CollectionUuid,
     pub name: String,
     pub version_file_path: String,
+    pub latest_version: i64,
 }
 
 #[derive(Debug, Error)]
@@ -478,6 +479,7 @@ impl TryFrom<chroma_proto::CollectionToGcInfo> for CollectionToGcInfo {
             id: collection_id,
             name: value.name,
             version_file_path: value.version_file_path,
+            latest_version: value.latest_version,
         })
     }
 }
