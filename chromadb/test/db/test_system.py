@@ -299,6 +299,7 @@ def test_count_collections(sysdb: SysDB) -> None:
         collection["tenant"] = DEFAULT_TENANT
 
     collection_count = sysdb.count_collections(tenant=DEFAULT_TENANT, database=DEFAULT_DATABASE)
+    logger.debug(f"Collection count: {collection_count}")
 
     assert collection_count == len(sample_collections)
 
