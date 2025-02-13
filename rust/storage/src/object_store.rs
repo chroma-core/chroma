@@ -2,6 +2,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use chroma_error::ChromaError;
+use futures::StreamExt;
 use object_store::path::Path;
 use object_store::{GetOptions, GetRange, ObjectStore as ObjectStoreTrait, PutOptions};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
@@ -217,6 +218,23 @@ impl ObjectStore {
                 Err(e.into())
             }
         }
+    }
+
+    pub async fn list_prefix(&self, prefix: &str) -> Result<Vec<String>, GetError> {
+        let mut files = Vec::new();
+        let mut stream = self.object_store.list(Some(&Path::from(prefix)));
+
+        while let Some(obj) = stream.next().await {
+            match obj {
+                Ok(obj) => {
+                    files.push(obj.location.to_string());
+                }
+                Err(e) => {
+                    return Err(e.into());
+                }
+            }
+        }
+        Ok(files)
     }
 }
 

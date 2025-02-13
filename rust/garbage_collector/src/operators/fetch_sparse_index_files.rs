@@ -34,6 +34,7 @@ pub struct FetchSparseIndexFilesOutput {
     pub versions_to_delete: VersionListForCollection,
     pub version_to_content: HashMap<i64, HashMap<String, Vec<u8>>>,
     pub oldest_version_to_keep: i64,
+    pub hnsw_prefixes_for_deletion: Vec<String>,
 }
 
 #[derive(Error, Debug)]
@@ -79,6 +80,7 @@ impl Operator<FetchSparseIndexFilesInput, FetchSparseIndexFilesOutput>
         let mut versions_to_fetch = input.versions_to_delete.versions.clone();
         versions_to_fetch.push(input.oldest_version_to_keep);
 
+        let mut hnsw_prefixes_for_deletion = Vec::new();
         println!(
             "Starting to fetch files for {} versions to delete",
             versions_to_fetch.len()
@@ -108,7 +110,9 @@ impl Operator<FetchSparseIndexFilesInput, FetchSparseIndexFilesOutput>
                             println!("    File type: {}", file_type);
                             // Skip hnsw_index files
                             if file_type == "hnsw_index" {
-                                println!("    ⚠ Skipping hnsw_index files");
+                                println!("        Added prefix: {:?}", file_paths.paths);
+                                // Add the hnsw_index files to the hnsw_prefixes_for_deletion vector
+                                hnsw_prefixes_for_deletion.extend(file_paths.paths.clone());
                                 continue;
                             }
                             // Attempt to fetch each file
@@ -167,6 +171,7 @@ impl Operator<FetchSparseIndexFilesInput, FetchSparseIndexFilesOutput>
             versions_to_delete: input.versions_to_delete.clone(),
             version_to_content,
             oldest_version_to_keep: input.oldest_version_to_keep,
+            hnsw_prefixes_for_deletion,
         })
     }
 }

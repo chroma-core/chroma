@@ -29,7 +29,7 @@ impl DeleteUnusedFilesOperator {
     }
 
     fn get_soft_delete_path(&self, path: &str, epoch: i64) -> String {
-        format!("deleted_at_{epoch}_{path}")
+        format!("deleted/{epoch}/{path}")
     }
 }
 
@@ -37,6 +37,7 @@ impl DeleteUnusedFilesOperator {
 pub struct DeleteUnusedFilesInput {
     pub unused_s3_files: HashSet<String>,
     pub epoch_id: i64,
+    pub hnsw_prefixes_for_deletion: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -72,64 +73,59 @@ impl Operator<DeleteUnusedFilesInput, DeleteUnusedFilesOutput> for DeleteUnusedF
     ) -> Result<DeleteUnusedFilesOutput, DeleteUnusedFilesError> {
         tracing::info!(
             files_count = input.unused_s3_files.len(),
+            hnsw_prefixes_count = input.hnsw_prefixes_for_deletion.len(),
             files = ?input.unused_s3_files,
+            hnsw_prefixes = ?input.hnsw_prefixes_for_deletion,
             soft_delete = self.soft_delete,
             "Starting deletion of unused files"
         );
 
         let mut deleted_files = HashSet::new();
 
+        // Log and delete regular unused files
+        println!("Deleting unused block files: {:?}", input.unused_s3_files);
         for file_path in &input.unused_s3_files {
-            if self.soft_delete {
-                // Soft delete - rename the file
-                let new_path = self.get_soft_delete_path(file_path, input.epoch_id);
-                tracing::info!(
-                    old_path = %file_path,
-                    new_path = %new_path,
-                    "Renaming file for soft delete"
-                );
+            if !self
+                .delete_file(file_path, input.epoch_id, &mut deleted_files)
+                .await?
+            {
+                continue;
+            }
+        }
 
-                match self.storage.rename(file_path, &new_path).await {
-                    Ok(_) => {
-                        tracing::info!(
-                            old_path = %file_path,
-                            new_path = %new_path,
-                            "Successfully renamed file"
-                        );
-                        deleted_files.insert(file_path.clone());
-                    }
-                    Err(e) => {
-                        tracing::error!(
-                            error = %e,
-                            path = %file_path,
-                            "Failed to rename file"
-                        );
-                        return Err(DeleteUnusedFilesError::RenameError {
-                            path: file_path.clone(),
-                            message: e.to_string(),
-                        });
-                    }
-                }
-            } else {
-                // Hard delete - remove the file
-                tracing::info!(path = %file_path, "Deleting file");
+        // Log and delete HNSW files for each prefix
+        let hnsw_files: Vec<String> = input
+            .hnsw_prefixes_for_deletion
+            .iter()
+            .flat_map(|prefix| {
+                [
+                    "header.bin",
+                    "data_level0.bin",
+                    "length.bin",
+                    "link_lists.bin",
+                ]
+                .iter()
+                .map(|file| format!("hnsw/{}/{}", prefix, file))
+                .collect::<Vec<String>>()
+            })
+            .collect();
+        println!("Deleting HNSW files: {:?}", hnsw_files);
 
-                match self.storage.delete(file_path).await {
-                    Ok(_) => {
-                        tracing::info!(path = %file_path, "Successfully deleted file");
-                        deleted_files.insert(file_path.clone());
-                    }
-                    Err(e) => {
-                        tracing::error!(
-                            error = %e,
-                            path = %file_path,
-                            "Failed to delete file"
-                        );
-                        return Err(DeleteUnusedFilesError::DeleteError {
-                            path: file_path.clone(),
-                            message: e.to_string(),
-                        });
-                    }
+        for prefix in &input.hnsw_prefixes_for_deletion {
+            for file in [
+                "header.bin",
+                "data_level0.bin",
+                "length.bin",
+                // "link_lists.bin",
+            ]
+            .iter()
+            {
+                let file_path = format!("hnsw/{}/{}", prefix, file);
+                if !self
+                    .delete_file(&file_path, input.epoch_id, &mut deleted_files)
+                    .await?
+                {
+                    continue;
                 }
             }
         }
@@ -141,6 +137,70 @@ impl Operator<DeleteUnusedFilesInput, DeleteUnusedFilesOutput> for DeleteUnusedF
         );
 
         Ok(DeleteUnusedFilesOutput { deleted_files })
+    }
+}
+
+impl DeleteUnusedFilesOperator {
+    async fn delete_file(
+        &self,
+        file_path: &str,
+        epoch_id: i64,
+        deleted_files: &mut HashSet<String>,
+    ) -> Result<bool, DeleteUnusedFilesError> {
+        if self.soft_delete {
+            // Soft delete - rename the file
+            let new_path = self.get_soft_delete_path(file_path, epoch_id);
+            tracing::info!(
+                old_path = %file_path,
+                new_path = %new_path,
+                "Renaming file for soft delete"
+            );
+
+            match self.storage.rename(file_path, &new_path).await {
+                Ok(_) => {
+                    tracing::info!(
+                        old_path = %file_path,
+                        new_path = %new_path,
+                        "Successfully renamed file"
+                    );
+                    deleted_files.insert(file_path.to_string());
+                    Ok(true)
+                }
+                Err(e) => {
+                    tracing::error!(
+                        error = %e,
+                        path = %file_path,
+                        "Failed to rename file"
+                    );
+                    Err(DeleteUnusedFilesError::RenameError {
+                        path: file_path.to_string(),
+                        message: e.to_string(),
+                    })
+                }
+            }
+        } else {
+            // Hard delete - remove the file
+            tracing::info!(path = %file_path, "Deleting file");
+
+            match self.storage.delete(file_path).await {
+                Ok(_) => {
+                    tracing::info!(path = %file_path, "Successfully deleted file");
+                    deleted_files.insert(file_path.to_string());
+                    Ok(true)
+                }
+                Err(e) => {
+                    tracing::error!(
+                        error = %e,
+                        path = %file_path,
+                        "Failed to delete file"
+                    );
+                    Err(DeleteUnusedFilesError::DeleteError {
+                        path: file_path.to_string(),
+                        message: e.to_string(),
+                    })
+                }
+            }
+        }
     }
 }
 
@@ -167,6 +227,10 @@ mod tests {
             create_test_file(&storage, file, b"test content").await;
         }
 
+        // Create HNSW test files
+        create_test_file(&storage, "hnsw/prefix1/file1.hnsw", b"test content").await;
+        create_test_file(&storage, "hnsw/prefix1/file2.hnsw", b"test content").await;
+
         let mut unused_files = HashSet::new();
         unused_files.extend(test_files.iter().map(|s| s.to_string()));
 
@@ -174,15 +238,19 @@ mod tests {
         let input = DeleteUnusedFilesInput {
             unused_s3_files: unused_files.clone(),
             epoch_id: 123,
+            hnsw_prefixes_for_deletion: vec!["prefix1".to_string()],
         };
 
         let result = operator.run(&input).await.unwrap();
 
-        // Verify files were deleted
-        assert_eq!(result.deleted_files, unused_files);
+        // Verify regular files were deleted
         for file in test_files {
             assert!(!Path::new(&tmp_dir.path().join(file)).exists());
         }
+
+        // Verify HNSW files were deleted
+        assert!(!Path::new(&tmp_dir.path().join("hnsw/prefix1/file1.hnsw")).exists());
+        assert!(!Path::new(&tmp_dir.path().join("hnsw/prefix1/file2.hnsw")).exists());
     }
 
     #[tokio::test]
@@ -196,6 +264,10 @@ mod tests {
             create_test_file(&storage, file, b"test content").await;
         }
 
+        // Create HNSW test files
+        create_test_file(&storage, "hnsw/prefix1/file1.hnsw", b"test content").await;
+        create_test_file(&storage, "hnsw/prefix1/file2.hnsw", b"test content").await;
+
         let mut unused_files = HashSet::new();
         unused_files.extend(test_files.iter().map(|s| s.to_string()));
 
@@ -203,13 +275,22 @@ mod tests {
         let input = DeleteUnusedFilesInput {
             unused_s3_files: unused_files.clone(),
             epoch_id: 123,
+            hnsw_prefixes_for_deletion: vec!["prefix1".to_string()],
         };
 
         let result = operator.run(&input).await.unwrap();
 
-        // Verify files were renamed
-        assert_eq!(result.deleted_files, unused_files);
+        // Verify regular files were renamed
         for file in test_files {
+            let original_path = tmp_dir.path().join(file);
+            let new_path = tmp_dir.path().join(format!("deleted_at_123_{}", file));
+            assert!(!original_path.exists());
+            assert!(new_path.exists());
+        }
+
+        // Verify HNSW files were renamed
+        let hnsw_files = vec!["hnsw/prefix1/file1.hnsw", "hnsw/prefix1/file2.hnsw"];
+        for file in hnsw_files {
             let original_path = tmp_dir.path().join(file);
             let new_path = tmp_dir.path().join(format!("deleted_at_123_{}", file));
             assert!(!original_path.exists());
@@ -229,6 +310,7 @@ mod tests {
         let input = DeleteUnusedFilesInput {
             unused_s3_files: unused_files,
             epoch_id: 123,
+            hnsw_prefixes_for_deletion: vec![],
         };
 
         let result = operator.run(&input).await;

@@ -269,6 +269,21 @@ impl Storage {
             }
         }
     }
+
+    pub async fn list_prefix(&self, prefix: &str) -> Result<Vec<String>, GetError> {
+        match self {
+            Storage::Local(_) => {
+                unimplemented!("list_prefix not implemented for LocalStorage")
+            }
+            Storage::S3(_) => {
+                unimplemented!("list_prefix not implemented for S3")
+            }
+            Storage::ObjectStore(object_store) => object_store.list_prefix(prefix).await,
+            Storage::AdmissionControlledS3(_) => {
+                unimplemented!("list_prefix not implemented for AdmissionControlledS3")
+            }
+        }
+    }
 }
 
 #[async_trait]

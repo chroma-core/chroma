@@ -99,6 +99,7 @@ pub struct GarbageCollectorOrchestrator {
     pending_version_file: Option<CollectionVersionFile>,
     pending_versions_to_delete: Option<chroma_types::chroma_proto::VersionListForCollection>,
     pending_epoch_id: Option<i64>,
+    hnsw_prefixes_for_deletion: Vec<String>,
 }
 
 impl Debug for GarbageCollectorOrchestrator {
@@ -134,6 +135,7 @@ impl GarbageCollectorOrchestrator {
             pending_version_file: None,
             pending_versions_to_delete: None,
             pending_epoch_id: None,
+            hnsw_prefixes_for_deletion: Vec::new(),
         }
     }
 }
@@ -402,6 +404,8 @@ impl Handler<TaskResult<FetchSparseIndexFilesOutput, FetchSparseIndexFilesError>
             None => return,
         };
 
+        self.hnsw_prefixes_for_deletion
+            .extend(output.hnsw_prefixes_for_deletion.clone());
         let input = ComputeUnusedBetweenVersionsInput {
             version_file: output.version_file,
             epoch_id: output.epoch_id,
@@ -448,6 +452,7 @@ impl Handler<TaskResult<ComputeUnusedBetweenVersionsOutput, ComputeUnusedBetween
             DeleteUnusedFilesInput {
                 unused_s3_files: output.unused_s3_files.clone(),
                 epoch_id: output.epoch_id,
+                hnsw_prefixes_for_deletion: self.hnsw_prefixes_for_deletion.clone(),
             },
             ctx.receiver(),
         );
@@ -551,11 +556,6 @@ mod tests {
     use std::time::Duration;
     use tokio::sync::oneshot;
     use tracing_subscriber;
-
-    // Helper function to check if cluster tests should run
-    fn should_run_cluster_tests() -> bool {
-        env::var("CHROMA_CLUSTER_TEST_ONLY").is_ok()
-    }
 
     async fn wait_for_new_version(
         clients: &mut ChromaGrpcClients,
@@ -914,9 +914,86 @@ mod tests {
             "Version counts before and after GC"
         );
 
-        assert!(
-            version_count_after_gc < version_count_before_gc,
-            "Expected fewer versions after garbage collection"
+        // Add check for HNSW prefixes before GC
+        let hnsw_prefixes_before_gc: Vec<String> = storage
+            .list_prefix("hnsw")
+            .await?
+            .into_iter()
+            .filter(|path| path.contains("hnsw/"))
+            .map(|path| {
+                path.split("/")
+                    .nth(1) // Get the prefix part after "hnsw/"
+                    .unwrap_or("")
+                    .to_string()
+            })
+            .collect();
+
+        println!("HNSW prefixes before GC: {:?}", hnsw_prefixes_before_gc);
+
+        // Add check for HNSW files
+        let hnsw_files_before_gc: Vec<_> = storage
+            .list_prefix("hnsw")
+            .await?
+            .into_iter()
+            .filter(|path| path.ends_with("header.bin"))
+            .collect();
+
+        tracing::info!(
+            count = hnsw_files_before_gc.len(),
+            files = ?hnsw_files_before_gc,
+            "HNSW header files before GC"
+        );
+
+        // The number of HNSW prefixes (unique indices) should match the number of versions before GC
+        assert_eq!(
+            hnsw_files_before_gc.len(),
+            version_count_before_gc,
+            "Expected one HNSW index per version before GC"
+        );
+
+        // Wait a bit for GC to complete
+        tokio::time::sleep(Duration::from_secs(2)).await;
+
+        // Check HNSW files after GC
+        let hnsw_files_after_gc: Vec<_> = storage
+            .list_prefix("hnsw")
+            .await?
+            .into_iter()
+            .filter(|path| path.ends_with("header.bin"))
+            .collect();
+
+        tracing::info!(
+            count = hnsw_files_after_gc.len(),
+            files = ?hnsw_files_after_gc,
+            "HNSW header files after GC"
+        );
+
+        // The number of remaining HNSW indices should match the number of versions after GC
+        assert_eq!(
+            hnsw_files_after_gc.len(),
+            version_count_after_gc,
+            "Expected one HNSW index per remaining version after GC"
+        );
+
+        // Verify that deleted files are renamed with the "deleted" prefix if using soft delete
+        let deleted_hnsw_files: Vec<_> = storage
+            .list_prefix("deleted")
+            .await?
+            .into_iter()
+            .filter(|path| path.contains("deleted") && path.contains("header.bin"))
+            .collect();
+
+        tracing::info!(
+            count = deleted_hnsw_files.len(),
+            files = ?deleted_hnsw_files,
+            "Soft-deleted HNSW header files"
+        );
+
+        // The number of deleted files should match the difference in versions
+        assert_eq!(
+            deleted_hnsw_files.len(),
+            version_count_before_gc - version_count_after_gc,
+            "Expected deleted HNSW files to match the number of deleted versions"
         );
 
         assert!(
