@@ -319,11 +319,14 @@ def test_cycle_versions(
     # 07/29/24: the max_seq_id for vector segments was moved from the pickled metadata file to SQLite.
     # Cleaning the log is dependent on vector segments migrating their max_seq_id from the pickled metadata file to SQLite.
     # Vector segments migrate this field automatically on init, but at this point the segment has not been loaded yet.
-    trigger_vector_segments_max_seq_id_migration(
-        embeddings_queue, system.instance(SegmentManager)
-    )
-
-    embeddings_queue.purge_log(coll.id)
+    if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ:
+        # Trigger log purge in Rust impl
+        invariants.count(coll, embeddings_strategy)
+    else:
+        trigger_vector_segments_max_seq_id_migration(
+            embeddings_queue, system.instance(SegmentManager)
+        )
+        embeddings_queue.purge_log(coll.id)
     invariants.log_size_below_max(system, [coll], True)
 
     # Should be able to add embeddings

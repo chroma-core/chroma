@@ -4,8 +4,7 @@ import os.path
 from uuid import UUID
 from contextlib import contextmanager
 
-from chromadb.api.rust import RustBindingsAPI
-from chromadb.api.segment import SegmentAPI, ServerAPI
+from chromadb.api.segment import SegmentAPI
 from chromadb.db.system import SysDB
 from chromadb.ingest.impl.utils import create_topic_name
 
@@ -423,7 +422,7 @@ def log_size_below_max(
             for collection in collections
         )
 
-        limit = sync_threshold_sum if isinstance(system.instance(ServerAPI), RustBindingsAPI) else sync_threshold_sum + batch_size_sum
+        limit = sync_threshold_sum if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ else sync_threshold_sum + batch_size_sum
 
         # -1 is used because the queue is always at least 1 entry long, so deletion stops before the max ack'ed sequence ID.
         # And for python impl if the batch_size != sync_threshold, the queue can have up to batch_size more entries.
