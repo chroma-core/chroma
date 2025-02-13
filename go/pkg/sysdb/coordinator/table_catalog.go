@@ -382,6 +382,20 @@ func (tc *Catalog) GetCollections(ctx context.Context, collectionID types.Unique
 	return collections, nil
 }
 
+func (tc *Catalog) CountCollections(ctx context.Context, tenantID string, databaseName *string) (uint64, error) {
+	tracer := otel.Tracer
+	if tracer != nil {
+		_, span := tracer.Start(ctx, "Catalog.CountCollections")
+		defer span.End()
+	}
+
+	collection_count, err := tc.metaDomain.CollectionDb(ctx).CountCollections(tenantID, databaseName)
+	if err != nil {
+		return 0, err
+	}
+	return collection_count, nil
+}
+
 func (tc *Catalog) GetCollectionSize(ctx context.Context, collectionID types.UniqueID) (uint64, error) {
 	tracer := otel.Tracer
 	if tracer != nil {

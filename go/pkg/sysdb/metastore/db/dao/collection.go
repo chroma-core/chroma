@@ -155,6 +155,25 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 	return
 }
 
+func (s *collectionDb) CountCollections(tenantID string, databaseName *string) (uint64, error) {
+	var count int64
+	query := s.db.Table("collections").
+		Joins("INNER JOIN databases ON collections.database_id = databases.id").
+		Where("databases.tenant_id = ?", tenantID)
+
+	if databaseName != nil {
+		query = query.Where("databases.name = ?", databaseName)
+	}
+
+	result := query.Count(&count)
+
+	if result.Error != nil {
+		return 0, result.Error
+	}
+
+	return uint64(count), nil
+}
+
 func (s *collectionDb) GetCollectionSize(id string) (uint64, error) {
 	query := s.read_db.Table("collections").
 		Select("collections.total_records_post_compaction").
