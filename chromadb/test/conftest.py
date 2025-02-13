@@ -571,12 +571,10 @@ def sqlite_fixture() -> Generator[System, None, None]:
 
 @pytest.fixture
 def sqlite() -> Generator[System, None, None]:
-    # TODO: Enable Rust ephemeral client for testing
-    # if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ:
-    #     yield from rust_system()
-    # else:
-    #     yield from sqlite_fixture()
-    yield from sqlite_fixture()
+    if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ:
+        yield from rust_system(persistent=False)
+    else:
+        yield from sqlite_fixture()
 
 
 def sqlite_persistent_fixture() -> Generator[System, None, None]:
