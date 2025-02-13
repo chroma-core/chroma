@@ -187,6 +187,17 @@ impl FullTextIndexWriter {
                     posting_list.push(offset);
                 }
                 None => {
+                    if last_key != TokenInstance::MAX {
+                        let token = last_key.get_token();
+                        let document_id = last_key.get_offset_id();
+                        self.posting_lists_blockfile_writer
+                            .set(&token, document_id, posting_list.clone())
+                            .await
+                            .unwrap();
+                        posting_list.clear();
+                        last_key = encoded_instance.omit_position();
+                    }
+
                     // Trigram & offset ID pair is a delete
                     self.posting_lists_blockfile_writer
                         .delete::<u32, Vec<u32>>(
@@ -906,7 +917,7 @@ mod tests {
         let root_cache = new_cache_for_test();
         let provider = BlockfileProvider::new_arrow(storage, 1024 * 1024, block_cache, root_cache);
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default().ordered_mutations())
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -937,7 +948,11 @@ mod tests {
 
         // Update document 3
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new().fork(pl_blockfile_id))
+            .write::<u32, Vec<u32>>(
+                BlockfileWriterOptions::new()
+                    .ordered_mutations()
+                    .fork(pl_blockfile_id),
+            )
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
