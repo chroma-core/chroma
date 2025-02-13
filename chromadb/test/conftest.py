@@ -572,7 +572,7 @@ def sqlite_fixture() -> Generator[System, None, None]:
 @pytest.fixture
 def sqlite() -> Generator[System, None, None]:
     if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ:
-        yield from rust_system(persistent=False)
+        yield from rust_ephemeral_system()
     else:
         yield from sqlite_fixture()
 
@@ -611,12 +611,29 @@ def sqlite_persistent_fixture() -> Generator[System, None, None]:
 @pytest.fixture
 def sqlite_persistent() -> Generator[System, None, None]:
     if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ:
-        yield from rust_system()
+        yield from rust_persistent_system()
     else:
         yield from sqlite_persistent_fixture()
 
 
-def rust_system(persistent: bool = True) -> Generator[System, None, None]:
+def rust_ephemeral_system() -> Generator[System, None, None]:
+    """Fixture generator for system using ephemeral Rust bindings"""
+    settings = Settings(
+        chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
+        chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
+        is_persistent=False,
+        allow_reset=True,
+        persist_directory="",
+    )
+    system = System(settings)
+    system.start()
+    yield system
+    system.stop()
+
+def rust_persistent_system() -> Generator[System, None, None]:
     """Fixture generator for system using Rust bindings"""
     save_path = tempfile.TemporaryDirectory()
     settings = Settings(
@@ -625,9 +642,9 @@ def rust_system(persistent: bool = True) -> Generator[System, None, None]:
         chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
         chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
         chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
-        is_persistent=persistent,
+        is_persistent=True,
         allow_reset=True,
-        persist_directory=save_path.name if persistent else "",
+        persist_directory=save_path.name,
     )
     system = System(settings)
     system.start()
@@ -650,7 +667,7 @@ def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
     if "CHROMA_CLUSTER_TEST_ONLY" in os.environ:
         fixtures = [basic_http_client]
     if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ:
-        fixtures = [rust_system]
+        fixtures = [rust_ephemeral_system, rust_persistent_system]
     return fixtures
 
 
@@ -660,7 +677,7 @@ def system_http_server_fixtures() -> List[Callable[[], Generator[System, None, N
         for fixture in system_fixtures()
         if fixture != sqlite_fixture
         and fixture != sqlite_persistent_fixture
-        and fixture != rust_system
+        and fixture not in [rust_ephemeral_system, rust_persistent_system]
     ]
     return fixtures
 
