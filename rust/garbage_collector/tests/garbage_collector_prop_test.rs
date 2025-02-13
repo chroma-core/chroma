@@ -14,6 +14,7 @@ mod tests {
     use proptest::prelude::*;
     use std::str::FromStr;
     use std::time::Duration;
+    use tracing_subscriber;
     use uuid::Uuid;
 
     // Helper function to create random embeddings
@@ -55,12 +56,12 @@ mod tests {
             storage,
         );
 
-        let (_sender, receiver) = tokio::sync::oneshot::channel();
-        // orchestrator.set_result_channel(sender);
+        let (sender, _receiver) = tokio::sync::oneshot::channel();
+        orchestrator.set_result_channel(sender);
         orchestrator.run(system).await?;
 
         // Wait for GC to complete
-        let _ = receiver.await?;
+        // let _ = receiver.await?;
 
         Ok(())
     }
@@ -123,6 +124,12 @@ mod tests {
             num_gc_runs in 1..2usize,
             num_insert_batches in 1..2usize,
         ) {
+            // Initialize tracing subscriber for logging
+            let _ = tracing_subscriber::fmt()
+                .with_max_level(tracing::Level::INFO)
+                .with_test_writer()
+                .try_init();
+
             let runtime = tokio::runtime::Runtime::new().unwrap();
 
             runtime.block_on(async {
@@ -213,6 +220,7 @@ mod tests {
                 println!("Collection Id: {:?}", collection_info.id);
                 println!("Latest version: {:?}", collection_info.latest_version);
                 for _ in 0..num_gc_runs {
+                    tracing::info!("Running GC.. and waiting for it to complete");
                     run_gc(
                         &collection_id,
                         &collection_info.version_file_path,
