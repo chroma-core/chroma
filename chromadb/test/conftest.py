@@ -569,14 +569,6 @@ def sqlite_fixture() -> Generator[System, None, None]:
     system.stop()
 
 
-@pytest.fixture
-def sqlite() -> Generator[System, None, None]:
-    if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ:
-        yield from rust_ephemeral_system()
-    else:
-        yield from sqlite_fixture()
-
-
 def sqlite_persistent_fixture() -> Generator[System, None, None]:
     """Fixture generator for segment-based API using persistent Sqlite"""
     save_path = tempfile.TemporaryDirectory()
@@ -608,15 +600,7 @@ def sqlite_persistent_fixture() -> Generator[System, None, None]:
             raise e
 
 
-@pytest.fixture
-def sqlite_persistent() -> Generator[System, None, None]:
-    if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ:
-        yield from rust_persistent_system()
-    else:
-        yield from sqlite_persistent_fixture()
-
-
-def rust_ephemeral_system() -> Generator[System, None, None]:
+def rust_ephemeral_fixture() -> Generator[System, None, None]:
     """Fixture generator for system using ephemeral Rust bindings"""
     settings = Settings(
         chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
@@ -633,7 +617,7 @@ def rust_ephemeral_system() -> Generator[System, None, None]:
     yield system
     system.stop()
 
-def rust_persistent_system() -> Generator[System, None, None]:
+def rust_persistent_fixture() -> Generator[System, None, None]:
     """Fixture generator for system using Rust bindings"""
     save_path = tempfile.TemporaryDirectory()
     settings = Settings(
@@ -652,6 +636,16 @@ def rust_persistent_system() -> Generator[System, None, None]:
     system.stop()
 
 
+@pytest.fixture(scope="module", params=[rust_ephemeral_fixture, sqlite_fixture])
+def sqlite(request: pytest.FixtureRequest) -> Generator[System, None, None]:
+    yield from request.param()
+
+
+@pytest.fixture(scope="module", params=[rust_persistent_fixture, sqlite_persistent_fixture])
+def sqlite_persistent(request: pytest.FixtureRequest) -> Generator[System, None, None]:
+    yield from request.param()
+
+
 def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
     fixtures = [
         fastapi,
@@ -659,6 +653,8 @@ def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
         fastapi_persistent,
         sqlite_fixture,
         sqlite_persistent_fixture,
+        rust_ephemeral_fixture,
+        rust_persistent_fixture,
     ]
     if "CHROMA_INTEGRATION_TEST" in os.environ:
         fixtures.append(integration)
@@ -666,8 +662,6 @@ def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
         fixtures = [integration]
     if "CHROMA_CLUSTER_TEST_ONLY" in os.environ:
         fixtures = [basic_http_client]
-    if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ:
-        fixtures = [rust_ephemeral_system, rust_persistent_system]
     return fixtures
 
 
@@ -677,7 +671,7 @@ def system_http_server_fixtures() -> List[Callable[[], Generator[System, None, N
         for fixture in system_fixtures()
         if fixture != sqlite_fixture
         and fixture != sqlite_persistent_fixture
-        and fixture not in [rust_ephemeral_system, rust_persistent_system]
+        and fixture not in [rust_ephemeral_fixture, rust_persistent_fixture]
     ]
     return fixtures
 
