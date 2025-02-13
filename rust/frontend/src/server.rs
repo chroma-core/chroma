@@ -595,11 +595,23 @@ async fn create_collection(
 }
 
 async fn get_collection(
+    headers: HeaderMap,
     Path((tenant_id, database_name, collection_name)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<Collection>, ServerError> {
     server.metrics.get_collection.add(1, &[]);
     tracing::info!("Getting collection [{collection_name}] in database [{database_name}] for tenant [{tenant_id}]");
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::GetCollection,
+            AuthzResource {
+                tenant: Some(tenant_id.clone()),
+                database: Some(database_name.clone()),
+                collection: Some(collection_name.clone()),
+            },
+        )
+        .await?;
     let _guard = server.scorecard_request(&[
         "op:get_collection",
         format!("tenant:{}", tenant_id).as_str(),

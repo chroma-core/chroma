@@ -827,6 +827,7 @@ class FastAPI(Server):
         database_name: str,
         collection_name: str,
     ) -> CollectionModel:
+        # NOTE(rescrv, iron will auth):  Implemented.
         await self.auth_request(
             request.headers,
             AuthzAction.GET_COLLECTION,
