@@ -307,15 +307,12 @@ async fn version(State(server): State<FrontendServer>) -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
-// TOOD: Dummy implementation for now
-async fn get_user_identity(State(server): State<FrontendServer>) -> Json<GetUserIdentityResponse> {
+async fn get_user_identity(
+    headers: HeaderMap,
+    State(server): State<FrontendServer>,
+) -> Result<Json<GetUserIdentityResponse>, ServerError> {
     server.metrics.version.add(1, &[]);
-    // TODO(rescrv):  Return user identity.
-    Json(GetUserIdentityResponse {
-        user_id: String::new(),
-        tenant: "default_tenant".to_string(),
-        databases: vec!["default_database".to_string()],
-    })
+    Ok(Json(server.auth.get_user_identity(&headers).await?))
 }
 
 async fn create_tenant(

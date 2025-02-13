@@ -5,6 +5,8 @@ use std::pin::Pin;
 use axum::http::HeaderMap;
 use axum::http::StatusCode;
 
+use chroma_types::GetUserIdentityResponse;
+
 #[derive(Clone, Copy, Debug)]
 pub enum AuthzAction {
     Reset,
@@ -86,6 +88,11 @@ pub trait AuthenticateAndAuthorize: Send + Sync {
         action: AuthzAction,
         resource: AuthzResource,
     ) -> Pin<Box<dyn Future<Output = Result<(), AuthError>> + Send>>;
+
+    fn get_user_identity(
+        &self,
+        _headers: &HeaderMap,
+    ) -> Pin<Box<dyn Future<Output = Result<GetUserIdentityResponse, AuthError>> + Send>>;
 }
 
 impl AuthenticateAndAuthorize for () {
@@ -96,5 +103,18 @@ impl AuthenticateAndAuthorize for () {
         _resource: AuthzResource,
     ) -> Pin<Box<dyn Future<Output = Result<(), AuthError>> + Send>> {
         Box::pin(ready(Ok::<(), AuthError>(())))
+    }
+
+    fn get_user_identity(
+        &self,
+        _headers: &HeaderMap,
+    ) -> Pin<Box<dyn Future<Output = Result<GetUserIdentityResponse, AuthError>> + Send>> {
+        Box::pin(ready(Ok::<GetUserIdentityResponse, AuthError>(
+            GetUserIdentityResponse {
+                user_id: String::new(),
+                tenant: "default_tenant".to_string(),
+                databases: vec!["default_database".to_string()],
+            },
+        )))
     }
 }
