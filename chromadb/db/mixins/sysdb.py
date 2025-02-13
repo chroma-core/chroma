@@ -964,4 +964,27 @@ class SqlSysDB(SqlDB, SysDB):
 
     @override
     def get_collection_size(self, id: UUID) -> int:
+<<<<<<< HEAD
         raise NotImplementedError
+||||||| parent of 3a9a76ee1 ([ENH] Count collections implementation (#3785))
+        raise NotImplementedError
+=======
+        raise NotImplementedError
+    
+    @override
+    def count_collections(
+        self,
+        tenant: str = DEFAULT_TENANT,
+        database: Optional[str] = None,
+    ) -> int:
+        """Gets the number of collections for the (tenant, database) combination."""
+        # TODO(Sanket): Implement this efficiently using a count query.
+        # Note, the underlying get_collections api always requires a database
+        # to be specified. In the sysdb implementation in go code, it does not
+        # filter on database if it is set to "". This is a bad API and
+        # should be fixed. For now, we will replicate the behavior.
+        request_database = database
+        if database == None or database == "":
+            request_database = ""
+        return len(self.get_collections(tenant=tenant, database=request_database))
+>>>>>>> 3a9a76ee1 ([ENH] Count collections implementation (#3785))

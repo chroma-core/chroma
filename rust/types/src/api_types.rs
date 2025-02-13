@@ -532,6 +532,20 @@ impl ChromaError for CreateCollectionError {
 }
 
 #[derive(Debug, Error)]
+pub enum CountCollectionsError {
+    #[error("Internal error in getting count")]
+    Internal,
+}
+
+impl ChromaError for CountCollectionsError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            CountCollectionsError::Internal => ErrorCodes::Internal,
+        }
+    }
+}
+
+#[derive(Debug, Error)]
 pub enum GetCollectionsError {
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),

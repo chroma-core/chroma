@@ -145,6 +145,15 @@ class SysDB(Component):
         pass
 
     @abstractmethod
+    def count_collections(
+        self,
+        tenant: str = DEFAULT_TENANT,
+        database: Optional[str] = None,
+    ) -> int:
+        """Gets the number of collections for the (tenant, database) combination."""
+        pass
+
+    @abstractmethod
     def get_collection_with_segments(
         self, collection_id: UUID
     ) -> CollectionAndSegments:

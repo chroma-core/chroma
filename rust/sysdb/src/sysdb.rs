@@ -8,13 +8,14 @@ use chroma_error::{ChromaError, ErrorCodes, TonicMissingFieldError};
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
 use chroma_types::chroma_proto::VersionListForCollection;
 use chroma_types::{
-    chroma_proto, CollectionAndSegments, CollectionMetadataUpdate, CreateCollectionError,
-    CreateDatabaseError, CreateDatabaseResponse, CreateTenantError, CreateTenantResponse, Database,
-    DeleteCollectionError, DeleteDatabaseError, DeleteDatabaseResponse,
-    GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError, GetDatabaseResponse,
-    GetSegmentsError, GetTenantError, GetTenantResponse, ListDatabasesError, ListDatabasesResponse,
-    Metadata, ResetError, ResetResponse, SegmentFlushInfo, SegmentFlushInfoConversionError,
-    SegmentUuid, UpdateCollectionError,
+    chroma_proto, CollectionAndSegments, CollectionMetadataUpdate, CountCollectionsError,
+    CreateCollectionError, CreateDatabaseError, CreateDatabaseResponse, CreateTenantError,
+    CreateTenantResponse, Database, DeleteCollectionError, DeleteDatabaseError,
+    DeleteDatabaseResponse, GetCollectionSizeError, GetCollectionWithSegmentsError,
+    GetCollectionsError, GetDatabaseError, GetDatabaseResponse, GetSegmentsError, GetTenantError,
+    GetTenantResponse, ListDatabasesError, ListDatabasesResponse, Metadata, ResetError,
+    ResetResponse, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
+    UpdateCollectionError,
 };
 use chroma_types::{
     Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
@@ -146,6 +147,53 @@ impl SysDb {
         }
     }
 
+<<<<<<< HEAD
+||||||| parent of 3a9a76ee1 ([ENH] Count collections implementation (#3785))
+    pub async fn get_collection_size(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<usize, GetCollectionSizeError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.get_collection_size(collection_id).await,
+            SysDb::Sqlite(_) => unimplemented!(),
+            SysDb::Test(_) => unimplemented!(),
+        }
+    }
+
+=======
+    pub async fn count_collections(
+        &mut self,
+        tenant: String,
+        database: Option<String>,
+    ) -> Result<usize, CountCollectionsError> {
+        // TODO(Sanket): optimize sqlite and test implementation.
+        match self {
+            SysDb::Grpc(grpc) => grpc.count_collections(tenant, database).await,
+            SysDb::Sqlite(sqlite) => Ok(sqlite
+                .get_collections(None, None, Some(tenant), database, None, 0)
+                .await
+                .map_err(|_| CountCollectionsError::Internal)?
+                .len()),
+            SysDb::Test(test) => Ok(test
+                .get_collections(None, None, Some(tenant), database)
+                .await
+                .map_err(|_| CountCollectionsError::Internal)?
+                .len()),
+        }
+    }
+
+    pub async fn get_collection_size(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<usize, GetCollectionSizeError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.get_collection_size(collection_id).await,
+            SysDb::Sqlite(_) => unimplemented!(),
+            SysDb::Test(_) => unimplemented!(),
+        }
+    }
+
+>>>>>>> 3a9a76ee1 ([ENH] Count collections implementation (#3785))
     #[allow(clippy::too_many_arguments)]
     pub async fn create_collection(
         &mut self,
@@ -660,6 +708,57 @@ impl GrpcSysDb {
         }
     }
 
+<<<<<<< HEAD
+||||||| parent of 3a9a76ee1 ([ENH] Count collections implementation (#3785))
+    async fn get_collection_size(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<usize, GetCollectionSizeError> {
+        let request = chroma_proto::GetCollectionSizeRequest {
+            id: collection_id.0.to_string(),
+        };
+        let res = self.client.get_collection_size(request).await;
+        match res {
+            Ok(res) => Ok(res.into_inner().total_records_post_compaction as usize),
+            Err(e) => match e.code() {
+                Code::NotFound => Err(GetCollectionSizeError::NotFound(collection_id.to_string())),
+                _ => Err(GetCollectionSizeError::Internal(e.into())),
+            },
+        }
+    }
+
+=======
+    async fn count_collections(
+        &mut self,
+        tenant: String,
+        database: Option<String>,
+    ) -> Result<usize, CountCollectionsError> {
+        let request = chroma_proto::CountCollectionsRequest { tenant, database };
+        let res = self.client.count_collections(request).await;
+        match res {
+            Ok(res) => Ok(res.into_inner().count as usize),
+            Err(_) => Err(CountCollectionsError::Internal),
+        }
+    }
+
+    async fn get_collection_size(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<usize, GetCollectionSizeError> {
+        let request = chroma_proto::GetCollectionSizeRequest {
+            id: collection_id.0.to_string(),
+        };
+        let res = self.client.get_collection_size(request).await;
+        match res {
+            Ok(res) => Ok(res.into_inner().total_records_post_compaction as usize),
+            Err(e) => match e.code() {
+                Code::NotFound => Err(GetCollectionSizeError::NotFound(collection_id.to_string())),
+                _ => Err(GetCollectionSizeError::Internal(e.into())),
+            },
+        }
+    }
+
+>>>>>>> 3a9a76ee1 ([ENH] Count collections implementation (#3785))
     #[allow(clippy::too_many_arguments)]
     async fn create_collection(
         &mut self,
