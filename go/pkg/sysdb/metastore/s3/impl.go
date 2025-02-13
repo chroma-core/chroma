@@ -151,6 +151,16 @@ func (store *S3MetaStore) GetVersionFile(tenantID, collectionID string, version 
 		return nil, fmt.Errorf("failed to unmarshal version file: %w", err)
 	}
 
+	numVersions := len(versionFile.VersionHistory.Versions)
+	lastVersion := versionFile.VersionHistory.Versions[numVersions-1]
+	lastVersionSegmentInfo := lastVersion.GetSegmentInfo()
+	if lastVersionSegmentInfo == nil {
+		log.Info("Last version segment info is nil")
+	} else {
+		lastVersionSegmentCompactionInfo := lastVersionSegmentInfo.SegmentCompactionInfo
+		log.Info("Last version segment compaction info", zap.Any("lastVersionSegmentCompactionInfo", lastVersionSegmentCompactionInfo))
+	}
+
 	return versionFile, nil
 }
 
@@ -164,6 +174,15 @@ func (store *S3MetaStore) PutVersionFile(tenantID, collectionID string, versionF
 	}
 
 	log.Info("putting version file", zap.String("path", path))
+	numVersions := len(versionFile.VersionHistory.Versions)
+	lastVersion := versionFile.VersionHistory.Versions[numVersions-1]
+	lastVersionSegmentInfo := lastVersion.GetSegmentInfo()
+	if lastVersionSegmentInfo == nil {
+		log.Info("Current version segment info is nil")
+	} else {
+		lastVersionSegmentCompactionInfo := lastVersionSegmentInfo.SegmentCompactionInfo
+		log.Info("Current version segment compaction info", zap.Any("lastVersionSegmentCompactionInfo", lastVersionSegmentCompactionInfo))
+	}
 
 	input := &s3.PutObjectInput{
 		Bucket: aws.String(store.BucketName),

@@ -135,6 +135,10 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
             versions: marked_versions,
         };
 
+        println!(
+            "versions to delete: {:?}, oldest version to keep: {}",
+            versions_to_delete, oldest_version_to_keep
+        );
         Ok(ComputeVersionsToDeleteOutput {
             version_file,
             versions_to_delete,

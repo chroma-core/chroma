@@ -1006,6 +1006,7 @@ func (tc *Catalog) updateVersionFileInS3(ctx context.Context, existingVersionFil
 		segmentCompactionInfos = append(segmentCompactionInfos, info)
 	}
 
+	log.Info("=======> Preparing the new version file with segment compaction info", zap.Any("segmentCompactionInfos", segmentCompactionInfos))
 	existingVersionFilePb.GetVersionHistory().Versions = append(existingVersionFilePb.GetVersionHistory().Versions, &coordinatorpb.CollectionVersionInfo{
 		Version:       int64(flushCollectionCompaction.CurrentCollectionVersion) + 1,
 		CreatedAtSecs: ts_secs,
@@ -1127,6 +1128,8 @@ func (tc *Catalog) validateVersionFile(versionFile *coordinatorpb.CollectionVers
 // 5. 		If version CAS fails - then fail the operation to the Compactor.
 // 6. 		If version file name CAS fails - read updated file and write a new version file to S3.
 func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.Context, flushCollectionCompaction *model.FlushCollectionCompaction) (*model.FlushCollectionInfo, error) {
+	log.Info("=======> Starting FlushCollectionCompactionForVersionedCollection", zap.Any("flushCollectionCompaction", flushCollectionCompaction))
+
 	// The result that is sent back to the Compactor.
 	flushCollectionInfo := &model.FlushCollectionInfo{
 		ID: flushCollectionCompaction.ID.String(),

@@ -116,7 +116,7 @@ impl Operator<DeleteUnusedFilesInput, DeleteUnusedFilesOutput> for DeleteUnusedF
                 "header.bin",
                 "data_level0.bin",
                 "length.bin",
-                // "link_lists.bin",
+                "link_lists.bin",
             ]
             .iter()
             {
