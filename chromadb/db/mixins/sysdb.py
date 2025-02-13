@@ -962,3 +962,13 @@ class SqlSysDB(SqlDB, SysDB):
     @override
     def get_collection_size(self, id: UUID) -> int:
         raise NotImplementedError
+    
+    @override
+    def count_collections(
+        self,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> int:
+        """Gets the number of collections for the (tenant, database) combination."""
+        # TODO(Sanket): Implement this efficiently using a count query.
+        return len(self.get_collections(tenant=tenant, database=database))

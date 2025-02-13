@@ -14,16 +14,16 @@ use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
     plan::{Count, Get, Knn},
     AddCollectionRecordsError, AddCollectionRecordsRequest, AddCollectionRecordsResponse,
-    CollectionUuid, CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
-    CreateCollectionError, CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseError,
-    CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantError, CreateTenantRequest,
-    CreateTenantResponse, DeleteCollectionError, DeleteCollectionRecordsError,
-    DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, DeleteCollectionRequest,
-    DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse, DistributedHnswParameters,
-    GetCollectionError, GetCollectionRequest, GetCollectionResponse, GetCollectionsError,
-    GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
-    GetTenantError, GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError,
-    HeartbeatResponse, Include, ListCollectionsRequest, ListCollectionsResponse,
+    CollectionUuid, CountCollectionsError, CountCollectionsRequest, CountCollectionsResponse,
+    CountRequest, CountResponse, CreateCollectionError, CreateCollectionRequest,
+    CreateCollectionResponse, CreateDatabaseError, CreateDatabaseRequest, CreateDatabaseResponse,
+    CreateTenantError, CreateTenantRequest, CreateTenantResponse, DeleteCollectionError,
+    DeleteCollectionRecordsError, DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse,
+    DeleteCollectionRequest, DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse,
+    DistributedHnswParameters, GetCollectionError, GetCollectionRequest, GetCollectionResponse,
+    GetCollectionsError, GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest,
+    GetResponse, GetTenantError, GetTenantRequest, GetTenantResponse, HealthCheckResponse,
+    HeartbeatError, HeartbeatResponse, Include, ListCollectionsRequest, ListCollectionsResponse,
     ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse, Metadata, Operation,
     OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
     ScalarEncoding, Segment, SegmentScope, SegmentType, SegmentUuid, SingleNodeHnswParameters,
@@ -343,18 +343,11 @@ impl Frontend {
     pub async fn count_collections(
         &mut self,
         request: CountCollectionsRequest,
-    ) -> Result<CountCollectionsResponse, GetCollectionsError> {
+    ) -> Result<CountCollectionsResponse, CountCollectionsError> {
         self.sysdb_client
-            .get_collections(
-                None,
-                None,
-                Some(request.tenant_id),
-                Some(request.database_name),
-                None,
-                0,
-            )
+            .count_collections(request.tenant_id, request.database_name)
             .await
-            .map(|collections| collections.len() as u32)
+            .map(|count| count as u32)
     }
 
     pub async fn get_collection(

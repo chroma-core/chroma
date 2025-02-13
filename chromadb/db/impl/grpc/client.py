@@ -17,6 +17,8 @@ from chromadb.proto.coordinator_pb2 import (
     CreateDatabaseRequest,
     CreateSegmentRequest,
     CreateTenantRequest,
+    CountCollectionsRequest,
+    CountCollectionsResponse,
     DeleteCollectionRequest,
     DeleteDatabaseRequest,
     DeleteSegmentRequest,
@@ -419,6 +421,20 @@ class GrpcSysDB(SysDB):
             logger.error(
                 f"Failed to get collections with id {id}, name {name}, tenant {tenant}, database {database} due to error: {e}"
             )
+            raise InternalError()
+
+    @overrides
+    def count_collections(
+        self,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> int:
+        try:
+            request = CountCollectionsRequest(tenant=tenant, database=database)
+            response: CountCollectionsResponse = self._sys_db_stub.CountCollections(request)
+            return response.count
+        except grpc.RpcError as e:
+            logger.error(f"Failed to count collections due to error: {e}")
             raise InternalError()
 
     @overrides
