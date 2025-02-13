@@ -392,7 +392,6 @@ where
     K: Clone + Send + Sync + StorageKey + Eq + PartialEq + Hash + 'static,
     V: Clone + Send + Sync + StorageValue + Weighted + 'static,
 {
-    #[tracing::instrument(skip(self, key))]
     async fn get(&self, key: &K) -> Result<Option<V>, CacheError> {
         let _stopwatch = Stopwatch::new(&self.get_latency);
         let res = self.cache.get(key).await?.map(|v| v.value().clone());
@@ -404,19 +403,16 @@ where
         Ok(res)
     }
 
-    #[tracing::instrument(skip(self, key, value))]
     async fn insert(&self, key: K, value: V) {
         let _stopwatch = Stopwatch::new(&self.insert_latency);
         self.cache.insert(key, value);
     }
 
-    #[tracing::instrument(skip(self, key))]
     async fn remove(&self, key: &K) {
         let _stopwatch = Stopwatch::new(&self.remove_latency);
         self.cache.remove(key);
     }
 
-    #[tracing::instrument(skip(self))]
     async fn clear(&self) -> Result<(), CacheError> {
         let _stopwatch = Stopwatch::new(&self.clear_latency);
         Ok(self.cache.clear().await?)
@@ -545,7 +541,6 @@ where
     K: Clone + Send + Sync + Eq + PartialEq + Hash + 'static,
     V: Clone + Send + Sync + Weighted + 'static,
 {
-    #[tracing::instrument(skip(self, key))]
     async fn get(&self, key: &K) -> Result<Option<V>, CacheError> {
         let _stopwatch = Stopwatch::new(&self.get_latency);
         let res = self.cache.get(key).map(|v| v.value().clone());
@@ -557,19 +552,16 @@ where
         Ok(res)
     }
 
-    #[tracing::instrument(skip(self, key, value))]
     async fn insert(&self, key: K, value: V) {
         let _stopwatch = Stopwatch::new(&self.insert_latency);
         self.cache.insert(key, value);
     }
 
-    #[tracing::instrument(skip(self, key))]
     async fn remove(&self, key: &K) {
         let _stopwatch = Stopwatch::new(&self.remove_latency);
         self.cache.remove(key);
     }
 
-    #[tracing::instrument(skip(self))]
     async fn clear(&self) -> Result<(), CacheError> {
         let _stopwatch = Stopwatch::new(&self.clear_latency);
         self.cache.clear();
