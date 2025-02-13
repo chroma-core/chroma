@@ -653,6 +653,7 @@ class FastAPI(Server):
         request: Request,
         tenant: str,
     ) -> Tenant:
+        # NOTE(rescrv, iron will auth):  Implemented.
         await self.auth_request(
             request.headers,
             AuthzAction.GET_TENANT,
@@ -747,6 +748,7 @@ class FastAPI(Server):
         tenant: str,
         database_name: str,
     ) -> int:
+        # NOTE(rescrv, iron will auth):  Implemented.
         await self.auth_request(
             request.headers,
             AuthzAction.COUNT_COLLECTIONS,
@@ -896,6 +898,7 @@ class FastAPI(Server):
         tenant: str,
         database_name: str,
     ) -> None:
+        # NOTE(rescrv, iron will auth):  Implemented.
         await self.auth_request(
             request.headers,
             AuthzAction.DELETE_COLLECTION,
@@ -1151,6 +1154,7 @@ class FastAPI(Server):
         database_name: str,
         collection_id: str,
     ) -> int:
+        # NOTE(rescrv, iron will auth):  Implemented.
         await self.auth_request(
             request.headers,
             AuthzAction.COUNT,
@@ -1177,6 +1181,7 @@ class FastAPI(Server):
         self,
         request: Request,
     ) -> bool:
+        # NOTE(rescrv, iron will auth):  Implemented.
         await self.auth_request(
             request.headers,
             AuthzAction.RESET,
