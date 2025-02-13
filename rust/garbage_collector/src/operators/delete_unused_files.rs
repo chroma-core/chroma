@@ -226,9 +226,16 @@ mod tests {
             create_test_file(&storage, file, b"test content").await;
         }
 
-        // Create HNSW test files
-        create_test_file(&storage, "hnsw/prefix1/file1.hnsw", b"test content").await;
-        create_test_file(&storage, "hnsw/prefix1/file2.hnsw", b"test content").await;
+        // Create HNSW test files with correct filenames
+        let hnsw_files = [
+            "hnsw/prefix1/header.bin",
+            "hnsw/prefix1/data_level0.bin",
+            "hnsw/prefix1/length.bin",
+            "hnsw/prefix1/link_lists.bin",
+        ];
+        for file in &hnsw_files {
+            create_test_file(&storage, file, b"test content").await;
+        }
 
         let mut unused_files = HashSet::new();
         unused_files.extend(test_files.iter().map(|s| s.to_string()));
@@ -248,8 +255,9 @@ mod tests {
         }
 
         // Verify HNSW files were deleted
-        assert!(!Path::new(&tmp_dir.path().join("hnsw/prefix1/file1.hnsw")).exists());
-        assert!(!Path::new(&tmp_dir.path().join("hnsw/prefix1/file2.hnsw")).exists());
+        for file in hnsw_files {
+            assert!(!Path::new(&tmp_dir.path().join(file)).exists());
+        }
     }
 
     #[tokio::test]
@@ -263,9 +271,16 @@ mod tests {
             create_test_file(&storage, file, b"test content").await;
         }
 
-        // Create HNSW test files
-        create_test_file(&storage, "hnsw/prefix1/file1.hnsw", b"test content").await;
-        create_test_file(&storage, "hnsw/prefix1/file2.hnsw", b"test content").await;
+        // Create HNSW test files with correct filenames
+        let hnsw_files = [
+            "hnsw/prefix1/header.bin",
+            "hnsw/prefix1/data_level0.bin",
+            "hnsw/prefix1/length.bin",
+            "hnsw/prefix1/link_lists.bin",
+        ];
+        for file in &hnsw_files {
+            create_test_file(&storage, file, b"test content").await;
+        }
 
         let mut unused_files = HashSet::new();
         unused_files.extend(test_files.iter().map(|s| s.to_string()));
@@ -279,19 +294,18 @@ mod tests {
 
         let _result = operator.run(&input).await.unwrap();
 
-        // Verify regular files were renamed
+        // Verify regular files were moved to deleted directory
         for file in test_files {
             let original_path = tmp_dir.path().join(file);
-            let new_path = tmp_dir.path().join(format!("deleted_at_123_{}", file));
+            let new_path = tmp_dir.path().join(format!("deleted/123/{}", file));
             assert!(!original_path.exists());
             assert!(new_path.exists());
         }
 
-        // Verify HNSW files were renamed
-        let hnsw_files = vec!["hnsw/prefix1/file1.hnsw", "hnsw/prefix1/file2.hnsw"];
+        // Verify HNSW files were moved to deleted directory
         for file in hnsw_files {
             let original_path = tmp_dir.path().join(file);
-            let new_path = tmp_dir.path().join(format!("deleted_at_123_{}", file));
+            let new_path = tmp_dir.path().join(format!("deleted/123/{}", file));
             assert!(!original_path.exists());
             assert!(new_path.exists());
         }
