@@ -40,7 +40,7 @@ jobs:
           override: true
 
       - name: Build Linux binary
-        run: cargo build --bin chroma --release --manifest-path rust/cli/Cargo.toml
+        run: PYO3_NO_PYTHON=1 cargo build --bin chroma --release --manifest-path rust/cli/Cargo.toml
 
       - name: Rename binary artifact for Linux
         run: mv target/release/chroma ./chroma-linux
@@ -80,7 +80,9 @@ jobs:
           override: true
 
       - name: Build Windows binary
-        run: cargo build --bin chroma --release --manifest-path rust/cli/Cargo.toml
+        run: | 
+          set PYO3_NO_PYTHON=1
+          cargo build --bin chroma --release --manifest-path rust/cli/Cargo.toml
 
       - name: Rename binary artifact for Windows
         shell: powershell
@@ -128,7 +130,7 @@ jobs:
         run: cargo build --bin chroma --release
 
       - name: Build macOS ARM64 binary
-        run: cargo build --bin chroma --release --target aarch64-apple-darwin --manifest-path rust/cli/Cargo.toml
+        run: PYO3_NO_PYTHON=1 cargo build --bin chroma --release --target aarch64-apple-darwin --manifest-path rust/cli/Cargo.toml
 
       - name: Rename macOS binaries
         run: |
