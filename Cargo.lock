@@ -1366,7 +1366,6 @@ dependencies = [
  "anyhow",
  "arrow",
  "async-trait",
- "cc",
  "chroma-benchmark",
  "chroma-blockstore",
  "chroma-cache",
@@ -1377,6 +1376,7 @@ dependencies = [
  "chroma-types",
  "criterion",
  "futures",
+ "hnswlib",
  "indicatif",
  "itertools 0.13.0",
  "parking_lot",
@@ -3010,6 +3010,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c49c37c09c17a53d937dfbb742eb3a961d65a994e6bcdcf37e7399d0cc8ab5e"
 dependencies = [
  "digest",
+]
+
+[[package]]
+name = "hnswlib"
+version = "0.8.0"
+dependencies = [
+ "cc",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
