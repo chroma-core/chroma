@@ -40,10 +40,9 @@
 use std::fmt::{Debug, Formatter};
 
 use async_trait::async_trait;
-use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::Storage;
-use chroma_sysdb::{GrpcSysDbConfig, SysDb, SysDbConfig};
+use chroma_sysdb::SysDb;
 use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
     PanicError, TaskError, TaskMessage, TaskResult,
@@ -82,10 +81,6 @@ use crate::operators::mark_versions_at_sysdb::{
     MarkVersionsAtSysDbOutput,
 };
 
-use chroma_config::registry::Registry;
-use chroma_storage::config::{
-    ObjectStoreBucketConfig, ObjectStoreConfig, ObjectStoreType, StorageConfig,
-};
 use prost::Message;
 
 pub struct GarbageCollectorOrchestrator {
@@ -555,9 +550,13 @@ impl Handler<TaskResult<DeleteVersionsAtSysDbOutput, DeleteVersionsAtSysDbError>
 mod tests {
     use super::*;
     use crate::helper::ChromaGrpcClients;
+    use chroma_config::registry::Registry;
+    use chroma_config::Configurable;
+    use chroma_storage::config::{
+        ObjectStoreBucketConfig, ObjectStoreConfig, ObjectStoreType, StorageConfig,
+    };
     use chroma_sysdb::{GrpcSysDbConfig, SysDbConfig};
     use chroma_system::System;
-    use std::env;
     use std::str::FromStr;
     use std::time::Duration;
     use tokio::sync::oneshot;
@@ -970,7 +969,7 @@ mod tests {
         );
 
         // Create channel for receiving result
-        let (sender, receiver) = oneshot::channel();
+        let (sender, _receiver) = oneshot::channel();
         orchestrator.set_result_channel(sender);
 
         tracing::info!("Running orchestrator");

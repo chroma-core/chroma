@@ -99,7 +99,7 @@ impl ChromaGrpcClients {
             configuration_json_str: "{}".to_string(),
             get_or_create: Some(true),
             metadata: None,
-            segments: segments, // Add the segments here
+            segments,
         };
         let response = self.sysdb.create_collection(coll_req).await?;
         Ok(response.into_inner().collection.unwrap().id)

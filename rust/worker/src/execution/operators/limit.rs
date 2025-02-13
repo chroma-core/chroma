@@ -188,7 +188,7 @@ impl Operator<LimitInput, LimitOutput> for LimitOperator {
     type Error = LimitError;
 
     async fn run(&self, input: &LimitInput) -> Result<LimitOutput, LimitError> {
-        println!("[{}]: {:?}", self.get_name(), input);
+        trace!("[{}]: {:?}", self.get_name(), input);
 
         let record_segment_reader = match RecordSegmentReader::from_segment(
             &input.record_segment,
@@ -213,13 +213,10 @@ impl Operator<LimitInput, LimitOutput> for LimitOperator {
                             tracing::trace_span!(parent: Span::current(), "Materialize logs"),
                         )
                         .await?;
-                println!("Materialized logs: {:?}", materialized_logs);
-                println!(">>>>>>>>>>>>>>>>>>>");
 
                 let active_domain: RoaringBitmap = materialized_logs
                     .iter()
                     .filter_map(|log| {
-                        println!("Log operation: {:?}", log.get_operation());
                         (!matches!(
                             log.get_operation(),
                             MaterializedLogOperation::DeleteExisting
@@ -227,16 +224,10 @@ impl Operator<LimitInput, LimitOutput> for LimitOperator {
                         .then_some(log.get_offset_id())
                     })
                     .collect();
-                println!("<<<<<<<<<<<<<<<<<<<<");
-                println!("Active domain: {:?}", active_domain);
                 active_domain - rbm
             }
         };
 
-        println!(
-            "Materialized log offset ids: {:?}",
-            materialized_log_offset_ids
-        );
         // Materialize all filtered offset ids with the compact segment
         let materialized_offset_ids = match &input.compact_offset_ids {
             SignedRoaringBitmap::Include(rbm) => {

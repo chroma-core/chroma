@@ -210,7 +210,6 @@ mod tests {
     use chroma_storage::local::LocalStorage;
     use std::path::Path;
     use tempfile::TempDir;
-    use tokio::fs;
 
     async fn create_test_file(storage: &Storage, path: &str, content: &[u8]) {
         storage.put_bytes(path, content.to_vec()).await.unwrap();
@@ -241,7 +240,7 @@ mod tests {
             hnsw_prefixes_for_deletion: vec!["prefix1".to_string()],
         };
 
-        let result = operator.run(&input).await.unwrap();
+        let _result = operator.run(&input).await.unwrap();
 
         // Verify regular files were deleted
         for file in test_files {
@@ -278,7 +277,7 @@ mod tests {
             hnsw_prefixes_for_deletion: vec!["prefix1".to_string()],
         };
 
-        let result = operator.run(&input).await.unwrap();
+        let _result = operator.run(&input).await.unwrap();
 
         // Verify regular files were renamed
         for file in test_files {

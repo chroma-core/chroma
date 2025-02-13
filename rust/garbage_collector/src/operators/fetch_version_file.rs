@@ -11,7 +11,6 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use chroma_config::{registry::Registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::{GetError, Storage};
 use chroma_system::{Operator, OperatorType};
@@ -116,6 +115,7 @@ impl Operator<FetchVersionFileInput, FetchVersionFileOutput> for FetchVersionFil
 mod tests {
     use super::*;
     use chroma_config::registry;
+    use chroma_config::Configurable;
     use chroma_storage::config::{
         ObjectStoreBucketConfig, ObjectStoreConfig, ObjectStoreType, StorageConfig,
     };

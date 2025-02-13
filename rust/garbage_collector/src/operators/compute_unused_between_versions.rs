@@ -35,7 +35,7 @@ impl ComputeUnusedBetweenVersionsOperator {
         let mut all_s3_files = HashSet::new();
         let root_manager = RootManager::new(self.storage.clone(), Box::new(NopCache));
 
-        for (file_path, _content) in version_files {
+        for file_path in version_files.keys() {
             tracing::info!(file_path = %file_path, "Processing sparse index file");
 
             // Extract UUID from the file path since it's in the format "sparse_index/<uuid>"
@@ -333,16 +333,12 @@ impl Operator<ComputeUnusedBetweenVersionsInput, ComputeUnusedBetweenVersionsOut
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chroma_blockstore::{
-        arrow::{provider::ArrowBlockfileProvider, types::ArrowWriteableValue},
-        BlockfileWriterOptions,
-    };
+    use chroma_blockstore::{arrow::provider::ArrowBlockfileProvider, BlockfileWriterOptions};
     use chroma_cache::UnboundedCacheConfig;
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_sysdb::{SysDb, TestSysDb};
-    use tempfile::TempDir;
 
-    async fn create_sparse_index(storage: &Storage, keys: Vec<String>) -> Uuid {
+    async fn _create_sparse_index(storage: &Storage, keys: Vec<String>) -> Uuid {
         let block_cache = Box::new(UnboundedCacheConfig {}.build());
         let sparse_index_cache = Box::new(UnboundedCacheConfig {}.build());
         let provider = ArrowBlockfileProvider::new(

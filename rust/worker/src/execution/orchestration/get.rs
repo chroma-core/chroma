@@ -204,7 +204,6 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for GetOrchestrator {
         message: TaskResult<FetchLogOutput, FetchLogError>,
         ctx: &ComponentContext<Self>,
     ) {
-        println!("FetchLogOutput success.");
         let output = match self.ok_or_terminate(message.into_inner(), ctx) {
             Some(output) => output,
             None => return,
@@ -235,8 +234,6 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for GetOrchestrator {
         message: TaskResult<FilterOutput, FilterError>,
         ctx: &ComponentContext<Self>,
     ) {
-        println!("FilterOutput success.");
-        println!("FilterOutput contents: {:?}", &message);
         let output = match self.ok_or_terminate(message.into_inner(), ctx) {
             Some(output) => output,
             None => return,
@@ -269,7 +266,6 @@ impl Handler<TaskResult<LimitOutput, LimitError>> for GetOrchestrator {
         message: TaskResult<LimitOutput, LimitError>,
         ctx: &ComponentContext<Self>,
     ) {
-        println!("LimitOutput success.");
         let output = match self.ok_or_terminate(message.into_inner(), ctx) {
             Some(output) => output,
             None => return,
@@ -324,7 +320,6 @@ impl Handler<TaskResult<ProjectionOutput, ProjectionError>> for GetOrchestrator 
         message: TaskResult<ProjectionOutput, ProjectionError>,
         ctx: &ComponentContext<Self>,
     ) {
-        println!("ProjectionOutput success.");
         self.terminate_with_result(message.into_inner().map_err(|e| e.into()), ctx);
     }
 }

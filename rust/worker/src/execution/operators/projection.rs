@@ -87,7 +87,7 @@ impl Operator<ProjectionInput, ProjectionOutput> for ProjectionOperator {
     type Error = ProjectionError;
 
     async fn run(&self, input: &ProjectionInput) -> Result<ProjectionOutput, ProjectionError> {
-        println!("[{}]: {:?}", self.get_name(), input);
+        trace!("[{}]: {:?}", self.get_name(), input);
 
         let record_segment_reader = match RecordSegmentReader::from_segment(
             &input.record_segment,
@@ -169,7 +169,6 @@ impl Operator<ProjectionInput, ProjectionOutput> for ProjectionOperator {
             records.push(record);
         }
 
-        println!("ProjectionOutput: {:?}", records);
         Ok(ProjectionOutput { records })
     }
 }
