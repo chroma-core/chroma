@@ -422,7 +422,7 @@ def log_size_below_max(
             for collection in collections
         )
 
-        limit = sync_threshold_sum if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ else sync_threshold_sum + batch_size_sum
+        limit = sync_threshold_sum if system.settings.chroma_api_impl == "chromadb.api.rust.RustBindingsAPI" else sync_threshold_sum + batch_size_sum
 
         # -1 is used because the queue is always at least 1 entry long, so deletion stops before the max ack'ed sequence ID.
         # And for python impl if the batch_size != sync_threshold, the queue can have up to batch_size more entries.
@@ -462,7 +462,7 @@ def _total_embedding_queue_log_size_per_collection(
 def log_size_for_collections_match_expected(
     system: System, collections: List[Collection], has_collection_mutated: bool
 ) -> None:
-    if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ:
+    if system.settings.chroma_api_impl == "chromadb.api.rust.RustBindingsAPI":
         # The rust impl does not use batch size
         return
     

@@ -61,3 +61,14 @@ runs:
       run: python bin/windows_upgrade_sqlite.py
       shell: bash
       if: runner.os == 'Windows'
+    - name: Setup Rust
+      uses: ./.github/actions/rust
+    - name: Build Rust bindings
+      uses: PyO3/maturin-action@v1
+      with:
+        command: build
+        working-directory: rust/python_bindings
+        sccache: true
+    - name: Install built wheel
+      shell: bash
+      run: pip install --find-links target/wheels/ rust_bindings
