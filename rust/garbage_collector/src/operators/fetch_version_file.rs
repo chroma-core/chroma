@@ -143,7 +143,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_fetch_version_file() {
+    async fn test_k8s_integration_fetch_version_file() {
         // Initialize tracing subscriber with more verbose output
         let _subscriber = tracing_subscriber::fmt()
             .with_max_level(tracing::Level::DEBUG)
@@ -184,7 +184,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_fetch_nonexistent_file() {
+    async fn test_k8s_integration_fetch_nonexistent_file() {
         // Initialize tracing subscriber once at the start of the test
         let _ = tracing_subscriber::fmt::try_init();
 
