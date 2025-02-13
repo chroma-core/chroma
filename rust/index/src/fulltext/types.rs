@@ -167,6 +167,21 @@ impl FullTextIndexWriter {
 
         let token_instances = std::mem::take(&mut *self.token_instances.lock());
 
+        // Assert that the token instances are sorted
+        let cloned_token_instances = token_instances.clone().into_iter().kmerge();
+        let mut last_token_instance = None;
+        for encoded_instance in cloned_token_instances {
+            if let Some(last) = last_token_instance {
+                if last > encoded_instance {
+                    panic!(
+                        "Token instances are not sorted. Received {:?} after {:?}.",
+                        encoded_instance, last
+                    );
+                }
+            }
+            last_token_instance = Some(encoded_instance);
+        }
+
         for encoded_instance in token_instances.into_iter().kmerge() {
             match encoded_instance.get_position() {
                 Some(offset) => {

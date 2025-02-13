@@ -18,6 +18,7 @@ pub struct OrderedBlockDelta {
     pub(in crate::arrow) id: Uuid,
     copied_up_to_row_of_old_block: usize,
     old_block: Option<Block>,
+    last_added_key: Option<(String, KeyWrapper)>,
 }
 
 impl Delta for OrderedBlockDelta {
@@ -32,6 +33,7 @@ impl Delta for OrderedBlockDelta {
             id,
             copied_up_to_row_of_old_block: 0,
             old_block: None,
+            last_added_key: None,
         }
     }
 
@@ -63,6 +65,15 @@ impl OrderedBlockDelta {
         V: ArrowWriteableValue,
     {
         let wrapped_key: KeyWrapper = key.into();
+        let this_key = (prefix.to_string(), wrapped_key.clone());
+        if let Some(ref last_key) = self.last_added_key {
+            if *last_key > this_key {
+                panic!("Found unordered keys while adding to block delta. Last key: {:?}, current key: {:?}", last_key, this_key);
+            }
+        } else {
+            self.last_added_key = Some(this_key);
+        }
+
         self.copy_up_to::<K::ReadableKey<'_>, V::ReadableValue<'_>>(prefix, &wrapped_key);
 
         // TODO: errors?
@@ -80,6 +91,8 @@ impl OrderedBlockDelta {
     pub fn copy_to_end<K: ArrowWriteableKey, V: ArrowWriteableValue>(&mut self) {
         // Copy remaining rows
         if let Some(old_block) = self.old_block.as_ref() {
+            let mut last_key = None;
+
             for i in self.copied_up_to_row_of_old_block..old_block.data.num_rows() {
                 let old_prefix = old_block
                     .data
@@ -89,6 +102,15 @@ impl OrderedBlockDelta {
                     .unwrap()
                     .value(i);
                 let old_key = K::ReadableKey::get(old_block.data.column(1), i);
+
+                if let Some(ref last_key) = last_key {
+                    if *last_key > (old_prefix, old_key.clone()) {
+                        panic!("Found unordered keys while copying to end of block. Last key: {:?}, current key: {:?}", last_key, (old_prefix, old_key));
+                    }
+                } else {
+                    last_key = Some((old_prefix, old_key.clone()));
+                }
+
                 let old_value = V::ReadableValue::get(old_block.data.column(2), i);
                 K::ReadableKey::add_to_delta(old_prefix, old_key, old_value, &mut self.builder);
             }
@@ -113,9 +135,17 @@ impl OrderedBlockDelta {
                 .unwrap();
             let key_arr = old_block.data.column(1);
 
+            let mut last_key = None;
             for i in self.copied_up_to_row_of_old_block..old_block.data.num_rows() {
                 let old_prefix = prefix_arr.value(i);
                 let old_key = K::get(key_arr, i);
+                if let Some(ref last_key) = last_key {
+                    if *last_key > (old_prefix, old_key.clone()) {
+                        panic!("Found unordered keys while copying up to excluded key. Excluded key: {:?}, last key: {:?}, current key: {:?}", (excluded_prefix, excluded_key), last_key, (old_prefix, old_key));
+                    }
+                } else {
+                    last_key = Some((old_prefix, old_key.clone()));
+                }
 
                 match old_prefix.cmp(excluded_prefix) {
                     std::cmp::Ordering::Less => {}
@@ -175,6 +205,7 @@ impl OrderedBlockDelta {
             id: Uuid::new_v4(),
             copied_up_to_row_of_old_block: 0,
             old_block: None,
+            last_added_key: None,
         };
         if new_block.get_size::<K, V>() > max_block_size_bytes {
             blocks_to_split.push(new_block);
@@ -191,6 +222,7 @@ impl OrderedBlockDelta {
                 id: Uuid::new_v4(),
                 copied_up_to_row_of_old_block: 0,
                 old_block: None,
+                last_added_key: None,
             };
 
             output.push((
@@ -224,6 +256,7 @@ impl OrderedBlockDelta {
             id: Uuid::new_v4(),
             copied_up_to_row_of_old_block: self.copied_up_to_row_of_old_block,
             old_block,
+            last_added_key: None,
         };
 
         self.copied_up_to_row_of_old_block = 0;
