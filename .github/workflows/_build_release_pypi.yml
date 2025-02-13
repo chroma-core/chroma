@@ -1,6 +1,23 @@
 name: Build & publish package to PyPI
 
 on:
+  workflow_dispatch:
+    inputs:
+      publish_to_test_pypi:
+        description: 'Publish to test PyPI'
+        required: false
+        default: false
+        type: boolean
+      publish_to_pypi:
+        description: 'Publish to PyPI'
+        required: false
+        default: false
+        type: boolean
+      version:
+        description: 'Version to publish'
+        required: false
+        type: string
+
   workflow_call:
     inputs:
       publish_to_test_pypi:
@@ -47,9 +64,9 @@ jobs:
       fail-fast: false
       matrix:
         platform:
-          # - { os: linux, runner: depot-ubuntu-22.04, target: x86_64 }
-          # - { os: linux, runner: depot-ubuntu-22.04-arm, target: aarch64 }
-          # - { os: windows, runner: windows-latest, target: x64 }
+          - { os: linux, runner: depot-ubuntu-22.04, target: x86_64 }
+          - { os: linux, runner: depot-ubuntu-22.04-arm, target: aarch64 }
+          - { os: windows, runner: windows-latest, target: x64 }
           - { os: macos, runner: depot-macos-14, target: x86_64 }
           - { os: macos, runner: depot-macos-14, target: aarch64 }
 
