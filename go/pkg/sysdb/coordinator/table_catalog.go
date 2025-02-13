@@ -382,7 +382,7 @@ func (tc *Catalog) GetCollections(ctx context.Context, collectionID types.Unique
 	return collections, nil
 }
 
-func (tc *Catalog) CountCollections(ctx context.Context, tenantID string, databaseName string) (uint64, error) {
+func (tc *Catalog) CountCollections(ctx context.Context, tenantID string, databaseName *string) (uint64, error) {
 	tracer := otel.Tracer
 	if tracer != nil {
 		_, span := tracer.Start(ctx, "Catalog.CountCollections")

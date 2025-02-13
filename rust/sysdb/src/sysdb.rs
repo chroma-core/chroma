@@ -150,18 +150,18 @@ impl SysDb {
     pub async fn count_collections(
         &mut self,
         tenant: String,
-        database: String,
+        database: Option<String>,
     ) -> Result<usize, CountCollectionsError> {
         // TODO(Sanket): optimize sqlite and test implementation.
         match self {
             SysDb::Grpc(grpc) => grpc.count_collections(tenant, database).await,
             SysDb::Sqlite(sqlite) => Ok(sqlite
-                .get_collections(None, None, Some(tenant), Some(database), None, 0)
+                .get_collections(None, None, Some(tenant), database, None, 0)
                 .await
                 .map_err(|_| CountCollectionsError::Internal)?
                 .len()),
             SysDb::Test(test) => Ok(test
-                .get_collections(None, None, Some(tenant), Some(database))
+                .get_collections(None, None, Some(tenant), database)
                 .await
                 .map_err(|_| CountCollectionsError::Internal)?
                 .len()),
@@ -694,7 +694,7 @@ impl GrpcSysDb {
     async fn count_collections(
         &mut self,
         tenant: String,
-        database: String,
+        database: Option<String>,
     ) -> Result<usize, CountCollectionsError> {
         let request = chroma_proto::CountCollectionsRequest { tenant, database };
         let res = self.client.count_collections(request).await;

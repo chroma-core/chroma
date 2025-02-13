@@ -152,7 +152,7 @@ func (s *Server) CountCollections(ctx context.Context, req *coordinatorpb.CountC
 	res := &coordinatorpb.CountCollectionsResponse{}
 	collection_count, err := s.coordinator.CountCollections(ctx, req.Tenant, req.Database)
 	if err != nil {
-		log.Error("CountCollections failed. ", zap.Error(err), zap.String("tenant", req.Tenant), zap.String("database", req.Database))
+		log.Error("CountCollections failed. ", zap.Error(err), zap.String("tenant", req.Tenant), zap.Stringp("database", req.Database))
 		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	res.Count = collection_count

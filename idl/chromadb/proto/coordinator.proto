@@ -162,7 +162,7 @@ message GetCollectionsResponse {
 
 message CountCollectionsRequest {
   string tenant = 4;
-  string database = 5;
+  optional string database = 5;
 }
 
 message CountCollectionsResponse {

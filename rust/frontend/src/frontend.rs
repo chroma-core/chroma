@@ -345,7 +345,7 @@ impl Frontend {
         request: CountCollectionsRequest,
     ) -> Result<CountCollectionsResponse, CountCollectionsError> {
         self.sysdb_client
-            .count_collections(request.tenant_id, request.database_name)
+            .count_collections(request.tenant_id, Some(request.database_name))
             .await
             .map(|count| count as u32)
     }

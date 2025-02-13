@@ -118,7 +118,7 @@ func (s *Coordinator) GetCollections(ctx context.Context, collectionID types.Uni
 	return s.catalog.GetCollections(ctx, collectionID, collectionName, tenantID, databaseName, limit, offset)
 }
 
-func (s *Coordinator) CountCollections(ctx context.Context, tenantID string, databaseName string) (uint64, error) {
+func (s *Coordinator) CountCollections(ctx context.Context, tenantID string, databaseName *string) (uint64, error) {
 	return s.catalog.CountCollections(ctx, tenantID, databaseName)
 }
 

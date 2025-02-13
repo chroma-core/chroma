@@ -155,13 +155,17 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 	return
 }
 
-func (s *collectionDb) CountCollections(tenantID string, databaseName string) (uint64, error) {
+func (s *collectionDb) CountCollections(tenantID string, databaseName *string) (uint64, error) {
 	var count int64
-	result := s.db.Table("collections").
+	query := s.db.Table("collections").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
-		Where("databases.name = ?", databaseName).
-		Where("databases.tenant_id = ?", tenantID).
-		Count(&count)
+		Where("databases.tenant_id = ?", tenantID)
+
+	if databaseName != nil {
+		query = query.Where("databases.name = ?", databaseName)
+	}
+
+	result := query.Count(&count)
 
 	if result.Error != nil {
 		return 0, result.Error

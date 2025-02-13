@@ -303,6 +303,12 @@ def test_count_collections(sysdb: SysDB) -> None:
 
     assert collection_count == len(sample_collections)
 
+    # without specifying the database name should give count of all collections for the tenant
+    collection_count = sysdb.count_collections(tenant=DEFAULT_TENANT)
+    logger.debug(f"Collection count: {collection_count}")
+
+    assert collection_count == len(sample_collections)
+
 def test_get_collection_size(sysdb: SysDB) -> None:
     if not isinstance(sysdb, GrpcSysDB):
         pytest.skip("Skipping because this functionality is only supported by GrpcSysDB")

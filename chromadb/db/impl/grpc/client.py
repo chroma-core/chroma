@@ -427,12 +427,20 @@ class GrpcSysDB(SysDB):
     def count_collections(
         self,
         tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
+        database: Optional[str] = None,
     ) -> int:
         try:
-            request = CountCollectionsRequest(tenant=tenant, database=database)
-            response: CountCollectionsResponse = self._sys_db_stub.CountCollections(request)
-            return response.count
+            if database is None or database == "":
+                request = CountCollectionsRequest(tenant=tenant)
+                response: CountCollectionsResponse = self._sys_db_stub.CountCollections(request)
+                return response.count
+            else:
+                request = CountCollectionsRequest(
+                    tenant=tenant,
+                    database=database,
+                )
+                response: CountCollectionsResponse = self._sys_db_stub.CountCollections(request)
+                return response.count
         except grpc.RpcError as e:
             logger.error(f"Failed to count collections due to error: {e}")
             raise InternalError()

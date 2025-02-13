@@ -13,7 +13,7 @@ type ICollectionDb struct {
 }
 
 // CountCollections provides a mock function with given fields: tenantID, databaseName
-func (_m *ICollectionDb) CountCollections(tenantID string, databaseName string) (uint64, error) {
+func (_m *ICollectionDb) CountCollections(tenantID string, databaseName *string) (uint64, error) {
 	ret := _m.Called(tenantID, databaseName)
 
 	if len(ret) == 0 {
@@ -22,16 +22,16 @@ func (_m *ICollectionDb) CountCollections(tenantID string, databaseName string) 
 
 	var r0 uint64
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string, string) (uint64, error)); ok {
+	if rf, ok := ret.Get(0).(func(string, *string) (uint64, error)); ok {
 		return rf(tenantID, databaseName)
 	}
-	if rf, ok := ret.Get(0).(func(string, string) uint64); ok {
+	if rf, ok := ret.Get(0).(func(string, *string) uint64); ok {
 		r0 = rf(tenantID, databaseName)
 	} else {
 		r0 = ret.Get(0).(uint64)
 	}
 
-	if rf, ok := ret.Get(1).(func(string, string) error); ok {
+	if rf, ok := ret.Get(1).(func(string, *string) error); ok {
 		r1 = rf(tenantID, databaseName)
 	} else {
 		r1 = ret.Error(1)
