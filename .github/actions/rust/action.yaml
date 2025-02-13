@@ -16,5 +16,10 @@ runs:
       uses: arduino/setup-protoc@v2
     - name: Use sccache
       uses: mozilla-actions/sccache-action@v0.0.7
+    - name: Enable sccache
+      shell: bash
+      run: |
+        echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+        echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
     - name: Setup Nextest
       uses: taiki-e/install-action@nextest

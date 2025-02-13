@@ -145,16 +145,21 @@ impl OrderedBlockDelta {
                 .unwrap();
             let key_arr = old_block.data.column(1);
 
+            #[cfg(debug_assertions)]
             let mut last_key = None;
             for i in self.copied_up_to_row_of_old_block..old_block.data.num_rows() {
                 let old_prefix = prefix_arr.value(i);
                 let old_key = K::get(key_arr, i);
-                if let Some(ref last_key) = last_key {
-                    if *last_key > (old_prefix, old_key.clone()) {
-                        panic!("Found unordered keys while copying up to excluded key. Excluded key: {:?}, last key: {:?}, current key: {:?}", (excluded_prefix, excluded_key), last_key, (old_prefix, old_key));
+
+                #[cfg(debug_assertions)]
+                {
+                    if let Some(ref last_key) = last_key {
+                        if *last_key > (old_prefix, old_key.clone()) {
+                            panic!("Found unordered keys while copying up to excluded key. Excluded key: {:?}, last key: {:?}, current key: {:?}", (excluded_prefix, excluded_key), last_key, (old_prefix, old_key));
+                        }
+                    } else {
+                        last_key = Some((old_prefix, old_key.clone()));
                     }
-                } else {
-                    last_key = Some((old_prefix, old_key.clone()));
                 }
 
                 match old_prefix.cmp(excluded_prefix) {
