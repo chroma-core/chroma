@@ -22,7 +22,6 @@ import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
 from packaging import version as packaging_version
 import re
-import sys
 import multiprocessing
 from chromadb.config import Settings
 from chromadb.api.client import Client as ClientCreator
@@ -125,7 +124,7 @@ def configurations(versions: List[str]) -> List[Tuple[str, Settings]]:
         (
             version,
             Settings(
-                chroma_api_impl="chromadb.api.segment.SegmentAPI",
+                chroma_api_impl="chromadb.api.rust.RustBindingsAPI" if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ else "chromadb.api.segment.SegmentAPI",
                 chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
                 chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
                 chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
@@ -175,6 +174,9 @@ def persist_generated_data_with_old_version(
 ) -> None:
     try:
         old_module = switch_to_version(version, VERSIONED_MODULES)
+        # In 0.7.0 we switch to Rust client. The old versions are using the the python SegmentAPI client
+        if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ and packaging_version.Version(version) < packaging_version.Version("0.7.0"):
+            settings.chroma_api_impl = "chromadb.api.segment.SegmentAPI"
         system = old_module.config.System(settings)
         api = system.instance(api_import_for_version(old_module, version))
         system.start()

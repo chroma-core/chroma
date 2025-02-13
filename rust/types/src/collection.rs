@@ -43,7 +43,7 @@ pub struct Collection {
     pub collection_id: CollectionUuid,
     #[pyo3(get)]
     pub name: String,
-    #[serde(rename(deserialize = "configuration_json_str"))]
+    #[serde(default, rename(deserialize = "configuration_json_str"))]
     pub configuration_json: Value,
     #[pyo3(get)]
     pub metadata: Option<Metadata>,
