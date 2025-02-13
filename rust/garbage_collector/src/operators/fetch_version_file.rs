@@ -11,11 +11,11 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use chroma_config::{registry::Registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::{GetError, Storage};
 use chroma_system::{Operator, OperatorType};
 use thiserror::Error;
-use tracing_subscriber;
 
 #[derive(Clone, Debug)]
 pub struct FetchVersionFileOperator {}
@@ -115,10 +115,11 @@ impl Operator<FetchVersionFileInput, FetchVersionFileOutput> for FetchVersionFil
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chroma_config::registry;
     use chroma_storage::config::{
         ObjectStoreBucketConfig, ObjectStoreConfig, ObjectStoreType, StorageConfig,
     };
-    use chroma_storage::from_config;
+    use tracing_subscriber;
 
     async fn setup_test_storage() -> Storage {
         // Create storage config for Minio
@@ -135,16 +136,10 @@ mod tests {
         // Add more detailed logging
         tracing::info!("Setting up test storage with config: {:?}", storage_config);
 
-        match from_config(&storage_config).await {
-            Ok(storage) => storage,
-            Err(e) => {
-                tracing::error!("Failed to create storage: {:?}", e);
-                panic!(
-                    "Failed to create storage. Is Minio running on localhost:9000? Error: {:?}",
-                    e
-                );
-            }
-        }
+        let registry = registry::Registry::new();
+        Storage::try_from_config(&storage_config, &registry)
+            .await
+            .expect("Failed to create storage")
     }
 
     #[tokio::test]

@@ -377,7 +377,7 @@ mod tests {
         let input = ComputeUnusedBetweenVersionsInput {
             version_file: CollectionVersionFile::default(),
             epoch_id: 1,
-            sysdb_client: Box::new(SysDb::Test(TestSysDb::new())),
+            sysdb_client: SysDb::Test(TestSysDb::new()),
             versions_to_delete: VersionListForCollection {
                 versions: vec![1, 2],
                 collection_id: "test_collection".to_string(),

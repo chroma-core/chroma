@@ -82,6 +82,10 @@ use crate::operators::mark_versions_at_sysdb::{
     MarkVersionsAtSysDbOutput,
 };
 
+use chroma_config::registry::Registry;
+use chroma_storage::config::{
+    ObjectStoreBucketConfig, ObjectStoreConfig, ObjectStoreType, StorageConfig,
+};
 use prost::Message;
 
 pub struct GarbageCollectorOrchestrator {
@@ -540,9 +544,6 @@ impl Handler<TaskResult<DeleteVersionsAtSysDbOutput, DeleteVersionsAtSysDbError>
 mod tests {
     use super::*;
     use crate::helper::ChromaGrpcClients;
-    use chroma_storage::config::{
-        ObjectStoreBucketConfig, ObjectStoreConfig, ObjectStoreType, StorageConfig,
-    };
     use chroma_sysdb::{GrpcSysDbConfig, SysDbConfig};
     use chroma_system::System;
     use std::env;
@@ -829,7 +830,7 @@ mod tests {
         let dispatcher = Dispatcher::new(chroma_system::DispatcherConfig::default());
         let dispatcher_handle = system.start_component(dispatcher);
 
-        // Create storage config
+        // Create storage config and storage client
         let storage_config = StorageConfig::ObjectStore(ObjectStoreConfig {
             bucket: ObjectStoreBucketConfig {
                 name: "chroma-storage".to_string(),
@@ -839,7 +840,12 @@ mod tests {
             download_part_size_bytes: 1024 * 1024, // 1MB
             max_concurrent_requests: 10,
         });
-        let storage = chroma_storage::from_config(&storage_config).await?;
+
+        // Create registry for configuration
+        let registry = Registry::new();
+
+        // Initialize storage using config and registry
+        let storage = Storage::try_from_config(&storage_config, &registry).await?;
 
         // Create sysdb config and client
         let sysdb_config = SysDbConfig::Grpc(GrpcSysDbConfig {
@@ -850,11 +856,8 @@ mod tests {
             num_channels: 1,
         });
 
-        // Create registry for configuration
-        let registry = chroma_config::registry::Registry::new();
-
-        // Initialize sysdb client using config
-        let sysdb = SysDb::try_from_config(&sysdb_config, &registry).await?;
+        // Initialize sysdb client using config and registry
+        let mut sysdb = SysDb::try_from_config(&sysdb_config, &registry).await?;
 
         // Get collection info for GC from sysdb
         let collections_to_gc = sysdb.get_collections_to_gc().await?;
