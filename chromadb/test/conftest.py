@@ -636,12 +636,12 @@ def rust_persistent_fixture() -> Generator[System, None, None]:
     system.stop()
 
 
-@pytest.fixture(scope="module", params=[rust_ephemeral_fixture] if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ else [sqlite_fixture])
+@pytest.fixture(params=[rust_ephemeral_fixture] if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ else [sqlite_fixture])
 def sqlite(request: pytest.FixtureRequest) -> Generator[System, None, None]:
     yield from request.param()
 
 
-@pytest.fixture(scope="module", params=[rust_persistent_fixture] if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ else [sqlite_persistent_fixture])
+@pytest.fixture(params=[rust_persistent_fixture] if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ else [sqlite_persistent_fixture])
 def sqlite_persistent(request: pytest.FixtureRequest) -> Generator[System, None, None]:
     yield from request.param()
 
@@ -669,9 +669,12 @@ def system_http_server_fixtures() -> List[Callable[[], Generator[System, None, N
     fixtures = [
         fixture
         for fixture in system_fixtures()
-        if fixture != sqlite_fixture
-        and fixture != sqlite_persistent_fixture
-        and fixture not in [rust_ephemeral_fixture, rust_persistent_fixture]
+        if fixture not in [
+            sqlite_fixture,
+            sqlite_persistent_fixture,
+            rust_ephemeral_fixture,
+            rust_persistent_fixture,
+        ]
     ]
     return fixtures
 
