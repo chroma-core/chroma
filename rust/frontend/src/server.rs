@@ -7,13 +7,16 @@ use axum::{
     response::Response,
 };
 use aide::{
-    axum::ApiRouter,
-    axum::routing::{get, post},
+    axum::{
+        routing::{get_with, post_with, put_with},
+        ApiRouter, IntoApiResponse,
+    },
+    transform::TransformOperation,
     openapi::{OpenApi, Tag},
     transform::TransformOpenApi,
-    axum::IntoApiResponse,
+    OperationOutput,
 };
-
+use schemars::JsonSchema;
 
 use chroma_types::RawWhereFields;
 use chroma_types::{
@@ -27,6 +30,7 @@ use chroma_types::{
     ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
     UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateMetadata,
     UpsertCollectionRecordsResponse,
+    HealthCheckResponse,
 };
 use mdac::{Rule, Scorecard, ScorecardTicket};
 use opentelemetry::global;
@@ -51,6 +55,8 @@ use crate::{
 
 };
 
+#[derive(Serialize, JsonSchema)]
+struct HealthCheckResponseWrapper(HealthCheckResponse);
 
 
 struct ScorecardGuard {
@@ -165,10 +171,10 @@ impl FrontendServer {
         let mut api = OpenApi::default();
 
         let circuit_breaker_config = server.config.circuit_breaker.clone();
-        let app = ApiRouter::new()
+        let app: ApiRouter<()> = ApiRouter::new()
             // `GET /` goes to `root`
             //.route("/api/v1/*any", get(v1_deprecation_notice).put(v1_deprecation_notice).patch(v1_deprecation_notice).delete(v1_deprecation_notice).head(v1_deprecation_notice).options(v1_deprecation_notice))
-            .route("/api/v2/healthcheck", get(healthcheck))
+            .route("/api/v2/healthcheck", get_with(healthcheck, healthcheck_docs))
             // .route("/api/v2/heartbeat", get(heartbeat))
             // .route("/api/v2/pre-flight-checks", get(pre_flight_checks))
             // .route("/api/v2/reset", post(reset))
@@ -268,15 +274,17 @@ impl FrontendServer {
 // These handlers simply proxy the call and the relevant inputs into
 // the appropriate method on the `FrontendServer` struct.
 
-async fn healthcheck(State(server): State<FrontendServer>) -> impl IntoApiResponse {
+async fn healthcheck(
+    State(server): State<FrontendServer>,
+) -> impl IntoApiResponse {
     server.metrics.healthcheck.add(1, &[]);
     let res = server.frontend.healthcheck().await;
-    let code = match res.get_status_code() {
-        tonic::Code::Ok => StatusCode::OK,
-        _ => StatusCode::SERVICE_UNAVAILABLE,
-    };
+    (StatusCode::OK, Json(HealthCheckResponseWrapper(res))).into_response()
+}
 
-    Json(res)
+fn healthcheck_docs(op: TransformOperation) -> TransformOperation {
+    op.description("Check the health status of the server.")
+        .response::<200, Json<HealthCheckResponseWrapper>>()
 }
 
 async fn heartbeat(
