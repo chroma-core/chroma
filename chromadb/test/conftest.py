@@ -636,12 +636,12 @@ def rust_persistent_fixture() -> Generator[System, None, None]:
     system.stop()
 
 
-@pytest.fixture(scope="module", params=[rust_ephemeral_fixture, sqlite_fixture])
+@pytest.fixture(scope="module", params=[rust_ephemeral_fixture] if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ else [sqlite_fixture])
 def sqlite(request: pytest.FixtureRequest) -> Generator[System, None, None]:
     yield from request.param()
 
 
-@pytest.fixture(scope="module", params=[rust_persistent_fixture, sqlite_persistent_fixture])
+@pytest.fixture(scope="module", params=[rust_persistent_fixture] if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ else [sqlite_persistent_fixture])
 def sqlite_persistent(request: pytest.FixtureRequest) -> Generator[System, None, None]:
     yield from request.param()
 
@@ -653,8 +653,6 @@ def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
         fastapi_persistent,
         sqlite_fixture,
         sqlite_persistent_fixture,
-        rust_ephemeral_fixture,
-        rust_persistent_fixture,
     ]
     if "CHROMA_INTEGRATION_TEST" in os.environ:
         fixtures.append(integration)
@@ -662,6 +660,8 @@ def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
         fixtures = [integration]
     if "CHROMA_CLUSTER_TEST_ONLY" in os.environ:
         fixtures = [basic_http_client]
+    if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ:
+        fixtures = [rust_ephemeral_fixture, rust_persistent_fixture]
     return fixtures
 
 

@@ -50,6 +50,50 @@ jobs:
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
 
+  test-rust-bindings:
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ${{fromJson(inputs.python_versions)}}
+        platform: [depot-ubuntu-22.04]
+        test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
+                   "chromadb/test/auth/test_simple_rbac_authz.py",
+                   "chromadb/test/property/test_add.py",
+                   "chromadb/test/property/test_collections.py",
+                   "chromadb/test/property/test_collections_with_database_tenant.py",
+                   "chromadb/test/property/test_collections_with_database_tenant_overwrite.py",
+                   "chromadb/test/property/test_cross_version_persist.py",
+                   "chromadb/test/property/test_embeddings.py",
+                   "chromadb/test/property/test_filtering.py",
+                   "chromadb/test/property/test_persist.py",
+                   "chromadb/test/property/test_sysdb.py",
+                   "chromadb/test/property/test_restart_persist.py"]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: ./.github/actions/python
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Setup Rust
+        uses: ./.github/actions/rust
+      - name: Build Rust bindings
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          working-directory: rust/python_bindings
+          sccache: true
+      - name: Install built wheel
+        shell: bash
+        run: pip install --find-links target/wheels/ rust_bindings
+      - name: Test
+        run: python -m pytest ${{ matrix.test-globs }}
+        shell: bash
+        env:
+          PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
+          CHROMA_RUST_BINDINGS_TEST_ONLY: "1"
+
   # todo: break out stress integration tests
   test-single-node-integration:
     strategy:

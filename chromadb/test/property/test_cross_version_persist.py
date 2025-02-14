@@ -124,7 +124,7 @@ def configurations(versions: List[str]) -> List[Tuple[str, Settings]]:
         (
             version,
             Settings(
-                chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
+                chroma_api_impl="chromadb.api.rust.RustBindingsAPI" if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ else "chromadb.api.segment.SegmentAPI",
                 chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
                 chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
                 chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
@@ -175,7 +175,8 @@ def persist_generated_data_with_old_version(
     try:
         old_module = switch_to_version(version, VERSIONED_MODULES)
         # In 0.7.0 we switch to Rust client. The old versions are using the the python SegmentAPI client
-        settings.chroma_api_impl = "chromadb.api.segment.SegmentAPI"
+        if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ and packaging_version.Version(version) < packaging_version.Version("0.7.0"):
+            settings.chroma_api_impl = "chromadb.api.segment.SegmentAPI"
         system = old_module.config.System(settings)
         api = system.instance(api_import_for_version(old_module, version))
         system.start()
@@ -317,8 +318,15 @@ def test_cycle_versions(
 
     # 07/29/24: the max_seq_id for vector segments was moved from the pickled metadata file to SQLite.
     # Cleaning the log is dependent on vector segments migrating their max_seq_id from the pickled metadata file to SQLite.
-    # For Rust impl, log purge is trigger by any read operation
-    invariants.count(coll, embeddings_strategy)
+    # Vector segments migrate this field automatically on init, but at this point the segment has not been loaded yet.
+    if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ:
+        # Trigger log purge in Rust impl
+        invariants.count(coll, embeddings_strategy)
+    else:
+        trigger_vector_segments_max_seq_id_migration(
+            embeddings_queue, system.instance(SegmentManager)
+        )
+        embeddings_queue.purge_log(coll.id)
     invariants.log_size_below_max(system, [coll], True)
 
     # Should be able to add embeddings

@@ -38,16 +38,26 @@ import numpy as np
 CreatePersistAPI = Callable[[], ServerAPI]
 
 configurations = [
-    Settings(
-        chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
-        chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
-        chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
-        chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
-        chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
-        allow_reset=True,
-        is_persistent=True,
-    )
-] 
+        Settings(
+            chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
+            chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
+            allow_reset=True,
+            is_persistent=True,
+        )
+    ] if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ else [
+        Settings(
+            chroma_api_impl="chromadb.api.segment.SegmentAPI",
+            chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
+            allow_reset=True,
+            is_persistent=True,
+        ),
+    ]
 
 
 @pytest.fixture(scope="module", params=configurations)
