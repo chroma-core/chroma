@@ -11,6 +11,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	trace_log "github.com/pingcap/log"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type LogRepository struct {
@@ -95,7 +97,7 @@ func (r *LogRepository) PullRecords(ctx context.Context, collectionId string, of
 	// Relies on the fact that the records are ordered by offset.
 	if len(records) > 0 && records[0].Offset != offset {
 		trace_log.Error("Error in pulling records from record_log table. Some entries have been purged.", zap.String("collectionId", collectionId), zap.Int("requestedOffset", int(offset)), zap.Int("actualOffset", int(records[0].Offset)))
-		records, err = nil, errors.New("[internal error] some entries have been purged")
+		records, err = nil, status.Error(codes.NotFound, "Some entries have been purged")
 		return
 	}
 	// This means that the log is empty i.e. compaction_offset = enumeration_offset
@@ -112,12 +114,12 @@ func (r *LogRepository) PullRecords(ctx context.Context, collectionId string, of
 		}
 		if offset_err != nil {
 			trace_log.Error("Error in getting last compacted offset", zap.Error(offset_err), zap.String("collectionId", collectionId))
-			records, err = nil, errors.New("[internal error] error in getting last compacted offset")
+			records, err = nil, status.Error(codes.NotFound, "Error in getting last compacted offset")
 			return
 		}
 		if offset <= compacted_offset {
 			trace_log.Error("Error in pulling records from record_log table. Some entries have been purged.", zap.String("collectionId", collectionId), zap.Int("requestedOffset", int(offset)), zap.Int("actualOffset", int(compacted_offset)))
-			records, err = nil, errors.New("[internal error] some entries have been purged")
+			records, err = nil, status.Error(codes.NotFound, "Some entries have been purged")
 			return
 		}
 	}

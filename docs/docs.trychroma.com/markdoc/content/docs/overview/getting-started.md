@@ -9,7 +9,7 @@
 
 # Getting Started
 
-Chroma is an AI-native open-source vector database. It comes with everything you need to get started built in, and runs on your machine. A [hosted version](https://airtable.com/shrOAiDUtS2ILy5vZ) is coming soon!
+Chroma is an AI-native open-source vector database. It comes with everything you need to get started built in, and runs on your machine. A [hosted version](https://trychroma.com/signup) is now available for early access!
 
 ### 1. Install
 
@@ -29,7 +29,7 @@ pip install chromadb
 
 {% Tab label="yarn" %}
 ```terminal
-yarn install chromadb chromadb-default-embed 
+yarn add chromadb chromadb-default-embed 
 ```
 {% /Tab %}
 
@@ -41,7 +41,7 @@ npm install --save chromadb chromadb-default-embed
 
 {% Tab label="pnpm" %}
 ```terminal
-pnpm install chromadb chromadb-default-embed 
+pnpm add chromadb chromadb-default-embed 
 ```
 {% /Tab %}
 

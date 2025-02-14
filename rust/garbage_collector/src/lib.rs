@@ -1,16 +1,46 @@
+use chroma_config::Configurable;
+use chroma_system::{Dispatcher, System};
 use config::GarbageCollectorConfig;
+use garbage_collector_component::GarbageCollector;
 use opentelemetry_config::init_otel_tracing;
 
 mod config;
+mod fetch_version_file;
+mod garbage_collector_component;
+mod garbage_collector_orchestrator;
 mod opentelemetry_config;
+pub mod operators;
+
+const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
 
 pub async fn garbage_collector_service_entrypoint() {
     // Parse configuration. Configuration includes sysdb connection details, and
-    // otel details.
-    let config = GarbageCollectorConfig::load();
+    // gc run details amongst others.
+    let config = match std::env::var(CONFIG_PATH_ENV_VAR) {
+        Ok(config_path) => GarbageCollectorConfig::load_from_path(&config_path),
+        Err(_) => GarbageCollectorConfig::load(),
+    };
     // Enable OTEL tracing.
     init_otel_tracing(&config.service_name, &config.otel_endpoint);
 
+    let registry = chroma_config::registry::Registry::new();
+
+    // Setup the dispatcher and the pool of workers.
+    let dispatcher = Dispatcher::try_from_config(&config.dispatcher_config, &registry)
+        .await
+        .expect("Failed to create dispatcher from config");
+
+    let system = System::new();
+    let dispatcher_handle = system.start_component(dispatcher);
+
     // Start a background task to periodically check for garbage.
-    todo!()
+    // Garbage collector is a component that gets notified every
+    // gc_interval_mins to check for garbage.
+    let mut garbage_collector_component = GarbageCollector::try_from_config(&config, &registry)
+        .await
+        .expect("Failed to create garbage collector component");
+    garbage_collector_component.set_dispatcher(dispatcher_handle);
+    garbage_collector_component.set_system(system.clone());
+
+    let _ = system.start_component(garbage_collector_component);
 }

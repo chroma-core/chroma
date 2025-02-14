@@ -1,11 +1,16 @@
 use super::{Metadata, MetadataValueConversionError};
-use crate::{chroma_proto, ConversionError, Segment};
+use crate::{chroma_proto, test_segment, Segment, SegmentScope};
 use chroma_error::{ChromaError, ErrorCodes};
+use pyo3::types::PyAnyMethods;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use thiserror::Error;
 use uuid::Uuid;
 
 /// CollectionUuid is a wrapper around Uuid to provide a type for the collection id.
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(
+    Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize,
+)]
 pub struct CollectionUuid(pub Uuid);
 
 impl CollectionUuid {
@@ -15,12 +20,12 @@ impl CollectionUuid {
 }
 
 impl std::str::FromStr for CollectionUuid {
-    type Err = CollectionConversionError;
+    type Err = uuid::Error;
 
-    fn from_str(s: &str) -> Result<Self, CollectionConversionError> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match Uuid::parse_str(s) {
             Ok(uuid) => Ok(CollectionUuid(uuid)),
-            Err(_) => Err(CollectionConversionError::InvalidUuid),
+            Err(err) => Err(err),
         }
     }
 }
@@ -31,20 +36,73 @@ impl std::fmt::Display for CollectionUuid {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[pyo3::pyclass]
 pub struct Collection {
+    #[serde(rename(serialize = "id"))]
     pub collection_id: CollectionUuid,
+    #[pyo3(get)]
     pub name: String,
+    #[serde(default, rename(deserialize = "configuration_json_str"))]
+    pub configuration_json: Value,
+    #[pyo3(get)]
     pub metadata: Option<Metadata>,
+    #[pyo3(get)]
     pub dimension: Option<i32>,
+    #[pyo3(get)]
     pub tenant: String,
+    #[pyo3(get)]
     pub database: String,
     pub log_position: i64,
     pub version: i32,
+    #[serde(skip)]
+    pub total_records_post_compaction: u64,
+}
+
+#[pyo3::pymethods]
+impl Collection {
+    #[getter]
+    fn id<'py>(&self, py: pyo3::Python<'py>) -> pyo3::PyResult<pyo3::Bound<'py, pyo3::PyAny>> {
+        let res = pyo3::prelude::PyModule::import(py, "uuid")?
+            .getattr("UUID")?
+            .call1((self.collection_id.to_string(),))?;
+        Ok(res)
+    }
+
+    #[getter]
+    fn configuration<'py>(
+        &self,
+        py: pyo3::Python<'py>,
+    ) -> pyo3::PyResult<pyo3::Bound<'py, pyo3::PyAny>> {
+        let res = pyo3::prelude::PyModule::import(py, "chromadb.api")?
+            .getattr("CollectionConfigurationInternal")?
+            .getattr("from_json_str")?
+            .call1((self.configuration_json.to_string(),))?;
+        Ok(res)
+    }
+}
+
+impl Collection {
+    pub fn test_collection(dim: i32) -> Self {
+        Self {
+            collection_id: CollectionUuid::new(),
+            name: "test_collection".to_string(),
+            configuration_json: Value::Null,
+            metadata: None,
+            dimension: Some(dim),
+            tenant: "default_tenant".to_string(),
+            database: "default_database".to_string(),
+            log_position: 0,
+            version: 0,
+            total_records_post_compaction: 0,
+        }
+    }
 }
 
 #[derive(Error, Debug)]
 pub enum CollectionConversionError {
+    #[error("Invalid config")]
+    InvalidConfig(#[from] serde_json::Error),
     #[error("Invalid UUID")]
     InvalidUuid,
     #[error(transparent)]
@@ -54,6 +112,7 @@ pub enum CollectionConversionError {
 impl ChromaError for CollectionConversionError {
     fn code(&self) -> ErrorCodes {
         match self {
+            CollectionConversionError::InvalidConfig(_) => ErrorCodes::InvalidArgument,
             CollectionConversionError::InvalidUuid => ErrorCodes::InvalidArgument,
             CollectionConversionError::MetadataValueConversionError(e) => e.code(),
         }
@@ -79,13 +138,33 @@ impl TryFrom<chroma_proto::Collection> for Collection {
         Ok(Collection {
             collection_id,
             name: proto_collection.name,
+            configuration_json: serde_json::from_str(&proto_collection.configuration_json_str)?,
             metadata: collection_metadata,
             dimension: proto_collection.dimension,
             tenant: proto_collection.tenant,
             database: proto_collection.database,
             log_position: proto_collection.log_position,
             version: proto_collection.version,
+            total_records_post_compaction: proto_collection.total_records_post_compaction,
         })
+    }
+}
+
+impl From<Collection> for chroma_proto::Collection {
+    fn from(value: Collection) -> Self {
+        Self {
+            id: value.collection_id.0.to_string(),
+            name: value.name,
+            configuration_json_str: serde_json::to_string(&value.configuration_json)
+                .unwrap_or("{}".to_string()),
+            metadata: value.metadata.map(Into::into),
+            dimension: value.dimension,
+            tenant: value.tenant,
+            database: value.database,
+            log_position: value.log_position,
+            version: value.version,
+            total_records_post_compaction: value.total_records_post_compaction,
+        }
     }
 }
 
@@ -97,32 +176,16 @@ pub struct CollectionAndSegments {
     pub vector_segment: Segment,
 }
 
-impl TryFrom<chroma_proto::ScanOperator> for CollectionAndSegments {
-    type Error = ConversionError;
-
-    fn try_from(value: chroma_proto::ScanOperator) -> Result<Self, ConversionError> {
-        Ok(Self {
-            collection: value
-                .collection
-                .ok_or(ConversionError::DecodeError)?
-                .try_into()
-                .map_err(|_| ConversionError::DecodeError)?,
-            metadata_segment: value
-                .metadata
-                .ok_or(ConversionError::DecodeError)?
-                .try_into()
-                .map_err(|_| ConversionError::DecodeError)?,
-            record_segment: value
-                .record
-                .ok_or(ConversionError::DecodeError)?
-                .try_into()
-                .map_err(|_| ConversionError::DecodeError)?,
-            vector_segment: value
-                .knn
-                .ok_or(ConversionError::DecodeError)?
-                .try_into()
-                .map_err(|_| ConversionError::DecodeError)?,
-        })
+impl CollectionAndSegments {
+    pub fn test(dim: i32) -> Self {
+        let collection = Collection::test_collection(dim);
+        let collection_uuid = collection.collection_id;
+        Self {
+            collection,
+            metadata_segment: test_segment(collection_uuid, SegmentScope::METADATA),
+            record_segment: test_segment(collection_uuid, SegmentScope::RECORD),
+            vector_segment: test_segment(collection_uuid, SegmentScope::VECTOR),
+        }
     }
 }
 
@@ -143,6 +206,7 @@ mod test {
             database: "qux".to_string(),
             log_position: 0,
             version: 0,
+            total_records_post_compaction: 0,
         };
         let converted_collection: Collection = proto_collection.try_into().unwrap();
         assert_eq!(
@@ -154,5 +218,6 @@ mod test {
         assert_eq!(converted_collection.dimension, None);
         assert_eq!(converted_collection.tenant, "baz".to_string());
         assert_eq!(converted_collection.database, "qux".to_string());
+        assert_eq!(converted_collection.total_records_post_compaction, 0);
     }
 }

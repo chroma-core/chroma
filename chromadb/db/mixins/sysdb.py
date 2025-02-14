@@ -17,7 +17,6 @@ from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System
 from chromadb.db.base import Cursor, SqlDB, ParameterValue, get_sql
 from chromadb.db.system import SysDB
 from chromadb.errors import (
-    InvalidCollectionException,
     NotFoundError,
     UniqueConstraintError,
 )
@@ -115,6 +114,35 @@ class SqlSysDB(SqlDB, SysDB):
                 name=row[1],
                 tenant=tenant,
             )
+
+    @override
+    def delete_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+        with self.tx() as cur:
+            databases = Table("databases")
+            q = (
+                self.querybuilder()
+                .from_(databases)
+                .where(databases.name == ParameterValue(name))
+                .where(databases.tenant_id == ParameterValue(tenant))
+                .delete()
+            )
+            sql, params = get_sql(q, self.parameter_format())
+            sql = sql + " RETURNING id"
+            result = cur.execute(sql, params).fetchone()
+            if not result:
+                raise NotFoundError(f"Database {name} not found for tenant {tenant}")
+
+            # As of 01/09/2025, cascading deletes don't work because foreign keys are not enabled.
+            # See https://github.com/chroma-core/chroma/issues/3456.
+            collections = Table("collections")
+            q = (
+                self.querybuilder()
+                .from_(collections)
+                .where(collections.database_id == ParameterValue(result[0]))
+                .delete()
+            )
+            sql, params = get_sql(q, self.parameter_format())
+            cur.execute(sql, params)
 
     @override
     def list_databases(
@@ -530,9 +558,7 @@ class SqlSysDB(SqlDB, SysDB):
     ) -> CollectionAndSegments:
         collections = self.get_collections(id=collection_id)
         if len(collections) == 0:
-            raise InvalidCollectionException(
-                f"Collection {collection_id} does not exist."
-            )
+            raise NotFoundError(f"Collection {collection_id} does not exist.")
         return CollectionAndSegments(
             collection=collections[0],
             segments=self.get_segments(collection=collection_id),
@@ -932,3 +958,24 @@ class SqlSysDB(SqlDB, SysDB):
         with self.tx() as cur:
             cur.execute(sql, params)
         return configuration
+
+    @override
+    def get_collection_size(self, id: UUID) -> int:
+        raise NotImplementedError
+    
+    @override
+    def count_collections(
+        self,
+        tenant: str = DEFAULT_TENANT,
+        database: Optional[str] = None,
+    ) -> int:
+        """Gets the number of collections for the (tenant, database) combination."""
+        # TODO(Sanket): Implement this efficiently using a count query.
+        # Note, the underlying get_collections api always requires a database
+        # to be specified. In the sysdb implementation in go code, it does not
+        # filter on database if it is set to "". This is a bad API and
+        # should be fixed. For now, we will replicate the behavior.
+        request_database = database
+        if database == None or database == "":
+            request_database = ""
+        return len(self.get_collections(tenant=tenant, database=request_database))

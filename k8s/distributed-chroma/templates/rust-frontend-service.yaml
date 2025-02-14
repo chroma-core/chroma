@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rust-frontend-service
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: {{ .Values.rustFrontendService.replicaCount }}
+  selector:
+    matchLabels:
+      app: rust-frontend-service
+  template:
+    metadata:
+      labels:
+        app: rust-frontend-service
+    spec:
+      containers:
+        - name: rust-frontend-service
+          image: "{{ .Values.rustFrontendService.image.repository }}:{{ .Values.rustFrontendService.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          readinessProbe:
+            httpGet:
+              port: 3000
+              path: /api/v2/healthcheck
+          ports:
+            - containerPort: 3000
+          {{ if .Values.rustFrontendService.resources }}
+          resources:
+            limits:
+              cpu: {{ .Values.rustFrontendService.resources.limits.cpu }}
+              memory: {{ .Values.rustFrontendService.resources.limits.memory }}
+            requests:
+              cpu: {{ .Values.rustFrontendService.resources.requests.cpu }}
+              memory: {{ .Values.rustFrontendService.resources.requests.memory }}
+          {{ end }}
+{{ if .Values.frontendService.otherEnvConfig }}
+          env:
+{{ .Values.frontendService.otherEnvConfig | nindent 12 }}
+{{ end }}
+      {{if .Values.rustFrontendService.tolerations}}
+      tolerations:
+        {{ toYaml .Values.rustFrontendService.tolerations | nindent 8 }}
+      {{ end }}
+      {{if .Values.rustFrontendService.nodeSelector}}
+      nodeSelector:
+        {{ toYaml .Values.rustFrontendService.nodeSelector | nindent 8 }}
+      {{ end }}
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: rust-frontend-service
+  namespace: {{ .Values.namespace }}
+spec:
+  ports:
+    - name: server-port
+      port: 3000
+      targetPort: 3000
+  selector:
+    app: rust-frontend-service
+  type: ClusterIP

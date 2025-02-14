@@ -48,7 +48,10 @@ class SharedSystemClient:
 
         if api_impl is None:
             raise ValueError("Chroma API implementation must be set in settings")
-        elif api_impl == "chromadb.api.segment.SegmentAPI":
+        elif api_impl in [
+            "chromadb.api.segment.SegmentAPI",
+            "chromadb.api.rust.RustBindingsAPI",
+        ]:
             if settings.is_persistent:
                 identifier = settings.persist_directory
             else:

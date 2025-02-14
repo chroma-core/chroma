@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::hash::Hash;
 
 use ::foyer::{StorageKey, StorageValue};
@@ -5,12 +6,14 @@ use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+mod async_partitioned_mutex;
 mod foyer;
 mod nop;
 mod unbounded;
 
 use crate::nop::NopCache;
 use crate::unbounded::UnboundedCache;
+pub use async_partitioned_mutex::*;
 
 pub use foyer::FoyerCacheConfig;
 pub use unbounded::UnboundedCacheConfig;
@@ -40,7 +43,7 @@ impl ChromaError for CacheError {
 /// "unbounded" is a cache that doesn't evict.
 /// "disk" is a foyer-backed cache that lives on disk.
 /// "memory" is a foyer-backed cache that lives in memory.
-#[derive(Deserialize, Debug, Clone, Serialize)]
+#[derive(Default, Deserialize, Debug, Clone, Serialize)]
 pub enum CacheConfig {
     // case-insensitive
     #[serde(rename = "unbounded")]
@@ -53,12 +56,13 @@ pub enum CacheConfig {
     #[serde(alias = "weighted_lru")]
     Memory(FoyerCacheConfig),
     #[serde(rename = "nop")]
+    #[default]
     Nop,
 }
 
 /// A cache offers async access.  It's unspecified whether this cache is persistent or not.
 #[async_trait::async_trait]
-pub trait Cache<K, V>: Send + Sync
+pub trait Cache<K, V>: Send + Sync + Debug
 where
     K: Clone + Send + Sync + Eq + PartialEq + Hash + 'static,
     V: Clone + Send + Sync + Weighted + 'static,

@@ -22,7 +22,7 @@ from chromadb.types import Collection as CollectionModel
 from chromadb import __version__
 from chromadb.errors import (
     InvalidDimensionException,
-    InvalidCollectionException,
+    NotFoundError,
     VersionMismatchError,
 )
 from chromadb.api.types import (
@@ -117,6 +117,7 @@ class SegmentAPI(ServerAPI):
     _opentelemetry_client: OpenTelemetryClient
     _tenant_id: str
     _topic_ns: str
+    _rate_limit_enforcer: RateLimitEnforcer
 
     def __init__(self, system: System):
         super().__init__(system)
@@ -156,6 +157,11 @@ class SegmentAPI(ServerAPI):
     @override
     def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> t.Database:
         return self._sysdb.get_database(name=name, tenant=tenant)
+
+    @trace_method("SegmentAPI.delete_database", OpenTelemetryGranularity.OPERATION)
+    @override
+    def delete_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+        self._sysdb.delete_database(name=name, tenant=tenant)
 
     @trace_method("SegmentAPI.list_databases", OpenTelemetryGranularity.OPERATION)
     @override
@@ -307,7 +313,7 @@ class SegmentAPI(ServerAPI):
         if existing:
             return existing[0]
         else:
-            raise InvalidCollectionException(f"Collection {name} does not exist.")
+            raise NotFoundError(f"Collection {name} does not exist.")
 
     @trace_method("SegmentAPI.list_collection", OpenTelemetryGranularity.OPERATION)
     @override
@@ -337,11 +343,7 @@ class SegmentAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> int:
-        collection_count = len(
-            self._sysdb.get_collections(tenant=tenant, database=database)
-        )
-
-        return collection_count
+        return self._sysdb.count_collections(tenant=tenant, database=database)
 
     @trace_method("SegmentAPI._modify", OpenTelemetryGranularity.OPERATION)
     @override
@@ -394,10 +396,10 @@ class SegmentAPI(ServerAPI):
         )
 
         if existing:
+            self._manager.delete_segments(existing[0].id)
             self._sysdb.delete_collection(
                 existing[0].id, tenant=tenant, database=database
             )
-            self._manager.delete_segments(existing[0].id)
         else:
             raise ValueError(f"Collection {name} does not exist.")
 
@@ -441,6 +443,7 @@ class SegmentAPI(ServerAPI):
             metadatas=metadatas,
             documents=documents,
             uris=uris,
+            collection_id=collection_id,
         )
 
         self._producer.submit_embeddings(collection_id, records_to_submit)
@@ -553,6 +556,7 @@ class SegmentAPI(ServerAPI):
             metadatas=metadatas,
             documents=documents,
             uris=uris,
+            collection_id=collection_id,
         )
 
         self._producer.submit_embeddings(collection_id, records_to_submit)
@@ -897,12 +901,10 @@ class SegmentAPI(ServerAPI):
     def _get_collection(self, collection_id: UUID) -> t.Collection:
         collections = self._sysdb.get_collections(id=collection_id)
         if not collections or len(collections) == 0:
-            raise InvalidCollectionException(
-                f"Collection {collection_id} does not exist."
-            )
+            raise NotFoundError(f"Collection {collection_id} does not exist.")
         return collections[0]
 
-    @trace_method("SegmentAPI._scan", OpenTelemetryGranularity.ALL)
+    @trace_method("SegmentAPI._scan", OpenTelemetryGranularity.OPERATION)
     def _scan(self, collection_id: UUID) -> Scan:
         collection_and_segments = self._sysdb.get_collection_with_segments(
             collection_id

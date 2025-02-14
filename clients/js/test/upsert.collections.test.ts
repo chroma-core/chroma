@@ -1,15 +1,11 @@
 import {
-  afterAll,
-  beforeAll,
   beforeEach,
   describe,
   expect,
   test,
 } from "@jest/globals";
-import { InvalidCollectionError } from "../src/Errors";
-import { StartedTestContainer } from "testcontainers";
 import { ChromaClient } from "../src/ChromaClient";
-import { startChromaContainer } from "./startChromaContainer";
+import { ChromaNotFoundError } from "../src/Errors";
 
 describe("upsert records", () => {
   // connects to the unauthenticated chroma instance started in
@@ -58,6 +54,6 @@ describe("upsert records", () => {
         metadatas: [{ test: "meta1" }],
         documents: ["doc1"],
       });
-    }).rejects.toThrow(InvalidCollectionError);
+    }).rejects.toThrow(ChromaNotFoundError);
   });
 });

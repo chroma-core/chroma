@@ -12,6 +12,7 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/sysdb/coordinator/model"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dao"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbcore"
+	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbmodel"
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/genproto/googleapis/rpc/code"
@@ -29,17 +30,19 @@ type TenantDatabaseServiceTestSuite struct {
 
 func (suite *TenantDatabaseServiceTestSuite) SetupSuite() {
 	log.Info("setup suite")
-	suite.db = dbcore.ConfigDatabaseForTesting()
+	suite.db, _ = dbcore.ConfigDatabaseForTesting()
 	s, err := NewWithGrpcProvider(Config{
 		SystemCatalogProvider: "database",
-		Testing:               true}, grpcutils.Default, suite.db)
+		Testing:               true,
+		BlockStoreProvider:    "none",
+	}, grpcutils.Default)
 	if err != nil {
 		suite.T().Fatalf("error creating server: %v", err)
 	}
 	suite.s = s
 	txnImpl := dbcore.NewTxImpl()
 	metaDomain := dao.NewMetaDomain()
-	suite.catalog = coordinator.NewTableCatalog(txnImpl, metaDomain)
+	suite.catalog = coordinator.NewTableCatalog(txnImpl, metaDomain, nil, false)
 }
 
 func (suite *TenantDatabaseServiceTestSuite) SetupTest() {
@@ -97,6 +100,42 @@ func (suite *TenantDatabaseServiceTestSuite) TestServer_TenantLastCompactionTime
 	// clean up
 	err = dao.CleanUpTestTenant(suite.db, tenantId)
 	suite.NoError(err)
+}
+
+func (suite *TenantDatabaseServiceTestSuite) TestServer_DeleteDatabase() {
+	tenantName := "TestDeleteDatabase"
+	databaseName := "TestDeleteDatabase"
+
+	_, err := suite.catalog.CreateTenant(context.Background(), &model.CreateTenant{
+		Name: tenantName,
+		Ts:   time.Now().Unix(),
+	}, time.Now().Unix())
+	suite.NoError(err)
+
+	_, err = suite.catalog.CreateDatabase(context.Background(), &model.CreateDatabase{
+		Tenant: tenantName,
+		Name:   databaseName,
+	}, time.Now().Unix())
+	suite.NoError(err)
+
+	_, _, err = suite.catalog.CreateCollection(context.Background(), &model.CreateCollection{
+		TenantID:     tenantName,
+		DatabaseName: databaseName,
+		Name:         "TestCollection",
+	}, time.Now().Unix())
+	suite.NoError(err)
+
+	err = suite.catalog.DeleteDatabase(context.Background(), &model.DeleteDatabase{
+		Tenant: tenantName,
+		Name:   databaseName,
+	})
+	suite.NoError(err)
+
+	// Check that associated collection was deleted
+	var count int64
+	var collections []*dbmodel.Collection
+	suite.NoError(suite.db.Find(&collections).Count(&count).Error)
+	suite.Equal(int64(0), count)
 }
 
 func TestTenantDatabaseServiceTestSuite(t *testing.T) {

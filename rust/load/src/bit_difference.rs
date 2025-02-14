@@ -28,12 +28,12 @@
 use chromadb::collection::{CollectionEntries, GetOptions, QueryOptions};
 use chromadb::ChromaClient;
 use guacamole::combinators::*;
-use guacamole::{FromGuacamole, Guacamole, Zipf};
+use guacamole::{FromGuacamole, Guacamole};
 use siphasher::sip::SipHasher24;
 use tracing::Instrument;
 
 use crate::words::MANY_WORDS;
-use crate::{DataSet, GetQuery, KeySelector, QueryQuery, Skew, UpsertQuery};
+use crate::{DataSet, Error, GetQuery, KeySelector, QueryQuery, Skew, UpsertQuery, ZIPF_CACHE};
 
 const EMBEDDING_BYTES: usize = 128;
 const EMBEDDING_SIZE: usize = 8 * EMBEDDING_BYTES;
@@ -201,7 +201,7 @@ impl SyntheticDataSet {
                 set_element(range_to(eo.num_clusters), |idx| self.cluster_by_index(idx))(guac)
             }
             Skew::Zipf { theta } => {
-                let zipf = Zipf::from_theta(eo.num_clusters as u64, theta);
+                let zipf = ZIPF_CACHE.from_theta(eo.num_clusters as u64, theta);
                 let cluster: Cluster = set_element(
                     |guac| zipf.next(guac) as usize,
                     |idx| self.cluster_by_index(idx),
@@ -227,7 +227,7 @@ impl SyntheticDataSet {
         _: UpsertQuery,
         idx: usize,
         _: &mut Guacamole,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn std::error::Error + Send>> {
         let collection = client.get_or_create_collection(&self.name(), None).await?;
         let mut ids = vec![];
         let mut embeddings = vec![];
@@ -259,7 +259,7 @@ impl SyntheticDataSet {
         uq: UpsertQuery,
         skew: Skew,
         guac: &mut Guacamole,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn std::error::Error + Send>> {
         let collection = client.get_or_create_collection(&self.name(), None).await?;
         let mut ids = vec![];
         let mut embeddings = vec![];
@@ -307,12 +307,18 @@ impl DataSet for SyntheticDataSet {
         }}
     }
 
+    fn cardinality(&self) -> usize {
+        // NOTE(rescrv):  This will report low.  There is currently no means by which a synthetic
+        // can be referenced through the built-in data sets, so we just let this be a broken API.
+        self.embedding_options.num_clusters
+    }
+
     async fn get(
         &self,
         client: &ChromaClient,
         gq: GetQuery,
         guac: &mut Guacamole,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn std::error::Error + Send>> {
         let collection = client.get_or_create_collection(&self.name(), None).await?;
         let limit = gq.limit.sample(guac);
         let mut ids = self.sample_ids(gq.skew, guac, limit);
@@ -333,7 +339,10 @@ impl DataSet for SyntheticDataSet {
         ids.sort();
         results.ids.sort();
         if where_metadata.is_none() && where_document.is_none() && results.ids != ids {
-            return Err(format!("expected {:?} but got {:?}", ids, results.ids).into());
+            return Err(Box::new(Error::InvalidRequest(format!(
+                "expected {:?} but got {:?}",
+                ids, results.ids
+            ))));
         }
         Ok(())
     }
@@ -343,7 +352,7 @@ impl DataSet for SyntheticDataSet {
         client: &ChromaClient,
         vq: QueryQuery,
         guac: &mut Guacamole,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn std::error::Error + Send>> {
         let collection = client.get_or_create_collection(&self.name(), None).await?;
         let cluster = self.cluster_by_skew(vq.skew, guac);
         let where_metadata = vq.metadata.map(|m| m.to_json(guac));
@@ -374,7 +383,7 @@ impl DataSet for SyntheticDataSet {
         client: &ChromaClient,
         uq: UpsertQuery,
         guac: &mut Guacamole,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn std::error::Error + Send>> {
         match uq.key {
             KeySelector::Index(idx) => self.upsert_sequential(client, uq, idx, guac).await,
             KeySelector::Random(skew) => self.upsert_random(client, uq, skew, guac).await,

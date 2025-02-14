@@ -15,10 +15,12 @@ a [model](https://github.com/ollama/ollama?tab=readme-ov-file#model-library) of 
 {% Tab label="python" %}
 
 ```python
-import chromadb.utils.embedding_functions as embedding_functions
+from chromadb.utils.embedding_functions.ollama_embedding_function import (
+    OllamaEmbeddingFunction,
+)
 
-ollama_ef = embedding_functions.OllamaEmbeddingFunction(
-    url="http://localhost:11434/api/embeddings",
+ollama_ef = OllamaEmbeddingFunction(
+    url="http://localhost:11434",
     model_name="llama2",
 )
 
@@ -33,7 +35,7 @@ embeddings = ollama_ef(["This is my first text to embed",
 ```typescript
 import { OllamaEmbeddingFunction } from "chromadb";
 const embedder = new OllamaEmbeddingFunction({
-    url: "http://127.0.0.1:11434/api/embeddings",
+    url: "http://127.0.0.1:11434/",
     model: "llama2"
 })
 

@@ -1,5 +1,5 @@
 from threading import Lock
-from typing import Dict, Sequence
+from typing import Dict, List, Sequence
 from uuid import UUID, uuid4
 
 from overrides import override
@@ -78,17 +78,15 @@ class DistributedSegmentManager(SegmentManager):
 
     @override
     def delete_segments(self, collection_id: UUID) -> Sequence[UUID]:
-        # TODO: this should be a pass, delete_collection is expected to delete segments in
-        # distributed
-        segments = self._sysdb.get_segments(collection=collection_id)
-        return [s["id"] for s in segments]
+        # delete_collection deletes segments in distributed mode
+        return []
 
     @trace_method(
         "DistributedSegmentManager.get_endpoint",
         OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
     )
-    def get_endpoint(self, segment: Segment) -> str:
-        return self._segment_directory.get_segment_endpoint(segment)
+    def get_endpoints(self, segment: Segment, n: int) -> List[str]:
+        return self._segment_directory.get_segment_endpoints(segment, n)
 
     @trace_method(
         "DistributedSegmentManager.hint_use_collection",

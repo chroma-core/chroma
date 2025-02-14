@@ -1,5 +1,6 @@
 use super::{CacheError, Weighted};
 use chroma_error::ChromaError;
+use chroma_types::CollectionAndSegments;
 use clap::Parser;
 use foyer::opentelemetry_0_27::OpenTelemetryMetricsRegistry;
 use foyer::{
@@ -9,6 +10,7 @@ use foyer::{
 };
 use opentelemetry::global;
 use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
 use std::hash::Hash;
 use std::sync::Arc;
 use std::time::Duration;
@@ -223,6 +225,31 @@ impl FoyerCacheConfig {
     }
 }
 
+impl Default for FoyerCacheConfig {
+    fn default() -> Self {
+        FoyerCacheConfig {
+            dir: None,
+            capacity: default_capacity(),
+            mem: default_mem(),
+            disk: default_disk(),
+            file_size: default_file_size(),
+            flushers: default_flushers(),
+            flush: default_flush(),
+            reclaimers: default_reclaimers(),
+            recover_concurrency: default_recover_concurrency(),
+            admission_rate_limit: default_admission_rate_limit(),
+            shards: default_shards(),
+            eviction: default_eviction(),
+            invalid_ratio: default_invalid_ratio(),
+            trace_insert_us: default_trace_insert_us(),
+            trace_get_us: default_trace_get_us(),
+            trace_obtain_us: default_trace_obtain_us(),
+            trace_remove_us: default_trace_remove_us(),
+            trace_fetch_us: default_trace_fetch_us(),
+        }
+    }
+}
+
 struct Stopwatch<'a>(
     &'a opentelemetry::metrics::Histogram<u64>,
     std::time::Instant,
@@ -254,6 +281,16 @@ where
     insert_latency: opentelemetry::metrics::Histogram<u64>,
     remove_latency: opentelemetry::metrics::Histogram<u64>,
     clear_latency: opentelemetry::metrics::Histogram<u64>,
+}
+
+impl<K, V> Debug for FoyerHybridCache<K, V>
+where
+    K: Clone + Send + Sync + StorageKey + Eq + PartialEq + Hash + 'static,
+    V: Clone + Send + Sync + StorageValue + Weighted + 'static,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FoyerHybridCache").finish()
+    }
 }
 
 impl<K, V> FoyerHybridCache<K, V>
@@ -324,10 +361,7 @@ where
             )));
         }
         let cache = builder.build().await.map_err(|e| {
-            Box::new(CacheError::InvalidCacheConfig(format!(
-                "builder failed: {:?}",
-                e
-            ))) as _
+            CacheError::InvalidCacheConfig(format!("builder failed: {:?}", e)).boxed()
         })?;
         cache.enable_tracing();
         cache.update_tracing_options(
@@ -409,6 +443,16 @@ where
     insert_latency: opentelemetry::metrics::Histogram<u64>,
     remove_latency: opentelemetry::metrics::Histogram<u64>,
     clear_latency: opentelemetry::metrics::Histogram<u64>,
+}
+
+impl<K, V> Debug for FoyerPlainCache<K, V>
+where
+    K: Clone + Send + Sync + Eq + PartialEq + Hash + 'static,
+    V: Clone + Send + Sync + Weighted + 'static,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FoyerPlainCache").finish()
+    }
 }
 
 impl<K, V> FoyerPlainCache<K, V>
@@ -538,4 +582,10 @@ where
     K: Clone + Send + Sync + Eq + PartialEq + Hash + StorageKey + 'static,
     V: Clone + Send + Sync + Weighted + StorageValue + 'static,
 {
+}
+
+impl crate::Weighted for CollectionAndSegments {
+    fn weight(&self) -> usize {
+        1
+    }
 }

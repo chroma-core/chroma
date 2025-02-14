@@ -9,11 +9,13 @@ from chromadb.types import Segment
 
 class SegmentDirectory(Component):
     """A segment directory is a data interface that manages the location of segments. Concretely, this
-    means that for clustered chroma, it provides the grpc endpoint for a segment."""
+    means that for distributed chroma, it provides the grpc endpoint for a segment."""
 
     @abstractmethod
-    def get_segment_endpoint(self, segment: Segment) -> str:
-        """Return the segment residence for a given segment ID"""
+    def get_segment_endpoints(self, segment: Segment, n: int) -> List[str]:
+        """Return the segment residences for a given segment ID. Will return at most n residences.
+        Should only return less than n residences if there are less than n residences available.
+        """
 
     @abstractmethod
     def register_updated_segment_callback(
@@ -27,6 +29,7 @@ class SegmentDirectory(Component):
 class Member:
     id: str
     ip: str
+    node: str
 
 
 Memberlist = List[Member]

@@ -3,7 +3,22 @@
 // Custom errors can use these codes in order to allow for generic handling
 use std::error::Error;
 
-#[derive(PartialEq, Debug)]
+#[cfg(feature = "tonic")]
+mod tonic;
+#[cfg(feature = "tonic")]
+pub use tonic::*;
+
+#[cfg(feature = "sqlx")]
+mod sqlx;
+#[cfg(feature = "sqlx")]
+pub use sqlx::*;
+
+#[cfg(feature = "validator")]
+mod validator;
+#[cfg(feature = "validator")]
+pub use validator::*;
+
+#[derive(PartialEq, Debug, Clone, Copy)]
 pub enum ErrorCodes {
     // OK is returned on success, we use "Success" since Ok is a keyword in Rust.
     Success = 0,
@@ -45,6 +60,12 @@ pub enum ErrorCodes {
 
 pub trait ChromaError: Error + Send {
     fn code(&self) -> ErrorCodes;
+    fn boxed(self) -> Box<dyn ChromaError>
+    where
+        Self: Sized + 'static,
+    {
+        Box::new(self)
+    }
 }
 
 impl Error for Box<dyn ChromaError> {}
@@ -52,30 +73,5 @@ impl Error for Box<dyn ChromaError> {}
 impl ChromaError for Box<dyn ChromaError> {
     fn code(&self) -> ErrorCodes {
         self.as_ref().code()
-    }
-}
-
-impl From<ErrorCodes> for tonic::Code {
-    fn from(err: ErrorCodes) -> tonic::Code {
-        match err {
-            ErrorCodes::Success => tonic::Code::Ok,
-            ErrorCodes::Cancelled => tonic::Code::Cancelled,
-            ErrorCodes::Unknown => tonic::Code::Unknown,
-            ErrorCodes::InvalidArgument => tonic::Code::InvalidArgument,
-            ErrorCodes::DeadlineExceeded => tonic::Code::DeadlineExceeded,
-            ErrorCodes::NotFound => tonic::Code::NotFound,
-            ErrorCodes::AlreadyExists => tonic::Code::AlreadyExists,
-            ErrorCodes::PermissionDenied => tonic::Code::PermissionDenied,
-            ErrorCodes::ResourceExhausted => tonic::Code::ResourceExhausted,
-            ErrorCodes::FailedPrecondition => tonic::Code::FailedPrecondition,
-            ErrorCodes::Aborted => tonic::Code::Aborted,
-            ErrorCodes::OutOfRange => tonic::Code::OutOfRange,
-            ErrorCodes::Unimplemented => tonic::Code::Unimplemented,
-            ErrorCodes::Internal => tonic::Code::Internal,
-            ErrorCodes::Unavailable => tonic::Code::Unavailable,
-            ErrorCodes::DataLoss => tonic::Code::DataLoss,
-            ErrorCodes::Unauthenticated => tonic::Code::Unauthenticated,
-            ErrorCodes::VersionMismatch => tonic::Code::Internal,
-        }
     }
 }

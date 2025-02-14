@@ -42,6 +42,19 @@ describe("AdminClient", () => {
     expect(getDatabase.name).toBe("test");
   });
 
+  test("it should delete a database", async () => {
+    await adminClient.createTenant({ name: "test4" });
+    await adminClient.createDatabase({
+      name: "test",
+      tenantName: "test4",
+    });
+    await adminClient.deleteDatabase({ name: "test", tenantName: "test4" });
+
+    await expect(
+      adminClient.getDatabase({ name: "test", tenantName: "test4" }),
+    ).rejects.toThrow();
+  });
+
   test("it should list databases for a tenant", async () => {
     await adminClient.createTenant({ name: "test2" });
 

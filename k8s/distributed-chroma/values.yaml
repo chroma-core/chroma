@@ -29,11 +29,28 @@ frontendService:
   logServiceHost: 'value: "logservice.chroma"'
   logServicePort: 'value: "50051"'
   otherEnvConfig: |
+    - name: CHROMA_ALLOW_RESET
+      value: "true"
     - name: CHROMA_OTEL_COLLECTION_ENDPOINT
       value: "http://jaeger:4317"
     - name: CHROMA_OTEL_GRANULARITY
       value: all
   replicaCount: 2
+
+
+rustFrontendService:
+  image:
+    repository: 'local'
+    tag: 'rust-frontend-service'
+  replicaCount: 1
+  resources:
+    limits:
+      cpu: '2000m'
+      memory: '1Gi'
+    requests:
+      cpu: '1000m'
+      memory: '512Mi'
+
 sysdb:
   image:
     repository: 'local'

@@ -25,6 +25,7 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chromadb::client::{ChromaAuthMethod, ChromaClientOptions, ChromaTokenHeader};
+use chromadb::collection::GetResult;
 use chromadb::ChromaClient;
 use guacamole::combinators::*;
 use guacamole::{Guacamole, Zipf};
@@ -93,6 +94,8 @@ impl axum::response::IntoResponse for Error {
 
 #[derive(Debug)]
 pub struct Metrics {
+    /// The number of operations performed by chroma-load.
+    num_operations: Counter<u64>,
     /// The number of times an individual workload step was inhibited.  It will not be tracked as
     /// inactive or stepped.
     inhibited: Counter<u64>,
@@ -107,6 +110,68 @@ pub struct Metrics {
     query: Counter<u64>,
     /// The number of times a workload issued an upsert against a data set.
     upsert: Counter<u64>,
+    /// The number of times a workload failed.
+    failed: Counter<u64>,
+    /// The number of times a workload was rate-limited.
+    limited: Counter<u64>,
+    /// The collection is returning no results when it is susposed to return results.
+    no_results: Counter<u64>,
+    /// The latency of get operations.
+    get_latency: opentelemetry::metrics::Histogram<f64>,
+    /// The latency of query operations.
+    query_latency: opentelemetry::metrics::Histogram<f64>,
+}
+
+struct Stopwatch<'a>(
+    &'a opentelemetry::metrics::Histogram<f64>,
+    std::time::Instant,
+    Vec<KeyValue>,
+);
+
+impl<'a> Stopwatch<'a> {
+    fn new(
+        histogram: &'a opentelemetry::metrics::Histogram<f64>,
+        attributes: Vec<KeyValue>,
+    ) -> Self {
+        Self(histogram, std::time::Instant::now(), attributes)
+    }
+}
+
+impl Drop for Stopwatch<'_> {
+    fn drop(&mut self) {
+        let elapsed = self.1.elapsed().as_micros() as f64;
+        self.0.record(elapsed, &self.2);
+    }
+}
+
+///////////////////////////////////////////// ZipfCache ////////////////////////////////////////////
+
+/// Gray's zipf algorithm is a bit slow to initialize, so we cache zipf distributions that we
+/// create with more than 1k cardinality.
+struct ZipfCache {
+    #[allow(clippy::type_complexity)]
+    cache: Mutex<Vec<(u64, f64, Zipf)>>,
+}
+
+static ZIPF_CACHE: ZipfCache = ZipfCache {
+    cache: Mutex::new(vec![]),
+};
+
+impl ZipfCache {
+    // NOTE(rescrv):  I allow this wrong convention because it's the same name as the method on
+    // Zipf.
+    #[allow(clippy::wrong_self_convention)]
+    fn from_theta(&self, cardinality: u64, theta: f64) -> Zipf {
+        let mut cache = ZIPF_CACHE.cache.lock().unwrap();
+        for (n, t, zipf) in cache.iter() {
+            if *n == cardinality && (*t - theta).abs() < 0.0001 {
+                return zipf.clone();
+            }
+        }
+        let zipf = Zipf::from_theta(cardinality, theta);
+        cache.push((cardinality, theta, zipf.clone()));
+        zipf
+    }
 }
 
 ////////////////////////////////////////////// client //////////////////////////////////////////////
@@ -129,7 +194,6 @@ pub async fn client_for_url(url: String) -> ChromaClient {
                 header: ChromaTokenHeader::XChromaToken,
             },
             database: "hf-tiny-stories".to_string(),
-            connections: 32,
         })
         .await
         .unwrap()
@@ -138,7 +202,6 @@ pub async fn client_for_url(url: String) -> ChromaClient {
             url: Some(url),
             auth: ChromaAuthMethod::None,
             database: "hf-tiny-stories".to_string(),
-            connections: 32,
         })
         .await
         .unwrap()
@@ -164,6 +227,19 @@ pub trait DataSet: std::fmt::Debug + Send + Sync {
     /// requesting JSON.
     fn json(&self) -> serde_json::Value;
 
+    /// The number of documents in the data set.
+    fn cardinality(&self) -> usize;
+
+    /// Get documents by key.  This is used when one workload references another.  Return None to
+    /// indicate the data set does not support referencing by index.
+    async fn get_by_key(
+        &self,
+        _: &ChromaClient,
+        _: &[&str],
+    ) -> Result<Option<GetResult>, Box<dyn std::error::Error + Send>> {
+        Ok(None)
+    }
+
     /// Get documents from the data set.
     ///
     /// The semantics of this call is that it should loosely translate to a non-vector query,
@@ -173,7 +249,7 @@ pub trait DataSet: std::fmt::Debug + Send + Sync {
         client: &ChromaClient,
         gq: GetQuery,
         guac: &mut Guacamole,
-    ) -> Result<(), Box<dyn std::error::Error>>;
+    ) -> Result<(), Box<dyn std::error::Error + Send>>;
 
     /// Query documents from the data set.
     ///
@@ -184,7 +260,7 @@ pub trait DataSet: std::fmt::Debug + Send + Sync {
         client: &ChromaClient,
         vq: QueryQuery,
         guac: &mut Guacamole,
-    ) -> Result<(), Box<dyn std::error::Error>>;
+    ) -> Result<(), Box<dyn std::error::Error + Send>>;
 
     /// Upsert documents into the data set.
     ///
@@ -195,7 +271,7 @@ pub trait DataSet: std::fmt::Debug + Send + Sync {
         client: &ChromaClient,
         uq: UpsertQuery,
         guac: &mut Guacamole,
-    ) -> Result<(), Box<dyn std::error::Error>>;
+    ) -> Result<(), Box<dyn std::error::Error + Send>>;
 }
 
 /////////////////////////////////////////// Distribution ///////////////////////////////////////////
@@ -220,8 +296,8 @@ impl Distribution {
             Distribution::Constant(n) => *n,
             Distribution::Exponential(rate) => poisson(*rate)(guac).ceil() as usize,
             Distribution::Uniform(min, max) => uniform(*min, *max)(guac),
-            Distribution::Zipf(n, alpha) => {
-                let z = Zipf::from_alpha(*n, *alpha);
+            Distribution::Zipf(n, theta) => {
+                let z = ZIPF_CACHE.from_theta(*n, *theta);
                 z.next(guac) as usize
             }
         }
@@ -256,6 +332,18 @@ pub enum Skew {
     /// skewed.  Try 0.9 and add nines for skew.
     #[serde(rename = "zipf")]
     Zipf { theta: f64 },
+}
+
+impl Skew {
+    pub fn sample(&self, guac: &mut Guacamole, cardinality: usize) -> usize {
+        match self {
+            Skew::Uniform => uniform(0, cardinality)(guac),
+            Skew::Zipf { theta } => {
+                let z = ZIPF_CACHE.from_theta(cardinality as u64, *theta);
+                z.next(guac) as usize
+            }
+        }
+    }
 }
 
 impl Eq for Skew {}
@@ -339,7 +427,7 @@ impl WhereMixin {
                 let word = match skew {
                     Skew::Uniform => WORDS[uniform(0, WORDS.len() as u64)(guac) as usize],
                     Skew::Zipf { theta } => {
-                        let z = Zipf::from_alpha(WORDS.len() as u64, *theta);
+                        let z = ZIPF_CACHE.from_theta(WORDS.len() as u64, *theta);
                         WORDS[z.next(guac) as usize]
                     }
                 };
@@ -423,6 +511,32 @@ pub enum KeySelector {
     Random(Skew),
 }
 
+impl KeySelector {
+    /// Select a key from the distribution.
+    pub fn select(&self, guac: &mut Guacamole, data_set: &dyn DataSet) -> String {
+        let index = match self {
+            KeySelector::Index(i) => *i,
+            KeySelector::Random(skew) => skew.sample(guac, data_set.cardinality()),
+        };
+        format!("{:0>16}", index)
+    }
+
+    /// Select a key from the distribution.
+    pub fn select_with_offset(
+        &self,
+        guac: &mut Guacamole,
+        data_set: &dyn DataSet,
+        offset: usize,
+    ) -> String {
+        let index = match self {
+            KeySelector::Index(i) => *i,
+            KeySelector::Random(skew) => skew.sample(guac, data_set.cardinality()),
+        };
+        let index = (index + offset) % data_set.cardinality();
+        format!("{:0>16}", index)
+    }
+}
+
 //////////////////////////////////////////// UpsertQuery ///////////////////////////////////////////
 
 /// An upsert query specifies an upsert operation in Chroma.
@@ -487,7 +601,7 @@ pub enum Workload {
 impl Workload {
     /// A human-readable description of the workload.
     pub fn description(&self) -> String {
-        serde_json::to_string_pretty(self).unwrap()
+        serde_json::to_string(self).unwrap()
     }
 
     /// Resolve named workload references to the actual workloads they reference.
@@ -522,7 +636,8 @@ impl Workload {
         metrics: &Metrics,
         data_set: &dyn DataSet,
         state: &mut WorkloadState,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+        done: &Arc<AtomicBool>,
+    ) -> Result<(), Box<dyn std::error::Error + Send>> {
         match self {
             Workload::Nop => {
                 tracing::info!("nop");
@@ -535,6 +650,13 @@ impl Workload {
                 )))
             }
             Workload::Get(get) => {
+                let _guard = Stopwatch::new(
+                    &metrics.get_latency,
+                    vec![KeyValue::new(
+                        Key::from_static_str("data_set"),
+                        Value::from(data_set.name()),
+                    )],
+                );
                 metrics.get.add(
                     1,
                     &[KeyValue::new(
@@ -548,6 +670,13 @@ impl Workload {
                     .await
             }
             Workload::Query(query) => {
+                let _guard = Stopwatch::new(
+                    &metrics.query_latency,
+                    vec![KeyValue::new(
+                        Key::from_static_str("data_set"),
+                        Value::from(data_set.name()),
+                    )],
+                );
                 metrics.query.add(
                     1,
                     &[KeyValue::new(
@@ -575,7 +704,8 @@ impl Workload {
                     }
                     if workload.is_active() {
                         if *p >= total {
-                            return Box::pin(workload.step(client, metrics, data_set, state)).await;
+                            return Box::pin(workload.step(client, metrics, data_set, state, done))
+                                .await;
                         }
                         total -= *p;
                     }
@@ -585,9 +715,13 @@ impl Workload {
                 )))
             }
             Workload::Delay { after: _, wrap } => {
-                Box::pin(wrap.step(client, metrics, data_set, state)).await
+                Box::pin(wrap.step(client, metrics, data_set, state, done)).await
             }
             Workload::Load => {
+                if (state.seq_no * 100) >= data_set.cardinality() as u64 {
+                    done.store(true, std::sync::atomic::Ordering::Relaxed);
+                    return Ok(());
+                }
                 metrics.upsert.add(
                     1,
                     &[KeyValue::new(
@@ -599,7 +733,7 @@ impl Workload {
                     .upsert(
                         client,
                         UpsertQuery {
-                            key: KeySelector::Index(state.seq_no as usize),
+                            key: KeySelector::Index((state.seq_no * 100) as usize),
                             batch_size: 100,
                             // Associativity is the ratio of documents in a cluster to documents
                             // written by the workload.  It is ignored for load.
@@ -934,19 +1068,31 @@ impl LoadService {
     /// Create a new load service from the given data sets and workloads.
     pub fn new(data_sets: Vec<Arc<dyn DataSet>>, workloads: HashMap<String, Workload>) -> Self {
         let meter = global::meter("chroma");
+        let num_operations = meter.u64_counter("num_operations").build();
         let inhibited = meter.u64_counter("inhibited").build();
         let inactive = meter.u64_counter("inactive").build();
         let step = meter.u64_counter("step").build();
         let get = meter.u64_counter("get").build();
         let query = meter.u64_counter("query").build();
         let upsert = meter.u64_counter("upsert").build();
+        let failed = meter.u64_counter("failed").build();
+        let limited = meter.u64_counter("limited").build();
+        let no_results = meter.u64_counter("no_results").build();
+        let get_latency = meter.f64_histogram("get_latency").build();
+        let query_latency = meter.f64_histogram("query_latency").build();
         let metrics = Metrics {
+            num_operations,
             inhibited,
             inactive,
             step,
             get,
             query,
             upsert,
+            failed,
+            limited,
+            no_results,
+            get_latency,
+            query_latency,
         };
         LoadService {
             metrics,
@@ -1118,11 +1264,28 @@ impl LoadService {
         let _ = tx
             .send(tokio::spawn(async move { Ok::<(), Error>(()) }))
             .await;
+        let this = Arc::clone(&self);
+        let data_set = Arc::clone(&spec.data_set);
         let reaper = tokio::spawn(async move {
             while let Some(task) = rx.recv().await {
                 if let Err(err) = task.await.unwrap() {
                     if !format!("{err:?}").contains("429") {
+                        this.metrics.failed.add(
+                            1,
+                            &[KeyValue::new(
+                                Key::from_static_str("data_set"),
+                                Value::from(data_set.name()),
+                            )],
+                        );
                         tracing::error!("workload task failed: {err:?}");
+                    } else {
+                        this.metrics.limited.add(
+                            1,
+                            &[KeyValue::new(
+                                Key::from_static_str("data_set"),
+                                Value::from(data_set.name()),
+                            )],
+                        );
                     }
                 }
             }
@@ -1185,7 +1348,9 @@ impl LoadService {
                 let data_set = Arc::clone(&spec.data_set);
                 let guac = Guacamole::new(any(&mut guac));
                 let mut state = WorkloadState { seq_no, guac };
+                let done = Arc::clone(&done);
                 let fut = async move {
+                    this.metrics.num_operations.add(1, &[]);
                     this.metrics.step.add(
                         1,
                         &[KeyValue::new(
@@ -1193,14 +1358,33 @@ impl LoadService {
                             Value::from(data_set.name()),
                         )],
                     );
-                    workload
-                        .step(&client, &this.metrics, &*data_set, &mut state)
+                    match workload
+                        .step(&client, &this.metrics, &*data_set, &mut state, &done)
                         .await
                         .map_err(|err| Error::FailWorkload(err.to_string()))
+                    {
+                        Ok(()) => Ok(()),
+                        Err(err) => {
+                            if err.to_string().contains("invalid request: No results") {
+                                this.metrics.no_results.add(
+                                    1,
+                                    &[KeyValue::new(
+                                        Key::from_static_str("data_set"),
+                                        Value::from(data_set.name()),
+                                    )],
+                                );
+                                Ok(())
+                            } else {
+                                Err(err)
+                            }
+                        }
+                    }
                 };
                 tx.send(tokio::spawn(fut)).await.unwrap();
             }
         }
+        // Not an error, just needs to show up in stdout.
+        tracing::error!("workload done: {}/{}", spec.name, spec.description());
         drop(tx);
         reaper.await.unwrap();
     }
@@ -1303,10 +1487,12 @@ This is a load generator service for Chroma.  This API is intended to be self-do
 
 It consists of endpoints, data sets, and workloads.  An endpoint is an exposed HTTP endpoint for
 controlling chroma-load.  A workload specifies a mix of operations to perform.  A data set specifies
-how to perform those operations.
+how to perform those operations against a Chroma collection.
 
 # Endpoints
 GET /           this document, available in "Accept: text/plain" and "Accept: application/json".
+GET /data-sets  a list of data sets, available in "Accept: text/plain" and "Accept: application/json".
+GET /workloads  a list of workloads, available in "Accept: text/plain" and "Accept: application/json".
 POST /start     start a job, requires a JSON body with the following fields:
                 - name: the name of the job; this is a human-readable identifier and can duplicate
                 - data_set: the name of the data set to use; see / for a list of data sets.
@@ -1318,41 +1504,87 @@ POST /stop      stop a job, requires a JSON body with the following fields:
 POST /inhibit   inhibit load generation.
 POST /uninhibit stop inhibiting load generation.
 
-# Data Sets
-        "#
+At a Glance
+-----------
+"#
+            .to_string();
+            if state.load.is_inhibited() {
+                output.push_str("Load generation is inhibited.\n");
+            } else {
+                for running in state.load.status() {
+                    output.push_str(&format!("## {}\n", running.name));
+                    output.push_str(&format!(
+                        "Workload: {}\n",
+                        running.workload.description().trim()
+                    ));
+                    output.push_str(&format!("Data Set: {}\n", running.data_set));
+                    output.push_str(&format!("Expires: {}\n", running.expires));
+                    output.push_str(&format!("Target Throughput: {}\n", running.throughput));
+                }
+                if state.load.status().is_empty() {
+                    output.push_str("No workloads are running.\n");
+                }
+            }
+            output.into_response()
+        }
+        Some(_) => StatusCode::BAD_REQUEST.into_response(),
+    }
+}
+
+async fn data_sets(headers: HeaderMap, State(state): State<AppState>) -> impl IntoResponse {
+    match headers.get(ACCEPT).map(|x| x.as_bytes()) {
+        Some(b"application/json") => {
+            let data_sets = state
+                .load
+                .data_sets()
+                .iter()
+                .map(|x| rest::Description::from(&**x))
+                .collect::<Vec<_>>();
+            Json(data_sets).into_response()
+        }
+        Some(b"*/*") | Some(b"text/plain") | None => {
+            let mut output = r#"data sets
+=========
+"#
             .to_string();
             for data_set in state.load.data_sets().iter() {
-                output.push_str(&format!("\n## {}\n", data_set.name()));
-                output.push_str(data_set.description().trim());
-                output.push('\n');
+                output.push_str(&format!(
+                    "{}: {}\n",
+                    data_set.name(),
+                    data_set.description().trim()
+                ));
             }
             if state.load.data_sets().is_empty() {
                 output.push_str("\nNo data sets are available.\n");
             }
+            output.into_response()
+        }
+        Some(_) => StatusCode::BAD_REQUEST.into_response(),
+    }
+}
 
-            output.push_str("\n# Workloads\n");
+async fn workloads(headers: HeaderMap, State(state): State<AppState>) -> impl IntoResponse {
+    match headers.get(ACCEPT).map(|x| x.as_bytes()) {
+        Some(b"application/json") => {
+            let workloads = state
+                .load
+                .workloads()
+                .iter()
+                // SAFETY(rescrv): x.1 is always serializable to JSON.
+                .map(|x| serde_json::to_value(x.1).unwrap())
+                .collect::<Vec<_>>();
+            Json(workloads).into_response()
+        }
+        Some(b"*/*") | Some(b"text/plain") | None => {
+            let mut output = r#"workloads
+=========
+"#
+            .to_string();
             for (name, workload) in state.load.workloads().iter() {
-                output.push_str(&format!("\n## {}\n", name));
-                output.push_str(workload.description().trim());
-                output.push('\n');
+                output.push_str(&format!("{}: {}\n", name, workload.description().trim()));
             }
             if state.load.workloads().is_empty() {
                 output.push_str("\nNo workloads are available.\n");
-            }
-            output.push_str("\n# At a Glance\n");
-            if state.load.is_inhibited() {
-                output.push_str("\nLoad generation is inhibited.\n");
-            } else {
-                for running in state.load.status() {
-                    output.push_str(&format!("\n## {}\n", running.name));
-                    output.push_str(&format!("Workload: {:?}\n", running.workload));
-                    output.push_str(&format!("Data Set: {}\n", running.data_set));
-                    output.push_str(&format!("Expires: {}\n", running.expires));
-                    output.push_str(&format!("Throughput: {}\n", running.throughput));
-                }
-                if state.load.status().is_empty() {
-                    output.push_str("\nNo workloads are running.\n");
-                }
             }
             output.into_response()
         }
@@ -1413,6 +1645,8 @@ pub async fn entrypoint() {
     };
     let app = Router::new()
         .route("/", get(readme))
+        .route("/data-sets", get(data_sets))
+        .route("/workloads", get(workloads))
         .route("/start", post(start))
         .route("/stop", post(stop))
         .route("/inhibit", post(inhibit))
@@ -1602,5 +1836,22 @@ mod tests {
             assert_eq!(expected, harness.running[0]);
         }
         std::fs::remove_file(TEST_PATH).ok();
+    }
+
+    #[test]
+    fn key_selector() {
+        let key = KeySelector::Index(42);
+        let mut guac = Guacamole::new(0);
+        let data_set = data_sets::from_json(&serde_json::json!({
+            "tiny_stories": {
+                "name": "stories1",
+                "model": data_sets::ALL_MINILM_L6_V2,
+                "size": 100_000,
+            }
+        }));
+        assert_eq!(
+            "0000000000000042",
+            key.select(&mut guac, &*data_set.unwrap())
+        );
     }
 }

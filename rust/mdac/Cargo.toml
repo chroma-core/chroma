@@ -1,0 +1,13 @@
+[package]
+name = "mdac"
+version = "0.1.0"
+edition = "2021"
+description = "Multi-dimensional admission control for the Chroma AI retrieval system (0.1.0 is a placeholder)."
+license = "Apache-2.0"
+
+[dependencies]
+serde.workspace = true
+siphasher = "1.0.1"
+
+[dev-dependencies]
+tokio = { version = "1.0", features = ["full"] }

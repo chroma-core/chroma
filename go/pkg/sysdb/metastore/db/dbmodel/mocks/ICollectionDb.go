@@ -12,6 +12,34 @@ type ICollectionDb struct {
 	mock.Mock
 }
 
+// CountCollections provides a mock function with given fields: tenantID, databaseName
+func (_m *ICollectionDb) CountCollections(tenantID string, databaseName *string) (uint64, error) {
+	ret := _m.Called(tenantID, databaseName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CountCollections")
+	}
+
+	var r0 uint64
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string, *string) (uint64, error)); ok {
+		return rf(tenantID, databaseName)
+	}
+	if rf, ok := ret.Get(0).(func(string, *string) uint64); ok {
+		r0 = rf(tenantID, databaseName)
+	} else {
+		r0 = ret.Get(0).(uint64)
+	}
+
+	if rf, ok := ret.Get(1).(func(string, *string) error); ok {
+		r1 = rf(tenantID, databaseName)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // DeleteAll provides a mock function with given fields:
 func (_m *ICollectionDb) DeleteAll() error {
 	ret := _m.Called()
@@ -81,6 +109,34 @@ func (_m *ICollectionDb) GetCollectionEntry(collectionID *string, databaseName *
 
 	if rf, ok := ret.Get(1).(func(*string, *string) error); ok {
 		r1 = rf(collectionID, databaseName)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// GetCollectionSize provides a mock function with given fields: collectionID
+func (_m *ICollectionDb) GetCollectionSize(collectionID string) (uint64, error) {
+	ret := _m.Called(collectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetCollectionSize")
+	}
+
+	var r0 uint64
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (uint64, error)); ok {
+		return rf(collectionID)
+	}
+	if rf, ok := ret.Get(0).(func(string) uint64); ok {
+		r0 = rf(collectionID)
+	} else {
+		r0 = ret.Get(0).(uint64)
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(collectionID)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -166,6 +222,36 @@ func (_m *ICollectionDb) Insert(in *dbmodel.Collection) error {
 	return r0
 }
 
+// ListCollectionsToGc provides a mock function with given fields:
+func (_m *ICollectionDb) ListCollectionsToGc() ([]*dbmodel.CollectionToGc, error) {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListCollectionsToGc")
+	}
+
+	var r0 []*dbmodel.CollectionToGc
+	var r1 error
+	if rf, ok := ret.Get(0).(func() ([]*dbmodel.CollectionToGc, error)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() []*dbmodel.CollectionToGc); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*dbmodel.CollectionToGc)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // Update provides a mock function with given fields: in
 func (_m *ICollectionDb) Update(in *dbmodel.Collection) error {
 	ret := _m.Called(in)
@@ -184,27 +270,83 @@ func (_m *ICollectionDb) Update(in *dbmodel.Collection) error {
 	return r0
 }
 
-// UpdateLogPositionAndVersion provides a mock function with given fields: collectionID, logPosition, currentCollectionVersion
-func (_m *ICollectionDb) UpdateLogPositionAndVersion(collectionID string, logPosition int64, currentCollectionVersion int32) (int32, error) {
-	ret := _m.Called(collectionID, logPosition, currentCollectionVersion)
+// UpdateLogPositionAndVersionInfo provides a mock function with given fields: collectionID, logPosition, currentCollectionVersion, currentVersionFileName, newCollectionVersion, newVersionFileName
+func (_m *ICollectionDb) UpdateLogPositionAndVersionInfo(collectionID string, logPosition int64, currentCollectionVersion int32, currentVersionFileName string, newCollectionVersion int32, newVersionFileName string) (int64, error) {
+	ret := _m.Called(collectionID, logPosition, currentCollectionVersion, currentVersionFileName, newCollectionVersion, newVersionFileName)
 
 	if len(ret) == 0 {
-		panic("no return value specified for UpdateLogPositionAndVersion")
+		panic("no return value specified for UpdateLogPositionAndVersionInfo")
+	}
+
+	var r0 int64
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string, int64, int32, string, int32, string) (int64, error)); ok {
+		return rf(collectionID, logPosition, currentCollectionVersion, currentVersionFileName, newCollectionVersion, newVersionFileName)
+	}
+	if rf, ok := ret.Get(0).(func(string, int64, int32, string, int32, string) int64); ok {
+		r0 = rf(collectionID, logPosition, currentCollectionVersion, currentVersionFileName, newCollectionVersion, newVersionFileName)
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+
+	if rf, ok := ret.Get(1).(func(string, int64, int32, string, int32, string) error); ok {
+		r1 = rf(collectionID, logPosition, currentCollectionVersion, currentVersionFileName, newCollectionVersion, newVersionFileName)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// UpdateLogPositionVersionAndTotalRecords provides a mock function with given fields: collectionID, logPosition, currentCollectionVersion, totalRecordsPostCompaction
+func (_m *ICollectionDb) UpdateLogPositionVersionAndTotalRecords(collectionID string, logPosition int64, currentCollectionVersion int32, totalRecordsPostCompaction uint64) (int32, error) {
+	ret := _m.Called(collectionID, logPosition, currentCollectionVersion, totalRecordsPostCompaction)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateLogPositionVersionAndTotalRecords")
 	}
 
 	var r0 int32
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string, int64, int32) (int32, error)); ok {
-		return rf(collectionID, logPosition, currentCollectionVersion)
+	if rf, ok := ret.Get(0).(func(string, int64, int32, uint64) (int32, error)); ok {
+		return rf(collectionID, logPosition, currentCollectionVersion, totalRecordsPostCompaction)
 	}
-	if rf, ok := ret.Get(0).(func(string, int64, int32) int32); ok {
-		r0 = rf(collectionID, logPosition, currentCollectionVersion)
+	if rf, ok := ret.Get(0).(func(string, int64, int32, uint64) int32); ok {
+		r0 = rf(collectionID, logPosition, currentCollectionVersion, totalRecordsPostCompaction)
 	} else {
 		r0 = ret.Get(0).(int32)
 	}
 
-	if rf, ok := ret.Get(1).(func(string, int64, int32) error); ok {
-		r1 = rf(collectionID, logPosition, currentCollectionVersion)
+	if rf, ok := ret.Get(1).(func(string, int64, int32, uint64) error); ok {
+		r1 = rf(collectionID, logPosition, currentCollectionVersion, totalRecordsPostCompaction)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// UpdateVersionFileName provides a mock function with given fields: collectionID, existingVersionFileName, newVersionFileName
+func (_m *ICollectionDb) UpdateVersionFileName(collectionID string, existingVersionFileName string, newVersionFileName string) (int64, error) {
+	ret := _m.Called(collectionID, existingVersionFileName, newVersionFileName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateVersionFileName")
+	}
+
+	var r0 int64
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string, string, string) (int64, error)); ok {
+		return rf(collectionID, existingVersionFileName, newVersionFileName)
+	}
+	if rf, ok := ret.Get(0).(func(string, string, string) int64); ok {
+		r0 = rf(collectionID, existingVersionFileName, newVersionFileName)
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+
+	if rf, ok := ret.Get(1).(func(string, string, string) error); ok {
+		r1 = rf(collectionID, existingVersionFileName, newVersionFileName)
 	} else {
 		r1 = ret.Error(1)
 	}

@@ -35,6 +35,11 @@ class SysDB(Component):
         pass
 
     @abstractmethod
+    def delete_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+        """Delete a database."""
+        pass
+
+    @abstractmethod
     def list_databases(
         self,
         limit: Optional[int] = None,
@@ -140,6 +145,15 @@ class SysDB(Component):
         pass
 
     @abstractmethod
+    def count_collections(
+        self,
+        tenant: str = DEFAULT_TENANT,
+        database: Optional[str] = None,
+    ) -> int:
+        """Gets the number of collections for the (tenant, database) combination."""
+        pass
+
+    @abstractmethod
     def get_collection_with_segments(
         self, collection_id: UUID
     ) -> CollectionAndSegments:
@@ -159,4 +173,9 @@ class SysDB(Component):
         """Update a collection. Unspecified fields will be left unchanged. For metadata,
         keys with None values will be removed and keys not present in the UpdateMetadata
         dict will be left unchanged."""
+        pass
+
+    @abstractmethod
+    def get_collection_size(self, id: UUID) -> int:
+        """Returns the number of records in a collection."""
         pass

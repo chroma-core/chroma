@@ -62,11 +62,13 @@ class FastAPI(BaseHTTPClient, ServerAPI):
 
         self._session = httpx.Client(timeout=None)
 
-        self._header = system.settings.chroma_server_headers
-        if self._header is not None:
-            self._session.headers.update(self._header)
+        self._header = system.settings.chroma_server_headers or {}
+        self._header["Content-Type"] = "application/json"
+
         if self._settings.chroma_server_ssl_verify is not None:
             self._session = httpx.Client(verify=self._settings.chroma_server_ssl_verify)
+        if self._header is not None:
+            self._session.headers.update(self._header)
 
         if system.settings.chroma_client_auth_provider:
             self._auth_provider = self.require(ClientAuthProvider)
@@ -97,6 +99,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         resp_json = self._make_request("get", "/heartbeat")
         return int(resp_json["nanosecond heartbeat"])
 
+    # Migrated to rust in distributed.
     @trace_method("FastAPI.create_database", OpenTelemetryGranularity.OPERATION)
     @override
     def create_database(
@@ -111,6 +114,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             json={"name": name},
         )
 
+    # Migrated to rust in distributed.
     @trace_method("FastAPI.get_database", OpenTelemetryGranularity.OPERATION)
     @override
     def get_database(
@@ -125,6 +129,19 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         )
         return Database(
             id=resp_json["id"], name=resp_json["name"], tenant=resp_json["tenant"]
+        )
+
+    @trace_method("FastAPI.delete_database", OpenTelemetryGranularity.OPERATION)
+    @override
+    def delete_database(
+        self,
+        name: str,
+        tenant: str = DEFAULT_TENANT,
+    ) -> None:
+        """Deletes a database"""
+        self._make_request(
+            "delete",
+            f"/tenants/{tenant}/databases/{name}",
         )
 
     @trace_method("FastAPI.list_databases", OpenTelemetryGranularity.OPERATION)

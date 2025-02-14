@@ -1,6 +1,4 @@
 import {
-  afterAll,
-  beforeAll,
   beforeEach,
   describe,
   expect,
@@ -10,10 +8,8 @@ import { IncludeEnum } from "../src/types";
 import { EMBEDDINGS, IDS, METADATAS, DOCUMENTS } from "./data";
 
 import { IEmbeddingFunction } from "../src/embeddings/IEmbeddingFunction";
-import { InvalidCollectionError } from "../src/Errors";
-import { StartedTestContainer } from "testcontainers";
+import { ChromaNotFoundError } from "../src/Errors";
 import { ChromaClient } from "../src/ChromaClient";
-import { startChromaContainer } from "./startChromaContainer";
 
 class TestEmbeddingFunction implements IEmbeddingFunction {
   constructor() {}
@@ -237,6 +233,6 @@ describe("query records", () => {
     await client.deleteCollection({ name: "test" });
     await expect(async () => {
       await collection.query({ queryEmbeddings: [1, 2, 3] });
-    }).rejects.toThrow(InvalidCollectionError);
+    }).rejects.toThrow(ChromaNotFoundError);
   });
 });

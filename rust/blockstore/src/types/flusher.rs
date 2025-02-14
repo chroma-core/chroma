@@ -31,4 +31,11 @@ impl BlockfileFlusher {
             BlockfileFlusher::ArrowBlockfileFlusher(flusher) => flusher.id(),
         }
     }
+
+    pub fn count(&self) -> u64 {
+        match self {
+            BlockfileFlusher::MemoryBlockfileFlusher(_) => unimplemented!(), // no op
+            BlockfileFlusher::ArrowBlockfileFlusher(flusher) => flusher.count(),
+        }
+    }
 }

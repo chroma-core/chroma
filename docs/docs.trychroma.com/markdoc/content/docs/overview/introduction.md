@@ -44,7 +44,7 @@ In JavaScript, use the Chroma JS/TS Client to connect to a Chroma server. Instal
 
 {% Tab label="yarn" %}
 ```terminal
-yarn install chromadb chromadb-default-embed 
+yarn add chromadb chromadb-default-embed 
 ```
 {% /Tab %}
 
@@ -84,6 +84,7 @@ Continue with the full [getting started guide](./getting-started).
 | PHP           | [from @CodeWithKyrian](https://github.com/CodeWithKyrian/chromadb-php)                                                   |
 | PHP (Laravel) | [from @HelgeSverre](https://github.com/helgeSverre/chromadb)                                                             |
 | Clojure       | [from @levand](https://github.com/levand/clojure-chroma-client)                                                          |
+| R             | [from @cynkra](https://cynkra.github.io/rchroma/)                                                                       |
 
 
 {% br %}{% /br %}

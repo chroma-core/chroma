@@ -106,9 +106,12 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             loop_hash = 0
 
         if loop_hash not in self._clients:
+            headers = (self._settings.chroma_server_headers or {}).copy()
+            headers["Content-Type"] = "application/json"
+
             self._clients[loop_hash] = httpx.AsyncClient(
                 timeout=None,
-                headers=self._settings.chroma_server_headers,
+                headers=headers,
                 verify=self._settings.chroma_server_ssl_verify or False,
             )
 
@@ -166,6 +169,18 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
 
         return Database(
             id=response["id"], name=response["name"], tenant=response["tenant"]
+        )
+
+    @trace_method("AsyncFastAPI.delete_database", OpenTelemetryGranularity.OPERATION)
+    @override
+    async def delete_database(
+        self,
+        name: str,
+        tenant: str = DEFAULT_TENANT,
+    ) -> None:
+        await self._make_request(
+            "delete",
+            f"/tenants/{tenant}/databases/{name}",
         )
 
     @trace_method("AsyncFastAPI.list_databases", OpenTelemetryGranularity.OPERATION)

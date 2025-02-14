@@ -38,17 +38,26 @@ import numpy as np
 CreatePersistAPI = Callable[[], ServerAPI]
 
 configurations = [
-    Settings(
-        chroma_api_impl="chromadb.api.segment.SegmentAPI",
-        chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
-        chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
-        chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
-        chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
-        allow_reset=True,
-        is_persistent=True,
-        persist_directory=tempfile.mkdtemp(),
-    ),
-]
+        Settings(
+            chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
+            chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
+            allow_reset=True,
+            is_persistent=True,
+        )
+    ] if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ else [
+        Settings(
+            chroma_api_impl="chromadb.api.segment.SegmentAPI",
+            chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
+            allow_reset=True,
+            is_persistent=True,
+        ),
+    ]
 
 
 @pytest.fixture(scope="module", params=configurations)
@@ -453,7 +462,7 @@ def test_batch_size_less_than_sync_with_duplicate_adds_results_in_skipped_seq_id
     state = PersistEmbeddingsStateMachine(settings=settings, client=client)
     state.initialize(
         collection=strategies.Collection(
-            name="JqzMs4pPm14c\n",
+            name="JqzMs4pPm14c",
             metadata={
                 "hnsw:construction_ef": 128,
                 "hnsw:search_ef": 128,

@@ -37,6 +37,7 @@ func init() {
 	Cmd.Flags().StringVar(&conf.DBConfig.Username, "username", "chroma", "MetaTable username")
 	Cmd.Flags().StringVar(&conf.DBConfig.Password, "password", "chroma", "MetaTable password")
 	Cmd.Flags().StringVar(&conf.DBConfig.Address, "db-address", "postgres", "MetaTable db address")
+	Cmd.Flags().StringVar(&conf.DBConfig.ReadAddress, "read-db-address", "postgres", "MetaTable db read only address")
 	Cmd.Flags().IntVar(&conf.DBConfig.Port, "db-port", 5432, "MetaTable db port")
 	Cmd.Flags().StringVar(&conf.DBConfig.DBName, "db-name", "sysdb", "MetaTable db name")
 	Cmd.Flags().IntVar(&conf.DBConfig.MaxIdleConns, "max-idle-conns", 10, "MetaTable max idle connections")
@@ -62,6 +63,11 @@ func init() {
 	// Compaction service Memberlist
 	Cmd.Flags().StringVar(&conf.CompactionServiceMemberlistName, "compaction-memberlist-name", "compaction-service-memberlist", "Compaction memberlist name")
 	Cmd.Flags().StringVar(&conf.CompactionServicePodLabel, "compaction-pod-label", "compaction-service", "Compaction pod label")
+
+	// Block store provider
+	Cmd.Flags().StringVar(&conf.BlockStoreProvider, "block-store-provider", "none", "Block store provider")
+	// Version file
+	Cmd.Flags().BoolVar(&conf.VersionFileEnabled, "version-file-enabled", false, "Enable version file")
 }
 
 func exec(*cobra.Command, []string) {

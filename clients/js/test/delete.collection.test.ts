@@ -1,16 +1,12 @@
 import {
-  afterAll,
-  beforeAll,
   beforeEach,
   describe,
   expect,
   test,
 } from "@jest/globals";
 import { EMBEDDINGS, IDS, METADATAS } from "./data";
-import { InvalidCollectionError } from "../src/Errors";
-import { StartedTestContainer } from "testcontainers";
 import { ChromaClient } from "../src/ChromaClient";
-import { startChromaContainer } from "./startChromaContainer";
+import { ChromaNotFoundError } from "../src/Errors";
 
 describe("delete collection", () => {
   // connects to the unauthenticated chroma instance started in
@@ -49,6 +45,6 @@ describe("delete collection", () => {
     await client.deleteCollection({ name: "test" });
     await expect(async () => {
       await collection.delete({ where: { test: "test1" } });
-    }).rejects.toThrow(InvalidCollectionError);
+    }).rejects.toThrow(ChromaNotFoundError);
   });
 });
