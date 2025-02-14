@@ -16,13 +16,13 @@ RUN curl -OL https://github.com/protocolbuffers/protobuf/releases/download/v25.1
     && unzip -o $PROTOC_ZIP -d /usr/local 'include/*' \
     && rm -f $PROTOC_ZIP
 
+# Install python for pyo3
+RUN apt-get update && apt-get install -y python3 python3-pip && rm -rf /var/lib/apt/lists/*
+
 COPY Cargo.toml Cargo.toml
 COPY Cargo.lock Cargo.lock
 COPY idl/ idl/
 COPY rust/ rust/
-
-# Install python for pyo3
-RUN apt-get update && apt-get install -y python3 python3-pip && rm -rf /var/lib/apt/lists/*
 
 FROM builder AS query_service_builder
 # sharing=locked is necessary to prevent cargo build from running concurrently on the same mounted directory
