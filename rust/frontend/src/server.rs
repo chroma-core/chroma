@@ -157,15 +157,19 @@ impl FrontendServer {
         let circuit_breaker_config = server.config.circuit_breaker.clone();
 
         // Build an OpenApiRouter with only the healthcheck endpoint
-        let (docs_router, docs_api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
-            .routes(routes!(healthcheck))
-            .split_for_parts();
+        let (docs_router, docs_api) =
+            OpenApiRouter::with_openapi(ApiDoc::openapi()).split_for_parts();
 
         let docs_router = docs_router.merge(SwaggerUi::new("/docs").url("/openapi.json", docs_api));
 
         let app = Router::new()
             // `GET /` goes to `root`
-            .route("/api/v1/*any", get(v1_deprecation_notice).put(v1_deprecation_notice).patch(v1_deprecation_notice).delete(v1_deprecation_notice).head(v1_deprecation_notice).options(v1_deprecation_notice))
+            .route("/api/v1/{*any}", get(v1_deprecation_notice)
+                                     .put(v1_deprecation_notice)
+                                     .patch(v1_deprecation_notice)
+                                     .delete(v1_deprecation_notice)
+                                     .head(v1_deprecation_notice)
+                                     .options(v1_deprecation_notice))
             .route("/api/v2/healthcheck", get(healthcheck))
             .route("/api/v2/heartbeat", get(heartbeat))
             .route("/api/v2/pre-flight-checks", get(pre_flight_checks))
@@ -173,50 +177,49 @@ impl FrontendServer {
             .route("/api/v2/version", get(version))
             .route("/api/v2/auth/identity", get(get_user_identity))
             .route("/api/v2/tenants", post(create_tenant))
-            .route("/api/v2/tenants/:tenant_name", get(get_tenant))
-            .route("/api/v2/tenants/:tenant_id/databases", get(list_databases).post(create_database))
-            .route("/api/v2/tenants/:tenant_id/databases/:name", get(get_database).delete(delete_database))
+            .route("/api/v2/tenants/{tenant_name}", get(get_tenant))
+            .route("/api/v2/tenants/{tenant_id}/databases", get(list_databases).post(create_database))
+            .route("/api/v2/tenants/{tenant_id}/databases/{name}", get(get_database).delete(delete_database))
             .route(
-                "/api/v2/tenants/:tenant_id/databases/:database_name/collections",
+                "/api/v2/tenants/{tenant_id}/databases/{database_name}/collections",
                post(create_collection).get(list_collections),
             )
             .route(
-                "/api/v2/tenants/:tenant_id/databases/:database_name/collections_count",
+                "/api/v2/tenants/{tenant_id}/databases/{database_name}/collections_count",
                 get(count_collections),
             )
             .route(
-                "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_id",
+                "/api/v2/tenants/{tenant_id}/databases/{database_name}/collections/{collection_id}",
                 get(get_collection).put(update_collection).delete(delete_collection),
             )
             .route(
-                "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/add",
+                "/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/add",
                 post(collection_add),
             )
             .route(
-                "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/update",
+                "/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/update",
                 post(collection_update),
             )
             .route(
-                "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/upsert",
+                "/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/upsert",
                 post(collection_upsert),
             )
             .route(
-                "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/delete",
+                "/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/delete",
                 post(collection_delete),
             )
             .route(
-                "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_id/count",
+                "/api/v2/tenants/{tenant_id}/databases/{database_name}/collections/{collection_id}/count",
                 get(collection_count),
             )
             .route(
-                "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_id/get",
+                "/api/v2/tenants/{tenant_id}/databases/{database_name}/collections/{collection_id}/get",
                 post(collection_get),
             )
             .route(
-                "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_id/query",
+                "/api/v2/tenants/{tenant_id}/databases/{database_name}/collections/{collection_id}/query",
                 post(collection_query),
             )
-            .route("/openapi.json", get(openapi))
             .merge(docs_router)
             .with_state(server)
             .layer(DefaultBodyLimit::max(6000000)); // TODO: add to server configuration
