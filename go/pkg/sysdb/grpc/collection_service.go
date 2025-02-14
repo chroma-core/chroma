@@ -148,6 +148,37 @@ func (s *Server) GetCollections(ctx context.Context, req *coordinatorpb.GetColle
 	return res, nil
 }
 
+func (s *Server) CountCollections(ctx context.Context, req *coordinatorpb.CountCollectionsRequest) (*coordinatorpb.CountCollectionsResponse, error) {
+	res := &coordinatorpb.CountCollectionsResponse{}
+	collection_count, err := s.coordinator.CountCollections(ctx, req.Tenant, req.Database)
+	if err != nil {
+		log.Error("CountCollections failed. ", zap.Error(err), zap.String("tenant", req.Tenant), zap.Stringp("database", req.Database))
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+	res.Count = collection_count
+	return res, nil
+}
+
+func (s *Server) GetCollectionSize(ctx context.Context, req *coordinatorpb.GetCollectionSizeRequest) (*coordinatorpb.GetCollectionSizeResponse, error) {
+	collectionID := req.Id
+
+	res := &coordinatorpb.GetCollectionSizeResponse{}
+
+	parsedCollectionID, err := types.ToUniqueID(&collectionID)
+	if err != nil {
+		log.Error("GetCollectionSize failed. collection id format error", zap.Error(err), zap.Stringp("collection_id", &collectionID))
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	total_records_post_compaction, err := s.coordinator.GetCollectionSize(ctx, parsedCollectionID)
+	if err != nil {
+		log.Error("GetCollectionSize failed. ", zap.Error(err), zap.Stringp("collection_id", &collectionID))
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+	res.TotalRecordsPostCompaction = total_records_post_compaction
+	return res, nil
+}
+
 func (s *Server) CheckCollections(ctx context.Context, req *coordinatorpb.CheckCollectionsRequest) (*coordinatorpb.CheckCollectionsResponse, error) {
 	res := &coordinatorpb.CheckCollectionsResponse{}
 	res.Deleted = make([]bool, len(req.CollectionIds))
@@ -295,6 +326,20 @@ func (s *Server) UpdateCollection(ctx context.Context, req *coordinatorpb.Update
 	return res, nil
 }
 
+func (s *Server) ListCollectionVersions(ctx context.Context, req *coordinatorpb.ListCollectionVersionsRequest) (*coordinatorpb.ListCollectionVersionsResponse, error) {
+	collectionID, err := types.ToUniqueID(&req.CollectionId)
+	if err != nil {
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+	versions, err := s.coordinator.ListCollectionVersions(ctx, collectionID, req.TenantId, req.MaxCount, *req.VersionsBefore, *req.VersionsAtOrAfter)
+	if err != nil {
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+	return &coordinatorpb.ListCollectionVersionsResponse{
+		Versions: versions,
+	}, nil
+}
+
 func (s *Server) FlushCollectionCompaction(ctx context.Context, req *coordinatorpb.FlushCollectionCompactionRequest) (*coordinatorpb.FlushCollectionCompactionResponse, error) {
 	_, err := json.Marshal(req)
 	if err != nil {
@@ -325,11 +370,12 @@ func (s *Server) FlushCollectionCompaction(ctx context.Context, req *coordinator
 		})
 	}
 	FlushCollectionCompaction := &model.FlushCollectionCompaction{
-		ID:                       collectionID,
-		TenantID:                 req.TenantId,
-		LogPosition:              req.LogPosition,
-		CurrentCollectionVersion: req.CollectionVersion,
-		FlushSegmentCompactions:  segmentCompactionInfo,
+		ID:                         collectionID,
+		TenantID:                   req.TenantId,
+		LogPosition:                req.LogPosition,
+		CurrentCollectionVersion:   req.CollectionVersion,
+		FlushSegmentCompactions:    segmentCompactionInfo,
+		TotalRecordsPostCompaction: req.TotalRecordsPostCompaction,
 	}
 	flushCollectionInfo, err := s.coordinator.FlushCollectionCompaction(ctx, FlushCollectionCompaction)
 	if err != nil {
@@ -342,4 +388,41 @@ func (s *Server) FlushCollectionCompaction(ctx context.Context, req *coordinator
 		LastCompactionTime: flushCollectionInfo.TenantLastCompactionTime,
 	}
 	return res, nil
+}
+
+func (s *Server) ListCollectionsToGc(ctx context.Context, req *coordinatorpb.ListCollectionsToGcRequest) (*coordinatorpb.ListCollectionsToGcResponse, error) {
+	// Dumb implementation that just returns ALL the collections for now.
+	collectionsToGc, err := s.coordinator.ListCollectionsToGc(ctx)
+	if err != nil {
+		log.Error("ListCollectionsToGc failed", zap.Error(err))
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+	res := &coordinatorpb.ListCollectionsToGcResponse{}
+	for _, collectionToGc := range collectionsToGc {
+		res.Collections = append(res.Collections, &coordinatorpb.CollectionToGcInfo{
+			Id:              collectionToGc.ID.String(),
+			Name:            collectionToGc.Name,
+			VersionFilePath: collectionToGc.VersionFilePath,
+		})
+	}
+	return res, nil
+}
+
+// Mark the versions for deletion.
+// GC minics a 2PC protocol.
+// 1. Mark the versions for deletion by calling MarkVersionForDeletion.
+// 2. Compute the diffs and delete the files from S3.
+// 3. Delete the versions from the version file by calling DeleteCollectionVersion.
+//
+// NOTE about concurrency:
+// This method updates the version file which can concurrently with FlushCollectionCompaction.
+func (s *Server) MarkVersionForDeletion(ctx context.Context, req *coordinatorpb.MarkVersionForDeletionRequest) (*coordinatorpb.MarkVersionForDeletionResponse, error) {
+	return nil, nil
+}
+
+// Delete the versions from the version file. Refer to comments in MarkVersionForDeletion.
+// NOTE about concurrency:
+// This method updates the version file which can concurrently with FlushCollectionCompaction.
+func (s *Server) DeleteCollectionVersion(ctx context.Context, req *coordinatorpb.DeleteCollectionVersionRequest) (*coordinatorpb.DeleteCollectionVersionResponse, error) {
+	return nil, nil
 }

@@ -375,10 +375,17 @@ def fastapi_ssl() -> Generator[System, None, None]:
 
 
 def basic_http_client() -> Generator[System, None, None]:
+    port = 8000
+    host = "localhost"
+
+    if os.getenv("CHROMA_SERVER_HOST"):
+        host = os.getenv("CHROMA_SERVER_HOST", "").split(":")[0]
+        port = int(os.getenv("CHROMA_SERVER_HOST", "").split(":")[1])
+
     settings = Settings(
         chroma_api_impl="chromadb.api.fastapi.FastAPI",
-        chroma_server_http_port=8000,
-        chroma_server_host="localhost",
+        chroma_server_http_port=port,
+        chroma_server_host=host,
         allow_reset=True,
     )
     system = System(settings)
@@ -564,6 +571,11 @@ def sqlite_fixture() -> Generator[System, None, None]:
 
 @pytest.fixture
 def sqlite() -> Generator[System, None, None]:
+    # TODO: Enable Rust ephemeral client for testing
+    # if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ:
+    #     yield from rust_system()
+    # else:
+    #     yield from sqlite_fixture()
     yield from sqlite_fixture()
 
 
@@ -600,7 +612,29 @@ def sqlite_persistent_fixture() -> Generator[System, None, None]:
 
 @pytest.fixture
 def sqlite_persistent() -> Generator[System, None, None]:
-    yield from sqlite_persistent_fixture()
+    if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ:
+        yield from rust_system()
+    else:
+        yield from sqlite_persistent_fixture()
+
+
+def rust_system(persistent: bool = True) -> Generator[System, None, None]:
+    """Fixture generator for system using Rust bindings"""
+    save_path = tempfile.TemporaryDirectory()
+    settings = Settings(
+        chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
+        chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
+        is_persistent=persistent,
+        allow_reset=True,
+        persist_directory=save_path.name if persistent else "",
+    )
+    system = System(settings)
+    system.start()
+    yield system
+    system.stop()
 
 
 def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
@@ -617,6 +651,8 @@ def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
         fixtures = [integration]
     if "CHROMA_CLUSTER_TEST_ONLY" in os.environ:
         fixtures = [basic_http_client]
+    if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ:
+        fixtures = [rust_system]
     return fixtures
 
 
@@ -624,7 +660,9 @@ def system_http_server_fixtures() -> List[Callable[[], Generator[System, None, N
     fixtures = [
         fixture
         for fixture in system_fixtures()
-        if fixture != sqlite_fixture and fixture != sqlite_persistent_fixture
+        if fixture != sqlite_fixture
+        and fixture != sqlite_persistent_fixture
+        and fixture != rust_system
     ]
     return fixtures
 
@@ -910,7 +948,7 @@ def is_client_in_process(client: ClientAPI) -> bool:
 
 
 @pytest.fixture(autouse=True)
-def log_tests(request):
+def log_tests(request: pytest.FixtureRequest) -> Generator[None, None, None]:
     """Automatically logs the start and end of each test."""
     test_name = request.node.name
     logger.debug(f"Starting test: {test_name}")

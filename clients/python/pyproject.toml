@@ -15,7 +15,7 @@ classifiers = [
   "Operating System :: OS Independent",
 ]
 dependencies = [
-  'numpy >= 1.22.5, < 2.0.0',
+  'numpy >= 1.22.5',
   'opentelemetry-api>=1.2.0',
   'opentelemetry-exporter-otlp-proto-grpc>=1.2.0',
   'opentelemetry-sdk>=1.2.0',

@@ -1,0 +1,33 @@
+allow_reset: false
+sqlitedb:
+  hash_type:
+    SHA256:
+  migration_mode:
+    Apply:
+  # TODO: Set this from the existing default
+  url: "./chroma/"
+segment_manager:
+  hnsw_index_pool_cache_config:
+    memory:
+      capacity: 65536
+sysdb:
+  Sqlite:
+    log_topic_namespace: "default"
+    log_tenant: "default"
+collections_with_segments_provider:
+  cache:
+    nop:
+  permitted_parallelism: 32
+  cache_invalidation_retry_policy:
+    delay_ms: 0
+    max_retries: 0
+service_name: "rust-frontend-service"
+otel_endpoint: "http://otel-collector:4317"
+log:
+  Sqlite:
+    tenant_id: "default"
+    topic_namespace: "default"
+executor:
+  Local:
+    LocalExecutorConfig:
+scorecard_enabled: false

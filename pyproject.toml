@@ -57,6 +57,7 @@ asyncio_mode = "auto"
 
 [tool.mypy]
 ignore_errors = false
+mypy_path = "rust/python_bindings"
 
 [[tool.mypy.overrides]]
 module = ["chromadb.proto.*"]

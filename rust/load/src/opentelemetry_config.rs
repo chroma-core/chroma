@@ -90,7 +90,25 @@ pub(crate) fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
     // global::set_tracer_provider(tracer_provider);
 
     // Prepare meter.
-    let client = reqwest::Client::new();
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(
+        "x-honeycomb-dataset",
+        reqwest::header::HeaderValue::from_static("chroma-load"),
+    );
+    if let Ok(api_key) = std::env::var("OTEL_EXPORTER_OTLP_HEADERS") {
+        if let Some((header, value)) = api_key.split_once("=") {
+            if header == "x-honeycomb-team" {
+                headers.insert(
+                    reqwest::header::HeaderName::from_static("x-honeycomb-team"),
+                    reqwest::header::HeaderValue::from_bytes(value.trim().as_bytes()).unwrap(),
+                );
+            }
+        }
+    }
+    let client = reqwest::ClientBuilder::new()
+        .default_headers(headers)
+        .build()
+        .unwrap();
     let metric_exporter = opentelemetry_otlp::MetricExporter::builder()
         .with_http()
         .with_http_client(client)

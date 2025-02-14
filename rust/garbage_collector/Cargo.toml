@@ -20,10 +20,12 @@ async-trait = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true }
 figment = { workspace = true }
+prost = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 uuid = { workspace = true }
+futures = { workspace = true }
 
 tracing = { workspace = true }
 tracing-bunyan-formatter = { workspace = true }
@@ -33,3 +35,11 @@ opentelemetry = { workspace = true }
 opentelemetry-otlp = { workspace = true }
 opentelemetry-http = { workspace = true }
 opentelemetry_sdk = { workspace = true }
+thiserror = { workspace = true }
+
+chroma-config = { workspace = true }
+chroma-error = { workspace = true }
+chroma-system = { workspace = true }
+chroma-types = { workspace = true }
+chroma-sysdb = { workspace = true }
+chroma-storage = { workspace = true }

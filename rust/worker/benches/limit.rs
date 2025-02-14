@@ -1,11 +1,11 @@
 use chroma_benchmark::benchmark::{bench_run, tokio_multi_thread};
+use chroma_log::test::{upsert_generator, LoadFromGenerator};
+use chroma_segment::test::TestDistributedSegment;
 use chroma_system::Operator;
 use chroma_types::{Chunk, SignedRoaringBitmap};
 use criterion::Criterion;
 use criterion::{criterion_group, criterion_main};
 use worker::execution::operators::limit::{LimitInput, LimitOperator};
-use worker::log::test::upsert_generator;
-use worker::segment::test::TestSegment;
 
 const FETCH: usize = 100;
 
@@ -14,7 +14,7 @@ fn bench_limit(criterion: &mut Criterion) {
 
     for record_count in [1000, 10000, 100000] {
         let test_segment = runtime.block_on(async {
-            let mut segment = TestSegment::default();
+            let mut segment = TestDistributedSegment::default();
             segment
                 .populate_with_generator(record_count, upsert_generator)
                 .await;

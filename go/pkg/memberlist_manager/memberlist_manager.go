@@ -3,6 +3,7 @@ package memberlist_manager
 import (
 	"context"
 	"time"
+	"sort"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/pingcap/log"
@@ -128,26 +129,23 @@ func memberlistSame(oldMemberlist Memberlist, newMemberlist Memberlist) bool {
 	if len(oldMemberlist) != len(newMemberlist) {
 		return false
 	}
-	oldMemberlistIps := make(map[string]string)
-	for _, member := range oldMemberlist {
-		oldMemberlistIps[member.id] = member.ip
-	}
-	for _, member := range newMemberlist {
-		if ip, ok := oldMemberlistIps[member.id]; !ok || ip != member.ip {
+
+	// make a copy of the slices to avoid modifying the original
+	oldMemberlistClone := make(Memberlist, len(oldMemberlist))
+	newMemberlistClone := make(Memberlist, len(newMemberlist))
+	copy(oldMemberlistClone, oldMemberlist)
+	copy(newMemberlistClone, newMemberlist)
+
+	// sort the slices to ensure that the order of the elements does not matter
+	sort.Sort(oldMemberlistClone)
+	sort.Sort(newMemberlistClone)
+
+	for i := range oldMemberlistClone {
+		if oldMemberlistClone[i] != newMemberlistClone[i] {
 			return false
 		}
 	}
 
-	// use a map to check if the new memberlist contains all the old members
-	newMemberlistMap := make(map[string]bool)
-	for _, member := range newMemberlist {
-		newMemberlistMap[member.id] = true
-	}
-	for _, member := range oldMemberlist {
-		if _, ok := newMemberlistMap[member.id]; !ok {
-			return false
-		}
-	}
 	return true
 }
 

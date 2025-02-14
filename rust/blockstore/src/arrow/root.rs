@@ -269,6 +269,32 @@ impl ChromaError for FromBytesError {
 }
 
 impl RootReader {
+    pub(super) fn get_all_block_ids_from_bytes(
+        bytes: &[u8],
+        id: Uuid,
+    ) -> Result<Vec<Uuid>, FromBytesError> {
+        let mut cursor = std::io::Cursor::new(bytes);
+        let arrow_reader = arrow::ipc::reader::FileReader::try_new(&mut cursor, None);
+
+        let record_batch = match arrow_reader {
+            Ok(mut reader) => match reader.next() {
+                Some(Ok(batch)) => batch,
+                Some(Err(e)) => return Err(FromBytesError::ArrowError(e)),
+                None => {
+                    return Err(FromBytesError::NoDataError);
+                }
+            },
+            Err(e) => return Err(FromBytesError::ArrowError(e)),
+        };
+
+        let (version, read_id) = Self::version_and_id_from_record_batch(&record_batch, id)?;
+        if read_id != id {
+            return Err(FromBytesError::IdMismatch);
+        }
+
+        Self::block_ids_from_record_batch(&record_batch, version)
+    }
+
     pub(super) fn from_bytes<'data, K: ArrowReadableKey<'data>>(
         bytes: &[u8],
         id: Uuid,
@@ -287,20 +313,7 @@ impl RootReader {
             Err(e) => return Err(FromBytesError::ArrowError(e)),
         };
 
-        let metadata = &record_batch.schema_ref().metadata;
-        let (version, read_id) = match (metadata.get("version"), metadata.get("id")) {
-            (Some(version), Some(read_id)) => (
-                Version::try_from(version.as_str())?,
-                Uuid::parse_str(read_id)?,
-            ),
-            (Some(_), None) => return Err(FromBytesError::MissingMetadata("id".to_string())),
-            (None, Some(_)) => {
-                return Err(FromBytesError::MissingMetadata("version".to_string()));
-            }
-            // We default to the current version in the absence of metadata for these fields for
-            // backwards compatibility
-            (None, None) => (Version::V1, id),
-        };
+        let (version, read_id) = Self::version_and_id_from_record_batch(&record_batch, id)?;
 
         if read_id != id {
             return Err(FromBytesError::IdMismatch);
@@ -316,31 +329,7 @@ impl RootReader {
         // The sparse index copies the data so it can live as long as it needs to independently
         let record_batch: &'data RecordBatch = unsafe { std::mem::transmute(&record_batch) };
         let key_arr = record_batch.column(1);
-        let mut ids: Vec<uuid::Uuid> = Vec::new();
-        // Versions after V1 store uuid as bytes
-        if version == Version::V1 {
-            let id_array = record_batch
-                .column(2)
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .expect("ID array to be a StringArray");
 
-            for i in 0..id_array.len() {
-                let id = Uuid::parse_str(id_array.value(i)).expect("ID to be a valid UUID");
-                ids.push(id);
-            }
-        } else {
-            let id_arr = record_batch
-                .column(2)
-                .as_any()
-                .downcast_ref::<BinaryArray>()
-                .expect("ID array to be a BinaryArray");
-
-            for i in 0..id_arr.len() {
-                let id = Uuid::from_slice(id_arr.value(i)).expect("ID to be a valid UUID");
-                ids.push(id);
-            }
-        }
         // Version 1.1 is the first version to have a count column
         let mut counts = None;
         if version >= Version::V1_1 {
@@ -351,6 +340,8 @@ impl RootReader {
                 .expect("Count array to be a UInt32Array");
             counts = Some(count_arr);
         }
+
+        let ids = Self::block_ids_from_record_batch(record_batch, version)?;
 
         let mut forward = BTreeMap::new();
         for (i, block_id) in ids.iter().enumerate() {
@@ -393,6 +384,57 @@ impl RootReader {
             sparse_index: new_sparse_index,
             id: new_id,
         }
+    }
+
+    fn version_and_id_from_record_batch(
+        record_batch: &RecordBatch,
+        default_id: Uuid,
+    ) -> Result<(Version, Uuid), FromBytesError> {
+        let metadata = &record_batch.schema_ref().metadata;
+        match (metadata.get("version"), metadata.get("id")) {
+            (Some(version), Some(read_id)) => Ok((
+                Version::try_from(version.as_str())?,
+                Uuid::parse_str(read_id)?,
+            )),
+            (Some(_), None) => Err(FromBytesError::MissingMetadata("id".to_string())),
+            (None, Some(_)) => Err(FromBytesError::MissingMetadata("version".to_string())),
+            // We default to the current version in the absence of metadata for these fields for
+            // backwards compatibility
+            (None, None) => Ok((Version::V1, default_id)),
+        }
+    }
+
+    fn block_ids_from_record_batch(
+        record_batch: &RecordBatch,
+        version: Version,
+    ) -> Result<Vec<Uuid>, FromBytesError> {
+        let mut ids: Vec<uuid::Uuid> = Vec::new();
+        // Versions after V1 store uuid as bytes
+        if version == Version::V1 {
+            let id_array = record_batch
+                .column(2)
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .expect("ID array to be a StringArray");
+
+            for i in 0..id_array.len() {
+                let id = Uuid::parse_str(id_array.value(i)).expect("ID to be a valid UUID");
+                ids.push(id);
+            }
+        } else {
+            let id_arr = record_batch
+                .column(2)
+                .as_any()
+                .downcast_ref::<BinaryArray>()
+                .expect("ID array to be a BinaryArray");
+
+            for i in 0..id_arr.len() {
+                let id = Uuid::from_slice(id_arr.value(i)).expect("ID to be a valid UUID");
+                ids.push(id);
+            }
+        }
+
+        Ok(ids)
     }
 }
 

@@ -471,6 +471,19 @@ Get a database. Raises an error if the database does not exist.
 - `database` - The name of the database to get.
 - `tenant` - The tenant of the database to get.
 
+## delete_database
+
+```python
+def delete_database(name: str, tenant: str = DEFAULT_TENANT) -> None
+```
+
+Delete a database and all associated collections. Raises an error if the database does not exist.
+
+**Arguments**:
+
+- `database` - The name of the database to delete.
+- `tenant` - The tenant of the database to delete.
+
 ## list_databases
 
 ```python

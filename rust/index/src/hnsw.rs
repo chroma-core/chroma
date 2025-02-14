@@ -8,9 +8,6 @@ use thiserror::Error;
 use tracing::instrument;
 
 pub const DEFAULT_MAX_ELEMENTS: usize = 10000;
-pub const DEFAULT_HNSW_M: usize = 16;
-pub const DEFAULT_HNSW_EF_CONSTRUCTION: usize = 100;
-pub const DEFAULT_HNSW_EF_SEARCH: usize = 10;
 
 // https://doc.rust-lang.org/nomicon/ffi.html#representing-opaque-structs
 #[repr(C)]
@@ -32,7 +29,7 @@ pub struct HnswIndexConfig {
     pub ef_construction: usize,
     pub ef_search: usize,
     pub random_seed: usize,
-    pub persist_path: String,
+    pub persist_path: Option<String>,
 }
 
 #[derive(Error, Debug)]
@@ -48,7 +45,18 @@ impl ChromaError for HnswIndexConfigError {
 }
 
 impl HnswIndexConfig {
-    pub fn new(
+    pub fn new_ephemeral(m: usize, ef_construction: usize, ef_search: usize) -> Self {
+        Self {
+            max_elements: DEFAULT_MAX_ELEMENTS,
+            m,
+            ef_construction,
+            ef_search,
+            random_seed: 0,
+            persist_path: None,
+        }
+    }
+
+    pub fn new_persistent(
         m: usize,
         ef_construction: usize,
         ef_search: usize,
@@ -68,7 +76,7 @@ impl HnswIndexConfig {
             ef_construction,
             ef_search,
             random_seed: 0,
-            persist_path: persist_path.to_string(),
+            persist_path: Some(persist_path.to_string()),
         })
     }
 }
@@ -150,7 +158,7 @@ impl Index<HnswIndexConfig> for HnswIndex {
                     unsafe { create_index(space_name.as_ptr(), index_config.dimensionality) };
                 read_and_return_hnsw_error(ffi_ptr)?;
 
-                let path = match CString::new(config.persist_path.clone()) {
+                let path = match CString::new(config.persist_path.clone().unwrap_or_default()) {
                     Ok(path) => path,
                     Err(e) => return Err(Box::new(HnswIndexInitError::InvalidPath(e.to_string()))),
                 };
@@ -163,7 +171,7 @@ impl Index<HnswIndexConfig> for HnswIndex {
                         config.ef_construction,
                         config.random_seed,
                         true,
-                        true,
+                        config.persist_path.is_some(),
                         path.as_ptr(),
                     );
                 }
@@ -284,7 +292,7 @@ impl PersistentIndex<HnswIndexConfig> for HnswIndex {
             Err(e) => return Err(Box::new(HnswIndexInitError::InvalidPath(e.to_string()))),
         };
         unsafe {
-            load_index(ffi_ptr, path.as_ptr(), true, true);
+            load_index(ffi_ptr, path.as_ptr(), true, true, DEFAULT_MAX_ELEMENTS);
         }
         read_and_return_hnsw_error(ffi_ptr)?;
 
@@ -329,6 +337,14 @@ impl HnswIndex {
     pub fn resize(&mut self, new_size: usize) -> Result<(), Box<dyn ChromaError>> {
         unsafe { resize_index(self.ffi_ptr, new_size) }
         read_and_return_hnsw_error(self.ffi_ptr)
+    }
+
+    pub fn open_fd(&self) {
+        unsafe { open_fd(self.ffi_ptr) }
+    }
+
+    pub fn close_fd(&self) {
+        unsafe { close_fd(self.ffi_ptr) }
     }
 
     #[cfg(test)]
@@ -379,6 +395,7 @@ extern "C" {
         path: *const c_char,
         allow_replace_deleted: bool,
         is_persistent_index: bool,
+        max_elements: usize,
     );
 
     fn persist_dirty(index: *const IndexPtrFFI);
@@ -399,6 +416,8 @@ extern "C" {
         disallowed_ids: *const usize,
         disallowed_ids_length: usize,
     ) -> c_int;
+    fn open_fd(index: *const IndexPtrFFI);
+    fn close_fd(index: *const IndexPtrFFI);
 
     #[cfg(test)]
     fn get_ef(index: *const IndexPtrFFI) -> c_int;
@@ -463,7 +482,7 @@ pub mod test {
                 ef_construction: 100,
                 ef_search: 10,
                 random_seed: 0,
-                persist_path,
+                persist_path: Some(persist_path),
             }),
             IndexUuid(Uuid::new_v4()),
         );
@@ -495,7 +514,7 @@ pub mod test {
                 ef_construction: 100,
                 ef_search: 100,
                 random_seed: 0,
-                persist_path,
+                persist_path: Some(persist_path),
             }),
             IndexUuid(Uuid::new_v4()),
         );
@@ -544,7 +563,7 @@ pub mod test {
                 ef_construction: 100,
                 ef_search: 100,
                 random_seed: 0,
-                persist_path,
+                persist_path: Some(persist_path),
             }),
             IndexUuid(Uuid::new_v4()),
         );
@@ -599,7 +618,7 @@ pub mod test {
                 ef_construction: 100,
                 ef_search: 100,
                 random_seed: 0,
-                persist_path,
+                persist_path: Some(persist_path),
             }),
             IndexUuid(Uuid::new_v4()),
         );
@@ -662,7 +681,7 @@ pub mod test {
                 ef_construction: 100,
                 ef_search: 100,
                 random_seed: 0,
-                persist_path: persist_path.clone(),
+                persist_path: Some(persist_path.clone()),
             }),
             IndexUuid(id),
         );
@@ -736,7 +755,7 @@ pub mod test {
                 ef_construction: 100,
                 ef_search: 100,
                 random_seed: 0,
-                persist_path,
+                persist_path: Some(persist_path),
             }),
             IndexUuid(Uuid::new_v4()),
         );
@@ -781,7 +800,8 @@ pub mod test {
                 ef_construction: 100,
                 ef_search: 100,
                 random_seed: 0,
-                persist_path,
+
+                persist_path: Some(persist_path),
             }),
             IndexUuid(Uuid::new_v4()),
         );
@@ -831,7 +851,8 @@ pub mod test {
                 ef_construction: 100,
                 ef_search: 100,
                 random_seed: 0,
-                persist_path,
+
+                persist_path: Some(persist_path),
             }),
             IndexUuid(Uuid::new_v4()),
         );
@@ -880,7 +901,7 @@ pub mod test {
                 ef_construction: 100,
                 ef_search: 100,
                 random_seed: 0,
-                persist_path: persist_path.clone(),
+                persist_path: Some(persist_path.clone()),
             }),
             IndexUuid(id),
         );
@@ -950,7 +971,7 @@ pub mod test {
                 ef_construction: 100,
                 ef_search: 100,
                 random_seed: 0,
-                persist_path: persist_path.clone(),
+                persist_path: Some(persist_path),
             }),
             IndexUuid(id),
         );

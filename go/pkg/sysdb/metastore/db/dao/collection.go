@@ -16,7 +16,8 @@ import (
 )
 
 type collectionDb struct {
-	db *gorm.DB
+	db      *gorm.DB
+	read_db *gorm.DB
 }
 
 var _ dbmodel.ICollectionDb = &collectionDb{}
@@ -50,10 +51,22 @@ func (s *collectionDb) GetCollections(id *string, name *string, tenantID string,
 	return s.getCollections(id, name, tenantID, databaseName, limit, offset, false)
 }
 
+func (s *collectionDb) ListCollectionsToGc() ([]*dbmodel.CollectionToGc, error) {
+	// TODO(Sanket): Read version file path.
+	var collections []*dbmodel.CollectionToGc
+	// Use the read replica for this so as to not overwhelm the writer.
+	// Skip collections that have not been compacted even once.
+	err := s.read_db.Table("collections").Select("id, name, version").Find(&collections).Where("version > 0").Error
+	if err != nil {
+		return nil, err
+	}
+	return collections, nil
+}
+
 func (s *collectionDb) getCollections(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32, is_deleted bool) (collectionWithMetdata []*dbmodel.CollectionAndMetadata, err error) {
 	var collections []*dbmodel.Collection
 	query := s.db.Table("collections").
-		Select("collections.id, collections.log_position, collections.version, collections.name, collections.configuration_json_str, collections.dimension, collections.database_id, collections.is_deleted, databases.name, databases.tenant_id").
+		Select("collections.id, collections.log_position, collections.version, collections.name, collections.configuration_json_str, collections.dimension, collections.database_id, collections.is_deleted, collections.total_records_post_compaction, databases.name, databases.tenant_id").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
 		Order("collections.created_at ASC")
 
@@ -96,22 +109,24 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 			collectionCreatedAt            sql.NullTime
 			databaseName                   string
 			databaseTenantID               string
+			totalRecordsPostCompaction     uint64
 		)
 
-		err := rows.Scan(&collectionID, &logPosition, &version, &collectionName, &collectionConfigurationJsonStr, &collectionDimension, &collectionDatabaseID, &collectionIsDeleted, &databaseName, &databaseTenantID)
+		err := rows.Scan(&collectionID, &logPosition, &version, &collectionName, &collectionConfigurationJsonStr, &collectionDimension, &collectionDatabaseID, &collectionIsDeleted, &totalRecordsPostCompaction, &databaseName, &databaseTenantID)
 		if err != nil {
 			log.Error("scan collection failed", zap.Error(err))
 			return nil, err
 		}
 
 		collection := &dbmodel.Collection{
-			ID:                   collectionID,
-			Name:                 &collectionName,
-			ConfigurationJsonStr: &collectionConfigurationJsonStr,
-			DatabaseID:           collectionDatabaseID,
-			LogPosition:          logPosition,
-			Version:              version,
-			IsDeleted:            collectionIsDeleted,
+			ID:                         collectionID,
+			Name:                       &collectionName,
+			ConfigurationJsonStr:       &collectionConfigurationJsonStr,
+			DatabaseID:                 collectionDatabaseID,
+			LogPosition:                logPosition,
+			Version:                    version,
+			IsDeleted:                  collectionIsDeleted,
+			TotalRecordsPostCompaction: totalRecordsPostCompaction,
 		}
 		if collectionDimension.Valid {
 			collection.Dimension = &collectionDimension.Int32
@@ -138,6 +153,48 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 	}
 
 	return
+}
+
+func (s *collectionDb) CountCollections(tenantID string, databaseName *string) (uint64, error) {
+	var count int64
+	query := s.db.Table("collections").
+		Joins("INNER JOIN databases ON collections.database_id = databases.id").
+		Where("databases.tenant_id = ?", tenantID)
+
+	if databaseName != nil {
+		query = query.Where("databases.name = ?", databaseName)
+	}
+
+	result := query.Count(&count)
+
+	if result.Error != nil {
+		return 0, result.Error
+	}
+
+	return uint64(count), nil
+}
+
+func (s *collectionDb) GetCollectionSize(id string) (uint64, error) {
+	query := s.read_db.Table("collections").
+		Select("collections.total_records_post_compaction").
+		Where("collections.id = ?", id)
+
+	rows, err := query.Rows()
+	if err != nil {
+		return 0, err
+	}
+
+	var totalRecordsPostCompaction uint64
+
+	for rows.Next() {
+		err := rows.Scan(&totalRecordsPostCompaction)
+		if err != nil {
+			log.Error("scan collection failed", zap.Error(err))
+			return 0, err
+		}
+	}
+	rows.Close()
+	return totalRecordsPostCompaction, nil
 }
 
 func (s *collectionDb) GetSoftDeletedCollections(collectionID *string, tenantID string, databaseName string, limit int32) ([]*dbmodel.CollectionAndMetadata, error) {
@@ -209,8 +266,36 @@ func (s *collectionDb) Update(in *dbmodel.Collection) error {
 	return nil
 }
 
-func (s *collectionDb) UpdateLogPositionAndVersion(collectionID string, logPosition int64, currentCollectionVersion int32) (int32, error) {
-	log.Info("update log position and version", zap.String("collectionID", collectionID), zap.Int64("logPosition", logPosition), zap.Int32("currentCollectionVersion", currentCollectionVersion))
+func (s *collectionDb) UpdateLogPositionAndVersionInfo(
+	collectionID string,
+	logPosition int64,
+	currentCollectionVersion int32,
+	currentVersionFileName string,
+	newCollectionVersion int32,
+	newVersionFileName string,
+) (int64, error) {
+	// TODO(rohitcp): Investigate if we need to hold the lock using "UPDATE"
+	// strength, or if we can use "SELECT FOR UPDATE" or some other less
+	// expensive locking mechanism. Taking the lock as a caution for now.
+	result := s.db.Model(&dbmodel.Collection{}).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ? AND version = ? AND version_file_name = ?",
+			collectionID,
+			currentCollectionVersion,
+			currentVersionFileName).
+		Updates(map[string]interface{}{
+			"log_position":      logPosition,
+			"version":           newCollectionVersion,
+			"version_file_name": newVersionFileName,
+		})
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return result.RowsAffected, nil
+}
+
+func (s *collectionDb) UpdateLogPositionVersionAndTotalRecords(collectionID string, logPosition int64, currentCollectionVersion int32, totalRecordsPostCompaction uint64) (int32, error) {
+	log.Info("update log position, version, and total records post compaction", zap.String("collectionID", collectionID), zap.Int64("logPosition", logPosition), zap.Int32("currentCollectionVersion", currentCollectionVersion), zap.Uint64("totalRecords", totalRecordsPostCompaction))
 	var collection dbmodel.Collection
 	// We use select for update to ensure no lost update happens even for isolation level read committed or below
 	// https://patrick.engineering/posts/postgres-internals/
@@ -230,9 +315,17 @@ func (s *collectionDb) UpdateLogPositionAndVersion(collectionID string, logPosit
 	}
 
 	version := currentCollectionVersion + 1
-	err = s.db.Model(&dbmodel.Collection{}).Where("id = ?", collectionID).Updates(map[string]interface{}{"log_position": logPosition, "version": version}).Error
+	err = s.db.Model(&dbmodel.Collection{}).Where("id = ?", collectionID).Updates(map[string]interface{}{"log_position": logPosition, "version": version, "total_records_post_compaction": totalRecordsPostCompaction}).Error
 	if err != nil {
 		return 0, err
 	}
 	return version, nil
+}
+
+func (s *collectionDb) UpdateVersionFileName(collectionID, existingVersionFileName, newVersionFileName string) (int64, error) {
+	result := s.db.Model(&dbmodel.Collection{}).Where("id = ? AND version_file_name = ?", collectionID, existingVersionFileName).Updates(map[string]interface{}{"version_file_name": newVersionFileName})
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return result.RowsAffected, nil
 }

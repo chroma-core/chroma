@@ -1,8 +1,8 @@
-use crate::segment::ChromaSegmentFlusher;
-use crate::segment::ChromaSegmentWriter;
 use async_trait::async_trait;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
+use chroma_segment::types::ChromaSegmentFlusher;
+use chroma_segment::types::ChromaSegmentWriter;
 use chroma_system::Operator;
 use thiserror::Error;
 use tracing::Instrument;

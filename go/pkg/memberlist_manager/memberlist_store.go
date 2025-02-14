@@ -21,16 +21,22 @@ type IMemberlistStore interface {
 type Member struct {
 	id string
 	ip string
+	node string
 }
 
 // MarshalLogObject implements the zapcore.ObjectMarshaler interface
 func (m Member) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	enc.AddString("id", m.id)
 	enc.AddString("ip", m.ip)
+	enc.AddString("node", m.node)
 	return nil
 }
 
 type Memberlist []Member
+
+func (p Memberlist) Len() int           { return len(p) }
+func (p Memberlist) Swap(i, j int)      { p[i], p[j] = p[j], p[i] }
+func (p Memberlist) Less(i, j int) bool { return p[i].id < p[j].id }
 
 // MarshalLogArray implements the zapcore.ArrayMarshaler interface
 func (ml Memberlist) MarshalLogArray(enc zapcore.ArrayEncoder) error {
@@ -88,8 +94,14 @@ func (s *CRMemberlistStore) GetMemberlist(ctx context.Context) (return_memberlis
 		if !ok {
 			member_ip = ""
 		}
+		// If the member_node_name is in the CR, extract it, otherwise set it to empty string
+		// This is for backwards compatibility with older CRs that don't have member_node_name
+		member_node_name, ok := member_map["member_node_name"].(string)
+		if !ok {
+			member_node_name = ""
+		}
 
-		memberlist = append(memberlist, Member{member_id, member_ip})
+		memberlist = append(memberlist, Member{member_id, member_ip, member_node_name})
 	}
 	return memberlist, unstrucuted.GetResourceVersion(), nil
 }
@@ -117,6 +129,7 @@ func (list Memberlist) toCr(namespace string, memberlistName string, resourceVer
 		members[i] = map[string]interface{}{
 			"member_id": member.id,
 			"member_ip": member.ip,
+			"member_node_name": member.node,
 		}
 	}
 

@@ -453,6 +453,10 @@ class AdminClient(SharedSystemClient, AdminAPI):
         return self._server.get_database(name=name, tenant=tenant)
 
     @override
+    def delete_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+        return self._server.delete_database(name=name, tenant=tenant)
+
+    @override
     def list_databases(
         self,
         limit: Optional[int] = None,

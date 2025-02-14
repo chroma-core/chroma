@@ -1,36 +1,52 @@
-use crate::assignment::assignment_policy::AssignmentPolicy;
+use std::collections::HashSet;
+use std::str::FromStr;
+
+use chroma_config::assignment::assignment_policy::AssignmentPolicy;
+use chroma_log::{CollectionInfo, CollectionRecord, Log};
+use chroma_memberlist::memberlist_provider::Memberlist;
+use chroma_sysdb::SysDb;
+use chroma_types::CollectionUuid;
+use figment::providers::Env;
+use figment::Figment;
+use serde::Deserialize;
+use uuid::Uuid;
+
 use crate::compactor::scheduler_policy::SchedulerPolicy;
 use crate::compactor::types::CompactionJob;
-use crate::log::log::CollectionInfo;
-use crate::log::log::CollectionRecord;
-use crate::log::log::Log;
-use crate::memberlist::Memberlist;
-use crate::sysdb::sysdb::SysDb;
 
 pub(crate) struct Scheduler {
-    my_ip: String,
-    log: Box<Log>,
-    sysdb: Box<SysDb>,
+    my_member_id: String,
+    log: Log,
+    sysdb: SysDb,
     policy: Box<dyn SchedulerPolicy>,
     job_queue: Vec<CompactionJob>,
     max_concurrent_jobs: usize,
     min_compaction_size: usize,
     memberlist: Option<Memberlist>,
     assignment_policy: Box<dyn AssignmentPolicy>,
+    oneoff_collections: HashSet<CollectionUuid>,
+    disabled_collections: HashSet<CollectionUuid>,
+}
+
+#[derive(Deserialize, Debug)]
+struct RunTimeConfig {
+    disabled_collections: Vec<String>,
 }
 
 impl Scheduler {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         my_ip: String,
-        log: Box<Log>,
-        sysdb: Box<SysDb>,
+        log: Log,
+        sysdb: SysDb,
         policy: Box<dyn SchedulerPolicy>,
         max_concurrent_jobs: usize,
         min_compaction_size: usize,
         assignment_policy: Box<dyn AssignmentPolicy>,
+        disabled_collections: HashSet<CollectionUuid>,
     ) -> Scheduler {
         Scheduler {
-            my_ip,
+            my_member_id: my_ip,
             log,
             sysdb,
             min_compaction_size,
@@ -39,7 +55,17 @@ impl Scheduler {
             max_concurrent_jobs,
             memberlist: None,
             assignment_policy,
+            oneoff_collections: HashSet::new(),
+            disabled_collections,
         }
+    }
+
+    pub(crate) fn add_oneoff_collections(&mut self, ids: Vec<CollectionUuid>) {
+        self.oneoff_collections.extend(ids);
+    }
+
+    pub(crate) fn get_oneoff_collections(&self) -> Vec<CollectionUuid> {
+        self.oneoff_collections.iter().cloned().collect()
     }
 
     async fn get_collections_with_new_data(&mut self) -> Vec<CollectionInfo> {
@@ -63,11 +89,21 @@ impl Scheduler {
     ) -> Vec<CollectionRecord> {
         let mut collection_records = Vec::new();
         for collection_info in collections {
+            if self
+                .disabled_collections
+                .contains(&collection_info.collection_id)
+            {
+                tracing::info!(
+                    "Ignoring collection: {:?} because it disabled for compaction",
+                    collection_info.collection_id
+                );
+                continue;
+            }
             let collection_id = Some(collection_info.collection_id);
             // TODO: add a cache to avoid fetching the same collection multiple times
             let result = self
                 .sysdb
-                .get_collections(collection_id, None, None, None)
+                .get_collections(collection_id, None, None, None, None, 0)
                 .await;
 
             match result {
@@ -126,21 +162,25 @@ impl Scheduler {
                 }
             }
         }
-        self.filter_collections(collection_records)
+        collection_records
     }
 
     fn filter_collections(&mut self, collections: Vec<CollectionRecord>) -> Vec<CollectionRecord> {
         let mut filtered_collections = Vec::new();
         let members = self.memberlist.as_ref().unwrap();
-        self.assignment_policy.set_members(members.clone());
+        let members_as_string = members
+            .iter()
+            .map(|member| member.member_id.clone())
+            .collect();
+        self.assignment_policy.set_members(members_as_string);
         for collection in collections {
             let result = self
                 .assignment_policy
                 // NOTE(rescrv):  Need to use the untyped uuid here.
-                .assign(collection.collection_id.0.to_string().as_str());
+                .assign_one(collection.collection_id.0.to_string().as_str());
             match result {
                 Ok(member) => {
-                    if member == self.my_ip {
+                    if member == self.my_member_id {
                         filtered_collections.push(collection);
                     }
                 }
@@ -154,11 +194,59 @@ impl Scheduler {
     }
 
     pub(crate) async fn schedule_internal(&mut self, collection_records: Vec<CollectionRecord>) {
-        let jobs = self
-            .policy
-            .determine(collection_records, self.max_concurrent_jobs as i32);
         self.job_queue.clear();
-        self.job_queue.extend(jobs);
+        let mut scheduled_collections = Vec::new();
+        for record in collection_records {
+            if self.oneoff_collections.contains(&record.collection_id) {
+                tracing::info!(
+                    "Creating one-off compaction job for collection: {}",
+                    record.collection_version
+                );
+                self.job_queue.push(CompactionJob {
+                    collection_id: record.collection_id,
+                    tenant_id: record.tenant_id,
+                    offset: record.offset,
+                    collection_version: record.collection_version,
+                });
+                self.oneoff_collections.remove(&record.collection_id);
+                if self.job_queue.len() == self.max_concurrent_jobs {
+                    return;
+                }
+            } else {
+                scheduled_collections.push(record);
+            }
+        }
+
+        let filtered_collections = self.filter_collections(scheduled_collections);
+        self.job_queue.extend(
+            self.policy
+                .determine(filtered_collections, self.max_concurrent_jobs as i32),
+        );
+        self.job_queue.truncate(self.max_concurrent_jobs);
+    }
+
+    pub(crate) fn recompute_disabled_collections(&mut self) {
+        let config = Figment::new()
+            .merge(
+                Env::prefixed("CHROMA_")
+                    .map(|k| k.as_str().replace("__", ".").into())
+                    .map(|k| {
+                        if k == "COMPACTION_SERVICE.COMPACTOR.DISABLED_COLLECTIONS" {
+                            k["COMPACTION_SERVICE.COMPACTOR.".len()..].into()
+                        } else {
+                            k.into()
+                        }
+                    })
+                    .only(&["DISABLED_COLLECTIONS"]),
+            )
+            .extract::<RunTimeConfig>();
+        if let Ok(config) = config {
+            self.disabled_collections = config
+                .disabled_collections
+                .iter()
+                .map(|collection| CollectionUuid(Uuid::from_str(collection).unwrap()))
+                .collect();
+        }
     }
 
     pub(crate) async fn schedule(&mut self) {
@@ -168,6 +256,8 @@ impl Scheduler {
             tracing::error!("Memberlist is not set or empty. Cannot schedule compaction jobs.");
             return;
         }
+        // Recompute disabled list.
+        self.recompute_disabled_collections();
         let collections = self.get_collections_with_new_data().await;
         if collections.is_empty() {
             return;
@@ -190,17 +280,18 @@ mod tests {
     use std::str::FromStr;
 
     use super::*;
-    use crate::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
     use crate::compactor::scheduler_policy::LasCompactionTimeSchedulerPolicy;
-    use crate::log::log::InMemoryLog;
-    use crate::log::log::InternalLogRecord;
-    use crate::sysdb::test_sysdb::TestSysDb;
+    use chroma_config::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
+    use chroma_log::in_memory_log::{InMemoryLog, InternalLogRecord};
+    use chroma_memberlist::memberlist_provider::Member;
+    use chroma_sysdb::TestSysDb;
     use chroma_types::{Collection, CollectionUuid, LogRecord, Operation, OperationRecord};
+    use serde_json::Value;
 
     #[tokio::test]
     async fn test_scheduler() {
-        let mut log = Box::new(Log::InMemory(InMemoryLog::new()));
-        let in_memory_log = match *log {
+        let mut log = Log::InMemory(InMemoryLog::new());
+        let in_memory_log = match log {
             Log::InMemory(ref mut in_memory_log) => in_memory_log,
             _ => panic!("Invalid log type"),
         };
@@ -249,32 +340,36 @@ mod tests {
             },
         );
 
-        let mut sysdb = Box::new(SysDb::Test(TestSysDb::new()));
+        let mut sysdb = SysDb::Test(TestSysDb::new());
 
         let tenant_1 = "tenant_1".to_string();
         let collection_1 = Collection {
             collection_id: collection_uuid_1,
             name: "collection_1".to_string(),
+            configuration_json: Value::Null,
             metadata: None,
             dimension: Some(1),
             tenant: tenant_1.clone(),
             database: "database_1".to_string(),
             log_position: 0,
             version: 0,
+            total_records_post_compaction: 0,
         };
 
         let tenant_2 = "tenant_2".to_string();
         let collection_2 = Collection {
             collection_id: collection_uuid_2,
             name: "collection_2".to_string(),
+            configuration_json: Value::Null,
             metadata: None,
             dimension: Some(1),
             tenant: tenant_2.clone(),
             database: "database_2".to_string(),
             log_position: 0,
             version: 0,
+            total_records_post_compaction: 0,
         };
-        match *sysdb {
+        match sysdb {
             SysDb::Test(ref mut sysdb) => {
                 sysdb.add_collection(collection_1);
                 sysdb.add_collection(collection_2);
@@ -284,22 +379,27 @@ mod tests {
             _ => panic!("Invalid sysdb type"),
         }
 
-        let my_member_id = "1".to_string();
+        let my_member = Member {
+            member_id: "member_1".to_string(),
+            member_ip: "10.0.0.1".to_string(),
+            member_node_name: "node_1".to_string(),
+        };
         let scheduler_policy = Box::new(LasCompactionTimeSchedulerPolicy {});
         let max_concurrent_jobs = 1000;
 
         // Set assignment policy
-        let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::new());
-        assignment_policy.set_members(vec![my_member_id.clone()]);
+        let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
+        assignment_policy.set_members(vec![my_member.member_id.clone()]);
 
         let mut scheduler = Scheduler::new(
-            my_member_id.clone(),
+            my_member.member_id.clone(),
             log,
             sysdb.clone(),
             scheduler_policy,
             max_concurrent_jobs,
             1,
             assignment_policy,
+            HashSet::new(),
         );
         // Scheduler does nothing without memberlist
         scheduler.schedule().await;
@@ -314,7 +414,7 @@ mod tests {
         assert_eq!(jobs.count(), 0);
 
         // Set memberlist
-        scheduler.set_memberlist(vec![my_member_id.clone()]);
+        scheduler.set_memberlist(vec![my_member.clone()]);
         scheduler.schedule().await;
         let jobs = scheduler.get_jobs();
         let jobs = jobs.collect::<Vec<&CompactionJob>>();
@@ -323,7 +423,7 @@ mod tests {
         assert_eq!(jobs[0].collection_id, collection_uuid_1,);
 
         // Add last compaction time for tenant_2
-        match *sysdb {
+        match sysdb {
             SysDb::Test(ref mut sysdb) => {
                 let last_compaction_time_2 = 1;
                 sysdb.add_tenant_last_compaction_time(tenant_2, last_compaction_time_2);
@@ -338,11 +438,52 @@ mod tests {
         assert_eq!(jobs[0].collection_id, collection_uuid_2,);
         assert_eq!(jobs[1].collection_id, collection_uuid_1,);
 
+        // Set disable list.
+        std::env::set_var(
+            "CHROMA_COMPACTION_SERVICE__COMPACTOR__DISABLED_COLLECTIONS",
+            "[\"00000000-0000-0000-0000-000000000001\"]",
+        );
+        scheduler.schedule().await;
+        let jobs = scheduler.get_jobs();
+        let jobs = jobs.collect::<Vec<&CompactionJob>>();
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].collection_id, collection_uuid_2,);
+        std::env::set_var(
+            "CHROMA_COMPACTION_SERVICE__COMPACTOR__DISABLED_COLLECTIONS",
+            "[]",
+        );
+        // Even . should work.
+        std::env::set_var(
+            "CHROMA_COMPACTION_SERVICE.COMPACTOR.DISABLED_COLLECTIONS",
+            "[\"00000000-0000-0000-0000-000000000002\"]",
+        );
+        std::env::set_var(
+            "CHROMA_COMPACTION_SERVICE.IRRELEVANT",
+            "[\"00000000-0000-0000-0000-000000000001\"]",
+        );
+        scheduler.schedule().await;
+        let jobs = scheduler.get_jobs();
+        let jobs = jobs.collect::<Vec<&CompactionJob>>();
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].collection_id, collection_uuid_1,);
+        std::env::set_var(
+            "CHROMA_COMPACTION_SERVICE.COMPACTOR.DISABLED_COLLECTIONS",
+            "[]",
+        );
+
         // Test filter_collections
-        let member_1 = "1".to_string();
-        let member_2 = "5".to_string();
+        let member_1 = Member {
+            member_id: "member_1".to_string(),
+            member_ip: "10.0.0.1".to_string(),
+            member_node_name: "node_1".to_string(),
+        };
+        let member_2 = Member {
+            member_id: "member_2".to_string(),
+            member_ip: "10.0.0.2".to_string(),
+            member_node_name: "node_2".to_string(),
+        };
         let members = vec![member_1.clone(), member_2.clone()];
-        scheduler.set_memberlist(members.clone());
+        scheduler.set_memberlist(members);
         scheduler.schedule().await;
         let jobs = scheduler.get_jobs();
         assert_eq!(jobs.count(), 1);
@@ -353,8 +494,8 @@ mod tests {
         expected = "offset in sysdb is less than offset in log, this should not happen!"
     )]
     async fn test_scheduler_panic() {
-        let mut log = Box::new(Log::InMemory(InMemoryLog::new()));
-        let in_memory_log = match *log {
+        let mut log = Log::InMemory(InMemoryLog::new());
+        let in_memory_log = match log {
             Log::InMemory(ref mut in_memory_log) => in_memory_log,
             _ => panic!("Invalid log type"),
         };
@@ -439,21 +580,23 @@ mod tests {
         );
         let _ = log.update_collection_log_offset(collection_uuid_1, 2).await;
 
-        let mut sysdb = Box::new(SysDb::Test(TestSysDb::new()));
+        let mut sysdb = SysDb::Test(TestSysDb::new());
 
         let tenant_1 = "tenant_1".to_string();
         let collection_1 = Collection {
             collection_id: collection_uuid_1,
             name: "collection_1".to_string(),
+            configuration_json: Value::Null,
             metadata: None,
             dimension: Some(1),
             tenant: tenant_1.clone(),
             database: "database_1".to_string(),
             log_position: 0,
             version: 0,
+            total_records_post_compaction: 0,
         };
 
-        match *sysdb {
+        match sysdb {
             SysDb::Test(ref mut sysdb) => {
                 sysdb.add_collection(collection_1);
                 let last_compaction_time_1 = 2;
@@ -461,25 +604,30 @@ mod tests {
             }
             _ => panic!("Invalid sysdb type"),
         }
-        let my_ip = "0.0.0.1".to_string();
+        let my_member = Member {
+            member_id: "member_1".to_string(),
+            member_ip: "0.0.0.1".to_string(),
+            member_node_name: "node_1".to_string(),
+        };
         let scheduler_policy = Box::new(LasCompactionTimeSchedulerPolicy {});
         let max_concurrent_jobs = 1000;
 
         // Set assignment policy
-        let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::new());
-        assignment_policy.set_members(vec![my_ip.clone()]);
+        let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
+        assignment_policy.set_members(vec![my_member.member_id.clone()]);
 
         let mut scheduler = Scheduler::new(
-            my_ip.clone(),
+            my_member.member_id.clone(),
             log,
             sysdb.clone(),
             scheduler_policy,
             max_concurrent_jobs,
             1,
             assignment_policy,
+            HashSet::new(),
         );
 
-        scheduler.set_memberlist(vec![my_ip.clone()]);
+        scheduler.set_memberlist(vec![my_member.clone()]);
         scheduler.schedule().await;
     }
 }

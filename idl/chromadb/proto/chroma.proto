@@ -53,6 +53,7 @@ message Collection {
   string database = 7;
   int64 log_position = 8;
   int32 version = 9;
+  uint64 total_records_post_compaction = 10;
 }
 
 message Database {
@@ -172,11 +173,13 @@ message WhereDocumentChildren {
 // `Where` clauses, where each node is exactly one of:
 // - A leaf node representing a direct comparison between a metadata key and a
 //   value or list of values.
+// - A leaf node representing a direct search against document.
 // - An branch node with a list of children and a way to combine them (AND or OR).
 message Where {
     oneof where {
         DirectComparison direct_comparison = 1;
         WhereChildren children = 2;
+        DirectWhereDocument direct_document_comparison = 3;
     }
 }
 

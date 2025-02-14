@@ -13,8 +13,22 @@ roaring = { workspace = true }
 thiserror = { workspace = true }
 tonic = { workspace = true }
 uuid = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+pyo3 = { workspace = true }
+validator = { workspace = true }
+regex = { workspace = true }
 
-chroma-error = { workspace = true }
+# (Cross-crate testing dependencies)
+proptest = { workspace = true, optional = true }
+proptest-derive = { workspace = true, optional = true }
+
+chroma-error = { workspace = true, features = ["tonic", "validator"] }
+chroma-config = { workspace = true }
 
 [build-dependencies]
 tonic-build = "0.10"
+
+[features]
+testing = ["dep:proptest", "dep:proptest-derive"]

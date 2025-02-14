@@ -25,6 +25,7 @@ use aws_sdk_s3::types::CompletedMultipartUpload;
 use aws_sdk_s3::types::CompletedPart;
 use aws_smithy_types::byte_stream::Length;
 use bytes::Bytes;
+use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
@@ -546,7 +547,10 @@ impl S3Storage {
 
 #[async_trait]
 impl Configurable<StorageConfig> for S3Storage {
-    async fn try_from_config(config: &StorageConfig) -> Result<Self, Box<dyn ChromaError>> {
+    async fn try_from_config(
+        config: &StorageConfig,
+        _registry: &Registry,
+    ) -> Result<Self, Box<dyn ChromaError>> {
         match &config {
             StorageConfig::S3(s3_config) => {
                 let client = match &s3_config.credentials {

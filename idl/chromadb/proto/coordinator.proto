@@ -38,6 +38,13 @@ message ListDatabasesResponse {
   repeated Database databases = 1;
 }
 
+message DeleteDatabaseRequest {
+  string name = 1;
+  string tenant = 2;
+}
+
+message DeleteDatabaseResponse {}
+
 message CreateTenantRequest {
   string name = 2; // Names are globally unique
 }
@@ -153,6 +160,15 @@ message GetCollectionsResponse {
   reserved "status";
 }
 
+message CountCollectionsRequest {
+  string tenant = 4;
+  optional string database = 5;
+}
+
+message CountCollectionsResponse {
+  uint64 count = 1;
+}
+
 message GetCollectionWithSegmentsRequest {
   string id = 1;
 }
@@ -218,6 +234,7 @@ message FlushCollectionCompactionRequest {
   int64 log_position = 3;
   int32 collection_version = 4;
   repeated FlushSegmentCompactionInfo segment_compaction_info = 5;
+  uint64 total_records_post_compaction = 6;
 }
 
 message FlushCollectionCompactionResponse {
@@ -275,6 +292,8 @@ message CollectionVersionInfo {
     VERSION_CHANGE_REASON_DATA_COMPACTION = 0;
   }
   VersionChangeReason version_change_reason = 5;
+  string version_file_name = 6;
+  bool marked_for_deletion = 7;
 }
 
 // This is metadata about the Collection that is mutable.
@@ -292,7 +311,7 @@ message CollectionInfoMutable {
 message CollectionSegmentInfo {
     // Information about segments that are part of this version.
     // Contains file paths for each segment.
-    repeated FlushSegmentCompactionInfo segments = 2;
+    repeated FlushSegmentCompactionInfo segment_compaction_info = 1;
     // TODO(rohitcp): Add additional information from Compaction about the
     // number of files creates, and other helpful information that can help with
     // GC's {collection,version} selection policy.
@@ -303,6 +322,13 @@ message CollectionVersionTuple {
     string collection_id = 1;
     string tenant_id = 2;
     int64 version = 3;
+}
+
+message VersionListForCollection {
+  string tenant_id = 1;
+  string database_id = 2;
+  string collection_id = 3;
+  repeated int64 versions = 4;
 }
 
 // Contains information about the lineage of a collection.
@@ -353,10 +379,49 @@ message RestoreCollectionResponse {
   int64 new_collection_version = 1;
 }
 
+message GetCollectionSizeRequest {
+  string id = 1;
+}
+
+message GetCollectionSizeResponse {
+  uint64 total_records_post_compaction = 1;
+}
+
+message ListCollectionsToGcRequest {}
+
+message CollectionToGcInfo {
+  string id = 1;
+  string name = 2;
+  string version_file_path = 3;
+}
+
+message ListCollectionsToGcResponse {
+  repeated CollectionToGcInfo collections = 1;
+}
+
+message MarkVersionForDeletionRequest {
+  int64 epoch_id = 1;
+  repeated VersionListForCollection versions = 2;
+}
+
+message MarkVersionForDeletionResponse {
+  map<string, bool> collection_id_to_success = 1;
+}
+
+message DeleteCollectionVersionRequest {
+  int64 epoch_id = 1;
+  repeated VersionListForCollection versions = 2;
+}
+
+message DeleteCollectionVersionResponse {
+  map<string, bool> collection_id_to_success = 1;
+}
+
 service SysDB {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse) {}
   rpc GetDatabase(GetDatabaseRequest) returns (GetDatabaseResponse) {}
   rpc ListDatabases(ListDatabasesRequest) returns (ListDatabasesResponse) {}
+  rpc DeleteDatabase(DeleteDatabaseRequest) returns (DeleteDatabaseResponse) {}
   rpc CreateTenant(CreateTenantRequest) returns (CreateTenantResponse) {}
   rpc GetTenant(GetTenantRequest) returns (GetTenantResponse) {}
   rpc CreateSegment(CreateSegmentRequest) returns (CreateSegmentResponse) {}
@@ -366,6 +431,7 @@ service SysDB {
   rpc CreateCollection(CreateCollectionRequest) returns (CreateCollectionResponse) {}
   rpc DeleteCollection(DeleteCollectionRequest) returns (DeleteCollectionResponse) {}
   rpc GetCollections(GetCollectionsRequest) returns (GetCollectionsResponse) {}
+  rpc CountCollections(CountCollectionsRequest) returns (CountCollectionsResponse) {}
   rpc GetCollectionWithSegments(GetCollectionWithSegmentsRequest) returns (GetCollectionWithSegmentsResponse) {}
   rpc CheckCollections(CheckCollectionsRequest) returns (CheckCollectionsResponse) {}
   rpc UpdateCollection(UpdateCollectionRequest) returns (UpdateCollectionResponse) {}
@@ -375,4 +441,8 @@ service SysDB {
   rpc FlushCollectionCompaction(FlushCollectionCompactionRequest) returns (FlushCollectionCompactionResponse) {}
   rpc RestoreCollection(RestoreCollectionRequest) returns (RestoreCollectionResponse) {}
   rpc ListCollectionVersions(ListCollectionVersionsRequest) returns (ListCollectionVersionsResponse) {}
+  rpc GetCollectionSize(GetCollectionSizeRequest) returns (GetCollectionSizeResponse) {}
+  rpc ListCollectionsToGc(ListCollectionsToGcRequest) returns (ListCollectionsToGcResponse) {}
+  rpc MarkVersionForDeletion(MarkVersionForDeletionRequest) returns (MarkVersionForDeletionResponse) {}
+  rpc DeleteCollectionVersion(DeleteCollectionVersionRequest) returns (DeleteCollectionVersionResponse) {}
 }

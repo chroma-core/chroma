@@ -21,27 +21,29 @@ use crate::execution::operators::partition::PartitionError;
 use crate::execution::operators::partition::PartitionInput;
 use crate::execution::operators::partition::PartitionOperator;
 use crate::execution::operators::partition::PartitionOutput;
+use crate::execution::operators::prefetch_segment::PrefetchSegmentError;
+use crate::execution::operators::prefetch_segment::PrefetchSegmentInput;
+use crate::execution::operators::prefetch_segment::PrefetchSegmentOperator;
+use crate::execution::operators::prefetch_segment::PrefetchSegmentOutput;
 use crate::execution::operators::register::RegisterError;
 use crate::execution::operators::register::RegisterInput;
 use crate::execution::operators::register::RegisterOperator;
 use crate::execution::operators::register::RegisterOutput;
-use crate::log::log::Log;
-use crate::segment::distributed_hnsw_segment::DistributedHNSWSegmentWriter;
-use crate::segment::metadata_segment::MetadataSegmentWriter;
-use crate::segment::record_segment::RecordSegmentReader;
-use crate::segment::record_segment::RecordSegmentReaderCreationError;
-use crate::segment::record_segment::RecordSegmentWriter;
-use crate::segment::ChromaSegmentFlusher;
-use crate::segment::ChromaSegmentWriter;
-use crate::segment::MaterializeLogsResult;
-use crate::sysdb::sysdb::GetCollectionsError;
-use crate::sysdb::sysdb::GetSegmentsError;
-use crate::sysdb::sysdb::SysDb;
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use chroma_index::hnsw_provider::HnswIndexProvider;
+use chroma_log::Log;
+use chroma_segment::blockfile_metadata::MetadataSegmentWriter;
+use chroma_segment::blockfile_record::RecordSegmentReader;
+use chroma_segment::blockfile_record::RecordSegmentReaderCreationError;
+use chroma_segment::blockfile_record::RecordSegmentWriter;
+use chroma_segment::distributed_hnsw::DistributedHNSWSegmentWriter;
+use chroma_segment::types::ChromaSegmentFlusher;
+use chroma_segment::types::ChromaSegmentWriter;
+use chroma_segment::types::MaterializeLogsResult;
+use chroma_sysdb::SysDb;
 use chroma_system::wrap;
 use chroma_system::ChannelError;
 use chroma_system::ComponentContext;
@@ -55,6 +57,8 @@ use chroma_system::TaskError;
 use chroma_system::TaskMessage;
 use chroma_system::TaskResult;
 use chroma_types::Chunk;
+use chroma_types::GetCollectionsError;
+use chroma_types::GetSegmentsError;
 use chroma_types::SegmentUuid;
 use chroma_types::{CollectionUuid, LogRecord, Segment, SegmentFlushInfo, SegmentType};
 use core::panic;
@@ -109,8 +113,8 @@ pub struct CompactOrchestrator {
     // Component Execution
     collection_id: CollectionUuid,
     // Dependencies
-    log: Box<Log>,
-    sysdb: Box<SysDb>,
+    log: Log,
+    sysdb: SysDb,
     blockfile_provider: BlockfileProvider,
     hnsw_index_provider: HnswIndexProvider,
     // State we hold across the execution
@@ -131,6 +135,8 @@ pub struct CompactOrchestrator {
     flush_results: Vec<SegmentFlushInfo>,
     // We track a parent span for each segment type so we can group all the spans for a given segment type (makes the resulting trace much easier to read)
     segment_spans: HashMap<SegmentUuid, Span>,
+    // Total number of records in the collection after the compaction
+    total_records_last_compaction: u64,
 }
 
 #[derive(Error, Debug)]
@@ -171,6 +177,8 @@ pub enum CompactionError {
     MaterializeLogs(#[from] MaterializeLogOperatorError),
     #[error("Apply logs to segment writer error: {0}")]
     ApplyLogToSegmentWriter(#[from] ApplyLogToSegmentWriterOperatorError),
+    #[error("Prefetch segment error: {0}")]
+    PrefetchSegment(#[from] PrefetchSegmentError),
     #[error("Commit segment writer error: {0}")]
     CommitSegmentWriter(#[from] CommitSegmentWriterOperatorError),
     #[error("Flush segment writer error: {0}")]
@@ -189,6 +197,8 @@ pub enum CompactionError {
     Generic(#[from] Box<dyn ChromaError>),
     #[error("Invariant violation: {}", .0)]
     InvariantViolation(&'static str),
+    #[error("Operation aborted because resources exhausted")]
+    Aborted,
 }
 
 impl<E> From<TaskError<E>> for CompactionError
@@ -199,13 +209,18 @@ where
         match value {
             TaskError::Panic(e) => CompactionError::Panic(e),
             TaskError::TaskFailed(e) => e.into(),
+            TaskError::Aborted => CompactionError::Aborted,
         }
     }
 }
 
 impl ChromaError for CompactionError {
     fn code(&self) -> ErrorCodes {
-        ErrorCodes::Internal
+        if matches!(self, CompactionError::Aborted) {
+            ErrorCodes::ResourceExhausted
+        } else {
+            ErrorCodes::Internal
+        }
     }
 }
 
@@ -224,8 +239,8 @@ impl CompactOrchestrator {
     pub fn new(
         compaction_job: CompactionJob,
         collection_id: CollectionUuid,
-        log: Box<Log>,
-        sysdb: Box<SysDb>,
+        log: Log,
+        sysdb: SysDb,
         blockfile_provider: BlockfileProvider,
         hnsw_index_provider: HnswIndexProvider,
         dispatcher: ComponentHandle<Dispatcher>,
@@ -253,6 +268,7 @@ impl CompactOrchestrator {
             writers: OnceCell::new(),
             flush_results: Vec::new(),
             segment_spans: HashMap::new(),
+            total_records_last_compaction: 0,
         }
     }
 
@@ -268,6 +284,21 @@ impl CompactOrchestrator {
         let input = PartitionInput::new(records, self.max_partition_size);
         let task = wrap(operator, input, ctx.receiver());
         self.send(task, ctx).await;
+
+        let segments = self.get_all_segments().await.unwrap();
+        for segment in segments {
+            if segment.r#type == SegmentType::BlockfileMetadata
+                || segment.r#type == SegmentType::BlockfileRecord
+            {
+                let prefetch_task = wrap(
+                    Box::new(PrefetchSegmentOperator::new()),
+                    PrefetchSegmentInput::new(segment, self.blockfile_provider.clone()),
+                    ctx.receiver(),
+                );
+
+                self.send(prefetch_task, ctx).await;
+            }
+        }
     }
 
     async fn materialize_log(
@@ -471,6 +502,7 @@ impl CompactOrchestrator {
             log_position,
             self.compaction_job.collection_version,
             self.flush_results.clone().into(),
+            self.total_records_last_compaction,
             self.sysdb.clone(),
             self.log.clone(),
         );
@@ -557,7 +589,7 @@ impl CompactOrchestrator {
 
                 // Create a hnsw segment writer
                 let collection_res = sysdb
-                    .get_collections(Some(self.collection_id), None, None, None)
+                    .get_collections(Some(self.collection_id), None, None, None, None, 0)
                     .await;
 
                 let collection_res = match collection_res {
@@ -701,7 +733,10 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
     ) {
         let records = match self.ok_or_terminate(message.into_inner(), ctx) {
             Some(recs) => recs,
-            None => todo!(),
+            None => {
+                tracing::info!("cancelled fetch log task");
+                return;
+            }
         };
         tracing::info!("Pulled Records: {:?}", records.len());
         let final_record_pulled = records.get(records.len() - 1);
@@ -717,6 +752,22 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
                 );
                 panic!("No records pulled by compaction, this is a system invariant violation");
             }
+        }
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<PrefetchSegmentOutput, PrefetchSegmentError>> for CompactOrchestrator {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<PrefetchSegmentOutput, PrefetchSegmentError>,
+        ctx: &ComponentContext<CompactOrchestrator>,
+    ) {
+        match self.ok_or_terminate(message.into_inner(), ctx) {
+            Some(_) => (),
+            None => return,
         }
     }
 }
@@ -840,7 +891,13 @@ impl Handler<TaskResult<CommitSegmentWriterOutput, CommitSegmentWriterOperatorEr
             None => return,
         };
 
-        self.dispatch_segment_flush(message.flusher, ctx.receiver(), ctx)
+        let flusher = message.flusher;
+        // If the flusher recieved is a record segment flusher, get the number of keys for the blockfile and set it on the orchestrator
+        if let ChromaSegmentFlusher::RecordSegment(ref record_segment_flusher) = flusher {
+            self.total_records_last_compaction = record_segment_flusher.count();
+        }
+
+        self.dispatch_segment_flush(flusher, ctx.receiver(), ctx)
             .await;
     }
 }

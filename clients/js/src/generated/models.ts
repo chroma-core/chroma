@@ -209,6 +209,9 @@ export namespace Api {
 	export interface DeleteCollectionV1200Response {
 	}
 
+	export interface DeleteDatabase200Response {
+	}
+
 	export interface DeleteV1200Response {
 	}
 

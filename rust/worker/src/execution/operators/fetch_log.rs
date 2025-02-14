@@ -1,8 +1,8 @@
 use std::time::{SystemTime, SystemTimeError, UNIX_EPOCH};
 
-use crate::log::log::{Log, PullLogsError};
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_log::Log;
 use chroma_system::{Operator, OperatorType};
 use chroma_types::{Chunk, CollectionUuid, LogRecord};
 use thiserror::Error;
@@ -29,7 +29,7 @@ use tracing::trace;
 /// It should be run at the start of an orchestrator to get the latest data of a collection
 #[derive(Clone, Debug)]
 pub struct FetchLogOperator {
-    pub log_client: Box<Log>,
+    pub log_client: Log,
     pub batch_size: u32,
     pub start_log_offset_id: u32,
     pub maximum_fetch_count: Option<u32>,
@@ -43,7 +43,7 @@ pub type FetchLogOutput = Chunk<LogRecord>;
 #[derive(Error, Debug)]
 pub enum FetchLogError {
     #[error("Error when pulling log: {0}")]
-    PullLog(#[from] PullLogsError),
+    PullLog(#[from] Box<dyn ChromaError>),
     #[error("Error when capturing system time: {0}")]
     SystemTime(#[from] SystemTimeError),
 }
@@ -108,20 +108,18 @@ impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
 
 #[cfg(test)]
 mod tests {
+    use chroma_log::{
+        in_memory_log::{InMemoryLog, InternalLogRecord},
+        test::{upsert_generator, LogGenerator},
+    };
     use chroma_system::Operator;
     use chroma_types::CollectionUuid;
 
-    use crate::{
-        execution::operators::fetch_log::FetchLogOperator,
-        log::{
-            log::{InMemoryLog, InternalLogRecord},
-            test::{upsert_generator, LogGenerator},
-        },
-    };
+    use crate::execution::operators::fetch_log::FetchLogOperator;
 
     use super::Log;
 
-    fn setup_in_memory_log() -> (CollectionUuid, Box<Log>) {
+    fn setup_in_memory_log() -> (CollectionUuid, Log) {
         let collection_id = CollectionUuid::new();
         let mut in_memory_log = InMemoryLog::new();
         upsert_generator
@@ -138,7 +136,7 @@ mod tests {
                     },
                 )
             });
-        (collection_id, Box::new(Log::InMemory(in_memory_log)))
+        (collection_id, Log::InMemory(in_memory_log))
     }
 
     #[tokio::test]

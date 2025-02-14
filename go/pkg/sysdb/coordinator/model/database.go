@@ -29,3 +29,10 @@ type ListDatabases struct {
 	Tenant string
 	Ts     types.Timestamp
 }
+
+type DeleteDatabase struct {
+	ID     string
+	Name   string
+	Tenant string
+	Ts     types.Timestamp
+}

@@ -2,8 +2,6 @@ import {
   expect,
   test,
   describe,
-  beforeAll,
-  afterAll,
   beforeEach,
 } from "@jest/globals";
 import { DOCUMENTS, EMBEDDINGS, IDS } from "./data";
@@ -11,10 +9,9 @@ import { METADATAS } from "./data";
 import { IncludeEnum } from "../src/types";
 import { OpenAIEmbeddingFunction } from "../src/embeddings/OpenAIEmbeddingFunction";
 import { CohereEmbeddingFunction } from "../src/embeddings/CohereEmbeddingFunction";
-import { OllamaEmbeddingFunction } from "../src/embeddings/OllamaEmbeddingFunction";
 import { VoyageAIEmbeddingFunction } from "../src/embeddings/VoyageAIEmbeddingFunction";
-import { InvalidCollectionError } from "../src/Errors";
 import { ChromaClient } from "../src/ChromaClient";
+import { ChromaNotFoundError } from "../src/Errors";
 
 describe("add collections", () => {
   // connects to the unauthenticated chroma instance started in
@@ -188,7 +185,7 @@ describe("add collections", () => {
     await client.deleteCollection({ name: "test" });
     await expect(async () => {
       await collection.add({ ids: IDS, embeddings: EMBEDDINGS });
-    }).rejects.toThrow(InvalidCollectionError);
+    }).rejects.toThrow(ChromaNotFoundError);
   });
 
   test("It should return an error when inserting duplicate IDs in the same batch", async () => {
@@ -214,30 +211,4 @@ describe("add collections", () => {
       expect(e.message).toMatch("got empty embedding at pos");
     }
   });
-
-  if (!process.env.OLLAMA_SERVER_URL) {
-    test.skip("it should use ollama EF, OLLAMA_SERVER_URL not defined", async () => {});
-  } else {
-    test("it should use ollama EF", async () => {
-      const embedder = new OllamaEmbeddingFunction({
-        url:
-          process.env.OLLAMA_SERVER_URL ||
-          "http://127.0.0.1:11434/api/embeddings",
-        model: "nomic-embed-text",
-      });
-      const collection = await client.createCollection({
-        name: "test",
-        embeddingFunction: embedder,
-      });
-      const embeddings = await embedder.generate(DOCUMENTS);
-      await collection.add({ ids: IDS, embeddings: embeddings });
-      const count = await collection.count();
-      expect(count).toBe(3);
-      var res = await collection.get({
-        ids: IDS,
-        include: [IncludeEnum.Embeddings],
-      });
-      expect(res.embeddings).toEqual(embeddings); // reverse because of the order of the ids
-    });
-  }
 });
