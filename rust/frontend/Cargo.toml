@@ -41,4 +41,6 @@ chroma-system = { workspace = true }
 chroma-tracing = { workspace = true }
 chroma-types = { workspace = true }
 chroma-sqlite = { workspace = true }
+utoipa = "5.0.0"
 utoipa-axum = "0.2.0"
+utoipa-swagger-ui = "9.0.0"

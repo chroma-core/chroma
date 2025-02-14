@@ -30,6 +30,7 @@ use std::sync::{
     Arc,
 };
 use uuid::Uuid;
+use utoipa::OpenApi;
 
 use crate::{
     ac::AdmissionControlledService,
@@ -204,6 +205,7 @@ impl FrontendServer {
                 "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_id/query",
                 post(collection_query),
             )
+            .route("/openapi.json", get(openapi))
             .with_state(server)
             .layer(DefaultBodyLimit::max(6000000)); // TODO: add to server configuration
         let app = add_tracing_middleware(app);
@@ -1253,4 +1255,21 @@ async fn v1_deprecation_notice() -> Response {
         "The v1 API is deprecated. Please use /v2 apis".to_string(),
     );
     (StatusCode::GONE, Json(err_response)).into_response()
+}
+
+#[derive(OpenApi)]
+#[openapi(
+    paths(openapi)
+)]
+struct ApiDoc;
+
+#[utoipa::path(
+    get,
+    path = "/openapi.json",
+    responses(
+        (status = 200, description = "JSON file", body = ())
+    )
+)]
+async fn openapi() -> axum::Json<utoipa::openapi::OpenApi> {
+    axum::Json(ApiDoc::openapi())
 }
