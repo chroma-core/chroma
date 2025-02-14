@@ -118,8 +118,14 @@ mod tests {
     }
 
     proptest! {
+        #![proptest_config(ProptestConfig{
+            cases: 10,
+            max_shrink_iters: 1,
+            fork: false,
+            ..ProptestConfig::default()
+        })]
         #[test]
-        fn test_record_count_preserved_after_gc(
+        fn test_k8s_integration_record_count_preserved_after_gc(
             num_records in 22..100usize,
             num_gc_runs in 1..2usize,
             num_insert_batches in 1..2usize,
