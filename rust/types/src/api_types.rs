@@ -26,6 +26,7 @@ use serde_json::Value;
 use std::time::SystemTimeError;
 use thiserror::Error;
 use tonic::Status;
+use utoipa::ToSchema;
 use uuid::Uuid;
 use validator::Validate;
 use validator::ValidationError;
@@ -118,16 +119,36 @@ pub struct ChecklistResponse {
     pub max_batch_size: u32,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct HeartbeatResponse {
     #[serde(rename(serialize = "nanosecond heartbeat"))]
     pub nanosecond_heartbeat: u128,
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, Serialize, ToSchema)]
+#[error("system time error: {message}")]
+pub struct ChromaSystemTimeError {
+    message: String,
+}
+
+impl From<SystemTimeError> for ChromaSystemTimeError {
+    fn from(err: SystemTimeError) -> Self {
+        Self {
+            message: err.to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Error, ToSchema)]
 pub enum HeartbeatError {
     #[error(transparent)]
-    CouldNotGetTime(#[from] SystemTimeError),
+    CouldNotGetTime(#[from] ChromaSystemTimeError),
+}
+
+impl From<SystemTimeError> for HeartbeatError {
+    fn from(err: SystemTimeError) -> Self {
+        HeartbeatError::CouldNotGetTime(ChromaSystemTimeError::from(err))
+    }
 }
 
 impl ChromaError for HeartbeatError {

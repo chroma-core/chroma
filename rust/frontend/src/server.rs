@@ -29,8 +29,11 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
-use uuid::Uuid;
 use utoipa::OpenApi;
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes;
+use utoipa_swagger_ui::SwaggerUi;
+use uuid::Uuid;
 
 use crate::{
     ac::AdmissionControlledService,
@@ -152,6 +155,14 @@ impl FrontendServer {
     #[allow(dead_code)]
     pub async fn run(server: FrontendServer) {
         let circuit_breaker_config = server.config.circuit_breaker.clone();
+
+        // Build an OpenApiRouter with only the healthcheck endpoint
+        let (docs_router, docs_api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
+            .routes(routes!(healthcheck))
+            .split_for_parts();
+
+        let docs_router = docs_router.merge(SwaggerUi::new("/docs").url("/openapi.json", docs_api));
+
         let app = Router::new()
             // `GET /` goes to `root`
             .route("/api/v1/*any", get(v1_deprecation_notice).put(v1_deprecation_notice).patch(v1_deprecation_notice).delete(v1_deprecation_notice).head(v1_deprecation_notice).options(v1_deprecation_notice))
@@ -206,6 +217,7 @@ impl FrontendServer {
                 post(collection_query),
             )
             .route("/openapi.json", get(openapi))
+            .merge(docs_router)
             .with_state(server)
             .layer(DefaultBodyLimit::max(6000000)); // TODO: add to server configuration
         let app = add_tracing_middleware(app);
@@ -256,6 +268,13 @@ impl FrontendServer {
 // These handlers simply proxy the call and the relevant inputs into
 // the appropriate method on the `FrontendServer` struct.
 
+#[utoipa::path(
+    method(get, head),
+    path = "/api/v2/healthcheck",
+    responses(
+        (status = 200, description = "Success", body = str, content_type = "text/plain")
+    )
+)]
 async fn healthcheck(State(server): State<FrontendServer>) -> impl IntoResponse {
     server.metrics.healthcheck.add(1, &[]);
     let res = server.frontend.healthcheck().await;
@@ -263,15 +282,26 @@ async fn healthcheck(State(server): State<FrontendServer>) -> impl IntoResponse 
         tonic::Code::Ok => StatusCode::OK,
         _ => StatusCode::SERVICE_UNAVAILABLE,
     };
-
     (code, Json(res))
 }
 
-async fn heartbeat(
-    State(server): State<FrontendServer>,
-) -> Result<Json<HeartbeatResponse>, ServerError> {
+#[utoipa::path(
+    get,
+    path = "/api/v2/heartbeat",
+    responses(
+        (status = 200, description = "Success", body = HeartbeatResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    )
+)]
+async fn heartbeat(State(server): State<FrontendServer>) -> impl IntoResponse {
     server.metrics.heartbeat.add(1, &[]);
-    Ok(Json(server.frontend.heartbeat().await?))
+    match server.frontend.heartbeat().await {
+        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
+        Err(err) => {
+            let error = ErrorResponse::new("HeartbeatError".to_string(), err.to_string());
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(error)).into_response()
+        }
+    }
 }
 
 // Dummy implementation for now
@@ -284,12 +314,18 @@ async fn pre_flight_checks(
     }))
 }
 
-async fn reset(
-    headers: HeaderMap,
-    State(mut server): State<FrontendServer>,
-) -> Result<Json<bool>, ServerError> {
+#[utoipa::path(
+    post,
+    path = "/api/v2/reset",
+    responses(
+        (status = 200, description = "Reset successful", body = bool),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    )
+)]
+async fn reset(headers: HeaderMap, State(mut server): State<FrontendServer>) -> impl IntoResponse {
     server.metrics.reset.add(1, &[]);
-    server
+    match server
         .authenticate_and_authorize(
             &headers,
             AuthzAction::Reset,
@@ -299,9 +335,20 @@ async fn reset(
                 collection: None,
             },
         )
-        .await?;
-    server.frontend.reset().await?;
-    Ok(Json(true))
+        .await
+    {
+        Err(auth_err) => {
+            let error = ErrorResponse::new("AuthError".to_string(), auth_err.to_string());
+            (StatusCode::UNAUTHORIZED, Json(error)).into_response()
+        }
+        Ok(_) => match server.frontend.reset().await {
+            Ok(_) => (StatusCode::OK, Json(true)).into_response(),
+            Err(reset_err) => {
+                let error = ErrorResponse::new("ResetError".to_string(), reset_err.to_string());
+                (StatusCode::INTERNAL_SERVER_ERROR, Json(error)).into_response()
+            }
+        },
+    }
 }
 
 async fn version(State(server): State<FrontendServer>) -> &'static str {
@@ -497,7 +544,7 @@ async fn delete_database(
     Ok(Json(server.frontend.delete_database(request).await?))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 struct ListCollectionsParams {
     limit: Option<u32>,
     #[serde(default)]
@@ -1258,9 +1305,7 @@ async fn v1_deprecation_notice() -> Response {
 }
 
 #[derive(OpenApi)]
-#[openapi(
-    paths(openapi)
-)]
+#[openapi(paths(healthcheck))]
 struct ApiDoc;
 
 #[utoipa::path(
