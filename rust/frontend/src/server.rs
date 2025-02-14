@@ -799,16 +799,6 @@ async fn collection_add(
         format!("collection:{}", collection_id).as_str(),
     ]);
 
-    server
-        .frontend
-        .validate_embedding(
-            collection_id,
-            payload.embeddings.as_ref(),
-            true,
-            |embedding| Some(embedding.len()),
-        )
-        .await?;
-
     let request = chroma_types::AddCollectionRecordsRequest::try_new(
         tenant_id,
         database_name,
@@ -879,16 +869,6 @@ async fn collection_update(
         format!("collection:{}", collection_id).as_str(),
     ]);
 
-    server
-        .frontend
-        .validate_embedding(
-            collection_id,
-            payload.embeddings.as_ref(),
-            true,
-            |embedding| embedding.as_ref().map(|e| e.len()),
-        )
-        .await?;
-
     let request = chroma_types::UpdateCollectionRecordsRequest::try_new(
         tenant_id,
         database_name,
@@ -957,16 +937,6 @@ async fn collection_upsert(
         format!("tenant:{}", tenant_id).as_str(),
         format!("collection:{}", collection_id).as_str(),
     ]);
-
-    server
-        .frontend
-        .validate_embedding(
-            collection_id,
-            payload.embeddings.as_ref(),
-            true,
-            |embedding| Some(embedding.len()),
-        )
-        .await?;
 
     let request = chroma_types::UpsertCollectionRecordsRequest::try_new(
         tenant_id,
@@ -1221,15 +1191,6 @@ async fn collection_query(
         format!("tenant:{}", tenant_id).as_str(),
         format!("collection:{}", collection_id).as_str(),
     ]);
-    server
-        .frontend
-        .validate_embedding(
-            collection_id,
-            Some(&payload.query_embeddings),
-            true,
-            |embedding| Some(embedding.len()),
-        )
-        .await?;
 
     let request = QueryRequest::try_new(
         tenant_id,
