@@ -1,11 +1,12 @@
 import json
 import logging
 import sys
-from typing import Optional, Sequence, Any, Tuple, cast, Dict, Union, Set
-from uuid import UUID
-from overrides import override
-from pypika import Table, Column
 from itertools import groupby
+from typing import Any, Dict, Optional, Sequence, Set, Tuple, Union, cast
+from uuid import UUID
+
+from overrides import override
+from pypika import Column, Table
 
 from chromadb.api.configuration import (
     CollectionConfigurationInternal,
@@ -14,27 +15,27 @@ from chromadb.api.configuration import (
     InvalidConfigurationError,
 )
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System
-from chromadb.db.base import Cursor, SqlDB, ParameterValue, get_sql
+from chromadb.db.base import Cursor, ParameterValue, SqlDB, get_sql
 from chromadb.db.system import SysDB
 from chromadb.errors import (
     InvalidCollectionException,
     NotFoundError,
     UniqueConstraintError,
 )
+from chromadb.ingest import Producer
 from chromadb.telemetry.opentelemetry import (
-    add_attributes_to_current_span,
     OpenTelemetryClient,
     OpenTelemetryGranularity,
+    add_attributes_to_current_span,
     trace_method,
 )
-from chromadb.ingest import Producer
 from chromadb.types import (
+    Collection,
     CollectionAndSegments,
     Database,
+    Metadata,
     OptionalArgument,
     Segment,
-    Metadata,
-    Collection,
     SegmentScope,
     Tenant,
     Unspecified,
@@ -964,13 +965,8 @@ class SqlSysDB(SqlDB, SysDB):
 
     @override
     def get_collection_size(self, id: UUID) -> int:
-<<<<<<< HEAD
         raise NotImplementedError
-||||||| parent of 3a9a76ee1 ([ENH] Count collections implementation (#3785))
-        raise NotImplementedError
-=======
-        raise NotImplementedError
-    
+
     @override
     def count_collections(
         self,
@@ -987,4 +983,3 @@ class SqlSysDB(SqlDB, SysDB):
         if database == None or database == "":
             request_database = ""
         return len(self.get_collections(tenant=tenant, database=request_database))
->>>>>>> 3a9a76ee1 ([ENH] Count collections implementation (#3785))
