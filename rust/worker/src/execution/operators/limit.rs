@@ -271,7 +271,6 @@ impl Operator<LimitInput, LimitOutput> for LimitOperator {
             }
         };
 
-        println!("Materialized offset ids: {:?}", materialized_offset_ids);
         Ok(LimitOutput {
             offset_ids: materialized_offset_ids,
         })

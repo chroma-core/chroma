@@ -2738,7 +2738,6 @@ dependencies = [
  "chroma-sysdb",
  "chroma-system",
  "chroma-types",
- "chromadb",
  "chrono",
  "clap",
  "figment",
