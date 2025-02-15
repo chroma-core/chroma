@@ -1,8 +1,8 @@
 package dao
 
 import (
-	"database/sql"
 	"errors"
+	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -64,9 +64,33 @@ func (s *collectionDb) ListCollectionsToGc() ([]*dbmodel.CollectionToGc, error) 
 }
 
 func (s *collectionDb) getCollections(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32, is_deleted bool) (collectionWithMetdata []*dbmodel.CollectionAndMetadata, err error) {
-	var collections []*dbmodel.Collection
+	type Result struct {
+		// Collection fields
+		ID                         string
+		LogPosition                int64
+		Version                    int32
+		CollectionName             *string `gorm:"column:collection_name"`
+		ConfigurationJsonStr       *string
+		Dimension                  *int32
+		DatabaseID                 string
+		IsDeleted                  bool
+		TotalRecordsPostCompaction uint64
+		DatabaseName               string `gorm:"column:database_name"`
+		TenantID                   string
+		// Metadata fields - all aligned with column names
+		CollectionID      *string    `gorm:"column:collection_id"`
+		Key               *string    `gorm:"column:key"`
+		StrValue          *string    `gorm:"column:str_value"`
+		IntValue          *int64     `gorm:"column:int_value"`
+		FloatValue        *float64   `gorm:"column:float_value"`
+		BoolValue         *bool      `gorm:"column:bool_value"`
+		Ts                *int64     `gorm:"column:ts"`
+		MetadataCreatedAt *time.Time `gorm:"column:created_at"`
+		MetadataUpdatedAt *time.Time `gorm:"column:updated_at"`
+	}
+
 	query := s.db.Table("collections").
-		Select("collections.id, collections.log_position, collections.version, collections.name, collections.configuration_json_str, collections.dimension, collections.database_id, collections.is_deleted, collections.total_records_post_compaction, databases.name, databases.tenant_id").
+		Select("collections.id, collections.log_position, collections.version, collections.name as collection_name, collections.configuration_json_str, collections.dimension, collections.database_id, collections.is_deleted, collections.total_records_post_compaction, databases.name as database_name, databases.tenant_id").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
 		Order("collections.created_at ASC")
 
@@ -91,68 +115,94 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 		query = query.Offset(int(*offset))
 
 	}
-	rows, err := query.Rows()
+	var results []Result
+	err = s.db.Table("(?) as ci", query).
+		Select(`
+            ci.*,
+            cm.collection_id,
+            cm.key,
+            cm.str_value,
+            cm.int_value,
+            cm.float_value,
+            cm.bool_value,
+            cm.ts,
+            cm.created_at,
+            cm.updated_at
+        `).
+		Joins("LEFT JOIN collection_metadata cm ON cm.collection_id = ci.id").
+		Scan(&results).Error
+
 	if err != nil {
 		return nil, err
 	}
-	collectionWithMetdata = make([]*dbmodel.CollectionAndMetadata, 0, len(collections))
-	for rows.Next() {
-		var (
-			collectionID                   string
-			logPosition                    int64
-			version                        int32
-			collectionName                 string
-			collectionConfigurationJsonStr string
-			collectionDimension            sql.NullInt32
-			collectionDatabaseID           string
-			collectionIsDeleted            bool
-			collectionCreatedAt            sql.NullTime
-			databaseName                   string
-			databaseTenantID               string
-			totalRecordsPostCompaction     uint64
-		)
 
-		err := rows.Scan(&collectionID, &logPosition, &version, &collectionName, &collectionConfigurationJsonStr, &collectionDimension, &collectionDatabaseID, &collectionIsDeleted, &totalRecordsPostCompaction, &databaseName, &databaseTenantID)
-		if err != nil {
-			log.Error("scan collection failed", zap.Error(err))
-			return nil, err
-		}
+	var collectionsMap = make(map[string]*dbmodel.CollectionAndMetadata)
 
-		collection := &dbmodel.Collection{
-			ID:                         collectionID,
-			Name:                       &collectionName,
-			ConfigurationJsonStr:       &collectionConfigurationJsonStr,
-			DatabaseID:                 collectionDatabaseID,
-			LogPosition:                logPosition,
-			Version:                    version,
-			IsDeleted:                  collectionIsDeleted,
-			TotalRecordsPostCompaction: totalRecordsPostCompaction,
-		}
-		if collectionDimension.Valid {
-			collection.Dimension = &collectionDimension.Int32
-		}
-		if collectionCreatedAt.Valid {
-			collection.CreatedAt = collectionCreatedAt.Time
+	for _, r := range results {
+		log.Info("Raw result",
+			zap.String("ID", r.ID),
+			zap.Any("Name", r.CollectionName),
+			zap.String("DatabaseName", r.DatabaseName))
+
+		collection, exists := collectionsMap[r.ID]
+		if !exists {
+			// Create new collection
+			var col = &dbmodel.Collection{
+				ID:                   r.ID,
+				Name:                 r.CollectionName,
+				ConfigurationJsonStr: r.ConfigurationJsonStr,
+				Dimension:            r.Dimension,
+				DatabaseID:           r.DatabaseID,
+				IsDeleted:            r.IsDeleted,
+				LogPosition:          r.LogPosition,
+				Version:              r.Version,
+			}
+
+			collection = &dbmodel.CollectionAndMetadata{
+				Collection:         col,
+				TenantID:           r.TenantID,
+				DatabaseName:       r.DatabaseName,
+				CollectionMetadata: make([]*dbmodel.CollectionMetadata, 0),
+			}
+			collectionsMap[r.ID] = collection
 		}
 
-		collectionWithMetdata = append(collectionWithMetdata, &dbmodel.CollectionAndMetadata{
-			Collection:   collection,
-			TenantID:     databaseTenantID,
-			DatabaseName: databaseName,
-		})
+		var metadata = &dbmodel.CollectionMetadata{}
+		if r.CollectionID != nil {
+			metadata.CollectionID = *r.CollectionID
+			metadata.Key = r.Key
+			metadata.StrValue = r.StrValue
+			metadata.IntValue = r.IntValue
+			metadata.FloatValue = r.FloatValue
+			metadata.BoolValue = r.BoolValue
+			if r.Ts != nil {
+				metadata.Ts = *r.Ts
+			} else {
+				metadata.Ts = 0
+			}
+			if r.MetadataCreatedAt != nil {
+				metadata.CreatedAt = *r.MetadataCreatedAt
+			} else {
+				// current time
+				metadata.CreatedAt = time.Now()
+			}
+
+			if r.MetadataUpdatedAt != nil {
+				metadata.UpdatedAt = *r.MetadataUpdatedAt
+			} else {
+				// current time
+				metadata.UpdatedAt = time.Now()
+			}
+			collection.CollectionMetadata = append(collection.CollectionMetadata, metadata)
+		}
 	}
-	rows.Close()
-	for _, collection := range collectionWithMetdata {
-		var metadata []*dbmodel.CollectionMetadata
-		err = s.db.Where("collection_id = ?", collection.Collection.ID).Find(&metadata).Error
-		if err != nil {
-			log.Error("get collection metadata failed", zap.Error(err))
-			return nil, err
-		}
-		collection.CollectionMetadata = metadata
+
+	var collections = make([]*dbmodel.CollectionAndMetadata, 0, len(collectionsMap))
+	for _, c := range collectionsMap {
+		collections = append(collections, c)
 	}
 
-	return
+	return collections, nil
 }
 
 func (s *collectionDb) CountCollections(tenantID string, databaseName *string) (uint64, error) {
