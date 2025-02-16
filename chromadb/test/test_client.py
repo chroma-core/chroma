@@ -7,6 +7,7 @@ from chromadb.api import ClientAPI
 import chromadb.server.fastapi
 import pytest
 import tempfile
+import os
 
 
 @pytest.fixture
@@ -51,7 +52,11 @@ def http_api_factory(
 
 @pytest.fixture()
 def http_api(http_api_factory: HttpAPIFactory) -> Generator[ClientAPI, None, None]:
-    client = http_api_factory()
+    if os.environ.get("CHROMA_SERVER_HTTP_PORT") is not None:
+        port = int(os.environ.get("CHROMA_SERVER_HTTP_PORT"))  # type: ignore
+        client = http_api_factory(port=port)
+    else:
+        client = http_api_factory()
     yield client
     client.clear_system_cache()
 
