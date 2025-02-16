@@ -178,6 +178,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             IncludeEnum.documents,
             IncludeEnum.distances,
         ],
+        max_distance: Optional[float] = None,
     ) -> QueryResult:
         """Get the n_results nearest neighbor embeddings for provided query_embeddings or query_texts.
 
@@ -210,6 +211,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             where=where,
             where_document=where_document,
             include=include,
+            max_distance=max_distance,
         )
 
         query_results = await self._client._query(
@@ -219,6 +221,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             where=query_request["where"],
             where_document=query_request["where_document"],
             include=query_request["include"],
+            max_distance=query_request["max_distance"],
             tenant=self.tenant,
             database=self.database,
         )

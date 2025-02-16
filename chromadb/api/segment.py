@@ -584,6 +584,7 @@ class SegmentAPI(ServerAPI):
         page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = None,
         include: Include = ["embeddings", "metadatas", "documents"],  # type: ignore[list-item]
+        max_distance: Optional[float] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> GetResult:
@@ -643,6 +644,7 @@ class SegmentAPI(ServerAPI):
                     False,
                     IncludeEnum.uris in include,
                 ),
+                max_distance,
             )
         )
 
@@ -766,6 +768,7 @@ class SegmentAPI(ServerAPI):
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
         include: Include = ["documents", "metadatas", "distances"],  # type: ignore[list-item]
+        max_distance: Optional[float] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> QueryResult:
@@ -823,6 +826,7 @@ class SegmentAPI(ServerAPI):
                     IncludeEnum.distances in include,
                     IncludeEnum.uris in include,
                 ),
+                max_distance=max_distance,
             )
         )
 

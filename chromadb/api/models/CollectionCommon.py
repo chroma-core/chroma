@@ -58,6 +58,7 @@ from chromadb.api.types import (
     validate_record_set_contains_any,
     validate_record_set_for_embedding,
     validate_filter_set,
+    validate_max_distance,
 )
 
 # TODO: We should rename the types in chromadb.types to be Models where
@@ -229,6 +230,7 @@ class CollectionCommon(Generic[ClientT]):
         where: Optional[Where],
         where_document: Optional[WhereDocument],
         include: Include,
+        max_distance: Optional[float],
     ) -> GetRequest:
         # Unpack
         unpacked_ids: Optional[IDs] = maybe_cast_one_to_many(target=ids)
@@ -257,6 +259,7 @@ class CollectionCommon(Generic[ClientT]):
             where=filters["where"],
             where_document=filters["where_document"],
             include=request_include,
+            max_distance=max_distance,
         )
 
     @validation_context("query")
@@ -275,6 +278,7 @@ class CollectionCommon(Generic[ClientT]):
         where: Optional[Where],
         where_document: Optional[WhereDocument],
         include: Include,
+        max_distance: Optional[float],
     ) -> QueryRequest:
         # Unpack
         query_records = normalize_base_record_set(
@@ -294,6 +298,7 @@ class CollectionCommon(Generic[ClientT]):
         validate_filter_set(filter_set=filters)
         validate_include(include=include)
         validate_n_results(n_results=n_results)
+        validate_max_distance(max_distance=max_distance)
 
         # Prepare
         if query_records["embeddings"] is None:
@@ -315,6 +320,7 @@ class CollectionCommon(Generic[ClientT]):
             where=request_where,
             where_document=request_where_document,
             include=request_include,
+            max_distance=max_distance,
             n_results=n_results,
         )
 

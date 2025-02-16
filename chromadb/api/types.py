@@ -1,4 +1,15 @@
-from typing import Optional, Set, Union, TypeVar, List, Dict, Any, Tuple, cast
+from typing import (
+    Optional,
+    Set,
+    Union,
+    TypeVar,
+    List,
+    Dict,
+    Any,
+    Tuple,
+    cast,
+    TypeAlias,
+)
 from numpy.typing import NDArray
 import numpy as np
 from typing_extensions import TypedDict, Protocol, runtime_checkable
@@ -49,6 +60,17 @@ PyEmbedding = PyVector
 PyEmbeddings = List[PyEmbedding]
 Embedding = Vector
 Embeddings = List[Embedding]
+
+EmbeddingsType: TypeAlias = Optional[
+    Union[
+        List[Embeddings],
+        List[PyEmbeddings],
+        List[NDArray[Union[np.int32, np.float32]]],
+    ]
+]
+EmbeddingType: TypeAlias = Optional[
+    Union[Embeddings, PyEmbeddings, NDArray[Union[np.int32, np.float32]]]
+]
 
 
 def normalize_embeddings(
@@ -371,6 +393,7 @@ class GetRequest(TypedDict):
     where: Optional[Where]
     where_document: Optional[WhereDocument]
     include: Include
+    max_distance: Optional[float]
 
 
 class GetResult(TypedDict):
@@ -391,6 +414,7 @@ class QueryRequest(TypedDict):
     where_document: Optional[WhereDocument]
     include: Include
     n_results: int
+    max_distance: Optional[float]
 
 
 class QueryResult(TypedDict):
@@ -750,6 +774,15 @@ def validate_n_results(n_results: int) -> int:
     return n_results
 
 
+def validate_max_distance(max_distance: Optional[float] = None) -> None:
+    """Validates max_distance to ensure it is a float"""
+    if max_distance is not None:
+        if not isinstance(max_distance, float):
+            raise ValueError(f"Expected max_distance to be a float, got {max_distance}")
+        if max_distance < 0:
+            raise ValueError(f"Max distance must be non-negative, got {max_distance}")
+
+
 def validate_embeddings(embeddings: Embeddings) -> Embeddings:
     """Validates embeddings to ensure it is a list of numpy arrays of ints, or floats"""
     if not isinstance(embeddings, (list, np.ndarray)):
@@ -836,7 +869,7 @@ def validate_batch(
 
 
 def convert_np_embeddings_to_list(embeddings: Embeddings) -> PyEmbeddings:
-    return [embedding.tolist() for embedding in embeddings]
+    return cast(PyEmbeddings, [embedding.tolist() for embedding in embeddings])
 
 
 def convert_list_embeddings_to_np(embeddings: PyEmbeddings) -> Embeddings:
