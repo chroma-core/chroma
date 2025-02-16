@@ -1341,6 +1341,7 @@ dependencies = [
  "chroma-tracing",
  "chroma-types",
  "figment",
+ "futures",
  "mdac",
  "opentelemetry",
  "parking_lot",

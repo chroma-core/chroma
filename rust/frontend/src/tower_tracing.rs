@@ -1,7 +1,9 @@
 use axum::extract::MatchedPath;
 use axum::http::{header, Request, Response};
 use axum::Router;
+use futures::future::BoxFuture;
 use std::time::Duration;
+use tower::Service;
 use tower_http::trace::{MakeSpan, OnResponse, TraceLayer};
 
 #[derive(Clone)]
@@ -45,8 +47,65 @@ impl<B> OnResponse<B> for RequestTracing {
     }
 }
 
+#[derive(Clone)]
+pub struct TraceIdMiddleware<S> {
+    inner: S,
+}
+
+impl<S, Request, Rs> Service<Request> for TraceIdMiddleware<S>
+where
+    S: Service<Request, Response = Response<Rs>> + Send + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: Request) -> Self::Future {
+        let future = self.inner.call(req);
+        Box::pin(async move {
+            let mut response: Response<Rs> = future.await?;
+            if response.status().is_client_error() || response.status().is_server_error() {
+                if let Some(span_id) = tracing::Span::current().id() {
+                    let headers = response.headers_mut();
+                    let header_val =
+                        format!("{:x}", span_id.into_u64()).parse::<header::HeaderValue>();
+                    if let Ok(val) = header_val {
+                        headers.insert("chroma-trace-id", val);
+                    }
+                }
+            }
+            Ok(response)
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SetTraceIdLayer {}
+
+impl SetTraceIdLayer {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+impl<S> tower::layer::Layer<S> for SetTraceIdLayer {
+    type Service = TraceIdMiddleware<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        TraceIdMiddleware { inner }
+    }
+}
+
 pub(crate) fn add_tracing_middleware(router: Router) -> Router {
-    router.layer(
+    router.layer(SetTraceIdLayer::new()).layer(
         TraceLayer::new_for_http()
             .make_span_with(RequestTracing)
             .on_response(RequestTracing),
