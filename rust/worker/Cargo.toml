@@ -100,3 +100,6 @@ harness = false
 [[bench]]
 name = "spann"
 harness = false
+
+[features]
+python = ["chroma-types/python"]

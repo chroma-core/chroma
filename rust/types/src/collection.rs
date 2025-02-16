@@ -1,11 +1,13 @@
 use super::{Metadata, MetadataValueConversionError};
 use crate::{chroma_proto, test_segment, Segment, SegmentScope};
 use chroma_error::{ChromaError, ErrorCodes};
-use pyo3::types::PyAnyMethods;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 use uuid::Uuid;
+
+#[cfg(feature = "python")]
+use pyo3::types::PyAnyMethods;
 
 /// CollectionUuid is a wrapper around Uuid to provide a type for the collection id.
 #[derive(
@@ -37,20 +39,25 @@ impl std::fmt::Display for CollectionUuid {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[pyo3::pyclass]
+#[cfg_attr(feature = "python", pyo3::pyclass)]
 pub struct Collection {
     #[serde(rename(serialize = "id"))]
     pub collection_id: CollectionUuid,
+    #[cfg(feature = "python")]
     #[pyo3(get)]
     pub name: String,
     #[serde(rename(deserialize = "configuration_json_str"))]
     pub configuration_json: Value,
+    #[cfg(feature = "python")]
     #[pyo3(get)]
     pub metadata: Option<Metadata>,
+    #[cfg(feature = "python")]
     #[pyo3(get)]
     pub dimension: Option<i32>,
+    #[cfg(feature = "python")]
     #[pyo3(get)]
     pub tenant: String,
+    #[cfg(feature = "python")]
     #[pyo3(get)]
     pub database: String,
     pub log_position: i64,
@@ -59,6 +66,7 @@ pub struct Collection {
     pub total_records_post_compaction: u64,
 }
 
+#[cfg(feature = "python")]
 #[pyo3::pymethods]
 impl Collection {
     #[getter]

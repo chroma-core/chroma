@@ -10,7 +10,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 async-trait = { workspace = true }
-pyo3 = { workspace = true }
+pyo3 = { workspace = true, features = ["extension-module"] }
 tokio = { workspace = true }
 uuid = { workspace = true }
 numpy = "0.23.0"
@@ -29,3 +29,6 @@ chroma-system = { workspace = true }
 chroma-types = { workspace = true }
 chroma-error = { workspace = true, features = ["validator"] }
 mdac = { workspace = true }
+
+[features]
+python = ["chroma-types/python", "chroma-sqlite/python"]

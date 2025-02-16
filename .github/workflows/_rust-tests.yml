@@ -17,7 +17,7 @@ jobs:
       - name: Setup
         uses: ./.github/actions/rust
       - name: Test
-        run: cargo nextest run
+        run: cargo nextest run --features python
   test-integration:
     strategy:
       matrix:
@@ -33,7 +33,7 @@ jobs:
       - name: Start services in Tilt
         uses: ./.github/actions/tilt
       - name: Run tests
-        run: cargo nextest run --profile k8s_integration
+        run: cargo nextest run --profile k8s_integration --features python
       - name: Save service logs to artifact
         if: always()
         uses: ./.github/actions/export-tilt-logs
@@ -53,4 +53,4 @@ jobs:
       - name: Setup
         uses: ./.github/actions/rust
       - name: Test compile
-        run: cargo bench --no-run
+        run: cargo bench --no-run --features python

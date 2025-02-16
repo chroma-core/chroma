@@ -18,8 +18,6 @@ use crate::Where;
 use chroma_config::assignment::rendezvous_hash::AssignmentError;
 use chroma_error::ChromaValidationError;
 use chroma_error::{ChromaError, ErrorCodes};
-use pyo3::pyclass;
-use pyo3::types::PyAnyMethods;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
@@ -29,6 +27,9 @@ use tonic::Status;
 use uuid::Uuid;
 use validator::Validate;
 use validator::ValidationError;
+
+#[cfg(feature = "python")]
+use pyo3::types::PyAnyMethods;
 
 #[derive(Debug, Error)]
 pub enum GetSegmentsError {
@@ -193,7 +194,7 @@ impl GetTenantRequest {
 }
 
 #[derive(Serialize)]
-#[pyclass]
+#[cfg_attr(feature = "python", pyo3::pyclass)]
 pub struct GetTenantResponse {
     pub name: String,
 }
@@ -261,15 +262,18 @@ impl ChromaError for CreateDatabaseError {
 }
 
 #[derive(Serialize, Debug)]
-#[pyo3::pyclass]
+#[cfg_attr(feature = "python", pyo3::pyclass)]
 pub struct Database {
     pub id: Uuid,
+    #[cfg(feature = "python")]
     #[pyo3(get)]
     pub name: String,
+    #[cfg(feature = "python")]
     #[pyo3(get)]
     pub tenant: String,
 }
 
+#[cfg(feature = "python")]
 #[pyo3::pymethods]
 impl Database {
     #[getter]
@@ -1002,7 +1006,7 @@ impl TryFrom<&str> for Include {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[pyclass]
+#[cfg_attr(feature = "python", pyo3::pyclass)]
 pub struct IncludeList(pub Vec<Include>);
 
 impl IncludeList {
@@ -1107,17 +1111,22 @@ impl GetRequest {
 }
 
 #[derive(Clone, Deserialize, Serialize, Debug)]
-#[pyclass]
+#[cfg_attr(feature = "python", pyo3::pyclass)]
 pub struct GetResponse {
+    #[cfg(feature = "python")]
     #[pyo3(get)]
     ids: Vec<String>,
+    #[cfg(feature = "python")]
     #[pyo3(get)]
     embeddings: Option<Vec<Vec<f32>>>,
+    #[cfg(feature = "python")]
     #[pyo3(get)]
     documents: Option<Vec<Option<String>>>,
+    #[cfg(feature = "python")]
     #[pyo3(get)]
     uris: Option<Vec<Option<String>>>,
     // TODO(hammadb): Add metadata & include to the response
+    #[cfg(feature = "python")]
     #[pyo3(get)]
     metadatas: Option<Vec<Option<Metadata>>>,
     include: Vec<Include>,
@@ -1223,18 +1232,24 @@ impl QueryRequest {
 }
 
 #[derive(Clone, Deserialize, Serialize)]
-#[pyclass]
+#[cfg_attr(feature = "python", pyo3::pyclass)]
 pub struct QueryResponse {
+    #[cfg(feature = "python")]
     #[pyo3(get)]
     ids: Vec<Vec<String>>,
+    #[cfg(feature = "python")]
     #[pyo3(get)]
     embeddings: Option<Vec<Vec<Option<Vec<f32>>>>>,
+    #[cfg(feature = "python")]
     #[pyo3(get)]
     documents: Option<Vec<Vec<Option<String>>>>,
+    #[cfg(feature = "python")]
     #[pyo3(get)]
     uris: Option<Vec<Vec<Option<String>>>>,
+    #[cfg(feature = "python")]
     #[pyo3(get)]
     metadatas: Option<Vec<Vec<Option<Metadata>>>>,
+    #[cfg(feature = "python")]
     #[pyo3(get)]
     distances: Option<Vec<Vec<Option<f32>>>>,
     include: Vec<Include>,

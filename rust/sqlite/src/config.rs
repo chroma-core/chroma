@@ -5,12 +5,14 @@ use chroma_config::{
     Configurable,
 };
 use chroma_error::ChromaError;
-use pyo3::{pyclass, pymethods};
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 
+#[cfg(feature = "python")]
+use pyo3::{pyclass, pymethods};
+
 #[derive(Serialize, Deserialize, Clone)]
-#[pyclass]
+#[cfg_attr(feature = "python", pyo3::pyclass)]
 pub struct SqliteDBConfig {
     pub hash_type: MigrationHash,
     pub migration_mode: MigrationMode,
@@ -23,7 +25,7 @@ pub struct SqliteDBConfig {
 /// - Apply: Apply the migrations
 /// - Validate: Validate the applied migrations and ensure none are unappliued
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
-#[pyclass(eq, eq_int)]
+#[cfg_attr(feature = "python", pyclass(eq, eq_int))]
 pub enum MigrationMode {
     Apply,
     Validate,
@@ -33,7 +35,7 @@ pub enum MigrationMode {
 /// - SHA256: Use SHA256 hash
 /// - MD5: Use MD5 hash
 #[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
-#[pyclass(eq, eq_int)]
+#[cfg_attr(feature = "python", pyclass(eq, eq_int))]
 pub enum MigrationHash {
     SHA256,
     MD5,
@@ -41,6 +43,7 @@ pub enum MigrationHash {
 
 //////////////////////// PyMethods Implementation ////////////////////////
 
+#[cfg(feature = "python")]
 #[pymethods]
 impl SqliteDBConfig {
     #[new]
