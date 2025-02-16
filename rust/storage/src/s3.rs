@@ -543,6 +543,62 @@ impl S3Storage {
         self.finish_multipart_upload(key, &upload_id, upload_parts)
             .await
     }
+
+    pub async fn delete(&self, key: &str) -> Result<(), S3PutError> {
+        tracing::info!(key = %key, "Deleting object from S3");
+
+        match self
+            .client
+            .delete_object()
+            .bucket(&self.bucket)
+            .key(key)
+            .send()
+            .await
+        {
+            Ok(_) => {
+                tracing::info!(key = %key, "Successfully deleted object from S3");
+                Ok(())
+            }
+            Err(e) => {
+                tracing::error!(error = %e, key = %key, "Failed to delete object from S3");
+                Err(S3PutError::S3PutError(e.to_string()))
+            }
+        }
+    }
+
+    pub async fn rename(&self, src_key: &str, dst_key: &str) -> Result<(), S3PutError> {
+        tracing::info!(src = %src_key, dst = %dst_key, "Renaming object in S3");
+
+        // S3 doesn't have a native rename operation, so we need to copy and delete
+        match self
+            .client
+            .copy_object()
+            .bucket(&self.bucket)
+            .copy_source(format!("{}/{}", self.bucket, src_key))
+            .key(dst_key)
+            .send()
+            .await
+        {
+            Ok(_) => {
+                tracing::info!(src = %src_key, dst = %dst_key, "Successfully copied object");
+                // After successful copy, delete the original
+                match self.delete(src_key).await {
+                    Ok(_) => {
+                        tracing::info!(src = %src_key, dst = %dst_key, "Successfully renamed object");
+                        Ok(())
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, src = %src_key, "Failed to delete source object after copy");
+                        Err(e)
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!(error = %e, src = %src_key, dst = %dst_key, "Failed to copy object");
+                Err(S3PutError::S3PutError(e.to_string()))
+            }
+        }
+    }
 }
 
 #[async_trait]

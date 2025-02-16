@@ -51,16 +51,53 @@ impl Operator<DeleteVersionsAtSysDbInput, DeleteVersionsAtSysDbOutput>
         &self,
         input: &DeleteVersionsAtSysDbInput,
     ) -> Result<DeleteVersionsAtSysDbOutput, DeleteVersionsAtSysDbError> {
+        tracing::info!(
+            collection_id = %input.versions_to_delete.collection_id,
+            database_id = %input.versions_to_delete.database_id,
+            tenant_id = %input.versions_to_delete.tenant_id,
+            versions = ?input.versions_to_delete.versions,
+            epoch_id = input.epoch_id,
+            "Starting deletion of versions from SysDB"
+        );
+
+        tracing::info!(
+            unused_files_count = input.unused_s3_files.len(),
+            unused_files = ?input.unused_s3_files,
+            "Unused S3 files that will be cleaned up after version deletion"
+        );
+
         let mut sysdb = input.sysdb_client.clone();
 
         if !input.versions_to_delete.versions.is_empty() {
-            let result = sysdb
+            tracing::info!(
+                versions = ?input.versions_to_delete.versions,
+                "Deleting versions from SysDB"
+            );
+
+            match sysdb
                 .delete_collection_version(vec![input.versions_to_delete.clone()])
-                .await;
-            if let Err(e) = result {
-                return Err(DeleteVersionsAtSysDbError::SysDBError(e.to_string()));
+                .await
+            {
+                Ok(_) => {
+                    tracing::info!(
+                        versions = ?input.versions_to_delete.versions,
+                        "Successfully deleted versions from SysDB"
+                    );
+                }
+                Err(e) => {
+                    tracing::error!(
+                        error = %e,
+                        versions = ?input.versions_to_delete.versions,
+                        "Failed to delete versions from SysDB"
+                    );
+                    return Err(DeleteVersionsAtSysDbError::SysDBError(e.to_string()));
+                }
             }
+        } else {
+            tracing::info!("No versions to delete from SysDB");
         }
+
+        tracing::info!("Version deletion operation completed successfully");
 
         Ok(DeleteVersionsAtSysDbOutput {
             version_file: input.version_file.clone(),

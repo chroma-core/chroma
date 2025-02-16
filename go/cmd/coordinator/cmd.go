@@ -65,9 +65,9 @@ func init() {
 	Cmd.Flags().StringVar(&conf.CompactionServicePodLabel, "compaction-pod-label", "compaction-service", "Compaction pod label")
 
 	// Block store provider
-	Cmd.Flags().StringVar(&conf.BlockStoreProvider, "block-store-provider", "none", "Block store provider")
+	Cmd.Flags().StringVar(&conf.BlockStoreProvider, "block-store-provider", "minio", "Block store provider")
 	// Version file
-	Cmd.Flags().BoolVar(&conf.VersionFileEnabled, "version-file-enabled", false, "Enable version file")
+	Cmd.Flags().BoolVar(&conf.VersionFileEnabled, "version-file-enabled", true, "Enable version file")
 }
 
 func exec(*cobra.Command, []string) {
