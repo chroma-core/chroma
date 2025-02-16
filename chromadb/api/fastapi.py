@@ -375,6 +375,9 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             offset = (page - 1) * page_size
             limit = page_size
 
+        # Servers do not support receiving "data", as that is hydrated by the client as a loadable
+        include = [i for i in include if i != "data"]
+
         resp_json = self._make_request(
             "post",
             f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/get",
@@ -557,6 +560,9 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> QueryResult:
+        # Clients do not support receiving "data", as that is hydrated by the client as a loadable
+        include = [i for i in include if i != "data"]
+
         """Gets the nearest neighbors of a single embedding"""
         resp_json = self._make_request(
             "post",

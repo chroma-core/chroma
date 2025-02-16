@@ -418,6 +418,9 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             offset = (page - 1) * page_size
             limit = page_size
 
+        # Servers do not support the "data" include, as that is hydrated on the client side
+        include = [i for i in include if i != "data"]
+
         resp_json = await self._make_request(
             "post",
             f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/get",
@@ -585,6 +588,9 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> QueryResult:
+        # Servers do not support the "data" include, as that is hydrated on the client side
+        include = [i for i in include if i != "data"]
+
         resp_json = await self._make_request(
             "post",
             f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/query",
