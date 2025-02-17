@@ -376,7 +376,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             limit = page_size
 
         # Servers do not support receiving "data", as that is hydrated by the client as a loadable
-        include = [i for i in include if i != "data"]
+        filtered_include = [i for i in include if i != "data"]
 
         resp_json = self._make_request(
             "post",
@@ -388,7 +388,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
                 "limit": limit,
                 "offset": offset,
                 "where_document": where_document,
-                "include": include,
+                "include": filtered_include,
             },
         )
 
@@ -399,7 +399,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             documents=resp_json.get("documents", None),
             data=None,
             uris=resp_json.get("uris", None),
-            included=resp_json.get("included", include),
+            included=include,
         )
 
     @trace_method("FastAPI._delete", OpenTelemetryGranularity.OPERATION)
@@ -561,7 +561,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> QueryResult:
         # Clients do not support receiving "data", as that is hydrated by the client as a loadable
-        include = [i for i in include if i != "data"]
+        filtered_include = [i for i in include if i != "data"]
 
         """Gets the nearest neighbors of a single embedding"""
         resp_json = self._make_request(
@@ -574,7 +574,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
                 "n_results": n_results,
                 "where": where,
                 "where_document": where_document,
-                "include": include,
+                "include": filtered_include,
             },
         )
 
@@ -586,7 +586,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             documents=resp_json.get("documents", None),
             uris=resp_json.get("uris", None),
             data=None,
-            included=resp_json.get("included", include),
+            included=include,
         )
 
     @trace_method("FastAPI.reset", OpenTelemetryGranularity.ALL)

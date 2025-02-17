@@ -1153,7 +1153,6 @@ impl From<(GetResult, IncludeList)> for GetResponse {
             if let Some(documents) = res.documents.as_mut() {
                 documents.push(document);
             }
-
             let uri = metadata.as_mut().and_then(|meta| {
                 meta.remove(CHROMA_URI_KEY).and_then(|v| {
                     if let crate::MetadataValue::Str(uri) = v {

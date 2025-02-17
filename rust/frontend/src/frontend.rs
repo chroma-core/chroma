@@ -779,7 +779,9 @@ impl Frontend {
                 proj: Projection {
                     document: request.include.0.contains(&Include::Document),
                     embedding: request.include.0.contains(&Include::Embedding),
-                    metadata: request.include.0.contains(&Include::Metadata),
+                    // If URI is requested, metadata is also requested so we can extract the URI.
+                    metadata: (request.include.0.contains(&Include::Metadata)
+                        || request.include.0.contains(&Include::Uri)),
                 },
             })
             .await?;
@@ -849,7 +851,9 @@ impl Frontend {
                     projection: Projection {
                         document: request.include.0.contains(&Include::Document),
                         embedding: request.include.0.contains(&Include::Embedding),
-                        metadata: request.include.0.contains(&Include::Metadata),
+                        // If URI is requested, metadata is also requested so we can extract the URI.
+                        metadata: (request.include.0.contains(&Include::Metadata)
+                            || request.include.0.contains(&Include::Uri)),
                     },
                     distance: request.include.0.contains(&Include::Distance),
                 },

@@ -290,7 +290,9 @@ async fn reset(State(mut server): State<FrontendServer>) -> Result<Json<bool>, S
 
 async fn version(State(server): State<FrontendServer>) -> &'static str {
     server.metrics.version.add(1, &[]);
-    env!("CARGO_PKG_VERSION")
+    // TODO: Decide on how to handle versioning across python / rust frontend
+    // for now return a hardcoded version
+    "0.7.0"
 }
 
 // TOOD: Dummy implementation for now

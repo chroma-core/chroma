@@ -419,7 +419,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             limit = page_size
 
         # Servers do not support the "data" include, as that is hydrated on the client side
-        include = [i for i in include if i != "data"]
+        filtered_include = [i for i in include if i != "data"]
 
         resp_json = await self._make_request(
             "post",
@@ -431,7 +431,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
                 "limit": limit,
                 "offset": offset,
                 "where_document": where_document,
-                "include": include,
+                "include": filtered_include,
             },
         )
 
@@ -442,7 +442,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             documents=resp_json.get("documents", None),
             data=None,
             uris=resp_json.get("uris", None),
-            included=resp_json.get("included", include),
+            included=include,
         )
 
     @trace_method("AsyncFastAPI._delete", OpenTelemetryGranularity.OPERATION)
@@ -589,7 +589,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> QueryResult:
         # Servers do not support the "data" include, as that is hydrated on the client side
-        include = [i for i in include if i != "data"]
+        filtered_include = [i for i in include if i != "data"]
 
         resp_json = await self._make_request(
             "post",
@@ -601,7 +601,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
                 "n_results": n_results,
                 "where": where,
                 "where_document": where_document,
-                "include": include,
+                "include": filtered_include,
             },
         )
 
@@ -613,7 +613,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             documents=resp_json.get("documents", None),
             uris=resp_json.get("uris", None),
             data=None,
-            included=resp_json.get("included", include),
+            included=include,
         )
 
     @trace_method("AsyncFastAPI.reset", OpenTelemetryGranularity.ALL)
