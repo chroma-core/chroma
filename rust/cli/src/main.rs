@@ -6,7 +6,10 @@ use clap::{Parser, Subcommand};
 #[derive(Subcommand, Debug)]
 enum Command {
     Docs,
-    Run,
+    Run {
+        #[arg(short, long)]
+        path: Option<String>,
+    },
     Support,
 }
 
@@ -40,7 +43,7 @@ fn main() {
                 eprintln!("Error: Failed to open the browser. Visit {}.", url);
             }
         }
-        Command::Run => {
+        Command::Run {path: _} => {
             // TODO: Allow user to specify a config file
             Cli::run();
         }
