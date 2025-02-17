@@ -265,11 +265,7 @@ impl ChromaError for CreateDatabaseError {
 #[cfg_attr(feature = "python", pyo3::pyclass)]
 pub struct Database {
     pub id: Uuid,
-    #[cfg(feature = "python")]
-    #[pyo3(get)]
     pub name: String,
-    #[cfg(feature = "python")]
-    #[pyo3(get)]
     pub tenant: String,
 }
 
@@ -282,6 +278,16 @@ impl Database {
             .getattr("UUID")?
             .call1((self.id.to_string(),))?;
         Ok(res)
+    }
+
+    #[getter]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    #[getter]
+    pub fn tenant(&self) -> &str {
+        &self.tenant
     }
 }
 
@@ -1127,23 +1133,42 @@ impl GetRequest {
 #[derive(Clone, Deserialize, Serialize, Debug)]
 #[cfg_attr(feature = "python", pyo3::pyclass)]
 pub struct GetResponse {
-    #[cfg(feature = "python")]
-    #[pyo3(get)]
     ids: Vec<String>,
-    #[cfg(feature = "python")]
-    #[pyo3(get)]
     embeddings: Option<Vec<Vec<f32>>>,
-    #[cfg(feature = "python")]
-    #[pyo3(get)]
     documents: Option<Vec<Option<String>>>,
-    #[cfg(feature = "python")]
-    #[pyo3(get)]
     uris: Option<Vec<Option<String>>>,
     // TODO(hammadb): Add metadata & include to the response
-    #[cfg(feature = "python")]
-    #[pyo3(get)]
     metadatas: Option<Vec<Option<Metadata>>>,
     include: Vec<Include>,
+}
+
+#[cfg(feature = "python")]
+#[pyo3::pymethods]
+impl GetResponse {
+    #[getter]
+    pub fn ids(&self) -> &Vec<String> {
+        &self.ids
+    }
+
+    #[getter]
+    pub fn embeddings(&self) -> Option<Vec<Vec<f32>>> {
+        self.embeddings.clone()
+    }
+
+    #[getter]
+    pub fn documents(&self) -> Option<Vec<Option<String>>> {
+        self.documents.clone()
+    }
+
+    #[getter]
+    pub fn uris(&self) -> Option<Vec<Option<String>>> {
+        self.uris.clone()
+    }
+
+    #[getter]
+    pub fn metadatas(&self) -> Option<Vec<Option<Metadata>>> {
+        self.metadatas.clone()
+    }
 }
 
 impl From<(GetResult, IncludeList)> for GetResponse {
@@ -1248,25 +1273,47 @@ impl QueryRequest {
 #[derive(Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "python", pyo3::pyclass)]
 pub struct QueryResponse {
-    #[cfg(feature = "python")]
-    #[pyo3(get)]
     ids: Vec<Vec<String>>,
-    #[cfg(feature = "python")]
-    #[pyo3(get)]
     embeddings: Option<Vec<Vec<Option<Vec<f32>>>>>,
-    #[cfg(feature = "python")]
-    #[pyo3(get)]
     documents: Option<Vec<Vec<Option<String>>>>,
-    #[cfg(feature = "python")]
-    #[pyo3(get)]
     uris: Option<Vec<Vec<Option<String>>>>,
-    #[cfg(feature = "python")]
-    #[pyo3(get)]
     metadatas: Option<Vec<Vec<Option<Metadata>>>>,
-    #[cfg(feature = "python")]
-    #[pyo3(get)]
     distances: Option<Vec<Vec<Option<f32>>>>,
     include: Vec<Include>,
+}
+
+#[cfg(feature = "python")]
+#[pyo3::pymethods]
+impl QueryResponse {
+    #[getter]
+    pub fn ids(&self) -> &Vec<Vec<String>> {
+        &self.ids
+    }
+
+    #[getter]
+    pub fn embeddings(&self) -> Option<Vec<Vec<Option<Vec<f32>>>>> {
+        self.embeddings.clone()
+    }
+
+    #[getter]
+    pub fn documents(&self) -> Option<Vec<Vec<Option<String>>>> {
+        self.documents.clone()
+    }
+
+    #[getter]
+    pub fn uris(&self) -> Option<Vec<Vec<Option<String>>>> {
+        self.uris.clone()
+    }
+
+    #[getter]
+    pub fn metadatas(&self) -> Option<Vec<Vec<Option<Metadata>>>> {
+        self.metadatas.clone()
+    }
+
+    #[getter]
+    pub fn distances(&self) -> Option<Vec<Vec<Option<f32>>>> {
+        self.distances.clone()
+    }
 }
 
 impl From<(KnnBatchResult, IncludeList)> for QueryResponse {

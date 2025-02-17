@@ -43,22 +43,12 @@ impl std::fmt::Display for CollectionUuid {
 pub struct Collection {
     #[serde(rename(serialize = "id"))]
     pub collection_id: CollectionUuid,
-    #[cfg(feature = "python")]
-    #[pyo3(get)]
     pub name: String,
     #[serde(default, rename(deserialize = "configuration_json_str"))]
     pub configuration_json: Value,
-    #[cfg(feature = "python")]
-    #[pyo3(get)]
     pub metadata: Option<Metadata>,
-    #[cfg(feature = "python")]
-    #[pyo3(get)]
     pub dimension: Option<i32>,
-    #[cfg(feature = "python")]
-    #[pyo3(get)]
     pub tenant: String,
-    #[cfg(feature = "python")]
-    #[pyo3(get)]
     pub database: String,
     pub log_position: i64,
     pub version: i32,
@@ -87,6 +77,31 @@ impl Collection {
             .getattr("from_json_str")?
             .call1((self.configuration_json.to_string(),))?;
         Ok(res)
+    }
+
+    #[getter]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    #[getter]
+    pub fn metadata(&self) -> Option<Metadata> {
+        self.metadata.clone()
+    }
+
+    #[getter]
+    pub fn dimension(&self) -> Option<i32> {
+        self.dimension
+    }
+
+    #[getter]
+    pub fn tenant(&self) -> &str {
+        &self.tenant
+    }
+
+    #[getter]
+    pub fn database(&self) -> &str {
+        &self.database
     }
 }
 
