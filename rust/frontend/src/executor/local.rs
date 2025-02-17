@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_distance::normalize;
 use chroma_error::ChromaError;
-use chroma_log::{BackfillMessage, LocalCompactionManager};
+use chroma_log::{BackfillMessage, LocalCompactionManager, PurgeLogsMessage};
 use chroma_segment::{
     local_segment_manager::LocalSegmentManager, sqlite_metadata::SqliteMetadataReader,
 };
@@ -71,6 +71,14 @@ impl LocalExecutor {
         };
         self.compactor_handle
             .request(backfill_msg, None)
+            .await
+            .map_err(|_| ExecutorError::BackfillError)?
+            .map_err(|_| ExecutorError::BackfillError)?;
+        let purge_log_msg = PurgeLogsMessage {
+            collection_id: collection_and_segment.collection.collection_id,
+        };
+        self.compactor_handle
+            .request(purge_log_msg, None)
             .await
             .map_err(|_| ExecutorError::BackfillError)?
             .map_err(|_| ExecutorError::BackfillError)?;

@@ -577,6 +577,20 @@ impl ChromaError for CreateCollectionError {
 }
 
 #[derive(Debug, Error)]
+pub enum CountCollectionsError {
+    #[error("Internal error in getting count")]
+    Internal,
+}
+
+impl ChromaError for CountCollectionsError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            CountCollectionsError::Internal => ErrorCodes::Internal,
+        }
+    }
+}
+
+#[derive(Debug, Error)]
 pub enum GetCollectionsError {
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
@@ -774,14 +788,14 @@ pub enum AddCollectionRecordsError {
     #[error("Failed to get collection: {0}")]
     Collection(#[from] GetCollectionError),
     #[error(transparent)]
-    Internal(#[from] Box<dyn ChromaError>),
+    Other(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for AddCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
             AddCollectionRecordsError::Collection(err) => err.code(),
-            AddCollectionRecordsError::Internal(err) => err.code(),
+            AddCollectionRecordsError::Other(err) => err.code(),
         }
     }
 }
@@ -834,13 +848,13 @@ pub struct UpdateCollectionRecordsResponse {}
 #[derive(Error, Debug)]
 pub enum UpdateCollectionRecordsError {
     #[error(transparent)]
-    Internal(#[from] Box<dyn ChromaError>),
+    Other(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for UpdateCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
-            UpdateCollectionRecordsError::Internal(err) => err.code(),
+            UpdateCollectionRecordsError::Other(err) => err.code(),
         }
     }
 }
@@ -893,13 +907,13 @@ pub struct UpsertCollectionRecordsResponse {}
 #[derive(Error, Debug)]
 pub enum UpsertCollectionRecordsError {
     #[error(transparent)]
-    Internal(#[from] Box<dyn ChromaError>),
+    Other(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for UpsertCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
-            UpsertCollectionRecordsError::Internal(err) => err.code(),
+            UpsertCollectionRecordsError::Other(err) => err.code(),
         }
     }
 }
@@ -1343,14 +1357,14 @@ pub enum QueryError {
     #[error("Error executing plan: {0}")]
     Executor(#[from] ExecutorError),
     #[error(transparent)]
-    Internal(#[from] Box<dyn ChromaError>),
+    Other(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for QueryError {
     fn code(&self) -> ErrorCodes {
         match self {
             QueryError::Executor(e) => e.code(),
-            QueryError::Internal(err) => err.code(),
+            QueryError::Other(err) => err.code(),
         }
     }
 }

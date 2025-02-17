@@ -282,8 +282,22 @@ async fn pre_flight_checks(
     }))
 }
 
-async fn reset(State(mut server): State<FrontendServer>) -> Result<Json<bool>, ServerError> {
+async fn reset(
+    headers: HeaderMap,
+    State(mut server): State<FrontendServer>,
+) -> Result<Json<bool>, ServerError> {
     server.metrics.reset.add(1, &[]);
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::Reset,
+            AuthzResource {
+                tenant: None,
+                database: None,
+                collection: None,
+            },
+        )
+        .await?;
     server.frontend.reset().await?;
     Ok(Json(true))
 }
@@ -293,14 +307,12 @@ async fn version(State(server): State<FrontendServer>) -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
-// TOOD: Dummy implementation for now
-async fn get_user_identity(State(server): State<FrontendServer>) -> Json<GetUserIdentityResponse> {
+async fn get_user_identity(
+    headers: HeaderMap,
+    State(server): State<FrontendServer>,
+) -> Result<Json<GetUserIdentityResponse>, ServerError> {
     server.metrics.version.add(1, &[]);
-    Json(GetUserIdentityResponse {
-        user_id: String::new(),
-        tenant: "default_tenant".to_string(),
-        databases: vec!["default_database".to_string()],
-    })
+    Ok(Json(server.auth.get_user_identity(&headers).await?))
 }
 
 async fn create_tenant(
@@ -325,11 +337,23 @@ async fn create_tenant(
 }
 
 async fn get_tenant(
+    headers: HeaderMap,
     Path(name): Path<String>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<GetTenantResponse>, ServerError> {
     server.metrics.get_tenant.add(1, &[]);
     tracing::info!("Getting tenant [{}]", name);
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::GetTenant,
+            AuthzResource {
+                tenant: Some(name.clone()),
+                database: None,
+                collection: None,
+            },
+        )
+        .await?;
     let request = GetTenantRequest::try_new(name)?;
     Ok(Json(server.frontend.get_tenant(request).await?))
 }
@@ -522,6 +546,7 @@ async fn list_collections(
 }
 
 async fn count_collections(
+    headers: HeaderMap,
     Path((tenant_id, database_name)): Path<(String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<CountCollectionsResponse>, ServerError> {
@@ -531,6 +556,17 @@ async fn count_collections(
         database_name,
         tenant_id
     );
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::CountCollections,
+            AuthzResource {
+                tenant: Some(tenant_id.clone()),
+                database: Some(database_name.clone()),
+                collection: None,
+            },
+        )
+        .await?;
     let _guard = server.scorecard_request(&[
         "op:count_collections",
         format!("tenant:{}", tenant_id).as_str(),
@@ -595,11 +631,23 @@ async fn create_collection(
 }
 
 async fn get_collection(
+    headers: HeaderMap,
     Path((tenant_id, database_name, collection_name)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<Collection>, ServerError> {
     server.metrics.get_collection.add(1, &[]);
     tracing::info!("Getting collection [{collection_name}] in database [{database_name}] for tenant [{tenant_id}]");
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::GetCollection,
+            AuthzResource {
+                tenant: Some(tenant_id.clone()),
+                database: Some(database_name.clone()),
+                collection: Some(collection_name.clone()),
+            },
+        )
+        .await?;
     let _guard = server.scorecard_request(&[
         "op:get_collection",
         format!("tenant:{}", tenant_id).as_str(),
@@ -668,10 +716,23 @@ async fn update_collection(
 }
 
 async fn delete_collection(
+    headers: HeaderMap,
     Path((tenant_id, database_name, collection_name)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<UpdateCollectionResponse>, ServerError> {
     server.metrics.delete_collection.add(1, &[]);
+    tracing::info!("Deleting collection [{collection_name}] in database [{database_name}] for tenant [{tenant_id}]");
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::DeleteCollection,
+            AuthzResource {
+                tenant: Some(tenant_id.clone()),
+                database: Some(database_name.clone()),
+                collection: Some(collection_name.clone()),
+            },
+        )
+        .await?;
     let _guard = server.scorecard_request(&[
         "op:delete_collection",
         format!("tenant:{}", tenant_id).as_str(),
@@ -737,16 +798,6 @@ async fn collection_add(
         format!("tenant:{}", tenant_id).as_str(),
         format!("collection:{}", collection_id).as_str(),
     ]);
-
-    server
-        .frontend
-        .validate_embedding(
-            collection_id,
-            payload.embeddings.as_ref(),
-            true,
-            |embedding| Some(embedding.len()),
-        )
-        .await?;
 
     let request = chroma_types::AddCollectionRecordsRequest::try_new(
         tenant_id,
@@ -818,16 +869,6 @@ async fn collection_update(
         format!("collection:{}", collection_id).as_str(),
     ]);
 
-    server
-        .frontend
-        .validate_embedding(
-            collection_id,
-            payload.embeddings.as_ref(),
-            true,
-            |embedding| embedding.as_ref().map(|e| e.len()),
-        )
-        .await?;
-
     let request = chroma_types::UpdateCollectionRecordsRequest::try_new(
         tenant_id,
         database_name,
@@ -896,16 +937,6 @@ async fn collection_upsert(
         format!("tenant:{}", tenant_id).as_str(),
         format!("collection:{}", collection_id).as_str(),
     ]);
-
-    server
-        .frontend
-        .validate_embedding(
-            collection_id,
-            payload.embeddings.as_ref(),
-            true,
-            |embedding| Some(embedding.len()),
-        )
-        .await?;
 
     let request = chroma_types::UpsertCollectionRecordsRequest::try_new(
         tenant_id,
@@ -981,6 +1012,7 @@ async fn collection_delete(
 }
 
 async fn collection_count(
+    headers: HeaderMap,
     Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<CountResponse>, ServerError> {
@@ -995,6 +1027,17 @@ async fn collection_count(
     tracing::info!(
         "Counting number of records in collection [{collection_id}] in database [{database_name}] for tenant [{tenant_id}]",
     );
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::Count,
+            AuthzResource {
+                tenant: Some(tenant_id.clone()),
+                database: Some(database_name.clone()),
+                collection: Some(collection_id.clone()),
+            },
+        )
+        .await?;
     let _guard = server.scorecard_request(&[
         "op:read",
         format!("tenant:{}", tenant_id).as_str(),
@@ -1148,15 +1191,6 @@ async fn collection_query(
         format!("tenant:{}", tenant_id).as_str(),
         format!("collection:{}", collection_id).as_str(),
     ]);
-    server
-        .frontend
-        .validate_embedding(
-            collection_id,
-            Some(&payload.query_embeddings),
-            true,
-            |embedding| Some(embedding.len()),
-        )
-        .await?;
 
     let request = QueryRequest::try_new(
         tenant_id,

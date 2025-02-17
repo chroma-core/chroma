@@ -54,3 +54,15 @@ jobs:
         uses: ./.github/actions/rust
       - name: Test compile
         run: cargo bench --no-run --features python
+
+  can-build-release:
+    runs-on: depot-ubuntu-22.04-16
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup
+        uses: ./.github/actions/rust
+      - name: Build in release mode
+        run: cargo build --release

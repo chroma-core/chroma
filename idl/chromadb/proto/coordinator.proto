@@ -160,6 +160,15 @@ message GetCollectionsResponse {
   reserved "status";
 }
 
+message CountCollectionsRequest {
+  string tenant = 4;
+  optional string database = 5;
+}
+
+message CountCollectionsResponse {
+  uint64 count = 1;
+}
+
 message GetCollectionWithSegmentsRequest {
   string id = 1;
 }
@@ -378,7 +387,13 @@ message GetCollectionSizeResponse {
   uint64 total_records_post_compaction = 1;
 }
 
-message ListCollectionsToGcRequest {}
+message ListCollectionsToGcRequest {
+  // Only return collections with last GC time less than this value.
+  // This introduces a limit on the number of collections that can be returned.
+  // This allows for a cheap pagination, and also a way to deal with GC to
+  // garbage collect collections that have not been cleaned up for a long time.
+  // uint64 last_gc_time_lt = 1;
+}
 
 message CollectionToGcInfo {
   string id = 1;
@@ -422,6 +437,7 @@ service SysDB {
   rpc CreateCollection(CreateCollectionRequest) returns (CreateCollectionResponse) {}
   rpc DeleteCollection(DeleteCollectionRequest) returns (DeleteCollectionResponse) {}
   rpc GetCollections(GetCollectionsRequest) returns (GetCollectionsResponse) {}
+  rpc CountCollections(CountCollectionsRequest) returns (CountCollectionsResponse) {}
   rpc GetCollectionWithSegments(GetCollectionWithSegmentsRequest) returns (GetCollectionWithSegmentsResponse) {}
   rpc CheckCollections(CheckCollectionsRequest) returns (CheckCollectionsResponse) {}
   rpc UpdateCollection(UpdateCollectionRequest) returns (UpdateCollectionResponse) {}

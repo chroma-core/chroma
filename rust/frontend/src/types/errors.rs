@@ -16,14 +16,8 @@ pub enum ValidationError {
     DimensionInconsistent,
     #[error("Collection expecting embedding with dimension of {0}, got {1}")]
     DimensionMismatch(u32, u32),
-    #[error("Deleting collection records without filter")]
-    EmptyDelete,
-    #[error("Empty metadata")]
-    EmptyMetadata,
     #[error("Error getting collection: {0}")]
     GetCollection(#[from] GetCollectionError),
-    #[error("Invalid name: {0}")]
-    Name(String),
     #[error("Error updatding collection: {0}")]
     UpdateCollection(#[from] UpdateCollectionError),
 }
@@ -34,10 +28,7 @@ impl ChromaError for ValidationError {
             ValidationError::CollectionId => ErrorCodes::InvalidArgument,
             ValidationError::DimensionInconsistent => ErrorCodes::InvalidArgument,
             ValidationError::DimensionMismatch(_, _) => ErrorCodes::InvalidArgument,
-            ValidationError::EmptyDelete => ErrorCodes::InvalidArgument,
-            ValidationError::EmptyMetadata => ErrorCodes::InvalidArgument,
             ValidationError::GetCollection(err) => err.code(),
-            ValidationError::Name(_) => ErrorCodes::InvalidArgument,
             ValidationError::UpdateCollection(err) => err.code(),
         }
     }

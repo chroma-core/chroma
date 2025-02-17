@@ -108,6 +108,32 @@ impl ChromaError for StorageConfigError {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum RenameError {
+    #[error("ObjectStore error: {0}")]
+    ObjectStoreError(Arc<::object_store::Error>),
+    #[error("S3 error: {0}")]
+    S3Error(#[from] s3::S3PutError),
+    #[error("Local storage error: {0}")]
+    LocalError(String),
+}
+
+impl ChromaError for RenameError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            RenameError::ObjectStoreError(_) => ErrorCodes::Internal,
+            RenameError::S3Error(_) => ErrorCodes::Internal,
+            RenameError::LocalError(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
+impl From<::object_store::Error> for RenameError {
+    fn from(e: ::object_store::Error) -> Self {
+        Self::ObjectStoreError(Arc::new(e))
+    }
+}
+
 impl Storage {
     pub async fn get(&self, key: &str) -> Result<Arc<Vec<u8>>, GetError> {
         match self {
@@ -205,6 +231,56 @@ impl Storage {
                 .map_err(PutError::LocalError),
             Storage::AdmissionControlledS3(as3) => {
                 as3.put_bytes(key, bytes).await.map_err(PutError::S3Error)
+            }
+        }
+    }
+
+    pub async fn delete(&self, key: &str) -> Result<(), PutError> {
+        match self {
+            Storage::ObjectStore(object_store) => object_store.delete(key).await,
+            Storage::S3(s3) => s3.delete(key).await.map_err(PutError::S3Error),
+            Storage::Local(local) => local.delete(key).await.map_err(PutError::LocalError),
+            Storage::AdmissionControlledS3(_) => {
+                unimplemented!("delete not implemented for AdmissionControlledS3")
+            }
+        }
+    }
+
+    pub async fn rename(&self, src_key: &str, dst_key: &str) -> Result<(), RenameError> {
+        match self {
+            Storage::ObjectStore(object_store) => object_store
+                .rename(src_key, dst_key)
+                .await
+                .map_err(|e| match e {
+                    PutError::ObjectStoreError(e) => RenameError::ObjectStoreError(e),
+                    PutError::S3Error(e) => RenameError::S3Error(e),
+                    PutError::LocalError(e) => RenameError::LocalError(e),
+                }),
+            Storage::S3(s3) => s3
+                .rename(src_key, dst_key)
+                .await
+                .map_err(RenameError::S3Error),
+            Storage::Local(local) => local
+                .rename(src_key, dst_key)
+                .await
+                .map_err(RenameError::LocalError),
+            Storage::AdmissionControlledS3(_) => {
+                unimplemented!("rename not implemented for AdmissionControlledS3")
+            }
+        }
+    }
+
+    pub async fn list_prefix(&self, prefix: &str) -> Result<Vec<String>, GetError> {
+        match self {
+            Storage::Local(_) => {
+                unimplemented!("list_prefix not implemented for LocalStorage")
+            }
+            Storage::S3(_) => {
+                unimplemented!("list_prefix not implemented for S3")
+            }
+            Storage::ObjectStore(object_store) => object_store.list_prefix(prefix).await,
+            Storage::AdmissionControlledS3(_) => {
+                unimplemented!("list_prefix not implemented for AdmissionControlledS3")
             }
         }
     }

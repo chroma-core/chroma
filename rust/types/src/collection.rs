@@ -46,7 +46,7 @@ pub struct Collection {
     #[cfg(feature = "python")]
     #[pyo3(get)]
     pub name: String,
-    #[serde(rename(deserialize = "configuration_json_str"))]
+    #[serde(default, rename(deserialize = "configuration_json_str"))]
     pub configuration_json: Value,
     #[cfg(feature = "python")]
     #[pyo3(get)]

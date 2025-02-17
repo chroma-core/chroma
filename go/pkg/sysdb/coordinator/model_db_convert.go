@@ -38,12 +38,11 @@ func convertCollectionToGcToModel(collectionToGc []*dbmodel.CollectionToGc) []*m
 		return nil
 	}
 	collections := make([]*model.CollectionToGc, 0, len(collectionToGc))
-	// TODO(Sanket): Set version file path.
 	for _, collectionInfo := range collectionToGc {
 		collection := model.CollectionToGc{
 			ID:              types.MustParse(collectionInfo.ID),
 			Name:            collectionInfo.Name,
-			VersionFilePath: "",
+			VersionFilePath: collectionInfo.VersionFileName,
 		}
 		collections = append(collections, &collection)
 	}

@@ -14,16 +14,16 @@ use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
     plan::{Count, Get, Knn},
     AddCollectionRecordsError, AddCollectionRecordsRequest, AddCollectionRecordsResponse,
-    CollectionUuid, CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
-    CreateCollectionError, CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseError,
-    CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantError, CreateTenantRequest,
-    CreateTenantResponse, DeleteCollectionError, DeleteCollectionRecordsError,
-    DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, DeleteCollectionRequest,
-    DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse, DistributedHnswParameters,
-    GetCollectionError, GetCollectionRequest, GetCollectionResponse, GetCollectionsError,
-    GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
-    GetTenantError, GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError,
-    HeartbeatResponse, Include, ListCollectionsRequest, ListCollectionsResponse,
+    CollectionUuid, CountCollectionsError, CountCollectionsRequest, CountCollectionsResponse,
+    CountRequest, CountResponse, CreateCollectionError, CreateCollectionRequest,
+    CreateCollectionResponse, CreateDatabaseError, CreateDatabaseRequest, CreateDatabaseResponse,
+    CreateTenantError, CreateTenantRequest, CreateTenantResponse, DeleteCollectionError,
+    DeleteCollectionRecordsError, DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse,
+    DeleteCollectionRequest, DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse,
+    DistributedHnswParameters, GetCollectionError, GetCollectionRequest, GetCollectionResponse,
+    GetCollectionsError, GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest,
+    GetResponse, GetTenantError, GetTenantRequest, GetTenantResponse, HealthCheckResponse,
+    HeartbeatError, HeartbeatResponse, Include, ListCollectionsRequest, ListCollectionsResponse,
     ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse, Metadata, Operation,
     OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
     ScalarEncoding, Segment, SegmentScope, SegmentType, SegmentUuid, SingleNodeHnswParameters,
@@ -209,7 +209,7 @@ impl Frontend {
         Ok(UpdateCollectionResponse {})
     }
 
-    pub async fn validate_embedding<Embedding, F>(
+    async fn validate_embedding<Embedding, F>(
         &mut self,
         collection_id: CollectionUuid,
         option_embeddings: Option<&Vec<Embedding>>,
@@ -343,18 +343,11 @@ impl Frontend {
     pub async fn count_collections(
         &mut self,
         request: CountCollectionsRequest,
-    ) -> Result<CountCollectionsResponse, GetCollectionsError> {
+    ) -> Result<CountCollectionsResponse, CountCollectionsError> {
         self.sysdb_client
-            .get_collections(
-                None,
-                None,
-                Some(request.tenant_id),
-                Some(request.database_name),
-                None,
-                0,
-            )
+            .count_collections(request.tenant_id, Some(request.database_name))
             .await
-            .map(|collections| collections.len() as u32)
+            .map(|count| count as u32)
     }
 
     pub async fn get_collection(
@@ -537,6 +530,12 @@ impl Frontend {
             ..
         } = request;
 
+        self.validate_embedding(collection_id, embeddings.as_ref(), true, |embedding| {
+            Some(embedding.len())
+        })
+        .await
+        .map_err(|err| err.boxed())?;
+
         let embeddings = embeddings.map(|embeddings| embeddings.into_iter().map(Some).collect());
 
         let records = to_records(ids, embeddings, documents, uris, metadatas, Operation::Add)
@@ -563,6 +562,12 @@ impl Frontend {
             metadatas,
             ..
         }: UpdateCollectionRecordsRequest = request;
+
+        self.validate_embedding(collection_id, embeddings.as_ref(), true, |embedding| {
+            embedding.as_ref().map(|emb| emb.len())
+        })
+        .await
+        .map_err(|err| err.boxed())?;
 
         let records = to_records(
             ids,
@@ -595,6 +600,12 @@ impl Frontend {
             metadatas,
             ..
         } = request;
+
+        self.validate_embedding(collection_id, embeddings.as_ref(), true, |embedding| {
+            Some(embedding.len())
+        })
+        .await
+        .map_err(|err| err.boxed())?;
 
         let embeddings = embeddings.map(|embeddings| embeddings.into_iter().map(Some).collect());
 
@@ -908,6 +919,15 @@ impl Frontend {
     }
 
     pub async fn query(&mut self, request: QueryRequest) -> Result<QueryResponse, QueryError> {
+        self.validate_embedding(
+            request.collection_id,
+            Some(&request.embeddings),
+            true,
+            |embedding| Some(embedding.len()),
+        )
+        .await
+        .map_err(|err| err.boxed())?;
+
         let retries = Arc::new(AtomicUsize::new(0));
         let query_to_retry = || {
             let mut self_clone = self.clone();

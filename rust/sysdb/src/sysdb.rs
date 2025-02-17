@@ -8,13 +8,14 @@ use chroma_error::{ChromaError, ErrorCodes, TonicError, TonicMissingFieldError};
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
 use chroma_types::chroma_proto::VersionListForCollection;
 use chroma_types::{
-    chroma_proto, CollectionAndSegments, CollectionMetadataUpdate, CreateCollectionError,
-    CreateDatabaseError, CreateDatabaseResponse, CreateTenantError, CreateTenantResponse, Database,
-    DeleteCollectionError, DeleteDatabaseError, DeleteDatabaseResponse, GetCollectionSizeError,
-    GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError, GetDatabaseResponse,
-    GetSegmentsError, GetTenantError, GetTenantResponse, ListDatabasesError, ListDatabasesResponse,
-    Metadata, ResetError, ResetResponse, SegmentFlushInfo, SegmentFlushInfoConversionError,
-    SegmentUuid, UpdateCollectionError,
+    chroma_proto, CollectionAndSegments, CollectionMetadataUpdate, CountCollectionsError,
+    CreateCollectionError, CreateDatabaseError, CreateDatabaseResponse, CreateTenantError,
+    CreateTenantResponse, Database, DeleteCollectionError, DeleteDatabaseError,
+    DeleteDatabaseResponse, GetCollectionSizeError, GetCollectionWithSegmentsError,
+    GetCollectionsError, GetDatabaseError, GetDatabaseResponse, GetSegmentsError, GetTenantError,
+    GetTenantResponse, ListDatabasesError, ListDatabasesResponse, Metadata, ResetError,
+    ResetResponse, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
+    UpdateCollectionError,
 };
 use chroma_types::{
     Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
@@ -143,6 +144,27 @@ impl SysDb {
                 test.get_collections(collection_id, name, tenant, database)
                     .await
             }
+        }
+    }
+
+    pub async fn count_collections(
+        &mut self,
+        tenant: String,
+        database: Option<String>,
+    ) -> Result<usize, CountCollectionsError> {
+        // TODO(Sanket): optimize sqlite and test implementation.
+        match self {
+            SysDb::Grpc(grpc) => grpc.count_collections(tenant, database).await,
+            SysDb::Sqlite(sqlite) => Ok(sqlite
+                .get_collections(None, None, Some(tenant), database, None, 0)
+                .await
+                .map_err(|_| CountCollectionsError::Internal)?
+                .len()),
+            SysDb::Test(test) => Ok(test
+                .get_collections(None, None, Some(tenant), database)
+                .await
+                .map_err(|_| CountCollectionsError::Internal)?
+                .len()),
         }
     }
 
@@ -666,6 +688,19 @@ impl GrpcSysDb {
                 }
             }
             Err(e) => Err(GetCollectionsError::Internal(e.into())),
+        }
+    }
+
+    async fn count_collections(
+        &mut self,
+        tenant: String,
+        database: Option<String>,
+    ) -> Result<usize, CountCollectionsError> {
+        let request = chroma_proto::CountCollectionsRequest { tenant, database };
+        let res = self.client.count_collections(request).await;
+        match res {
+            Ok(res) => Ok(res.into_inner().count as usize),
+            Err(_) => Err(CountCollectionsError::Internal),
         }
     }
 

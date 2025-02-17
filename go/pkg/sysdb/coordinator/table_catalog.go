@@ -382,6 +382,20 @@ func (tc *Catalog) GetCollections(ctx context.Context, collectionID types.Unique
 	return collections, nil
 }
 
+func (tc *Catalog) CountCollections(ctx context.Context, tenantID string, databaseName *string) (uint64, error) {
+	tracer := otel.Tracer
+	if tracer != nil {
+		_, span := tracer.Start(ctx, "Catalog.CountCollections")
+		defer span.End()
+	}
+
+	collection_count, err := tc.metaDomain.CollectionDb(ctx).CountCollections(tenantID, databaseName)
+	if err != nil {
+		return 0, err
+	}
+	return collection_count, nil
+}
+
 func (tc *Catalog) GetCollectionSize(ctx context.Context, collectionID types.UniqueID) (uint64, error) {
 	tracer := otel.Tracer
 	if tracer != nil {
@@ -722,11 +736,11 @@ func (tc *Catalog) createFirstVersionFile(ctx context.Context, createCollection 
 	}
 	// Construct the version file name.
 	versionFileName := "0"
-	err := tc.s3Store.PutVersionFile(createCollection.TenantID, createCollection.ID.String(), versionFileName, collectionVersionFilePb)
+	fullFilePath, err := tc.s3Store.PutVersionFile(createCollection.TenantID, createCollection.ID.String(), versionFileName, collectionVersionFilePb)
 	if err != nil {
 		return "", err
 	}
-	return versionFileName, nil
+	return fullFilePath, nil
 }
 
 func (tc *Catalog) CreateCollectionAndSegments(ctx context.Context, createCollection *model.CreateCollection, createSegments []*model.CreateSegment, ts types.Timestamp) (*model.Collection, bool, error) {
@@ -747,6 +761,7 @@ func (tc *Catalog) CreateCollectionAndSegments(ctx context.Context, createCollec
 		}
 	}
 
+	log.Info("creating collection and segments", zap.Any("createCollection", createCollection), zap.Any("createSegments", createSegments), zap.Any("versionFileName", versionFileName))
 	err = tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		// Create the collection using the refactored helper
 		var err error
@@ -930,10 +945,63 @@ func (tc *Catalog) ListCollectionVersions(ctx context.Context,
 	collectionID types.UniqueID,
 	tenantID string,
 	maxCount *int64,
-	versionsBefore int64,
-	versionsAtOrAfter int64,
+	versionsBefore *int64,
+	versionsAtOrAfter *int64,
 ) ([]*coordinatorpb.CollectionVersionInfo, error) {
-	return nil, nil
+	// Get collection entry to get version file name
+	collectionEntry, err := tc.metaDomain.CollectionDb(ctx).GetCollectionEntry(types.FromUniqueID(collectionID), nil)
+	if err != nil {
+		log.Error("error getting collection entry", zap.Error(err))
+		return nil, err
+	}
+	if collectionEntry == nil {
+		return nil, common.ErrCollectionNotFound
+	}
+
+	// Get version file from S3
+	log.Info("getting version file from S3",
+		zap.String("tenant_id", tenantID),
+		zap.String("collection_id", collectionID.String()),
+		zap.Int64("version", int64(collectionEntry.Version)),
+		zap.String("version_file_name", collectionEntry.VersionFileName))
+
+	versionFile, err := tc.s3Store.GetVersionFile(tenantID, collectionID.String(), int64(collectionEntry.Version), collectionEntry.VersionFileName)
+	if err != nil {
+		log.Error("error getting version file", zap.Error(err))
+		return nil, err
+	}
+
+	if versionFile.GetVersionHistory() == nil || len(versionFile.GetVersionHistory().Versions) == 0 {
+		return []*coordinatorpb.CollectionVersionInfo{}, nil
+	}
+
+	// Filter versions based on criteria and build result
+	versions := versionFile.GetVersionHistory().Versions
+	filteredVersions := make([]*coordinatorpb.CollectionVersionInfo, 0)
+
+	for _, version := range versions {
+		// Skip versions marked for deletion
+		if version.MarkedForDeletion {
+			continue
+		}
+
+		// Apply time range filters if specified
+		if versionsBefore != nil && version.CreatedAtSecs >= *versionsBefore {
+			continue
+		}
+		if versionsAtOrAfter != nil && version.CreatedAtSecs < *versionsAtOrAfter {
+			continue
+		}
+
+		filteredVersions = append(filteredVersions, version)
+	}
+
+	// Apply maxCount limit if specified
+	if maxCount != nil && int64(len(filteredVersions)) > *maxCount {
+		filteredVersions = filteredVersions[:*maxCount]
+	}
+
+	return filteredVersions, nil
 }
 
 func (tc *Catalog) updateVersionFileInS3(ctx context.Context, existingVersionFilePb *coordinatorpb.CollectionVersionFile, flushCollectionCompaction *model.FlushCollectionCompaction, ts_secs int64) (string, error) {
@@ -970,12 +1038,12 @@ func (tc *Catalog) updateVersionFileInS3(ctx context.Context, existingVersionFil
 	// Format of version file name: <version>_<uuid>_flush
 	// The version should be left padded with 0s upto 6 digits.
 	newVersionFileName := fmt.Sprintf("%06d_%s_flush", flushCollectionCompaction.CurrentCollectionVersion+1, uuid.New().String())
-	err := tc.s3Store.PutVersionFile(flushCollectionCompaction.TenantID, flushCollectionCompaction.ID.String(), newVersionFileName, existingVersionFilePb)
+	fullFilePath, err := tc.s3Store.PutVersionFile(flushCollectionCompaction.TenantID, flushCollectionCompaction.ID.String(), newVersionFileName, existingVersionFilePb)
 	if err != nil {
 		return "", err
 	}
 
-	return newVersionFileName, nil
+	return fullFilePath, nil
 }
 
 func (tc *Catalog) FlushCollectionCompaction(ctx context.Context, flushCollectionCompaction *model.FlushCollectionCompaction) (*model.FlushCollectionInfo, error) {
@@ -1037,8 +1105,22 @@ func (tc *Catalog) validateVersionFile(versionFile *coordinatorpb.CollectionVers
 		log.Error("collection id mismatch", zap.String("collection_id", collectionID), zap.String("version_file_collection_id", versionFile.GetCollectionInfoImmutable().GetCollectionId()))
 		return errors.New("collection id mismatch")
 	}
-	if versionFile.GetVersionHistory().GetVersions()[0].GetVersion() != version {
-		log.Error("version mismatch", zap.Int64("version", version), zap.Int64("version_file_version", versionFile.GetVersionHistory().GetVersions()[0].GetVersion()))
+	if versionFile.GetVersionHistory() == nil || len(versionFile.GetVersionHistory().GetVersions()) == 0 {
+		log.Error("version history is empty")
+		return errors.New("version history is empty")
+	}
+	versions := versionFile.GetVersionHistory().GetVersions()
+	lastVersion := versions[len(versions)-1].GetVersion()
+	if lastVersion != version {
+		// Extract all version numbers for logging
+		versionNumbers := make([]int64, len(versions))
+		for i, v := range versions {
+			versionNumbers[i] = v.GetVersion()
+		}
+		log.Error("version mismatch",
+			zap.Int64("expected_version", version),
+			zap.Int64("last_version", lastVersion),
+			zap.Int64s("version_history", versionNumbers))
 		return errors.New("version mismatch")
 	}
 	return nil
@@ -1093,7 +1175,7 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 
 		// Do a check to see if the version is stale.
 		if existingVersion > versionAtCompactionStart {
-			// Compactor is trying to flush a version that is no longer valid, since
+			// Compactor is trying to flush a stale version, since
 			// a different compaction instance has already incremented the version.
 			log.Info("Compactor is trying to flush a stale version", zap.Int64("existing_version", existingVersion), zap.Int64("current_collection_version", versionAtCompactionStart))
 			return nil, common.ErrCollectionVersionStale
@@ -1315,14 +1397,14 @@ func (tc *Catalog) markVersionForDeletionInSingleCollection(
 			collectionEntry.Version,
 			uuid.New().String(),
 		)
-		err = tc.s3Store.PutVersionFile(tenantID, collectionID, newVersionFileName, versionFilePb)
+		newVerFileFullPath, err := tc.s3Store.PutVersionFile(tenantID, collectionID, newVersionFileName, versionFilePb)
 		if err != nil {
 			return err
 		}
 
 		// Update the version file name in Postgres table as a CAS operation.
 		// TODO(rohit): Investigate if we really need a Tx here.
-		rowsAffected, err := tc.metaDomain.CollectionDb(ctx).UpdateVersionFileName(collectionID, existingVersionFileName, newVersionFileName)
+		rowsAffected, err := tc.metaDomain.CollectionDb(ctx).UpdateVersionFileName(collectionID, existingVersionFileName, newVerFileFullPath)
 		if err != nil {
 			// Delete the newly created version file from S3 since it is not needed.
 			tc.s3Store.DeleteVersionFile(tenantID, collectionID, newVersionFileName)
@@ -1419,13 +1501,13 @@ func (tc *Catalog) DeleteVersionEntriesForCollection(ctx context.Context, tenant
 			collectionEntry.Version,
 			uuid.New().String(),
 		)
-		err = tc.s3Store.PutVersionFile(tenantID, collectionID, newVersionFileName, versionFilePb)
+		newVerFileFullPath, err := tc.s3Store.PutVersionFile(tenantID, collectionID, newVersionFileName, versionFilePb)
 		if err != nil {
 			return err
 		}
 
 		// Update the version file name in Postgres table as a CAS operation
-		rowsAffected, err := tc.metaDomain.CollectionDb(ctx).UpdateVersionFileName(collectionID, existingVersionFileName, newVersionFileName)
+		rowsAffected, err := tc.metaDomain.CollectionDb(ctx).UpdateVersionFileName(collectionID, existingVersionFileName, newVerFileFullPath)
 		if err != nil {
 			// Delete the newly created version file from S3 since it is not needed
 			tc.s3Store.DeleteVersionFile(tenantID, collectionID, newVersionFileName)

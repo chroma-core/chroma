@@ -118,6 +118,10 @@ func (s *Coordinator) GetCollections(ctx context.Context, collectionID types.Uni
 	return s.catalog.GetCollections(ctx, collectionID, collectionName, tenantID, databaseName, limit, offset)
 }
 
+func (s *Coordinator) CountCollections(ctx context.Context, tenantID string, databaseName *string) (uint64, error) {
+	return s.catalog.CountCollections(ctx, tenantID, databaseName)
+}
+
 func (s *Coordinator) GetCollectionSize(ctx context.Context, collectionID types.UniqueID) (uint64, error) {
 	return s.catalog.GetCollectionSize(ctx, collectionID)
 }
@@ -235,6 +239,14 @@ func (s *Coordinator) ListCollectionsToGc(ctx context.Context) ([]*model.Collect
 	return s.catalog.ListCollectionsToGc(ctx)
 }
 
-func (s *Coordinator) ListCollectionVersions(ctx context.Context, collectionID types.UniqueID, tenantID string, maxCount *int64, versionsBefore int64, versionsAtOrAfter int64) ([]*coordinatorpb.CollectionVersionInfo, error) {
+func (s *Coordinator) ListCollectionVersions(ctx context.Context, collectionID types.UniqueID, tenantID string, maxCount *int64, versionsBefore *int64, versionsAtOrAfter *int64) ([]*coordinatorpb.CollectionVersionInfo, error) {
 	return s.catalog.ListCollectionVersions(ctx, collectionID, tenantID, maxCount, versionsBefore, versionsAtOrAfter)
+}
+
+func (s *Coordinator) MarkVersionForDeletion(ctx context.Context, req *coordinatorpb.MarkVersionForDeletionRequest) (*coordinatorpb.MarkVersionForDeletionResponse, error) {
+	return s.catalog.MarkVersionForDeletion(ctx, req)
+}
+
+func (s *Coordinator) DeleteCollectionVersion(ctx context.Context, req *coordinatorpb.DeleteCollectionVersionRequest) (*coordinatorpb.DeleteCollectionVersionResponse, error) {
+	return s.catalog.DeleteCollectionVersion(ctx, req)
 }

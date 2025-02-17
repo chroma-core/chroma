@@ -2,6 +2,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use chroma_error::ChromaError;
+use futures::StreamExt;
 use object_store::path::Path;
 use object_store::{GetOptions, GetRange, ObjectStore as ObjectStoreTrait, PutOptions};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
@@ -23,12 +24,17 @@ impl ObjectStore {
     ) -> Result<Self, Box<dyn ChromaError>> {
         match &config.bucket.r#type {
             super::config::ObjectStoreType::Minio => {
+                tracing::info!(
+                    "Creating Minio object store with bucket: {}",
+                    config.bucket.name
+                );
                 let object_store = object_store::aws::AmazonS3Builder::new()
                     .with_region("us-east-1")
-                    .with_endpoint("http://minio.chroma:9000")
+                    .with_endpoint("http://localhost:9000")
                     .with_bucket_name(&config.bucket.name)
                     .with_access_key_id("minio")
                     .with_secret_access_key("minio123")
+                    .with_allow_http(true)
                     .build()
                     .map_err(|err| {
                         tracing::error! {"Failed to create object store: {:?}", err};
@@ -45,6 +51,10 @@ impl ObjectStore {
                 })
             }
             super::config::ObjectStoreType::S3 => {
+                tracing::info!(
+                    "Creating S3 object store with bucket: {}",
+                    config.bucket.name
+                );
                 let object_store = object_store::aws::AmazonS3Builder::from_env()
                     .with_bucket_name(&config.bucket.name)
                     .build()
@@ -66,6 +76,7 @@ impl ObjectStore {
     }
 
     pub async fn get(&self, key: &str) -> Result<Arc<Vec<u8>>, GetError> {
+        // tracing::info!("ObjectStore::get called with key: {}", key);
         Ok(self
             .object_store
             .get_opts(&Path::from(key), GetOptions::default())
@@ -157,10 +168,73 @@ impl ObjectStore {
     }
 
     pub async fn put_bytes(&self, key: &str, bytes: Vec<u8>) -> Result<(), PutError> {
+        // tracing::warn!("put_bytes key: {}, path: {:?}", key, Path::from(key));
         self.object_store
             .put_opts(&Path::from(key), bytes.into(), PutOptions::default())
             .await?;
         Ok(())
+    }
+
+    pub async fn delete(&self, key: &str) -> Result<(), PutError> {
+        tracing::info!(key = %key, "Deleting object");
+
+        match self.object_store.delete(&Path::from(key)).await {
+            Ok(_) => {
+                tracing::info!(key = %key, "Successfully deleted object");
+                Ok(())
+            }
+            Err(e) => {
+                tracing::error!(error = %e, key = %key, "Failed to delete object");
+                Err(e.into())
+            }
+        }
+    }
+
+    pub async fn rename(&self, src_key: &str, dst_key: &str) -> Result<(), PutError> {
+        tracing::info!(src = %src_key, dst = %dst_key, "Renaming object");
+
+        // Copy the object
+        match self
+            .object_store
+            .copy(&Path::from(src_key), &Path::from(dst_key))
+            .await
+        {
+            Ok(_) => {
+                tracing::info!(src = %src_key, dst = %dst_key, "Successfully copied object");
+                // After successful copy, delete the original
+                match self.delete(src_key).await {
+                    Ok(_) => {
+                        tracing::info!(src = %src_key, dst = %dst_key, "Successfully renamed object");
+                        Ok(())
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, src = %src_key, "Failed to delete source object after copy");
+                        Err(e)
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!(error = %e, src = %src_key, dst = %dst_key, "Failed to copy object");
+                Err(e.into())
+            }
+        }
+    }
+
+    pub async fn list_prefix(&self, prefix: &str) -> Result<Vec<String>, GetError> {
+        let mut files = Vec::new();
+        let mut stream = self.object_store.list(Some(&Path::from(prefix)));
+
+        while let Some(obj) = stream.next().await {
+            match obj {
+                Ok(obj) => {
+                    files.push(obj.location.to_string());
+                }
+                Err(e) => {
+                    return Err(e.into());
+                }
+            }
+        }
+        Ok(files)
     }
 }
 

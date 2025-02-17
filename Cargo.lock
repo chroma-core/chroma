@@ -1323,7 +1323,7 @@ dependencies = [
 
 [[package]]
 name = "chroma-frontend"
-version = "0.1.0"
+version = "0.7.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -2730,6 +2730,8 @@ name = "garbage_collector"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "chroma-blockstore",
+ "chroma-cache",
  "chroma-config",
  "chroma-error",
  "chroma-storage",
@@ -2747,8 +2749,10 @@ dependencies = [
  "prost 0.13.3",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "tonic",
  "tracing",
  "tracing-bunyan-formatter",
  "tracing-opentelemetry",
