@@ -65,4 +65,4 @@ jobs:
       - name: Setup
         uses: ./.github/actions/rust
       - name: Build in release mode
-        run: cargo build --release
+        run: cargo build --release --features python
