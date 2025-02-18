@@ -131,7 +131,7 @@ impl Bindings {
     fn heartbeat(&self) -> ChromaPyResult<u128> {
         let duration_since_epoch = std::time::SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
-            .map_err(HeartbeatError::CouldNotGetTime)?;
+            .map_err(|err| HeartbeatError::CouldNotGetTime(err.into()))?;
         Ok(duration_since_epoch.as_nanos())
     }
 

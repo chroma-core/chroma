@@ -31,7 +31,6 @@ use std::sync::{
 };
 use utoipa::OpenApi;
 use utoipa_axum::router::OpenApiRouter;
-use utoipa_axum::routes;
 use utoipa_swagger_ui::SwaggerUi;
 use uuid::Uuid;
 
@@ -1310,14 +1309,3 @@ async fn v1_deprecation_notice() -> Response {
 #[derive(OpenApi)]
 #[openapi(paths(healthcheck))]
 struct ApiDoc;
-
-#[utoipa::path(
-    get,
-    path = "/openapi.json",
-    responses(
-        (status = 200, description = "JSON file", body = ())
-    )
-)]
-async fn openapi() -> axum::Json<utoipa::openapi::OpenApi> {
-    axum::Json(ApiDoc::openapi())
-}
