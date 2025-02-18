@@ -19,7 +19,7 @@ from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 
 # TODO(hammadb): Unify imports across types vs root __init__.py
 from chromadb.types import Database, Tenant, Collection as CollectionModel
-import rust_bindings
+import chromadb_rust_bindings
 
 from typing import Optional, Sequence
 from overrides import override
@@ -42,7 +42,7 @@ elif platform.system() == "Windows":
 # TODO(hammadb): Propagate the types from the bindings into the Python API
 # and remove the python-level types entirely.
 class RustBindingsAPI(ServerAPI):
-    bindings: rust_bindings.Bindings
+    bindings: chromadb_rust_bindings.Bindings
     # NOTE(hammadb) We proxy all calls to this instance of the Segment API
     proxy_segment_api: SegmentAPI
     hnsw_cache_size: int
@@ -76,23 +76,23 @@ class RustBindingsAPI(ServerAPI):
             sqlite_persist_path = None
         hash_type = self._system.settings.require("migrations_hash_algorithm")
         hash_type_bindings = (
-            rust_bindings.MigrationHash.MD5
+            chromadb_rust_bindings.MigrationHash.MD5
             if hash_type == "md5"
-            else rust_bindings.MigrationHash.SHA256
+            else chromadb_rust_bindings.MigrationHash.SHA256
         )
         migration_mode = self._system.settings.require("migrations")
         migration_mode_bindings = (
-            rust_bindings.MigrationMode.Apply
+            chromadb_rust_bindings.MigrationMode.Apply
             if migration_mode == "apply"
-            else rust_bindings.MigrationMode.Validate
+            else chromadb_rust_bindings.MigrationMode.Validate
         )
-        sqlite_config = rust_bindings.SqliteDBConfig(
+        sqlite_config = chromadb_rust_bindings.SqliteDBConfig(
             hash_type=hash_type_bindings,
             migration_mode=migration_mode_bindings,
             url=sqlite_persist_path,
         )
 
-        self.bindings = rust_bindings.Bindings(
+        self.bindings = chromadb_rust_bindings.Bindings(
             allow_reset=self._system.settings.require("allow_reset"),
             sqlite_db_config=sqlite_config,
             persist_path=persist_path,
@@ -275,7 +275,13 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> GetResult:
-        return self._get(str(collection_id), limit=n, tenant=tenant, database=database, include=["embeddings", "metadatas", "documents"])
+        return self._get(
+            str(collection_id),
+            limit=n,
+            tenant=tenant,
+            database=database,
+            include=["embeddings", "metadatas", "documents"],
+        )
         # return self.proxy_segment_api._peek(collection_id, n, tenant, database)
 
     @override
@@ -473,7 +479,7 @@ class RustBindingsAPI(ServerAPI):
             tenant,
             database,
         )
-        
+
         # return self.proxy_segment_api._delete(
         #     collection_id, ids, where, where_document, tenant, database
         # )

@@ -8,7 +8,7 @@ use pyo3::prelude::*;
 use chroma_sqlite::config::{MigrationHash, MigrationMode, SqliteDBConfig};
 
 #[pymodule]
-fn rust_bindings(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn chromadb_rust_bindings(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Bindings>()?;
 
     // TODO: move this into a module hierarchy
