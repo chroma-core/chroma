@@ -404,6 +404,10 @@ def log_size_below_max(
 ) -> None:
     sqlite = system.instance(SqliteDB)
 
+    # Ephemeral Rust client is using its own sqlite impl, which cannot be accessed from Python
+    if not system.settings.is_persistent and system.settings.chroma_api_impl == "chromadb.api.rust.RustBindingsAPI":
+        return
+
     if has_collection_mutated:
         # Must always keep one entry to avoid reusing seq_ids
         assert _total_embedding_queue_log_size(sqlite) >= 1
