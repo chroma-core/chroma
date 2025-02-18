@@ -29,8 +29,7 @@ chroma-config = { workspace = true }
 chroma-storage = { workspace = true }
 chroma-distance = { workspace = true }
 itertools = { workspace = true }
-
-hnswlib = { path = "../../../hnswlib" }
+hnswlib = { workspace = true }
 
 [dev-dependencies]
 rayon = { workspace = true }
