@@ -793,7 +793,7 @@ class ClientFactories:
             self._created_clients.append(client)
             return client
 
-        client = ClientCreator(*args, **kwargs)
+        client = ClientCreator.from_system(self._system)
         self._created_clients.append(client)
         return client
 
