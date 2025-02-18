@@ -387,16 +387,17 @@ async fn create_database(
 }
 
 #[derive(Deserialize)]
-struct ListDatabasesPayload {
+struct ListDatabasesParams {
     limit: Option<u32>,
+    #[serde(default)]
     offset: u32,
 }
 
 async fn list_databases(
     headers: HeaderMap,
     Path(tenant_id): Path<String>,
+    Query(ListDatabasesParams { limit, offset }): Query<ListDatabasesParams>,
     State(mut server): State<FrontendServer>,
-    Json(ListDatabasesPayload { limit, offset }): Json<ListDatabasesPayload>,
 ) -> Result<Json<ListDatabasesResponse>, ServerError> {
     server.metrics.list_databases.add(1, &[]);
     tracing::info!("Listing database for tenant [{}]", tenant_id);
