@@ -58,6 +58,7 @@ jobs:
             echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
           fi
   build:
+    name: build-${{ matrix.platform.os }}-${{ matrix.platform.target }}
     runs-on: ${{ matrix.platform.runner }}
     needs: version
     strategy:
@@ -125,6 +126,7 @@ jobs:
           path: dist
 
   sdist:
+    name: build-sdist
     runs-on: depot-ubuntu-22.04
     needs: version
     steps:
