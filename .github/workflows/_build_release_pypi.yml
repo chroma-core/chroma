@@ -71,6 +71,7 @@ jobs:
           - { os: macos, runner: depot-macos-14, target: aarch64 }
 
     steps:
+      - uses: actions/checkout@v4
       - name: Install Protoc
         uses: arduino/setup-protoc@v3
         with:
