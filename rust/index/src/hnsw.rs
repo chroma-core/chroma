@@ -109,6 +109,10 @@ impl HnswIndex {
         self.index.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.index.is_empty()
+    }
+
     pub fn len_with_deleted(&self) -> usize {
         self.index.len_with_deleted()
     }
