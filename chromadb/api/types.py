@@ -59,7 +59,7 @@ def normalize_embeddings(
 
     if len(target) == 0:
         raise ValueError(
-            f"Expected Embedings to be non-empty list or numpy array, got {target}"
+            f"Expected Embeddings to be non-empty list or numpy array, got {target}"
         )
 
     if isinstance(target, list):
