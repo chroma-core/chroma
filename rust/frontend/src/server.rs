@@ -288,11 +288,11 @@ async fn reset(State(mut server): State<FrontendServer>) -> Result<Json<bool>, S
     Ok(Json(true))
 }
 
-async fn version(State(server): State<FrontendServer>) -> &'static str {
+async fn version(State(server): State<FrontendServer>) -> Json<String> {
     server.metrics.version.add(1, &[]);
     // TODO: Decide on how to handle versioning across python / rust frontend
     // for now return a hardcoded version
-    "0.7.0"
+    Json("0.7.0".to_string())
 }
 
 // TOOD: Dummy implementation for now
