@@ -793,6 +793,19 @@ class ClientFactories:
             self._created_clients.append(client)
             return client
 
+        client = ClientCreator(*args, **kwargs)
+        self._created_clients.append(client)
+        return client
+
+    def create_client_from_system(self) -> ClientCreator:
+        if (
+            self._system.settings.chroma_api_impl
+            == "chromadb.api.async_fastapi.AsyncFastAPI"
+        ):
+            client = cast(ClientCreator, AsyncClientCreatorSync.from_system(self._system))
+            self._created_clients.append(client)
+            return client
+
         client = ClientCreator.from_system(self._system)
         self._created_clients.append(client)
         return client

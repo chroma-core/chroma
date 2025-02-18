@@ -8,7 +8,7 @@ import numpy as np
 
 
 def test_database_tenant_collections(client_factories: ClientFactories) -> None:
-    client = client_factories.create_client()
+    client = client_factories.create_client_from_system()
     client.reset()
     # Create a new database in the default tenant
     admin_client = client_factories.create_admin_client_from_system()
@@ -75,7 +75,7 @@ def test_database_tenant_collections(client_factories: ClientFactories) -> None:
 
 
 def test_database_collections_add(client_factories: ClientFactories) -> None:
-    client = client_factories.create_client()
+    client = client_factories.create_client_from_system()
     client.reset()
 
     # Create a new database in the default tenant
@@ -121,7 +121,7 @@ def test_database_collections_add(client_factories: ClientFactories) -> None:
 
 
 def test_tenant_collections_add(client_factories: ClientFactories) -> None:
-    client = client_factories.create_client()
+    client = client_factories.create_client_from_system()
     client.reset()
 
     # Create two databases with same name in different tenants
@@ -168,7 +168,7 @@ def test_tenant_collections_add(client_factories: ClientFactories) -> None:
 
 
 def test_min_len_name(client_factories: ClientFactories) -> None:
-    client = client_factories.create_client()
+    client = client_factories.create_client_from_system()
     client.reset()
 
     # Create a new database in the default tenant with a name of length 1
