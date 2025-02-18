@@ -2,6 +2,7 @@ package dao
 
 import (
 	"errors"
+	"sort"
 	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
@@ -66,31 +67,34 @@ func (s *collectionDb) ListCollectionsToGc() ([]*dbmodel.CollectionToGc, error) 
 func (s *collectionDb) getCollections(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32, is_deleted bool) (collectionWithMetdata []*dbmodel.CollectionAndMetadata, err error) {
 	type Result struct {
 		// Collection fields
-		ID                         string
-		LogPosition                int64
-		Version                    int32
-		CollectionName             *string `gorm:"column:collection_name"`
-		ConfigurationJsonStr       *string
-		Dimension                  *int32
-		DatabaseID                 string
-		IsDeleted                  bool
-		TotalRecordsPostCompaction uint64
-		DatabaseName               string `gorm:"column:database_name"`
-		TenantID                   string
-		// Metadata fields - all aligned with column names
-		CollectionID      *string    `gorm:"column:collection_id"`
+		CollectionId               string     `gorm:"column:collection_id"`
+		CollectionName             *string    `gorm:"column:collection_name"`
+		ConfigurationJsonStr       *string    `gorm:"column:configuration_json_str"`
+		Dimension                  *int32     `gorm:"column:dimension"`
+		DatabaseID                 string     `gorm:"column:database_id"`
+		CollectionTs               *int64     `gorm:"column:collection_ts"`
+		IsDeleted                  bool       `gorm:"column:is_deleted"`
+		CollectionCreatedAt        *time.Time `gorm:"column:collection_created_at"`
+		CollectionUpdatedAt        *time.Time `gorm:"column:collection_updated_at"`
+		LogPosition                int64      `gorm:"column:log_position"`
+		Version                    int32      `gorm:"column:version"`
+		VersionFileName            string     `gorm:"column:version_file_name"`
+		TotalRecordsPostCompaction uint64     `gorm:"column:total_records_post_compaction"`
+		DatabaseName               string     `gorm:"column:database_name"`
+		TenantID                   string     `gorm:"column:tenant_id"`
+		// Metadata fields
 		Key               *string    `gorm:"column:key"`
 		StrValue          *string    `gorm:"column:str_value"`
 		IntValue          *int64     `gorm:"column:int_value"`
 		FloatValue        *float64   `gorm:"column:float_value"`
 		BoolValue         *bool      `gorm:"column:bool_value"`
-		Ts                *int64     `gorm:"column:ts"`
-		MetadataCreatedAt *time.Time `gorm:"column:created_at"`
-		MetadataUpdatedAt *time.Time `gorm:"column:updated_at"`
+		MetadataTs        *int64     `gorm:"column:metadata_ts"`
+		MetadataCreatedAt *time.Time `gorm:"column:metadata_created_at"`
+		MetadataUpdatedAt *time.Time `gorm:"column:metadata_updated_at"`
 	}
 
 	query := s.db.Table("collections").
-		Select("collections.id, collections.log_position, collections.version, collections.name as collection_name, collections.configuration_json_str, collections.dimension, collections.database_id, collections.is_deleted, collections.total_records_post_compaction, databases.name as database_name, databases.tenant_id").
+		Select("collections.id as collection_id, collections.name as collection_name, collections.configuration_json_str, collections.dimension, collections.database_id, collections.ts as collection_ts, collections.is_deleted, collections.created_at as collection_created_at, collections.updated_at as collection_updated_at, collections.log_position, collections.version, collections.version_file_name, collections.total_records_post_compaction, databases.name as database_name, databases.tenant_id as tenant_id").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
 		Order("collections.created_at ASC")
 
@@ -119,17 +123,16 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 	err = s.db.Table("(?) as ci", query).
 		Select(`
             ci.*,
-            cm.collection_id,
             cm.key,
             cm.str_value,
             cm.int_value,
             cm.float_value,
             cm.bool_value,
-            cm.ts,
-            cm.created_at,
-            cm.updated_at
+            cm.ts as metadata_ts,
+            cm.created_at as metadata_created_at,
+            cm.updated_at as metadata_updated_at
         `).
-		Joins("LEFT JOIN collection_metadata cm ON cm.collection_id = ci.id").
+		Joins("LEFT JOIN collection_metadata cm ON cm.collection_id = ci.collection_id").
 		Scan(&results).Error
 
 	if err != nil {
@@ -139,23 +142,39 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 	var collectionsMap = make(map[string]*dbmodel.CollectionAndMetadata)
 
 	for _, r := range results {
-		log.Info("Raw result",
-			zap.String("ID", r.ID),
-			zap.Any("Name", r.CollectionName),
-			zap.String("DatabaseName", r.DatabaseName))
-
-		collection, exists := collectionsMap[r.ID]
+		collection, exists := collectionsMap[r.CollectionId]
 		if !exists {
 			// Create new collection
 			var col = &dbmodel.Collection{
-				ID:                   r.ID,
-				Name:                 r.CollectionName,
-				ConfigurationJsonStr: r.ConfigurationJsonStr,
-				Dimension:            r.Dimension,
-				DatabaseID:           r.DatabaseID,
-				IsDeleted:            r.IsDeleted,
-				LogPosition:          r.LogPosition,
-				Version:              r.Version,
+				ID:                         r.CollectionId,
+				Name:                       r.CollectionName,
+				ConfigurationJsonStr:       r.ConfigurationJsonStr,
+				Dimension:                  r.Dimension,
+				DatabaseID:                 r.DatabaseID,
+				IsDeleted:                  r.IsDeleted,
+				LogPosition:                r.LogPosition,
+				Version:                    r.Version,
+				VersionFileName:            r.VersionFileName,
+				TotalRecordsPostCompaction: r.TotalRecordsPostCompaction,
+			}
+			if r.CollectionTs != nil {
+				col.Ts = *r.CollectionTs
+			} else {
+				col.Ts = 0
+			}
+
+			if r.CollectionCreatedAt != nil {
+				col.CreatedAt = *r.CollectionCreatedAt
+			} else {
+				// Current time as default.
+				col.CreatedAt = time.Now()
+			}
+
+			if r.CollectionUpdatedAt != nil {
+				col.UpdatedAt = *r.CollectionUpdatedAt
+			} else {
+				// Current time as default.
+				col.UpdatedAt = time.Now()
 			}
 
 			collection = &dbmodel.CollectionAndMetadata{
@@ -164,19 +183,19 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 				DatabaseName:       r.DatabaseName,
 				CollectionMetadata: make([]*dbmodel.CollectionMetadata, 0),
 			}
-			collectionsMap[r.ID] = collection
+			collectionsMap[r.CollectionId] = collection
 		}
 
+		// Populate metadata if it exists.
 		var metadata = &dbmodel.CollectionMetadata{}
-		if r.CollectionID != nil {
-			metadata.CollectionID = *r.CollectionID
+		if r.Key != nil {
 			metadata.Key = r.Key
 			metadata.StrValue = r.StrValue
 			metadata.IntValue = r.IntValue
 			metadata.FloatValue = r.FloatValue
 			metadata.BoolValue = r.BoolValue
-			if r.Ts != nil {
-				metadata.Ts = *r.Ts
+			if r.MetadataTs != nil {
+				metadata.Ts = *r.MetadataTs
 			} else {
 				metadata.Ts = 0
 			}
@@ -201,6 +220,11 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 	for _, c := range collectionsMap {
 		collections = append(collections, c)
 	}
+
+	// Sort the result by created time.
+	sort.Slice(collections, func(i, j int) bool {
+		return collections[i].Collection.CreatedAt.Before(collections[j].Collection.CreatedAt)
+	})
 
 	return collections, nil
 }
