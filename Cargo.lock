@@ -1270,6 +1270,7 @@ dependencies = [
 name = "chroma-cache"
 version = "0.1.0"
 dependencies = [
+ "ahash",
  "anyhow",
  "async-trait",
  "chroma-config",
@@ -1281,6 +1282,7 @@ dependencies = [
  "parking_lot",
  "serde",
  "serde_yaml",
+ "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "tracing",

@@ -17,7 +17,7 @@ opentelemetry = { version = "0.27.0", default-features = false, features = [
 
 # TODO(rescrv):  Deprecated.  Find a suitable replacement for such things.
 serde_yaml = "0.9"
-
+ahash = "0.8.11"
 async-trait = { workspace = true }
 parking_lot = { workspace = true }
 serde = { workspace = true }
@@ -29,6 +29,9 @@ uuid = { workspace = true }
 chroma-config = { workspace = true }
 chroma-error = { workspace = true }
 chroma-types = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
 
 [features]
 default = []
