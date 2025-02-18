@@ -71,16 +71,6 @@ jobs:
           - { os: macos, runner: depot-macos-14, target: aarch64 }
 
     steps:
-      - uses: actions/checkout@v4
-      - name: Checkout chroma-hnswlib
-        uses: actions/checkout@v4
-        with:
-          repository: chroma-core/hnswlib
-          path: hnswlib
-      # (actions/checkout doesn't allow cloning above the workspace root)
-      - name: Symlink hnswlib to parent
-        run: ln -s "$(pwd)/hnswlib" ../hnswlib
-
       - name: Install Protoc
         uses: arduino/setup-protoc@v3
         with:
