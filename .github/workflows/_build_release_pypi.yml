@@ -41,7 +41,7 @@ permissions:
 jobs:
   version:
     name: Resolve version
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-22.04
     outputs:
       version: ${{ steps.resolve_version.outputs.version }}
     steps:
@@ -125,7 +125,7 @@ jobs:
           path: dist
 
   sdist:
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-22.04
     needs: version
     steps:
       - uses: actions/checkout@v4
@@ -168,7 +168,7 @@ jobs:
 
   release:
     name: Release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     if: ${{ inputs.publish_to_pypi || inputs.publish_to_test_pypi }}
     needs: [build, sdist]
     permissions:
