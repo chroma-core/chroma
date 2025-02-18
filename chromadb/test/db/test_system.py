@@ -272,6 +272,42 @@ def test_create_get_delete_collections(sysdb: SysDB) -> None:
     by_collection_result = sysdb.get_segments(collection=sample_collections[0].id)
     assert by_collection_result == []
 
+def test_count_collections(sysdb: SysDB) -> None:
+    logger.debug("Resetting state")
+    sysdb.reset_state()
+
+    segments_created_with_collection = []
+    for collection in sample_collections:
+        logger.debug(f"Creating collection: {collection.name}")
+        segments = [
+            sample_segment(collection_id=collection.id, scope=SegmentScope.METADATA),
+            sample_segment(collection_id=collection.id, scope=SegmentScope.RECORD),
+            sample_segment(collection_id=collection.id, scope=SegmentScope.VECTOR),
+        ]
+        segments_created_with_collection.extend(segments)
+        sysdb.create_collection(
+            id=collection.id,
+            name=collection.name,
+            configuration=collection.get_configuration(),
+            segments=segments,
+            metadata=collection["metadata"],
+            dimension=collection["dimension"],
+            tenant = DEFAULT_TENANT,
+            database = DEFAULT_DATABASE,
+        )
+        collection["database"] = DEFAULT_DATABASE
+        collection["tenant"] = DEFAULT_TENANT
+
+    collection_count = sysdb.count_collections(tenant=DEFAULT_TENANT, database=DEFAULT_DATABASE)
+    logger.debug(f"Collection count: {collection_count}")
+
+    assert collection_count == len(sample_collections)
+
+    # without specifying the database name should give count of all collections for the tenant
+    collection_count = sysdb.count_collections(tenant=DEFAULT_TENANT)
+    logger.debug(f"Collection count: {collection_count}")
+
+    assert collection_count == len(sample_collections)
 
 def test_get_collection_size(sysdb: SysDB) -> None:
     if not isinstance(sysdb, GrpcSysDB):

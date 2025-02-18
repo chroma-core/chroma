@@ -179,12 +179,12 @@ func (m *mockS3MetaStore) GetVersionFile(tenantID, collectionID string, version 
 	}, nil
 }
 
-func (m *mockS3MetaStore) PutVersionFile(tenantID, collectionID, fileName string, file *coordinatorpb.CollectionVersionFile) error {
+func (m *mockS3MetaStore) PutVersionFile(tenantID, collectionID, fileName string, file *coordinatorpb.CollectionVersionFile) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	m.files[fileName] = file
-	return nil
+	return fileName, nil
 }
 
 func (m *mockS3MetaStore) HasObjectWithPrefix(ctx context.Context, prefix string) (bool, error) {
@@ -230,8 +230,9 @@ func TestCatalog_FlushCollectionCompactionForVersionedCollection(t *testing.T) {
 			},
 		},
 	}
-	err := mockS3Store.PutVersionFile(tenantID, collectionID.String(), "version_1.pb", initialVersionFile)
+	fileName, err := mockS3Store.PutVersionFile(tenantID, collectionID.String(), "version_1.pb", initialVersionFile)
 	assert.NoError(t, err)
+	assert.Equal(t, "version_1.pb", fileName)
 
 	// Setup mock collection entry
 	mockCollectionEntry := &dbmodel.Collection{

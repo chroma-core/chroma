@@ -76,7 +76,7 @@ We will use Chroma's `Settings` object to define the authentication method on th
 import chromadb
 from chromadb.config import Settings
 
-client = chromadb.HttpClient(
+chroma_client = chromadb.HttpClient(
     host="localhost",
     port=8000,
     settings=Settings(

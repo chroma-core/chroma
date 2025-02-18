@@ -1,6 +1,7 @@
 import pytest
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
 from chromadb.test.conftest import ClientFactories
+from chromadb.errors import InvalidArgumentError
 from chromadb.api.types import GetResult
 from typing import Dict, Any
 import numpy as np
@@ -173,11 +174,11 @@ def test_min_len_name(client_factories: ClientFactories) -> None:
     # Create a new database in the default tenant with a name of length 1
     # and expect an error
     admin_client = client_factories.create_admin_client_from_system()
-    with pytest.raises(Exception):
+    with pytest.raises((Exception, InvalidArgumentError)):
         admin_client.create_database("a")
 
     # Create a tenant with a name of length 1 and expect an error
-    with pytest.raises(Exception):
+    with pytest.raises((Exception, InvalidArgumentError)):
         admin_client.create_tenant("a")
 
 

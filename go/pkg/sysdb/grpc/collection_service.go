@@ -148,6 +148,17 @@ func (s *Server) GetCollections(ctx context.Context, req *coordinatorpb.GetColle
 	return res, nil
 }
 
+func (s *Server) CountCollections(ctx context.Context, req *coordinatorpb.CountCollectionsRequest) (*coordinatorpb.CountCollectionsResponse, error) {
+	res := &coordinatorpb.CountCollectionsResponse{}
+	collection_count, err := s.coordinator.CountCollections(ctx, req.Tenant, req.Database)
+	if err != nil {
+		log.Error("CountCollections failed. ", zap.Error(err), zap.String("tenant", req.Tenant), zap.Stringp("database", req.Database))
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+	res.Count = collection_count
+	return res, nil
+}
+
 func (s *Server) GetCollectionSize(ctx context.Context, req *coordinatorpb.GetCollectionSizeRequest) (*coordinatorpb.GetCollectionSizeResponse, error) {
 	collectionID := req.Id
 
@@ -320,7 +331,8 @@ func (s *Server) ListCollectionVersions(ctx context.Context, req *coordinatorpb.
 	if err != nil {
 		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
-	versions, err := s.coordinator.ListCollectionVersions(ctx, collectionID, req.TenantId, req.MaxCount, *req.VersionsBefore, *req.VersionsAtOrAfter)
+
+	versions, err := s.coordinator.ListCollectionVersions(ctx, collectionID, req.TenantId, req.MaxCount, req.VersionsBefore, req.VersionsAtOrAfter)
 	if err != nil {
 		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
@@ -406,12 +418,20 @@ func (s *Server) ListCollectionsToGc(ctx context.Context, req *coordinatorpb.Lis
 // NOTE about concurrency:
 // This method updates the version file which can concurrently with FlushCollectionCompaction.
 func (s *Server) MarkVersionForDeletion(ctx context.Context, req *coordinatorpb.MarkVersionForDeletionRequest) (*coordinatorpb.MarkVersionForDeletionResponse, error) {
-	return nil, nil
+	res, err := s.coordinator.MarkVersionForDeletion(ctx, req)
+	if err != nil {
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+	return res, nil
 }
 
 // Delete the versions from the version file. Refer to comments in MarkVersionForDeletion.
 // NOTE about concurrency:
 // This method updates the version file which can concurrently with FlushCollectionCompaction.
 func (s *Server) DeleteCollectionVersion(ctx context.Context, req *coordinatorpb.DeleteCollectionVersionRequest) (*coordinatorpb.DeleteCollectionVersionResponse, error) {
-	return nil, nil
+	res, err := s.coordinator.DeleteCollectionVersion(ctx, req)
+	if err != nil {
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+	return res, nil
 }

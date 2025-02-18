@@ -248,6 +248,10 @@ impl SqliteSysDb {
             .begin()
             .await
             .map_err(|e| CreateCollectionError::Internal(e.into()))?;
+        self.db
+            .begin_immediate(&mut *tx)
+            .await
+            .map_err(|e| CreateCollectionError::Internal(e.into()))?;
 
         let mut existing_collections = self
             .get_collections_with_conn(
@@ -662,13 +666,15 @@ impl SqliteSysDb {
                 let metadata = self.metadata_from_rows(rows.iter());
                 let first_row = rows.first().unwrap();
 
-                let configuration_json =
-                    match serde_json::from_str::<serde_json::Value>(first_row.get::<&str, _>(2))
+                let configuration_json = match first_row.get::<Option<&str>, _>(2) {
+                    Some(json_str) => match serde_json::from_str::<serde_json::Value>(json_str)
                         .map_err(GetCollectionsError::Configuration)
                     {
                         Ok(configuration_json) => configuration_json,
                         Err(e) => return Some(Err(e)),
-                    };
+                    },
+                    None => serde_json::Value::Object(Default::default()),
+                };
 
                 Some(Ok(Collection {
                     collection_id,

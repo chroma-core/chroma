@@ -1323,7 +1323,7 @@ dependencies = [
 
 [[package]]
 name = "chroma-frontend"
-version = "0.1.0"
+version = "0.7.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -1341,6 +1341,7 @@ dependencies = [
  "chroma-tracing",
  "chroma-types",
  "figment",
+ "futures",
  "mdac",
  "opentelemetry",
  "parking_lot",
@@ -1366,7 +1367,6 @@ dependencies = [
  "anyhow",
  "arrow",
  "async-trait",
- "cc",
  "chroma-benchmark",
  "chroma-blockstore",
  "chroma-cache",
@@ -1377,6 +1377,7 @@ dependencies = [
  "chroma-types",
  "criterion",
  "futures",
+ "hnswlib",
  "indicatif",
  "itertools 0.13.0",
  "parking_lot",
@@ -2755,6 +2756,8 @@ name = "garbage_collector"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "chroma-blockstore",
+ "chroma-cache",
  "chroma-config",
  "chroma-error",
  "chroma-storage",
@@ -2772,8 +2775,10 @@ dependencies = [
  "prost 0.13.3",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "tonic",
  "tracing",
  "tracing-bunyan-formatter",
  "tracing-opentelemetry",
@@ -3035,6 +3040,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c49c37c09c17a53d937dfbb742eb3a961d65a994e6bcdcf37e7399d0cc8ab5e"
 dependencies = [
  "digest",
+]
+
+[[package]]
+name = "hnswlib"
+version = "0.8.0"
+source = "git+https://github.com/chroma-core/hnswlib.git#57c14ff2f7159ad34014e29012f06429643aaee8"
+dependencies = [
+ "cc",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

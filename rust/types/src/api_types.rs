@@ -573,6 +573,20 @@ impl ChromaError for CreateCollectionError {
 }
 
 #[derive(Debug, Error)]
+pub enum CountCollectionsError {
+    #[error("Internal error in getting count")]
+    Internal,
+}
+
+impl ChromaError for CountCollectionsError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            CountCollectionsError::Internal => ErrorCodes::Internal,
+        }
+    }
+}
+
+#[derive(Debug, Error)]
 pub enum GetCollectionsError {
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
@@ -697,6 +711,23 @@ impl ChromaError for DeleteCollectionError {
     }
 }
 
+#[derive(Debug, Error)]
+pub enum GetCollectionSizeError {
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+    #[error("Collection [{0}] does not exists")]
+    NotFound(String),
+}
+
+impl ChromaError for GetCollectionSizeError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GetCollectionSizeError::Internal(err) => err.code(),
+            GetCollectionSizeError::NotFound(_) => ErrorCodes::NotFound,
+        }
+    }
+}
+
 ////////////////////////// Metadata Key Constants //////////////////////////
 
 pub const CHROMA_KEY: &str = "chroma:";
@@ -753,14 +784,14 @@ pub enum AddCollectionRecordsError {
     #[error("Failed to get collection: {0}")]
     Collection(#[from] GetCollectionError),
     #[error(transparent)]
-    Internal(#[from] Box<dyn ChromaError>),
+    Other(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for AddCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
             AddCollectionRecordsError::Collection(err) => err.code(),
-            AddCollectionRecordsError::Internal(err) => err.code(),
+            AddCollectionRecordsError::Other(err) => err.code(),
         }
     }
 }
@@ -813,13 +844,13 @@ pub struct UpdateCollectionRecordsResponse {}
 #[derive(Error, Debug)]
 pub enum UpdateCollectionRecordsError {
     #[error(transparent)]
-    Internal(#[from] Box<dyn ChromaError>),
+    Other(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for UpdateCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
-            UpdateCollectionRecordsError::Internal(err) => err.code(),
+            UpdateCollectionRecordsError::Other(err) => err.code(),
         }
     }
 }
@@ -872,13 +903,13 @@ pub struct UpsertCollectionRecordsResponse {}
 #[derive(Error, Debug)]
 pub enum UpsertCollectionRecordsError {
     #[error(transparent)]
-    Internal(#[from] Box<dyn ChromaError>),
+    Other(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for UpsertCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
-            UpsertCollectionRecordsError::Internal(err) => err.code(),
+            UpsertCollectionRecordsError::Other(err) => err.code(),
         }
     }
 }
@@ -1136,7 +1167,6 @@ impl From<(GetResult, IncludeList)> for GetResponse {
             if let Some(documents) = res.documents.as_mut() {
                 documents.push(document);
             }
-
             let uri = metadata.as_mut().and_then(|meta| {
                 meta.remove(CHROMA_URI_KEY).and_then(|v| {
                     if let crate::MetadataValue::Str(uri) = v {
@@ -1311,14 +1341,14 @@ pub enum QueryError {
     #[error("Error executing plan: {0}")]
     Executor(#[from] ExecutorError),
     #[error(transparent)]
-    Internal(#[from] Box<dyn ChromaError>),
+    Other(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for QueryError {
     fn code(&self) -> ErrorCodes {
         match self {
             QueryError::Executor(e) => e.code(),
-            QueryError::Internal(err) => err.code(),
+            QueryError::Other(err) => err.code(),
         }
     }
 }
@@ -1370,5 +1400,22 @@ impl ChromaError for ExecutorError {
             ExecutorError::NoClientFound(_) => ErrorCodes::Internal,
             ExecutorError::BackfillError => ErrorCodes::Internal,
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_create_database_min_length() {
+        let request = CreateDatabaseRequest::try_new("default_tenant".to_string(), "a".to_string());
+        assert!(request.is_err());
+    }
+
+    #[test]
+    fn test_create_tenant_min_length() {
+        let request = CreateTenantRequest::try_new("a".to_string());
+        assert!(request.is_err());
     }
 }

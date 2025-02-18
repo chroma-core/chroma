@@ -10,6 +10,9 @@ use chroma_storage::test_storage;
 use provider::BlockfileProvider;
 pub use types::*;
 
+// Re-export RootManager for external use
+pub use arrow::provider::RootManager;
+
 pub fn test_arrow_blockfile_provider(max_block_size_bytes: usize) -> BlockfileProvider {
     BlockfileProvider::new_arrow(
         test_storage(),

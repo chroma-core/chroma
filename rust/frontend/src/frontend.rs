@@ -14,16 +14,16 @@ use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
     plan::{Count, Get, Knn},
     AddCollectionRecordsError, AddCollectionRecordsRequest, AddCollectionRecordsResponse,
-    CollectionUuid, CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
-    CreateCollectionError, CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseError,
-    CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantError, CreateTenantRequest,
-    CreateTenantResponse, DeleteCollectionError, DeleteCollectionRecordsError,
-    DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, DeleteCollectionRequest,
-    DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse, DistributedHnswParameters,
-    GetCollectionError, GetCollectionRequest, GetCollectionResponse, GetCollectionsError,
-    GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
-    GetTenantError, GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError,
-    HeartbeatResponse, Include, ListCollectionsRequest, ListCollectionsResponse,
+    CollectionUuid, CountCollectionsError, CountCollectionsRequest, CountCollectionsResponse,
+    CountRequest, CountResponse, CreateCollectionError, CreateCollectionRequest,
+    CreateCollectionResponse, CreateDatabaseError, CreateDatabaseRequest, CreateDatabaseResponse,
+    CreateTenantError, CreateTenantRequest, CreateTenantResponse, DeleteCollectionError,
+    DeleteCollectionRecordsError, DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse,
+    DeleteCollectionRequest, DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse,
+    DistributedHnswParameters, GetCollectionError, GetCollectionRequest, GetCollectionResponse,
+    GetCollectionsError, GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest,
+    GetResponse, GetTenantError, GetTenantRequest, GetTenantResponse, HealthCheckResponse,
+    HeartbeatError, HeartbeatResponse, Include, ListCollectionsRequest, ListCollectionsResponse,
     ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse, Metadata, Operation,
     OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
     ScalarEncoding, Segment, SegmentScope, SegmentType, SegmentUuid, SingleNodeHnswParameters,
@@ -33,6 +33,10 @@ use chroma_types::{
     UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, CHROMA_DOCUMENT_KEY,
     CHROMA_URI_KEY,
 };
+use opentelemetry::global;
+use opentelemetry::metrics::Counter;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(thiserror::Error, Debug)]
@@ -114,6 +118,14 @@ fn to_records<
     Ok(records)
 }
 
+#[derive(Debug)]
+struct Metrics {
+    delete_retries_counter: Counter<u64>,
+    count_retries_counter: Counter<u64>,
+    query_retries_counter: Counter<u64>,
+    get_retries_counter: Counter<u64>,
+}
+
 #[derive(Clone, Debug)]
 pub struct Frontend {
     allow_reset: bool,
@@ -122,6 +134,7 @@ pub struct Frontend {
     sysdb_client: SysDb,
     collections_with_segments_provider: CollectionsWithSegmentsProvider,
     max_batch_size: u32,
+    metrics: Arc<Metrics>,
 }
 
 impl Frontend {
@@ -133,6 +146,17 @@ impl Frontend {
         executor: Executor,
         max_batch_size: u32,
     ) -> Self {
+        let meter = global::meter("chroma");
+        let delete_retries_counter = meter.u64_counter("delete_retries").build();
+        let count_retries_counter = meter.u64_counter("count_retries").build();
+        let query_retries_counter = meter.u64_counter("query_retries").build();
+        let get_retries_counter = meter.u64_counter("query_retries").build();
+        let metrics = Arc::new(Metrics {
+            delete_retries_counter,
+            count_retries_counter,
+            query_retries_counter,
+            get_retries_counter,
+        });
         Frontend {
             allow_reset,
             executor,
@@ -140,6 +164,7 @@ impl Frontend {
             sysdb_client,
             collections_with_segments_provider,
             max_batch_size,
+            metrics,
         }
     }
 
@@ -184,7 +209,7 @@ impl Frontend {
         Ok(UpdateCollectionResponse {})
     }
 
-    pub async fn validate_embedding<Embedding, F>(
+    async fn validate_embedding<Embedding, F>(
         &mut self,
         collection_id: CollectionUuid,
         option_embeddings: Option<&Vec<Embedding>>,
@@ -318,18 +343,11 @@ impl Frontend {
     pub async fn count_collections(
         &mut self,
         request: CountCollectionsRequest,
-    ) -> Result<CountCollectionsResponse, GetCollectionsError> {
+    ) -> Result<CountCollectionsResponse, CountCollectionsError> {
         self.sysdb_client
-            .get_collections(
-                None,
-                None,
-                Some(request.tenant_id),
-                Some(request.database_name),
-                None,
-                0,
-            )
+            .count_collections(request.tenant_id, Some(request.database_name))
             .await
-            .map(|collections| collections.len() as u32)
+            .map(|count| count as u32)
     }
 
     pub async fn get_collection(
@@ -512,6 +530,12 @@ impl Frontend {
             ..
         } = request;
 
+        self.validate_embedding(collection_id, embeddings.as_ref(), true, |embedding| {
+            Some(embedding.len())
+        })
+        .await
+        .map_err(|err| err.boxed())?;
+
         let embeddings = embeddings.map(|embeddings| embeddings.into_iter().map(Some).collect());
 
         let records = to_records(ids, embeddings, documents, uris, metadatas, Operation::Add)
@@ -538,6 +562,12 @@ impl Frontend {
             metadatas,
             ..
         }: UpdateCollectionRecordsRequest = request;
+
+        self.validate_embedding(collection_id, embeddings.as_ref(), true, |embedding| {
+            embedding.as_ref().map(|emb| emb.len())
+        })
+        .await
+        .map_err(|err| err.boxed())?;
 
         let records = to_records(
             ids,
@@ -570,6 +600,12 @@ impl Frontend {
             metadatas,
             ..
         } = request;
+
+        self.validate_embedding(collection_id, embeddings.as_ref(), true, |embedding| {
+            Some(embedding.len())
+        })
+        .await
+        .map_err(|err| err.boxed())?;
 
         let embeddings = embeddings.map(|embeddings| embeddings.into_iter().map(Some).collect());
 
@@ -668,6 +704,7 @@ impl Frontend {
         &mut self,
         request: DeleteCollectionRecordsRequest,
     ) -> Result<DeleteCollectionRecordsResponse, DeleteCollectionRecordsError> {
+        let retries = Arc::new(AtomicUsize::new(0));
         let delete_to_retry = || {
             let mut self_clone = self.clone();
             let request_clone = request.clone();
@@ -692,10 +729,17 @@ impl Frontend {
                 }
             }
         };
-        delete_to_retry
+        let res = delete_to_retry
             .retry(self.collections_with_segments_provider.get_retry_backoff())
             .when(|e| e.code() == ErrorCodes::NotFound)
-            .await
+            .notify(|_, _| {
+                retries.fetch_add(1, Ordering::Relaxed);
+            })
+            .await;
+        self.metrics
+            .delete_retries_counter
+            .add(retries.load(Ordering::Relaxed) as u64, &[]);
+        res
     }
 
     pub async fn retryable_count(
@@ -722,6 +766,7 @@ impl Frontend {
     }
 
     pub async fn count(&mut self, request: CountRequest) -> Result<CountResponse, QueryError> {
+        let retries = Arc::new(AtomicUsize::new(0));
         let count_to_retry = || {
             let mut self_clone = self.clone();
             let request_clone = request.clone();
@@ -746,10 +791,17 @@ impl Frontend {
                 }
             }
         };
-        count_to_retry
+        let res = count_to_retry
             .retry(self.collections_with_segments_provider.get_retry_backoff())
             .when(|e| e.code() == ErrorCodes::NotFound)
-            .await
+            .notify(|_, _| {
+                retries.fetch_add(1, Ordering::Relaxed);
+            })
+            .await;
+        self.metrics
+            .count_retries_counter
+            .add(retries.load(Ordering::Relaxed) as u64, &[]);
+        res
     }
 
     async fn retryable_get(&mut self, request: GetRequest) -> Result<GetResponse, QueryError> {
@@ -779,7 +831,9 @@ impl Frontend {
                 proj: Projection {
                     document: request.include.0.contains(&Include::Document),
                     embedding: request.include.0.contains(&Include::Embedding),
-                    metadata: request.include.0.contains(&Include::Metadata),
+                    // If URI is requested, metadata is also requested so we can extract the URI.
+                    metadata: (request.include.0.contains(&Include::Metadata)
+                        || request.include.0.contains(&Include::Uri)),
                 },
             })
             .await?;
@@ -787,6 +841,7 @@ impl Frontend {
     }
 
     pub async fn get(&mut self, request: GetRequest) -> Result<GetResponse, QueryError> {
+        let retries = Arc::new(AtomicUsize::new(0));
         let get_to_retry = || {
             let mut self_clone = self.clone();
             let request_clone = request.clone();
@@ -811,10 +866,17 @@ impl Frontend {
                 }
             }
         };
-        get_to_retry
+        let res = get_to_retry
             .retry(self.collections_with_segments_provider.get_retry_backoff())
             .when(|e| e.code() == ErrorCodes::NotFound)
-            .await
+            .notify(|_, _| {
+                retries.fetch_add(1, Ordering::Relaxed);
+            })
+            .await;
+        self.metrics
+            .get_retries_counter
+            .add(retries.load(Ordering::Relaxed) as u64, &[]);
+        res
     }
 
     async fn retryable_query(
@@ -849,7 +911,9 @@ impl Frontend {
                     projection: Projection {
                         document: request.include.0.contains(&Include::Document),
                         embedding: request.include.0.contains(&Include::Embedding),
-                        metadata: request.include.0.contains(&Include::Metadata),
+                        // If URI is requested, metadata is also requested so we can extract the URI.
+                        metadata: (request.include.0.contains(&Include::Metadata)
+                            || request.include.0.contains(&Include::Uri)),
                     },
                     distance: request.include.0.contains(&Include::Distance),
                 },
@@ -859,6 +923,16 @@ impl Frontend {
     }
 
     pub async fn query(&mut self, request: QueryRequest) -> Result<QueryResponse, QueryError> {
+        self.validate_embedding(
+            request.collection_id,
+            Some(&request.embeddings),
+            true,
+            |embedding| Some(embedding.len()),
+        )
+        .await
+        .map_err(|err| err.boxed())?;
+
+        let retries = Arc::new(AtomicUsize::new(0));
         let query_to_retry = || {
             let mut self_clone = self.clone();
             let request_clone = request.clone();
@@ -883,10 +957,17 @@ impl Frontend {
                 }
             }
         };
-        query_to_retry
+        let res = query_to_retry
             .retry(self.collections_with_segments_provider.get_retry_backoff())
             .when(|e| e.code() == ErrorCodes::NotFound)
-            .await
+            .notify(|_, _| {
+                retries.fetch_add(1, Ordering::Relaxed);
+            })
+            .await;
+        self.metrics
+            .query_retries_counter
+            .add(retries.load(Ordering::Relaxed) as u64, &[]);
+        res
     }
 
     pub async fn healthcheck(&self) -> HealthCheckResponse {

@@ -22,7 +22,7 @@ import (
 // s3://<bucket-name>/<sysdbPathPrefix>/<tenant_id>/collections/<collection_id>/versionfiles/file_name
 const (
 	versionFilesPathFormat = "%s/%s/collections/%s/versionfiles/%s"
-	minioEndpoint          = "localhost:9000"
+	minioEndpoint          = "minio:9000"
 	minioAccessKeyID       = "minio"
 	minioSecretAccessKey   = "minio123"
 )
@@ -50,7 +50,7 @@ type S3MetaStoreConfig struct {
 
 type S3MetaStoreInterface interface {
 	GetVersionFile(tenantID, collectionID string, version int64, fileName string) (*coordinatorpb.CollectionVersionFile, error)
-	PutVersionFile(tenantID, collectionID, fileName string, file *coordinatorpb.CollectionVersionFile) error
+	PutVersionFile(tenantID, collectionID, fileName string, file *coordinatorpb.CollectionVersionFile) (string, error)
 	HasObjectWithPrefix(ctx context.Context, prefix string) (bool, error)
 	DeleteVersionFile(tenantID, collectionID, fileName string) error
 }
@@ -89,6 +89,7 @@ func NewS3MetaStoreForTesting(bucketName, region, basePathSysDB, endpoint, acces
 func NewS3MetaStore(config S3MetaStoreConfig) (*S3MetaStore, error) {
 	var sess *session.Session
 	var err error
+	bucketName := config.BucketName
 
 	if config.BlockStoreProvider == BlockStoreProviderNone {
 		// TODO(rohit): Remove this once the feature is enabled.
@@ -100,9 +101,11 @@ func NewS3MetaStore(config S3MetaStoreConfig) (*S3MetaStore, error) {
 		sess, err = session.NewSession(&aws.Config{
 			Credentials:      credentials.NewStaticCredentials(minioAccessKeyID, minioSecretAccessKey, ""),
 			Endpoint:         aws.String(minioEndpoint),
+			Region:           aws.String("us-east-1"),
 			DisableSSL:       aws.Bool(true),
 			S3ForcePathStyle: aws.Bool(true),
 		})
+		bucketName = "chroma-storage"
 	} else {
 		sess, err = session.NewSession(&aws.Config{
 			Region: aws.String(config.Region),
@@ -115,7 +118,7 @@ func NewS3MetaStore(config S3MetaStoreConfig) (*S3MetaStore, error) {
 
 	return &S3MetaStore{
 		S3:            s3.New(sess),
-		BucketName:    config.BucketName,
+		BucketName:    bucketName,
 		Region:        config.Region,
 		BasePathSysDB: config.BasePathSysDB,
 	}, nil
@@ -123,7 +126,9 @@ func NewS3MetaStore(config S3MetaStoreConfig) (*S3MetaStore, error) {
 
 // Get the version file from S3. Return the protobuf.
 func (store *S3MetaStore) GetVersionFile(tenantID, collectionID string, version int64, versionFileName string) (*coordinatorpb.CollectionVersionFile, error) {
-	path := store.GetVersionFilePath(tenantID, collectionID, versionFileName)
+	// path := store.GetVersionFilePath(tenantID, collectionID, versionFileName)
+	path := versionFileName
+	log.Info("getting version file from S3", zap.String("path", path))
 
 	input := &s3.GetObjectInput{
 		Bucket: aws.String(store.BucketName),
@@ -146,19 +151,38 @@ func (store *S3MetaStore) GetVersionFile(tenantID, collectionID string, version 
 		return nil, fmt.Errorf("failed to unmarshal version file: %w", err)
 	}
 
+	numVersions := len(versionFile.VersionHistory.Versions)
+	lastVersion := versionFile.VersionHistory.Versions[numVersions-1]
+	lastVersionSegmentInfo := lastVersion.GetSegmentInfo()
+	if lastVersionSegmentInfo == nil {
+		log.Info("Last version segment info is nil")
+	} else {
+		lastVersionSegmentCompactionInfo := lastVersionSegmentInfo.SegmentCompactionInfo
+		log.Info("Last version segment compaction info", zap.Any("lastVersionSegmentCompactionInfo", lastVersionSegmentCompactionInfo))
+	}
+
 	return versionFile, nil
 }
 
 // Put the version file to S3. Serialize the protobuf to bytes.
-func (store *S3MetaStore) PutVersionFile(tenantID, collectionID string, versionFileName string, versionFile *coordinatorpb.CollectionVersionFile) error {
+func (store *S3MetaStore) PutVersionFile(tenantID, collectionID string, versionFileName string, versionFile *coordinatorpb.CollectionVersionFile) (string, error) {
 	path := store.GetVersionFilePath(tenantID, collectionID, versionFileName)
 
 	data, err := proto.Marshal(versionFile)
 	if err != nil {
-		return fmt.Errorf("failed to marshal version file: %w", err)
+		return "", fmt.Errorf("failed to marshal version file: %w", err)
 	}
 
 	log.Info("putting version file", zap.String("path", path))
+	numVersions := len(versionFile.VersionHistory.Versions)
+	lastVersion := versionFile.VersionHistory.Versions[numVersions-1]
+	lastVersionSegmentInfo := lastVersion.GetSegmentInfo()
+	if lastVersionSegmentInfo == nil {
+		log.Info("Current version segment info is nil")
+	} else {
+		lastVersionSegmentCompactionInfo := lastVersionSegmentInfo.SegmentCompactionInfo
+		log.Info("Current version segment compaction info", zap.Any("lastVersionSegmentCompactionInfo", lastVersionSegmentCompactionInfo))
+	}
 
 	input := &s3.PutObjectInput{
 		Bucket: aws.String(store.BucketName),
@@ -167,8 +191,8 @@ func (store *S3MetaStore) PutVersionFile(tenantID, collectionID string, versionF
 	}
 
 	output, err := store.S3.PutObject(input)
-	log.Info("put object output", zap.Any("output", output))
-	return err
+	log.Info("put object output", zap.Any("output", output), zap.Error(err))
+	return path, err
 }
 
 // GetVersionFilePath constructs the S3 path for a version file
