@@ -1,7 +1,6 @@
 use crate::config::{MigrationHash, MigrationMode, SqliteDBConfig};
 use crate::migrations::{GetSourceMigrationsError, Migration, MigrationDir, MIGRATION_DIRS};
 use chroma_error::{ChromaError, ErrorCodes};
-use futures::TryStreamExt;
 use sqlx::sqlite::SqlitePool;
 use sqlx::{Executor, Row};
 use thiserror::Error;
@@ -34,12 +33,13 @@ impl SqliteDb {
     }
 
     pub async fn reset(&self) -> Result<(), SqliteMigrationError> {
+        // TODO: Make this into a transaction
         let query = r#"
             SELECT name FROM sqlite_master
             WHERE type='table'
         "#;
-        let mut rows = sqlx::query(query).fetch(&self.conn);
-        while let Some(row) = rows.try_next().await? {
+        let rows = sqlx::query(query).fetch_all(&self.conn).await?;
+        for row in rows {
             let name: String = row.get("name");
             let query = format!("DROP TABLE IF EXISTS {}", name);
             sqlx::query(&query).execute(&self.conn).await?;

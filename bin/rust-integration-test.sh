@@ -2,7 +2,21 @@
 
 set -e
 
+if [[ $CHROMA_THIN_CLIENT -eq 1 ]]; then
+    echo "Using thin client"
+    is_thin_client_py="clients/python/is_thin_client.py"
+    is_thin_client_target="chromadb/is_thin_client.py"
+    cp "$is_thin_client_py" "$is_thin_client_target"
+else
+    echo "Using normal client"
+fi
+
 cleanup() {
+    echo "Removing thin client target..."
+    if [[ $CHROMA_THIN_CLIENT -eq 1 ]]; then
+        rm "$is_thin_client_target"
+    fi
+
     echo "Stopping Cargo process..."
     rm -f chroma_integration_test_tmp_dir
     pkill -P $$

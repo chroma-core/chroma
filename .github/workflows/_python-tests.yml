@@ -93,14 +93,13 @@ jobs:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
           CHROMA_RUST_BINDINGS_TEST_ONLY: "1"
 
-  # todo: break out stress integration tests
   test-single-node-integration:
     strategy:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
         platform: [depot-ubuntu-22.04, windows-latest]
-        test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore='chromadb/test/test_cli.py' --ignore-glob 'chromadb/test/distributed/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
+        test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore='chromadb/test/test_cli.py' --ignore-glob 'chromadb/test/distributed/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
                    "chromadb/test/property/test_add.py",
                    "chromadb/test/test_cli.py",
                    "chromadb/test/auth/test_simple_rbac_authz.py",
@@ -110,7 +109,8 @@ jobs:
                    "chromadb/test/property/test_embeddings.py",
                    "chromadb/test/property/test_filtering.py",
                    "chromadb/test/property/test_persist.py",
-                   "chromadb/test/property/test_sysdb.py"]
+                   "chromadb/test/property/test_sysdb.py",
+                   "chromadb/test/stress"]
         include:
           - platform: depot-ubuntu-22.04
             env-file: compose-env.linux
@@ -135,7 +135,7 @@ jobs:
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
         platform: [depot-ubuntu-22.04]
-        test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore='chromadb/test/test_cli.py' --ignore-glob 'chromadb/test/distributed/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
+        test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore='chromadb/test/test_cli.py' --ignore-glob 'chromadb/test/distributed/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
                    "chromadb/test/property/test_add.py",
                    "chromadb/test/property/test_collections.py",
                    "chromadb/test/property/test_collections_with_database_tenant.py",
@@ -143,7 +143,8 @@ jobs:
                    "chromadb/test/property/test_embeddings.py",
                    "chromadb/test/property/test_filtering.py",
                    "chromadb/test/property/test_persist.py",
-                   "chromadb/test/property/test_sysdb.py"]
+                   "chromadb/test/property/test_sysdb.py",
+                   "chromadb/test/stress"]
         include:
           - platform: depot-ubuntu-22.04
             env-file: compose-env.linux
@@ -162,13 +163,36 @@ jobs:
         ENV_FILE: ${{ matrix.env-file }}
         PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
 
+  test-rust-thin-client:
+    strategy:
+      matrix:
+        python: ${{fromJson(inputs.python_versions)}}
+        platform: [depot-ubuntu-22.04] # todo: should run on Windows, currently failing because Dockerfile doesn't build
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python (${{ matrix.python }})
+        uses: ./.github/actions/python
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Setup Rust
+        uses: ./.github/actions/rust
+      - name: Test
+        run: bin/rust-integration-test.sh 'chromadb/test/property/' --ignore-glob 'chromadb/test/property/*persist.py' --ignore 'chromadb/test/property/test_collections_with_database_tenant_overwrite.py'
+        shell: bash
+        env:
+          CHROMA_THIN_CLIENT: "1"
+          ENV_FILE: ${{ matrix.env-file }}
+          PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
+
   test-cluster-rust-frontend:
     strategy:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
         platform: ["depot-ubuntu-22.04-4"]
-        test-globs: ["chromadb/test/db/test_system.py",
+        test-globs: ["chromadb/test/api",
+                   "chromadb/test/db/test_system.py",
                    "chromadb/test/api/test_collection.py",
                    "chromadb/test/api/test_limit_offset.py",
                    "chromadb/test/property/test_collections.py",
@@ -210,9 +234,8 @@ jobs:
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
         platform: ["depot-ubuntu-22.04-4"]
-        test-globs: ["chromadb/test/db/test_system.py",
-                   "chromadb/test/api/test_collection.py",
-                   "chromadb/test/api/test_limit_offset.py",
+        test-globs: ["chromadb/test/api",
+                   "chromadb/test/db/test_system.py",
                    "chromadb/test/property/test_collections.py",
                    "chromadb/test/property/test_add.py",
                    "chromadb/test/property/test_filtering.py",
@@ -256,15 +279,15 @@ jobs:
           name: cluster_test_logs
           pattern: cluster_logs_*
 
-  test-thin-client:
+  test-thin-client-python:
     strategy:
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: [depot-ubuntu-22.04] # # todo: should run on Windows, currently failing because Dockerfile doesn't build
+        platform: [depot-ubuntu-22.04] # todo: should run on Windows, currently failing because Dockerfile doesn't build
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
-      - name: Setup
+      - name: Set up Python (${{ matrix.python }})
         uses: ./.github/actions/python
         with:
           python-version: ${{ matrix.python }}
@@ -291,20 +314,3 @@ jobs:
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
-
-  test-single-node-integration-stress:
-    strategy:
-      matrix:
-        python: ${{fromJson(inputs.python_versions)}}
-        platform: [depot-ubuntu-22.04] # todo: should run on Windows, currently failing because Dockerfile doesn't build
-    runs-on: ${{ matrix.platform }}
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-    - name: Set up Python (${{ matrix.python }})
-      uses: ./.github/actions/python
-    - name: Integration Test
-      run: bin/python-integration-test chromadb/test/stress/
-      shell: bash
-      env:
-        PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}

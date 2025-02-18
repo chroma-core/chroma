@@ -60,10 +60,10 @@ pub enum GetCollectionWithSegmentsError {
     Field(String),
     #[error("Failed to convert proto segment")]
     SegmentConversionError(#[from] SegmentConversionError),
-    #[error("Failed to fetch")]
-    FailedToGetSegments(#[from] tonic::Status),
     #[error("Failed to get segments")]
     GetSegmentsError(#[from] GetSegmentsError),
+    #[error("Grpc error: {0}")]
+    Grpc(#[from] tonic::Status),
     #[error("Collection [{0}] does not exists.")]
     NotFound(String),
     #[error(transparent)]
@@ -81,7 +81,7 @@ impl ChromaError for GetCollectionWithSegmentsError {
             GetCollectionWithSegmentsError::SegmentConversionError(segment_conversion_error) => {
                 segment_conversion_error.code()
             }
-            GetCollectionWithSegmentsError::FailedToGetSegments(status) => status.code().into(),
+            GetCollectionWithSegmentsError::Grpc(status) => status.code().into(),
             GetCollectionWithSegmentsError::GetSegmentsError(get_segments_error) => {
                 get_segments_error.code()
             }
