@@ -271,7 +271,7 @@ impl FrontendServer {
 // the appropriate method on the `FrontendServer` struct.
 
 #[utoipa::path(
-    method(get, head),
+    get,
     path = "/api/v2/healthcheck",
     responses(
         (status = 200, description = "Success", body = str, content_type = "text/plain")
@@ -306,7 +306,14 @@ async fn heartbeat(State(server): State<FrontendServer>) -> impl IntoResponse {
     }
 }
 
-// Dummy implementation for now
+#[utoipa::path(
+    get,
+    path = "/api/v2/pre-flight-checks",
+    responses(
+        (status = 200, description = "Pre flight checks", body = ChecklistResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    )
+)]
 async fn pre_flight_checks(
     State(server): State<FrontendServer>,
 ) -> Result<Json<ChecklistResponse>, ServerError> {
@@ -1307,5 +1314,5 @@ async fn v1_deprecation_notice() -> Response {
 }
 
 #[derive(OpenApi)]
-#[openapi(paths(healthcheck))]
+#[openapi(paths(healthcheck, pre_flight_checks, reset))]
 struct ApiDoc;

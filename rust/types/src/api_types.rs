@@ -114,7 +114,7 @@ impl ChromaError for ResetError {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct ChecklistResponse {
     pub max_batch_size: u32,
 }
@@ -1423,4 +1423,10 @@ impl ChromaError for ExecutorError {
             ExecutorError::BackfillError => ErrorCodes::Internal,
         }
     }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ErrorResponse {
+    pub error: String,
+    pub message: String,
 }
