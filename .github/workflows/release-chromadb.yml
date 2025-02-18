@@ -122,6 +122,7 @@ jobs:
       - rust-tests
       - go-tests
     uses: ./.github/workflows/_build_release_pypi.yml
+    secrets: inherit
     with:
       publish_to_test_pypi: true
       publish_to_pypi: ${{ needs.check-tag.outputs.tag_matches == 'true' }}
