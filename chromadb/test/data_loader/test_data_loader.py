@@ -6,6 +6,7 @@ import pytest
 import chromadb
 from chromadb.api.types import URI, DataLoader, Documents, IDs, Image, URIs
 from chromadb.api import ClientAPI
+from chromadb.test.conftest import reset
 from chromadb.test.ef.test_multimodal_ef import hashing_multimodal_ef
 
 
@@ -31,6 +32,7 @@ def record_set_with_uris(n: int = 3) -> Dict[str, Union[IDs, Documents, URIs]]:
 def collection_with_data_loader(
     client: ClientAPI,
 ) -> Generator[chromadb.Collection, None, None]:
+    reset(client)
     collection = client.create_collection(
         name="collection_with_data_loader",
         data_loader=DefaultDataLoader(),
@@ -44,6 +46,7 @@ def collection_with_data_loader(
 def collection_without_data_loader(
     client: ClientAPI,
 ) -> Generator[chromadb.Collection, None, None]:
+    reset(client)
     collection = client.create_collection(
         name="collection_without_data_loader",
         embedding_function=hashing_multimodal_ef(),

@@ -248,6 +248,10 @@ impl SqliteSysDb {
             .begin()
             .await
             .map_err(|e| CreateCollectionError::Internal(e.into()))?;
+        self.db
+            .begin_immediate(&mut *tx)
+            .await
+            .map_err(|e| CreateCollectionError::Internal(e.into()))?;
 
         let mut existing_collections = self
             .get_collections_with_conn(
