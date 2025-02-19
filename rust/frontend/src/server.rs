@@ -271,6 +271,7 @@ impl FrontendServer {
 // These handlers simply proxy the call and the relevant inputs into
 // the appropriate method on the `FrontendServer` struct.
 
+/// Health check endpoint that returns 200 if the server and executor are ready
 #[utoipa::path(
     get,
     path = "/api/v2/healthcheck",
@@ -288,6 +289,7 @@ async fn healthcheck(State(server): State<FrontendServer>) -> impl IntoResponse 
     (code, Json(res))
 }
 
+/// Heartbeat endpoint that returns a nanosecond timestamp of the current time. Useful for making sure the client remains connected.
 #[utoipa::path(
     get,
     path = "/api/v2/heartbeat",
@@ -303,6 +305,7 @@ async fn heartbeat(
     Ok(Json(server.frontend.heartbeat().await?))
 }
 
+/// Pre-flight checks endpoint reporting basic readiness info.
 #[utoipa::path(
     get,
     path = "/api/v2/pre-flight-checks",
@@ -320,6 +323,7 @@ async fn pre_flight_checks(
     }))
 }
 
+/// Reset endpoint allowing authorized users to reset the database.
 #[utoipa::path(
     post,
     path = "/api/v2/reset",
@@ -357,6 +361,7 @@ async fn reset(headers: HeaderMap, State(mut server): State<FrontendServer>) -> 
     }
 }
 
+/// Returns the version of the server.
 #[utoipa::path(
     get,
     path = "/api/v2/version",
@@ -369,6 +374,7 @@ async fn version(State(server): State<FrontendServer>) -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
+/// Retrieves the current user's identity, tenant, and databases.
 #[utoipa::path(
     get,
     path = "/api/v2/auth/identity",
@@ -385,6 +391,7 @@ async fn get_user_identity(
     Ok(Json(server.auth.get_user_identity(&headers).await?))
 }
 
+/// Creates a new tenant.
 #[utoipa::path(
     post,
     path = "/api/v2/tenants",
@@ -416,6 +423,7 @@ async fn create_tenant(
     Ok(Json(server.frontend.create_tenant(request).await?))
 }
 
+/// Returns an existing tenant by name.
 #[utoipa::path(
     get,
     path = "/api/v2/tenants/{tenant_name}",
@@ -456,6 +464,7 @@ struct CreateDatabasePayload {
     name: String,
 }
 
+/// Creates a new database for a given tenant.
 #[utoipa::path(
     post,
     path = "/api/v2/tenants/{tenant_id}/databases",
@@ -515,6 +524,7 @@ struct ListDatabasesQueryParams {
     offset: u32,
 }
 
+/// Lists all databases for a given tenant.
 #[utoipa::path(
     get,
     path = "/api/v2/tenants/{tenant_id}/databases",
@@ -557,6 +567,7 @@ async fn list_databases(
     Ok(Json(server.frontend.list_databases(request).await?))
 }
 
+/// Retrieves a specific database by name.
 #[utoipa::path(
     get,
     path = "/api/v2/tenants/{tenant_id}/databases/{database_name}",
@@ -600,6 +611,7 @@ async fn get_database(
     Ok(Json(res))
 }
 
+/// Deletes a specific database.
 #[utoipa::path(
     delete,
     path = "/api/v2/tenants/{tenant_id}/databases/{database_name}",
@@ -651,6 +663,7 @@ struct ListCollectionsParams {
     offset: u32,
 }
 
+/// Lists all collections in the specified database.
 #[utoipa::path(
     get,
     path = "/api/v2/tenants/{tenant_id}/databases/{database_name}/collections",
@@ -709,6 +722,7 @@ async fn list_collections(
     Ok(Json(server.frontend.list_collections(request).await?))
 }
 
+/// Retrieves the total number of collections in a given database.
 #[utoipa::path(
     get,
     path = "/api/v2/tenants/{tenant_id}/databases/{database_name}/collections_count",
@@ -758,7 +772,7 @@ pub struct CreateCollectionPayload {
     pub metadata: Option<Metadata>,
     pub get_or_create: bool,
 }
-
+/// Creates a new collection under the specified database.
 #[utoipa::path(
     post,
     path = "/api/v2/tenants/{tenant_id}/databases/{database_name}/collections",
@@ -820,6 +834,7 @@ async fn create_collection(
     Ok(Json(collection))
 }
 
+/// Retrieves a collection by ID or name.
 #[utoipa::path(
     get,
     path = "/api/v2/tenants/{tenant_id}/databases/{database_name}/collections/{collection_id}",
@@ -868,6 +883,7 @@ pub struct UpdateCollectionPayload {
     pub new_metadata: Option<UpdateMetadata>,
 }
 
+/// Updates an existing collection's name or metadata.
 #[utoipa::path(
     put,
     path = "/api/v2/tenants/{tenant_id}/databases/{database_name}/collections/{collection_id}",
@@ -936,6 +952,7 @@ async fn update_collection(
     Ok(Json(UpdateCollectionResponse {}))
 }
 
+/// Deletes a collection in a given database.
 #[utoipa::path(
     delete,
     path = "/api/v2/tenants/{tenant_id}/databases/{database_name}/collections/{collection_id}",
@@ -989,6 +1006,7 @@ pub struct AddCollectionRecordsPayload {
     metadatas: Option<Vec<Option<Metadata>>>,
 }
 
+/// Adds records to a collection.
 #[utoipa::path(
     post,
     path = "/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/add",
@@ -1079,6 +1097,7 @@ pub struct UpdateCollectionRecordsPayload {
     metadatas: Option<Vec<Option<UpdateMetadata>>>,
 }
 
+/// Updates records in a collection by ID.
 #[utoipa::path(
     post,
     path = "/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/update",
@@ -1166,6 +1185,7 @@ pub struct UpsertCollectionRecordsPayload {
     metadatas: Option<Vec<Option<UpdateMetadata>>>,
 }
 
+/// Upserts records in a collection (create if not exists, otherwise update).
 #[utoipa::path(
     post,
     path = "/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/upsert",
@@ -1259,6 +1279,7 @@ pub struct DeleteCollectionRecordsPayload {
     where_fields: RawWhereFields,
 }
 
+/// Deletes records in a collection. Can filter by IDs or metadata.
 #[utoipa::path(
     post,
     path = "/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/delete",
@@ -1327,6 +1348,7 @@ async fn collection_delete(
     Ok(Json(DeleteCollectionRecordsResponse {}))
 }
 
+/// Retrieves the number of records in a collection.
 #[utoipa::path(
     get,
     path = "/api/v2/tenants/{tenant_id}/databases/{database_name}/collections/{collection_id}/count",
@@ -1395,6 +1417,7 @@ pub struct GetRequestPayload {
     include: IncludeList,
 }
 
+/// Retrieves records from a collection by ID or metadata filter.
 #[utoipa::path(
     post,
     path = "/api/v2/tenants/{tenant_id}/databases/{database_name}/collections/{collection_id}/get",
@@ -1486,7 +1509,7 @@ pub struct QueryRequestPayload {
     include: IncludeList,
 }
 
-/// Query a collection for nearest matches using vector search
+/// Query a collection in a variety of ways, including vector search, metadata filtering, and full-text search
 #[utoipa::path(
     post,
     path = "/api/v2/tenants/{tenant_id}/databases/{database_name}/collections/{collection_id}/query",
