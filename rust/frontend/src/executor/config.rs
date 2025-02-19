@@ -28,6 +28,21 @@ pub struct DistributedExecutorConfig {
     pub memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig,
 }
 
+// todo
+impl Default for DistributedExecutorConfig {
+    fn default() -> Self {
+        DistributedExecutorConfig {
+            connections_per_node: 5,
+            replication_factor: 3,
+            connect_timeout_ms: 5000,
+            request_timeout_ms: 5000,
+            retry: RetryConfig::default(),
+            assignment: chroma_config::assignment::config::AssignmentPolicyConfig::default(),
+            memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig::default(),
+        }
+    }
+}
+
 #[derive(Deserialize, Clone, Serialize)]
 pub struct LocalExecutorConfig {}
 

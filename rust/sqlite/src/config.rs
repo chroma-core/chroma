@@ -9,7 +9,7 @@ use pyo3::{pyclass, pymethods};
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Default)]
 #[pyclass]
 pub struct SqliteDBConfig {
     pub hash_type: MigrationHash,
@@ -22,9 +22,10 @@ pub struct SqliteDBConfig {
 /// Migration mode for the database
 /// - Apply: Apply the migrations
 /// - Validate: Validate the applied migrations and ensure none are unappliued
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize, Default)]
 #[pyclass(eq, eq_int)]
 pub enum MigrationMode {
+    #[default]
     Apply,
     Validate,
 }
@@ -32,9 +33,10 @@ pub enum MigrationMode {
 /// The hash function to use for the migration files
 /// - SHA256: Use SHA256 hash
 /// - MD5: Use MD5 hash
-#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize, Default)]
 #[pyclass(eq, eq_int)]
 pub enum MigrationHash {
+    #[default]
     SHA256,
     MD5,
 }

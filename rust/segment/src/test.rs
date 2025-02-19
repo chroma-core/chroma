@@ -7,12 +7,13 @@ use std::{
 use chroma_blockstore::{provider::BlockfileProvider, test_arrow_blockfile_provider};
 use chroma_index::{hnsw_provider::HnswIndexProvider, test_hnsw_index_provider};
 use chroma_types::{
-    operator::{CountResult, GetResult, Projection, ProjectionOutput, ProjectionRecord},
+    operator::{self, CountResult, GetResult, Projection, ProjectionOutput, ProjectionRecord},
     plan::{Count, Get},
     test_segment, BooleanOperator, Chunk, Collection, CollectionAndSegments, CompositeExpression,
-    DocumentExpression, DocumentOperator, LogRecord, Metadata, MetadataComparison,
-    MetadataExpression, MetadataSetValue, MetadataValue, Operation, OperationRecord,
-    PrimitiveOperator, Segment, SegmentScope, SegmentUuid, SetOperator, UpdateMetadata, Where,
+    DocumentExpression, DocumentOperator, GetCollectionRequest, GetCollectionResponse, GetRequest,
+    LogRecord, Metadata, MetadataComparison, MetadataExpression, MetadataSetValue, MetadataValue,
+    Operation, OperationRecord, PrimitiveOperator, Segment, SegmentScope, SegmentUuid, SetOperator,
+    UpdateMetadata, Where,
 };
 use thiserror::Error;
 
@@ -144,6 +145,10 @@ pub struct TestReferenceSegment {
 }
 
 impl TestReferenceSegment {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     fn merge_meta(old_meta: Option<Metadata>, delta: Option<UpdateMetadata>) -> Option<Metadata> {
         let (deleted_keys, new_meta) = if let Some(m) = delta {
             let mut dk = HashSet::new();
