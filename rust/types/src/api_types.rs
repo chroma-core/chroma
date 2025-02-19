@@ -213,7 +213,7 @@ impl GetTenantRequest {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 #[pyclass]
 pub struct GetTenantResponse {
     pub name: String,

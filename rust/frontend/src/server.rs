@@ -419,6 +419,19 @@ async fn create_tenant(
     Ok(Json(server.frontend.create_tenant(request).await?))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v2/tenants/{tenant_name}",
+    params(
+        ("tenant_name" = String, Path, description = "Tenant name or ID to retrieve")
+    ),
+    responses(
+        (status = 200, description = "Tenant found", body = GetTenantResponse),
+        (status = 404, description = "Tenant not found", body = ErrorResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    )
+)]
 async fn get_tenant(
     headers: HeaderMap,
     Path(name): Path<String>,
@@ -1346,6 +1359,7 @@ async fn v1_deprecation_notice() -> Response {
     reset,
     version,
     get_user_identity,
-    create_tenant
+    create_tenant,
+    get_tenant
 ))]
 struct ApiDoc;
