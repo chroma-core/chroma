@@ -81,7 +81,7 @@ impl Configurable<QueryServiceConfig> for WorkerServer {
 }
 
 impl WorkerServer {
-    pub(crate) async fn run(worker: WorkerServer) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn run(worker: WorkerServer) -> Result<(), Box<dyn std::error::Error>> {
         let addr = format!("[::]:{}", worker.port).parse().unwrap();
         println!("Worker listening on {}", addr);
         let server = Server::builder().add_service(

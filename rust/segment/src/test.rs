@@ -156,6 +156,10 @@ pub struct TestReferenceSegment {
 }
 
 impl TestReferenceSegment {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     fn merge_meta(old_meta: Option<Metadata>, delta: Option<UpdateMetadata>) -> Option<Metadata> {
         let (deleted_keys, new_meta) = if let Some(m) = delta {
             let mut dk = HashSet::new();
