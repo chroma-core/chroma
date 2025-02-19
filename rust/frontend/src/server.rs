@@ -388,6 +388,16 @@ async fn get_user_identity(
     Ok(Json(server.auth.get_user_identity(&headers).await?))
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v2/tenants",
+    request_body = CreateTenantRequest,
+    responses(
+        (status = 200, description = "Tenant created successfully", body = CreateTenantResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    )
+)]
 async fn create_tenant(
     headers: HeaderMap,
     State(mut server): State<FrontendServer>,
@@ -1335,6 +1345,7 @@ async fn v1_deprecation_notice() -> Response {
     pre_flight_checks,
     reset,
     version,
-    get_user_identity
+    get_user_identity,
+    create_tenant
 ))]
 struct ApiDoc;

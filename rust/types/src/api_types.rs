@@ -165,7 +165,7 @@ pub struct GetUserIdentityResponse {
 }
 
 #[non_exhaustive]
-#[derive(Deserialize, Validate)]
+#[derive(Serialize, Validate, Deserialize, ToSchema)]
 pub struct CreateTenantRequest {
     #[validate(length(min = 3))]
     pub name: String,
@@ -179,7 +179,7 @@ impl CreateTenantRequest {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, ToSchema)]
 pub struct CreateTenantResponse {}
 
 #[derive(Debug, Error)]
