@@ -1333,6 +1333,21 @@ async fn collection_delete(
     Ok(Json(DeleteCollectionRecordsResponse {}))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v2/tenants/{tenant_id}/databases/{database_name}/collections/{collection_id}/count",
+    responses(
+        (status = 200, description = "Number of records in the collection", body = CountResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Collection not found", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant_id" = String, Path, description = "Tenant ID for the collection"),
+        ("database_name" = String, Path, description = "Database containing this collection"),
+        ("collection_id" = String, Path, description = "Collection ID whose records are counted")
+    )
+)]
 async fn collection_count(
     headers: HeaderMap,
     Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
@@ -1375,7 +1390,7 @@ async fn collection_count(
     Ok(Json(server.frontend.count(request).await?))
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct GetRequestPayload {
     ids: Option<Vec<String>>,
     #[serde(flatten)]
@@ -1386,6 +1401,22 @@ pub struct GetRequestPayload {
     include: IncludeList,
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v2/tenants/{tenant_id}/databases/{database_name}/collections/{collection_id}/get",
+    request_body = GetRequestPayload,
+    responses(
+        (status = 200, description = "Records retrieved from the collection", body = GetResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Collection not found", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant_id" = String, Path, description = "Tenant ID"),
+        ("database_name" = String, Path, description = "Database name for the collection"),
+        ("collection_id" = String, Path, description = "Collection ID to fetch records from")
+    )
+)]
 async fn collection_get(
     headers: HeaderMap,
     Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
@@ -1570,6 +1601,8 @@ async fn v1_deprecation_notice() -> Response {
     collection_add,
     collection_update,
     collection_upsert,
-    collection_delete
+    collection_delete,
+    collection_count,
+    collection_get
 ))]
 struct ApiDoc;

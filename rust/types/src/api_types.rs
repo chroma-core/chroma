@@ -1007,7 +1007,7 @@ impl ChromaError for IncludeParsingError {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
 pub enum Include {
     #[serde(rename = "distances")]
     Distance,
@@ -1036,7 +1036,7 @@ impl TryFrom<&str> for Include {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema, PartialEq)]
 #[pyclass]
 pub struct IncludeList(pub Vec<Include>);
 
@@ -1141,7 +1141,7 @@ impl GetRequest {
     }
 }
 
-#[derive(Clone, Deserialize, Serialize, Debug)]
+#[derive(Clone, Deserialize, Serialize, Debug, ToSchema)]
 #[pyclass]
 pub struct GetResponse {
     #[pyo3(get)]
