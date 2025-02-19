@@ -613,11 +613,47 @@ impl crate::Weighted for CollectionAndSegments {
 
 #[cfg(test)]
 mod test {
+    use std::path::PathBuf;
+
+    use tokio::{fs::File, sync::mpsc};
+
     use super::*;
+
+    impl crate::Weighted for Arc<File> {
+        fn weight(&self) -> usize {
+            1
+        }
+    }
 
     impl crate::Weighted for String {
         fn weight(&self) -> usize {
             self.len()
+        }
+    }
+
+    #[tokio::test]
+    async fn test_foyer_memory_cache_can_close_file_descriptor() {
+        let dir = tempfile::tempdir().expect("Should be able to create temp path");
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let fd_pool = FoyerCacheConfig {
+            capacity: 54,
+            ..Default::default()
+        }
+        .build_memory_with_event_listener::<PathBuf, Arc<File>>(tx)
+        .await
+        .expect("Should be able to build in memory cache");
+
+        tokio::spawn(async move { while rx.recv().await.is_some() {} });
+
+        for i in 0..10000 {
+            let path = dir.path().join(i.to_string());
+            let file = Arc::new(
+                File::create(path.as_path())
+                    .await
+                    .expect("Should be able to create new file descriptor"),
+            );
+            fd_pool.insert(path, file).await;
         }
     }
 
@@ -631,7 +667,7 @@ mod test {
             .to_string();
         let cache = FoyerCacheConfig {
             dir: Some(dir.clone()),
-            ..FoyerCacheConfig::default()
+            ..Default::default()
         }
         .build_hybrid::<String, String>()
         .await
