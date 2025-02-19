@@ -46,3 +46,11 @@ chroma-sqlite = { workspace = true }
 utoipa = { workspace = true }
 utoipa-axum = { version = "0.2.0", features = ["debug"] }
 utoipa-swagger-ui = { version = "9", features = ["axum"] }
+
+[dev-dependencies]
+proptest = { workspace = true }
+proptest-state-machine = { workspace = true }
+chroma-types = { workspace = true, features = ["testing"] }
+tempfile = { workspace = true }
+random-port = "0.1.1"
+worker = { workspace = true }

@@ -500,7 +500,7 @@ impl CountCollectionsRequest {
 pub type CountCollectionsResponse = u32;
 
 #[non_exhaustive]
-#[derive(Validate)]
+#[derive(Validate, Clone)]
 pub struct GetCollectionRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -543,7 +543,7 @@ impl ChromaError for GetCollectionError {
 }
 
 #[non_exhaustive]
-#[derive(Clone, Validate)]
+#[derive(Clone, Validate, Debug)]
 pub struct CreateCollectionRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -773,7 +773,7 @@ pub const CHROMA_URI_KEY: &str = "chroma:uri";
 ////////////////////////// AddCollectionRecords //////////////////////////
 
 #[non_exhaustive]
-#[derive(Debug, Validate)]
+#[derive(Debug, Validate, Clone)]
 pub struct AddCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -835,7 +835,7 @@ impl ChromaError for AddCollectionRecordsError {
 ////////////////////////// UpdateCollectionRecords //////////////////////////
 
 #[non_exhaustive]
-#[derive(Validate)]
+#[derive(Validate, Debug, Clone)]
 pub struct UpdateCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -894,7 +894,7 @@ impl ChromaError for UpdateCollectionRecordsError {
 ////////////////////////// UpsertCollectionRecords //////////////////////////
 
 #[non_exhaustive]
-#[derive(Validate)]
+#[derive(Validate, Debug, Clone)]
 pub struct UpsertCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -953,7 +953,7 @@ impl ChromaError for UpsertCollectionRecordsError {
 ////////////////////////// DeleteCollectionRecords //////////////////////////
 
 #[non_exhaustive]
-#[derive(Clone, Validate, ToSchema)]
+#[derive(Clone, Validate, ToSchema, Debug)]
 pub struct DeleteCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -1066,6 +1066,15 @@ impl IncludeList {
     pub fn default_get() -> Self {
         Self(vec![Include::Document, Include::Metadata])
     }
+    pub fn all() -> Self {
+        Self(vec![
+            Include::Document,
+            Include::Metadata,
+            Include::Distance,
+            Include::Embedding,
+            Include::Uri,
+        ])
+    }
 }
 
 impl TryFrom<Vec<String>> for IncludeList {
@@ -1117,7 +1126,7 @@ pub type CountResponse = u32;
 ////////////////////////// Get //////////////////////////
 
 #[non_exhaustive]
-#[derive(Clone, Validate)]
+#[derive(Debug, Clone, Validate)]
 pub struct GetRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -1159,13 +1168,13 @@ impl GetRequest {
 #[derive(Clone, Deserialize, Serialize, Debug, ToSchema)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct GetResponse {
-    ids: Vec<String>,
-    embeddings: Option<Vec<Vec<f32>>>,
-    documents: Option<Vec<Option<String>>>,
-    uris: Option<Vec<Option<String>>>,
+    pub ids: Vec<String>,
+    pub embeddings: Option<Vec<Vec<f32>>>,
+    pub documents: Option<Vec<Option<String>>>,
+    pub uris: Option<Vec<Option<String>>>,
     // TODO(hammadb): Add metadata & include to the response
-    metadatas: Option<Vec<Option<Metadata>>>,
-    include: Vec<Include>,
+    pub metadatas: Option<Vec<Option<Metadata>>>,
+    pub include: Vec<Include>,
 }
 
 #[cfg(feature = "pyo3")]
@@ -1256,7 +1265,7 @@ impl From<(GetResult, IncludeList)> for GetResponse {
 ////////////////////////// Query //////////////////////////
 
 #[non_exhaustive]
-#[derive(Clone, Validate)]
+#[derive(Clone, Validate, Debug)]
 pub struct QueryRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -1298,13 +1307,13 @@ impl QueryRequest {
 #[derive(Clone, Deserialize, Serialize, ToSchema)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct QueryResponse {
-    ids: Vec<Vec<String>>,
-    embeddings: Option<Vec<Vec<Option<Vec<f32>>>>>,
-    documents: Option<Vec<Vec<Option<String>>>>,
-    uris: Option<Vec<Vec<Option<String>>>>,
-    metadatas: Option<Vec<Vec<Option<Metadata>>>>,
-    distances: Option<Vec<Vec<Option<f32>>>>,
-    include: Vec<Include>,
+    pub ids: Vec<Vec<String>>,
+    pub embeddings: Option<Vec<Vec<Option<Vec<f32>>>>>,
+    pub documents: Option<Vec<Vec<Option<String>>>>,
+    pub uris: Option<Vec<Vec<Option<String>>>>,
+    pub metadatas: Option<Vec<Vec<Option<Metadata>>>>,
+    pub distances: Option<Vec<Vec<Option<f32>>>>,
+    pub include: Vec<Include>,
 }
 
 #[cfg(feature = "pyo3")]

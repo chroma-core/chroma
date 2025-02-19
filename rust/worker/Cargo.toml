@@ -80,6 +80,7 @@ rand_xorshift = { workspace = true }
 tempfile = { workspace = true }
 
 chroma-benchmark = { workspace = true }
+chroma-types = { workspace = true, features = ["testing"] }
 
 [[bench]]
 name = "filter"
