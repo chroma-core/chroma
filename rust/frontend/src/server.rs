@@ -334,9 +334,12 @@ async fn pre_flight_checks(
         (status = 500, description = "Server error", body = ErrorResponse)
     )
 )]
-async fn reset(headers: HeaderMap, State(mut server): State<FrontendServer>) -> impl IntoResponse {
+async fn reset(
+    headers: HeaderMap,
+    State(mut server): State<FrontendServer>,
+) -> Result<Json<bool>, ServerError> {
     server.metrics.reset.add(1, &[]);
-    match server
+    server
         .authenticate_and_authorize(
             &headers,
             AuthzAction::Reset,
@@ -346,20 +349,9 @@ async fn reset(headers: HeaderMap, State(mut server): State<FrontendServer>) -> 
                 collection: None,
             },
         )
-        .await
-    {
-        Err(auth_err) => {
-            let error = ErrorResponse::new("AuthError".to_string(), auth_err.to_string());
-            (StatusCode::UNAUTHORIZED, Json(error)).into_response()
-        }
-        Ok(_) => match server.frontend.reset().await {
-            Ok(_) => (StatusCode::OK, Json(true)).into_response(),
-            Err(reset_err) => {
-                let error = ErrorResponse::new("ResetError".to_string(), reset_err.to_string());
-                (StatusCode::INTERNAL_SERVER_ERROR, Json(error)).into_response()
-            }
-        },
-    }
+        .await?;
+    server.frontend.reset().await?;
+    Ok(Json(true))
 }
 
 /// Returns the version of the server.
