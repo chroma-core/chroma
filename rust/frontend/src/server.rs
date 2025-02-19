@@ -157,7 +157,6 @@ impl FrontendServer {
     pub async fn run(server: FrontendServer) {
         let circuit_breaker_config = server.config.circuit_breaker.clone();
 
-        // Build an OpenApiRouter with only the healthcheck endpoint
         let (docs_router, docs_api) =
             OpenApiRouter::with_openapi(ApiDoc::openapi()).split_for_parts();
 
@@ -523,7 +522,6 @@ struct ListDatabasesQueryParams {
 #[utoipa::path(
     get,
     path = "/api/v2/tenants/{tenant_id}/databases",
-    // Remove the request_body line entirely
     responses(
         (status = 200, description = "List of databases", body = [ListDatabasesResponse]),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -667,7 +665,9 @@ struct ListCollectionsParams {
     ),
     params(
         ("tenant_id" = String, Path, description = "Tenant ID"),
-        ("database_name" = String, Path, description = "Database name to list collections from")
+        ("database_name" = String, Path, description = "Database name to list collections from"),
+        ("limit" = Option<u32>, Query, description = "Limit for pagination"),
+        ("offset" = Option<u32>, Query, description = "Offset for pagination")
     )
 )]
 async fn list_collections(
@@ -731,13 +731,7 @@ async fn count_collections(
     Path((tenant_id, database_name)): Path<(String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<CountCollectionsResponse>, ServerError> {
-    server.metrics.count_collections.add(
-        1,
-        &[
-            KeyValue::new("tenant_id", tenant_id.clone()),
-            KeyValue::new("database_name", database_name.clone()),
-        ],
-    );
+    server.metrics.count_collections.add(1, &[]);
     tracing::info!(
         "Counting number of collections in database [{database_name}] for tenant [{tenant_id}]",
     );
@@ -1510,7 +1504,9 @@ pub struct QueryRequestPayload {
     params(
         ("tenant_id" = String, Path, description = "Tenant ID"),
         ("database_name" = String, Path, description = "Database name containing the collection"),
-        ("collection_id" = String, Path, description = "Collection ID to query")
+        ("collection_id" = String, Path, description = "Collection ID to query"),
+        ("limit" = Option<u32>, Query, description = "Limit for pagination"),
+        ("offset" = Option<u32>, Query, description = "Offset for pagination")
     )
 )]
 async fn collection_query(
@@ -1599,7 +1595,10 @@ async fn v1_deprecation_notice() -> Response {
     (StatusCode::GONE, Json(err_response)).into_response()
 }
 
-// Add a struct implementing Modify to inject the new security scheme
+////////////////////////////////////////////////////////////
+/// OpenAPI
+////////////////////////////////////////////////////////////
+
 struct ChromaTokenSecurityAddon;
 
 impl Modify for ChromaTokenSecurityAddon {
