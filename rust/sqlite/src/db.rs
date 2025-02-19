@@ -4,6 +4,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 use sqlx::sqlite::SqlitePool;
 use sqlx::{Executor, Row};
 use thiserror::Error;
+use tokio::io;
 
 // // TODO:
 // // - support memory mode, add concurrency tests
@@ -283,16 +284,19 @@ impl ChromaError for SqliteMigrationError {
 #[derive(Error, Debug)]
 pub enum SqliteCreationError {
     #[error(transparent)]
-    SqlxError(#[from] sqlx::Error),
-    #[error(transparent)]
     MigrationError(#[from] SqliteMigrationError),
+    #[error(transparent)]
+    PathError(#[from] io::Error),
+    #[error(transparent)]
+    SqlxError(#[from] sqlx::Error),
 }
 
 impl ChromaError for SqliteCreationError {
     fn code(&self) -> chroma_error::ErrorCodes {
         match self {
-            SqliteCreationError::SqlxError(_) => ErrorCodes::Internal,
             SqliteCreationError::MigrationError(err) => err.code(),
+            SqliteCreationError::PathError(_) => ErrorCodes::Internal,
+            SqliteCreationError::SqlxError(_) => ErrorCodes::Internal,
         }
     }
 }
