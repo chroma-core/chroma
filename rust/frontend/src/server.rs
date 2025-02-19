@@ -296,15 +296,11 @@ async fn healthcheck(State(server): State<FrontendServer>) -> impl IntoResponse 
         (status = 500, description = "Server error", body = ErrorResponse)
     )
 )]
-async fn heartbeat(State(server): State<FrontendServer>) -> impl IntoResponse {
+async fn heartbeat(
+    State(server): State<FrontendServer>,
+) -> Result<Json<HeartbeatResponse>, ServerError> {
     server.metrics.heartbeat.add(1, &[]);
-    match server.frontend.heartbeat().await {
-        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
-        Err(err) => {
-            let error = ErrorResponse::new("HeartbeatError".to_string(), err.to_string());
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(error)).into_response()
-        }
-    }
+    Ok(Json(server.frontend.heartbeat().await?))
 }
 
 #[utoipa::path(
