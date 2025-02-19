@@ -30,6 +30,7 @@ use std::sync::{
     Arc,
 };
 use utoipa::OpenApi;
+use utoipa::ToSchema;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_swagger_ui::SwaggerUi;
 use uuid::Uuid;
@@ -454,11 +455,24 @@ async fn get_tenant(
     Ok(Json(server.frontend.get_tenant(request).await?))
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Serialize, ToSchema, Debug)]
 struct CreateDatabasePayload {
     name: String,
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v2/tenants/{tenant_id}/databases",
+    request_body = CreateDatabasePayload,
+    responses(
+        (status = 200, description = "Database created successfully", body = CreateDatabaseResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant_id" = String, Path, description = "Tenant ID to associate with the new database")
+    )
+)]
 async fn create_database(
     headers: HeaderMap,
     Path(tenant_id): Path<String>,
@@ -498,12 +512,25 @@ async fn create_database(
     Ok(Json(res))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize, ToSchema, Debug)]
 struct ListDatabasesPayload {
     limit: Option<u32>,
     offset: u32,
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v2/tenants/{tenant_id}/databases",
+    request_body = ListDatabasesPayload,
+    responses(
+        (status = 200, description = "List of databases", body = [ListDatabasesResponse]),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant_id" = String, Path, description = "Tenant ID to list databases for")
+    )
+)]
 async fn list_databases(
     headers: HeaderMap,
     Path(tenant_id): Path<String>,
@@ -532,6 +559,20 @@ async fn list_databases(
     Ok(Json(server.frontend.list_databases(request).await?))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v2/tenants/{tenant_id}/databases/{database_name}",
+    responses(
+        (status = 200, description = "Database retrieved successfully", body = GetDatabaseResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Database not found", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant_id" = String, Path, description = "Tenant ID"),
+        ("database_name" = String, Path, description = "Name of the database to retrieve")
+    )
+)]
 async fn get_database(
     headers: HeaderMap,
     Path((tenant_id, database_name)): Path<(String, String)>,
@@ -561,6 +602,20 @@ async fn get_database(
     Ok(Json(res))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/api/v2/tenants/{tenant_id}/databases/{database_name}",
+    responses(
+        (status = 200, description = "Database deleted successfully", body = DeleteDatabaseResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Database not found", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant_id" = String, Path, description = "Tenant ID"),
+        ("database_name" = String, Path, description = "Name of the database to delete")
+    )
+)]
 async fn delete_database(
     headers: HeaderMap,
     Path((tenant_id, database_name)): Path<(String, String)>,
@@ -1360,6 +1415,10 @@ async fn v1_deprecation_notice() -> Response {
     version,
     get_user_identity,
     create_tenant,
-    get_tenant
+    get_tenant,
+    list_databases,
+    create_database,
+    get_database,
+    delete_database
 ))]
 struct ApiDoc;

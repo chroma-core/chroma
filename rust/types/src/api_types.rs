@@ -261,7 +261,7 @@ impl CreateDatabaseRequest {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct CreateDatabaseResponse {}
 
 #[derive(Error, Debug)]
@@ -281,7 +281,7 @@ impl ChromaError for CreateDatabaseError {
     }
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, ToSchema)]
 #[pyo3::pyclass]
 pub struct Database {
     pub id: Uuid,
@@ -409,7 +409,7 @@ impl DeleteDatabaseRequest {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct DeleteDatabaseResponse {}
 
 #[derive(Debug, Error)]
