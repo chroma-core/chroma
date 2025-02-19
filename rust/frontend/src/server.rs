@@ -1479,7 +1479,7 @@ async fn collection_get(
     Ok(Json(res))
 }
 
-#[derive(Deserialize, Debug, Clone, Serialize, utoipa::ToSchema)]
+#[derive(Deserialize, Debug, Clone, Serialize, ToSchema)]
 pub struct QueryRequestPayload {
     ids: Option<Vec<String>>,
     #[serde(flatten)]

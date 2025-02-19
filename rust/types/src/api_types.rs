@@ -1257,7 +1257,7 @@ impl QueryRequest {
     }
 }
 
-#[derive(Clone, Deserialize, Serialize, utoipa::ToSchema)]
+#[derive(Clone, Deserialize, Serialize, ToSchema)]
 #[pyclass]
 pub struct QueryResponse {
     #[pyo3(get)]
@@ -1423,37 +1423,4 @@ impl ChromaError for ExecutorError {
             ExecutorError::BackfillError => ErrorCodes::Internal,
         }
     }
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-pub struct ErrorResponse {
-    pub error: String,
-    pub message: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, ToSchema)]
-pub struct CollectionAddRequest {
-    /// Name of the new collection
-    pub name: String,
-    /// Optional description
-    pub description: Option<String>,
-    // etc.
-}
-
-#[derive(Serialize, Deserialize, Debug, ToSchema)]
-pub struct CollectionUpdateRequest {
-    /// Name of the collection to update
-    pub name: String,
-    /// Updated description or other fields
-    pub new_description: Option<String>,
-    // etc.
-}
-
-/// Example success response for collection create/update
-#[derive(Serialize, Deserialize, Debug, ToSchema)]
-pub struct CollectionAddResponse {
-    /// The updated or newly created collection name
-    pub name: String,
-    /// Any relevant status or message
-    pub message: String,
 }
