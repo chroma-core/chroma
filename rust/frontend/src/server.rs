@@ -29,8 +29,9 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
-use utoipa::OpenApi;
+use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityScheme};
 use utoipa::ToSchema;
+use utoipa::{Modify, OpenApi};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_swagger_ui::SwaggerUi;
 use uuid::Uuid;
@@ -1595,32 +1596,49 @@ async fn v1_deprecation_notice() -> Response {
     (StatusCode::GONE, Json(err_response)).into_response()
 }
 
+// Add a struct implementing Modify to inject the new security scheme
+struct ChromaTokenSecurityAddon;
+
+impl Modify for ChromaTokenSecurityAddon {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        let components = openapi.components.as_mut().unwrap();
+        components.add_security_scheme(
+            "x-chroma-token",
+            SecurityScheme::ApiKey(ApiKey::Header(ApiKeyValue::new("x-chroma-token"))),
+        );
+    }
+}
+
 #[derive(OpenApi)]
-#[openapi(paths(
-    healthcheck,
-    heartbeat,
-    pre_flight_checks,
-    reset,
-    version,
-    get_user_identity,
-    create_tenant,
-    get_tenant,
-    list_databases,
-    create_database,
-    get_database,
-    delete_database,
-    create_collection,
-    list_collections,
-    count_collections,
-    get_collection,
-    update_collection,
-    delete_collection,
-    collection_add,
-    collection_update,
-    collection_upsert,
-    collection_delete,
-    collection_count,
-    collection_get,
-    collection_query
-))]
+#[openapi(
+    paths(
+        healthcheck,
+        heartbeat,
+        pre_flight_checks,
+        reset,
+        version,
+        get_user_identity,
+        create_tenant,
+        get_tenant,
+        list_databases,
+        create_database,
+        get_database,
+        delete_database,
+        create_collection,
+        list_collections,
+        count_collections,
+        get_collection,
+        update_collection,
+        delete_collection,
+        collection_add,
+        collection_update,
+        collection_upsert,
+        collection_delete,
+        collection_count,
+        collection_get,
+        collection_query
+    ),
+    // Apply our new security scheme here
+    modifiers(&ChromaTokenSecurityAddon)
+)]
 struct ApiDoc;
