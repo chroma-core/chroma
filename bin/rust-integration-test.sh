@@ -19,7 +19,6 @@ cleanup() {
 
     echo "Stopping Cargo process..."
     pkill -P $$
-    rm -rf chroma_integration_test_tmp_dir
 }
 
 trap cleanup EXIT
