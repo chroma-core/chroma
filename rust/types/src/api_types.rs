@@ -659,7 +659,7 @@ impl UpdateCollectionRequest {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct UpdateCollectionResponse {}
 
 #[derive(Error, Debug)]

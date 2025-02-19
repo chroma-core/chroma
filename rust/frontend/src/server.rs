@@ -653,6 +653,19 @@ struct ListCollectionsParams {
     offset: u32,
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v2/tenants/{tenant_id}/databases/{database_name}/collections",
+    responses(
+        (status = 200, description = "List of collections", body = [Collection]),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant_id" = String, Path, description = "Tenant ID"),
+        ("database_name" = String, Path, description = "Database name to list collections from")
+    )
+)]
 async fn list_collections(
     headers: HeaderMap,
     Path((tenant_id, database_name)): Path<(String, String)>,
@@ -696,16 +709,33 @@ async fn list_collections(
     Ok(Json(server.frontend.list_collections(request).await?))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v2/tenants/{tenant_id}/databases/{database_name}/collections_count",
+    responses(
+        (status = 200, description = "Count of collections", body = u32),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant_id" = String, Path, description = "Tenant ID"),
+        ("database_name" = String, Path, description = "Database name to count collections from")
+    )
+)]
 async fn count_collections(
     headers: HeaderMap,
     Path((tenant_id, database_name)): Path<(String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<CountCollectionsResponse>, ServerError> {
-    server.metrics.count_collections.add(1, &[]);
+    server.metrics.count_collections.add(
+        1,
+        &[
+            KeyValue::new("tenant_id", tenant_id.clone()),
+            KeyValue::new("database_name", database_name.clone()),
+        ],
+    );
     tracing::info!(
-        "Counting collections in database [{}] for tenant [{}]",
-        database_name,
-        tenant_id
+        "Counting number of collections in database [{database_name}] for tenant [{tenant_id}]",
     );
     server
         .authenticate_and_authorize(
@@ -722,11 +752,12 @@ async fn count_collections(
         "op:count_collections",
         format!("tenant:{}", tenant_id).as_str(),
     ]);
+
     let request = CountCollectionsRequest::try_new(tenant_id, database_name)?;
     Ok(Json(server.frontend.count_collections(request).await?))
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
 pub struct CreateCollectionPayload {
     pub name: String,
     pub configuration: Option<serde_json::Value>,
@@ -734,6 +765,20 @@ pub struct CreateCollectionPayload {
     pub get_or_create: bool,
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v2/tenants/{tenant_id}/databases/{database_name}/collections",
+    request_body = CreateCollectionPayload,
+    responses(
+        (status = 200, description = "Collection created successfully", body = Collection),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant_id" = String, Path, description = "Tenant ID"),
+        ("database_name" = String, Path, description = "Database name containing the new collection")
+    )
+)]
 async fn create_collection(
     headers: HeaderMap,
     Path((tenant_id, database_name)): Path<(String, String)>,
@@ -781,6 +826,21 @@ async fn create_collection(
     Ok(Json(collection))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v2/tenants/{tenant_id}/databases/{database_name}/collections/{collection_id}",
+    responses(
+        (status = 200, description = "Collection found", body = Collection),
+        (status = 404, description = "Collection not found", body = ErrorResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant_id" = String, Path, description = "Tenant ID"),
+        ("database_name" = String, Path, description = "Database name"),
+        ("collection_id" = String, Path, description = "UUID of the collection")
+    )
+)]
 async fn get_collection(
     headers: HeaderMap,
     Path((tenant_id, database_name, collection_name)): Path<(String, String, String)>,
@@ -808,12 +868,28 @@ async fn get_collection(
     Ok(Json(collection))
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
 pub struct UpdateCollectionPayload {
     pub new_name: Option<String>,
     pub new_metadata: Option<UpdateMetadata>,
 }
 
+#[utoipa::path(
+    put,
+    path = "/api/v2/tenants/{tenant_id}/databases/{database_name}/collections/{collection_id}",
+    request_body = UpdateCollectionPayload,
+    responses(
+        (status = 200, description = "Collection updated successfully", body = UpdateCollectionResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Collection not found", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant_id" = String, Path, description = "Tenant ID"),
+        ("database_name" = String, Path, description = "Database name"),
+        ("collection_id" = String, Path, description = "UUID of the collection to update")
+    )
+)]
 async fn update_collection(
     headers: HeaderMap,
     Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
@@ -866,6 +942,21 @@ async fn update_collection(
     Ok(Json(UpdateCollectionResponse {}))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/api/v2/tenants/{tenant_id}/databases/{database_name}/collections/{collection_id}",
+    responses(
+        (status = 200, description = "Collection deleted successfully", body = UpdateCollectionResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Collection not found", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant_id" = String, Path, description = "Tenant ID"),
+        ("database_name" = String, Path, description = "Database name"),
+        ("collection_id" = String, Path, description = "UUID of the collection to delete")
+    )
+)]
 async fn delete_collection(
     headers: HeaderMap,
     Path((tenant_id, database_name, collection_name)): Path<(String, String, String)>,
@@ -895,7 +986,7 @@ async fn delete_collection(
     Ok(Json(UpdateCollectionResponse {}))
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, ToSchema, Debug, Clone)]
 pub struct AddCollectionRecordsPayload {
     ids: Vec<String>,
     embeddings: Option<Vec<Vec<f32>>>,
@@ -1419,6 +1510,12 @@ async fn v1_deprecation_notice() -> Response {
     list_databases,
     create_database,
     get_database,
-    delete_database
+    delete_database,
+    create_collection,
+    list_collections,
+    count_collections,
+    get_collection,
+    update_collection,
+    delete_collection
 ))]
 struct ApiDoc;

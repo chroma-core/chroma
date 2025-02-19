@@ -7,10 +7,11 @@ use std::{
     collections::{HashMap, HashSet},
 };
 use thiserror::Error;
+use utoipa::ToSchema;
 
 use crate::chroma_proto;
 
-#[derive(Clone, Debug, PartialEq, PartialOrd, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Deserialize, Serialize, ToSchema)]
 #[serde(untagged)]
 pub enum UpdateMetadataValue {
     Bool(bool),
@@ -118,7 +119,15 @@ MetadataValue
 */
 
 #[derive(
-    Clone, Debug, Deserialize, PartialEq, PartialOrd, Serialize, FromPyObject, IntoPyObject,
+    Clone,
+    Debug,
+    Deserialize,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    FromPyObject,
+    IntoPyObject,
+    ToSchema,
 )]
 #[serde(untagged)]
 pub enum MetadataValue {
