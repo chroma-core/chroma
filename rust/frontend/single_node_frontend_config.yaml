@@ -4,8 +4,7 @@ sqlitedb:
     SHA256:
   migration_mode:
     Apply:
-  # TODO: Set this from the existing default
-  url: "./chroma/"
+  url: "./chroma/chroma.sqlite3"
 segment_manager:
   hnsw_index_pool_cache_config:
     memory:
