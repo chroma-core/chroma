@@ -995,6 +995,15 @@ pub struct AddCollectionRecordsPayload {
     metadatas: Option<Vec<Option<Metadata>>>,
 }
 
+#[utoipa::path(
+    post,
+    path = "/collection_add",
+    request_body = AddCollectionRecordsPayload,
+    responses(
+        (status = 201, description = "Collection added successfully", body = AddCollectionRecordsResponse),
+        (status = 400, description = "Invalid data for collection addition")
+    )
+)]
 async fn collection_add(
     headers: HeaderMap,
     Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
@@ -1067,7 +1076,7 @@ async fn collection_add(
     Ok(Json(res))
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, ToSchema)]
 pub struct UpdateCollectionRecordsPayload {
     ids: Vec<String>,
     embeddings: Option<Vec<Option<Vec<f32>>>>,
@@ -1076,6 +1085,15 @@ pub struct UpdateCollectionRecordsPayload {
     metadatas: Option<Vec<Option<UpdateMetadata>>>,
 }
 
+#[utoipa::path(
+    put,
+    path = "/collection_update",
+    request_body = UpdateCollectionRecordsPayload,
+    responses(
+        (status = 200, description = "Collection updated successfully"),
+        (status = 404, description = "Collection not found")
+    )
+)]
 async fn collection_update(
     headers: HeaderMap,
     Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
@@ -1516,6 +1534,8 @@ async fn v1_deprecation_notice() -> Response {
     count_collections,
     get_collection,
     update_collection,
-    delete_collection
+    delete_collection,
+    collection_add,
+    collection_update
 ))]
 struct ApiDoc;
