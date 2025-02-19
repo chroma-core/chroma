@@ -1580,9 +1580,7 @@ async fn v1_deprecation_notice() -> Response {
 ////////////////////////////////////////////////////////////
 /// OpenAPI
 ////////////////////////////////////////////////////////////
-
 struct ChromaTokenSecurityAddon;
-
 impl Modify for ChromaTokenSecurityAddon {
     fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
         let components = openapi.components.as_mut().unwrap();
