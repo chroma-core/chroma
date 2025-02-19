@@ -1481,7 +1481,7 @@ async fn collection_get(
     Ok(Json(res))
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct QueryRequestPayload {
     ids: Option<Vec<String>>,
     #[serde(flatten)]
@@ -1492,6 +1492,23 @@ pub struct QueryRequestPayload {
     include: IncludeList,
 }
 
+/// Query a collection for nearest matches using vector search
+#[utoipa::path(
+    post,
+    path = "/api/v2/tenants/{tenant_id}/databases/{database_name}/collections/{collection_id}/query",
+    request_body = QueryRequestPayload,
+    responses(
+        (status = 200, description = "Records matching the query", body = QueryResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Collection not found", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse),
+    ),
+    params(
+        ("tenant_id" = String, Path, description = "Tenant ID"),
+        ("database_name" = String, Path, description = "Database name containing the collection"),
+        ("collection_id" = String, Path, description = "Collection ID to query")
+    )
+)]
 async fn collection_query(
     headers: HeaderMap,
     Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
@@ -1603,6 +1620,7 @@ async fn v1_deprecation_notice() -> Response {
     collection_upsert,
     collection_delete,
     collection_count,
-    collection_get
+    collection_get,
+    collection_query
 ))]
 struct ApiDoc;

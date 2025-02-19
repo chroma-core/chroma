@@ -1257,7 +1257,7 @@ impl QueryRequest {
     }
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize, utoipa::ToSchema)]
 #[pyclass]
 pub struct QueryResponse {
     #[pyo3(get)]
