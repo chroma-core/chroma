@@ -1,6 +1,6 @@
 [project]
-name = "chromadb"
-dynamic = ["version"]
+name = "chromadb-deterministic"
+version = "0.5.5.post1"
 
 authors = [
   { name = "Jeff Huber", email = "jeff@trychroma.com" },
