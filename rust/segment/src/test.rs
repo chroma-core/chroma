@@ -461,7 +461,7 @@ impl CheckRecord for DocumentExpression {
         let contains = record
             .document
             .as_ref()
-            .is_some_and(|doc| doc.contains(&self.text));
+            .is_some_and(|doc| doc.contains(&self.text.replace("%", "")));
         match self.operator {
             DocumentOperator::Contains => contains,
             DocumentOperator::NotContains => !contains,
@@ -475,8 +475,27 @@ impl CheckRecord for MetadataExpression {
         let stored = record.metadata.as_ref().and_then(|m| m.get(&self.key));
         match &self.comparison {
             MetadataComparison::Primitive(primitive_operator, metadata_value) => {
+                // Convert int to float to make comparisons easier
+                let metadata_value = match metadata_value {
+                    MetadataValue::Int(i) => {
+                        if matches!(stored, Some(MetadataValue::Float(_))) {
+                            MetadataValue::Float(*i as f64)
+                        } else {
+                            metadata_value.clone()
+                        }
+                    }
+                    MetadataValue::Float(f) => {
+                        if matches!(stored, Some(MetadataValue::Int(_))) {
+                            MetadataValue::Int(*f as i64)
+                        } else {
+                            metadata_value.clone()
+                        }
+                    }
+                    v => v.clone(),
+                };
+
                 let match_type = matches!(
-                    (stored, metadata_value),
+                    (&stored, &metadata_value),
                     (Some(MetadataValue::Bool(_)), MetadataValue::Bool(_))
                         | (Some(MetadataValue::Int(_)), MetadataValue::Int(_))
                         | (Some(MetadataValue::Float(_)), MetadataValue::Float(_))
@@ -484,22 +503,22 @@ impl CheckRecord for MetadataExpression {
                 );
                 match primitive_operator {
                     PrimitiveOperator::Equal => {
-                        match_type && stored.is_some_and(|v| v == metadata_value)
+                        match_type && stored.is_some_and(|v| *v == metadata_value)
                     }
                     PrimitiveOperator::NotEqual => {
-                        !match_type || stored.is_some_and(|v| v != metadata_value)
+                        !match_type || stored.is_some_and(|v| *v != metadata_value)
                     }
                     PrimitiveOperator::GreaterThan => {
-                        match_type && stored.is_some_and(|v| v > metadata_value)
+                        match_type && stored.is_some_and(|v| *v > metadata_value)
                     }
                     PrimitiveOperator::GreaterThanOrEqual => {
-                        match_type && stored.is_some_and(|v| v >= metadata_value)
+                        match_type && stored.is_some_and(|v| *v >= metadata_value)
                     }
                     PrimitiveOperator::LessThan => {
-                        match_type && stored.is_some_and(|v| v < metadata_value)
+                        match_type && stored.is_some_and(|v| *v < metadata_value)
                     }
                     PrimitiveOperator::LessThanOrEqual => {
-                        match_type && stored.is_some_and(|v| v <= metadata_value)
+                        match_type && stored.is_some_and(|v| *v <= metadata_value)
                     }
                 }
             }
