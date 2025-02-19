@@ -513,30 +513,33 @@ async fn create_database(
     Ok(Json(res))
 }
 
-#[derive(Deserialize, Serialize, ToSchema, Debug)]
-struct ListDatabasesPayload {
+#[derive(Deserialize, ToSchema, Debug)]
+struct ListDatabasesQueryParams {
     limit: Option<u32>,
+    #[serde(default)]
     offset: u32,
 }
 
 #[utoipa::path(
     get,
     path = "/api/v2/tenants/{tenant_id}/databases",
-    request_body = ListDatabasesPayload,
+    // Remove the request_body line entirely
     responses(
         (status = 200, description = "List of databases", body = [ListDatabasesResponse]),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
     params(
-        ("tenant_id" = String, Path, description = "Tenant ID to list databases for")
+        ("tenant_id" = String, Path, description = "Tenant ID to list databases for"),
+        ("limit" = Option<u32>, Query, description = "Limit for pagination"),
+        ("offset" = Option<u32>, Query, description = "Offset for pagination")
     )
 )]
 async fn list_databases(
     headers: HeaderMap,
     Path(tenant_id): Path<String>,
+    Query(ListDatabasesQueryParams { limit, offset }): Query<ListDatabasesQueryParams>,
     State(mut server): State<FrontendServer>,
-    Json(ListDatabasesPayload { limit, offset }): Json<ListDatabasesPayload>,
 ) -> Result<Json<ListDatabasesResponse>, ServerError> {
     server.metrics.list_databases.add(1, &[]);
     tracing::info!("Listing database for tenant [{}]", tenant_id);
@@ -998,7 +1001,7 @@ pub struct AddCollectionRecordsPayload {
 
 #[utoipa::path(
     post,
-    path = "/collection_add",
+    path = "/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/add",
     request_body = AddCollectionRecordsPayload,
     responses(
         (status = 201, description = "Collection added successfully", body = AddCollectionRecordsResponse),
@@ -1087,8 +1090,8 @@ pub struct UpdateCollectionRecordsPayload {
 }
 
 #[utoipa::path(
-    put,
-    path = "/collection_update",
+    post,
+    path = "/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/update",
     request_body = UpdateCollectionRecordsPayload,
     responses(
         (status = 200, description = "Collection updated successfully"),
