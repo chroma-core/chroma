@@ -33,7 +33,7 @@ impl From<Count> for chroma_proto::CountPlan {
 }
 
 /// The `Get` plan should output records matching the specified filter and limit in the collection
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Get {
     pub scan: Scan,
     pub filter: Filter,

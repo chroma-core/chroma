@@ -481,7 +481,7 @@ impl CountCollectionsRequest {
 pub type CountCollectionsResponse = u32;
 
 #[non_exhaustive]
-#[derive(Validate)]
+#[derive(Validate, Clone)]
 pub struct GetCollectionRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -524,7 +524,7 @@ impl ChromaError for GetCollectionError {
 }
 
 #[non_exhaustive]
-#[derive(Clone, Validate)]
+#[derive(Clone, Validate, Debug)]
 pub struct CreateCollectionRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -754,7 +754,7 @@ pub const CHROMA_URI_KEY: &str = "chroma:uri";
 ////////////////////////// AddCollectionRecords //////////////////////////
 
 #[non_exhaustive]
-#[derive(Debug, Validate)]
+#[derive(Debug, Validate, Clone)]
 pub struct AddCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -816,7 +816,7 @@ impl ChromaError for AddCollectionRecordsError {
 ////////////////////////// UpdateCollectionRecords //////////////////////////
 
 #[non_exhaustive]
-#[derive(Validate)]
+#[derive(Validate, Debug, Clone)]
 pub struct UpdateCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -875,7 +875,7 @@ impl ChromaError for UpdateCollectionRecordsError {
 ////////////////////////// UpsertCollectionRecords //////////////////////////
 
 #[non_exhaustive]
-#[derive(Validate)]
+#[derive(Validate, Debug, Clone)]
 pub struct UpsertCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -934,7 +934,7 @@ impl ChromaError for UpsertCollectionRecordsError {
 ////////////////////////// DeleteCollectionRecords //////////////////////////
 
 #[non_exhaustive]
-#[derive(Clone, Validate, ToSchema)]
+#[derive(Clone, Validate, ToSchema, Debug)]
 pub struct DeleteCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -1051,6 +1051,15 @@ impl IncludeList {
     pub fn default_get() -> Self {
         Self(vec![Include::Document, Include::Metadata])
     }
+    pub fn all() -> Self {
+        Self(vec![
+            Include::Document,
+            Include::Metadata,
+            Include::Distance,
+            Include::Embedding,
+            Include::Uri,
+        ])
+    }
 }
 
 impl TryFrom<Vec<String>> for IncludeList {
@@ -1102,7 +1111,7 @@ pub type CountResponse = u32;
 ////////////////////////// Get //////////////////////////
 
 #[non_exhaustive]
-#[derive(Clone, Validate)]
+#[derive(Debug, Clone, Validate)]
 pub struct GetRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -1151,6 +1160,36 @@ pub struct GetResponse {
     // TODO(hammadb): Add metadata & include to the response
     pub metadatas: Option<Vec<Option<Metadata>>>,
     pub include: Vec<Include>,
+}
+
+impl GetResponse {
+    pub fn sort_by_ids(&mut self) {
+        let mut indices: Vec<usize> = (0..self.ids.len()).collect();
+        indices.sort_by(|&a, &b| self.ids[a].cmp(&self.ids[b]));
+
+        let sorted_ids = indices.iter().map(|&i| self.ids[i].clone()).collect();
+        self.ids = sorted_ids;
+
+        if let Some(ref mut embeddings) = self.embeddings {
+            let sorted_embeddings = indices.iter().map(|&i| embeddings[i].clone()).collect();
+            *embeddings = sorted_embeddings;
+        }
+
+        if let Some(ref mut documents) = self.documents {
+            let sorted_docs = indices.iter().map(|&i| documents[i].clone()).collect();
+            *documents = sorted_docs;
+        }
+
+        if let Some(ref mut uris) = self.uris {
+            let sorted_uris = indices.iter().map(|&i| uris[i].clone()).collect();
+            *uris = sorted_uris;
+        }
+
+        if let Some(ref mut metadatas) = self.metadatas {
+            let sorted_metas = indices.iter().map(|&i| metadatas[i].clone()).collect();
+            *metadatas = sorted_metas;
+        }
+    }
 }
 
 #[cfg(feature = "pyo3")]
@@ -1241,7 +1280,7 @@ impl From<(GetResult, IncludeList)> for GetResponse {
 ////////////////////////// Query //////////////////////////
 
 #[non_exhaustive]
-#[derive(Clone, Validate)]
+#[derive(Clone, Validate, Debug)]
 pub struct QueryRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -1290,6 +1329,45 @@ pub struct QueryResponse {
     pub metadatas: Option<Vec<Vec<Option<Metadata>>>>,
     pub distances: Option<Vec<Vec<Option<f32>>>>,
     pub include: Vec<Include>,
+}
+
+impl QueryResponse {
+    pub fn sort_by_ids(&mut self) {
+        fn reorder<T: Clone>(v: &mut [T], indices: &[usize]) {
+            let old = v.to_owned();
+            for (new_pos, &i) in indices.iter().enumerate() {
+                v[new_pos] = old[i].clone();
+            }
+        }
+
+        for i in 0..self.ids.len() {
+            let mut indices: Vec<usize> = (0..self.ids[i].len()).collect();
+
+            indices.sort_unstable_by(|&a, &b| self.ids[i][a].cmp(&self.ids[i][b]));
+
+            reorder(&mut self.ids[i], &indices);
+
+            if let Some(embeddings) = &mut self.embeddings {
+                reorder(&mut embeddings[i], &indices);
+            }
+
+            if let Some(documents) = &mut self.documents {
+                reorder(&mut documents[i], &indices);
+            }
+
+            if let Some(uris) = &mut self.uris {
+                reorder(&mut uris[i], &indices);
+            }
+
+            if let Some(metadatas) = &mut self.metadatas {
+                reorder(&mut metadatas[i], &indices);
+            }
+
+            if let Some(distances) = &mut self.distances {
+                reorder(&mut distances[i], &indices);
+            }
+        }
+    }
 }
 
 #[cfg(feature = "pyo3")]
