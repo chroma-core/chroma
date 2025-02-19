@@ -360,11 +360,26 @@ async fn reset(headers: HeaderMap, State(mut server): State<FrontendServer>) -> 
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v2/version",
+    responses(
+        (status = 200, description = "Get server version", body = String)
+    )
+)]
 async fn version(State(server): State<FrontendServer>) -> &'static str {
     server.metrics.version.add(1, &[]);
     env!("CARGO_PKG_VERSION")
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v2/auth/identity",
+    responses(
+        (status = 200, description = "Get user identity", body = GetUserIdentityResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    )
+)]
 async fn get_user_identity(
     headers: HeaderMap,
     State(server): State<FrontendServer>,
@@ -1314,5 +1329,12 @@ async fn v1_deprecation_notice() -> Response {
 }
 
 #[derive(OpenApi)]
-#[openapi(paths(healthcheck, pre_flight_checks, reset))]
+#[openapi(paths(
+    healthcheck,
+    heartbeat,
+    pre_flight_checks,
+    reset,
+    version,
+    get_user_identity
+))]
 struct ApiDoc;
