@@ -118,7 +118,11 @@ impl MigrationDir {
                             migration_name.to_string(),
                         )
                     })?
-                    .to_string(),
+                    // Remove CR character on Windows
+                    .replace(
+                        str::from_utf8(&[13]).expect("CR is valid ASCII character"),
+                        "",
+                    ),
                 None => {
                     return Err(GetSourceMigrationsError::NoSuchMigrationFile(
                         migration_name.to_string(),

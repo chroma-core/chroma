@@ -1325,6 +1325,7 @@ dependencies = [
 name = "chroma-cache"
 version = "0.1.0"
 dependencies = [
+ "ahash",
  "anyhow",
  "async-trait",
  "chroma-config",
@@ -1336,6 +1337,7 @@ dependencies = [
  "parking_lot",
  "serde",
  "serde_yaml",
+ "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
@@ -1396,6 +1398,7 @@ dependencies = [
  "chroma-tracing",
  "chroma-types",
  "figment",
+ "futures",
  "mdac",
  "opentelemetry",
  "parking_lot",
@@ -1424,7 +1427,6 @@ dependencies = [
  "anyhow",
  "arrow",
  "async-trait",
- "cc",
  "chroma-benchmark",
  "chroma-blockstore",
  "chroma-cache",
@@ -1435,6 +1437,7 @@ dependencies = [
  "chroma-types",
  "criterion",
  "futures",
+ "hnswlib",
  "indicatif",
  "itertools 0.13.0",
  "parking_lot",
@@ -1718,6 +1721,31 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "chromadb_rust_bindings"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chroma-cache",
+ "chroma-config",
+ "chroma-error",
+ "chroma-frontend",
+ "chroma-log",
+ "chroma-segment",
+ "chroma-sqlite",
+ "chroma-sysdb",
+ "chroma-system",
+ "chroma-types",
+ "mdac",
+ "numpy",
+ "pyo3",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -2800,6 +2828,8 @@ name = "garbage_collector"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "chroma-blockstore",
+ "chroma-cache",
  "chroma-config",
  "chroma-error",
  "chroma-storage",
@@ -2817,8 +2847,10 @@ dependencies = [
  "prost 0.13.3",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "tonic",
  "tracing",
  "tracing-bunyan-formatter",
  "tracing-opentelemetry",
@@ -3080,6 +3112,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c49c37c09c17a53d937dfbb742eb3a961d65a994e6bcdcf37e7399d0cc8ab5e"
 dependencies = [
  "digest",
+]
+
+[[package]]
+name = "hnswlib"
+version = "0.8.0"
+source = "git+https://github.com/chroma-core/hnswlib.git#57c14ff2f7159ad34014e29012f06429643aaee8"
+dependencies = [
+ "cc",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -5708,31 +5749,6 @@ checksum = "e46a2036019fdb888131db7a4c847a1063a7493f971ed94ea82c67eada63ca54"
 dependencies = [
  "serde",
  "serde_derive",
-]
-
-[[package]]
-name = "rust_bindings"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chroma-cache",
- "chroma-config",
- "chroma-error",
- "chroma-frontend",
- "chroma-log",
- "chroma-segment",
- "chroma-sqlite",
- "chroma-sysdb",
- "chroma-system",
- "chroma-types",
- "mdac",
- "numpy",
- "pyo3",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "uuid",
 ]
 
 [[package]]

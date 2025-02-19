@@ -51,8 +51,20 @@ query_service:
             block_manager_config:
                 max_block_size_bytes: 16384
                 block_cache_config:
-                    lru:
+                    disk:
+                        dir: "/cache/chroma/query-service/block-cache"
+                        # 1k blocks * 8MiB = 8GiB, this is actually ignored in the disk cache config. Leaving it set to 1k for consistency.
                         capacity: 1000
+                        mem: 8000 # 8GiB
+                        disk: 12884 # 12GiB
+                        file_size: 256 #  256 MiB
+                        flushers: 4
+                        flush: false
+                        reclaimers: 2
+                        recover_concurrency: 16
+                        admission_rate_limit: 256 # 256MiB/s
+                        shards: 64
+                        eviction: lru
             sparse_index_manager_config:
                 sparse_index_cache_config:
                     lru:

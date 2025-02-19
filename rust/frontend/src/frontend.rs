@@ -209,7 +209,7 @@ impl Frontend {
         Ok(UpdateCollectionResponse {})
     }
 
-    pub async fn validate_embedding<Embedding, F>(
+    async fn validate_embedding<Embedding, F>(
         &mut self,
         collection_id: CollectionUuid,
         option_embeddings: Option<&Vec<Embedding>>,
@@ -530,6 +530,12 @@ impl Frontend {
             ..
         } = request;
 
+        self.validate_embedding(collection_id, embeddings.as_ref(), true, |embedding| {
+            Some(embedding.len())
+        })
+        .await
+        .map_err(|err| err.boxed())?;
+
         let embeddings = embeddings.map(|embeddings| embeddings.into_iter().map(Some).collect());
 
         let records = to_records(ids, embeddings, documents, uris, metadatas, Operation::Add)
@@ -556,6 +562,12 @@ impl Frontend {
             metadatas,
             ..
         }: UpdateCollectionRecordsRequest = request;
+
+        self.validate_embedding(collection_id, embeddings.as_ref(), true, |embedding| {
+            embedding.as_ref().map(|emb| emb.len())
+        })
+        .await
+        .map_err(|err| err.boxed())?;
 
         let records = to_records(
             ids,
@@ -588,6 +600,12 @@ impl Frontend {
             metadatas,
             ..
         } = request;
+
+        self.validate_embedding(collection_id, embeddings.as_ref(), true, |embedding| {
+            Some(embedding.len())
+        })
+        .await
+        .map_err(|err| err.boxed())?;
 
         let embeddings = embeddings.map(|embeddings| embeddings.into_iter().map(Some).collect());
 
@@ -813,7 +831,9 @@ impl Frontend {
                 proj: Projection {
                     document: request.include.0.contains(&Include::Document),
                     embedding: request.include.0.contains(&Include::Embedding),
-                    metadata: request.include.0.contains(&Include::Metadata),
+                    // If URI is requested, metadata is also requested so we can extract the URI.
+                    metadata: (request.include.0.contains(&Include::Metadata)
+                        || request.include.0.contains(&Include::Uri)),
                 },
             })
             .await?;
@@ -891,7 +911,9 @@ impl Frontend {
                     projection: Projection {
                         document: request.include.0.contains(&Include::Document),
                         embedding: request.include.0.contains(&Include::Embedding),
-                        metadata: request.include.0.contains(&Include::Metadata),
+                        // If URI is requested, metadata is also requested so we can extract the URI.
+                        metadata: (request.include.0.contains(&Include::Metadata)
+                            || request.include.0.contains(&Include::Uri)),
                     },
                     distance: request.include.0.contains(&Include::Distance),
                 },
@@ -901,6 +923,15 @@ impl Frontend {
     }
 
     pub async fn query(&mut self, request: QueryRequest) -> Result<QueryResponse, QueryError> {
+        self.validate_embedding(
+            request.collection_id,
+            Some(&request.embeddings),
+            true,
+            |embedding| Some(embedding.len()),
+        )
+        .await
+        .map_err(|err| err.boxed())?;
+
         let retries = Arc::new(AtomicUsize::new(0));
         let query_to_retry = || {
             let mut self_clone = self.clone();

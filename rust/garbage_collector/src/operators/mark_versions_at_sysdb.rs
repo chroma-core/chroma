@@ -14,6 +14,7 @@ pub struct MarkVersionsAtSysDbInput {
     pub versions_to_delete: VersionListForCollection,
     pub sysdb_client: SysDb,
     pub epoch_id: i64,
+    pub oldest_version_to_keep: i64,
 }
 
 #[derive(Debug)]
@@ -22,6 +23,7 @@ pub struct MarkVersionsAtSysDbOutput {
     pub epoch_id: i64,
     pub sysdb_client: SysDb,
     pub versions_to_delete: VersionListForCollection,
+    pub oldest_version_to_keep: i64,
 }
 
 #[derive(Error, Debug)]
@@ -63,6 +65,7 @@ impl Operator<MarkVersionsAtSysDbInput, MarkVersionsAtSysDbOutput> for MarkVersi
             epoch_id: input.epoch_id,
             sysdb_client: input.sysdb_client.clone(),
             versions_to_delete: input.versions_to_delete.clone(),
+            oldest_version_to_keep: input.oldest_version_to_keep,
         })
     }
 }
@@ -88,6 +91,7 @@ mod tests {
             versions_to_delete,
             sysdb_client: sysdb,
             epoch_id: 123,
+            oldest_version_to_keep: 1,
         };
 
         let operator = MarkVersionsAtSysDbOperator {};
@@ -114,6 +118,7 @@ mod tests {
             versions_to_delete,
             sysdb_client: sysdb,
             epoch_id: 123,
+            oldest_version_to_keep: 1,
         };
 
         let operator = MarkVersionsAtSysDbOperator {};
@@ -140,6 +145,7 @@ mod tests {
             versions_to_delete,
             sysdb_client: sysdb,
             epoch_id: 123,
+            oldest_version_to_keep: 1,
         };
 
         let operator = MarkVersionsAtSysDbOperator {};

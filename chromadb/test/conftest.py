@@ -569,16 +569,6 @@ def sqlite_fixture() -> Generator[System, None, None]:
     system.stop()
 
 
-@pytest.fixture
-def sqlite() -> Generator[System, None, None]:
-    # TODO: Enable Rust ephemeral client for testing
-    # if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ:
-    #     yield from rust_system()
-    # else:
-    #     yield from sqlite_fixture()
-    yield from sqlite_fixture()
-
-
 def sqlite_persistent_fixture() -> Generator[System, None, None]:
     """Fixture generator for segment-based API using persistent Sqlite"""
     save_path = tempfile.TemporaryDirectory()
@@ -610,15 +600,24 @@ def sqlite_persistent_fixture() -> Generator[System, None, None]:
             raise e
 
 
-@pytest.fixture
-def sqlite_persistent() -> Generator[System, None, None]:
-    if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ:
-        yield from rust_system()
-    else:
-        yield from sqlite_persistent_fixture()
+def rust_ephemeral_fixture() -> Generator[System, None, None]:
+    """Fixture generator for system using ephemeral Rust bindings"""
+    settings = Settings(
+        chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
+        chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
+        is_persistent=False,
+        allow_reset=True,
+        persist_directory="",
+    )
+    system = System(settings)
+    system.start()
+    yield system
+    system.stop()
 
-
-def rust_system(persistent: bool = True) -> Generator[System, None, None]:
+def rust_persistent_fixture() -> Generator[System, None, None]:
     """Fixture generator for system using Rust bindings"""
     save_path = tempfile.TemporaryDirectory()
     settings = Settings(
@@ -627,14 +626,24 @@ def rust_system(persistent: bool = True) -> Generator[System, None, None]:
         chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
         chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
         chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
-        is_persistent=persistent,
+        is_persistent=True,
         allow_reset=True,
-        persist_directory=save_path.name if persistent else "",
+        persist_directory=save_path.name,
     )
     system = System(settings)
     system.start()
     yield system
     system.stop()
+
+
+@pytest.fixture(params=[rust_ephemeral_fixture] if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ else [sqlite_fixture])
+def sqlite(request: pytest.FixtureRequest) -> Generator[System, None, None]:
+    yield from request.param()
+
+
+@pytest.fixture(params=[rust_persistent_fixture] if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ else [sqlite_persistent_fixture])
+def sqlite_persistent(request: pytest.FixtureRequest) -> Generator[System, None, None]:
+    yield from request.param()
 
 
 def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
@@ -652,7 +661,7 @@ def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
     if "CHROMA_CLUSTER_TEST_ONLY" in os.environ:
         fixtures = [basic_http_client]
     if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ:
-        fixtures = [rust_system]
+        fixtures = [rust_ephemeral_fixture, rust_persistent_fixture]
     return fixtures
 
 
@@ -660,9 +669,12 @@ def system_http_server_fixtures() -> List[Callable[[], Generator[System, None, N
     fixtures = [
         fixture
         for fixture in system_fixtures()
-        if fixture != sqlite_fixture
-        and fixture != sqlite_persistent_fixture
-        and fixture != rust_system
+        if fixture not in [
+            sqlite_fixture,
+            sqlite_persistent_fixture,
+            rust_ephemeral_fixture,
+            rust_persistent_fixture,
+        ]
     ]
     return fixtures
 
@@ -782,6 +794,19 @@ class ClientFactories:
             return client
 
         client = ClientCreator(*args, **kwargs)
+        self._created_clients.append(client)
+        return client
+
+    def create_client_from_system(self) -> ClientCreator:
+        if (
+            self._system.settings.chroma_api_impl
+            == "chromadb.api.async_fastapi.AsyncFastAPI"
+        ):
+            client = cast(ClientCreator, AsyncClientCreatorSync.from_system_async(self._system))
+            self._created_clients.append(client)
+            return client
+
+        client = ClientCreator.from_system(self._system)
         self._created_clients.append(client)
         return client
 

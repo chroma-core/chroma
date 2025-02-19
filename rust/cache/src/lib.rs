@@ -8,7 +8,7 @@ use thiserror::Error;
 
 mod async_partitioned_mutex;
 mod foyer;
-mod nop;
+pub mod nop;
 mod unbounded;
 
 use crate::nop::NopCache;

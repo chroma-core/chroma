@@ -375,15 +375,6 @@ impl Bindings {
             uuid::Uuid::parse_str(&collection_id).map_err(WrappedUuidError)?,
         );
 
-        let mut frontend_clone = self.frontend.clone();
-        self.runtime.block_on(async {
-            frontend_clone
-                .validate_embedding(collection_id, Some(&embeddings), true, |embedding| {
-                    Some(embedding.len())
-                })
-                .await
-        })?;
-
         let req = chroma_types::AddCollectionRecordsRequest::try_new(
             tenant,
             database,
@@ -431,13 +422,6 @@ impl Bindings {
         );
 
         let mut frontend_clone = self.frontend.clone();
-        self.runtime.block_on(async {
-            frontend_clone
-                .validate_embedding(collection_id, embeddings.as_ref(), false, |embedding| {
-                    embedding.as_ref().map(|emb| emb.len())
-                })
-                .await
-        })?;
 
         let req = chroma_types::UpdateCollectionRecordsRequest::try_new(
             tenant,
@@ -486,13 +470,6 @@ impl Bindings {
         );
 
         let mut frontend_clone = self.frontend.clone();
-        self.runtime.block_on(async {
-            frontend_clone
-                .validate_embedding(collection_id, embeddings.as_ref(), true, |embedding| {
-                    Some(embedding.len())
-                })
-                .await
-        })?;
 
         let req = chroma_types::UpsertCollectionRecordsRequest::try_new(
             tenant,
@@ -645,15 +622,6 @@ impl Bindings {
         );
 
         let include = IncludeList::try_from(include)?;
-
-        let mut frontend_clone = self.frontend.clone();
-        self.runtime.block_on(async {
-            frontend_clone
-                .validate_embedding(collection_id, Some(&query_embeddings), false, |embedding| {
-                    Some(embedding.len())
-                })
-                .await
-        })?;
 
         let request = chroma_types::QueryRequest::try_new(
             tenant,

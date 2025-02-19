@@ -13,13 +13,12 @@ from chromadb import (
 )
 from chromadb.api import ServerAPI
 from chromadb.api.configuration import CollectionConfigurationInternal
-from chromadb.api.segment import SegmentAPI
 from chromadb.auth import UserIdentity
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 
 # TODO(hammadb): Unify imports across types vs root __init__.py
 from chromadb.types import Database, Tenant, Collection as CollectionModel
-import rust_bindings
+import chromadb_rust_bindings
 
 from typing import Optional, Sequence
 from overrides import override
@@ -42,14 +41,11 @@ elif platform.system() == "Windows":
 # TODO(hammadb): Propagate the types from the bindings into the Python API
 # and remove the python-level types entirely.
 class RustBindingsAPI(ServerAPI):
-    bindings: rust_bindings.Bindings
-    # NOTE(hammadb) We proxy all calls to this instance of the Segment API
-    proxy_segment_api: SegmentAPI
+    bindings: chromadb_rust_bindings.Bindings
     hnsw_cache_size: int
 
     def __init__(self, system: System):
         super().__init__(system)
-        self.proxy_segment_api = system.require(SegmentAPI)
 
         if platform.system() != "Windows":
             max_file_handles = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
@@ -76,23 +72,23 @@ class RustBindingsAPI(ServerAPI):
             sqlite_persist_path = None
         hash_type = self._system.settings.require("migrations_hash_algorithm")
         hash_type_bindings = (
-            rust_bindings.MigrationHash.MD5
+            chromadb_rust_bindings.MigrationHash.MD5
             if hash_type == "md5"
-            else rust_bindings.MigrationHash.SHA256
+            else chromadb_rust_bindings.MigrationHash.SHA256
         )
         migration_mode = self._system.settings.require("migrations")
         migration_mode_bindings = (
-            rust_bindings.MigrationMode.Apply
+            chromadb_rust_bindings.MigrationMode.Apply
             if migration_mode == "apply"
-            else rust_bindings.MigrationMode.Validate
+            else chromadb_rust_bindings.MigrationMode.Validate
         )
-        sqlite_config = rust_bindings.SqliteDBConfig(
+        sqlite_config = chromadb_rust_bindings.SqliteDBConfig(
             hash_type=hash_type_bindings,
             migration_mode=migration_mode_bindings,
             url=sqlite_persist_path,
         )
 
-        self.bindings = rust_bindings.Bindings(
+        self.bindings = chromadb_rust_bindings.Bindings(
             allow_reset=self._system.settings.require("allow_reset"),
             sqlite_db_config=sqlite_config,
             persist_path=persist_path,
@@ -265,7 +261,6 @@ class RustBindingsAPI(ServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> int:
         return self.bindings.count(str(collection_id), tenant, database)
-        # return self.proxy_segment_api._count(collection_id, tenant, database)  # type: ignore[no-any-return]
 
     @override
     def _peek(
@@ -275,8 +270,13 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> GetResult:
-        return self._get(str(collection_id), limit=n, tenant=tenant, database=database, include=["embeddings", "metadatas", "documents"])
-        # return self.proxy_segment_api._peek(collection_id, n, tenant, database)
+        return self._get(
+            str(collection_id),
+            limit=n,
+            tenant=tenant,
+            database=database,
+            include=["embeddings", "metadatas", "documents"],
+        )
 
     @override
     def _get(
@@ -306,7 +306,6 @@ class RustBindingsAPI(ServerAPI):
             database,
         )
 
-        # TODO: The data field is missing from rust?
         return GetResult(
             ids=rust_response.ids,
             embeddings=rust_response.embeddings,
@@ -316,21 +315,6 @@ class RustBindingsAPI(ServerAPI):
             data=None,
             metadatas=rust_response.metadatas,
         )
-
-        # return self.proxy_segment_api._get(  # type: ignore[no-any-return]
-        #     collection_id,
-        #     ids,
-        #     where,
-        #     sort,
-        #     limit,
-        #     offset,
-        #     page,
-        #     page_size,
-        #     where_document,
-        #     include,
-        #     tenant,
-        #     database,
-        # )
 
     @override
     def _add(
@@ -354,9 +338,6 @@ class RustBindingsAPI(ServerAPI):
             tenant,
             database,
         )
-        # return self.proxy_segment_api._add(
-        #     ids, collection_id, embeddings, metadatas, documents, uris, tenant, database
-        # )
 
     @override
     def _update(
@@ -380,9 +361,6 @@ class RustBindingsAPI(ServerAPI):
             tenant,
             database,
         )
-        # return self.proxy_segment_api._update(
-        #     collection_id, ids, embeddings, metadatas, documents, uris, tenant, database
-        # )
 
     @override
     def _upsert(
@@ -406,9 +384,6 @@ class RustBindingsAPI(ServerAPI):
             tenant,
             database,
         )
-        # return self.proxy_segment_api._upsert(
-        #     collection_id, ids, embeddings, metadatas, documents, uris, tenant, database
-        # )
 
     @override
     def _query(
@@ -444,17 +419,6 @@ class RustBindingsAPI(ServerAPI):
             distances=rust_response.distances,
         )
 
-        # return self.proxy_segment_api._query(  # type: ignore[no-any-return]
-        #     collection_id,
-        #     query_embeddings,
-        #     n_results,
-        #     where,
-        #     where_document,
-        #     include,
-        #     tenant,
-        #     database,
-        # )
-
     @override
     def _delete(
         self,
@@ -473,10 +437,6 @@ class RustBindingsAPI(ServerAPI):
             tenant,
             database,
         )
-        
-        # return self.proxy_segment_api._delete(
-        #     collection_id, ids, where, where_document, tenant, database
-        # )
 
     @override
     def reset(self) -> bool:
@@ -488,12 +448,17 @@ class RustBindingsAPI(ServerAPI):
 
     @override
     def get_settings(self) -> Settings:
-        return self.proxy_segment_api.get_settings()
+        return self._system.settings
 
     @override
     def get_max_batch_size(self) -> int:
         return self.bindings.get_max_batch_size()
 
+    # TODO: Remove this if it's not planned to be used
     @override
     def get_user_identity(self) -> UserIdentity:
-        return self.proxy_segment_api.get_user_identity()
+        return UserIdentity(
+            user_id="",
+            tenant=DEFAULT_TENANT,
+            databases=[DEFAULT_DATABASE],
+        )

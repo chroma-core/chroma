@@ -222,7 +222,7 @@ impl FrontendServer {
             )
             .merge(docs_router)
             .with_state(server)
-            .layer(DefaultBodyLimit::max(6000000)); // TODO: add to server configuration
+            .layer(DefaultBodyLimit::max(6000000*8)); // TODO: add to server configuration
         let app = add_tracing_middleware(app);
 
         // TODO: configuration for this
@@ -320,7 +320,7 @@ async fn pre_flight_checks(
 ) -> Result<Json<ChecklistResponse>, ServerError> {
     server.metrics.pre_flight_checks.add(1, &[]);
     Ok(Json(ChecklistResponse {
-        max_batch_size: 100,
+        max_batch_size: server.frontend.clone().get_max_batch_size(),
     }))
 }
 
@@ -370,9 +370,11 @@ async fn reset(headers: HeaderMap, State(mut server): State<FrontendServer>) -> 
         (status = 200, description = "Get server version", body = String)
     )
 )]
-async fn version(State(server): State<FrontendServer>) -> &'static str {
+async fn version(State(server): State<FrontendServer>) -> Json<String> {
     server.metrics.version.add(1, &[]);
-    env!("CARGO_PKG_VERSION")
+    // TODO: Decide on how to handle versioning across python / rust frontend
+    // for now return a hardcoded version
+    Json("0.7.0".to_string())
 }
 
 /// Retrieves the current user's identity, tenant, and databases.
@@ -392,11 +394,16 @@ async fn get_user_identity(
     Ok(Json(server.auth.get_user_identity(&headers).await?))
 }
 
+#[derive(Deserialize, Debug, ToSchema)]
+struct CreateTenantPayload {
+    name: String,
+}
+
 /// Creates a new tenant.
 #[utoipa::path(
     post,
     path = "/api/v2/tenants",
-    request_body = CreateTenantRequest,
+    request_body = CreateTenantPayload,
     responses(
         (status = 200, description = "Tenant created successfully", body = CreateTenantResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -406,7 +413,7 @@ async fn get_user_identity(
 async fn create_tenant(
     headers: HeaderMap,
     State(mut server): State<FrontendServer>,
-    Json(request): Json<CreateTenantRequest>,
+    Json(request): Json<CreateTenantPayload>,
 ) -> Result<Json<CreateTenantResponse>, ServerError> {
     server.metrics.create_tenant.add(1, &[]);
     tracing::info!("Creating tenant [{}]", request.name);
@@ -421,6 +428,7 @@ async fn create_tenant(
             },
         )
         .await?;
+    let request = CreateTenantRequest::try_new(request.name)?;
     Ok(Json(server.frontend.create_tenant(request).await?))
 }
 
@@ -519,7 +527,7 @@ async fn create_database(
 }
 
 #[derive(Deserialize, ToSchema, Debug)]
-struct ListDatabasesQueryParams {
+struct ListDatabasesParams {
     limit: Option<u32>,
     #[serde(default)]
     offset: u32,
@@ -543,7 +551,7 @@ struct ListDatabasesQueryParams {
 async fn list_databases(
     headers: HeaderMap,
     Path(tenant_id): Path<String>,
-    Query(ListDatabasesQueryParams { limit, offset }): Query<ListDatabasesQueryParams>,
+    Query(ListDatabasesParams { limit, offset }): Query<ListDatabasesParams>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<ListDatabasesResponse>, ServerError> {
     server.metrics.list_databases.add(1, &[]);
@@ -773,6 +781,7 @@ pub struct CreateCollectionPayload {
     pub metadata: Option<Metadata>,
     pub get_or_create: bool,
 }
+
 /// Creates a new collection under the specified database.
 #[utoipa::path(
     post,
@@ -1063,16 +1072,6 @@ async fn collection_add(
         format!("collection:{}", collection_id).as_str(),
     ]);
 
-    server
-        .frontend
-        .validate_embedding(
-            collection_id,
-            payload.embeddings.as_ref(),
-            true,
-            |embedding| Some(embedding.len()),
-        )
-        .await?;
-
     let request = chroma_types::AddCollectionRecordsRequest::try_new(
         tenant_id,
         database_name,
@@ -1152,16 +1151,6 @@ async fn collection_update(
         format!("tenant:{}", tenant_id).as_str(),
         format!("collection:{}", collection_id).as_str(),
     ]);
-
-    server
-        .frontend
-        .validate_embedding(
-            collection_id,
-            payload.embeddings.as_ref(),
-            true,
-            |embedding| embedding.as_ref().map(|e| e.len()),
-        )
-        .await?;
 
     let request = chroma_types::UpdateCollectionRecordsRequest::try_new(
         tenant_id,
@@ -1248,16 +1237,6 @@ async fn collection_upsert(
         format!("tenant:{}", tenant_id).as_str(),
         format!("collection:{}", collection_id).as_str(),
     ]);
-
-    server
-        .frontend
-        .validate_embedding(
-            collection_id,
-            payload.embeddings.as_ref(),
-            true,
-            |embedding| Some(embedding.len()),
-        )
-        .await?;
 
     let request = chroma_types::UpsertCollectionRecordsRequest::try_new(
         tenant_id,
@@ -1581,15 +1560,6 @@ async fn collection_query(
         format!("tenant:{}", tenant_id).as_str(),
         format!("collection:{}", collection_id).as_str(),
     ]);
-    server
-        .frontend
-        .validate_embedding(
-            collection_id,
-            Some(&payload.query_embeddings),
-            true,
-            |embedding| Some(embedding.len()),
-        )
-        .await?;
 
     let request = QueryRequest::try_new(
         tenant_id,

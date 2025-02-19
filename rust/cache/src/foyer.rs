@@ -1,4 +1,5 @@
 use super::{CacheError, Weighted};
+use ahash::RandomState;
 use chroma_error::ChromaError;
 use chroma_types::CollectionAndSegments;
 use clap::Parser;
@@ -47,6 +48,10 @@ const fn default_reclaimers() -> usize {
 
 const fn default_recover_concurrency() -> usize {
     16
+}
+
+const fn default_deterministic_hashing() -> bool {
+    true
 }
 
 const fn default_admission_rate_limit() -> usize {
@@ -130,6 +135,14 @@ pub struct FoyerCacheConfig {
     #[arg(long, default_value_t = 16)]
     #[serde(default = "default_recover_concurrency")]
     pub recover_concurrency: usize,
+
+    /// Enable deterministic hashing.
+    /// If true, the cache will use a deterministic hasher which is stable
+    /// across restarts. Note that this hasher is not necessarily stable across
+    /// architectures or versions of foyer, and the underlying AHash.
+    #[arg(long, default_value_t = true)]
+    #[serde(default = "default_deterministic_hashing")]
+    pub deterministic_hashing: bool,
 
     /// Enable rated ticket admission picker if `admission_rate_limit > 0`. (MiB/s)
     #[arg(long, default_value_t = 100)]
@@ -237,6 +250,7 @@ impl Default for FoyerCacheConfig {
             flush: default_flush(),
             reclaimers: default_reclaimers(),
             recover_concurrency: default_recover_concurrency(),
+            deterministic_hashing: default_deterministic_hashing(),
             admission_rate_limit: default_admission_rate_limit(),
             shards: default_shards(),
             eviction: default_eviction(),
@@ -328,6 +342,20 @@ where
             }
         };
 
+        let builder = match config.deterministic_hashing {
+            true => {
+                // These are generated from a good RNG.
+                let rs = RandomState::with_seeds(
+                    18408126631592559320,
+                    14098607199905812554,
+                    3530350452151671086,
+                    4042281453092388365,
+                );
+                builder.with_hash_builder(rs)
+            }
+            false => builder,
+        };
+
         let Some(dir) = config.dir.as_ref() else {
             return Err(Box::new(CacheError::InvalidCacheConfig(
                 "missing dir".to_string(),
@@ -343,6 +371,7 @@ where
                     .with_file_size(config.file_size * MIB),
             )
             .with_flush(config.flush)
+            .with_recover_mode(foyer::RecoverMode::Strict)
             .with_large_object_disk_cache_options(
                 LargeEngineOptions::new()
                     .with_indexer_shards(config.shards)
@@ -392,7 +421,6 @@ where
     K: Clone + Send + Sync + StorageKey + Eq + PartialEq + Hash + 'static,
     V: Clone + Send + Sync + StorageValue + Weighted + 'static,
 {
-    #[tracing::instrument(skip(self, key))]
     async fn get(&self, key: &K) -> Result<Option<V>, CacheError> {
         let _stopwatch = Stopwatch::new(&self.get_latency);
         let res = self.cache.get(key).await?.map(|v| v.value().clone());
@@ -404,19 +432,16 @@ where
         Ok(res)
     }
 
-    #[tracing::instrument(skip(self, key, value))]
     async fn insert(&self, key: K, value: V) {
         let _stopwatch = Stopwatch::new(&self.insert_latency);
         self.cache.insert(key, value);
     }
 
-    #[tracing::instrument(skip(self, key))]
     async fn remove(&self, key: &K) {
         let _stopwatch = Stopwatch::new(&self.remove_latency);
         self.cache.remove(key);
     }
 
-    #[tracing::instrument(skip(self))]
     async fn clear(&self) -> Result<(), CacheError> {
         let _stopwatch = Stopwatch::new(&self.clear_latency);
         Ok(self.cache.clear().await?)
@@ -545,7 +570,6 @@ where
     K: Clone + Send + Sync + Eq + PartialEq + Hash + 'static,
     V: Clone + Send + Sync + Weighted + 'static,
 {
-    #[tracing::instrument(skip(self, key))]
     async fn get(&self, key: &K) -> Result<Option<V>, CacheError> {
         let _stopwatch = Stopwatch::new(&self.get_latency);
         let res = self.cache.get(key).map(|v| v.value().clone());
@@ -557,19 +581,16 @@ where
         Ok(res)
     }
 
-    #[tracing::instrument(skip(self, key, value))]
     async fn insert(&self, key: K, value: V) {
         let _stopwatch = Stopwatch::new(&self.insert_latency);
         self.cache.insert(key, value);
     }
 
-    #[tracing::instrument(skip(self, key))]
     async fn remove(&self, key: &K) {
         let _stopwatch = Stopwatch::new(&self.remove_latency);
         self.cache.remove(key);
     }
 
-    #[tracing::instrument(skip(self))]
     async fn clear(&self) -> Result<(), CacheError> {
         let _stopwatch = Stopwatch::new(&self.clear_latency);
         self.cache.clear();
@@ -587,5 +608,62 @@ where
 impl crate::Weighted for CollectionAndSegments {
     fn weight(&self) -> usize {
         1
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    impl crate::Weighted for String {
+        fn weight(&self) -> usize {
+            self.len()
+        }
+    }
+
+    #[tokio::test]
+    async fn test_foyer_hybrid_cache_can_recover() {
+        let dir = tempfile::tempdir()
+            .expect("To be able to create temp path")
+            .path()
+            .to_str()
+            .expect("To be able to parse path")
+            .to_string();
+        let cache = FoyerCacheConfig {
+            dir: Some(dir.clone()),
+            ..FoyerCacheConfig::default()
+        }
+        .build_hybrid::<String, String>()
+        .await
+        .unwrap();
+
+        cache.insert("key1".to_string(), "value1".to_string()).await;
+        drop(cache);
+
+        // Test that we can recover the cache from disk.
+        let cache2 = FoyerCacheConfig {
+            dir: Some(dir.clone()),
+            ..FoyerCacheConfig::default()
+        }
+        .build_hybrid::<String, String>()
+        .await
+        .unwrap();
+
+        assert_eq!(
+            cache2.get(&"key1".to_string()).await.unwrap(),
+            Some("value1".to_string())
+        );
+
+        // Deterministic hashing off should not be able to recover the cache.
+        let cache3 = FoyerCacheConfig {
+            dir: Some(dir.clone()),
+            deterministic_hashing: false,
+            ..FoyerCacheConfig::default()
+        }
+        .build_hybrid::<String, String>()
+        .await
+        .unwrap();
+
+        assert_eq!(cache3.get(&"key1".to_string()).await.unwrap(), None);
     }
 }

@@ -424,7 +424,7 @@ impl ChromaError for BlockFlushError {
 // ==============
 
 #[derive(Error, Debug)]
-pub(super) enum RootManagerError {
+pub enum RootManagerError {
     #[error("Not found")]
     NotFound,
     #[error(transparent)]
@@ -450,7 +450,7 @@ impl ChromaError for RootManagerError {
 }
 
 #[derive(Clone)]
-pub(super) struct RootManager {
+pub struct RootManager {
     cache: Arc<dyn PersistentCache<Uuid, RootReader>>,
     storage: Storage,
 }

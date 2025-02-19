@@ -1,10 +1,10 @@
-allow_reset: false
+allow_reset: true
 sqlitedb:
   hash_type:
     SHA256:
   migration_mode:
     Apply:
-  url: "./chroma/chroma.sqlite3"
+  url: "./chroma_integration_test_tmp_dir/chroma.sqlite3"
 segment_manager:
   hnsw_index_pool_cache_config:
     memory:
