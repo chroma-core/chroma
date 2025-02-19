@@ -69,18 +69,34 @@ impl Scheduler {
     }
 
     async fn get_collections_with_new_data(&mut self) -> Vec<CollectionInfo> {
-        let collections = self
+        let mut collections = match self
             .log
             .get_collections_with_new_data(self.min_compaction_size as u64)
-            .await;
-
-        match collections {
+            .await
+        {
             Ok(collections) => collections,
             Err(e) => {
                 tracing::error!("Error: {:?}", e);
                 Vec::new()
             }
+        };
+
+        // todo: parallel
+        for collection in self.oneoff_collections.iter() {
+            let mut collection = self
+                .sysdb
+                .get_collections(Some(*collection), None, None, None, None, 0)
+                .await
+                .unwrap();
+            let collection = collection.pop().unwrap(); // todo
+            collections.push(CollectionInfo {
+                collection_id: collection.collection_id,
+                first_log_offset: collection.log_position,
+                first_log_ts: collection.log_position,
+            });
         }
+
+        collections
     }
 
     async fn verify_and_enrich_collections(

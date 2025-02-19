@@ -340,6 +340,10 @@ impl Handler<OneOffCompactionMessage> for CompactionManager {
             "One-off collections queued: {:?}",
             self.scheduler.get_oneoff_collections()
         );
+
+        tracing::info!("CompactionManager: Performing scheduled compaction");
+        let ids = self.compact_batch().await;
+        self.hnsw_index_provider.purge_by_id(&ids).await;
     }
 }
 

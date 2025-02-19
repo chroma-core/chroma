@@ -1,4 +1,5 @@
 use crate::{
+    compaction_client::compaction_client::CompactionClientConfig,
     executor::config::{ExecutorConfig, LocalExecutorConfig},
     CollectionsWithSegmentsProviderConfig,
 };
@@ -61,6 +62,7 @@ pub struct FrontendConfig {
     pub log: LogConfig,
     #[serde(default = "default_executor_config")]
     pub executor: ExecutorConfig,
+    pub compaction_client: CompactionClientConfig,
 }
 
 impl FrontendConfig {
@@ -181,8 +183,8 @@ mod tests {
         let sysdb_config = config.frontend.sysdb;
         let sysdb_config = match sysdb_config {
             chroma_sysdb::SysDbConfig::Grpc(grpc_sys_db_config) => grpc_sys_db_config,
-            chroma_sysdb::SysDbConfig::Sqlite(_) => {
-                panic!("Expected grpc sysdb config, got sqlite sysdb config")
+            _ => {
+                panic!("Expected grpc sysdb config")
             }
         };
         assert_eq!(sysdb_config.host, "sysdb.chroma");

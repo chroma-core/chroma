@@ -115,6 +115,25 @@ impl ChromaError for ResetError {
     }
 }
 
+#[non_exhaustive]
+#[derive(Validate)]
+pub struct ManualCompactionRequest {
+    pub collection_id: CollectionUuid,
+}
+
+impl ManualCompactionRequest {
+    pub fn try_new(collection_id: CollectionUuid) -> Result<Self, ChromaValidationError> {
+        let request = Self { collection_id };
+        request.validate().map_err(ChromaValidationError::from)?;
+        Ok(request)
+    }
+}
+
+pub struct ManualCompactionResponse {}
+
+#[derive(Error, Debug)]
+pub enum ManualCompactionError {}
+
 #[derive(Serialize, ToSchema)]
 pub struct ChecklistResponse {
     pub max_batch_size: u32,
