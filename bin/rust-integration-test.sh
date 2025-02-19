@@ -18,7 +18,7 @@ cleanup() {
     fi
 
     echo "Stopping Cargo process..."
-    rm -f chroma_integration_test_tmp_dir
+    rm -rf chroma_integration_test_tmp_dir
     pkill -P $$
 }
 
