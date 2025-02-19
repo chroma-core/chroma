@@ -30,6 +30,7 @@ uuid = { workspace = true }
 
 dirs = "5.0.1"
 reqwest = { version = "0.12.9", features = ["stream"] }
+tar = "0.4.43"
 tokio-stream = { version = "0.1.16", features = ["full"] }
 tokio-util = "0.7.12"
 bloom = "0.3.2"

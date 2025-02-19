@@ -2,7 +2,7 @@ use std::{collections::HashSet, path::PathBuf};
 
 use chroma_benchmark::{
     benchmark::tokio_multi_thread,
-    datasets::{gist::GistDataset, types::RecordDataset},
+    datasets::{gist::Gist1MDataset, types::RecordDataset},
 };
 use chroma_blockstore::{arrow::provider::ArrowBlockfileProvider, provider::BlockfileProvider};
 use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
@@ -27,7 +27,7 @@ use worker::execution::operators::{
 
 fn get_records(runtime: &tokio::runtime::Runtime) -> Vec<(u32, Vec<f32>)> {
     runtime.block_on(async {
-        let gist_dataset = GistDataset::init()
+        let gist_dataset = Gist1MDataset::init()
             .await
             .expect("Failed to initialize Gist dataset");
         let mut records_stream = gist_dataset

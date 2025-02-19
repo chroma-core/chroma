@@ -1,53 +1,80 @@
 use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
+use async_compression::tokio::bufread::GzipDecoder;
+use futures::TryStreamExt;
+use tar::Archive;
 use tokio::io::{AsyncReadExt, BufReader};
+use tokio_util::io::StreamReader;
 
-use super::{
-    types::{Record, RecordDataset},
-    util::get_or_populate_cached_dataset_file,
-};
+use super::{types::Record, util::get_dataset_cache_path};
 
-pub struct GistDataset {
+pub struct Gist1MDataset {
+    base_dir: PathBuf,
+    download_url: String,
     base_file_path: PathBuf,
+    query_file_path: PathBuf,
     dimension: usize,
     num_records: usize,
 }
 
 const FLOAT32_SIZE: usize = 4;
 
-impl RecordDataset for GistDataset {
+impl Gist1MDataset {
     const DISPLAY_NAME: &'static str = "Gist";
     const NAME: &'static str = "gist";
 
-    async fn init() -> Result<Self> {
-        // TODO(Sanket): Download file if it doesn't exist.
-        // move file from downloads to cached path.
-        let current_path = "/Users/sanketkedia/Downloads/siftsmall/siftsmall_base.fvecs";
-        let base_file_path = get_or_populate_cached_dataset_file(
-            "gist",
-            "siftsmall_base.fvecs",
-            None,
-            |mut writer| async move {
-                let mut file = tokio::fs::File::open(current_path).await?;
-                tokio::io::copy(&mut file, &mut writer).await?;
-                Ok(())
-            },
-        )
-        .await?;
+    pub async fn init() -> Result<Self> {
+        let download_url = "https://huggingface.co/datasets/fzliu/gist1m/resolve/main/gist.tar.gz";
+        let client = reqwest::Client::new();
+        let response = client.get(download_url).send().await?;
+        if !response.status().is_success() {
+            return Err(anyhow!(
+                "Failed to download gist dataset, got status code {}",
+                response.status()
+            ));
+        }
+
+        // Create async stream reader
+        let byte_stream = response.bytes_stream();
+        let stream_reader = StreamReader::new(
+            byte_stream.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)),
+        );
+
+        // Create async gzip decoder
+        let mut gzip_decoder = GzipDecoder::new(stream_reader);
+
+        // Create dataset directory
+        let dataset_dir = get_dataset_cache_path("gist", None).await?;
+
+        // Extract the contents to a path.
+        let tar_path = dataset_dir.join("output.tar");
+        let mut writer = tokio::fs::File::create(tar_path.clone()).await?;
+
+        tokio::io::copy(&mut gzip_decoder, &mut writer).await?;
+
+        let tar_file = std::fs::File::open(&tar_path)?;
+        let mut archive = Archive::new(tar_file);
+        archive.unpack(&dataset_dir)?;
+
+        tokio::fs::remove_file(tar_path).await?;
 
         Ok(Self {
-            base_file_path,
-            dimension: 128,
-            num_records: 10000,
+            base_dir: dataset_dir.clone(),
+            download_url: download_url.to_string(),
+            base_file_path: dataset_dir.join("gist_base.fvecs"),
+            query_file_path: dataset_dir.join("gist_query.fvecs"),
+            dimension: 960,
+            num_records: 1000000,
         })
     }
 
-    async fn create_records_stream(
+    pub async fn create_records_stream(
         &self,
     ) -> anyhow::Result<impl futures::Stream<Item = anyhow::Result<super::types::Record>>> {
+        let num_records = 10000;
         let chunk_size = FLOAT32_SIZE + self.dimension * FLOAT32_SIZE;
-        let total_bytes = self.num_records * chunk_size;
+        let total_bytes = num_records * chunk_size;
         let file = tokio::fs::File::open(self.base_file_path.clone()).await?;
         let mut buf_read = BufReader::new(file);
         let mut buf = vec![0u8; total_bytes];

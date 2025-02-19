@@ -7,7 +7,7 @@ pub(crate) fn get_dir_for_persistent_dataset_files() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("dataset_files")
 }
 
-async fn get_dataset_cache_path(
+pub(crate) async fn get_dataset_cache_path(
     dataset_name: &str,
     cache_dir: Option<PathBuf>,
 ) -> Result<PathBuf, std::io::Error> {
