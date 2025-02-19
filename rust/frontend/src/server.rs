@@ -276,7 +276,8 @@ impl FrontendServer {
     get,
     path = "/api/v2/healthcheck",
     responses(
-        (status = 200, description = "Success", body = str, content_type = "text/plain")
+        (status = 200, description = "Success", body = String, content_type = "application/json"),
+        (status = 503, description = "Service Unavailable", body = ErrorResponse),
     )
 )]
 async fn healthcheck(State(server): State<FrontendServer>) -> impl IntoResponse {
@@ -529,7 +530,7 @@ struct ListDatabasesQueryParams {
     get,
     path = "/api/v2/tenants/{tenant_id}/databases",
     responses(
-        (status = 200, description = "List of databases", body = [ListDatabasesResponse]),
+        (status = 200, description = "List of databases", body = ListDatabasesResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
@@ -668,7 +669,7 @@ struct ListCollectionsParams {
     get,
     path = "/api/v2/tenants/{tenant_id}/databases/{database_name}/collections",
     responses(
-        (status = 200, description = "List of collections", body = [Collection]),
+        (status = 200, description = "List of collections", body = ListCollectionsResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
@@ -727,7 +728,7 @@ async fn list_collections(
     get,
     path = "/api/v2/tenants/{tenant_id}/databases/{database_name}/collections_count",
     responses(
-        (status = 200, description = "Count of collections", body = u32),
+        (status = 200, description = "Count of collections", body = CountCollectionsResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
@@ -1103,7 +1104,7 @@ pub struct UpdateCollectionRecordsPayload {
     path = "/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/update",
     request_body = UpdateCollectionRecordsPayload,
     responses(
-        (status = 200, description = "Collection updated successfully"),
+        (status = 200, description = "Collection updated successfully", body = UpdateCollectionRecordsResponse),
         (status = 404, description = "Collection not found")
     )
 )]
