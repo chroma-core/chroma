@@ -11,19 +11,6 @@ else
     echo "Using normal client"
 fi
 
-cleanup() {
-    echo "Removing thin client target..."
-    if [[ $CHROMA_THIN_CLIENT -eq 1 ]]; then
-        rm "$is_thin_client_target"
-    fi
-
-    echo "Stopping Cargo process..."
-    rm -f chroma_integration_test_tmp_dir
-    pkill -P $$
-}
-
-trap cleanup EXIT
-
 cargo build --bin chroma
 cargo run --bin chroma -- run bin/rust_single_node_integration_test_config.yaml &
 

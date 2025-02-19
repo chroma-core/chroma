@@ -56,7 +56,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: [depot-ubuntu-22.04]
+        platform: [depot-ubuntu-22.04, windows-latest]
         test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
                    "chromadb/test/auth/test_simple_rbac_authz.py",
                    "chromadb/test/property/test_add.py",
@@ -134,7 +134,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: [depot-ubuntu-22.04]
+        platform: [depot-ubuntu-22.04, windows-latest]
         test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore='chromadb/test/test_cli.py' --ignore-glob 'chromadb/test/distributed/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
                    "chromadb/test/property/test_add.py",
                    "chromadb/test/property/test_collections.py",
@@ -167,7 +167,13 @@ jobs:
     strategy:
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: [depot-ubuntu-22.04] # todo: should run on Windows, currently failing because Dockerfile doesn't build
+        platform: [depot-ubuntu-22.04, windows-latest]
+        test-globs: ["chromadb/test/property/test_add.py",
+                   "chromadb/test/property/test_collections.py",
+                   "chromadb/test/property/test_collections_with_database_tenant.py",
+                   "chromadb/test/property/test_embeddings.py",
+                   "chromadb/test/property/test_filtering.py",
+                   "chromadb/test/property/test_sysdb.py"]
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
@@ -178,7 +184,7 @@ jobs:
       - name: Setup Rust
         uses: ./.github/actions/rust
       - name: Test
-        run: bin/rust-integration-test.sh 'chromadb/test/property/' --ignore-glob 'chromadb/test/property/*persist.py' --ignore 'chromadb/test/property/test_collections_with_database_tenant_overwrite.py'
+        run: bin/rust-integration-test.sh ${{ matrix.test-globs }}
         shell: bash
         env:
           CHROMA_THIN_CLIENT: "1"
