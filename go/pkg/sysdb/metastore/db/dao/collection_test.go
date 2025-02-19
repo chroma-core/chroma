@@ -47,7 +47,8 @@ func (suite *CollectionDbTestSuite) TearDownSuite() {
 
 func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 	collectionName := "test_collection_get_collections"
-	collectionID, err := CreateTestCollection(suite.db, collectionName, 128, suite.databaseId)
+	dim := int32(128)
+	collectionID, err := CreateTestCollection(suite.db, collectionName, dim, suite.databaseId)
 	suite.NoError(err)
 
 	testKey := "test"
@@ -78,6 +79,15 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 	suite.Equal(metadata.Key, collections[0].CollectionMetadata[0].Key)
 	suite.Equal(metadata.StrValue, collections[0].CollectionMetadata[0].StrValue)
 	suite.Equal(uint64(100), collections[0].Collection.TotalRecordsPostCompaction)
+	suite.Equal(collections[0].DatabaseName, suite.databaseName)
+	suite.Equal(collections[0].TenantID, suite.tenantName)
+	suite.Equal(collections[0].Collection.Dimension, &dim)
+	defaultConfig := "{\"a\": \"param\", \"b\": \"param2\", \"3\": true}"
+	suite.Equal(collections[0].Collection.ConfigurationJsonStr, &defaultConfig)
+	suite.Equal(collections[0].Collection.DatabaseID, suite.databaseId)
+	suite.Equal(collections[0].Collection.LogPosition, int64(0))
+	suite.Equal(collections[0].Collection.Version, int32(0))
+	suite.Equal(collections[0].Collection.IsDeleted, false)
 
 	// Test when filtering by ID
 	collections, err = suite.collectionDb.GetCollections(&collectionID, nil, "", "", nil, nil)
