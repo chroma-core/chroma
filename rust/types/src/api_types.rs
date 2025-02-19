@@ -918,7 +918,7 @@ impl UpsertCollectionRecordsRequest {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct UpsertCollectionRecordsResponse {}
 
 #[derive(Error, Debug)]
@@ -938,7 +938,7 @@ impl ChromaError for UpsertCollectionRecordsError {
 ////////////////////////// DeleteCollectionRecords //////////////////////////
 
 #[non_exhaustive]
-#[derive(Clone, Validate)]
+#[derive(Clone, Validate, ToSchema)]
 pub struct DeleteCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -975,7 +975,7 @@ impl DeleteCollectionRecordsRequest {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct DeleteCollectionRecordsResponse {}
 
 #[derive(Error, Debug)]

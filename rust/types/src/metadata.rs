@@ -447,7 +447,7 @@ impl WhereConversionError {
 /// present we simply create a conjunction of both clauses as the actual filter. This is consistent with
 /// the semantics we used to have when the `where` and `where_document` clauses are treated seperately.
 // TODO: Remove this note once the `where` clause and `where_document` clause is unified in the API level.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, ToSchema)]
 pub enum Where {
     Composite(CompositeExpression),
     Document(DocumentExpression),
@@ -521,7 +521,7 @@ impl TryFrom<Where> for chroma_proto::Where {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, ToSchema)]
 pub struct CompositeExpression {
     pub operator: BooleanOperator,
     pub children: Vec<Where>,
@@ -557,7 +557,7 @@ impl TryFrom<CompositeExpression> for chroma_proto::WhereChildren {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, ToSchema)]
 pub enum BooleanOperator {
     And,
     Or,
@@ -581,7 +581,7 @@ impl From<BooleanOperator> for chroma_proto::BooleanOperator {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, ToSchema)]
 pub struct DocumentExpression {
     pub operator: DocumentOperator,
     pub text: String,
@@ -605,7 +605,7 @@ impl From<DocumentExpression> for chroma_proto::DirectWhereDocument {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, ToSchema)]
 pub enum DocumentOperator {
     Contains,
     NotContains,
@@ -628,7 +628,7 @@ impl From<DocumentOperator> for chroma_proto::WhereDocumentOperator {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, ToSchema)]
 pub struct MetadataExpression {
     pub key: String,
     pub comparison: MetadataComparison,
@@ -758,7 +758,7 @@ impl TryFrom<MetadataExpression> for chroma_proto::DirectComparison {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, ToSchema)]
 pub enum MetadataComparison {
     Primitive(PrimitiveOperator, MetadataValue),
     Set(SetOperator, MetadataSetValue),

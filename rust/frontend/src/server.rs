@@ -1076,7 +1076,7 @@ async fn collection_add(
     Ok(Json(res))
 }
 
-#[derive(Deserialize, Debug, Clone, ToSchema)]
+#[derive(Deserialize, Debug, Clone, ToSchema, Serialize)]
 pub struct UpdateCollectionRecordsPayload {
     ids: Vec<String>,
     embeddings: Option<Vec<Option<Vec<f32>>>>,
@@ -1163,7 +1163,7 @@ async fn collection_update(
     Ok(Json(server.frontend.update(request).await?))
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, ToSchema, Serialize)]
 pub struct UpsertCollectionRecordsPayload {
     ids: Vec<String>,
     embeddings: Option<Vec<Vec<f32>>>,
@@ -1172,6 +1172,22 @@ pub struct UpsertCollectionRecordsPayload {
     metadatas: Option<Vec<Option<UpdateMetadata>>>,
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/upsert",
+    request_body = UpsertCollectionRecordsPayload,
+    responses(
+        (status = 200, description = "Records upserted successfully", body = UpsertCollectionRecordsResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Collection not found", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse),
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant ID"),
+        ("database_name" = String, Path, description = "Database name"),
+        ("collection_id" = String, Path, description = "Collection ID"),
+    )
+)]
 async fn collection_upsert(
     headers: HeaderMap,
     Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
@@ -1242,13 +1258,29 @@ async fn collection_upsert(
     Ok(Json(server.frontend.upsert(request).await?))
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, ToSchema, Serialize)]
 pub struct DeleteCollectionRecordsPayload {
     ids: Option<Vec<String>>,
     #[serde(flatten)]
     where_fields: RawWhereFields,
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/delete",
+    request_body = DeleteCollectionRecordsPayload,
+    responses(
+        (status = 200, description = "Records deleted successfully", body = DeleteCollectionRecordsResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Collection not found", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse),
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant ID"),
+        ("database_name" = String, Path, description = "Database name"),
+        ("collection_id" = String, Path, description = "Collection ID"),
+    )
+)]
 async fn collection_delete(
     headers: HeaderMap,
     Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
@@ -1536,6 +1568,8 @@ async fn v1_deprecation_notice() -> Response {
     update_collection,
     delete_collection,
     collection_add,
-    collection_update
+    collection_update,
+    collection_upsert,
+    collection_delete
 ))]
 struct ApiDoc;
