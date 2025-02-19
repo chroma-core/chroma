@@ -344,6 +344,7 @@ where
 
         let builder = match config.deterministic_hashing {
             true => {
+                // These are generated from a good RNG.
                 let rs = RandomState::with_seeds(
                     18408126631592559320,
                     14098607199905812554,
