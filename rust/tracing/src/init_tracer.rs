@@ -10,12 +10,55 @@ use opentelemetry::{global, InstrumentationScope};
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use tracing_bunyan_formatter::BunyanFormattingLayer;
+use tracing_subscriber::Registry;
 use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Layer};
 
-pub fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
-    println!(
+use crate::meter_event::{MeterEvent, MeterLayer};
+
+pub fn init_global_filter_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
+    EnvFilter::new(std::env::var("RUST_LOG").unwrap_or_else(|_| {
+        "error,".to_string()
+            + &vec![
+                "chroma",
+                "chroma-blockstore",
+                "chroma-config",
+                "chroma-cache",
+                "chroma-distance",
+                "chroma-error",
+                "chroma-frontend",
+                "chroma-index",
+                "chroma-storage",
+                "chroma-test",
+                "chroma-types",
+                "compaction_service",
+                "distance_metrics",
+                "full_text",
+                "hosted-frontend",
+                "metadata_filtering",
+                "query_service",
+                "worker",
+            ]
+            .into_iter()
+            .map(|s| s.to_string() + "=trace")
+            .collect::<Vec<String>>()
+            .join(",")
+            + &format!(",{}=info", MeterEvent::trace_target())
+    }))
+    .boxed()
+}
+
+pub fn init_meter_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
+    MeterLayer {}.boxed()
+}
+
+pub fn init_otel_layer(
+    service_name: &String,
+    otel_endpoint: &String,
+) -> Box<dyn Layer<Registry> + Send + Sync> {
+    tracing::info!(
         "Registering jaeger subscriber for {} at endpoint {}",
-        service_name, otel_endpoint
+        service_name,
+        otel_endpoint
     );
     let resource = opentelemetry_sdk::Resource::new(vec![opentelemetry::KeyValue::new(
         "service.name",
@@ -66,82 +109,49 @@ pub fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
         .with_resource(resource.clone())
         .build();
     global::set_meter_provider(meter_provider);
-
     // Layer for adding our configured tracer.
     // Export everything at this layer. The backend i.e. honeycomb or jaeger will filter at its end.
-    let exporter_layer = tracing_opentelemetry::OpenTelemetryLayer::new(tracer)
-        .with_filter(tracing_subscriber::filter::LevelFilter::TRACE);
-    // Layer for printing spans to stdout. Only print INFO logs by default.
-    let stdout_layer =
-        BunyanFormattingLayer::new(service_name.clone().to_string(), std::io::stdout)
-            .with_filter(tracing_subscriber::filter::FilterFn::new(|metadata| {
-                // NOTE(rescrv):  This is a hack, too.  Not an uppercase hack, just a hack.  This
-                // one's localized to the cache module.  There's not much to do to unify it with
-                // the otel filter because these are different output layers from the tracing.
+    tracing_opentelemetry::OpenTelemetryLayer::new(tracer)
+        .with_filter(tracing_subscriber::filter::LevelFilter::TRACE)
+        .boxed()
+}
 
-                // This filter ensures that we don't cache calls for get/insert on stdout, but will
-                // still see the clear call.
-                !(metadata
-                    .module_path()
-                    .unwrap_or("")
-                    .starts_with("chroma_cache")
-                    && metadata.name() != "clear")
-            }))
-            .with_filter(tracing_subscriber::filter::LevelFilter::INFO);
-    // global filter layer. Don't filter anything at above trace at the global layer for chroma.
-    // And enable errors for every other library.
-    let global_layer = EnvFilter::new(std::env::var("RUST_LOG").unwrap_or_else(|_| {
-        "error,".to_string()
-            + &vec![
-                "chroma",
-                "chroma-blockstore",
-                "chroma-config",
-                "chroma-cache",
-                "chroma-distance",
-                "chroma-error",
-                "chroma-index",
-                "chroma-storage",
-                "chroma-test",
-                "chroma-types",
-                "frontend",
-                "chroma-frontend",
-                "chroma_frontend",
-                "hosted-frontend",
-                "compaction_service",
-                "distance_metrics",
-                "full_text",
-                "metadata_filtering",
-                "query_service",
-                "worker",
-            ]
-            .into_iter()
-            .map(|s| s.to_string() + "=trace")
-            .collect::<Vec<String>>()
-            .join(",")
-    }));
+pub fn init_stdout_layer(service_name: &str) -> Box<dyn Layer<Registry> + Send + Sync> {
+    BunyanFormattingLayer::new(service_name.to_string(), std::io::stdout)
+        .with_filter(tracing_subscriber::filter::FilterFn::new(|metadata| {
+            // NOTE(rescrv):  This is a hack, too.  Not an uppercase hack, just a hack.  This
+            // one's localized to the cache module.  There's not much to do to unify it with
+            // the otel filter because these are different output layers from the tracing.
 
-    // Create subscriber.
-    let subscriber = tracing_subscriber::registry()
-        .with(global_layer)
-        .with(stdout_layer)
-        .with(exporter_layer);
+            // This filter ensures that we don't cache calls for get/insert on stdout, but will
+            // still see the clear call.
+            !(metadata
+                .module_path()
+                .unwrap_or("")
+                .starts_with("chroma_cache")
+                && metadata.name() != "clear")
+        }))
+        .with_filter(tracing_subscriber::filter::LevelFilter::INFO)
+        .boxed()
+}
+
+pub fn init_tracing(layers: Vec<Box<dyn Layer<Registry> + Send + Sync>>) {
     global::set_text_map_propagator(TraceContextPropagator::new());
+    let subscriber = tracing_subscriber::registry().with(layers);
     tracing::subscriber::set_global_default(subscriber)
-        .expect("Set global default subscriber failed");
-    println!("Set global subscriber for {}", service_name);
+        .expect("Should be able to set global tracing subscriber");
+    tracing::info!("Global tracing subscriber set");
+}
 
-    // Add panics to tracing
+pub fn init_panic_tracing_hook() {
     let prev_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
         let payload = panic_info.payload();
 
-        #[allow(clippy::manual_map)]
         let payload = if let Some(s) = payload.downcast_ref::<&str>() {
             Some(&**s)
-        } else if let Some(s) = payload.downcast_ref::<String>() {
-            Some(s.as_str())
         } else {
-            None
+            payload.downcast_ref::<String>().map(|s| s.as_str())
         };
 
         tracing::error!(
@@ -153,4 +163,15 @@ pub fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
 
         prev_hook(panic_info);
     }));
+}
+
+pub fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
+    let layers = vec![
+        init_global_filter_layer(),
+        init_meter_layer(),
+        init_otel_layer(service_name, otel_endpoint),
+        init_stdout_layer(service_name),
+    ];
+    init_tracing(layers);
+    init_panic_tracing_hook();
 }

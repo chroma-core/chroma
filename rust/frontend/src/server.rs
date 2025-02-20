@@ -6,6 +6,7 @@ use axum::{
     routing::{get, post},
     Json, Router, ServiceExt,
 };
+use chroma_tracing::{meter, meter_event::MeterEvent};
 use chroma_types::RawWhereFields;
 use chroma_types::{
     AddCollectionRecordsResponse, ChecklistResponse, Collection, CollectionMetadataUpdate,
@@ -313,6 +314,7 @@ async fn healthcheck(State(server): State<FrontendServer>) -> impl IntoResponse 
 async fn heartbeat(
     State(server): State<FrontendServer>,
 ) -> Result<Json<HeartbeatResponse>, ServerError> {
+    meter!(MeterEvent::Heartbeat, why = "heartbeat is metered");
     server.metrics.heartbeat.add(1, &[]);
     Ok(Json(server.frontend.heartbeat().await?))
 }
