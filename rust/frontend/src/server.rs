@@ -205,7 +205,7 @@ impl FrontendServer {
                 post(collection_query),
             )
             .with_state(server)
-            .layer(DefaultBodyLimit::max(6000000)); // TODO: add to server configuration
+            .layer(DefaultBodyLimit::max(6000000*8)); // TODO: add to server configuration
         let app = add_tracing_middleware(app);
 
         // TODO: configuration for this
@@ -278,7 +278,7 @@ async fn pre_flight_checks(
 ) -> Result<Json<ChecklistResponse>, ServerError> {
     server.metrics.pre_flight_checks.add(1, &[]);
     Ok(Json(ChecklistResponse {
-        max_batch_size: 100,
+        max_batch_size: server.frontend.clone().get_max_batch_size(),
     }))
 }
 
@@ -302,9 +302,11 @@ async fn reset(
     Ok(Json(true))
 }
 
-async fn version(State(server): State<FrontendServer>) -> &'static str {
+async fn version(State(server): State<FrontendServer>) -> Json<String> {
     server.metrics.version.add(1, &[]);
-    env!("CARGO_PKG_VERSION")
+    // TODO: Decide on how to handle versioning across python / rust frontend
+    // for now return a hardcoded version
+    Json("0.7.0".to_string())
 }
 
 async fn get_user_identity(
@@ -315,10 +317,15 @@ async fn get_user_identity(
     Ok(Json(server.auth.get_user_identity(&headers).await?))
 }
 
+#[derive(Deserialize, Debug)]
+struct CreateTenantPayload {
+    name: String,
+}
+
 async fn create_tenant(
     headers: HeaderMap,
     State(mut server): State<FrontendServer>,
-    Json(request): Json<CreateTenantRequest>,
+    Json(request): Json<CreateTenantPayload>,
 ) -> Result<Json<CreateTenantResponse>, ServerError> {
     server.metrics.create_tenant.add(1, &[]);
     tracing::info!("Creating tenant [{}]", request.name);
@@ -333,6 +340,7 @@ async fn create_tenant(
             },
         )
         .await?;
+    let request = CreateTenantRequest::try_new(request.name)?;
     Ok(Json(server.frontend.create_tenant(request).await?))
 }
 
@@ -403,16 +411,17 @@ async fn create_database(
 }
 
 #[derive(Deserialize)]
-struct ListDatabasesPayload {
+struct ListDatabasesParams {
     limit: Option<u32>,
+    #[serde(default)]
     offset: u32,
 }
 
 async fn list_databases(
     headers: HeaderMap,
     Path(tenant_id): Path<String>,
+    Query(ListDatabasesParams { limit, offset }): Query<ListDatabasesParams>,
     State(mut server): State<FrontendServer>,
-    Json(ListDatabasesPayload { limit, offset }): Json<ListDatabasesPayload>,
 ) -> Result<Json<ListDatabasesResponse>, ServerError> {
     server.metrics.list_databases.add(1, &[]);
     tracing::info!("Listing database for tenant [{}]", tenant_id);

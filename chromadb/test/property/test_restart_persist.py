@@ -80,7 +80,7 @@ class RestartablePersistedEmbeddingStateMachine(EmbeddingStateMachineBase):
 
 def test_restart_persisted_client(sqlite_persistent: System) -> None:
     # TODO: This test is broken for rust bindings and should be fixed
-    if "CHROMA_RUST_BINDINGS_TEST_ONLY" not in os.environ:
+    if sqlite_persistent.settings.chroma_api_impl != "chromadb.api.rust.RustBindingsAPI":
         run_state_machine_as_test(
             lambda: RestartablePersistedEmbeddingStateMachine(sqlite_persistent),
         )  # type: ignore

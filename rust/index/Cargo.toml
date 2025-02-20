@@ -29,6 +29,7 @@ chroma-config = { workspace = true }
 chroma-storage = { workspace = true }
 chroma-distance = { workspace = true }
 itertools = { workspace = true }
+hnswlib = { workspace = true }
 
 [dev-dependencies]
 rayon = { workspace = true }
@@ -39,10 +40,6 @@ indicatif = "0.17.9"
 anyhow = "1.0.93"
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = "0.6"
-
-
-[build-dependencies]
-cc = "1.2"
 
 [[bench]]
 name = "full_text"

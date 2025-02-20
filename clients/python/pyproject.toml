@@ -4,7 +4,6 @@ dynamic = ["version"]
 
 authors = [
   { name = "Jeff Huber", email = "jeff@trychroma.com" },
-  { name = "Anton Troynikov", email = "anton@trychroma.com" },
 ]
 description = "Chroma Client."
 readme = "README.md"

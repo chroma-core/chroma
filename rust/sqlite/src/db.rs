@@ -1,10 +1,10 @@
 use crate::config::{MigrationHash, MigrationMode, SqliteDBConfig};
 use crate::migrations::{GetSourceMigrationsError, Migration, MigrationDir, MIGRATION_DIRS};
 use chroma_error::{ChromaError, ErrorCodes};
-use futures::TryStreamExt;
 use sqlx::sqlite::SqlitePool;
 use sqlx::{Executor, Row};
 use thiserror::Error;
+use tokio::io;
 
 // // TODO:
 // // - support memory mode, add concurrency tests
@@ -34,12 +34,13 @@ impl SqliteDb {
     }
 
     pub async fn reset(&self) -> Result<(), SqliteMigrationError> {
+        // TODO: Make this into a transaction
         let query = r#"
             SELECT name FROM sqlite_master
             WHERE type='table'
         "#;
-        let mut rows = sqlx::query(query).fetch(&self.conn);
-        while let Some(row) = rows.try_next().await? {
+        let rows = sqlx::query(query).fetch_all(&self.conn).await?;
+        for row in rows {
             let name: String = row.get("name");
             let query = format!("DROP TABLE IF EXISTS {}", name);
             sqlx::query(&query).execute(&self.conn).await?;
@@ -172,7 +173,34 @@ impl SqliteDb {
             )
         "#;
         sqlx::query(query).execute(&self.conn).await?;
+        // HACK(hammadb) - https://github.com/launchbadge/sqlx/issues/481#issuecomment-2224913791
+        // This is really not great, and ideally we'd write out own pool, like we have
+        // in python, but for now this is the best we can do
+        let lock_table = r#"
+            CREATE TABLE IF NOT EXISTS acquire_write (
+                id INTEGER PRIMARY KEY,
+                lock_status INTEGER NOT NULL
+            )
+        "#;
+        sqlx::query(lock_table).execute(&self.conn).await?;
+        let insert_lock = r#"
+            INSERT INTO acquire_write (lock_status) VALUES (TRUE)
+        "#;
+        sqlx::query(insert_lock).execute(&self.conn).await?;
         Ok(())
+    }
+
+    pub async fn begin_immediate<'tx, C>(&self, tx: C) -> Result<(), sqlx::Error>
+    where
+        C: sqlx::Executor<'tx, Database = sqlx::Sqlite>,
+    {
+        let query = r#"
+            UPDATE acquire_write SET lock_status = TRUE WHERE id = 1
+        "#;
+        match tx.execute(query).await {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e),
+        }
     }
 
     /// Check if the migrations table has been initialized
@@ -256,16 +284,19 @@ impl ChromaError for SqliteMigrationError {
 #[derive(Error, Debug)]
 pub enum SqliteCreationError {
     #[error(transparent)]
-    SqlxError(#[from] sqlx::Error),
-    #[error(transparent)]
     MigrationError(#[from] SqliteMigrationError),
+    #[error(transparent)]
+    PathError(#[from] io::Error),
+    #[error(transparent)]
+    SqlxError(#[from] sqlx::Error),
 }
 
 impl ChromaError for SqliteCreationError {
     fn code(&self) -> chroma_error::ErrorCodes {
         match self {
-            SqliteCreationError::SqlxError(_) => ErrorCodes::Internal,
             SqliteCreationError::MigrationError(err) => err.code(),
+            SqliteCreationError::PathError(_) => ErrorCodes::Internal,
+            SqliteCreationError::SqlxError(_) => ErrorCodes::Internal,
         }
     }
 }

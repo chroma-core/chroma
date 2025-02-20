@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::db::{SqliteCreationError, SqliteDb};
 use async_trait::async_trait;
 use chroma_config::{
@@ -7,6 +9,7 @@ use chroma_config::{
 use chroma_error::ChromaError;
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+use tokio::fs::create_dir_all;
 
 #[cfg(feature = "python")]
 use pyo3::{pyclass, pymethods};
@@ -81,8 +84,14 @@ impl Configurable<SqliteDBConfig> for SqliteDb {
             .pragma("foreign_keys", "OFF")
             .pragma("case_sensitive_like", "ON");
         let conn = if let Some(url) = &config.url {
+            let path = Path::new(url);
+            if let Some(parent) = path.parent() {
+                create_dir_all(parent)
+                    .await
+                    .map_err(|err| SqliteCreationError::PathError(err).boxed())?;
+            }
             SqlitePoolOptions::new()
-                .connect_with(conn_options.filename(url).create_if_missing(true))
+                .connect_with(conn_options.filename(path).create_if_missing(true))
                 .await
                 .map_err(|err| SqliteCreationError::SqlxError(err).boxed())?
         } else {

@@ -61,10 +61,10 @@ pub enum GetCollectionWithSegmentsError {
     Field(String),
     #[error("Failed to convert proto segment")]
     SegmentConversionError(#[from] SegmentConversionError),
-    #[error("Failed to fetch")]
-    FailedToGetSegments(#[from] tonic::Status),
     #[error("Failed to get segments")]
     GetSegmentsError(#[from] GetSegmentsError),
+    #[error("Grpc error: {0}")]
+    Grpc(#[from] tonic::Status),
     #[error("Collection [{0}] does not exists.")]
     NotFound(String),
     #[error(transparent)]
@@ -82,7 +82,7 @@ impl ChromaError for GetCollectionWithSegmentsError {
             GetCollectionWithSegmentsError::SegmentConversionError(segment_conversion_error) => {
                 segment_conversion_error.code()
             }
-            GetCollectionWithSegmentsError::FailedToGetSegments(status) => status.code().into(),
+            GetCollectionWithSegmentsError::Grpc(status) => status.code().into(),
             GetCollectionWithSegmentsError::GetSegmentsError(get_segments_error) => {
                 get_segments_error.code()
             }
@@ -1201,7 +1201,6 @@ impl From<(GetResult, IncludeList)> for GetResponse {
             if let Some(documents) = res.documents.as_mut() {
                 documents.push(document);
             }
-
             let uri = metadata.as_mut().and_then(|meta| {
                 meta.remove(CHROMA_URI_KEY).and_then(|v| {
                     if let crate::MetadataValue::Str(uri) = v {
@@ -1463,5 +1462,22 @@ impl ChromaError for ExecutorError {
             ExecutorError::NoClientFound(_) => ErrorCodes::Internal,
             ExecutorError::BackfillError => ErrorCodes::Internal,
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_create_database_min_length() {
+        let request = CreateDatabaseRequest::try_new("default_tenant".to_string(), "a".to_string());
+        assert!(request.is_err());
+    }
+
+    #[test]
+    fn test_create_tenant_min_length() {
+        let request = CreateTenantRequest::try_new("a".to_string());
+        assert!(request.is_err());
     }
 }

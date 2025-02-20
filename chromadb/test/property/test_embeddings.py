@@ -469,6 +469,7 @@ def test_embeddings_state(caplog: pytest.LogCaptureFixture, client: ClientAPI) -
 
 
 def test_add_then_delete_n_minus_1(client: ClientAPI) -> None:
+    client.reset()
     state = EmbeddingStateMachine(client)
     state.initialize(
         collection=strategies.Collection(
@@ -522,6 +523,7 @@ def test_add_then_delete_n_minus_1(client: ClientAPI) -> None:
 
 
 def test_embeddings_flake1(client: ClientAPI) -> None:
+    client.reset()
     state = EmbeddingStateMachine(client)
     state.initialize(
         collection=strategies.Collection(
@@ -1061,6 +1063,7 @@ def test_embeddings_flake1(client: ClientAPI) -> None:
 
 
 def test_update_none(caplog: pytest.LogCaptureFixture, client: ClientAPI) -> None:
+    client.reset()
     state = EmbeddingStateMachine(client)
     state.initialize(
         collection=strategies.Collection(
@@ -1115,6 +1118,7 @@ def test_update_none(caplog: pytest.LogCaptureFixture, client: ClientAPI) -> Non
 
 
 def test_add_delete_add(client: ClientAPI) -> None:
+    client.reset()
     state = EmbeddingStateMachine(client)
     state.initialize(
         collection=strategies.Collection(

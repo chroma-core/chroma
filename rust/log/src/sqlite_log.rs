@@ -1,5 +1,5 @@
 use crate::{
-    config::SqliteLogConfig, CollectionInfo, CompactionManagerError, CompactionMessage,
+    config::SqliteLogConfig, BackfillMessage, CollectionInfo, CompactionManagerError,
     LocalCompactionManager, PurgeLogsMessage,
 };
 use async_trait::async_trait;
@@ -267,13 +267,6 @@ impl SqliteLog {
             return Ok(());
         }
 
-        let row = sqlx::query("SELECT MAX(seq_id) AS max_seq_id FROM embeddings_queue")
-            .fetch_one(self.db.get_conn())
-            .await
-            .map_err(WrappedSqlxError)?;
-        let start_log_offset: i64 = row.get("max_seq_id");
-        let total_records = records.len() as i64;
-
         let topic =
             get_embeddings_queue_topic_name(&self.tenant_id, &self.topic_namespace, collection_id);
 
@@ -320,12 +313,8 @@ impl SqliteLog {
             .map_err(WrappedSqlxError)?;
 
         if let Some(handle) = self.compactor_handle.get() {
-            let compact_message = CompactionMessage {
-                collection_id,
-                start_offset: start_log_offset,
-                total_records,
-            };
-            handle.request(compact_message, None).await??;
+            let backfill_message = BackfillMessage { collection_id };
+            handle.request(backfill_message, None).await??;
             let purge_log_msg = PurgeLogsMessage { collection_id };
             handle.clone().request(purge_log_msg, None).await??;
         }

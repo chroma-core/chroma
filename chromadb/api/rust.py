@@ -13,13 +13,21 @@ from chromadb import (
 )
 from chromadb.api import ServerAPI
 from chromadb.api.configuration import CollectionConfigurationInternal
-from chromadb.api.segment import SegmentAPI
 from chromadb.auth import UserIdentity
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
+from chromadb.telemetry.product import ProductTelemetryClient
+from chromadb.telemetry.product.events import (
+    CollectionAddEvent,
+    CollectionDeleteEvent,
+    CollectionGetEvent,
+    CollectionUpdateEvent,
+    CollectionQueryEvent,
+    ClientCreateCollectionEvent,
+)
 
 # TODO(hammadb): Unify imports across types vs root __init__.py
 from chromadb.types import Database, Tenant, Collection as CollectionModel
-import rust_bindings
+import chromadb_rust_bindings
 
 from typing import Optional, Sequence
 from overrides import override
@@ -42,14 +50,13 @@ elif platform.system() == "Windows":
 # TODO(hammadb): Propagate the types from the bindings into the Python API
 # and remove the python-level types entirely.
 class RustBindingsAPI(ServerAPI):
-    bindings: rust_bindings.Bindings
-    # NOTE(hammadb) We proxy all calls to this instance of the Segment API
-    proxy_segment_api: SegmentAPI
+    bindings: chromadb_rust_bindings.Bindings
     hnsw_cache_size: int
+    product_telemetry_client: ProductTelemetryClient
 
     def __init__(self, system: System):
         super().__init__(system)
-        self.proxy_segment_api = system.require(SegmentAPI)
+        self.product_telemetry_client = self.require(ProductTelemetryClient)
 
         if platform.system() != "Windows":
             max_file_handles = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
@@ -76,23 +83,23 @@ class RustBindingsAPI(ServerAPI):
             sqlite_persist_path = None
         hash_type = self._system.settings.require("migrations_hash_algorithm")
         hash_type_bindings = (
-            rust_bindings.MigrationHash.MD5
+            chromadb_rust_bindings.MigrationHash.MD5
             if hash_type == "md5"
-            else rust_bindings.MigrationHash.SHA256
+            else chromadb_rust_bindings.MigrationHash.SHA256
         )
         migration_mode = self._system.settings.require("migrations")
         migration_mode_bindings = (
-            rust_bindings.MigrationMode.Apply
+            chromadb_rust_bindings.MigrationMode.Apply
             if migration_mode == "apply"
-            else rust_bindings.MigrationMode.Validate
+            else chromadb_rust_bindings.MigrationMode.Validate
         )
-        sqlite_config = rust_bindings.SqliteDBConfig(
+        sqlite_config = chromadb_rust_bindings.SqliteDBConfig(
             hash_type=hash_type_bindings,
             migration_mode=migration_mode_bindings,
             url=sqlite_persist_path,
         )
 
-        self.bindings = rust_bindings.Bindings(
+        self.bindings = chromadb_rust_bindings.Bindings(
             allow_reset=self._system.settings.require("allow_reset"),
             sqlite_db_config=sqlite_config,
             persist_path=persist_path,
@@ -191,6 +198,15 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
+        # TODO: This event doesn't capture the get_or_create case appropriately
+        # TODO: Re-enable embedding function tracking in create_collection
+        self.product_telemetry_client.capture(
+            ClientCreateCollectionEvent(
+                collection_uuid=str(id),
+                # embedding_function=embedding_function.__class__.__name__,
+            )
+        )
+
         collection = self.bindings.create_collection(
             name, configuration, metadata, get_or_create, tenant, database
         )
@@ -203,7 +219,6 @@ class RustBindingsAPI(ServerAPI):
             tenant=collection.tenant,
             database=collection.database,
         )
-
         return collection
 
     @override
@@ -265,7 +280,6 @@ class RustBindingsAPI(ServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> int:
         return self.bindings.count(str(collection_id), tenant, database)
-        # return self.proxy_segment_api._count(collection_id, tenant, database)  # type: ignore[no-any-return]
 
     @override
     def _peek(
@@ -275,8 +289,13 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> GetResult:
-        return self._get(str(collection_id), limit=n, tenant=tenant, database=database, include=["embeddings", "metadatas", "documents"])
-        # return self.proxy_segment_api._peek(collection_id, n, tenant, database)
+        return self._get(
+            str(collection_id),
+            limit=n,
+            tenant=tenant,
+            database=database,
+            include=["embeddings", "metadatas", "documents"],
+        )
 
     @override
     def _get(
@@ -294,6 +313,18 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> GetResult:
+        ids_amount = len(ids) if ids else 0
+        self.product_telemetry_client.capture(
+            CollectionGetEvent(
+                collection_uuid=str(collection_id),
+                ids_count=ids_amount,
+                limit=limit if limit else 0,
+                include_metadata=ids_amount if "metadatas" in include else 0,
+                include_documents=ids_amount if "documents" in include else 0,
+                include_uris=ids_amount if "uris" in include else 0,
+            )
+        )
+
         rust_response = self.bindings.get(
             str(collection_id),
             ids,
@@ -306,7 +337,6 @@ class RustBindingsAPI(ServerAPI):
             database,
         )
 
-        # TODO: The data field is missing from rust?
         return GetResult(
             ids=rust_response.ids,
             embeddings=rust_response.embeddings,
@@ -316,21 +346,6 @@ class RustBindingsAPI(ServerAPI):
             data=None,
             metadatas=rust_response.metadatas,
         )
-
-        # return self.proxy_segment_api._get(  # type: ignore[no-any-return]
-        #     collection_id,
-        #     ids,
-        #     where,
-        #     sort,
-        #     limit,
-        #     offset,
-        #     page,
-        #     page_size,
-        #     where_document,
-        #     include,
-        #     tenant,
-        #     database,
-        # )
 
     @override
     def _add(
@@ -344,6 +359,16 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
+        self.product_telemetry_client.capture(
+            CollectionAddEvent(
+                collection_uuid=str(collection_id),
+                add_amount=len(ids),
+                with_metadata=len(ids) if metadatas is not None else 0,
+                with_documents=len(ids) if documents is not None else 0,
+                with_uris=len(ids) if uris is not None else 0,
+            )
+        )
+
         return self.bindings.add(
             ids,
             str(collection_id),
@@ -354,9 +379,6 @@ class RustBindingsAPI(ServerAPI):
             tenant,
             database,
         )
-        # return self.proxy_segment_api._add(
-        #     ids, collection_id, embeddings, metadatas, documents, uris, tenant, database
-        # )
 
     @override
     def _update(
@@ -370,6 +392,17 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
+        self.product_telemetry_client.capture(
+            CollectionUpdateEvent(
+                collection_uuid=str(collection_id),
+                update_amount=len(ids),
+                with_embeddings=len(embeddings) if embeddings else 0,
+                with_metadata=len(metadatas) if metadatas else 0,
+                with_documents=len(documents) if documents else 0,
+                with_uris=len(uris) if uris else 0,
+            )
+        )
+
         return self.bindings.update(
             str(collection_id),
             ids,
@@ -380,9 +413,6 @@ class RustBindingsAPI(ServerAPI):
             tenant,
             database,
         )
-        # return self.proxy_segment_api._update(
-        #     collection_id, ids, embeddings, metadatas, documents, uris, tenant, database
-        # )
 
     @override
     def _upsert(
@@ -406,9 +436,6 @@ class RustBindingsAPI(ServerAPI):
             tenant,
             database,
         )
-        # return self.proxy_segment_api._upsert(
-        #     collection_id, ids, embeddings, metadatas, documents, uris, tenant, database
-        # )
 
     @override
     def _query(
@@ -422,6 +449,21 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> QueryResult:
+        query_amount = len(query_embeddings)
+        self.product_telemetry_client.capture(
+            CollectionQueryEvent(
+                collection_uuid=str(collection_id),
+                query_amount=query_amount,
+                n_results=n_results,
+                with_metadata_filter=query_amount if where is not None else 0,
+                with_document_filter=query_amount if where_document is not None else 0,
+                include_metadatas=query_amount if "metadatas" in include else 0,
+                include_documents=query_amount if "documents" in include else 0,
+                include_uris=query_amount if "uris" in include else 0,
+                include_distances=query_amount if "distances" in include else 0,
+            )
+        )
+
         rust_response = self.bindings.query(
             str(collection_id),
             query_embeddings,
@@ -444,17 +486,6 @@ class RustBindingsAPI(ServerAPI):
             distances=rust_response.distances,
         )
 
-        # return self.proxy_segment_api._query(  # type: ignore[no-any-return]
-        #     collection_id,
-        #     query_embeddings,
-        #     n_results,
-        #     where,
-        #     where_document,
-        #     include,
-        #     tenant,
-        #     database,
-        # )
-
     @override
     def _delete(
         self,
@@ -465,6 +496,14 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
+        self.product_telemetry_client.capture(
+            CollectionDeleteEvent(
+                # NOTE: the delete amount is not observable from python
+                # TODO: Fix this when posthog is pushed into Rust frontend
+                collection_uuid=str(collection_id), delete_amount=0
+            )
+        )
+
         return self.bindings.delete(
             str(collection_id),
             ids,
@@ -473,10 +512,6 @@ class RustBindingsAPI(ServerAPI):
             tenant,
             database,
         )
-        
-        # return self.proxy_segment_api._delete(
-        #     collection_id, ids, where, where_document, tenant, database
-        # )
 
     @override
     def reset(self) -> bool:
@@ -488,12 +523,17 @@ class RustBindingsAPI(ServerAPI):
 
     @override
     def get_settings(self) -> Settings:
-        return self.proxy_segment_api.get_settings()
+        return self._system.settings
 
     @override
     def get_max_batch_size(self) -> int:
         return self.bindings.get_max_batch_size()
 
+    # TODO: Remove this if it's not planned to be used
     @override
     def get_user_identity(self) -> UserIdentity:
-        return self.proxy_segment_api.get_user_identity()
+        return UserIdentity(
+            user_id="",
+            tenant=DEFAULT_TENANT,
+            databases=[DEFAULT_DATABASE],
+        )
