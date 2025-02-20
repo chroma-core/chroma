@@ -90,7 +90,8 @@ const sidebarConfig: AppSection[] = [
     id: "cloud",
     name: "Chroma Cloud",
     icon: CloudIcon,
-    override: "https://trychroma.com/signup",
+    tag: "New",
+    pages: [{ id: "getting-started", name: "Getting Started" }],
   },
   {
     id: "production",
@@ -190,7 +191,8 @@ const sidebarConfig: AppSection[] = [
     id: "guides-and-examples",
     name: "Guides & Examples",
     icon: GraduationCap,
-    comingSoon: true,
+    disable: true,
+    tag: "Coming Soon",
   },
 ];
 
