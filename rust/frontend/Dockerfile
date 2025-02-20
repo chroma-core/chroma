@@ -22,7 +22,7 @@ FROM builder AS frontend_service_builder
 # sharing=locked is necessary to prevent cargo build from running concurrently on the same mounted directory
 RUN --mount=type=cache,sharing=locked,target=/chroma/target/ \
     --mount=type=cache,sharing=locked,target=/usr/local/cargo/registry/ \
-    if [ "$RELEASE_MODE" = "1" ]; then cargo build --bin frontend_service --release --features python; else cargo build --bin frontend_service --features python; fi && \
+    if [ "$RELEASE_MODE" = "1" ]; then cargo build --bin frontend_service --release; else cargo build --bin frontend_service; fi && \
     if [ "$RELEASE_MODE" = "1" ]; then mv target/release/frontend_service ./frontend_service; else mv target/debug/frontend_service ./frontend_service; fi
 
 
