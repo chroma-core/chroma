@@ -1577,7 +1577,11 @@ async fn v1_deprecation_notice() -> Response {
 struct ChromaTokenSecurityAddon;
 impl Modify for ChromaTokenSecurityAddon {
     fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
-        let components = openapi.components.as_mut().unwrap();
+        // NOTE(philipithomas) - This unwrap is usually safe, and will crash the service on initialization if it's not.
+        let components = openapi
+            .components
+            .as_mut()
+            .expect("It should be able to get components as mutable");
         components.add_security_scheme(
             "x-chroma-token",
             SecurityScheme::ApiKey(ApiKey::Header(ApiKeyValue::new("x-chroma-token"))),
