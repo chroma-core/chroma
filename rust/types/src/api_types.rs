@@ -125,29 +125,15 @@ pub struct HeartbeatResponse {
     pub nanosecond_heartbeat: u128,
 }
 
-#[derive(Debug, Error, Serialize, ToSchema)]
-#[error("system time error: {message}")]
-pub struct ChromaSystemTimeError {
-    message: String,
-}
-
-impl From<SystemTimeError> for ChromaSystemTimeError {
-    fn from(err: SystemTimeError) -> Self {
-        Self {
-            message: err.to_string(),
-        }
-    }
-}
-
 #[derive(Debug, Error, ToSchema)]
 pub enum HeartbeatError {
-    #[error(transparent)]
-    CouldNotGetTime(#[from] ChromaSystemTimeError),
+    #[error("system time error: {0}")]
+    CouldNotGetTime(String),
 }
 
 impl From<SystemTimeError> for HeartbeatError {
     fn from(err: SystemTimeError) -> Self {
-        HeartbeatError::CouldNotGetTime(ChromaSystemTimeError::from(err))
+        HeartbeatError::CouldNotGetTime(err.to_string())
     }
 }
 
