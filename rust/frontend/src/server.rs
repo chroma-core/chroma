@@ -301,7 +301,7 @@ async fn healthcheck(State(server): State<FrontendServer>) -> impl IntoResponse 
     (code, Json(res))
 }
 
-/// Heartbeat endpoint that returns a nanosecond timestamp of the current time. Useful for making sure the client remains connected.
+/// Heartbeat endpoint that returns a nanosecond timestamp of the current time.
 #[utoipa::path(
     get,
     path = "/api/v2/heartbeat",
