@@ -8,8 +8,8 @@ use chroma_error::{ChromaError, ErrorCodes, WrappedSqlxError};
 use chroma_sqlite::{db::SqliteDb, helpers::get_embeddings_queue_topic_name};
 use chroma_system::{ChannelError, ComponentHandle, RequestError};
 use chroma_types::{
-    CollectionUuid, LogRecord, Operation, OperationRecord, ScalarEncoding,
-    ScalarEncodingConversionError, UpdateMetadata, UpdateMetadataValue,
+    CollectionUuid, LogRecord, Operation, OperationRecord, ResetError, ResetResponse,
+    ScalarEncoding, ScalarEncodingConversionError, UpdateMetadata, UpdateMetadataValue,
 };
 use futures::TryStreamExt;
 use serde::{Deserialize, Serialize};
@@ -460,6 +460,14 @@ impl SqliteLog {
             })
             .fold(DEFAULT_VAR_OPT, |_, opt| opt);
         Ok(max_variable_number / VARIABLE_PER_RECORD)
+    }
+
+    pub async fn reset(&mut self) -> Result<ResetResponse, ResetError> {
+        // Populate default config
+        self.get_legacy_embeddings_queue_config()
+            .await
+            .map_err(|e| e.boxed())?;
+        Ok(ResetResponse {})
     }
 
     async fn get_legacy_embeddings_queue_config(
