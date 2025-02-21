@@ -3,10 +3,12 @@
 //
 // Keep them in-sync manually.
 
+use std::time::Duration;
+
 use opentelemetry::global;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry_otlp::{WithExportConfig, WithHttpConfig};
-use opentelemetry_sdk::propagation::TraceContextPropagator;
+use opentelemetry_sdk::{propagation::TraceContextPropagator, trace::BatchConfigBuilder};
 use tracing_bunyan_formatter::BunyanFormattingLayer;
 use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Layer};
 
@@ -81,8 +83,18 @@ pub(crate) fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
     let trace_config = opentelemetry_sdk::trace::Config::default()
         .with_sampler(ChromaShouldSample)
         .with_resource(resource.clone());
+    let batch = opentelemetry_sdk::trace::BatchSpanProcessor::builder(
+        span_exporter,
+        opentelemetry_sdk::runtime::Tokio,
+    )
+    .with_batch_config(
+        BatchConfigBuilder::default()
+            .with_scheduled_delay(Duration::from_millis(200))
+            .build(),
+    )
+    .build();
     let tracer_provider = opentelemetry_sdk::trace::TracerProvider::builder()
-        .with_batch_exporter(span_exporter, opentelemetry_sdk::runtime::Tokio)
+        .with_span_processor(batch)
         .with_config(trace_config)
         .build();
     let tracer = tracer_provider.tracer(service_name.clone());
