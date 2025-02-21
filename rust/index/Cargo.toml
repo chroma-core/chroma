@@ -41,6 +41,9 @@ anyhow = "1.0.93"
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = "0.6"
 
+[build-dependencies]
+cc = "1.2"
+
 [[bench]]
 name = "full_text"
 harness = false
