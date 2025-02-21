@@ -548,20 +548,10 @@ impl Handler<TaskResult<DeleteVersionsAtSysDbOutput, DeleteVersionsAtSysDbError>
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::helper::ChromaGrpcClients;
-    use chroma_config::registry::Registry;
-    use chroma_config::Configurable;
-    use chroma_storage::config::{
-        ObjectStoreBucketConfig, ObjectStoreConfig, ObjectStoreType, StorageConfig,
-    };
-    use chroma_sysdb::{GrpcSysDbConfig, SysDbConfig};
-    use chroma_system::System;
-    use std::str::FromStr;
     use std::time::Duration;
-    use tokio::sync::oneshot;
-    use tracing_subscriber;
 
+    #[allow(dead_code)]
     async fn wait_for_new_version(
         clients: &mut ChromaGrpcClients,
         collection_id: &str,
@@ -595,541 +585,546 @@ mod tests {
         Err("Timeout waiting for new version to be created".into())
     }
 
-    #[tokio::test]
-    async fn test_k8s_integration_check_end_to_end() -> Result<(), Box<dyn std::error::Error>> {
-        // Initialize tracing subscriber once at the start of the test
-        let _ = tracing_subscriber::fmt::try_init();
+    // NOTE(hammadb): This test was added without consideration as to how to handle
+    // the required configuration for the test. It expects configuration to be ON
+    // for the sysdb that should not be on by default. I am disabling it until
+    // we properly handle the config.
 
-        tracing::info!("Starting direct service calls test");
+    // #[tokio::test]
+    // async fn test_k8s_integration_check_end_to_end() -> Result<(), Box<dyn std::error::Error>> {
+    //     // Initialize tracing subscriber once at the start of the test
+    //     let _ = tracing_subscriber::fmt::try_init();
 
-        // Create storage config and storage client
-        let storage_config = StorageConfig::ObjectStore(ObjectStoreConfig {
-            bucket: ObjectStoreBucketConfig {
-                name: "chroma-storage".to_string(),
-                r#type: ObjectStoreType::Minio,
-            },
-            upload_part_size_bytes: 1024 * 1024,   // 1MB
-            download_part_size_bytes: 1024 * 1024, // 1MB
-            max_concurrent_requests: 10,
-        });
-        // Create registry for configuration
-        let registry = Registry::new();
-        // Initialize storage using config and registry
-        let storage = Storage::try_from_config(&storage_config, &registry).await?;
-        // Add check for HNSW prefixes before Tests.
-        let hnsw_prefixes_before_tests: Vec<String> = storage
-            .list_prefix("hnsw")
-            .await?
-            .into_iter()
-            .filter(|path| path.contains("hnsw/"))
-            .map(|path| {
-                path.split("/")
-                    .nth(1) // Get the prefix part after "hnsw/"
-                    .unwrap_or("")
-                    .to_string()
-            })
-            .collect::<std::collections::HashSet<_>>() // Collect into HashSet first
-            .into_iter() // Convert HashSet back to iterator
-            .collect(); // Collect into final Vec
+    //     tracing::info!("Starting direct service calls test");
 
-        println!(
-            "HNSW prefixes before Tests: {:?}",
-            hnsw_prefixes_before_tests
-        );
-        let deleted_hnsw_files_before_tests: Vec<_> = storage
-            .list_prefix("deleted")
-            .await?
-            .into_iter()
-            .filter(|path| path.contains("deleted") && path.contains("header.bin"))
-            .collect();
+    //     // Create storage config and storage client
+    //     let storage_config = StorageConfig::ObjectStore(ObjectStoreConfig {
+    //         bucket: ObjectStoreBucketConfig {
+    //             name: "chroma-storage".to_string(),
+    //             r#type: ObjectStoreType::Minio,
+    //         },
+    //         upload_part_size_bytes: 1024 * 1024,   // 1MB
+    //         download_part_size_bytes: 1024 * 1024, // 1MB
+    //         max_concurrent_requests: 10,
+    //     });
+    //     // Create registry for configuration
+    //     let registry = Registry::new();
+    //     // Initialize storage using config and registry
+    //     let storage = Storage::try_from_config(&storage_config, &registry).await?;
+    //     // Add check for HNSW prefixes before Tests.
+    //     let hnsw_prefixes_before_tests: Vec<String> = storage
+    //         .list_prefix("hnsw")
+    //         .await?
+    //         .into_iter()
+    //         .filter(|path| path.contains("hnsw/"))
+    //         .map(|path| {
+    //             path.split("/")
+    //                 .nth(1) // Get the prefix part after "hnsw/"
+    //                 .unwrap_or("")
+    //                 .to_string()
+    //         })
+    //         .collect::<std::collections::HashSet<_>>() // Collect into HashSet first
+    //         .into_iter() // Convert HashSet back to iterator
+    //         .collect(); // Collect into final Vec
 
-        let mut clients = ChromaGrpcClients::new().await.map_err(|e| {
-            tracing::error!(error = ?e, "Failed to create ChromaGrpcClients");
-            e
-        })?;
+    //     println!(
+    //         "HNSW prefixes before Tests: {:?}",
+    //         hnsw_prefixes_before_tests
+    //     );
+    //     let deleted_hnsw_files_before_tests: Vec<_> = storage
+    //         .list_prefix("deleted")
+    //         .await?
+    //         .into_iter()
+    //         .filter(|path| path.contains("deleted") && path.contains("header.bin"))
+    //         .collect();
 
-        // Create unique identifiers for tenant and database
-        let test_uuid = uuid::Uuid::new_v4();
-        let tenant_id = format!("test_tenant_{}", test_uuid);
-        let database_name = format!("test_db_{}", test_uuid);
-        let collection_name = format!("test_collection_{}", test_uuid);
+    //     let mut clients = ChromaGrpcClients::new().await.map_err(|e| {
+    //         tracing::error!(error = ?e, "Failed to create ChromaGrpcClients");
+    //         e
+    //     })?;
 
-        tracing::info!(
-            tenant_id = %tenant_id,
-            database = %database_name,
-            collection = %collection_name,
-            "Starting test with resources"
-        );
+    //     // Create unique identifiers for tenant and database
+    //     let test_uuid = uuid::Uuid::new_v4();
+    //     let tenant_id = format!("test_tenant_{}", test_uuid);
+    //     let database_name = format!("test_db_{}", test_uuid);
+    //     let collection_name = format!("test_collection_{}", test_uuid);
 
-        let collection_id = clients
-            .create_database_and_collection(&tenant_id, &database_name, &collection_name)
-            .await
-            .map_err(|e| {
-                tracing::error!(
-                    error = ?e,
-                    tenant_id = %tenant_id,
-                    database = %database_name,
-                    collection = %collection_name,
-                    "Failed to create database and collection"
-                );
-                e
-            })?;
+    //     tracing::info!(
+    //         tenant_id = %tenant_id,
+    //         database = %database_name,
+    //         collection = %collection_name,
+    //         "Starting test with resources"
+    //     );
 
-        tracing::info!(collection_id = %collection_id, "Created collection");
-        println!("Created collection: {}", collection_id);
+    //     let collection_id = clients
+    //         .create_database_and_collection(&tenant_id, &database_name, &collection_name)
+    //         .await
+    //         .map_err(|e| {
+    //             tracing::error!(
+    //                 error = ?e,
+    //                 tenant_id = %tenant_id,
+    //                 database = %database_name,
+    //                 collection = %collection_name,
+    //                 "Failed to create database and collection"
+    //             );
+    //             e
+    //         })?;
 
-        // Create 33 records
-        let mut embeddings = Vec::with_capacity(33);
-        let mut ids = Vec::with_capacity(33);
+    //     tracing::info!(collection_id = %collection_id, "Created collection");
+    //     println!("Created collection: {}", collection_id);
 
-        for i in 0..33 {
-            let mut embedding = vec![0.0; 3];
-            embedding[i % 3] = 1.0;
-            embeddings.push(embedding);
-            ids.push(format!("id{}", i));
-        }
+    //     // Create 33 records
+    //     let mut embeddings = Vec::with_capacity(33);
+    //     let mut ids = Vec::with_capacity(33);
 
-        // Get initial version count
-        let initial_versions = clients
-            .list_collection_versions(&collection_id, &tenant_id, Some(100), None, None)
-            .await?;
-        let initial_version_count = initial_versions.versions.len();
+    //     for i in 0..33 {
+    //         let mut embedding = vec![0.0; 3];
+    //         embedding[i % 3] = 1.0;
+    //         embeddings.push(embedding);
+    //         ids.push(format!("id{}", i));
+    //     }
 
-        tracing::info!(
-            initial_count = initial_version_count,
-            "Initial version count"
-        );
+    //     // Get initial version count
+    //     let initial_versions = clients
+    //         .list_collection_versions(&collection_id, &tenant_id, Some(100), None, None)
+    //         .await?;
+    //     let initial_version_count = initial_versions.versions.len();
 
-        // Add first batch of 11 records
-        tracing::info!("Adding first batch of embeddings");
-        clients
-            .add_embeddings(
-                &collection_id,
-                embeddings[..11].to_vec(),
-                ids[..11].to_vec(),
-            )
-            .await?;
+    //     tracing::info!(
+    //         initial_count = initial_version_count,
+    //         "Initial version count"
+    //     );
 
-        // Wait for new version after first batch
-        wait_for_new_version(
-            &mut clients,
-            &collection_id,
-            &tenant_id,
-            initial_version_count,
-            10,
-        )
-        .await?;
+    //     // Add first batch of 11 records
+    //     tracing::info!("Adding first batch of embeddings");
+    //     clients
+    //         .add_embeddings(
+    //             &collection_id,
+    //             embeddings[..11].to_vec(),
+    //             ids[..11].to_vec(),
+    //         )
+    //         .await?;
 
-        // Add second batch of 11 records
-        tracing::info!("Adding second batch of embeddings");
-        clients
-            .add_embeddings(
-                &collection_id,
-                embeddings[11..22].to_vec(),
-                ids[11..22].to_vec(),
-            )
-            .await?;
-        // Wait for new version after first batch
-        wait_for_new_version(
-            &mut clients,
-            &collection_id,
-            &tenant_id,
-            initial_version_count + 1,
-            10,
-        )
-        .await?;
+    //     // Wait for new version after first batch
+    //     wait_for_new_version(
+    //         &mut clients,
+    //         &collection_id,
+    //         &tenant_id,
+    //         initial_version_count,
+    //         10,
+    //     )
+    //     .await?;
 
-        // After adding second batch and waiting for version, add a third batch
-        tracing::info!("Adding third batch of embeddings (modified records)");
-        clients
-            .add_embeddings(
-                &collection_id,
-                embeddings[22..].to_vec(),
-                ids[22..].to_vec(),
-            )
-            .await?;
+    //     // Add second batch of 11 records
+    //     tracing::info!("Adding second batch of embeddings");
+    //     clients
+    //         .add_embeddings(
+    //             &collection_id,
+    //             embeddings[11..22].to_vec(),
+    //             ids[11..22].to_vec(),
+    //         )
+    //         .await?;
+    //     // Wait for new version after first batch
+    //     wait_for_new_version(
+    //         &mut clients,
+    //         &collection_id,
+    //         &tenant_id,
+    //         initial_version_count + 1,
+    //         10,
+    //     )
+    //     .await?;
 
-        wait_for_new_version(
-            &mut clients,
-            &collection_id,
-            &tenant_id,
-            initial_version_count + 2,
-            10,
-        )
-        .await?;
+    //     // After adding second batch and waiting for version, add a third batch
+    //     tracing::info!("Adding third batch of embeddings (modified records)");
+    //     clients
+    //         .add_embeddings(
+    //             &collection_id,
+    //             embeddings[22..].to_vec(),
+    //             ids[22..].to_vec(),
+    //         )
+    //         .await?;
 
-        // Get version count before GC
-        let versions_before_gc = clients
-            .list_collection_versions(&collection_id, &tenant_id, Some(100), None, None)
-            .await?;
-        let unique_versions_before_gc = versions_before_gc
-            .versions
-            .iter()
-            .map(|v| v.version)
-            .collect::<std::collections::HashSet<_>>()
-            .len();
-        tracing::info!(
-            count = unique_versions_before_gc,
-            "Unique version count before GC"
-        );
+    //     wait_for_new_version(
+    //         &mut clients,
+    //         &collection_id,
+    //         &tenant_id,
+    //         initial_version_count + 2,
+    //         10,
+    //     )
+    //     .await?;
 
-        // Get records from the collection
-        tracing::info!(collection_id = %collection_id, "Getting records from collection");
+    //     // Get version count before GC
+    //     let versions_before_gc = clients
+    //         .list_collection_versions(&collection_id, &tenant_id, Some(100), None, None)
+    //         .await?;
+    //     let unique_versions_before_gc = versions_before_gc
+    //         .versions
+    //         .iter()
+    //         .map(|v| v.version)
+    //         .collect::<std::collections::HashSet<_>>()
+    //         .len();
+    //     tracing::info!(
+    //         count = unique_versions_before_gc,
+    //         "Unique version count before GC"
+    //     );
 
-        let results = clients
-            .get_records(
-                &collection_id,
-                None,
-                true,
-                false,
-                false,
-            )
-            .await
-            .map_err(|e| {
-                tracing::error!(error = ?e, collection_id = %collection_id, "Failed to get records");
-                e
-            })?;
+    //     // Get records from the collection
+    //     tracing::info!(collection_id = %collection_id, "Getting records from collection");
 
-        // Verify results
-        tracing::info!(
-            num_results = results.ids.len(),
-            "Get records results received"
-        );
-        assert_eq!(results.ids.len(), 33, "Expected 33 results");
+    //     let results = clients
+    //         .get_records(
+    //             &collection_id,
+    //             None,
+    //             true,
+    //             false,
+    //             false,
+    //         )
+    //         .await
+    //         .map_err(|e| {
+    //             tracing::error!(error = ?e, collection_id = %collection_id, "Failed to get records");
+    //             e
+    //         })?;
 
-        // Verify all IDs are present
-        for i in 0..33 {
-            let expected_id = format!("id{}", i);
-            assert!(
-                results.ids.contains(&expected_id),
-                "Expected to find {}",
-                expected_id
-            );
-        }
+    //     // Verify results
+    //     tracing::info!(
+    //         num_results = results.ids.len(),
+    //         "Get records results received"
+    //     );
+    //     assert_eq!(results.ids.len(), 33, "Expected 33 results");
 
-        // Verify embeddings
-        if let Some(returned_embeddings) = results.embeddings {
-            assert_eq!(returned_embeddings.len(), 33, "Expected 33 embeddings");
+    //     // Verify all IDs are present
+    //     for i in 0..33 {
+    //         let expected_id = format!("id{}", i);
+    //         assert!(
+    //             results.ids.contains(&expected_id),
+    //             "Expected to find {}",
+    //             expected_id
+    //         );
+    //     }
 
-            for (i, embedding) in returned_embeddings.iter().enumerate() {
-                let expected_index = ids
-                    .iter()
-                    .position(|id| id == &format!("id{}", i))
-                    .expect("ID should exist");
-                assert_eq!(
-                    embedding, &embeddings[expected_index],
-                    "Embedding mismatch for id{}",
-                    i
-                );
-            }
-        } else {
-            panic!("Expected embeddings in results");
-        }
+    //     // Verify embeddings
+    //     if let Some(returned_embeddings) = results.embeddings {
+    //         assert_eq!(returned_embeddings.len(), 33, "Expected 33 embeddings");
 
-        // Get final versions
-        tracing::info!(collection_id = %collection_id, "Requesting final collection versions");
+    //         for (i, embedding) in returned_embeddings.iter().enumerate() {
+    //             let expected_index = ids
+    //                 .iter()
+    //                 .position(|id| id == &format!("id{}", i))
+    //                 .expect("ID should exist");
+    //             assert_eq!(
+    //                 embedding, &embeddings[expected_index],
+    //                 "Embedding mismatch for id{}",
+    //                 i
+    //             );
+    //         }
+    //     } else {
+    //         panic!("Expected embeddings in results");
+    //     }
 
-        let versions_response = clients
-            .list_collection_versions(&collection_id, &tenant_id, Some(10), None, None)
-            .await?;
+    //     // Get final versions
+    //     tracing::info!(collection_id = %collection_id, "Requesting final collection versions");
 
-        tracing::info!("Collection versions:");
-        let mut oldest_version_num = 0;
-        let mut youngest_version_num = 0;
-        for version_info in versions_response.versions.iter() {
-            if version_info.version > oldest_version_num {
-                oldest_version_num = version_info.version;
-            }
-            if version_info.version < youngest_version_num {
-                youngest_version_num = version_info.version;
-            }
-        }
-        println!(
-            "Oldest version: {}, youngest version: {}",
-            oldest_version_num, youngest_version_num
-        );
+    //     let versions_response = clients
+    //         .list_collection_versions(&collection_id, &tenant_id, Some(10), None, None)
+    //         .await?;
 
-        for version in versions_response.versions {
-            tracing::info!(
-                version = version.version,
-                created_at = version.created_at_secs,
-                change_reason = ?version.version_change_reason,
-                marked_for_deletion = version.marked_for_deletion,
-                "Version info"
-            );
+    //     tracing::info!("Collection versions:");
+    //     let mut oldest_version_num = 0;
+    //     let mut youngest_version_num = 0;
+    //     for version_info in versions_response.versions.iter() {
+    //         if version_info.version > oldest_version_num {
+    //             oldest_version_num = version_info.version;
+    //         }
+    //         if version_info.version < youngest_version_num {
+    //             youngest_version_num = version_info.version;
+    //         }
+    //     }
+    //     println!(
+    //         "Oldest version: {}, youngest version: {}",
+    //         oldest_version_num, youngest_version_num
+    //     );
 
-            if let Some(collection_info) = version.collection_info_mutable {
-                tracing::info!(
-                    log_position = collection_info.current_log_position,
-                    collection_version = collection_info.current_collection_version,
-                    last_compaction = collection_info.last_compaction_time_secs,
-                    dimension = collection_info.dimension,
-                    "Collection mutable info"
-                );
-            }
-            println!("For Version: {}", version.version);
-            if let Some(segment_info) = version.segment_info {
-                println!(
-                    "Segment info - Number of segments: {}",
-                    segment_info.segment_compaction_info.len()
-                );
-                tracing::info!(
-                    num_segments = segment_info.segment_compaction_info.len(),
-                    "Segment info"
-                );
+    //     for version in versions_response.versions {
+    //         tracing::info!(
+    //             version = version.version,
+    //             created_at = version.created_at_secs,
+    //             change_reason = ?version.version_change_reason,
+    //             marked_for_deletion = version.marked_for_deletion,
+    //             "Version info"
+    //         );
 
-                // Print detailed information for each segment
-                for (idx, segment) in segment_info.segment_compaction_info.iter().enumerate() {
-                    println!("Segment #{} - ID: {}", idx, segment.segment_id);
-                    tracing::info!(
-                        segment_number = idx,
-                        segment_id = %segment.segment_id,
-                        "Segment details"
-                    );
+    //         if let Some(collection_info) = version.collection_info_mutable {
+    //             tracing::info!(
+    //                 log_position = collection_info.current_log_position,
+    //                 collection_version = collection_info.current_collection_version,
+    //                 last_compaction = collection_info.last_compaction_time_secs,
+    //                 dimension = collection_info.dimension,
+    //                 "Collection mutable info"
+    //             );
+    //         }
+    //         println!("For Version: {}", version.version);
+    //         if let Some(segment_info) = version.segment_info {
+    //             println!(
+    //                 "Segment info - Number of segments: {}",
+    //                 segment_info.segment_compaction_info.len()
+    //             );
+    //             tracing::info!(
+    //                 num_segments = segment_info.segment_compaction_info.len(),
+    //                 "Segment info"
+    //             );
 
-                    // Log file paths for the segment
-                    if !segment.file_paths.is_empty() {
-                        println!(
-                            "Segment #{} - ID: {} - File paths: {:?}",
-                            idx, segment.segment_id, segment.file_paths
-                        );
-                        tracing::info!(
-                            segment_number = idx,
-                            segment_id = %segment.segment_id,
-                            file_paths = ?segment.file_paths,
-                            "Segment file paths"
-                        );
-                    }
-                }
-            }
-        }
+    //             // Print detailed information for each segment
+    //             for (idx, segment) in segment_info.segment_compaction_info.iter().enumerate() {
+    //                 println!("Segment #{} - ID: {}", idx, segment.segment_id);
+    //                 tracing::info!(
+    //                     segment_number = idx,
+    //                     segment_id = %segment.segment_id,
+    //                     "Segment details"
+    //                 );
 
-        tracing::info!(
-            is_truncated = versions_response.list_is_truncated,
-            "Version list complete"
-        );
+    //                 // Log file paths for the segment
+    //                 if !segment.file_paths.is_empty() {
+    //                     println!(
+    //                         "Segment #{} - ID: {} - File paths: {:?}",
+    //                         idx, segment.segment_id, segment.file_paths
+    //                     );
+    //                     tracing::info!(
+    //                         segment_number = idx,
+    //                         segment_id = %segment.segment_id,
+    //                         file_paths = ?segment.file_paths,
+    //                         "Segment file paths"
+    //                     );
+    //                 }
+    //             }
+    //         }
+    //     }
 
-        // After creating versions and verifying records, add garbage collection:
-        tracing::info!("Starting garbage collection process");
+    //     tracing::info!(
+    //         is_truncated = versions_response.list_is_truncated,
+    //         "Version list complete"
+    //     );
 
-        // Create system first
-        let system = System::new();
+    //     // After creating versions and verifying records, add garbage collection:
+    //     tracing::info!("Starting garbage collection process");
 
-        // Create dispatcher and handle
-        let dispatcher = Dispatcher::new(chroma_system::DispatcherConfig::default());
-        let dispatcher_handle = system.start_component(dispatcher);
+    //     // Create system first
+    //     let system = System::new();
 
-        // Create sysdb config and client
-        let sysdb_config = SysDbConfig::Grpc(GrpcSysDbConfig {
-            host: "localhost".to_string(),
-            port: 50051,
-            connect_timeout_ms: 5000,
-            request_timeout_ms: 10000,
-            num_channels: 1,
-        });
+    //     // Create dispatcher and handle
+    //     let dispatcher = Dispatcher::new(chroma_system::DispatcherConfig::default());
+    //     let dispatcher_handle = system.start_component(dispatcher);
 
-        // Initialize sysdb client using config and registry
-        let mut sysdb = SysDb::try_from_config(&sysdb_config, &registry).await?;
+    //     // Create sysdb config and client
+    //     let sysdb_config = SysDbConfig::Grpc(GrpcSysDbConfig {
+    //         host: "localhost".to_string(),
+    //         port: 50051,
+    //         connect_timeout_ms: 5000,
+    //         request_timeout_ms: 10000,
+    //         num_channels: 1,
+    //     });
 
-        // Get collection info for GC from sysdb
-        let collections_to_gc = sysdb.get_collections_to_gc().await?;
-        let collection_info = collections_to_gc
-            .iter()
-            .find(|c| c.id.0.to_string() == collection_id)
-            .expect("Collection should be available for GC");
+    //     // Initialize sysdb client using config and registry
+    //     let mut sysdb = SysDb::try_from_config(&sysdb_config, &registry).await?;
 
-        tracing::info!(
-            "Collection info: {:?} {:?}",
-            collection_info.id,
-            collection_info.version_file_path
-        );
+    //     // Get collection info for GC from sysdb
+    //     let collections_to_gc = sysdb.get_collections_to_gc().await?;
+    //     let collection_info = collections_to_gc
+    //         .iter()
+    //         .find(|c| c.id.0.to_string() == collection_id)
+    //         .expect("Collection should be available for GC");
 
-        // Verify the version file exists before proceeding by attempting to get it
-        let version_file_exists = storage
-            .get(&collection_info.version_file_path)
-            .await
-            .is_ok();
+    //     tracing::info!(
+    //         "Collection info: {:?} {:?}",
+    //         collection_info.id,
+    //         collection_info.version_file_path
+    //     );
 
-        if !version_file_exists {
-            tracing::error!(
-                path = ?collection_info.version_file_path,
-                "Version file does not exist"
-            );
-            return Err("Version file not found".into());
-        }
+    //     // Verify the version file exists before proceeding by attempting to get it
+    //     let version_file_exists = storage
+    //         .get(&collection_info.version_file_path)
+    //         .await
+    //         .is_ok();
 
-        // Create orchestrator with correct version file path
-        let mut orchestrator = GarbageCollectorOrchestrator::new(
-            CollectionUuid::from_str(&collection_id)?,
-            collection_info.version_file_path.clone(),
-            0,     // cutoff_time_hours: immediately expire versions
-            sysdb, // sysdb is already a SysDb, will be boxed by new()
-            dispatcher_handle,
-            storage.clone(), // Clone storage since we'll use it again
-        );
+    //     if !version_file_exists {
+    //         tracing::error!(
+    //             path = ?collection_info.version_file_path,
+    //             "Version file does not exist"
+    //         );
+    //         return Err("Version file not found".into());
+    //     }
 
-        // Create channel for receiving result
-        let (sender, _receiver) = oneshot::channel();
-        orchestrator.set_result_channel(sender);
+    //     // Create orchestrator with correct version file path
+    //     let mut orchestrator = GarbageCollectorOrchestrator::new(
+    //         CollectionUuid::from_str(&collection_id)?,
+    //         collection_info.version_file_path.clone(),
+    //         0,     // cutoff_time_hours: immediately expire versions
+    //         sysdb, // sysdb is already a SysDb, will be boxed by new()
+    //         dispatcher_handle,
+    //         storage.clone(), // Clone storage since we'll use it again
+    //     );
 
-        tracing::info!("Running orchestrator");
-        // Run orchestrator with system
-        orchestrator.run(system).await?;
-        // let gc_result = receiver.await?; // Waiting here is giving error.
+    //     // Create channel for receiving result
+    //     let (sender, _receiver) = oneshot::channel();
+    //     orchestrator.set_result_channel(sender);
 
-        // After running GC and waiting for result, verify versions were deleted
-        tokio::time::sleep(Duration::from_secs(5)).await; // Give some time for GC to complete
+    //     tracing::info!("Running orchestrator");
+    //     // Run orchestrator with system
+    //     orchestrator.run(system).await?;
+    //     // let gc_result = receiver.await?; // Waiting here is giving error.
 
-        let versions_after_gc = clients
-            .list_collection_versions(&collection_id, &tenant_id, Some(100), None, None)
-            .await?;
+    //     // After running GC and waiting for result, verify versions were deleted
+    //     tokio::time::sleep(Duration::from_secs(5)).await; // Give some time for GC to complete
 
-        let unique_versions_after_gc = versions_after_gc
-            .versions
-            .iter()
-            .map(|v| v.version)
-            .collect::<std::collections::HashSet<_>>()
-            .len();
-        println!(
-            "versions after GC: {:?}",
-            versions_after_gc
-                .versions
-                .iter()
-                .map(|v| v.version)
-                .collect::<std::collections::HashSet<_>>()
-        );
+    //     let versions_after_gc = clients
+    //         .list_collection_versions(&collection_id, &tenant_id, Some(100), None, None)
+    //         .await?;
 
-        tracing::info!(
-            before = unique_versions_before_gc,
-            after = unique_versions_after_gc,
-            "Unique version counts before and after GC"
-        );
-        println!(
-            "Unique version counts before and after GC: {} {}",
-            unique_versions_before_gc, unique_versions_after_gc
-        );
+    //     let unique_versions_after_gc = versions_after_gc
+    //         .versions
+    //         .iter()
+    //         .map(|v| v.version)
+    //         .collect::<std::collections::HashSet<_>>()
+    //         .len();
+    //     println!(
+    //         "versions after GC: {:?}",
+    //         versions_after_gc
+    //             .versions
+    //             .iter()
+    //             .map(|v| v.version)
+    //             .collect::<std::collections::HashSet<_>>()
+    //     );
 
-        // Add check for HNSW files
-        // let hnsw_files_after_gc: Vec<_> = storage
-        //     .list_prefix("hnsw")
-        //     .await?
-        //     .into_iter()
-        //     .filter(|path| path.ends_with("header.bin"))
-        //     .collect();
-        let hnsw_prefixes_after_gc: Vec<String> = storage
-            .list_prefix("hnsw")
-            .await?
-            .into_iter()
-            .filter(|path| path.contains("hnsw/"))
-            .map(|path| {
-                path.split("/")
-                    .nth(1) // Get the prefix part after "hnsw/"
-                    .unwrap_or("")
-                    .to_string()
-            })
-            .collect::<std::collections::HashSet<_>>() // Collect into HashSet first
-            .into_iter() // Convert HashSet back to iterator
-            .collect(); // Collect into final Vec
+    //     tracing::info!(
+    //         before = unique_versions_before_gc,
+    //         after = unique_versions_after_gc,
+    //         "Unique version counts before and after GC"
+    //     );
+    //     println!(
+    //         "Unique version counts before and after GC: {} {}",
+    //         unique_versions_before_gc, unique_versions_after_gc
+    //     );
 
-        tracing::info!(
-            count = hnsw_prefixes_after_gc.len(),
-            files = ?hnsw_prefixes_after_gc,
-            "HNSW header files after GC"
-        );
+    //     // Add check for HNSW files
+    //     // let hnsw_files_after_gc: Vec<_> = storage
+    //     //     .list_prefix("hnsw")
+    //     //     .await?
+    //     //     .into_iter()
+    //     //     .filter(|path| path.ends_with("header.bin"))
+    //     //     .collect();
+    //     let hnsw_prefixes_after_gc: Vec<String> = storage
+    //         .list_prefix("hnsw")
+    //         .await?
+    //         .into_iter()
+    //         .filter(|path| path.contains("hnsw/"))
+    //         .map(|path| {
+    //             path.split("/")
+    //                 .nth(1) // Get the prefix part after "hnsw/"
+    //                 .unwrap_or("")
+    //                 .to_string()
+    //         })
+    //         .collect::<std::collections::HashSet<_>>() // Collect into HashSet first
+    //         .into_iter() // Convert HashSet back to iterator
+    //         .collect(); // Collect into final Vec
 
-        assert_eq!(
-            hnsw_prefixes_after_gc.len() - hnsw_prefixes_before_tests.len(),
-            unique_versions_after_gc - 1, // unique_versions_before_gc - unique_versions_after_gc, //
-            "Increase in HNSW prefixes should match the number of versions left behind after GC"
-        );
+    //     tracing::info!(
+    //         count = hnsw_prefixes_after_gc.len(),
+    //         files = ?hnsw_prefixes_after_gc,
+    //         "HNSW header files after GC"
+    //     );
 
-        // Wait a bit for GC to complete
-        tokio::time::sleep(Duration::from_secs(2)).await;
+    //     assert_eq!(
+    //         hnsw_prefixes_after_gc.len() - hnsw_prefixes_before_tests.len(),
+    //         unique_versions_after_gc - 1, // unique_versions_before_gc - unique_versions_after_gc, //
+    //         "Increase in HNSW prefixes should match the number of versions left behind after GC"
+    //     );
 
-        // Verify that deleted files are renamed with the "deleted" prefix if using soft delete
-        let deleted_hnsw_files: Vec<_> = storage
-            .list_prefix("deleted")
-            .await?
-            .into_iter()
-            .filter(|path| path.contains("deleted") && path.contains("header.bin"))
-            .collect();
+    //     // Wait a bit for GC to complete
+    //     tokio::time::sleep(Duration::from_secs(2)).await;
 
-        tracing::info!(
-            count = deleted_hnsw_files.len(),
-            files = ?deleted_hnsw_files,
-            "Soft-deleted HNSW header files"
-        );
+    //     // Verify that deleted files are renamed with the "deleted" prefix if using soft delete
+    //     let deleted_hnsw_files: Vec<_> = storage
+    //         .list_prefix("deleted")
+    //         .await?
+    //         .into_iter()
+    //         .filter(|path| path.contains("deleted") && path.contains("header.bin"))
+    //         .collect();
 
-        // The number of deleted files should match the difference in versions
-        assert_eq!(
-            deleted_hnsw_files.len() - deleted_hnsw_files_before_tests.len(),
-            unique_versions_before_gc - unique_versions_after_gc,
-            "Expected deleted HNSW files to match the number of deleted unique versions"
-        );
+    //     tracing::info!(
+    //         count = deleted_hnsw_files.len(),
+    //         files = ?deleted_hnsw_files,
+    //         "Soft-deleted HNSW header files"
+    //     );
 
-        assert!(
-            unique_versions_after_gc >= 2,
-            "Expected at least 2 unique versions to remain after garbage collection (min_versions_to_keep)"
-        );
+    //     // The number of deleted files should match the difference in versions
+    //     assert_eq!(
+    //         deleted_hnsw_files.len() - deleted_hnsw_files_before_tests.len(),
+    //         unique_versions_before_gc - unique_versions_after_gc,
+    //         "Expected deleted HNSW files to match the number of deleted unique versions"
+    //     );
 
-        tracing::info!("Verifying records are still accessible after GC");
-        let results_after_gc = clients
-            .get_records(
-                &collection_id,
-                None,
-                true,  // include embeddings
-                false, // include metadata
-                false, // include documents
-            )
-            .await
-            .map_err(|e| {
-                tracing::error!(error = ?e, collection_id = %collection_id, "Failed to get records after GC");
-                e
-            })?;
+    //     assert!(
+    //         unique_versions_after_gc >= 2,
+    //         "Expected at least 2 unique versions to remain after garbage collection (min_versions_to_keep)"
+    //     );
 
-        // Verify results count matches pre-GC
-        assert_eq!(
-            results_after_gc.ids.len(),
-            results.ids.len(),
-            "Expected same number of results after GC"
-        );
+    //     tracing::info!("Verifying records are still accessible after GC");
+    //     let results_after_gc = clients
+    //         .get_records(
+    //             &collection_id,
+    //             None,
+    //             true,  // include embeddings
+    //             false, // include metadata
+    //             false, // include documents
+    //         )
+    //         .await
+    //         .map_err(|e| {
+    //             tracing::error!(error = ?e, collection_id = %collection_id, "Failed to get records after GC");
+    //             e
+    //         })?;
 
-        // Verify all IDs are still present
-        for i in 0..33 {
-            let expected_id = format!("id{}", i);
-            assert!(
-                results_after_gc.ids.contains(&expected_id),
-                "Expected to find {} after GC",
-                expected_id
-            );
-        }
+    //     // Verify results count matches pre-GC
+    //     assert_eq!(
+    //         results_after_gc.ids.len(),
+    //         results.ids.len(),
+    //         "Expected same number of results after GC"
+    //     );
 
-        // Verify embeddings are unchanged
-        if let Some(returned_embeddings) = results_after_gc.embeddings {
-            assert_eq!(
-                returned_embeddings.len(),
-                33,
-                "Expected 33 embeddings after GC"
-            );
+    //     // Verify all IDs are still present
+    //     for i in 0..33 {
+    //         let expected_id = format!("id{}", i);
+    //         assert!(
+    //             results_after_gc.ids.contains(&expected_id),
+    //             "Expected to find {} after GC",
+    //             expected_id
+    //         );
+    //     }
 
-            // Compare with original embeddings
-            for (i, embedding) in returned_embeddings.iter().enumerate() {
-                let expected_index = ids
-                    .iter()
-                    .position(|id| id == &format!("id{}", i))
-                    .expect("ID should exist");
-                assert_eq!(
-                    embedding, &embeddings[expected_index],
-                    "Embedding mismatch for id{} after GC",
-                    i
-                );
-            }
-        } else {
-            panic!("Expected embeddings in results after GC");
-        }
+    //     // Verify embeddings are unchanged
+    //     if let Some(returned_embeddings) = results_after_gc.embeddings {
+    //         assert_eq!(
+    //             returned_embeddings.len(),
+    //             33,
+    //             "Expected 33 embeddings after GC"
+    //         );
 
-        tracing::info!("Successfully verified all records are accessible after GC");
+    //         // Compare with original embeddings
+    //         for (i, embedding) in returned_embeddings.iter().enumerate() {
+    //             let expected_index = ids
+    //                 .iter()
+    //                 .position(|id| id == &format!("id{}", i))
+    //                 .expect("ID should exist");
+    //             assert_eq!(
+    //                 embedding, &embeddings[expected_index],
+    //                 "Embedding mismatch for id{} after GC",
+    //                 i
+    //             );
+    //         }
+    //     } else {
+    //         panic!("Expected embeddings in results after GC");
+    //     }
 
-        Ok(())
-    }
+    //     tracing::info!("Successfully verified all records are accessible after GC");
+
+    //     Ok(())
+    // }
 }

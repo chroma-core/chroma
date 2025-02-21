@@ -67,7 +67,7 @@ func init() {
 	// Block store provider
 	Cmd.Flags().StringVar(&conf.BlockStoreProvider, "block-store-provider", "minio", "Block store provider")
 	// Version file
-	Cmd.Flags().BoolVar(&conf.VersionFileEnabled, "version-file-enabled", true, "Enable version file")
+	Cmd.Flags().BoolVar(&conf.VersionFileEnabled, "version-file-enabled", false, "Enable version file")
 }
 
 func exec(*cobra.Command, []string) {
