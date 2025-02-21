@@ -316,7 +316,9 @@ async fn heartbeat(
 ) -> Result<Json<HeartbeatResponse>, ServerError> {
     server.metrics.heartbeat.add(1, &[]);
     let resp = server.frontend.heartbeat().await?;
-    MeterEvent::Heartbeat(resp.nanosecond_heartbeat).submit();
+    MeterEvent::Heartbeat(resp.nanosecond_heartbeat)
+        .submit()
+        .await;
     Ok(Json(resp))
 }
 

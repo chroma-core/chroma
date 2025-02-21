@@ -1,48 +1,39 @@
-use std::sync::LazyLock;
+use std::sync::OnceLock;
 
 use thiserror::Error;
 use tokio::{
     runtime::Handle,
-    sync::mpsc::{unbounded_channel, UnboundedSender},
+    sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
 };
-use tracing::{instrument::WithSubscriber, Event, Subscriber};
-use tracing_subscriber::{
-    layer::{Context, SubscriberExt},
-    registry, Layer,
-};
-
-// NOTE: Metering events should be issued under tokio runtime
-pub static METER_EVENT_SENDER: LazyLock<UnboundedSender<MeterEvent>> = LazyLock::new(|| {
-    let runtime_handle = Handle::current();
-    let (tx, mut rx) = unbounded_channel::<MeterEvent>();
-    runtime_handle.spawn(
-        async move {
-            while let Some(event) = rx.recv().await {
-                event.emit()
-            }
-        }
-        .with_subscriber(registry().with(MeterLayer {})),
-    );
-    tx
-});
+use tonic::async_trait;
+use tracing::{Event, Subscriber};
+use tracing_subscriber::{layer::Context, Layer};
 
 #[derive(Clone, Debug)]
 pub enum MeterEvent {
     Heartbeat(u128),
 }
 
-impl MeterEvent {
-    fn emit(self) {
-        match self {
-            MeterEvent::Heartbeat(epoch) => {
-                tracing::info!(meter_event = "heartbeat", epoch)
-            }
+#[async_trait]
+pub trait MeterEventHandler {
+    async fn handle(&mut self, _event: MeterEvent) {}
+    async fn listen(&mut self, mut rx: UnboundedReceiver<MeterEvent>) {
+        while let Some(event) = rx.recv().await {
+            self.handle(event).await
         }
     }
+}
 
-    pub fn submit(self) {
-        if let Err(err) = METER_EVENT_SENDER.send(self) {
-            tracing::error!("Unable to send meter event: {err}")
+pub static METER_EVENT_SENDER: OnceLock<UnboundedSender<MeterEvent>> = OnceLock::new();
+
+impl MeterEvent {
+    pub async fn submit(self) {
+        if let Some(handler) = METER_EVENT_SENDER.get() {
+            if let Err(err) = handler.send(self) {
+                tracing::error!("Unable to send meter event: {err}")
+            }
+        } else {
+            tracing::error!("Meter event handler is unintialized")
         }
     }
 }
@@ -62,5 +53,21 @@ pub struct MeterLayer {}
 impl<S: Subscriber> Layer<S> for MeterLayer {
     fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
         println!("Intercepted event: {event:?}")
+    }
+}
+
+pub fn init_meter_event_handler(mut handler: impl MeterEventHandler + Send + Sync + 'static) {
+    let (tx, rx) = unbounded_channel();
+    let runtime_handle = Handle::current();
+    runtime_handle.spawn(async move { handler.listen(rx).await });
+    if METER_EVENT_SENDER.set(tx).is_err() {
+        tracing::error!("Meter event handler is already initialized")
+    }
+}
+
+#[async_trait]
+impl MeterEventHandler for () {
+    async fn handle(&mut self, event: MeterEvent) {
+        println!("Metering event: {event:?}")
     }
 }

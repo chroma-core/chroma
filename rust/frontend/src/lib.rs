@@ -17,7 +17,7 @@ use chroma_error::ChromaError;
 use chroma_system::System;
 use chroma_tracing::{
     init_global_filter_layer, init_otel_layer, init_panic_tracing_hook, init_stdout_layer,
-    init_tracing,
+    init_tracing, meter_event::init_meter_event_handler,
 };
 use frontend::Frontend;
 use get_collection_with_segments_provider::*;
@@ -66,6 +66,7 @@ pub async fn frontend_service_entrypoint_with_config(
     ];
     init_tracing(tracing_layers);
     init_panic_tracing_hook();
+    init_meter_event_handler(());
 
     let system = System::new();
     let registry = Registry::new();
