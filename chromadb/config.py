@@ -1,5 +1,7 @@
+import hashlib
 import importlib
 import inspect
+import json
 import logging
 from abc import ABC
 from enum import Enum
@@ -322,6 +324,29 @@ class Settings(BaseSettings):  # type: ignore
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+
+    def __eq__(self, other: "Settings") -> bool:
+        return self.hash() == other.hash()
+
+    def hash(self) -> str:
+        """Generate a hash of the settings, ensuring consistent dict ordering and enum serialization."""
+
+        def serialize(obj):
+            if isinstance(obj, Enum):
+                return obj.value  # Convert Enums to their values
+            if isinstance(obj, dict):
+                return {
+                    k: serialize(v) for k, v in sorted(obj.items())
+                }  # Sort dict keys
+            if isinstance(obj, list):
+                return [serialize(v) for v in obj]  # Recursively handle lists
+            if hasattr(obj, "__dict__"):
+                return obj.__dict__
+            return str(obj)
+
+        data = {k: serialize(v) for k, v in self.dict().items()}
+        json_data = json.dumps(data, sort_keys=True)  # Ensure consistent key order
+        return hashlib.sha256(json_data.encode()).hexdigest()
 
 
 T = TypeVar("T", bound="Component")
