@@ -18,6 +18,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
+      - name: Checkout chroma-hnswlib
+        uses: actions/checkout@v4
+        with:
+          repository: chroma-core/hnswlib
+          path: hnswlib
+
+      - name: Symlink hnswlib to parent directory
+        run: ln -s "$(pwd)/hnswlib" ../hnswlib
+        shell: bash
+
+      - name: Install Protocol Buffers Compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+
       - name: Set up Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
@@ -25,10 +40,10 @@ jobs:
           override: true
 
       - name: Build Linux binary
-        run: cargo build --release --manifest-path=rust/cli/Cargo.toml
+        run: cargo build --bin chroma --release --manifest-path rust/cli/Cargo.toml
 
       - name: Rename binary artifact for Linux
-        run: mv rust/cli/target/release/chroma chroma-linux
+        run: mv target/release/chroma ./chroma-linux
 
       - name: Upload Linux binary artifact
         uses: actions/upload-artifact@v4
@@ -43,6 +58,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
+      - name: Checkout chroma-hnswlib
+        uses: actions/checkout@v4
+        with:
+          repository: chroma-core/hnswlib
+          path: hnswlib
+
+      - name: Create symlink for hnswlib on Windows
+        shell: powershell
+        run: |
+          New-Item -ItemType SymbolicLink -Path "..\hnswlib" -Target "$(Resolve-Path hnswlib)" -Force
+      
+
+      - name: Install Protocol Buffers Compiler
+        run: choco install protoc -y
+
       - name: Set up Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
@@ -50,13 +80,14 @@ jobs:
           override: true
 
       - name: Build Windows binary
-        run: cargo build --release --manifest-path=rust/cli/Cargo.toml
+        run: cargo build --bin chroma --release --manifest-path rust/cli/Cargo.toml
 
       - name: Rename binary artifact for Windows
         shell: powershell
         run: |
-          Move-Item -Path rust\cli\target\release\chroma.exe -Destination chroma-windows.exe -Force
-          Get-ChildItem -Path .
+          Move-Item -Path "target\release\chroma.exe" -Destination ".\chroma-windows.exe" -Force
+          # List files in the parent directory for debugging.
+          Get-ChildItem -Path ..
 
       - name: Upload Windows binary artifact
         uses: actions/upload-artifact@v4
@@ -71,6 +102,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
+      - name: Checkout chroma-hnswlib
+        uses: actions/checkout@v4
+        with:
+          repository: chroma-core/hnswlib
+          path: hnswlib
+
+      - name: Symlink hnswlib to parent directory
+        run: ln -s "$(pwd)/hnswlib" ../hnswlib
+        shell: bash
+
+      - name: Install Protocol Buffers Compiler
+        run: brew install protobuf
+
       - name: Set up Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
@@ -81,16 +125,16 @@ jobs:
         run: rustup target add aarch64-apple-darwin
 
       - name: Build macOS Intel binary
-        run: cargo build --release --manifest-path=rust/cli/Cargo.toml
+        run: cargo build --bin chroma --release
 
       - name: Build macOS ARM64 binary
-        run: cargo build --release --manifest-path=rust/cli/Cargo.toml --target aarch64-apple-darwin
+        run: cargo build --bin chroma --release --target aarch64-apple-darwin --manifest-path rust/cli/Cargo.toml
 
       - name: Rename macOS binaries
         run: |
-          mv rust/cli/target/release/chroma chroma-macos-intel
-          mv rust/cli/target/aarch64-apple-darwin/release/chroma chroma-macos-arm64
-          chmod +x chroma-macos-*
+          mv target/release/chroma ./chroma-macos-intel
+          mv target/aarch64-apple-darwin/release/chroma ./chroma-macos-arm64
+          chmod +x ./chroma-macos-intel ./chroma-macos-arm64
 
       - name: Upload macOS Intel binary artifact
         uses: actions/upload-artifact@v4
@@ -148,7 +192,7 @@ jobs:
           release_name: ${{ steps.release_info.outputs.release_name }}
           body: "CLI release."
           draft: false
-          prerelease: false
+          prerelease: true
 
       - name: Upload Linux binary to release
         uses: actions/upload-release-asset@v1

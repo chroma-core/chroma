@@ -7,6 +7,15 @@ set -e
 #   curl -sSL https://raw.githubusercontent.com/chroma-core/chroma/main/rust/cli/install/install.sh | bash
 # ----------------------------------------------
 
+EXISTING_BIN=$(command -v chroma || true)
+if [ -n "$EXISTING_BIN" ]; then
+  if [ "$EXISTING_BIN" != "/usr/local/bin/chroma" ] && [ "$EXISTING_BIN" != "$HOME/.local/bin/chroma" ]; then
+    echo "Error: Chroma CLI is already installed at ${EXISTING_BIN}."
+    echo "Please remove the existing installation and try again."
+    exit 1
+  fi
+fi
+
 REPO="chroma-core/chroma"
 RELEASE="cli-0.1.0"
 

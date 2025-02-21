@@ -1,5 +1,4 @@
 use chroma_error::{ChromaError, ErrorCodes};
-use pyo3::{types::PyAnyMethods, FromPyObject, IntoPyObject};
 use serde::{Deserialize, Serialize};
 use serde_json::{Number, Value};
 use std::{
@@ -9,6 +8,9 @@ use std::{
 use thiserror::Error;
 
 use crate::chroma_proto;
+
+#[cfg(feature = "python")]
+use pyo3::{types::PyAnyMethods, FromPyObject, IntoPyObject};
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Deserialize, Serialize)]
 #[serde(untagged)]
@@ -20,6 +22,7 @@ pub enum UpdateMetadataValue {
     None,
 }
 
+#[cfg(feature = "python")]
 impl FromPyObject<'_> for UpdateMetadataValue {
     fn extract_bound(ob: &pyo3::Bound<'_, pyo3::PyAny>) -> pyo3::PyResult<Self> {
         if let Ok(value) = ob.extract::<bool>() {
@@ -117,9 +120,8 @@ MetadataValue
 ===========================================
 */
 
-#[derive(
-    Clone, Debug, Deserialize, PartialEq, PartialOrd, Serialize, FromPyObject, IntoPyObject,
-)]
+#[derive(Clone, Debug, Deserialize, PartialEq, PartialOrd, Serialize)]
+#[cfg_attr(feature = "python", derive(FromPyObject, IntoPyObject))]
 #[serde(untagged)]
 pub enum MetadataValue {
     Bool(bool),
