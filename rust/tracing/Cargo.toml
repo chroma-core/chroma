@@ -10,7 +10,6 @@ http = { version = "1", optional = true }
 opentelemetry = { workspace = true }
 opentelemetry-otlp = { workspace = true }
 opentelemetry_sdk = { workspace = true }
-thiserror = { workspace = true }
 tokio = { workspace = true }
 tonic = { workspace = true }
 tower = { workspace = true, optional = true }

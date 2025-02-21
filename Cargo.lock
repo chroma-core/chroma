@@ -1677,7 +1677,6 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
- "thiserror 1.0.69",
  "tokio",
  "tonic",
  "tower 0.5.2",
