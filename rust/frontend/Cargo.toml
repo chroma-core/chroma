@@ -42,3 +42,11 @@ chroma-system = { workspace = true }
 chroma-tracing = { workspace = true }
 chroma-types = { workspace = true }
 chroma-sqlite = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+proptest-state-machine = { workspace = true }
+chroma-types = { workspace = true, features = ["testing"] }
+tempfile = { workspace = true }
+random-port = "0.1.1"
+worker = { workspace = true }

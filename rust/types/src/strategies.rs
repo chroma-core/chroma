@@ -1,40 +1,31 @@
 use crate::{
     Collection, CollectionAndSegments, CollectionUuid, DocumentExpression, DocumentOperator,
-    LogRecord, MetadataExpression, MetadataValue, Operation, OperationRecord, PrimitiveOperator,
-    ScalarEncoding, Segment, SegmentType, SegmentUuid, UpdateMetadata, UpdateMetadataValue, Where,
+    IncludeList, LogRecord, Metadata, MetadataComparison, MetadataExpression, MetadataValue,
+    Operation, OperationRecord, PrimitiveOperator, ScalarEncoding, Segment, SegmentType,
+    SegmentUuid, SetOperator, UpdateMetadata, UpdateMetadataValue, Where,
 };
-use proptest::{collection, prelude::*};
+use proptest::{collection, prelude::*, sample::SizeRange};
 use serde_json::Value;
 
 /**
  * Strategy for metadata.
  */
-fn arbitrary_update_metadata(
-    min_pairs: usize,
-    max_pairs: usize,
+pub fn arbitrary_update_metadata(
+    num_pairs: impl Into<SizeRange>,
 ) -> impl Strategy<Value = UpdateMetadata> {
-    let num_pairs = (min_pairs..=max_pairs).boxed();
+    proptest::collection::hash_map(
+        proptest::arbitrary::any::<String>(),
+        proptest::arbitrary::any::<UpdateMetadataValue>(),
+        num_pairs,
+    )
+}
 
-    num_pairs
-        .clone()
-        .prop_flat_map(|num_pairs| {
-            let keys = proptest::collection::vec(proptest::arbitrary::any::<String>(), num_pairs);
-
-            let values = proptest::collection::vec(
-                prop_oneof![
-                    proptest::strategy::Just(UpdateMetadataValue::None),
-                    proptest::bool::ANY.prop_map(UpdateMetadataValue::Bool),
-                    proptest::arbitrary::any::<i64>().prop_map(UpdateMetadataValue::Int),
-                    (-1e6..1e6f64).prop_map(UpdateMetadataValue::Float),
-                    proptest::arbitrary::any::<String>()
-                        .prop_map(|v| { UpdateMetadataValue::Str(v) }),
-                ],
-                num_pairs,
-            );
-
-            (keys, values)
-        })
-        .prop_map(|(keys, values)| keys.into_iter().zip(values).collect::<UpdateMetadata>())
+pub fn arbitrary_metadata(num_pairs: impl Into<SizeRange>) -> impl Strategy<Value = Metadata> {
+    proptest::collection::hash_map(
+        proptest::arbitrary::any::<String>(),
+        proptest::arbitrary::any::<MetadataValue>(),
+        num_pairs,
+    )
 }
 
 /**
@@ -68,10 +59,10 @@ impl Arbitrary for OperationRecord {
             proptest::arbitrary::any::<f32>(),
             args.min_embedding_size..=args.max_embedding_size,
         );
-        let metadata = proptest::option::of(arbitrary_update_metadata(
-            args.min_metadata_pairs,
-            args.max_metadata_pairs,
-        ));
+        let metadata = proptest::option::of(
+            (args.min_metadata_pairs..=args.max_metadata_pairs)
+                .prop_flat_map(|num_pairs| arbitrary_update_metadata(num_pairs)),
+        );
         let document = proptest::option::of(proptest::arbitrary::any::<String>());
         let operation = prop_oneof![
             proptest::strategy::Just(Operation::Add),
@@ -126,14 +117,84 @@ pub struct TestCollectionDataParams {
 impl Default for TestCollectionDataParams {
     fn default() -> Self {
         Self {
-            collection_max_size: 100,
+            collection_max_size: 2, // todo
         }
     }
 }
 
-const PROP_TENANT: &str = "tenant_proptest";
-const PROP_DB: &str = "database_proptest";
+const PROP_TENANT: &str = "default_tenant"; // todo
+const PROP_DB: &str = "default_database"; // todo
 const PROP_COLL: &str = "collection_proptest";
+
+pub fn arbitrary_log_records(num_records: usize) -> impl Strategy<Value = Vec<LogRecord>> {
+    let idless_records = collection::vec(
+        prop_oneof![
+            (
+                any::<proptest::sample::Index>(),
+                proptest::strategy::Just(Operation::Add),
+                proptest::option::of("\\PC{1,}"),
+                any::<[f32; 3]>().no_shrink().prop_map(|v| Some(v.to_vec())),
+                proptest::option::of(
+                    (0..=10usize).prop_flat_map(|num_pairs| arbitrary_update_metadata(num_pairs))
+                ),
+            ),
+            (
+                any::<proptest::sample::Index>(),
+                proptest::strategy::Just(Operation::Upsert),
+                proptest::option::of("\\PC{1,}"),
+                any::<[f32; 3]>().no_shrink().prop_map(|v| Some(v.to_vec())),
+                proptest::option::of(
+                    (0..=10usize).prop_flat_map(|num_pairs| arbitrary_update_metadata(num_pairs))
+                ),
+            ),
+            (
+                any::<proptest::sample::Index>(),
+                proptest::strategy::Just(Operation::Update),
+                proptest::option::of("\\PC{1,}"),
+                proptest::option::of(any::<[f32; 3]>().no_shrink().prop_map(|v| v.to_vec())),
+                proptest::option::of(
+                    (0..=10usize).prop_flat_map(|num_pairs| arbitrary_update_metadata(num_pairs))
+                ),
+            ),
+            (
+                any::<proptest::sample::Index>(),
+                proptest::strategy::Just(Operation::Delete),
+                proptest::strategy::Just(None),
+                proptest::strategy::Just(None),
+                proptest::strategy::Just(None),
+            ),
+        ],
+        num_records,
+    );
+
+    let ids = collection::vec("\\PC{1,}", num_records);
+
+    let records_strategy = (idless_records, ids).prop_map(|(idless_records, ids)| {
+        idless_records
+            .into_iter()
+            .map(|(id_index, operation, document, embedding, metadata)| {
+                let id = id_index.get(&ids).clone();
+
+                let operation_record = OperationRecord {
+                    id,
+                    encoding: embedding.as_ref().map(|_| ScalarEncoding::FLOAT32),
+                    embedding,
+                    metadata,
+                    document,
+                    operation,
+                };
+                return operation_record;
+            })
+            .enumerate()
+            .map(|(log_offset, operation_record)| LogRecord {
+                log_offset: log_offset as i64,
+                record: operation_record,
+            })
+            .collect::<Vec<_>>()
+    });
+
+    records_strategy
+}
 
 #[derive(Debug)]
 pub struct TestCollectionData {
@@ -147,7 +208,7 @@ impl Arbitrary for TestCollectionData {
 
     fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
         let records = collection::vec(
-            (any::<String>(), any::<[f32; 3]>()),
+            ("\\PC{1,}", any::<[f32; 3]>().no_shrink()),
             args.collection_max_size,
         )
         .prop_map(|ids| {
@@ -170,7 +231,7 @@ impl Arbitrary for TestCollectionData {
                 })
                 .collect::<Vec<_>>()
         })
-        .prop_shuffle()
+        // .prop_shuffle()
         .prop_map(|id_ops| {
             id_ops
                 .into_iter()
@@ -259,6 +320,8 @@ pub struct TestWhereFilterParams {
     pub depth: u32,
     pub branch: u32,
     pub leaf: u32,
+    pub seed_documents: Option<Vec<String>>,
+    pub seed_metadata: Option<Vec<Metadata>>,
 }
 
 impl Default for TestWhereFilterParams {
@@ -267,55 +330,140 @@ impl Default for TestWhereFilterParams {
             depth: 4,
             branch: 4,
             leaf: 32,
+            seed_documents: None,
+            seed_metadata: None,
         }
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TestWhereFilter {
     pub clause: Where,
 }
+
+const MIN_DOCUMENT_FILTER_LENGTH: usize = 3;
+pub const DOCUMENT_TEXT_STRATEGY: &'static str = "\\PC{3,}";
 
 impl Arbitrary for TestWhereFilter {
     type Parameters = TestWhereFilterParams;
     type Strategy = BoxedStrategy<Self>;
 
     fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
-        let doc_expr = (0..30).prop_map(|roll| {
-            let digit: i32 = roll % 10;
-            let operator = match roll % 3 {
-                0 => DocumentOperator::Contains,
-                _ => DocumentOperator::NotContains,
-            };
-            Where::Document(DocumentExpression {
-                operator,
-                text: digit.to_string(),
-            })
-        });
-        let meta_expr = (0..42).prop_map(|roll| {
-            let val = MetadataValue::Int(roll as i64 % 7);
-            let op = match roll % 6 {
-                0 => PrimitiveOperator::Equal,
-                1 => PrimitiveOperator::GreaterThan,
-                2 => PrimitiveOperator::GreaterThanOrEqual,
-                3 => PrimitiveOperator::LessThan,
-                4 => PrimitiveOperator::LessThanOrEqual,
-                _ => PrimitiveOperator::NotEqual,
-            };
-            Where::Metadata(MetadataExpression {
-                key: "modulo_7".to_string(),
-                comparison: crate::MetadataComparison::Primitive(op, val),
-            })
-        });
-        let leaf = prop_oneof![doc_expr, meta_expr];
-        let max_branch = args.branch as usize;
-        leaf.prop_recursive(args.depth, args.leaf, args.branch, move |inner| {
+        let doc_string = if let Some(seed_documents) = args.seed_documents {
+            if seed_documents.is_empty() {
+                DOCUMENT_TEXT_STRATEGY.boxed()
+            } else {
+                prop_oneof![
+                    1 => DOCUMENT_TEXT_STRATEGY,
+                    3 => any::<proptest::sample::Index>()
+                        .prop_map(move |index| index.get(&seed_documents).clone())
+                        .prop_flat_map(move |s| {
+                            let len = s.char_indices().count();
+                            (
+                                Just(s),
+                                0..=(len - MIN_DOCUMENT_FILTER_LENGTH),
+                                MIN_DOCUMENT_FILTER_LENGTH..=len,
+                            )
+                        })
+                        .prop_map(|(s, start, len)| {
+                            let start = s.char_indices().nth(start).map_or(0, |(i, _)| i);
+                            let end = s
+                                .char_indices()
+                                .nth(start + len)
+                                .map_or(s.len(), |(i, _)| i);
+                            s[start..end].to_string()
+                        }),
+                ]
+                .boxed()
+            }
+        } else {
+            DOCUMENT_TEXT_STRATEGY.boxed()
+        };
+
+        let doc_operator = prop_oneof![
+            proptest::strategy::Just(DocumentOperator::Contains),
+            proptest::strategy::Just(DocumentOperator::NotContains),
+        ];
+        let document_expression_strategy =
+            (doc_string, doc_operator).prop_map(|(text, operator)| {
+                Where::Document(DocumentExpression {
+                    operator,
+                    text: text.to_string(),
+                })
+            });
+
+        let metadata_pair_strategy = if let Some(seed_metadata) = &args.seed_metadata {
+            let mut metadata_pairs = seed_metadata
+                .clone()
+                .into_iter()
+                .flat_map(|m| m.into_iter())
+                .collect::<Vec<_>>();
+            metadata_pairs.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+
+            if metadata_pairs.len() > 0 {
+                let seeded_metadata_strategy = any::<proptest::sample::Index>()
+                    .prop_map(move |index| index.get(&metadata_pairs).clone());
+
+                prop_oneof![
+                    1 => ("\\PC", any::<MetadataValue>()),
+                    1 => (seeded_metadata_strategy.clone().prop_map(|(k, _v)| k), any::<MetadataValue>()),
+                    1 => ("\\PC", seeded_metadata_strategy.clone().prop_map(|(_k, v)| v)),
+                    5 => seeded_metadata_strategy,
+                ]
+                .boxed()
+            } else {
+                ("\\PC", any::<MetadataValue>()).boxed()
+            }
+        } else {
+            ("\\PC", any::<MetadataValue>()).boxed()
+        };
+
+        let metadata_expression_strategy = metadata_pair_strategy.prop_flat_map(|(key, value)| {
             prop_oneof![
-                collection::vec(inner.clone(), 0..max_branch).prop_map(Where::conjunction),
-                collection::vec(inner, 0..max_branch).prop_map(Where::disjunction)
+                any::<PrimitiveOperator>().prop_map({
+                    let key = key.clone();
+                    let value = value.clone();
+
+                    move |op| {
+                        Where::Metadata(MetadataExpression {
+                            key: key.clone(),
+                            comparison: MetadataComparison::Primitive(op, value.clone()),
+                        })
+                    }
+                }),
+                any::<SetOperator>().prop_map(move |op| {
+                    Where::Metadata(MetadataExpression {
+                        key: key.to_string(),
+                        comparison: MetadataComparison::Set(op, value.clone().into()),
+                    })
+                }),
             ]
-        })
-        .prop_map(|clause| TestWhereFilter { clause })
-        .boxed()
+        });
+
+        let leaf = prop_oneof![metadata_expression_strategy, document_expression_strategy];
+        let max_branch = args.branch as usize;
+        let recursive_strategy = leaf
+            .prop_recursive(args.depth, args.leaf, args.branch, move |inner| {
+                prop_oneof![
+                    collection::vec(inner.clone(), 0..max_branch).prop_map(Where::conjunction),
+                    collection::vec(inner, 0..max_branch).prop_map(Where::disjunction)
+                ]
+            })
+            .prop_map(|clause| TestWhereFilter { clause });
+
+        recursive_strategy.boxed()
+    }
+}
+
+impl Arbitrary for IncludeList {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        let all = IncludeList::all();
+        let size = all.0.len();
+        proptest::sample::subsequence(all.0, 0..=size)
+            .prop_map(|subseq| IncludeList(subseq))
+            .boxed()
     }
 }

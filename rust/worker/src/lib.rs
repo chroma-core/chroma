@@ -1,5 +1,5 @@
 mod compactor;
-mod server;
+pub mod server;
 mod utils;
 
 use chroma_config::registry::Registry;

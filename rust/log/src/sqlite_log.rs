@@ -496,7 +496,7 @@ mod tests {
     use super::*;
     use chroma_config::{registry::Registry, Configurable};
     use chroma_sqlite::{config::SqliteDBConfig, db::test_utils::new_test_db_persist_path};
-    use chroma_types::{are_metadatas_close_to_equal, CollectionUuid};
+    use chroma_types::{are_update_metadatas_close_to_equal, CollectionUuid};
     use proptest::prelude::*;
 
     use tokio::runtime::Runtime;
@@ -603,7 +603,7 @@ mod tests {
                     assert!(log.record.embedding == operation.embedding);
                     assert!(log.record.encoding == operation.encoding);
                     assert!(
-                        are_metadatas_close_to_equal(
+                        are_update_metadatas_close_to_equal(
                             &received_metadata,
                             &expected_metadata
                         ),
