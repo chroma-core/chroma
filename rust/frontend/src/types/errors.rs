@@ -6,7 +6,9 @@ use axum::{
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{GetCollectionError, UpdateCollectionError};
 use serde::Serialize;
+use std::fmt;
 use thiserror::Error;
+use utoipa::ToSchema;
 
 #[derive(Error, Debug)]
 pub enum ValidationError {
@@ -18,7 +20,7 @@ pub enum ValidationError {
     DimensionMismatch(u32, u32),
     #[error("Error getting collection: {0}")]
     GetCollection(#[from] GetCollectionError),
-    #[error("Error updatding collection: {0}")]
+    #[error("Error updating collection: {0}")]
     UpdateCollection(#[from] UpdateCollectionError),
 }
 
@@ -43,7 +45,13 @@ impl<E: ChromaError + 'static> From<E> for ServerError {
     }
 }
 
-#[derive(Serialize)]
+impl fmt::Display for ServerError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Serialize, ToSchema)]
 pub struct ErrorResponse {
     error: String,
     message: String,

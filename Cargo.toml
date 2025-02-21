@@ -6,7 +6,7 @@ members = ["rust/benchmark", "rust/blockstore", "rust/cache", "rust/chroma", "ru
 [workspace.dependencies]
 arrow = "52.2.0"
 async-trait = "0.1"
-axum = { version = "0.7", features = ["macros"] }
+axum = { version = "0.8", features = ["macros"] }
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 criterion = { version = "0.5", features = ["async_tokio"] }
@@ -38,6 +38,7 @@ tracing-bunyan-formatter = "0.3"
 tracing-opentelemetry = "0.28.0"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1.11.0", features = ["v4", "fast-rng", "macro-diagnostics", "serde"] }
+utoipa = { version = "5.0.0", features = ["macros", "axum_extras", "debug", "uuid"] }
 sqlx = { version = "0.8.3", features = ["runtime-tokio", "sqlite"] }
 sha2 = "0.10.8"
 md5 = "0.7.0"

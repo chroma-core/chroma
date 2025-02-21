@@ -1,10 +1,12 @@
 use crate::{CompositeExpression, DocumentOperator, MetadataExpression, PrimitiveOperator, Where};
 use chroma_error::ChromaError;
 use serde::Deserialize;
+use serde::Serialize;
 use serde_json::Value;
 use thiserror::Error;
+use utoipa::ToSchema;
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, Serialize, ToSchema)]
 pub struct RawWhereFields {
     #[serde(default)]
     r#where: Value,
