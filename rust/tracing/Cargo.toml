@@ -4,18 +4,19 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-tracing-bunyan-formatter = { workspace = true }
 fastrace = "0.7"
 fastrace-opentelemetry = "0.8"
+http = { version = "1", optional = true }
 opentelemetry = { workspace = true }
 opentelemetry-otlp = { workspace = true }
 opentelemetry_sdk = { workspace = true }
+tracing-bunyan-formatter = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 tracing-subscriber = { workspace = true }
 tracing.workspace = true
 tonic = { workspace = true }
 tower = { workspace = true, optional = true }
-http = { version = "1", optional = true }
+valuable = { workspace = true }
 
 [features]
 grpc = ["dep:tower", "dep:http"]

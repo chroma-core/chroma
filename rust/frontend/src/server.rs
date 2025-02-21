@@ -314,7 +314,7 @@ async fn healthcheck(State(server): State<FrontendServer>) -> impl IntoResponse 
 async fn heartbeat(
     State(server): State<FrontendServer>,
 ) -> Result<Json<HeartbeatResponse>, ServerError> {
-    meter!(MeterEvent::Heartbeat, why = "heartbeat is metered");
+    meter!(MeterEvent::Heartbeat(42));
     server.metrics.heartbeat.add(1, &[]);
     Ok(Json(server.frontend.heartbeat().await?))
 }
