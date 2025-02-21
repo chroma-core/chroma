@@ -548,20 +548,10 @@ impl Handler<TaskResult<DeleteVersionsAtSysDbOutput, DeleteVersionsAtSysDbError>
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::helper::ChromaGrpcClients;
-    use chroma_config::registry::Registry;
-    use chroma_config::Configurable;
-    use chroma_storage::config::{
-        ObjectStoreBucketConfig, ObjectStoreConfig, ObjectStoreType, StorageConfig,
-    };
-    use chroma_sysdb::{GrpcSysDbConfig, SysDbConfig};
-    use chroma_system::System;
-    use std::str::FromStr;
     use std::time::Duration;
-    use tokio::sync::oneshot;
-    use tracing_subscriber;
 
+    #[allow(dead_code)]
     async fn wait_for_new_version(
         clients: &mut ChromaGrpcClients,
         collection_id: &str,
