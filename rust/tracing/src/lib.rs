@@ -7,5 +7,3 @@ pub mod util;
 #[cfg(feature = "grpc")]
 pub use grpc_tower::*;
 pub use init_tracer::*;
-
-pub use valuable::Valuable;

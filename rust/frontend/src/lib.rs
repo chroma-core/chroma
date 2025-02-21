@@ -16,7 +16,7 @@ use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
 use chroma_system::System;
 use chroma_tracing::{
-    init_global_filter_layer, init_meter_layer, init_panic_tracing_hook, init_stdout_layer,
+    init_global_filter_layer, init_otel_layer, init_panic_tracing_hook, init_stdout_layer,
     init_tracing,
 };
 use frontend::Frontend;
@@ -61,7 +61,7 @@ pub async fn frontend_service_entrypoint_with_config(
 ) {
     let tracing_layers = vec![
         init_global_filter_layer(),
-        init_meter_layer(),
+        init_otel_layer(&config.service_name, &config.otel_endpoint),
         init_stdout_layer(&config.service_name),
     ];
     init_tracing(tracing_layers);

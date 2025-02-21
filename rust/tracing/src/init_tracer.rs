@@ -13,8 +13,6 @@ use tracing_bunyan_formatter::BunyanFormattingLayer;
 use tracing_subscriber::Registry;
 use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Layer};
 
-use crate::meter_event::{MeterEvent, MeterLayer};
-
 pub fn init_global_filter_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
     EnvFilter::new(std::env::var("RUST_LOG").unwrap_or_else(|_| {
         "error,".to_string()
@@ -42,13 +40,8 @@ pub fn init_global_filter_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
             .map(|s| s.to_string() + "=trace")
             .collect::<Vec<String>>()
             .join(",")
-            + &format!(",{}=info", MeterEvent::trace_target())
     }))
     .boxed()
-}
-
-pub fn init_meter_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
-    MeterLayer {}.boxed()
 }
 
 pub fn init_otel_layer(
@@ -168,7 +161,6 @@ pub fn init_panic_tracing_hook() {
 pub fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
     let layers = vec![
         init_global_filter_layer(),
-        init_meter_layer(),
         init_otel_layer(service_name, otel_endpoint),
         init_stdout_layer(service_name),
     ];
