@@ -1,4 +1,7 @@
-use crate::{executor::config::ExecutorConfig, CollectionsWithSegmentsProviderConfig};
+use crate::{
+    compaction_client::compaction_client::CompactionClientConfig, executor::config::ExecutorConfig,
+    CollectionsWithSegmentsProviderConfig,
+};
 use chroma_log::config::LogConfig;
 use chroma_segment::local_segment_manager::LocalSegmentManagerConfig;
 use chroma_sqlite::config::SqliteDBConfig;
@@ -31,6 +34,7 @@ pub struct FrontendConfig {
     pub scorecard_enabled: bool,
     #[serde(default)]
     pub scorecard: Vec<ScorecardRule>,
+    pub compaction_client: CompactionClientConfig,
 }
 
 const DEFAULT_CONFIG_PATH: &str = "./frontend_config.yaml";
@@ -88,8 +92,8 @@ mod tests {
         let sysdb_config = config.sysdb;
         let sysdb_config = match sysdb_config {
             chroma_sysdb::SysDbConfig::Grpc(grpc_sys_db_config) => grpc_sys_db_config,
-            chroma_sysdb::SysDbConfig::Sqlite(_) => {
-                panic!("Expected grpc sysdb config, got sqlite sysdb config")
+            _ => {
+                panic!("Expected grpc sysdb config")
             }
         };
         assert_eq!(sysdb_config.host, "sysdb.chroma");

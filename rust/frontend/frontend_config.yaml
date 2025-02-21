@@ -9,7 +9,7 @@ sysdb:
 collections_with_segments_provider:
   cache:
     lru:
-      capacity: 1000 
+      capacity: 1000
   permitted_parallelism: 180
   cache_invalidation_retry_policy:
     delay_ms: 0
@@ -20,6 +20,9 @@ log:
     port: 50051
     connect_timeout_ms: 5000
     request_timeout_ms: 5000
+compaction_client:
+  Grpc:
+    url: "compactionservice.chroma:50051" # todo
 executor:
   Distributed:
     connections_per_node: 5

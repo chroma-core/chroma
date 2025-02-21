@@ -146,7 +146,7 @@ k8s_resource('sysdb', resource_deps=['sysdb-migration-sysdb-migration'], labels=
 k8s_resource('frontend-service', resource_deps=['sysdb', 'logservice'],labels=["chroma"], port_forwards='8000:8000')
 k8s_resource('rust-frontend-service', resource_deps=['sysdb', 'logservice'], labels=["chroma"], port_forwards='3000:3000')
 k8s_resource('query-service', resource_deps=['sysdb'], labels=["chroma"], port_forwards='50053:50051')
-k8s_resource('compaction-service', resource_deps=['sysdb'], labels=["chroma"])
+k8s_resource('compaction-service', resource_deps=['sysdb'], labels=["chroma"], port_forwards='50054:50051')
 
 # I have no idea why these need their own lines but the others don't.
 k8s_resource('jaeger', resource_deps=['k8s_setup'], labels=["observability"])

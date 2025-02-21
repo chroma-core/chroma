@@ -13,6 +13,8 @@ sysdb:
   Sqlite:
     log_topic_namespace: "default"
     log_tenant: "default"
+compaction_client:
+  Local:
 collections_with_segments_provider:
   cache:
     nop:

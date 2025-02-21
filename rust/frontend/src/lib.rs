@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 mod ac;
 pub mod auth;
+pub mod compaction_client; // todo
 pub mod config;
 #[allow(dead_code)]
 pub mod executor;
