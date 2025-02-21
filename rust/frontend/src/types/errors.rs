@@ -20,7 +20,7 @@ pub enum ValidationError {
     DimensionMismatch(u32, u32),
     #[error("Error getting collection: {0}")]
     GetCollection(#[from] GetCollectionError),
-    #[error("Error updatding collection: {0}")]
+    #[error("Error updating collection: {0}")]
     UpdateCollection(#[from] UpdateCollectionError),
 }
 
