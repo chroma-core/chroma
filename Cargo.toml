@@ -72,7 +72,7 @@ worker = { path = "rust/worker" }
 # Dev dependencies
 bincode = "1.3.3"
 indicatif = "0.17.9"
-proptest = "1.5.0"
+proptest = "1.6.0"
 proptest-state-machine = "0.3.0"
 proptest-derive = "0.5.1"
 rand = "0.8.5"

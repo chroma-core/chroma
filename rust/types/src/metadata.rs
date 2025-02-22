@@ -11,6 +11,7 @@ use thiserror::Error;
 use crate::chroma_proto;
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Deserialize, Serialize)]
+#[cfg_attr(feature = "testing", derive(proptest_derive::Arbitrary))]
 #[serde(untagged)]
 pub enum UpdateMetadataValue {
     Bool(bool),
@@ -120,6 +121,7 @@ MetadataValue
 #[derive(
     Clone, Debug, Deserialize, PartialEq, PartialOrd, Serialize, FromPyObject, IntoPyObject,
 )]
+#[cfg_attr(feature = "testing", derive(proptest_derive::Arbitrary))]
 #[serde(untagged)]
 pub enum MetadataValue {
     Bool(bool),
@@ -278,7 +280,7 @@ pub type UpdateMetadata = HashMap<String, UpdateMetadataValue>;
 /**
  * Check if two metadata are close to equal. Ignores small differences in float values.
  */
-pub fn are_metadatas_close_to_equal(
+pub fn are_update_metadatas_close_to_equal(
     metadata1: &UpdateMetadata,
     metadata2: &UpdateMetadata,
 ) -> bool {
@@ -291,6 +293,29 @@ pub fn are_metadatas_close_to_equal(
         let other_value = metadata2.get(key).unwrap();
 
         if let (UpdateMetadataValue::Float(value), UpdateMetadataValue::Float(other_value)) =
+            (value, other_value)
+        {
+            if (value - other_value).abs() > 1e-6 {
+                return false;
+            }
+        } else if value != other_value {
+            return false;
+        }
+    }
+
+    true
+}
+
+pub fn are_metadatas_close_to_equal(metadata1: &Metadata, metadata2: &Metadata) -> bool {
+    assert_eq!(metadata1.len(), metadata2.len());
+
+    for (key, value) in metadata1.iter() {
+        if !metadata2.contains_key(key) {
+            return false;
+        }
+        let other_value = metadata2.get(key).unwrap();
+
+        if let (MetadataValue::Float(value), MetadataValue::Float(other_value)) =
             (value, other_value)
         {
             if (value - other_value).abs() > 1e-6 {
@@ -756,6 +781,7 @@ pub enum MetadataComparison {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "testing", derive(proptest_derive::Arbitrary))]
 pub enum PrimitiveOperator {
     Equal,
     NotEqual,
@@ -814,6 +840,7 @@ impl TryFrom<PrimitiveOperator> for chroma_proto::NumberComparator {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "testing", derive(proptest_derive::Arbitrary))]
 pub enum SetOperator {
     In,
     NotIn,
@@ -838,11 +865,23 @@ impl From<SetOperator> for chroma_proto::ListOperator {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "testing", derive(proptest_derive::Arbitrary))]
 pub enum MetadataSetValue {
     Bool(Vec<bool>),
     Int(Vec<i64>),
     Float(Vec<f64>),
     Str(Vec<String>),
+}
+
+impl From<MetadataValue> for MetadataSetValue {
+    fn from(value: MetadataValue) -> Self {
+        match value {
+            MetadataValue::Bool(value) => Self::Bool(vec![value]),
+            MetadataValue::Int(value) => Self::Int(vec![value]),
+            MetadataValue::Float(value) => Self::Float(vec![value]),
+            MetadataValue::Str(value) => Self::Str(vec![value]),
+        }
+    }
 }
 
 // TODO: Deprecate where_document
