@@ -82,7 +82,6 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           command: build
-          args: "--features python"
           sccache: true
       - name: Install built wheel
         shell: bash
