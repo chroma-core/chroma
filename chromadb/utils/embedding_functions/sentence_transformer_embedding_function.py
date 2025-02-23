@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, cast
+from typing import Any, Dict, cast, Optional
 
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 
@@ -14,9 +14,10 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
     # for a full list of options: https://huggingface.co/sentence-transformers, https://www.sbert.net/docs/pretrained_models.html
     def __init__(
         self,
-        model_name: str = "all-MiniLM-L6-v2",
-        device: str = "cpu",
-        normalize_embeddings: bool = False,
+        model_name: Optional[str] = "all-MiniLM-L6-v2",
+        device: Optional[str] = "cpu",
+        normalize_embeddings: Optional[bool] = False,
+        batch_size: Optional[int] = 32,
         **kwargs: Any,
     ):
         """Initialize SentenceTransformerEmbeddingFunction.
@@ -25,6 +26,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
             model_name (str, optional): Identifier of the SentenceTransformer model, defaults to "all-MiniLM-L6-v2"
             device (str, optional): Device used for computation, defaults to "cpu"
             normalize_embeddings (bool, optional): Whether to normalize returned vectors, defaults to False
+            batch_size (int, optional): The batch size used for the computation. This parameter is particularly useful if you encounter a CUDA out of memory error. Defaults to 32.
             **kwargs: Additional arguments to pass to the SentenceTransformer model.
         """
         if model_name not in self.models:
@@ -39,6 +41,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
             )
         self._model = self.models[model_name]
         self._normalize_embeddings = normalize_embeddings
+        self._batch_size = batch_size
 
     def __call__(self, input: Documents) -> Embeddings:
         return cast(
@@ -49,6 +52,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
                     list(input),
                     convert_to_numpy=True,
                     normalize_embeddings=self._normalize_embeddings,
+                    batch_size=self._batch_size
                 )
             ],
         )
