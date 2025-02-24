@@ -9,7 +9,7 @@ use thiserror::Error;
 
 use crate::chroma_proto;
 
-#[cfg(feature = "python")]
+#[cfg(feature = "pyo3")]
 use pyo3::{types::PyAnyMethods, FromPyObject, IntoPyObject};
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Deserialize, Serialize)]
@@ -22,7 +22,7 @@ pub enum UpdateMetadataValue {
     None,
 }
 
-#[cfg(feature = "python")]
+#[cfg(feature = "pyo3")]
 impl FromPyObject<'_> for UpdateMetadataValue {
     fn extract_bound(ob: &pyo3::Bound<'_, pyo3::PyAny>) -> pyo3::PyResult<Self> {
         if let Ok(value) = ob.extract::<bool>() {
@@ -121,7 +121,7 @@ MetadataValue
 */
 
 #[derive(Clone, Debug, Deserialize, PartialEq, PartialOrd, Serialize)]
-#[cfg_attr(feature = "python", derive(FromPyObject, IntoPyObject))]
+#[cfg_attr(feature = "pyo3", derive(FromPyObject, IntoPyObject))]
 #[serde(untagged)]
 pub enum MetadataValue {
     Bool(bool),

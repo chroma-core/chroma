@@ -6,7 +6,7 @@ use serde_json::Value;
 use thiserror::Error;
 use uuid::Uuid;
 
-#[cfg(feature = "python")]
+#[cfg(feature = "pyo3")]
 use pyo3::types::PyAnyMethods;
 
 /// CollectionUuid is a wrapper around Uuid to provide a type for the collection id.
@@ -39,7 +39,7 @@ impl std::fmt::Display for CollectionUuid {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[cfg_attr(feature = "python", pyo3::pyclass)]
+#[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct Collection {
     #[serde(rename(serialize = "id"))]
     pub collection_id: CollectionUuid,
@@ -56,7 +56,7 @@ pub struct Collection {
     pub total_records_post_compaction: u64,
 }
 
-#[cfg(feature = "python")]
+#[cfg(feature = "pyo3")]
 #[pyo3::pymethods]
 impl Collection {
     #[getter]

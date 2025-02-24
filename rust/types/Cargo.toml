@@ -32,4 +32,3 @@ tonic-build = "0.10"
 
 [features]
 testing = ["dep:proptest", "dep:proptest-derive"]
-python = ["pyo3"]

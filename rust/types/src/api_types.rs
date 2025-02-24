@@ -28,7 +28,7 @@ use uuid::Uuid;
 use validator::Validate;
 use validator::ValidationError;
 
-#[cfg(feature = "python")]
+#[cfg(feature = "pyo3")]
 use pyo3::types::PyAnyMethods;
 
 #[derive(Debug, Error)]
@@ -194,7 +194,7 @@ impl GetTenantRequest {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "python", pyo3::pyclass)]
+#[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct GetTenantResponse {
     pub name: String,
 }
@@ -262,14 +262,14 @@ impl ChromaError for CreateDatabaseError {
 }
 
 #[derive(Serialize, Debug)]
-#[cfg_attr(feature = "python", pyo3::pyclass)]
+#[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct Database {
     pub id: Uuid,
     pub name: String,
     pub tenant: String,
 }
 
-#[cfg(feature = "python")]
+#[cfg(feature = "pyo3")]
 #[pyo3::pymethods]
 impl Database {
     #[getter]
@@ -1026,7 +1026,7 @@ impl TryFrom<&str> for Include {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[cfg_attr(feature = "python", pyo3::pyclass)]
+#[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct IncludeList(pub Vec<Include>);
 
 impl IncludeList {
@@ -1131,7 +1131,7 @@ impl GetRequest {
 }
 
 #[derive(Clone, Deserialize, Serialize, Debug)]
-#[cfg_attr(feature = "python", pyo3::pyclass)]
+#[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct GetResponse {
     ids: Vec<String>,
     embeddings: Option<Vec<Vec<f32>>>,
@@ -1142,7 +1142,7 @@ pub struct GetResponse {
     include: Vec<Include>,
 }
 
-#[cfg(feature = "python")]
+#[cfg(feature = "pyo3")]
 #[pyo3::pymethods]
 impl GetResponse {
     #[getter]
@@ -1270,7 +1270,7 @@ impl QueryRequest {
 }
 
 #[derive(Clone, Deserialize, Serialize)]
-#[cfg_attr(feature = "python", pyo3::pyclass)]
+#[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct QueryResponse {
     ids: Vec<Vec<String>>,
     embeddings: Option<Vec<Vec<Option<Vec<f32>>>>>,
@@ -1281,7 +1281,7 @@ pub struct QueryResponse {
     include: Vec<Include>,
 }
 
-#[cfg(feature = "python")]
+#[cfg(feature = "pyo3")]
 #[pyo3::pymethods]
 impl QueryResponse {
     #[getter]

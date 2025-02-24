@@ -36,10 +36,6 @@ fn run(args: RunArgs) {
     });
 }
 
-fn vacuum(path: String) {
-
-}
-
 fn main() {
     let cli = Cli::parse();
 
