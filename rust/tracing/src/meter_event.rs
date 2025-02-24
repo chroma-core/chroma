@@ -9,8 +9,10 @@ use tonic::async_trait;
 #[derive(Clone, Debug)]
 pub enum IoKind {
     Read {
-        collection_size_bytes: u64,
-        query_complexity: u64,
+        collection_record: u32,
+        collection_dim: u32,
+        where_complexity: u32,
+        vector_complexity: u32,
     },
     Write {
         log_bytes: u64,
@@ -51,11 +53,7 @@ pub trait MeterEventHandler {
 }
 
 #[async_trait]
-impl MeterEventHandler for () {
-    async fn handle(&mut self, event: MeterEvent) {
-        println!("Metering event: {event:?}")
-    }
-}
+impl MeterEventHandler for () {}
 
 pub fn init_meter_event_handler(mut handler: impl MeterEventHandler + Send + Sync + 'static) {
     let (tx, rx) = unbounded_channel();

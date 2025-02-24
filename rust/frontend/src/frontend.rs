@@ -31,7 +31,7 @@ use chroma_types::{
     UpdateCollectionError, UpdateCollectionRecordsError, UpdateCollectionRecordsRequest,
     UpdateCollectionRecordsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
     UpdateMetadata, UpdateMetadataValue, UpsertCollectionRecordsError,
-    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, CHROMA_DOCUMENT_KEY,
+    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, Where, CHROMA_DOCUMENT_KEY,
     CHROMA_URI_KEY,
 };
 use opentelemetry::global;
@@ -116,7 +116,7 @@ fn to_records<
             operation,
         };
 
-        total_bytes += record.byte_size();
+        total_bytes += record.size_byte();
 
         records.push(record);
     }
@@ -769,7 +769,7 @@ impl Frontend {
             return Ok(DeleteCollectionRecordsResponse {});
         }
 
-        let log_bytes = records.iter().map(OperationRecord::byte_size).sum();
+        let log_bytes = records.iter().map(OperationRecord::size_byte).sum();
 
         self.log_client
             .push_logs(collection_id, records)
@@ -831,7 +831,12 @@ impl Frontend {
 
     pub async fn retryable_count(
         &mut self,
-        CountRequest { collection_id, .. }: CountRequest,
+        CountRequest {
+            tenant_id,
+            database_name,
+            collection_id,
+            ..
+        }: CountRequest,
     ) -> Result<CountResponse, QueryError> {
         tracing::info!("Retrying count() request for collection {}", collection_id);
         let collection_and_segments = self
@@ -839,14 +844,33 @@ impl Frontend {
             .get_collection_with_segments(collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
-        Ok(self
+        let meter_event = MeterEvent::Collection {
+            tenant_id,
+            database_name,
+            io: IoKind::Read {
+                collection_record: collection_and_segments
+                    .collection
+                    .total_records_post_compaction as u32,
+                collection_dim: collection_and_segments
+                    .collection
+                    .dimension
+                    .as_ref()
+                    .map(|dim| *dim as u32)
+                    .unwrap_or_default(),
+                where_complexity: 0,
+                vector_complexity: 0,
+            },
+        };
+        let res = self
             .executor
             .count(Count {
                 scan: Scan {
                     collection_and_segments,
                 },
             })
-            .await?)
+            .await?;
+        meter_event.submit().await;
+        Ok(res)
     }
 
     pub async fn count(&mut self, request: CountRequest) -> Result<CountResponse, QueryError> {
@@ -891,6 +915,8 @@ impl Frontend {
     async fn retryable_get(
         &mut self,
         GetRequest {
+            tenant_id,
+            database_name,
             collection_id,
             ids,
             r#where,
@@ -906,6 +932,23 @@ impl Frontend {
             .get_collection_with_segments(collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        let meter_event = MeterEvent::Collection {
+            tenant_id,
+            database_name,
+            io: IoKind::Read {
+                collection_record: collection_and_segments
+                    .collection
+                    .total_records_post_compaction as u32,
+                collection_dim: collection_and_segments
+                    .collection
+                    .dimension
+                    .as_ref()
+                    .map(|dim| *dim as u32)
+                    .unwrap_or_default(),
+                where_complexity: r#where.as_ref().map(Where::complexity).unwrap_or_default(),
+                vector_complexity: 0,
+            },
+        };
         let get_result = self
             .executor
             .get(Get {
@@ -929,6 +972,7 @@ impl Frontend {
                 },
             })
             .await?;
+        meter_event.submit().await;
         Ok((get_result, include).into())
     }
 
@@ -974,6 +1018,8 @@ impl Frontend {
     async fn retryable_query(
         &mut self,
         QueryRequest {
+            tenant_id,
+            database_name,
             collection_id,
             ids,
             r#where,
@@ -989,7 +1035,23 @@ impl Frontend {
             .get_collection_with_segments(collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
-
+        let meter_event = MeterEvent::Collection {
+            tenant_id,
+            database_name,
+            io: IoKind::Read {
+                collection_record: collection_and_segments
+                    .collection
+                    .total_records_post_compaction as u32,
+                collection_dim: collection_and_segments
+                    .collection
+                    .dimension
+                    .as_ref()
+                    .map(|dim| *dim as u32)
+                    .unwrap_or_default(),
+                where_complexity: r#where.as_ref().map(Where::complexity).unwrap_or_default(),
+                vector_complexity: embeddings.len() as u32,
+            },
+        };
         let query_result = self
             .executor
             .knn(Knn {
@@ -1016,6 +1078,7 @@ impl Frontend {
                 },
             })
             .await?;
+        meter_event.submit().await;
         Ok((query_result, include).into())
     }
 

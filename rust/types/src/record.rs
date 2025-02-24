@@ -21,14 +21,14 @@ pub struct OperationRecord {
 }
 
 impl OperationRecord {
-    pub fn byte_size(&self) -> u64 {
-        let mut byte_size = 0;
-        byte_size += self.id.len();
+    pub fn size_byte(&self) -> u64 {
+        let mut size_byte = 0;
+        size_byte += self.id.len();
         if let Some(emb) = &self.embedding {
-            byte_size += size_of::<f32>() * emb.len();
+            size_byte += size_of::<f32>() * emb.len();
         }
         if let Some(meta) = &self.metadata {
-            byte_size += meta.iter().fold(0, |acc, (k, v)| {
+            size_byte += meta.iter().fold(0, |acc, (k, v)| {
                 acc + k.len()
                     + match v {
                         UpdateMetadataValue::Bool(b) => size_of_val(b),
@@ -40,9 +40,9 @@ impl OperationRecord {
             });
         }
         if let Some(doc) = &self.document {
-            byte_size += doc.len();
+            size_byte += doc.len();
         }
-        byte_size as u64
+        size_byte as u64
     }
 }
 
