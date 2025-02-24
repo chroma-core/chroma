@@ -830,7 +830,7 @@ impl SpannIndexWriter {
                         new_head_embeddings[k] = Some(&clustering_output.cluster_centers[k]);
                         // Insert to hnsw now.
                         let mut hnsw_write_guard = self.hnsw_index.inner.write();
-                        let hnsw_len = hnsw_write_guard.len();
+                        let hnsw_len = hnsw_write_guard.len_with_deleted();
                         let hnsw_capacity = hnsw_write_guard.capacity();
                         if hnsw_len + 1 > hnsw_capacity {
                             tracing::info!("Resizing hnsw index");
@@ -1363,7 +1363,10 @@ impl SpannIndexFlusher {
         self.pl_flusher
             .flush::<u32, &SpannPostingList<'_>>()
             .await
-            .map_err(|_| SpannIndexWriterError::PostingListFlushError)?;
+            .map_err(|err| {
+                println!("(Sanket-temp) Error flushing posting list: {:?}", err);
+                SpannIndexWriterError::PostingListFlushError
+            })?;
         self.versions_map_flusher
             .flush::<u32, u32>()
             .await
@@ -1375,7 +1378,10 @@ impl SpannIndexFlusher {
         self.hnsw_flusher
             .flush(&self.hnsw_id)
             .await
-            .map_err(|_| SpannIndexWriterError::HnswIndexFlushError)?;
+            .map_err(|err| {
+                println!("(Sanket-temp) Error flushing hnsw index: {:?}", err);
+                SpannIndexWriterError::HnswIndexFlushError
+            })?;
         Ok(res)
     }
 }

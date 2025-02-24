@@ -58,7 +58,7 @@ impl ArrowBlockfileFlusher {
             self.root_manager.flush::<K>(&self.root).await?;
             return Ok(());
         }
-        tracing::debug!("Flushing {} blocks", num_futures);
+        println!("(Sanket-temp) Flushing {} blocks", num_futures);
         futures::stream::iter(futures)
             .buffer_unordered(num_futures)
             .try_collect::<Vec<_>>()

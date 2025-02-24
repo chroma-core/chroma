@@ -72,11 +72,13 @@ random-port = "0.1.1"
 serial_test = { workspace = true }
 criterion = { workspace = true }
 indicatif = { workspace = true }
+ndarray = { version = "0.16.1", features = ["rayon"] }
 proptest = { workspace = true }
 proptest-state-machine = { workspace = true }
 shuttle = { workspace = true }
 rand = { workspace = true }
 rand_xorshift = { workspace = true }
+rayon = "1.10.0"
 tempfile = { workspace = true }
 
 chroma-benchmark = { workspace = true }
