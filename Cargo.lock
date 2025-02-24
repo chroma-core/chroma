@@ -1677,6 +1677,7 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
+ "tokio",
  "tonic",
  "tower 0.5.2",
  "tracing",

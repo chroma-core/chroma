@@ -6,6 +6,7 @@ use axum::{
     routing::{get, post},
     Json, Router, ServiceExt,
 };
+use chroma_tracing::meter_event::MeterEvent;
 use chroma_types::RawWhereFields;
 use chroma_types::{
     AddCollectionRecordsResponse, ChecklistResponse, Collection, CollectionMetadataUpdate,
@@ -314,7 +315,11 @@ async fn heartbeat(
     State(server): State<FrontendServer>,
 ) -> Result<Json<HeartbeatResponse>, ServerError> {
     server.metrics.heartbeat.add(1, &[]);
-    Ok(Json(server.frontend.heartbeat().await?))
+    let resp = server.frontend.heartbeat().await?;
+    MeterEvent::Heartbeat(resp.nanosecond_heartbeat)
+        .submit()
+        .await;
+    Ok(Json(resp))
 }
 
 /// Pre-flight checks endpoint reporting basic readiness info.
