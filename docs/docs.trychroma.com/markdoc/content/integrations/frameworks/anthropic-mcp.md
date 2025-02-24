@@ -3,95 +3,215 @@ id: anthropic-mcp
 name: Anthropic MCP
 ---
 
-# Anthropic MCP
+# Anthropic MCP Integration
 
-The Model Context Protocol (MCP) is an open protocol that standardizes how applications provide context to LLMs. Think of MCP like a USB-C port for AI applications - it provides a standardized way to connect AI models to different data sources and tools.
+## What is MCP?
 
-The Chroma MCP server implements this protocol to allow LLMs like Claude to seamlessly interact with Chroma's vector database capabilities.
+The Model Context Protocol (MCP) is an open protocol that standardizes how AI applications communicate with data sources and tools. Think of MCP like a USB-C port for AI applications - it provides a universal way to connect AI models like Claude to different services and data sources.
 
-## Features
+MCP follows a client-server architecture:
+- **MCP Hosts**: Applications like Claude Desktop that want to access data through MCP
+- **MCP Clients**: Protocol clients that maintain connections with servers
+- **MCP Servers**: Lightweight programs that expose specific capabilities (like Chroma's vector database)
+- **Data Sources**: Your local or remote data that MCP servers can securely access
 
-- Create and manage Chroma collections
-- Add, update, and query documents
-- Perform vector and keyword searches
-- Manage embeddings and metadata
-- Execute batch operations
-- Handle persistent storage
+## What is the Chroma MCP Server?
 
-## Setup
+The Chroma MCP server allows Claude to directly interact with Chroma's vector database capabilities through this standardized protocol. This enables powerful features like:
+
+- Persistent memory across conversations
+- Semantic search through previous chats
+- Document management and retrieval
+- Vector and keyword search capabilities
+- Metadata management and filtering
+
+## Prerequisites
+
+Before setting up the Chroma MCP server, ensure you have:
+
+1. Claude Desktop installed (Windows or macOS)
+2. Python 3.10+ installed
+3. `uvx` installed (`curl -LsSf https://astral.sh/uv/install.sh | sh`)
+
+## Setup Guide
 
 ### 1. Configure MCP Server
 
-Add the following to your `claude_desktop_config.json` to enable the Chroma MCP server:
+1. Open Claude Desktop
+2. Click on the Claude menu and select "Settings..."
+3. Click on "Developer" in the left sidebar
+4. Click "Edit Config" to open your configuration file
+
+Add the following configuration:
 
 ```json
-"chroma": {
-    "command": "uvx",
-    "args": [
+{
+  "mcpServers": {
+    "chroma": {
+      "command": "uvx",
+      "args": [
         "chroma-mcp",
         "--client-type",
         "persistent",
         "--data-dir",
         "/path/to/your/data/directory"
-    ]
+      ]
+    }
+  }
 }
 ```
 
-## Usage
+Replace `/path/to/your/data/directory` with where you want Chroma to store its data, for example:
+- macOS: `/Users/username/Documents/chroma-data`
+- Windows: `C:\\Users\\username\\Documents\\chroma-data`
 
-The MCP server exposes Chroma's core functionality through a standardized interface:
+### 2. Restart and Verify
 
-- Collection Management: Create, delete, and modify collections
-- Document Operations: Add, update, delete documents
-- Search Capabilities: Vector similarity search, keyword search, filtering
-- Metadata Management: Add and query metadata
-- Embedding Generation: Automatic embedding of text content
-- Batch Processing: Efficient handling of multiple operations
+1. Restart Claude Desktop completely
+2. Look for the hammer 🔨 icon in the bottom right of your chat input
+3. Click it to see available Chroma tools
 
-## Example: Adding Memory to Claude Projects
+If you don't see the tools, check the logs at:
+- macOS: `~/Library/Logs/Claude/mcp*.log`
+- Windows: `%APPDATA%\Claude\logs\mcp*.log`
 
-Here's an example of how to use the Chroma MCP server to give Claude persistent memory of conversations.
+## Client Types
 
-### 1. Enable Memory Context
+The Chroma MCP server supports multiple client types to suit different needs:
 
-Add this text to your project context:
-
+### 1. Ephemeral Client
+```json
+{
+  "mcpServers": {
+    "chroma": {
+      "command": "uvx",
+      "args": [
+        "chroma-mcp",
+      ]
+    }
+  }
+}
 ```
-You have access to Chroma tools.
-If the user references previous chats or memory, check chroma for similar conversations.
-If you find similar conversations, use that where possible.
+- Stores data in memory only
+- Data is cleared when the server restarts
+- Useful for temporary sessions or testing
+
+### 2. Persistent Client (Default)
+```json
+{
+  "mcpServers": {
+    "chroma": {
+      "command": "uvx",
+      "args": [
+        "chroma-mcp",
+        "--client-type",
+        "persistent",
+        "--data-dir",
+        "/path/to/your/data/directory"
+      ]
+    }
+  }
+}
 ```
+- Stores data persistently on your local machine
+- Data survives between restarts
+- Best for personal use and long-term memory
 
-### 2. Store Conversations
 
-To store a conversation, tell Claude:
-
+### 3. Self-Hosted Client
+```json
+{
+  "mcpServers": {
+    "chroma": {
+      "command": "uvx",
+      "args": [
+        "chroma-mcp",
+        "--client-type",
+        "http",
+        "--host",
+        "http://localhost:8000"
+      ]
+    }
+  }
+}
 ```
-Chunk our entire conversation into small embeddable text chunks, no longer than a couple lines each.
-Then, add it to the collection for this project.
+- Connects to your own Chroma server
+- Full control over data and infrastructure
+- Suitable for team environments
+
+### 4. Cloud Client
+```json
+{
+  "mcpServers": {
+    "chroma": {
+      "command": "uvx",
+      "args": [
+        "chroma-mcp",
+        "--client-type",
+        "http",
+        "--host",
+        "https://your-chroma-cloud.example.com",
+        "--token",
+        "your-api-token"
+      ]
+    }
+  }
+}
+```
+- Connects to Chroma Cloud or other hosted instances
+- Scalable and managed infrastructure
+- Best for production deployments
+
+## Using Chroma with Claude
+
+### Basic Memory Storage
+
+To store the current conversation:
+```
+Claude, please chunk our conversation into small chunks and store it in Chroma for future reference.
 ```
 
 Claude will automatically:
-- Break conversations into appropriate chunks
-- Generate unique IDs
-- Add relevant metadata and labels
-- Store in Chroma for future reference
+- Break the conversation into appropriate chunks
+- Generate embeddings and unique IDs
+- Add metadata (like timestamps and topics)
+- Store everything in your Chroma collection
 
-### 3. Access Previous Conversations
+### Accessing Previous Conversations
 
-When users reference past discussions, Claude can:
-- Search for semantically similar conversation chunks
-- Use full text search when appropriate
-- Filter results using metadata
-- Incorporate relevant past context into responses
-
-Example query:
+To recall past discussions:
 ```
-Can we continue our conversation about cuda threading?
+Claude, what did we discuss previously about vector databases?
 ```
+
+Claude will:
+1. Search Chroma for semantically similar conversation chunks
+2. Filter results based on relevance
+3. Incorporate previous context into its response
+
+### Advanced Features
+
+The Chroma MCP server supports:
+
+- **Collection Management**: Create and organize separate collections for different projects
+- **Document Operations**: Add, update, or delete documents
+- **Search Capabilities**:
+  - Vector similarity search
+  - Keyword-based search
+  - Metadata filtering
+- **Batch Processing**: Efficient handling of multiple operations
+
+## Troubleshooting
+
+If you encounter issues:
+
+1. Verify your configuration file syntax
+2. Ensure all paths are absolute and valid
+3. Try using full paths for `uvx` with `which uvx` and using that path in the config
+4. Check the Claude logs (paths listed above)
 
 ## Resources
 
+- [Model Context Protocol Documentation](https://modelcontextprotocol.io/introduction)
 - [Chroma MCP Server Documentation](https://github.com/chroma-core/chroma-mcp)
-- [Model Context Protocol Specification](https://github.com/anthropics/anthropic-mcp)
-- [Understanding MCP](https://docs.anthropic.com/claude/docs/model-context-protocol)
+- [Claude Desktop Guide](https://docs.anthropic.com/claude/docs/claude-desktop)
