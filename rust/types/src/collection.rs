@@ -4,6 +4,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 #[cfg(feature = "pyo3")]
@@ -11,7 +12,18 @@ use pyo3::types::PyAnyMethods;
 
 /// CollectionUuid is a wrapper around Uuid to provide a type for the collection id.
 #[derive(
-    Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize,
+    Copy,
+    Clone,
+    Debug,
+    Default,
+    Deserialize,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Hash,
+    Serialize,
+    ToSchema,
 )]
 pub struct CollectionUuid(pub Uuid);
 
@@ -38,7 +50,7 @@ impl std::fmt::Display for CollectionUuid {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct Collection {
     #[serde(rename(serialize = "id"))]

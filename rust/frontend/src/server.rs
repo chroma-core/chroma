@@ -29,6 +29,11 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
+use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityScheme};
+use utoipa::ToSchema;
+use utoipa::{Modify, OpenApi};
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_swagger_ui::SwaggerUi;
 use uuid::Uuid;
 
 use crate::{
@@ -151,9 +156,23 @@ impl FrontendServer {
     #[allow(dead_code)]
     pub async fn run(server: FrontendServer) {
         let circuit_breaker_config = server.config.circuit_breaker.clone();
+
+        let (docs_router, docs_api) =
+            OpenApiRouter::with_openapi(ApiDoc::openapi()).split_for_parts();
+
+        let docs_router = docs_router.merge(SwaggerUi::new("/docs").url("/openapi.json", docs_api));
+
         let app = Router::new()
             // `GET /` goes to `root`
-            .route("/api/v1/*any", get(v1_deprecation_notice).put(v1_deprecation_notice).patch(v1_deprecation_notice).delete(v1_deprecation_notice).head(v1_deprecation_notice).options(v1_deprecation_notice))
+            .route(
+                "/api/v1/{*any}",
+                get(v1_deprecation_notice)
+                    .put(v1_deprecation_notice)
+                    .patch(v1_deprecation_notice)
+                    .delete(v1_deprecation_notice)
+                    .head(v1_deprecation_notice)
+                    .options(v1_deprecation_notice),
+            )
             .route("/api/v2/healthcheck", get(healthcheck))
             .route("/api/v2/heartbeat", get(heartbeat))
             .route("/api/v2/pre-flight-checks", get(pre_flight_checks))
@@ -161,51 +180,60 @@ impl FrontendServer {
             .route("/api/v2/version", get(version))
             .route("/api/v2/auth/identity", get(get_user_identity))
             .route("/api/v2/tenants", post(create_tenant))
-            .route("/api/v2/tenants/:tenant_name", get(get_tenant))
-            .route("/api/v2/tenants/:tenant_id/databases", get(list_databases).post(create_database))
-            .route("/api/v2/tenants/:tenant_id/databases/:name", get(get_database).delete(delete_database))
+            .route("/api/v2/tenants/{tenant_name}", get(get_tenant))
             .route(
-                "/api/v2/tenants/:tenant_id/databases/:database_name/collections",
-               post(create_collection).get(list_collections),
+                "/api/v2/tenants/{tenant}/databases",
+                get(list_databases).post(create_database),
             )
             .route(
-                "/api/v2/tenants/:tenant_id/databases/:database_name/collections_count",
+                "/api/v2/tenants/{tenant}/databases/{database}",
+                get(get_database).delete(delete_database),
+            )
+            .route(
+                "/api/v2/tenants/{tenant}/databases/{database}/collections",
+                post(create_collection).get(list_collections),
+            )
+            .route(
+                "/api/v2/tenants/{tenant}/databases/{database}/collections_count",
                 get(count_collections),
             )
             .route(
-                "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_id",
-                get(get_collection).put(update_collection).delete(delete_collection),
+                "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}",
+                get(get_collection)
+                    .put(update_collection)
+                    .delete(delete_collection),
             )
             .route(
-                "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/add",
+                "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/add",
                 post(collection_add),
             )
             .route(
-                "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/update",
+                "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/update",
                 post(collection_update),
             )
             .route(
-                "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/upsert",
+                "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/upsert",
                 post(collection_upsert),
             )
             .route(
-                "/api/v2/tenants/:tenant/databases/:database_name/collections/:collection_id/delete",
+                "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/delete",
                 post(collection_delete),
             )
             .route(
-                "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_id/count",
+                "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/count",
                 get(collection_count),
             )
             .route(
-                "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_id/get",
+                "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/get",
                 post(collection_get),
             )
             .route(
-                "/api/v2/tenants/:tenant_id/databases/:database_name/collections/:collection_id/query",
+                "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/query",
                 post(collection_query),
             )
+            .merge(docs_router)
             .with_state(server)
-            .layer(DefaultBodyLimit::max(6000000*8)); // TODO: add to server configuration
+            .layer(DefaultBodyLimit::max(6000000 * 8)); // TODO: add to server configuration
         let app = add_tracing_middleware(app);
 
         // TODO: configuration for this
@@ -254,6 +282,15 @@ impl FrontendServer {
 // These handlers simply proxy the call and the relevant inputs into
 // the appropriate method on the `FrontendServer` struct.
 
+/// Health check endpoint that returns 200 if the server and executor are ready
+#[utoipa::path(
+    get,
+    path = "/api/v2/healthcheck",
+    responses(
+        (status = 200, description = "Success", body = String, content_type = "application/json"),
+        (status = 503, description = "Service Unavailable", body = ErrorResponse),
+    )
+)]
 async fn healthcheck(State(server): State<FrontendServer>) -> impl IntoResponse {
     server.metrics.healthcheck.add(1, &[]);
     let res = server.frontend.healthcheck().await;
@@ -261,10 +298,18 @@ async fn healthcheck(State(server): State<FrontendServer>) -> impl IntoResponse 
         tonic::Code::Ok => StatusCode::OK,
         _ => StatusCode::SERVICE_UNAVAILABLE,
     };
-
     (code, Json(res))
 }
 
+/// Heartbeat endpoint that returns a nanosecond timestamp of the current time.
+#[utoipa::path(
+    get,
+    path = "/api/v2/heartbeat",
+    responses(
+        (status = 200, description = "Success", body = HeartbeatResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    )
+)]
 async fn heartbeat(
     State(server): State<FrontendServer>,
 ) -> Result<Json<HeartbeatResponse>, ServerError> {
@@ -272,7 +317,15 @@ async fn heartbeat(
     Ok(Json(server.frontend.heartbeat().await?))
 }
 
-// Dummy implementation for now
+/// Pre-flight checks endpoint reporting basic readiness info.
+#[utoipa::path(
+    get,
+    path = "/api/v2/pre-flight-checks",
+    responses(
+        (status = 200, description = "Pre flight checks", body = ChecklistResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    )
+)]
 async fn pre_flight_checks(
     State(server): State<FrontendServer>,
 ) -> Result<Json<ChecklistResponse>, ServerError> {
@@ -282,6 +335,16 @@ async fn pre_flight_checks(
     }))
 }
 
+/// Reset endpoint allowing authorized users to reset the database.
+#[utoipa::path(
+    post,
+    path = "/api/v2/reset",
+    responses(
+        (status = 200, description = "Reset successful", body = bool),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    )
+)]
 async fn reset(
     headers: HeaderMap,
     State(mut server): State<FrontendServer>,
@@ -302,6 +365,14 @@ async fn reset(
     Ok(Json(true))
 }
 
+/// Returns the version of the server.
+#[utoipa::path(
+    get,
+    path = "/api/v2/version",
+    responses(
+        (status = 200, description = "Get server version", body = String)
+    )
+)]
 async fn version(State(server): State<FrontendServer>) -> Json<String> {
     server.metrics.version.add(1, &[]);
     // TODO: Decide on how to handle versioning across python / rust frontend
@@ -309,6 +380,15 @@ async fn version(State(server): State<FrontendServer>) -> Json<String> {
     Json("0.7.0".to_string())
 }
 
+/// Retrieves the current user's identity, tenant, and databases.
+#[utoipa::path(
+    get,
+    path = "/api/v2/auth/identity",
+    responses(
+        (status = 200, description = "Get user identity", body = GetUserIdentityResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    )
+)]
 async fn get_user_identity(
     headers: HeaderMap,
     State(server): State<FrontendServer>,
@@ -317,11 +397,22 @@ async fn get_user_identity(
     Ok(Json(server.auth.get_user_identity(&headers).await?))
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, ToSchema)]
 struct CreateTenantPayload {
     name: String,
 }
 
+/// Creates a new tenant.
+#[utoipa::path(
+    post,
+    path = "/api/v2/tenants",
+    request_body = CreateTenantPayload,
+    responses(
+        (status = 200, description = "Tenant created successfully", body = CreateTenantResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    )
+)]
 async fn create_tenant(
     headers: HeaderMap,
     State(mut server): State<FrontendServer>,
@@ -344,6 +435,20 @@ async fn create_tenant(
     Ok(Json(server.frontend.create_tenant(request).await?))
 }
 
+/// Returns an existing tenant by name.
+#[utoipa::path(
+    get,
+    path = "/api/v2/tenants/{tenant_name}",
+    params(
+        ("tenant_name" = String, Path, description = "Tenant name or ID to retrieve")
+    ),
+    responses(
+        (status = 200, description = "Tenant found", body = GetTenantResponse),
+        (status = 404, description = "Tenant not found", body = ErrorResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    )
+)]
 async fn get_tenant(
     headers: HeaderMap,
     Path(name): Path<String>,
@@ -366,25 +471,39 @@ async fn get_tenant(
     Ok(Json(server.frontend.get_tenant(request).await?))
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Serialize, ToSchema, Debug)]
 struct CreateDatabasePayload {
     name: String,
 }
 
+/// Creates a new database for a given tenant.
+#[utoipa::path(
+    post,
+    path = "/api/v2/tenants/{tenant}/databases",
+    request_body = CreateDatabasePayload,
+    responses(
+        (status = 200, description = "Database created successfully", body = CreateDatabaseResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant ID to associate with the new database")
+    )
+)]
 async fn create_database(
     headers: HeaderMap,
-    Path(tenant_id): Path<String>,
+    Path(tenant): Path<String>,
     State(mut server): State<FrontendServer>,
     Json(CreateDatabasePayload { name }): Json<CreateDatabasePayload>,
 ) -> Result<Json<CreateDatabaseResponse>, ServerError> {
     server.metrics.create_database.add(1, &[]);
-    tracing::info!("Creating database [{}] for tenant [{}]", name, tenant_id);
+    tracing::info!("Creating database [{}] for tenant [{}]", name, tenant);
     server
         .authenticate_and_authorize(
             &headers,
             AuthzAction::CreateDatabase,
             AuthzResource {
-                tenant: Some(tenant_id.clone()),
+                tenant: Some(tenant.clone()),
                 database: Some(name.clone()),
                 collection: None,
             },
@@ -395,14 +514,12 @@ async fn create_database(
         .get("x-chroma-token")
         .map(|val| val.to_str().unwrap_or_default())
         .map(|val| val.to_string());
-    let mut quota_payload = QuotaPayload::new(Action::CreateDatabase, tenant_id.clone(), api_token);
+    let mut quota_payload = QuotaPayload::new(Action::CreateDatabase, tenant.clone(), api_token);
     quota_payload = quota_payload.with_collection_name(&name);
     server.quota_enforcer.enforce(&quota_payload).await?;
-    let _guard = server.scorecard_request(&[
-        "op:create_database",
-        format!("tenant:{}", tenant_id).as_str(),
-    ]);
-    let create_database_request = CreateDatabaseRequest::try_new(tenant_id, name)?;
+    let _guard =
+        server.scorecard_request(&["op:create_database", format!("tenant:{}", tenant).as_str()]);
+    let create_database_request = CreateDatabaseRequest::try_new(tenant, name)?;
     let res = server
         .frontend
         .create_database(create_database_request)
@@ -410,118 +527,167 @@ async fn create_database(
     Ok(Json(res))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema, Debug)]
 struct ListDatabasesParams {
     limit: Option<u32>,
     #[serde(default)]
     offset: u32,
 }
 
+/// Lists all databases for a given tenant.
+#[utoipa::path(
+    get,
+    path = "/api/v2/tenants/{tenant}/databases",
+    responses(
+        (status = 200, description = "List of databases", body = ListDatabasesResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant ID to list databases for"),
+        ("limit" = Option<u32>, Query, description = "Limit for pagination"),
+        ("offset" = Option<u32>, Query, description = "Offset for pagination")
+    )
+)]
 async fn list_databases(
     headers: HeaderMap,
-    Path(tenant_id): Path<String>,
+    Path(tenant): Path<String>,
     Query(ListDatabasesParams { limit, offset }): Query<ListDatabasesParams>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<ListDatabasesResponse>, ServerError> {
     server.metrics.list_databases.add(1, &[]);
-    tracing::info!("Listing database for tenant [{}]", tenant_id);
+    tracing::info!("Listing database for tenant [{}]", tenant);
     server
         .authenticate_and_authorize(
             &headers,
             AuthzAction::ListDatabases,
             AuthzResource {
-                tenant: Some(tenant_id.clone()),
+                tenant: Some(tenant.clone()),
                 database: None,
                 collection: None,
             },
         )
         .await?;
-    let _guard = server.scorecard_request(&[
-        "op:list_databases",
-        format!("tenant:{}", tenant_id).as_str(),
-    ]);
+    let _guard =
+        server.scorecard_request(&["op:list_databases", format!("tenant:{}", tenant).as_str()]);
 
-    let request = ListDatabasesRequest::try_new(tenant_id, limit, offset)?;
+    let request = ListDatabasesRequest::try_new(tenant, limit, offset)?;
     Ok(Json(server.frontend.list_databases(request).await?))
 }
 
+/// Retrieves a specific database by name.
+#[utoipa::path(
+    get,
+    path = "/api/v2/tenants/{tenant}/databases/{database}",
+    responses(
+        (status = 200, description = "Database retrieved successfully", body = GetDatabaseResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Database not found", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant ID"),
+        ("database" = String, Path, description = "Name of the database to retrieve")
+    )
+)]
 async fn get_database(
     headers: HeaderMap,
-    Path((tenant_id, database_name)): Path<(String, String)>,
+    Path((tenant, database)): Path<(String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<GetDatabaseResponse>, ServerError> {
     server.metrics.get_database.add(1, &[]);
-    tracing::info!(
-        "Getting database [{}] for tenant [{}]",
-        database_name,
-        tenant_id
-    );
+    tracing::info!("Getting database [{}] for tenant [{}]", database, tenant);
     server
         .authenticate_and_authorize(
             &headers,
             AuthzAction::GetDatabase,
             AuthzResource {
-                tenant: Some(tenant_id.clone()),
-                database: Some(database_name.clone()),
+                tenant: Some(tenant.clone()),
+                database: Some(database.clone()),
                 collection: None,
             },
         )
         .await?;
     let _guard =
-        server.scorecard_request(&["op:get_database", format!("tenant:{}", tenant_id).as_str()]);
-    let request = GetDatabaseRequest::try_new(tenant_id, database_name)?;
+        server.scorecard_request(&["op:get_database", format!("tenant:{}", tenant).as_str()]);
+    let request = GetDatabaseRequest::try_new(tenant, database)?;
     let res = server.frontend.get_database(request).await?;
     Ok(Json(res))
 }
 
+/// Deletes a specific database.
+#[utoipa::path(
+    delete,
+    path = "/api/v2/tenants/{tenant}/databases/{database}",
+    responses(
+        (status = 200, description = "Database deleted successfully", body = DeleteDatabaseResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Database not found", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant ID"),
+        ("database" = String, Path, description = "Name of the database to delete")
+    )
+)]
 async fn delete_database(
     headers: HeaderMap,
-    Path((tenant_id, database_name)): Path<(String, String)>,
+    Path((tenant, database)): Path<(String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<DeleteDatabaseResponse>, ServerError> {
     server.metrics.delete_database.add(1, &[]);
-    tracing::info!(
-        "Deleting database [{}] for tenant [{}]",
-        database_name,
-        tenant_id
-    );
+    tracing::info!("Deleting database [{}] for tenant [{}]", database, tenant);
     server
         .authenticate_and_authorize(
             &headers,
             AuthzAction::DeleteDatabase,
             AuthzResource {
-                tenant: Some(tenant_id.clone()),
-                database: Some(database_name.clone()),
+                tenant: Some(tenant.clone()),
+                database: Some(database.clone()),
                 collection: None,
             },
         )
         .await?;
-    let _guard = server.scorecard_request(&[
-        "op:delete_database",
-        format!("tenant:{}", tenant_id).as_str(),
-    ]);
-    let request = DeleteDatabaseRequest::try_new(tenant_id, database_name)?;
+    let _guard =
+        server.scorecard_request(&["op:delete_database", format!("tenant:{}", tenant).as_str()]);
+    let request = DeleteDatabaseRequest::try_new(tenant, database)?;
     Ok(Json(server.frontend.delete_database(request).await?))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 struct ListCollectionsParams {
     limit: Option<u32>,
     #[serde(default)]
     offset: u32,
 }
 
+/// Lists all collections in the specified database.
+#[utoipa::path(
+    get,
+    path = "/api/v2/tenants/{tenant}/databases/{database}/collections",
+    responses(
+        (status = 200, description = "List of collections", body = ListCollectionsResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant ID"),
+        ("database" = String, Path, description = "Database name to list collections from"),
+        ("limit" = Option<u32>, Query, description = "Limit for pagination"),
+        ("offset" = Option<u32>, Query, description = "Offset for pagination")
+    )
+)]
 async fn list_collections(
     headers: HeaderMap,
-    Path((tenant_id, database_name)): Path<(String, String)>,
+    Path((tenant, database)): Path<(String, String)>,
     Query(ListCollectionsParams { limit, offset }): Query<ListCollectionsParams>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<ListCollectionsResponse>, ServerError> {
     server.metrics.list_collections.add(1, &[]);
     tracing::info!(
         "Listing collections in database [{}] for tenant [{}] with limit [{:?}] and offset [{:?}]",
-        database_name,
-        tenant_id,
+        database,
+        tenant,
         limit,
         offset
     );
@@ -530,8 +696,8 @@ async fn list_collections(
             &headers,
             AuthzAction::ListCollections,
             AuthzResource {
-                tenant: Some(tenant_id.clone()),
-                database: Some(database_name.clone()),
+                tenant: Some(tenant.clone()),
+                database: Some(database.clone()),
                 collection: None,
             },
         )
@@ -540,51 +706,59 @@ async fn list_collections(
         .get("x-chroma-token")
         .map(|val| val.to_str().unwrap_or_default())
         .map(|val| val.to_string());
-    let mut quota_payload =
-        QuotaPayload::new(Action::ListCollections, tenant_id.clone(), api_token);
+    let mut quota_payload = QuotaPayload::new(Action::ListCollections, tenant.clone(), api_token);
     if let Some(limit) = limit {
         quota_payload = quota_payload.with_limit(limit);
     }
     server.quota_enforcer.enforce(&quota_payload).await?;
-    let _guard = server.scorecard_request(&[
-        "op:list_collections",
-        format!("tenant:{}", tenant_id).as_str(),
-    ]);
-    let request = ListCollectionsRequest::try_new(tenant_id, database_name, limit, offset)?;
+    let _guard =
+        server.scorecard_request(&["op:list_collections", format!("tenant:{}", tenant).as_str()]);
+    let request = ListCollectionsRequest::try_new(tenant, database, limit, offset)?;
     Ok(Json(server.frontend.list_collections(request).await?))
 }
 
+/// Retrieves the total number of collections in a given database.
+#[utoipa::path(
+    get,
+    path = "/api/v2/tenants/{tenant}/databases/{database}/collections_count",
+    responses(
+        (status = 200, description = "Count of collections", body = CountCollectionsResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant ID"),
+        ("database" = String, Path, description = "Database name to count collections from")
+    )
+)]
 async fn count_collections(
     headers: HeaderMap,
-    Path((tenant_id, database_name)): Path<(String, String)>,
+    Path((tenant, database)): Path<(String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<CountCollectionsResponse>, ServerError> {
     server.metrics.count_collections.add(1, &[]);
-    tracing::info!(
-        "Counting collections in database [{}] for tenant [{}]",
-        database_name,
-        tenant_id
-    );
+    tracing::info!("Counting number of collections in database [{database}] for tenant [{tenant}]",);
     server
         .authenticate_and_authorize(
             &headers,
             AuthzAction::CountCollections,
             AuthzResource {
-                tenant: Some(tenant_id.clone()),
-                database: Some(database_name.clone()),
+                tenant: Some(tenant.clone()),
+                database: Some(database.clone()),
                 collection: None,
             },
         )
         .await?;
     let _guard = server.scorecard_request(&[
         "op:count_collections",
-        format!("tenant:{}", tenant_id).as_str(),
+        format!("tenant:{}", tenant).as_str(),
     ]);
-    let request = CountCollectionsRequest::try_new(tenant_id, database_name)?;
+
+    let request = CountCollectionsRequest::try_new(tenant, database)?;
     Ok(Json(server.frontend.count_collections(request).await?))
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
 pub struct CreateCollectionPayload {
     pub name: String,
     pub configuration: Option<serde_json::Value>,
@@ -592,21 +766,36 @@ pub struct CreateCollectionPayload {
     pub get_or_create: bool,
 }
 
+/// Creates a new collection under the specified database.
+#[utoipa::path(
+    post,
+    path = "/api/v2/tenants/{tenant}/databases/{database}/collections",
+    request_body = CreateCollectionPayload,
+    responses(
+        (status = 200, description = "Collection created successfully", body = Collection),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant ID"),
+        ("database" = String, Path, description = "Database name containing the new collection")
+    )
+)]
 async fn create_collection(
     headers: HeaderMap,
-    Path((tenant_id, database_name)): Path<(String, String)>,
+    Path((tenant, database)): Path<(String, String)>,
     State(mut server): State<FrontendServer>,
     Json(payload): Json<CreateCollectionPayload>,
 ) -> Result<Json<Collection>, ServerError> {
     server.metrics.create_collection.add(1, &[]);
-    tracing::info!("Creating collection in database [{database_name}] for tenant [{tenant_id}]");
+    tracing::info!("Creating collection in database [{database}] for tenant [{tenant}]");
     server
         .authenticate_and_authorize(
             &headers,
             AuthzAction::CreateCollection,
             AuthzResource {
-                tenant: Some(tenant_id.clone()),
-                database: Some(database_name.clone()),
+                tenant: Some(tenant.clone()),
+                database: Some(database.clone()),
                 collection: Some(payload.name.clone()),
             },
         )
@@ -615,8 +804,7 @@ async fn create_collection(
         .get("x-chroma-token")
         .map(|val| val.to_str().unwrap_or_default())
         .map(|val| val.to_string());
-    let mut quota_payload =
-        QuotaPayload::new(Action::CreateCollection, tenant_id.clone(), api_token);
+    let mut quota_payload = QuotaPayload::new(Action::CreateCollection, tenant.clone(), api_token);
     quota_payload = quota_payload.with_collection_name(&payload.name);
     if let Some(metadata) = &payload.metadata {
         quota_payload = quota_payload.with_create_collection_metadata(metadata);
@@ -624,11 +812,11 @@ async fn create_collection(
     server.quota_enforcer.enforce(&quota_payload).await?;
     let _guard = server.scorecard_request(&[
         "op:create_collection",
-        format!("tenant:{}", tenant_id).as_str(),
+        format!("tenant:{}", tenant).as_str(),
     ]);
     let request = CreateCollectionRequest::try_new(
-        tenant_id,
-        database_name,
+        tenant,
+        database,
         payload.name,
         payload.metadata,
         payload.configuration,
@@ -639,54 +827,89 @@ async fn create_collection(
     Ok(Json(collection))
 }
 
+/// Retrieves a collection by ID or name.
+#[utoipa::path(
+    get,
+    path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}",
+    responses(
+        (status = 200, description = "Collection found", body = Collection),
+        (status = 404, description = "Collection not found", body = ErrorResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant ID"),
+        ("database" = String, Path, description = "Database name"),
+        ("collection_id" = String, Path, description = "UUID of the collection")
+    )
+)]
 async fn get_collection(
     headers: HeaderMap,
-    Path((tenant_id, database_name, collection_name)): Path<(String, String, String)>,
+    Path((tenant, database, collection_name)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<Collection>, ServerError> {
     server.metrics.get_collection.add(1, &[]);
-    tracing::info!("Getting collection [{collection_name}] in database [{database_name}] for tenant [{tenant_id}]");
+    tracing::info!(
+        "Getting collection [{collection_name}] in database [{database}] for tenant [{tenant}]"
+    );
     server
         .authenticate_and_authorize(
             &headers,
             AuthzAction::GetCollection,
             AuthzResource {
-                tenant: Some(tenant_id.clone()),
-                database: Some(database_name.clone()),
+                tenant: Some(tenant.clone()),
+                database: Some(database.clone()),
                 collection: Some(collection_name.clone()),
             },
         )
         .await?;
-    let _guard = server.scorecard_request(&[
-        "op:get_collection",
-        format!("tenant:{}", tenant_id).as_str(),
-    ]);
-    let request = GetCollectionRequest::try_new(tenant_id, database_name, collection_name)?;
+    let _guard =
+        server.scorecard_request(&["op:get_collection", format!("tenant:{}", tenant).as_str()]);
+    let request = GetCollectionRequest::try_new(tenant, database, collection_name)?;
     let collection = server.frontend.get_collection(request).await?;
     Ok(Json(collection))
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
 pub struct UpdateCollectionPayload {
     pub new_name: Option<String>,
     pub new_metadata: Option<UpdateMetadata>,
 }
 
+/// Updates an existing collection's name or metadata.
+#[utoipa::path(
+    put,
+    path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}",
+    request_body = UpdateCollectionPayload,
+    responses(
+        (status = 200, description = "Collection updated successfully", body = UpdateCollectionResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Collection not found", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant ID"),
+        ("database" = String, Path, description = "Database name"),
+        ("collection_id" = String, Path, description = "UUID of the collection to update")
+    )
+)]
 async fn update_collection(
     headers: HeaderMap,
-    Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
+    Path((tenant, database, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
     Json(payload): Json<UpdateCollectionPayload>,
 ) -> Result<Json<UpdateCollectionResponse>, ServerError> {
     server.metrics.update_collection.add(1, &[]);
-    tracing::info!("Updating collection [{collection_id}] in database [{database_name}] for tenant [{tenant_id}]");
+    tracing::info!(
+        "Updating collection [{collection_id}] in database [{database}] for tenant [{tenant}]"
+    );
     server
         .authenticate_and_authorize(
             &headers,
             AuthzAction::UpdateCollection,
             AuthzResource {
-                tenant: Some(tenant_id.clone()),
-                database: Some(database_name.clone()),
+                tenant: Some(tenant.clone()),
+                database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
         )
@@ -695,8 +918,7 @@ async fn update_collection(
         .get("x-chroma-token")
         .map(|val| val.to_str().unwrap_or_default())
         .map(|val| val.to_string());
-    let mut quota_payload =
-        QuotaPayload::new(Action::UpdateCollection, tenant_id.clone(), api_token);
+    let mut quota_payload = QuotaPayload::new(Action::UpdateCollection, tenant.clone(), api_token);
     if let Some(new_name) = &payload.new_name {
         quota_payload = quota_payload.with_collection_new_name(new_name);
     }
@@ -706,7 +928,7 @@ async fn update_collection(
     server.quota_enforcer.enforce(&quota_payload).await?;
     let _guard = server.scorecard_request(&[
         "op:update_collection",
-        format!("tenant:{}", tenant_id).as_str(),
+        format!("tenant:{}", tenant).as_str(),
     ]);
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
@@ -724,36 +946,54 @@ async fn update_collection(
     Ok(Json(UpdateCollectionResponse {}))
 }
 
+/// Deletes a collection in a given database.
+#[utoipa::path(
+    delete,
+    path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}",
+    responses(
+        (status = 200, description = "Collection deleted successfully", body = UpdateCollectionResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Collection not found", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant ID"),
+        ("database" = String, Path, description = "Database name"),
+        ("collection_id" = String, Path, description = "UUID of the collection to delete")
+    )
+)]
 async fn delete_collection(
     headers: HeaderMap,
-    Path((tenant_id, database_name, collection_name)): Path<(String, String, String)>,
+    Path((tenant, database, collection_name)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<UpdateCollectionResponse>, ServerError> {
     server.metrics.delete_collection.add(1, &[]);
-    tracing::info!("Deleting collection [{collection_name}] in database [{database_name}] for tenant [{tenant_id}]");
+    tracing::info!(
+        "Deleting collection [{collection_name}] in database [{database}] for tenant [{tenant}]"
+    );
     server
         .authenticate_and_authorize(
             &headers,
             AuthzAction::DeleteCollection,
             AuthzResource {
-                tenant: Some(tenant_id.clone()),
-                database: Some(database_name.clone()),
+                tenant: Some(tenant.clone()),
+                database: Some(database.clone()),
                 collection: Some(collection_name.clone()),
             },
         )
         .await?;
     let _guard = server.scorecard_request(&[
         "op:delete_collection",
-        format!("tenant:{}", tenant_id).as_str(),
+        format!("tenant:{}", tenant).as_str(),
     ]);
     let request =
-        chroma_types::DeleteCollectionRequest::try_new(tenant_id, database_name, collection_name)?;
+        chroma_types::DeleteCollectionRequest::try_new(tenant, database, collection_name)?;
     server.frontend.delete_collection(request).await?;
 
     Ok(Json(UpdateCollectionResponse {}))
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, ToSchema, Debug, Clone)]
 pub struct AddCollectionRecordsPayload {
     ids: Vec<String>,
     embeddings: Option<Vec<Vec<f32>>>,
@@ -762,9 +1002,19 @@ pub struct AddCollectionRecordsPayload {
     metadatas: Option<Vec<Option<Metadata>>>,
 }
 
+/// Adds records to a collection.
+#[utoipa::path(
+    post,
+    path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/add",
+    request_body = AddCollectionRecordsPayload,
+    responses(
+        (status = 201, description = "Collection added successfully", body = AddCollectionRecordsResponse),
+        (status = 400, description = "Invalid data for collection addition")
+    )
+)]
 async fn collection_add(
     headers: HeaderMap,
-    Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
+    Path((tenant, database, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
     Json(payload): Json<AddCollectionRecordsPayload>,
 ) -> Result<Json<AddCollectionRecordsResponse>, ServerError> {
@@ -774,8 +1024,8 @@ async fn collection_add(
             &headers,
             AuthzAction::Add,
             AuthzResource {
-                tenant: Some(tenant_id.clone()),
-                database: Some(database_name.clone()),
+                tenant: Some(tenant.clone()),
+                database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
         )
@@ -786,7 +1036,7 @@ async fn collection_add(
         .get("x-chroma-token")
         .map(|val| val.to_str().unwrap_or_default())
         .map(|val| val.to_string());
-    let mut quota_payload = QuotaPayload::new(Action::Add, tenant_id.clone(), api_token);
+    let mut quota_payload = QuotaPayload::new(Action::Add, tenant.clone(), api_token);
     quota_payload = quota_payload.with_ids(&payload.ids);
     if let Some(embeddings) = &payload.embeddings {
         quota_payload = quota_payload.with_add_embeddings(embeddings);
@@ -804,13 +1054,13 @@ async fn collection_add(
     server.quota_enforcer.enforce(&quota_payload).await?;
     let _guard = server.scorecard_request(&[
         "op:write",
-        format!("tenant:{}", tenant_id).as_str(),
+        format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
     ]);
 
     let request = chroma_types::AddCollectionRecordsRequest::try_new(
-        tenant_id,
-        database_name,
+        tenant,
+        database,
         collection_id,
         payload.ids,
         payload.embeddings,
@@ -824,7 +1074,7 @@ async fn collection_add(
     Ok(Json(res))
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, ToSchema, Serialize)]
 pub struct UpdateCollectionRecordsPayload {
     ids: Vec<String>,
     embeddings: Option<Vec<Option<Vec<f32>>>>,
@@ -833,9 +1083,19 @@ pub struct UpdateCollectionRecordsPayload {
     metadatas: Option<Vec<Option<UpdateMetadata>>>,
 }
 
+/// Updates records in a collection by ID.
+#[utoipa::path(
+    post,
+    path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/update",
+    request_body = UpdateCollectionRecordsPayload,
+    responses(
+        (status = 200, description = "Collection updated successfully", body = UpdateCollectionRecordsResponse),
+        (status = 404, description = "Collection not found")
+    )
+)]
 async fn collection_update(
     headers: HeaderMap,
-    Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
+    Path((tenant, database, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
     Json(payload): Json<UpdateCollectionRecordsPayload>,
 ) -> Result<Json<UpdateCollectionRecordsResponse>, ServerError> {
@@ -845,8 +1105,8 @@ async fn collection_update(
             &headers,
             AuthzAction::Update,
             AuthzResource {
-                tenant: Some(tenant_id.clone()),
-                database: Some(database_name.clone()),
+                tenant: Some(tenant.clone()),
+                database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
         )
@@ -857,7 +1117,7 @@ async fn collection_update(
         .get("x-chroma-token")
         .map(|val| val.to_str().unwrap_or_default())
         .map(|val| val.to_string());
-    let mut quota_payload = QuotaPayload::new(Action::Update, tenant_id.clone(), api_token);
+    let mut quota_payload = QuotaPayload::new(Action::Update, tenant.clone(), api_token);
     quota_payload = quota_payload.with_ids(&payload.ids);
     if let Some(embeddings) = &payload.embeddings {
         quota_payload = quota_payload.with_update_embeddings(embeddings);
@@ -874,13 +1134,13 @@ async fn collection_update(
     server.quota_enforcer.enforce(&quota_payload).await?;
     let _guard = server.scorecard_request(&[
         "op:write",
-        format!("tenant:{}", tenant_id).as_str(),
+        format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
     ]);
 
     let request = chroma_types::UpdateCollectionRecordsRequest::try_new(
-        tenant_id,
-        database_name,
+        tenant,
+        database,
         collection_id,
         payload.ids,
         payload.embeddings,
@@ -892,7 +1152,7 @@ async fn collection_update(
     Ok(Json(server.frontend.update(request).await?))
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, ToSchema, Serialize)]
 pub struct UpsertCollectionRecordsPayload {
     ids: Vec<String>,
     embeddings: Option<Vec<Vec<f32>>>,
@@ -901,9 +1161,26 @@ pub struct UpsertCollectionRecordsPayload {
     metadatas: Option<Vec<Option<UpdateMetadata>>>,
 }
 
+/// Upserts records in a collection (create if not exists, otherwise update).
+#[utoipa::path(
+    post,
+    path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/upsert",
+    request_body = UpsertCollectionRecordsPayload,
+    responses(
+        (status = 200, description = "Records upserted successfully", body = UpsertCollectionRecordsResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Collection not found", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse),
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant ID"),
+        ("database" = String, Path, description = "Database name"),
+        ("collection_id" = String, Path, description = "Collection ID"),
+    )
+)]
 async fn collection_upsert(
     headers: HeaderMap,
-    Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
+    Path((tenant, database, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
     Json(payload): Json<UpsertCollectionRecordsPayload>,
 ) -> Result<Json<UpsertCollectionRecordsResponse>, ServerError> {
@@ -913,8 +1190,8 @@ async fn collection_upsert(
             &headers,
             AuthzAction::Update,
             AuthzResource {
-                tenant: Some(tenant_id.clone()),
-                database: Some(database_name.clone()),
+                tenant: Some(tenant.clone()),
+                database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
         )
@@ -925,7 +1202,7 @@ async fn collection_upsert(
         .get("x-chroma-token")
         .map(|val| val.to_str().unwrap_or_default())
         .map(|val| val.to_string());
-    let mut quota_payload = QuotaPayload::new(Action::Upsert, tenant_id.clone(), api_token);
+    let mut quota_payload = QuotaPayload::new(Action::Upsert, tenant.clone(), api_token);
     quota_payload = quota_payload.with_ids(&payload.ids);
     if let Some(embeddings) = &payload.embeddings {
         quota_payload = quota_payload.with_add_embeddings(embeddings);
@@ -943,13 +1220,13 @@ async fn collection_upsert(
     server.quota_enforcer.enforce(&quota_payload).await?;
     let _guard = server.scorecard_request(&[
         "op:write",
-        format!("tenant:{}", tenant_id).as_str(),
+        format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
     ]);
 
     let request = chroma_types::UpsertCollectionRecordsRequest::try_new(
-        tenant_id,
-        database_name,
+        tenant,
+        database,
         collection_id,
         payload.ids,
         payload.embeddings,
@@ -961,16 +1238,33 @@ async fn collection_upsert(
     Ok(Json(server.frontend.upsert(request).await?))
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, ToSchema, Serialize)]
 pub struct DeleteCollectionRecordsPayload {
     ids: Option<Vec<String>>,
     #[serde(flatten)]
     where_fields: RawWhereFields,
 }
 
+/// Deletes records in a collection. Can filter by IDs or metadata.
+#[utoipa::path(
+    post,
+    path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/delete",
+    request_body = DeleteCollectionRecordsPayload,
+    responses(
+        (status = 200, description = "Records deleted successfully", body = DeleteCollectionRecordsResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Collection not found", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse),
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant ID"),
+        ("database" = String, Path, description = "Database name"),
+        ("collection_id" = String, Path, description = "Collection ID"),
+    )
+)]
 async fn collection_delete(
     headers: HeaderMap,
-    Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
+    Path((tenant, database, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
     Json(payload): Json<DeleteCollectionRecordsPayload>,
 ) -> Result<Json<DeleteCollectionRecordsResponse>, ServerError> {
@@ -980,8 +1274,8 @@ async fn collection_delete(
             &headers,
             AuthzAction::Delete,
             AuthzResource {
-                tenant: Some(tenant_id.clone()),
-                database: Some(database_name.clone()),
+                tenant: Some(tenant.clone()),
+                database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
         )
@@ -993,7 +1287,7 @@ async fn collection_delete(
         .get("x-chroma-token")
         .map(|val| val.to_str().unwrap_or_default())
         .map(|val| val.to_string());
-    let mut quota_payload = QuotaPayload::new(Action::Delete, tenant_id.clone(), api_token);
+    let mut quota_payload = QuotaPayload::new(Action::Delete, tenant.clone(), api_token);
     if let Some(ids) = &payload.ids {
         quota_payload = quota_payload.with_ids(ids);
     }
@@ -1003,13 +1297,13 @@ async fn collection_delete(
     server.quota_enforcer.enforce(&quota_payload).await?;
     let _guard = server.scorecard_request(&[
         "op:write",
-        format!("tenant:{}", tenant_id).as_str(),
+        format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
     ]);
 
     let request = chroma_types::DeleteCollectionRecordsRequest::try_new(
-        tenant_id,
-        database_name,
+        tenant,
+        database,
         collection_id,
         payload.ids,
         r#where,
@@ -1020,49 +1314,65 @@ async fn collection_delete(
     Ok(Json(DeleteCollectionRecordsResponse {}))
 }
 
+/// Retrieves the number of records in a collection.
+#[utoipa::path(
+    get,
+    path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/count",
+    responses(
+        (status = 200, description = "Number of records in the collection", body = CountResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Collection not found", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant ID for the collection"),
+        ("database" = String, Path, description = "Database containing this collection"),
+        ("collection_id" = String, Path, description = "Collection ID whose records are counted")
+    )
+)]
 async fn collection_count(
     headers: HeaderMap,
-    Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
+    Path((tenant, database, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<CountResponse>, ServerError> {
     server.metrics.collection_count.add(
         1,
         &[
-            KeyValue::new("tenant_id", tenant_id.clone()),
-            KeyValue::new("database_name", database_name.clone()),
+            KeyValue::new("tenant", tenant.clone()),
+            KeyValue::new("database", database.clone()),
             KeyValue::new("collection_id", collection_id.clone()),
         ],
     );
     tracing::info!(
-        "Counting number of records in collection [{collection_id}] in database [{database_name}] for tenant [{tenant_id}]",
+        "Counting number of records in collection [{collection_id}] in database [{database}] for tenant [{tenant}]",
     );
     server
         .authenticate_and_authorize(
             &headers,
             AuthzAction::Count,
             AuthzResource {
-                tenant: Some(tenant_id.clone()),
-                database: Some(database_name.clone()),
+                tenant: Some(tenant.clone()),
+                database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
         )
         .await?;
     let _guard = server.scorecard_request(&[
         "op:read",
-        format!("tenant:{}", tenant_id).as_str(),
+        format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
     ]);
 
     let request = CountRequest::try_new(
-        tenant_id,
-        database_name,
+        tenant,
+        database,
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
     )?;
 
     Ok(Json(server.frontend.count(request).await?))
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct GetRequestPayload {
     ids: Option<Vec<String>>,
     #[serde(flatten)]
@@ -1073,16 +1383,33 @@ pub struct GetRequestPayload {
     include: IncludeList,
 }
 
+/// Retrieves records from a collection by ID or metadata filter.
+#[utoipa::path(
+    post,
+    path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/get",
+    request_body = GetRequestPayload,
+    responses(
+        (status = 200, description = "Records retrieved from the collection", body = GetResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Collection not found", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant ID"),
+        ("database" = String, Path, description = "Database name for the collection"),
+        ("collection_id" = String, Path, description = "Collection ID to fetch records from")
+    )
+)]
 async fn collection_get(
     headers: HeaderMap,
-    Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
+    Path((tenant, database, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
     Json(payload): Json<GetRequestPayload>,
 ) -> Result<Json<GetResponse>, ServerError> {
     server.metrics.collection_get.add(
         1,
         &[
-            KeyValue::new("tenant_id", tenant_id.clone()),
+            KeyValue::new("tenant", tenant.clone()),
             KeyValue::new("collection_id", collection_id.clone()),
         ],
     );
@@ -1091,8 +1418,8 @@ async fn collection_get(
             &headers,
             AuthzAction::Get,
             AuthzResource {
-                tenant: Some(tenant_id.clone()),
-                database: Some(database_name.clone()),
+                tenant: Some(tenant.clone()),
+                database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
         )
@@ -1104,7 +1431,7 @@ async fn collection_get(
         .get("x-chroma-token")
         .map(|val| val.to_str().unwrap_or_default())
         .map(|val| val.to_string());
-    let mut quota_payload = QuotaPayload::new(Action::Get, tenant_id.clone(), api_token);
+    let mut quota_payload = QuotaPayload::new(Action::Get, tenant.clone(), api_token);
     if let Some(ids) = &payload.ids {
         quota_payload = quota_payload.with_ids(ids);
     }
@@ -1116,16 +1443,16 @@ async fn collection_get(
     }
     server.quota_enforcer.enforce(&quota_payload).await?;
     tracing::info!(
-        "Getting records from collection [{collection_id}] in database [{database_name}] for tenant [{tenant_id}]",
+        "Getting records from collection [{collection_id}] in database [{database}] for tenant [{tenant}]",
     );
     let _guard = server.scorecard_request(&[
         "op:read",
-        format!("tenant:{}", tenant_id).as_str(),
+        format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
     ]);
     let request = GetRequest::try_new(
-        tenant_id,
-        database_name,
+        tenant,
+        database,
         collection_id,
         payload.ids,
         parsed_where,
@@ -1137,7 +1464,7 @@ async fn collection_get(
     Ok(Json(res))
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, Serialize, ToSchema)]
 pub struct QueryRequestPayload {
     ids: Option<Vec<String>>,
     #[serde(flatten)]
@@ -1148,16 +1475,35 @@ pub struct QueryRequestPayload {
     include: IncludeList,
 }
 
+/// Query a collection in a variety of ways, including vector search, metadata filtering, and full-text search
+#[utoipa::path(
+    post,
+    path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/query",
+    request_body = QueryRequestPayload,
+    responses(
+        (status = 200, description = "Records matching the query", body = QueryResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Collection not found", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse),
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant ID"),
+        ("database" = String, Path, description = "Database name containing the collection"),
+        ("collection_id" = String, Path, description = "Collection ID to query"),
+        ("limit" = Option<u32>, Query, description = "Limit for pagination"),
+        ("offset" = Option<u32>, Query, description = "Offset for pagination")
+    )
+)]
 async fn collection_query(
     headers: HeaderMap,
-    Path((tenant_id, database_name, collection_id)): Path<(String, String, String)>,
+    Path((tenant, database, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
     Json(payload): Json<QueryRequestPayload>,
 ) -> Result<Json<QueryResponse>, ServerError> {
     server.metrics.collection_query.add(
         1,
         &[
-            KeyValue::new("tenant_id", tenant_id.clone()),
+            KeyValue::new("tenant", tenant.clone()),
             KeyValue::new("collection_id", collection_id.clone()),
         ],
     );
@@ -1166,8 +1512,8 @@ async fn collection_query(
             &headers,
             AuthzAction::Query,
             AuthzResource {
-                tenant: Some(tenant_id.clone()),
-                database: Some(database_name.clone()),
+                tenant: Some(tenant.clone()),
+                database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
         )
@@ -1179,7 +1525,7 @@ async fn collection_query(
         .get("x-chroma-token")
         .map(|val| val.to_str().unwrap_or_default())
         .map(|val| val.to_string());
-    let mut quota_payload = QuotaPayload::new(Action::Query, tenant_id.clone(), api_token);
+    let mut quota_payload = QuotaPayload::new(Action::Query, tenant.clone(), api_token);
     if let Some(ids) = &payload.ids {
         quota_payload = quota_payload.with_ids(ids);
     }
@@ -1192,18 +1538,18 @@ async fn collection_query(
     }
     server.quota_enforcer.enforce(&quota_payload).await?;
     tracing::info!(
-        "Querying records from collection [{collection_id}] in database [{database_name}] for tenant [{tenant_id}]",
+        "Querying records from collection [{collection_id}] in database [{database}] for tenant [{tenant}]",
     );
 
     let _guard = server.scorecard_request(&[
         "op:read",
-        format!("tenant:{}", tenant_id).as_str(),
+        format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
     ]);
 
     let request = QueryRequest::try_new(
-        tenant_id,
-        database_name,
+        tenant,
+        database,
         collection_id,
         payload.ids,
         parsed_where,
@@ -1224,3 +1570,55 @@ async fn v1_deprecation_notice() -> Response {
     );
     (StatusCode::GONE, Json(err_response)).into_response()
 }
+
+////////////////////////////////////////////////////////////
+/// OpenAPI
+////////////////////////////////////////////////////////////
+struct ChromaTokenSecurityAddon;
+impl Modify for ChromaTokenSecurityAddon {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        // NOTE(philipithomas) - This unwrap is usually safe, and will crash the service on initialization if it's not.
+        let components = openapi
+            .components
+            .as_mut()
+            .expect("It should be able to get components as mutable");
+        components.add_security_scheme(
+            "x-chroma-token",
+            SecurityScheme::ApiKey(ApiKey::Header(ApiKeyValue::new("x-chroma-token"))),
+        );
+    }
+}
+
+#[derive(OpenApi)]
+#[openapi(
+    paths(
+        healthcheck,
+        heartbeat,
+        pre_flight_checks,
+        reset,
+        version,
+        get_user_identity,
+        create_tenant,
+        get_tenant,
+        list_databases,
+        create_database,
+        get_database,
+        delete_database,
+        create_collection,
+        list_collections,
+        count_collections,
+        get_collection,
+        update_collection,
+        delete_collection,
+        collection_add,
+        collection_update,
+        collection_upsert,
+        collection_delete,
+        collection_count,
+        collection_get,
+        collection_query
+    ),
+    // Apply our new security scheme here
+    modifiers(&ChromaTokenSecurityAddon)
+)]
+struct ApiDoc;

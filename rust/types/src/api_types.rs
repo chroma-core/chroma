@@ -24,6 +24,7 @@ use serde_json::Value;
 use std::time::SystemTimeError;
 use thiserror::Error;
 use tonic::Status;
+use utoipa::ToSchema;
 use uuid::Uuid;
 use validator::Validate;
 use validator::ValidationError;
@@ -114,21 +115,27 @@ impl ChromaError for ResetError {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct ChecklistResponse {
     pub max_batch_size: u32,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct HeartbeatResponse {
     #[serde(rename(serialize = "nanosecond heartbeat"))]
     pub nanosecond_heartbeat: u128,
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, ToSchema)]
 pub enum HeartbeatError {
-    #[error(transparent)]
-    CouldNotGetTime(#[from] SystemTimeError),
+    #[error("system time error: {0}")]
+    CouldNotGetTime(String),
+}
+
+impl From<SystemTimeError> for HeartbeatError {
+    fn from(err: SystemTimeError) -> Self {
+        HeartbeatError::CouldNotGetTime(err.to_string())
+    }
 }
 
 impl ChromaError for HeartbeatError {
@@ -137,7 +144,7 @@ impl ChromaError for HeartbeatError {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct GetUserIdentityResponse {
     pub user_id: String,
     pub tenant: String,
@@ -145,7 +152,7 @@ pub struct GetUserIdentityResponse {
 }
 
 #[non_exhaustive]
-#[derive(Deserialize, Validate)]
+#[derive(Serialize, Validate, Deserialize, ToSchema)]
 pub struct CreateTenantRequest {
     #[validate(length(min = 3))]
     pub name: String,
@@ -159,7 +166,7 @@ impl CreateTenantRequest {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, ToSchema)]
 pub struct CreateTenantResponse {}
 
 #[derive(Debug, Error)]
@@ -193,7 +200,7 @@ impl GetTenantRequest {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct GetTenantResponse {
     pub name: String,
@@ -241,7 +248,7 @@ impl CreateDatabaseRequest {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct CreateDatabaseResponse {}
 
 #[derive(Error, Debug)]
@@ -261,7 +268,7 @@ impl ChromaError for CreateDatabaseError {
     }
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, ToSchema)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct Database {
     pub id: Uuid,
@@ -398,7 +405,7 @@ impl DeleteDatabaseRequest {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct DeleteDatabaseResponse {}
 
 #[derive(Debug, Error)]
@@ -648,7 +655,7 @@ impl UpdateCollectionRequest {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct UpdateCollectionResponse {}
 
 #[derive(Error, Debug)]
@@ -786,7 +793,7 @@ impl AddCollectionRecordsRequest {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct AddCollectionRecordsResponse {}
 
 #[derive(Error, Debug)]
@@ -848,7 +855,7 @@ impl UpdateCollectionRecordsRequest {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct UpdateCollectionRecordsResponse {}
 
 #[derive(Error, Debug)]
@@ -907,7 +914,7 @@ impl UpsertCollectionRecordsRequest {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct UpsertCollectionRecordsResponse {}
 
 #[derive(Error, Debug)]
@@ -927,7 +934,7 @@ impl ChromaError for UpsertCollectionRecordsError {
 ////////////////////////// DeleteCollectionRecords //////////////////////////
 
 #[non_exhaustive]
-#[derive(Clone, Validate)]
+#[derive(Clone, Validate, ToSchema)]
 pub struct DeleteCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -964,7 +971,7 @@ impl DeleteCollectionRecordsRequest {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct DeleteCollectionRecordsResponse {}
 
 #[derive(Error, Debug)]
@@ -996,7 +1003,7 @@ impl ChromaError for IncludeParsingError {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
 pub enum Include {
     #[serde(rename = "distances")]
     Distance,
@@ -1025,7 +1032,7 @@ impl TryFrom<&str> for Include {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema, PartialEq)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct IncludeList(pub Vec<Include>);
 
@@ -1130,7 +1137,7 @@ impl GetRequest {
     }
 }
 
-#[derive(Clone, Deserialize, Serialize, Debug)]
+#[derive(Clone, Deserialize, Serialize, Debug, ToSchema)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct GetResponse {
     ids: Vec<String>,
@@ -1269,7 +1276,7 @@ impl QueryRequest {
     }
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize, ToSchema)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct QueryResponse {
     ids: Vec<Vec<String>>,
