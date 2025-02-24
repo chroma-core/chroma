@@ -13,8 +13,6 @@ class DistanceMetric(Enum):
     INNER_PRODUCT = "inner_product"
 
 
-supported_embedding_functions = {}
-
 DistanceMetrics = List[DistanceMetric]
 
 
@@ -57,6 +55,9 @@ class EmbeddingFunction(Protocol[D]):
     @abstractmethod
     def validate_config(self, config: Dict[str, Any]) -> None:
         pass
+
+
+supported_embedding_functions: Dict[str, EmbeddingFunction[Embeddable]] = {}
 
 
 class CohereEmbeddingFunction(EmbeddingFunction[Embeddable]):
