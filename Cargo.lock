@@ -1399,6 +1399,7 @@ dependencies = [
  "chroma-types",
  "figment",
  "futures",
+ "lazy_static",
  "mdac",
  "opentelemetry",
  "parking_lot",

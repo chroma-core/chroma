@@ -191,10 +191,95 @@ impl<'other> QuotaPayload<'other> {
     }
 }
 
+use std::collections::HashMap;
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub enum UsageType {
+    MetadataKeySizeBytes,       // Max metadata key size in bytes
+    MetadataValueSizeBytes,     // Max metadata value size in bytes
+    NumMetadataKeys,            // Number of keys in the metadata
+    NumWherePredicates,         // Number of predicates in the where
+    WhereValueSizeBytes,        // Max where clause value size in bytes
+    NumWhereDocumentPredicates, // Number of predicates in the where_document
+    WhereDocumentValueLength,   // Max where_document value length
+    NumRecords,                 // Number of records
+    EmbeddingDimensions,        // Number of ints/floats in the embedding
+    DocumentSizeBytes,          // Max document size in bytes
+    UriSizeBytes,               // Max uri size in bytes
+    IdSizeBytes,                // Max id size in bytes
+    NameSizeBytes,              // Max name size in bytes (e.g. collection, database)
+    LimitValue,
+    NumResults,
+    NumQueryEmbeddings,    // Number of query embeddings
+    CollectionSizeRecords, // Number of records in the collection
+    NumCollections,        // Total number of collections for a tenant
+}
+
+impl TryFrom<&str> for UsageType {
+    type Error = String;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "metadata_key_size_bytes" => Ok(UsageType::MetadataKeySizeBytes),
+            "metadata_value_size_bytes" => Ok(UsageType::MetadataValueSizeBytes),
+            "num_metadata_keys" => Ok(UsageType::NumMetadataKeys),
+            "num_where_predicates" => Ok(UsageType::NumWherePredicates),
+            "where_value_size_bytes" => Ok(UsageType::WhereValueSizeBytes),
+            "num_where_document_predicates" => Ok(UsageType::NumWhereDocumentPredicates),
+            "where_document_value_length" => Ok(UsageType::WhereDocumentValueLength),
+            "num_records" => Ok(UsageType::NumRecords),
+            "embedding_dimensions" => Ok(UsageType::EmbeddingDimensions),
+            "document_size_bytes" => Ok(UsageType::DocumentSizeBytes),
+            "uri_size_bytes" => Ok(UsageType::UriSizeBytes),
+            "id_size_bytes" => Ok(UsageType::IdSizeBytes),
+            "name_size_bytes" => Ok(UsageType::NameSizeBytes),
+            "limit_value" => Ok(UsageType::LimitValue),
+            "num_results" => Ok(UsageType::NumResults),
+            "num_query_embeddings" => Ok(UsageType::NumQueryEmbeddings),
+            "collection_size_records" => Ok(UsageType::CollectionSizeRecords),
+            "num_collections" => Ok(UsageType::NumCollections),
+            _ => Err(format!("Invalid UsageType: {}", value)),
+        }
+    }
+}
+
+lazy_static::lazy_static! {
+    pub static ref DEFAULT_QUOTAS: HashMap<UsageType, usize> = {
+        let mut m = HashMap::new();
+        m.insert(UsageType::MetadataKeySizeBytes, 36);
+        m.insert(UsageType::MetadataValueSizeBytes, 36);
+        m.insert(UsageType::NumMetadataKeys, 16);
+        m.insert(UsageType::NumWherePredicates, 8);
+        m.insert(UsageType::WhereValueSizeBytes, 36); // Same as METADATA_VALUE_SIZE
+        m.insert(UsageType::NumWhereDocumentPredicates, 8);
+        m.insert(UsageType::WhereDocumentValueLength, 130);
+        m.insert(UsageType::NumRecords, 100);
+        m.insert(UsageType::EmbeddingDimensions, 3072);
+        m.insert(UsageType::DocumentSizeBytes, 5000);
+        m.insert(UsageType::UriSizeBytes, 32);
+        m.insert(UsageType::IdSizeBytes, 128);
+        m.insert(UsageType::NameSizeBytes, 128);
+        m.insert(UsageType::LimitValue, 1000);
+        m.insert(UsageType::NumResults, 100);
+        m.insert(UsageType::NumQueryEmbeddings, 100);
+        m.insert(UsageType::CollectionSizeRecords, 1_000_000);
+        m.insert(UsageType::NumCollections, 1_000_000);
+        m
+    };
+}
+
+#[derive(Debug)]
+pub struct QuotaExceededError {
+    pub usage_type: UsageType,
+    pub action: Action,
+    pub usage: usize,
+    pub limit: usize,
+}
+
 #[derive(Error, Debug)]
 pub enum QuotaEnforcerError {
     #[error("Quota exceeded")]
-    QuotaExceeded,
+    QuotaExceeded(QuotaExceededError),
     #[error("Missing API key in the request header")]
     ApiKeyMissing,
     #[error("Unauthorized")]
@@ -206,7 +291,7 @@ pub enum QuotaEnforcerError {
 impl ChromaError for QuotaEnforcerError {
     fn code(&self) -> chroma_error::ErrorCodes {
         match self {
-            QuotaEnforcerError::QuotaExceeded => chroma_error::ErrorCodes::ResourceExhausted,
+            QuotaEnforcerError::QuotaExceeded(_) => chroma_error::ErrorCodes::ResourceExhausted,
             QuotaEnforcerError::ApiKeyMissing => chroma_error::ErrorCodes::InvalidArgument,
             QuotaEnforcerError::Unauthorized => chroma_error::ErrorCodes::PermissionDenied,
             QuotaEnforcerError::InitializationFailed => chroma_error::ErrorCodes::Internal,
