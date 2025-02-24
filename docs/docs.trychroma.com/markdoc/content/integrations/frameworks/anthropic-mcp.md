@@ -79,7 +79,8 @@ If you don't see the tools, check the logs at:
 
 The Chroma MCP server supports multiple client types to suit different needs:
 
-### 1. Ephemeral Client
+### 1. Ephemeral Client (Default)
+By default, the server will use the ephemeral client.
 ```json
 {
   "mcpServers": {
