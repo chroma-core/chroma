@@ -96,7 +96,7 @@ The Chroma MCP server supports multiple client types to suit different needs:
 - Data is cleared when the server restarts
 - Useful for temporary sessions or testing
 
-### 2. Persistent Client (Default)
+### 2. Persistent Client
 ```json
 {
   "mcpServers": {
