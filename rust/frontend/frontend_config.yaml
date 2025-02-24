@@ -1,5 +1,6 @@
-service_name: "rust-frontend-service"
-otel_endpoint: "http://otel-collector:4317"
+open_telemetry:
+  service_name: "rust-frontend-service"
+  endpoint: "http://otel-collector:4317"
 sysdb:
   Grpc:
     host: "sysdb.chroma"
@@ -9,7 +10,7 @@ sysdb:
 collections_with_segments_provider:
   cache:
     lru:
-      capacity: 1000 
+      capacity: 1000
   permitted_parallelism: 180
   cache_invalidation_retry_policy:
     delay_ms: 0

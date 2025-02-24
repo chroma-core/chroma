@@ -1145,7 +1145,9 @@ impl Configurable<(FrontendConfig, System)> for Frontend {
     ) -> Result<Self, Box<dyn ChromaError>> {
         // Create sqlitedb if configured
         if let Some(sqlite_conf) = &config.sqlitedb {
-            SqliteDb::try_from_config(sqlite_conf, registry).await?;
+            SqliteDb::try_from_config(sqlite_conf, registry)
+                .await
+                .map_err(|e| e.boxed())?;
         };
 
         // Create segment manager if configured

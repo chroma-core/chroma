@@ -6,7 +6,6 @@ use chroma_config::{
     registry::{Injectable, Registry},
     Configurable,
 };
-use chroma_error::ChromaError;
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use tokio::fs::create_dir_all;
@@ -69,11 +68,11 @@ impl SqliteDBConfig {
 impl Injectable for SqliteDb {}
 
 #[async_trait]
-impl Configurable<SqliteDBConfig> for SqliteDb {
+impl Configurable<SqliteDBConfig, SqliteCreationError> for SqliteDb {
     async fn try_from_config(
         config: &SqliteDBConfig,
         registry: &Registry,
-    ) -> Result<Self, Box<dyn ChromaError>> {
+    ) -> Result<Self, SqliteCreationError> {
         // TODO: copy all other pragmas from python and add basic tests
         let conn_options = SqliteConnectOptions::new()
             // Due to a bug in the python code, foreign_keys is turned off
@@ -86,20 +85,16 @@ impl Configurable<SqliteDBConfig> for SqliteDb {
         let conn = if let Some(url) = &config.url {
             let path = Path::new(url);
             if let Some(parent) = path.parent() {
-                create_dir_all(parent)
-                    .await
-                    .map_err(|err| SqliteCreationError::PathError(err).boxed())?;
+                create_dir_all(parent).await?;
             }
             SqlitePoolOptions::new()
                 .connect_with(conn_options.filename(path).create_if_missing(true))
-                .await
-                .map_err(|err| SqliteCreationError::SqlxError(err).boxed())?
+                .await?
         } else {
             SqlitePoolOptions::new()
                 .max_connections(1)
                 .connect_with(conn_options.in_memory(true).shared_cache(true))
-                .await
-                .map_err(|err| SqliteCreationError::SqlxError(err).boxed())?
+                .await?
         };
 
         let db = SqliteDb::new(conn, config.hash_type);
@@ -107,15 +102,9 @@ impl Configurable<SqliteDBConfig> for SqliteDb {
         db.initialize_migrations_table().await?;
         match config.migration_mode {
             MigrationMode::Apply => {
-                db.apply_all_migration()
-                    .await
-                    .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+                db.apply_all_migration().await?;
             }
-            MigrationMode::Validate => {
-                db.validate_all_migrations()
-                    .await
-                    .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
-            }
+            MigrationMode::Validate => db.validate_all_migrations().await?,
         }
 
         registry.register(db.clone());
