@@ -39,7 +39,9 @@ Before setting up the Chroma MCP server, ensure you have:
 
 1. Open Claude Desktop
 2. Click on the Claude menu and select "Settings..."
+![mcp-settings](/mcp-settings.png)
 3. Click on "Developer" in the left sidebar
+![mcp-developer](/mcp-developer.png)
 4. Click "Edit Config" to open your configuration file
 
 Add the following configuration:
@@ -69,7 +71,9 @@ Replace `/path/to/your/data/directory` with where you want Chroma to store its d
 
 1. Restart Claude Desktop completely
 2. Look for the hammer 🔨 icon in the bottom right of your chat input
+![mcp-hammer](/mcp-hammer.png)
 3. Click it to see available Chroma tools
+![mcp-tools](/mcp-tools.png)
 
 If you don't see the tools, check the logs at:
 - macOS: `~/Library/Logs/Claude/mcp*.log`
@@ -165,30 +169,126 @@ By default, the server will use the ephemeral client.
 
 ## Using Chroma with Claude
 
-### Basic Memory Storage
+### Team Knowledge Base Example
 
-To store the current conversation:
+Let's say your team maintains a knowledge base of customer support interactions. By storing these in Chroma Cloud, team members can use Claude to quickly access and learn from past support cases.
+
+First, set up your shared knowledge base:
+
+```python
+import chromadb
+from datetime import datetime
+
+# Connect to Chroma Cloud
+client = chromadb.HttpClient(
+    ssl=True,
+    host='api.trychroma.com',
+    tenant='your-tenant-id',
+    database='support-kb',
+    headers={
+        'x-chroma-token': 'YOUR_API_KEY'
+    }
+)
+
+# Create a collection for support cases
+collection = client.create_collection("support_cases")
+
+# Add some example support cases
+support_cases = [
+    {
+        "case": "Customer reported issues connecting their IoT devices to the dashboard.",
+        "resolution": "Guided customer through firewall configuration and port forwarding setup.",
+        "category": "connectivity",
+        "date": "2024-03-15"
+    },
+    {
+        "case": "User couldn't access admin features after recent update.",
+        "resolution": "Discovered role permissions weren't migrated correctly. Applied fix and documented process.",
+        "category": "permissions",
+        "date": "2024-03-16"
+    }
+]
+
+# Add documents to collection
+collection.add(
+    documents=[case["case"] + "\n" + case["resolution"] for case in support_cases],
+    metadatas=[{
+        "category": case["category"],
+        "date": case["date"]
+    } for case in support_cases],
+    ids=[f"case_{i}" for i in range(len(support_cases))]
+)
 ```
-Claude, please chunk our conversation into small chunks and store it in Chroma for future reference.
+
+Now team members can use Claude to access this knowledge:
+
 ```
-
-Claude will automatically:
-- Break the conversation into appropriate chunks
-- Generate embeddings and unique IDs
-- Add metadata (like timestamps and topics)
-- Store everything in your Chroma collection
-
-### Accessing Previous Conversations
-
-To recall past discussions:
-```
-Claude, what did we discuss previously about vector databases?
+Claude, I'm having trouble helping a customer with IoT device connectivity. Can you check our support knowledge base for similar cases and suggest a solution?
 ```
 
 Claude will:
-1. Search Chroma for semantically similar conversation chunks
-2. Filter results based on relevance
-3. Incorporate previous context into its response
+1. Search the shared knowledge base for relevant cases
+2. Consider the context and solutions from similar past issues
+3. Provide recommendations based on previous successful resolutions
+
+This setup is particularly powerful because:
+- All support team members have access to the same knowledge base
+- Claude can learn from the entire team's experience
+- Solutions are standardized across the organization
+- New team members can quickly get up to speed on common issues
+
+### Project Memory Example
+
+Claude's context window has limits - long conversations eventually get truncated, and chats don't persist between sessions. Using Chroma as an external memory store solves these limitations, allowing Claude to reference past conversations and maintain context across multiple sessions.
+
+First, tell Claude to use Chroma for memory as part of the project setup:
+```
+Remember, you have access to Chroma tools.
+At any point if the user references previous chats or memory, check chroma for similar conversations.
+Try to use retrieved information where possible.
+```
+
+![mcp-instructions](/mcp-instructions.png)
+
+This prompt instructs Claude to:
+- Proactively check Chroma when memory-related topics come up
+- Search for semantically similar past conversations
+- Incorporate relevant historical context into responses
+
+To store the current conversation:
+```
+Please chunk our conversation into small chunks and store it in Chroma for future reference.
+```
+
+Claude will:
+1. Break the conversation into smaller chunks (typically 512-1024 tokens)
+   - Chunking is necessary because:
+   - Large texts are harder to search semantically
+   - Smaller chunks help retrieve more precise context
+   - It prevents token limits in future retrievals
+2. Generate embeddings for each chunk
+3. Add metadata like timestamps and detected topics
+4. Store everything in your Chroma collection
+
+![mcp-store](/mcp-store.png)
+
+Later, you can access past conversations naturally:
+```
+What did we discuss previously about the authentication system?
+```
+
+Claude will:
+1. Search Chroma for chunks semantically related to authentication
+2. Filter by timestamp metadata for last week's discussions
+3. Incorporate the relevant historical context into its response
+
+![mcp-search](/mcp-search.png)
+
+This setup is particularly useful for:
+- Long-running projects where context gets lost
+- Teams where multiple people interact with Claude
+- Complex discussions that reference past decisions
+- Maintaining consistent context across multiple chat sessions
 
 ### Advanced Features
 
