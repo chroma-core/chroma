@@ -17,7 +17,8 @@ use chroma_error::ChromaError;
 use chroma_system::System;
 use chroma_tracing::{
     init_global_filter_layer, init_otel_layer, init_panic_tracing_hook, init_stdout_layer,
-    init_tracing, meter_event::init_meter_event_handler,
+    init_tracing,
+    meter_event::{init_meter_event_handler, MeterEventHandler},
 };
 use frontend::Frontend;
 use get_collection_with_segments_provider::*;
@@ -46,17 +47,19 @@ impl ChromaError for ScorecardRuleError {
 pub async fn frontend_service_entrypoint(
     auth: Arc<dyn auth::AuthenticateAndAuthorize>,
     quota_enforcer: Arc<dyn QuotaEnforcer>,
+    meter_ingestor: impl MeterEventHandler + Send + Sync + 'static,
 ) {
     let config = match std::env::var(CONFIG_PATH_ENV_VAR) {
         Ok(config_path) => FrontendConfig::load_from_path(&config_path),
         Err(_) => FrontendConfig::load(),
     };
-    frontend_service_entrypoint_with_config(auth, quota_enforcer, config).await;
+    frontend_service_entrypoint_with_config(auth, quota_enforcer, meter_ingestor, config).await;
 }
 
 pub async fn frontend_service_entrypoint_with_config(
     auth: Arc<dyn auth::AuthenticateAndAuthorize>,
     quota_enforcer: Arc<dyn QuotaEnforcer>,
+    meter_ingestor: impl MeterEventHandler + Send + Sync + 'static,
     config: FrontendConfig,
 ) {
     let tracing_layers = vec![
@@ -66,7 +69,7 @@ pub async fn frontend_service_entrypoint_with_config(
     ];
     init_tracing(tracing_layers);
     init_panic_tracing_hook();
-    init_meter_event_handler(());
+    init_meter_event_handler(meter_ingestor);
 
     let system = System::new();
     let registry = Registry::new();
