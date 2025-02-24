@@ -24,7 +24,6 @@ const legacyPathsMapping: Record<string, string> = {
   "/integrations/openllmetry": "/integrations/frameworks/openllmetry",
   "/integrations/streamlit": "/integrations/frameworks/streamlit",
   "/integrations/openlit": "/integrations/frameworks/openlit",
-  "/integrations/anthropic-mcp": "/integrations/frameworks/anthropic-mcp",
   "/deployment": "/production/deployment",
   "/deployment/client-server-mode":
     "/production/chroma-server/client-server-mode",
