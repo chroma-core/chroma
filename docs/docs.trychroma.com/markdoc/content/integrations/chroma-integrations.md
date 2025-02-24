@@ -42,3 +42,4 @@ We welcome pull requests to add new Integrations to the community.
 | [Streamlit](./frameworks/streamlit)     | ✓      | -            |
 | [Haystack](./frameworks/haystack)       | ✓      | -            |
 | [OpenLIT](./frameworks/openlit)         | ✓      | Coming Soon! |
+| [Anthropic MCP](./frameworks/anthropic-mcp) | ✓ | Coming Soon! |
