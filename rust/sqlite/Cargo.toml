@@ -11,7 +11,7 @@ sea-query-binder = { workspace = true, features = ["sqlx-sqlite"] }
 sha2 = { workspace = true }
 sqlx = { workspace = true }
 tempfile = { workspace = true }
-pyo3 = { workspace = true }
+pyo3 = { workspace = true, optional = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 futures = { workspace = true }
@@ -22,3 +22,4 @@ rust-embed = { workspace = true }
 chroma-error = { workspace = true, features = ["sqlx"] }
 chroma-types = { workspace = true }
 chroma-config = { workspace = true }
+
