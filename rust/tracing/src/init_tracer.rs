@@ -12,6 +12,7 @@ use opentelemetry_sdk::propagation::TraceContextPropagator;
 use tracing_bunyan_formatter::BunyanFormattingLayer;
 use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Layer};
 
+#[derive(Clone, Debug)]
 struct ChromaShouldSample;
 
 const BUSY_NS: opentelemetry::Key = opentelemetry::Key::from_static_str("busy_ns");
