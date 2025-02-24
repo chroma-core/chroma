@@ -134,7 +134,13 @@ By default, the server will use the ephemeral client.
         "--client-type",
         "http",
         "--host",
-        "http://localhost:8000"
+        "http://localhost:8000",
+        "--port",
+        "8000",
+        "--custom-auth-credentials",
+        "username:password",
+        "--ssl",
+        "true"
       ]
     }
   }
@@ -153,11 +159,13 @@ By default, the server will use the ephemeral client.
       "args": [
         "chroma-mcp",
         "--client-type",
-        "http",
-        "--host",
-        "https://your-chroma-cloud.example.com",
-        "--token",
-        "your-api-token"
+        "cloud",
+        "--tenant",
+        "your-tenant-id",
+        "--database",
+        "your-database-name",
+        "--api-key",
+        "your-api-key"
       ]
     }
   }
@@ -222,6 +230,28 @@ collection.add(
 
 Now team members can use Claude to access this knowledge:
 
+In your claude config, add the following:
+```json
+{
+  "mcpServers": {
+    "chroma": {
+      "command": "uvx",
+      "args": [
+        "chroma-mcp",
+        "--client-type",
+        "cloud",
+        "--tenant",
+        "your-tenant-id",
+        "--database",
+        "support-kb",
+        "--api-key",
+        "YOUR_API_KEY"
+      ]
+    }
+  }
+}
+
+Now you can use the knowledge base in your chats:
 ```
 Claude, I'm having trouble helping a customer with IoT device connectivity. Can you check our support knowledge base for similar cases and suggest a solution?
 ```
