@@ -228,7 +228,7 @@ collection.add(
 )
 ```
 
-Now team members can use Claude to access this knowledge:
+Now team members can use Claude to access this knowledge.
 
 In your claude config, add the following:
 ```json
