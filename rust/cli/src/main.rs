@@ -2,6 +2,20 @@ use chroma_frontend::{config::FrontendConfig, frontend_service_entrypoint_with_c
 use clap::{Parser, Subcommand};
 use std::sync::Arc;
 
+const LOGO: &str = "
+                \x1b[38;5;069m(((((((((    \x1b[38;5;203m(((((\x1b[38;5;220m####
+             \x1b[38;5;069m(((((((((((((\x1b[38;5;203m(((((((((\x1b[38;5;220m#########
+           \x1b[38;5;069m(((((((((((((\x1b[38;5;203m(((((((((((\x1b[38;5;220m###########
+         \x1b[38;5;069m((((((((((((((\x1b[38;5;203m((((((((((((\x1b[38;5;220m############
+        \x1b[38;5;069m(((((((((((((\x1b[38;5;203m((((((((((((((\x1b[38;5;220m#############
+        \x1b[38;5;069m(((((((((((((\x1b[38;5;203m((((((((((((((\x1b[38;5;220m#############
+         \x1b[38;5;069m((((((((((((\x1b[38;5;203m(((((((((((((\x1b[38;5;220m##############
+         \x1b[38;5;069m((((((((((((\x1b[38;5;203m((((((((((((\x1b[38;5;220m##############
+           \x1b[38;5;069m((((((((((\x1b[38;5;203m(((((((((((\x1b[38;5;220m#############
+             \x1b[38;5;069m((((((((\x1b[38;5;203m((((((((\x1b[38;5;220m##############
+                \x1b[38;5;069m(((((\x1b[38;5;203m((((    \x1b[38;5;220m#########\x1b[0m
+";
+
 #[derive(Parser, Debug)]
 struct RunArgs {
     #[clap(name = "config", default_value = None)]
@@ -25,12 +39,14 @@ struct Cli {
 }
 
 fn run(args: RunArgs) {
+    println!("{}", LOGO);
+
     let config = match &args.config {
         Some(path) => FrontendConfig::load_from_path(path),
         None => FrontendConfig::single_node_default(None),
     };
 
-    let runtime = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
+    let runtime = tokio::runtime::Runtime::new().expect("Failed to start Chroma");
     runtime.block_on(async {
         frontend_service_entrypoint_with_config(Arc::new(()), Arc::new(()), config).await;
     });

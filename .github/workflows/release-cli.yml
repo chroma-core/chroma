@@ -18,20 +18,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Checkout chroma-hnswlib
-        uses: actions/checkout@v4
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
         with:
-          repository: chroma-core/hnswlib
-          path: hnswlib
-
-      - name: Symlink hnswlib to parent directory
-        run: ln -s "$(pwd)/hnswlib" ../hnswlib
-        shell: bash
-
-      - name: Install Protocol Buffers Compiler
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y protobuf-compiler
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Rust toolchain
         uses: actions-rs/toolchain@v1
@@ -57,18 +47,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
-
-      - name: Checkout chroma-hnswlib
-        uses: actions/checkout@v4
-        with:
-          repository: chroma-core/hnswlib
-          path: hnswlib
-
-      - name: Create symlink for hnswlib on Windows
-        shell: powershell
-        run: |
-          New-Item -ItemType SymbolicLink -Path "..\hnswlib" -Target "$(Resolve-Path hnswlib)" -Force
-      
 
       - name: Install Protocol Buffers Compiler
         run: choco install protoc -y
@@ -102,16 +80,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Checkout chroma-hnswlib
-        uses: actions/checkout@v4
-        with:
-          repository: chroma-core/hnswlib
-          path: hnswlib
-
-      - name: Symlink hnswlib to parent directory
-        run: ln -s "$(pwd)/hnswlib" ../hnswlib
-        shell: bash
-
       - name: Install Protocol Buffers Compiler
         run: brew install protobuf
 
@@ -124,15 +92,19 @@ jobs:
       - name: Add ARM64 target for macOS
         run: rustup target add aarch64-apple-darwin
 
+      - name: Add Intel target for macOS
+        run: rustup target add x86_64-apple-darwin
+
       - name: Build macOS Intel binary
-        run: cargo build --bin chroma --release
+        run: cargo build --bin chroma --release --target x86_64-apple-darwin --manifest-path rust/cli/Cargo.toml
+
 
       - name: Build macOS ARM64 binary
         run: cargo build --bin chroma --release --target aarch64-apple-darwin --manifest-path rust/cli/Cargo.toml
 
       - name: Rename macOS binaries
         run: |
-          mv target/release/chroma ./chroma-macos-intel
+          mv target/x86_64-apple-darwin/release/chroma ./chroma-macos-intel
           mv target/aarch64-apple-darwin/release/chroma ./chroma-macos-arm64
           chmod +x ./chroma-macos-intel ./chroma-macos-arm64
 
@@ -192,7 +164,7 @@ jobs:
           release_name: ${{ steps.release_info.outputs.release_name }}
           body: "CLI release."
           draft: false
-          prerelease: true
+          prerelease: false
 
       - name: Upload Linux binary to release
         uses: actions/upload-release-asset@v1
