@@ -250,10 +250,12 @@ In your claude config, add the following:
     }
   }
 }
+```
 
 Now you can use the knowledge base in your chats:
 ```
-Claude, I'm having trouble helping a customer with IoT device connectivity. Can you check our support knowledge base for similar cases and suggest a solution?
+Claude, I'm having trouble helping a customer with IoT device connectivity.
+Can you check our support knowledge base for similar cases and suggest a solution?
 ```
 
 Claude will:
