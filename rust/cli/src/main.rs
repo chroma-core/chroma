@@ -43,7 +43,7 @@ fn run(args: RunArgs) {
 
     let config = match &args.config {
         Some(path) => FrontendConfig::load_from_path(path),
-        None => FrontendConfig::single_node_default(None),
+        None => FrontendConfig::single_node_default(),
     };
 
     let runtime = tokio::runtime::Runtime::new().expect("Failed to start Chroma");

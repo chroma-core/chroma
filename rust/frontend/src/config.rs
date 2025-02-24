@@ -62,23 +62,16 @@ impl FrontendConfig {
         }
     }
 
-    pub fn single_node_default(url: Option<String>) -> Self {
+    pub fn single_node_default() -> Self {
         // TOOD: unify this with load_from_path to get the env overrides
         let config = DefaultConfigurationsFolder::get(DEFAULT_SINGLE_NODE_CONFIG_FILENAME)
             .expect("Failed to load default single node frontend config");
         let config_data = config.data;
         let config_str = std::str::from_utf8(&config_data).expect("Failed to parse config data");
         let f = figment::Figment::from(Yaml::string(config_str));
-        let res = f.extract::<FrontendConfig>();
+        let res = f.extract();
         match res {
-            Ok(mut config) => {
-                if let Some(url) = url {
-                    if let Some(ref mut sqlite_config) = config.sqlitedb {
-                        sqlite_config.url = Some(url)
-                    }
-                }
-                config
-            },
+            Ok(config) => config,
             Err(e) => panic!("Error loading config: {}", e),
         }
     }
