@@ -7,8 +7,23 @@ use tokio::{
 use tonic::async_trait;
 
 #[derive(Clone, Debug)]
+pub enum IoKind {
+    Read {
+        collection_size_bytes: u64,
+        query_complexity: u64,
+    },
+    Write {
+        log_bytes: u64,
+    },
+}
+
+#[derive(Clone, Debug)]
 pub enum MeterEvent {
-    Heartbeat(u128),
+    Collection {
+        tenant_id: String,
+        database_name: String,
+        io: IoKind,
+    },
 }
 
 pub static METER_EVENT_SENDER: OnceLock<UnboundedSender<MeterEvent>> = OnceLock::new();
