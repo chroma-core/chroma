@@ -21,16 +21,62 @@ pub struct FrontendConfig {
     pub sqlitedb: Option<SqliteDBConfig>,
     pub segment_manager: Option<LocalSegmentManagerConfig>,
     pub sysdb: SysDbConfig,
-    #[serde(default = "CircuitBreakerConfig::default")]
-    pub circuit_breaker: CircuitBreakerConfig,
+    // #[serde(default = "CircuitBreakerConfig::default")]
+    // pub circuit_breaker: CircuitBreakerConfig,
     pub collections_with_segments_provider: CollectionsWithSegmentsProviderConfig,
-    pub service_name: String,
-    pub otel_endpoint: String,
+    // pub service_name: String,
+    // pub otel_endpoint: String,
     pub log: LogConfig,
     pub executor: ExecutorConfig,
+    // Local does not use server config. We nest server config under the server
+    // in order to avoid needing seperate root configs for local and server.
+    pub server: Option<ServerConfig>,
+    // pub scorecard_enabled: bool,
+    // #[serde(default)]
+    // pub scorecard: Vec<ScorecardRule>,
+}
+
+#[derive(Deserialize, Serialize, Clone)]
+pub struct ServerConfig {
+    pub service_name: String,
+    pub otel_endpoint: String,
     pub scorecard_enabled: bool,
     #[serde(default)]
     pub scorecard: Vec<ScorecardRule>,
+    #[serde(default = "CircuitBreakerConfig::default")]
+    pub circuit_breaker: CircuitBreakerConfig,
+}
+
+/// Convenience type to ensure that the server config is set for servers
+/// Can be dereferenced to a FrontendConfig
+#[derive(Deserialize, Serialize, Clone)]
+pub struct FrontendServerConfig {
+    inner: FrontendConfig,
+}
+
+impl FrontendServerConfig {
+    /// Create a new FrontendServerConfig from a FrontendConfig
+    /// Panics if the server config is not set
+    /// Note
+    /// - Panic is deemed ok here because the server config is required for servers
+    /// and the next thing the server should do is crash, not fallback to bad defaults
+    pub fn new(inner: FrontendConfig) -> Self {
+        if inner.server.is_none() {
+            panic!("Server config must be set to create a FrontendServerConfig");
+        }
+        Self { inner }
+    }
+
+    pub fn into_inner(self) -> FrontendConfig {
+        self.inner
+    }
+}
+
+impl std::ops::Deref for FrontendServerConfig {
+    type Target = FrontendConfig;
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
 }
 
 const DEFAULT_CONFIG_PATH: &str = "./frontend_config.yaml";

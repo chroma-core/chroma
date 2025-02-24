@@ -15,6 +15,7 @@ mod types;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
 use chroma_system::System;
+use config::FrontendServerConfig;
 use frontend::Frontend;
 use get_collection_with_segments_provider::*;
 use mdac::{Pattern, Rule};
@@ -55,7 +56,8 @@ pub async fn frontend_service_entrypoint_with_config(
     quota_enforcer: Arc<dyn QuotaEnforcer>,
     config: FrontendConfig,
 ) {
-    chroma_tracing::init_otel_tracing(&config.service_name, &config.otel_endpoint);
+    let config = &FrontendServerConfig::new(config);
+    chroma_tracing::init_otel_tracing(&server_config.service_name, &server_config.otel_endpoint);
     let system = System::new();
     let registry = Registry::new();
 
@@ -73,7 +75,7 @@ pub async fn frontend_service_entrypoint_with_config(
             limit: rule.score as usize,
         })
     }
-    let rules = config
+    let rules = server_config
         .scorecard
         .iter()
         .map(rule_to_rule)
