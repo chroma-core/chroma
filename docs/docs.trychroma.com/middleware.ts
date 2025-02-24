@@ -18,6 +18,7 @@ const legacyPathsMapping: Record<string, string> = {
   "/integrations/roboflow": "/integrations/embedding-models/roboflow",
   "/integrations/langchain": "/integrations/frameworks/langchain",
   "/integrations/llamaindex": "/integrations/frameworks/llamaindex",
+  "/integrations/deepeval": "/integrations/frameworks/deepeval",
   "/integrations/braintrust": "/integrations/frameworks/braintrust",
   "/integrations/haystack": "/integrations/frameworks/haystack",
   "/integrations/openllmetry": "/integrations/frameworks/openllmetry",
