@@ -13,8 +13,23 @@ class Space(Enum):
 
 @runtime_checkable
 class EmbeddingFunction(Protocol[D]):
+    """
+    A protocol for embedding functions. To implement a new embedding function,
+    you need to implement the following methods:
+    - __init__
+    - __call__
+    - name
+    - build_from_config
+    - get_config
+    """
+
     @abstractmethod
     def __init__(self, *args: Any, **kwargs: Any) -> None:
+        """
+        Initialize the embedding function.
+        Pass any arguments that will be needed to build the embedding function
+        config.
+        """
         ...
 
     @abstractmethod
@@ -23,26 +38,52 @@ class EmbeddingFunction(Protocol[D]):
 
     @abstractmethod
     def name(self) -> str:
+        """
+        Return the name of the embedding function.
+        """
         ...
 
+    @abstractmethod
     def default_space(self) -> Space:
-        return Space.COSINE
+        """
+        Return the default space for the embedding function.
+        """
+        ...
 
+    @abstractmethod
     def supported_spaces(self) -> List[Space]:
-        return [Space.COSINE, Space.L2, Space.INNER_PRODUCT]
+        """
+        Return the supported spaces for the embedding function.
+        """
+        ...
 
     @staticmethod
+    @abstractmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[D]":
+        """
+        Build the embedding function from a config, which will be used to
+        deserialize the embedding function.
+        """
         ...
 
     @abstractmethod
     def get_config(self) -> Dict[str, Any]:
+        """
+        Return the config for the embedding function, which will be used to
+        serialize the embedding function.
+        """
         ...
 
     def validate_config_update(
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
+        """
+        Validate the update to the config.
+        """
         pass
 
     def validate_config(self, config: Dict[str, Any]) -> None:
+        """
+        Validate the config.
+        """
         pass
