@@ -330,7 +330,8 @@ func (suite *CollectionServiceTestSuite) TestCreateCollection() {
 		Tenant:   suite.tenantName,
 	})
 	suite.Error(err)
-	suite.Equal(common.ErrDatabaseNotFound, err)
+	// Check that err is NOT_FOUND
+	suite.Equal(status.Error(codes.Code(code.Code_NOT_FOUND), common.ErrDatabaseNotFound.Error()), err)
 }
 
 func (suite *CollectionServiceTestSuite) TestServer_FlushCollectionCompaction() {
