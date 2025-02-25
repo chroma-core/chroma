@@ -478,6 +478,21 @@ impl Where {
             children,
         })
     }
+
+    pub fn complexity(&self) -> u32 {
+        // TODO: Properly estimate filter complexity
+        match self {
+            Where::Composite(composite_expression) => composite_expression
+                .children
+                .iter()
+                .map(Where::complexity)
+                .sum(),
+            Where::Document(document_expression) => {
+                document_expression.text.len().max(5) as u32 - 3
+            }
+            Where::Metadata(_metadata_expression) => 1,
+        }
+    }
 }
 
 impl TryFrom<chroma_proto::Where> for Where {
