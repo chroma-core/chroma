@@ -486,7 +486,7 @@ impl Where {
                 .map(Where::complexity)
                 .sum(),
             Where::Document(document_expression) => {
-                (document_expression.text.len() - 2).max(3) as u32
+                document_expression.text.len().max(5) as u32 - 3
             }
             Where::Metadata(_metadata_expression) => 1,
         }
