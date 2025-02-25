@@ -27,7 +27,7 @@ module = ["chromadb.proto.*"]
 ignore_errors = true
 
 [project.scripts]
-chroma = "chromadb.cli.cli:app"
+chroma = "chromadb.cli.cli:main"
 
 [project.urls]
 "Homepage" = "https://github.com/chroma-core/chroma"
