@@ -78,6 +78,8 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Setup Rust
         uses: ./.github/actions/rust
+        with:
+          github-token: ${{ github.token }}
       - name: Build Rust bindings
         uses: PyO3/maturin-action@v1
         with:
@@ -156,6 +158,8 @@ jobs:
       uses: ./.github/actions/python
     - name: Setup Rust
       uses: ./.github/actions/rust
+      with:
+          github-token: ${{ github.token }}
     - name: Rust Integration Test
       run: bin/rust-integration-test.sh ${{ matrix.test-globs }}
       shell: bash
@@ -183,6 +187,8 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Setup Rust
         uses: ./.github/actions/rust
+        with:
+          github-token: ${{ github.token }}
       - name: Test
         run: bin/rust-integration-test.sh ${{ matrix.test-globs }}
         shell: bash

@@ -1,12 +1,16 @@
 name: Setup Rust
 description: "This action sets up Rust"
+inputs:
+  github-token:
+    description: "GitHub token"
+    required: false
 runs:
   using: "composite"
   steps:
     - name: Install Protoc
       uses: arduino/setup-protoc@v2
       with:
-        repo-token: ${{ secrets.GITHUB_TOKEN }}
+        repo-token: ${{ inputs.github-token }}
     - name: Use sccache
       uses: mozilla-actions/sccache-action@v0.0.7
     - name: Enable sccache
