@@ -16,7 +16,7 @@ uuid = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
-pyo3 = { workspace = true }
+pyo3 = { workspace = true, optional = true }
 validator = { workspace = true }
 regex = { workspace = true }
 utoipa = { workspace = true }

@@ -6,7 +6,6 @@ set -e
 # Usage:
 #   curl -sSL https://raw.githubusercontent.com/chroma-core/chroma/main/rust/cli/install/install.sh | bash
 # ----------------------------------------------
-
 REPO="chroma-core/chroma"
 RELEASE="cli-0.1.0"
 

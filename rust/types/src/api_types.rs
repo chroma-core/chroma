@@ -18,8 +18,6 @@ use crate::Where;
 use chroma_config::assignment::rendezvous_hash::AssignmentError;
 use chroma_error::ChromaValidationError;
 use chroma_error::{ChromaError, ErrorCodes};
-use pyo3::pyclass;
-use pyo3::types::PyAnyMethods;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
@@ -30,6 +28,9 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 use validator::Validate;
 use validator::ValidationError;
+
+#[cfg(feature = "pyo3")]
+use pyo3::types::PyAnyMethods;
 
 #[derive(Debug, Error)]
 pub enum GetSegmentsError {
@@ -200,7 +201,7 @@ impl GetTenantRequest {
 }
 
 #[derive(Serialize, ToSchema)]
-#[pyclass]
+#[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct GetTenantResponse {
     pub name: String,
 }
@@ -268,15 +269,14 @@ impl ChromaError for CreateDatabaseError {
 }
 
 #[derive(Serialize, Debug, ToSchema)]
-#[pyo3::pyclass]
+#[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct Database {
     pub id: Uuid,
-    #[pyo3(get)]
     pub name: String,
-    #[pyo3(get)]
     pub tenant: String,
 }
 
+#[cfg(feature = "pyo3")]
 #[pyo3::pymethods]
 impl Database {
     #[getter]
@@ -285,6 +285,16 @@ impl Database {
             .getattr("UUID")?
             .call1((self.id.to_string(),))?;
         Ok(res)
+    }
+
+    #[getter]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    #[getter]
+    pub fn tenant(&self) -> &str {
+        &self.tenant
     }
 }
 
@@ -1023,7 +1033,7 @@ impl TryFrom<&str> for Include {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema, PartialEq)]
-#[pyclass]
+#[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct IncludeList(pub Vec<Include>);
 
 impl IncludeList {
@@ -1128,20 +1138,44 @@ impl GetRequest {
 }
 
 #[derive(Clone, Deserialize, Serialize, Debug, ToSchema)]
-#[pyclass]
+#[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct GetResponse {
-    #[pyo3(get)]
     ids: Vec<String>,
-    #[pyo3(get)]
     embeddings: Option<Vec<Vec<f32>>>,
-    #[pyo3(get)]
     documents: Option<Vec<Option<String>>>,
-    #[pyo3(get)]
     uris: Option<Vec<Option<String>>>,
     // TODO(hammadb): Add metadata & include to the response
-    #[pyo3(get)]
     metadatas: Option<Vec<Option<Metadata>>>,
     include: Vec<Include>,
+}
+
+#[cfg(feature = "pyo3")]
+#[pyo3::pymethods]
+impl GetResponse {
+    #[getter]
+    pub fn ids(&self) -> &Vec<String> {
+        &self.ids
+    }
+
+    #[getter]
+    pub fn embeddings(&self) -> Option<Vec<Vec<f32>>> {
+        self.embeddings.clone()
+    }
+
+    #[getter]
+    pub fn documents(&self) -> Option<Vec<Option<String>>> {
+        self.documents.clone()
+    }
+
+    #[getter]
+    pub fn uris(&self) -> Option<Vec<Option<String>>> {
+        self.uris.clone()
+    }
+
+    #[getter]
+    pub fn metadatas(&self) -> Option<Vec<Option<Metadata>>> {
+        self.metadatas.clone()
+    }
 }
 
 impl From<(GetResult, IncludeList)> for GetResponse {
@@ -1243,21 +1277,49 @@ impl QueryRequest {
 }
 
 #[derive(Clone, Deserialize, Serialize, ToSchema)]
-#[pyclass]
+#[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct QueryResponse {
-    #[pyo3(get)]
     ids: Vec<Vec<String>>,
-    #[pyo3(get)]
     embeddings: Option<Vec<Vec<Option<Vec<f32>>>>>,
-    #[pyo3(get)]
     documents: Option<Vec<Vec<Option<String>>>>,
-    #[pyo3(get)]
     uris: Option<Vec<Vec<Option<String>>>>,
-    #[pyo3(get)]
     metadatas: Option<Vec<Vec<Option<Metadata>>>>,
-    #[pyo3(get)]
     distances: Option<Vec<Vec<Option<f32>>>>,
     include: Vec<Include>,
+}
+
+#[cfg(feature = "pyo3")]
+#[pyo3::pymethods]
+impl QueryResponse {
+    #[getter]
+    pub fn ids(&self) -> &Vec<Vec<String>> {
+        &self.ids
+    }
+
+    #[getter]
+    pub fn embeddings(&self) -> Option<Vec<Vec<Option<Vec<f32>>>>> {
+        self.embeddings.clone()
+    }
+
+    #[getter]
+    pub fn documents(&self) -> Option<Vec<Vec<Option<String>>>> {
+        self.documents.clone()
+    }
+
+    #[getter]
+    pub fn uris(&self) -> Option<Vec<Vec<Option<String>>>> {
+        self.uris.clone()
+    }
+
+    #[getter]
+    pub fn metadatas(&self) -> Option<Vec<Vec<Option<Metadata>>>> {
+        self.metadatas.clone()
+    }
+
+    #[getter]
+    pub fn distances(&self) -> Option<Vec<Vec<Option<f32>>>> {
+        self.distances.clone()
+    }
 }
 
 impl From<(KnnBatchResult, IncludeList)> for QueryResponse {

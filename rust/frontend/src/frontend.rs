@@ -10,6 +10,7 @@ use chroma_segment::local_segment_manager::LocalSegmentManager;
 use chroma_sqlite::db::SqliteDb;
 use chroma_sysdb::SysDb;
 use chroma_system::System;
+use chroma_tracing::meter_event::{IoKind, MeterEvent};
 use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
     plan::{Count, Get, Knn},
@@ -30,7 +31,7 @@ use chroma_types::{
     UpdateCollectionError, UpdateCollectionRecordsError, UpdateCollectionRecordsRequest,
     UpdateCollectionRecordsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
     UpdateMetadata, UpdateMetadataValue, UpsertCollectionRecordsError,
-    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, CHROMA_DOCUMENT_KEY,
+    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, Where, CHROMA_DOCUMENT_KEY,
     CHROMA_URI_KEY,
 };
 use opentelemetry::global;
@@ -61,7 +62,8 @@ fn to_records<
     uris: Option<Vec<Option<String>>>,
     metadatas: Option<Vec<Option<M>>>,
     operation: Operation,
-) -> Result<Vec<OperationRecord>, ToRecordsError> {
+) -> Result<(Vec<OperationRecord>, u64), ToRecordsError> {
+    let mut total_bytes = 0;
     let len = ids.len();
 
     // Check that every present vector has the same length as `ids`.
@@ -105,17 +107,21 @@ fn to_records<
             metadata.insert(CHROMA_URI_KEY.to_string(), UpdateMetadataValue::Str(uri));
         }
 
-        records.push(OperationRecord {
+        let record = OperationRecord {
             id,
             embedding,
             document,
             encoding,
             metadata: Some(metadata),
             operation,
-        });
+        };
+
+        total_bytes += record.size_byte();
+
+        records.push(record);
     }
 
-    Ok(records)
+    Ok((records, total_bytes))
 }
 
 #[derive(Debug)]
@@ -272,95 +278,124 @@ impl Frontend {
 
     pub async fn create_tenant(
         &mut self,
-        request: CreateTenantRequest,
+        CreateTenantRequest { name, .. }: CreateTenantRequest,
     ) -> Result<CreateTenantResponse, CreateTenantError> {
-        self.sysdb_client.create_tenant(request.name).await
+        self.sysdb_client.create_tenant(name).await
     }
 
     pub async fn get_tenant(
         &mut self,
-        request: GetTenantRequest,
+        GetTenantRequest { name, .. }: GetTenantRequest,
     ) -> Result<GetTenantResponse, GetTenantError> {
-        self.sysdb_client.get_tenant(request.name).await
+        self.sysdb_client.get_tenant(name).await
     }
 
     pub async fn create_database(
         &mut self,
-        request: CreateDatabaseRequest,
+        CreateDatabaseRequest {
+            database_id,
+            tenant_id,
+            database_name,
+            ..
+        }: CreateDatabaseRequest,
     ) -> Result<CreateDatabaseResponse, CreateDatabaseError> {
         self.sysdb_client
-            .create_database(
-                request.database_id,
-                request.database_name,
-                request.tenant_id,
-            )
+            .create_database(database_id, database_name, tenant_id)
             .await
     }
 
     pub async fn list_databases(
         &mut self,
-        request: ListDatabasesRequest,
+        ListDatabasesRequest {
+            tenant_id,
+            limit,
+            offset,
+            ..
+        }: ListDatabasesRequest,
     ) -> Result<ListDatabasesResponse, ListDatabasesError> {
         self.sysdb_client
-            .list_databases(request.tenant_id, request.limit, request.offset)
+            .list_databases(tenant_id, limit, offset)
             .await
     }
 
     pub async fn get_database(
         &mut self,
-        request: GetDatabaseRequest,
+        GetDatabaseRequest {
+            tenant_id,
+            database_name,
+            ..
+        }: GetDatabaseRequest,
     ) -> Result<GetDatabaseResponse, GetDatabaseError> {
         self.sysdb_client
-            .get_database(request.database_name, request.tenant_id)
+            .get_database(database_name, tenant_id)
             .await
     }
 
     pub async fn delete_database(
         &mut self,
-        request: DeleteDatabaseRequest,
+        DeleteDatabaseRequest {
+            tenant_id,
+            database_name,
+            ..
+        }: DeleteDatabaseRequest,
     ) -> Result<DeleteDatabaseResponse, DeleteDatabaseError> {
         self.sysdb_client
-            .delete_database(request.database_name, request.tenant_id)
+            .delete_database(database_name, tenant_id)
             .await
     }
 
     pub async fn list_collections(
         &mut self,
-        request: ListCollectionsRequest,
+        ListCollectionsRequest {
+            tenant_id,
+            database_name,
+            limit,
+            offset,
+            ..
+        }: ListCollectionsRequest,
     ) -> Result<ListCollectionsResponse, GetCollectionsError> {
         self.sysdb_client
             .get_collections(
                 None,
                 None,
-                Some(request.tenant_id),
-                Some(request.database_name),
-                request.limit,
-                request.offset,
+                Some(tenant_id),
+                Some(database_name),
+                limit,
+                offset,
             )
             .await
     }
 
     pub async fn count_collections(
         &mut self,
-        request: CountCollectionsRequest,
+        CountCollectionsRequest {
+            tenant_id,
+            database_name,
+            ..
+        }: CountCollectionsRequest,
     ) -> Result<CountCollectionsResponse, CountCollectionsError> {
         self.sysdb_client
-            .count_collections(request.tenant_id, Some(request.database_name))
+            .count_collections(tenant_id, Some(database_name))
             .await
             .map(|count| count as u32)
     }
 
     pub async fn get_collection(
         &mut self,
-        request: GetCollectionRequest,
+        GetCollectionRequest {
+            tenant_id,
+            database_name,
+            collection_name,
+            ..
+        }: GetCollectionRequest,
     ) -> Result<GetCollectionResponse, GetCollectionError> {
         let mut collections = self
             .sysdb_client
             .get_collections(
                 None,
-                Some(request.collection_name.clone()),
-                Some(request.tenant_id),
-                Some(request.database_name),
+                Some(collection_name.clone()),
+                Some(tenant_id),
+                Some(database_name),
                 None,
                 0,
             )
@@ -368,18 +403,25 @@ impl Frontend {
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         collections
             .pop()
-            .ok_or(GetCollectionError::NotFound(request.collection_name))
+            .ok_or(GetCollectionError::NotFound(collection_name))
     }
 
     pub async fn create_collection(
         &mut self,
-        request: CreateCollectionRequest,
+        CreateCollectionRequest {
+            tenant_id,
+            database_name,
+            name,
+            metadata,
+            get_or_create,
+            ..
+        }: CreateCollectionRequest,
     ) -> Result<CreateCollectionResponse, CreateCollectionError> {
         let collection_id = CollectionUuid::new();
         let segments = match self.executor {
             Executor::Distributed(_) => {
                 let hnsw_metadata =
-                    Metadata::try_from(DistributedHnswParameters::try_from(&request.metadata)?)?;
+                    Metadata::try_from(DistributedHnswParameters::try_from(&metadata)?)?;
 
                 vec![
                     Segment {
@@ -410,7 +452,7 @@ impl Frontend {
             }
             Executor::Local(_) => {
                 let hnsw_metadata =
-                    Metadata::try_from(SingleNodeHnswParameters::try_from(&request.metadata)?)?;
+                    Metadata::try_from(SingleNodeHnswParameters::try_from(&metadata)?)?;
 
                 vec![
                     Segment {
@@ -436,14 +478,14 @@ impl Frontend {
         let collection = self
             .sysdb_client
             .create_collection(
-                request.tenant_id,
-                request.database_name,
+                tenant_id,
+                database_name,
                 collection_id,
-                request.name,
+                name,
                 segments,
-                request.metadata,
+                metadata,
                 None,
-                request.get_or_create,
+                get_or_create,
             )
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
@@ -457,21 +499,21 @@ impl Frontend {
 
     pub async fn update_collection(
         &mut self,
-        request: UpdateCollectionRequest,
+        UpdateCollectionRequest {
+            collection_id,
+            new_name,
+            new_metadata,
+            ..
+        }: UpdateCollectionRequest,
     ) -> Result<UpdateCollectionResponse, UpdateCollectionError> {
         self.sysdb_client
-            .update_collection(
-                request.collection_id,
-                request.new_name,
-                request.new_metadata,
-                None,
-            )
+            .update_collection(collection_id, new_name, new_metadata, None)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         // Invalidate the cache.
         self.collections_with_segments_provider
             .collections_with_segments_cache
-            .remove(&request.collection_id)
+            .remove(&collection_id)
             .await;
 
         Ok(UpdateCollectionResponse {})
@@ -479,14 +521,19 @@ impl Frontend {
 
     pub async fn delete_collection(
         &mut self,
-        request: DeleteCollectionRequest,
+        DeleteCollectionRequest {
+            tenant_id,
+            database_name,
+            collection_name,
+            ..
+        }: DeleteCollectionRequest,
     ) -> Result<DeleteCollectionRecordsResponse, DeleteCollectionError> {
         let collection = self
             .get_collection(
                 GetCollectionRequest::try_new(
-                    request.tenant_id.clone(),
-                    request.database_name.clone(),
-                    request.collection_name,
+                    tenant_id.clone(),
+                    database_name.clone(),
+                    collection_name,
                 )
                 .map_err(DeleteCollectionError::Validation)?,
             )
@@ -500,8 +547,8 @@ impl Frontend {
 
         self.sysdb_client
             .delete_collection(
-                request.tenant_id,
-                request.database_name,
+                tenant_id,
+                database_name,
                 collection.collection_id,
                 segments.into_iter().map(|s| s.id).collect(),
             )
@@ -518,9 +565,9 @@ impl Frontend {
 
     pub async fn add(
         &mut self,
-        request: AddCollectionRecordsRequest,
-    ) -> Result<AddCollectionRecordsResponse, AddCollectionRecordsError> {
-        let AddCollectionRecordsRequest {
+        AddCollectionRecordsRequest {
+            tenant_id,
+            database_name,
             collection_id,
             ids,
             embeddings,
@@ -528,8 +575,8 @@ impl Frontend {
             uris,
             metadatas,
             ..
-        } = request;
-
+        }: AddCollectionRecordsRequest,
+    ) -> Result<AddCollectionRecordsResponse, AddCollectionRecordsError> {
         self.validate_embedding(collection_id, embeddings.as_ref(), true, |embedding| {
             Some(embedding.len())
         })
@@ -538,22 +585,31 @@ impl Frontend {
 
         let embeddings = embeddings.map(|embeddings| embeddings.into_iter().map(Some).collect());
 
-        let records = to_records(ids, embeddings, documents, uris, metadatas, Operation::Add)
-            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        let (records, log_bytes) =
+            to_records(ids, embeddings, documents, uris, metadatas, Operation::Add)
+                .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
         self.log_client
             .push_logs(collection_id, records)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
+        MeterEvent::Collection {
+            tenant_id,
+            database_name,
+            io: IoKind::Write { log_bytes },
+        }
+        .submit()
+        .await;
+
         Ok(AddCollectionRecordsResponse {})
     }
 
     pub async fn update(
         &mut self,
-        request: UpdateCollectionRecordsRequest,
-    ) -> Result<UpdateCollectionRecordsResponse, UpdateCollectionRecordsError> {
-        let UpdateCollectionRecordsRequest {
+        UpdateCollectionRecordsRequest {
+            tenant_id,
+            database_name,
             collection_id,
             ids,
             embeddings,
@@ -561,15 +617,15 @@ impl Frontend {
             uris,
             metadatas,
             ..
-        }: UpdateCollectionRecordsRequest = request;
-
+        }: UpdateCollectionRecordsRequest,
+    ) -> Result<UpdateCollectionRecordsResponse, UpdateCollectionRecordsError> {
         self.validate_embedding(collection_id, embeddings.as_ref(), true, |embedding| {
             embedding.as_ref().map(|emb| emb.len())
         })
         .await
         .map_err(|err| err.boxed())?;
 
-        let records = to_records(
+        let (records, log_bytes) = to_records(
             ids,
             embeddings,
             documents,
@@ -584,14 +640,22 @@ impl Frontend {
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
+        MeterEvent::Collection {
+            tenant_id,
+            database_name,
+            io: IoKind::Write { log_bytes },
+        }
+        .submit()
+        .await;
+
         Ok(UpdateCollectionRecordsResponse {})
     }
 
     pub async fn upsert(
         &mut self,
-        request: UpsertCollectionRecordsRequest,
-    ) -> Result<UpsertCollectionRecordsResponse, UpsertCollectionRecordsError> {
-        let UpsertCollectionRecordsRequest {
+        UpsertCollectionRecordsRequest {
+            tenant_id,
+            database_name,
             collection_id,
             ids,
             embeddings,
@@ -599,8 +663,8 @@ impl Frontend {
             uris,
             metadatas,
             ..
-        } = request;
-
+        }: UpsertCollectionRecordsRequest,
+    ) -> Result<UpsertCollectionRecordsResponse, UpsertCollectionRecordsError> {
         self.validate_embedding(collection_id, embeddings.as_ref(), true, |embedding| {
             Some(embedding.len())
         })
@@ -609,7 +673,7 @@ impl Frontend {
 
         let embeddings = embeddings.map(|embeddings| embeddings.into_iter().map(Some).collect());
 
-        let records = to_records(
+        let (records, log_bytes) = to_records(
             ids,
             embeddings,
             documents,
@@ -624,35 +688,39 @@ impl Frontend {
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
+        MeterEvent::Collection {
+            tenant_id,
+            database_name,
+            io: IoKind::Write { log_bytes },
+        }
+        .submit()
+        .await;
+
         Ok(UpsertCollectionRecordsResponse {})
     }
 
     pub async fn retryable_delete(
         &mut self,
-        request: DeleteCollectionRecordsRequest,
+        DeleteCollectionRecordsRequest {
+            tenant_id,
+            database_name,
+            collection_id,
+            ids,
+            r#where,
+            ..
+        }: DeleteCollectionRecordsRequest,
     ) -> Result<DeleteCollectionRecordsResponse, DeleteCollectionRecordsError> {
         let mut records = Vec::new();
 
-        if let Some(ids) = request.ids {
-            records.extend(ids.into_iter().map(|id| OperationRecord {
-                id,
-                operation: Operation::Delete,
-                document: None,
-                embedding: None,
-                encoding: None,
-                metadata: None,
-            }));
-        }
-
-        if let Some(where_clause) = request.r#where {
-            let scan = self
+        if let Some(where_clause) = r#where {
+            let collection_and_segments = self
                 .collections_with_segments_provider
-                .get_collection_with_segments(request.collection_id)
+                .get_collection_with_segments(collection_id)
                 .await
                 .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
             let filter = Filter {
-                query_ids: None,
+                query_ids: ids,
                 where_clause: Some(where_clause),
             };
 
@@ -660,7 +728,7 @@ impl Frontend {
                 .executor
                 .get(Get {
                     scan: Scan {
-                        collection_and_segments: scan,
+                        collection_and_segments,
                     },
                     filter,
                     limit: Limit {
@@ -685,6 +753,15 @@ impl Frontend {
                     metadata: None,
                 });
             }
+        } else if let Some(user_ids) = ids {
+            records.extend(user_ids.into_iter().map(|id| OperationRecord {
+                id,
+                operation: Operation::Delete,
+                document: None,
+                embedding: None,
+                encoding: None,
+                metadata: None,
+            }));
         }
 
         if records.is_empty() {
@@ -692,10 +769,20 @@ impl Frontend {
             return Ok(DeleteCollectionRecordsResponse {});
         }
 
+        let log_bytes = records.iter().map(OperationRecord::size_byte).sum();
+
         self.log_client
-            .push_logs(request.collection_id, records)
+            .push_logs(collection_id, records)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+
+        MeterEvent::Collection {
+            tenant_id,
+            database_name,
+            io: IoKind::Write { log_bytes },
+        }
+        .submit()
+        .await;
 
         Ok(DeleteCollectionRecordsResponse {})
     }
@@ -744,25 +831,46 @@ impl Frontend {
 
     pub async fn retryable_count(
         &mut self,
-        request: CountRequest,
+        CountRequest {
+            tenant_id,
+            database_name,
+            collection_id,
+            ..
+        }: CountRequest,
     ) -> Result<CountResponse, QueryError> {
-        tracing::info!(
-            "Retrying count() request for collection {}",
-            request.collection_id
-        );
+        tracing::info!("Retrying count() request for collection {}", collection_id);
         let collection_and_segments = self
             .collections_with_segments_provider
-            .get_collection_with_segments(request.collection_id)
+            .get_collection_with_segments(collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
-        Ok(self
+        let meter_event = MeterEvent::Collection {
+            tenant_id,
+            database_name,
+            io: IoKind::Read {
+                collection_record: collection_and_segments
+                    .collection
+                    .total_records_post_compaction as u32,
+                collection_dim: collection_and_segments
+                    .collection
+                    .dimension
+                    .as_ref()
+                    .map(|dim| *dim as u32)
+                    .unwrap_or_default(),
+                where_complexity: 0,
+                vector_complexity: 0,
+            },
+        };
+        let res = self
             .executor
             .count(Count {
                 scan: Scan {
                     collection_and_segments,
                 },
             })
-            .await?)
+            .await?;
+        meter_event.submit().await;
+        Ok(res)
     }
 
     pub async fn count(&mut self, request: CountRequest) -> Result<CountResponse, QueryError> {
@@ -804,16 +912,43 @@ impl Frontend {
         res
     }
 
-    async fn retryable_get(&mut self, request: GetRequest) -> Result<GetResponse, QueryError> {
-        tracing::info!(
-            "Retrying get() request for collection {}",
-            request.collection_id
-        );
+    async fn retryable_get(
+        &mut self,
+        GetRequest {
+            tenant_id,
+            database_name,
+            collection_id,
+            ids,
+            r#where,
+            limit,
+            offset,
+            include,
+            ..
+        }: GetRequest,
+    ) -> Result<GetResponse, QueryError> {
+        tracing::info!("Retrying get() request for collection {}", collection_id);
         let collection_and_segments = self
             .collections_with_segments_provider
-            .get_collection_with_segments(request.collection_id)
+            .get_collection_with_segments(collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        let meter_event = MeterEvent::Collection {
+            tenant_id,
+            database_name,
+            io: IoKind::Read {
+                collection_record: collection_and_segments
+                    .collection
+                    .total_records_post_compaction as u32,
+                collection_dim: collection_and_segments
+                    .collection
+                    .dimension
+                    .as_ref()
+                    .map(|dim| *dim as u32)
+                    .unwrap_or_default(),
+                where_complexity: r#where.as_ref().map(Where::complexity).unwrap_or_default(),
+                vector_complexity: 0,
+            },
+        };
         let get_result = self
             .executor
             .get(Get {
@@ -821,23 +956,24 @@ impl Frontend {
                     collection_and_segments,
                 },
                 filter: Filter {
-                    query_ids: request.ids,
-                    where_clause: request.r#where,
+                    query_ids: ids,
+                    where_clause: r#where,
                 },
                 limit: Limit {
-                    skip: request.offset,
-                    fetch: request.limit,
+                    skip: offset,
+                    fetch: limit,
                 },
                 proj: Projection {
-                    document: request.include.0.contains(&Include::Document),
-                    embedding: request.include.0.contains(&Include::Embedding),
+                    document: include.0.contains(&Include::Document),
+                    embedding: include.0.contains(&Include::Embedding),
                     // If URI is requested, metadata is also requested so we can extract the URI.
-                    metadata: (request.include.0.contains(&Include::Metadata)
-                        || request.include.0.contains(&Include::Uri)),
+                    metadata: (include.0.contains(&Include::Metadata)
+                        || include.0.contains(&Include::Uri)),
                 },
             })
             .await?;
-        Ok((get_result, request.include).into())
+        meter_event.submit().await;
+        Ok((get_result, include).into())
     }
 
     pub async fn get(&mut self, request: GetRequest) -> Result<GetResponse, QueryError> {
@@ -881,18 +1017,41 @@ impl Frontend {
 
     async fn retryable_query(
         &mut self,
-        request: QueryRequest,
+        QueryRequest {
+            tenant_id,
+            database_name,
+            collection_id,
+            ids,
+            r#where,
+            embeddings,
+            n_results,
+            include,
+            ..
+        }: QueryRequest,
     ) -> Result<QueryResponse, QueryError> {
-        tracing::info!(
-            "Retrying query() request for collection {}",
-            request.collection_id
-        );
+        tracing::info!("Retrying query() request for collection {}", collection_id);
         let collection_and_segments = self
             .collections_with_segments_provider
-            .get_collection_with_segments(request.collection_id)
+            .get_collection_with_segments(collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
-
+        let meter_event = MeterEvent::Collection {
+            tenant_id,
+            database_name,
+            io: IoKind::Read {
+                collection_record: collection_and_segments
+                    .collection
+                    .total_records_post_compaction as u32,
+                collection_dim: collection_and_segments
+                    .collection
+                    .dimension
+                    .as_ref()
+                    .map(|dim| *dim as u32)
+                    .unwrap_or_default(),
+                where_complexity: r#where.as_ref().map(Where::complexity).unwrap_or_default(),
+                vector_complexity: embeddings.len() as u32,
+            },
+        };
         let query_result = self
             .executor
             .knn(Knn {
@@ -900,26 +1059,27 @@ impl Frontend {
                     collection_and_segments,
                 },
                 filter: Filter {
-                    query_ids: request.ids,
-                    where_clause: request.r#where,
+                    query_ids: ids,
+                    where_clause: r#where,
                 },
                 knn: KnnBatch {
-                    embeddings: request.embeddings,
-                    fetch: request.n_results,
+                    embeddings,
+                    fetch: n_results,
                 },
                 proj: KnnProjection {
                     projection: Projection {
-                        document: request.include.0.contains(&Include::Document),
-                        embedding: request.include.0.contains(&Include::Embedding),
+                        document: include.0.contains(&Include::Document),
+                        embedding: include.0.contains(&Include::Embedding),
                         // If URI is requested, metadata is also requested so we can extract the URI.
-                        metadata: (request.include.0.contains(&Include::Metadata)
-                            || request.include.0.contains(&Include::Uri)),
+                        metadata: (include.0.contains(&Include::Metadata)
+                            || include.0.contains(&Include::Uri)),
                     },
-                    distance: request.include.0.contains(&Include::Distance),
+                    distance: include.0.contains(&Include::Distance),
                 },
             })
             .await?;
-        Ok((query_result, request.include).into())
+        meter_event.submit().await;
+        Ok((query_result, include).into())
     }
 
     pub async fn query(&mut self, request: QueryRequest) -> Result<QueryResponse, QueryError> {

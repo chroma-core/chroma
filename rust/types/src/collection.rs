@@ -1,12 +1,14 @@
 use super::{Metadata, MetadataValueConversionError};
 use crate::{chroma_proto, test_segment, Segment, SegmentScope};
 use chroma_error::{ChromaError, ErrorCodes};
-use pyo3::types::PyAnyMethods;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 use utoipa::ToSchema;
 use uuid::Uuid;
+
+#[cfg(feature = "pyo3")]
+use pyo3::types::PyAnyMethods;
 
 /// CollectionUuid is a wrapper around Uuid to provide a type for the collection id.
 #[derive(
@@ -49,21 +51,16 @@ impl std::fmt::Display for CollectionUuid {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
-#[pyo3::pyclass]
+#[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct Collection {
     #[serde(rename(serialize = "id"))]
     pub collection_id: CollectionUuid,
-    #[pyo3(get)]
     pub name: String,
     #[serde(default, rename(deserialize = "configuration_json_str"))]
     pub configuration_json: Value,
-    #[pyo3(get)]
     pub metadata: Option<Metadata>,
-    #[pyo3(get)]
     pub dimension: Option<i32>,
-    #[pyo3(get)]
     pub tenant: String,
-    #[pyo3(get)]
     pub database: String,
     pub log_position: i64,
     pub version: i32,
@@ -71,6 +68,7 @@ pub struct Collection {
     pub total_records_post_compaction: u64,
 }
 
+#[cfg(feature = "pyo3")]
 #[pyo3::pymethods]
 impl Collection {
     #[getter]
@@ -91,6 +89,31 @@ impl Collection {
             .getattr("from_json_str")?
             .call1((self.configuration_json.to_string(),))?;
         Ok(res)
+    }
+
+    #[getter]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    #[getter]
+    pub fn metadata(&self) -> Option<Metadata> {
+        self.metadata.clone()
+    }
+
+    #[getter]
+    pub fn dimension(&self) -> Option<i32> {
+        self.dimension
+    }
+
+    #[getter]
+    pub fn tenant(&self) -> &str {
+        &self.tenant
+    }
+
+    #[getter]
+    pub fn database(&self) -> &str {
+        &self.database
     }
 }
 

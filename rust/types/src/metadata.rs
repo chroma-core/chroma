@@ -1,5 +1,4 @@
 use chroma_error::{ChromaError, ErrorCodes};
-use pyo3::{types::PyAnyMethods, FromPyObject, IntoPyObject};
 use serde::{Deserialize, Serialize};
 use serde_json::{Number, Value};
 use std::{
@@ -11,6 +10,9 @@ use utoipa::ToSchema;
 
 use crate::chroma_proto;
 
+#[cfg(feature = "pyo3")]
+use pyo3::{types::PyAnyMethods, FromPyObject, IntoPyObject};
+
 #[derive(Clone, Debug, PartialEq, PartialOrd, Deserialize, Serialize, ToSchema)]
 #[serde(untagged)]
 pub enum UpdateMetadataValue {
@@ -21,6 +23,7 @@ pub enum UpdateMetadataValue {
     None,
 }
 
+#[cfg(feature = "pyo3")]
 impl FromPyObject<'_> for UpdateMetadataValue {
     fn extract_bound(ob: &pyo3::Bound<'_, pyo3::PyAny>) -> pyo3::PyResult<Self> {
         if let Ok(value) = ob.extract::<bool>() {
@@ -125,10 +128,9 @@ MetadataValue
     PartialEq,
     PartialOrd,
     Serialize,
-    FromPyObject,
-    IntoPyObject,
     ToSchema,
 )]
+#[cfg_attr(feature = "pyo3", derive(FromPyObject, IntoPyObject))]
 #[serde(untagged)]
 pub enum MetadataValue {
     Bool(bool),
@@ -475,6 +477,21 @@ impl Where {
             operator: BooleanOperator::Or,
             children,
         })
+    }
+
+    pub fn complexity(&self) -> u32 {
+        // TODO: Properly estimate filter complexity
+        match self {
+            Where::Composite(composite_expression) => composite_expression
+                .children
+                .iter()
+                .map(Where::complexity)
+                .sum(),
+            Where::Document(document_expression) => {
+                document_expression.text.len().max(5) as u32 - 3
+            }
+            Where::Metadata(_metadata_expression) => 1,
+        }
     }
 }
 
