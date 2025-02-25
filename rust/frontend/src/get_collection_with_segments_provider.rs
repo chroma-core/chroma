@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::{sync::Arc, time::Duration};
 use thiserror::Error;
 
-#[derive(Deserialize, Serialize, Clone)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct CacheInvalidationRetryConfig {
     pub delay_ms: u32,
     pub max_retries: u32,
@@ -32,12 +32,22 @@ impl Default for CacheInvalidationRetryConfig {
     }
 }
 
-#[derive(Deserialize, Clone, Serialize)]
+#[derive(Deserialize, Clone, Serialize, Debug)]
 pub struct CollectionsWithSegmentsProviderConfig {
     pub cache: chroma_cache::CacheConfig,
     pub permitted_parallelism: u32,
     #[serde(default = "CacheInvalidationRetryConfig::default")]
     pub cache_invalidation_retry_policy: CacheInvalidationRetryConfig,
+}
+
+impl Default for CollectionsWithSegmentsProviderConfig {
+    fn default() -> Self {
+        Self {
+            cache: chroma_cache::CacheConfig::Nop,
+            permitted_parallelism: 100,
+            cache_invalidation_retry_policy: CacheInvalidationRetryConfig::default(),
+        }
+    }
 }
 
 #[async_trait::async_trait]

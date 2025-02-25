@@ -1,6 +1,4 @@
-use std::sync::Arc;
-
-use chroma_cache::{Cache, CacheConfig, CacheError};
+use chroma_cache::{Cache, CacheConfig, CacheError, FoyerCacheConfig};
 use chroma_config::{
     registry::{Injectable, Registry},
     Configurable,
@@ -10,6 +8,7 @@ use chroma_index::IndexUuid;
 use chroma_sqlite::db::SqliteDb;
 use chroma_types::Segment;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use thiserror::Error;
 
 use crate::local_hnsw::{
@@ -17,10 +16,18 @@ use crate::local_hnsw::{
     LocalHnswSegmentWriterError,
 };
 
+fn default_hnsw_index_pool_cache_config() -> CacheConfig {
+    CacheConfig::Memory(FoyerCacheConfig {
+        capacity: 65536,
+        ..Default::default()
+    })
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LocalSegmentManagerConfig {
     // TODO(Sanket): Estimate the max number of FDs that can be kept open and
     // use that as a capacity in the cache.
+    #[serde(default = "default_hnsw_index_pool_cache_config")]
     pub hnsw_index_pool_cache_config: CacheConfig,
     pub persist_path: Option<String>,
 }

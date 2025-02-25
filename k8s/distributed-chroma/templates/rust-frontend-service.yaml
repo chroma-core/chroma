@@ -19,10 +19,10 @@ spec:
           imagePullPolicy: IfNotPresent
           readinessProbe:
             httpGet:
-              port: 3000
+              port: 8000
               path: /api/v2/healthcheck
           ports:
-            - containerPort: 3000
+            - containerPort: 8000
           {{ if .Values.rustFrontendService.resources }}
           resources:
             limits:
@@ -55,8 +55,8 @@ metadata:
 spec:
   ports:
     - name: server-port
-      port: 3000
-      targetPort: 3000
+      port: 8000
+      targetPort: 8000
   selector:
     app: rust-frontend-service
   type: ClusterIP

@@ -1,4 +1,7 @@
-use crate::{executor::config::ExecutorConfig, CollectionsWithSegmentsProviderConfig};
+use crate::{
+    executor::config::{ExecutorConfig, LocalExecutorConfig},
+    CollectionsWithSegmentsProviderConfig,
+};
 use chroma_log::config::LogConfig;
 use chroma_segment::local_segment_manager::LocalSegmentManagerConfig;
 use chroma_sqlite::config::SqliteDBConfig;
@@ -8,21 +11,55 @@ use mdac::CircuitBreakerConfig;
 use rust_embed::Embed;
 use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize, Serialize, Clone)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct ScorecardRule {
     pub patterns: Vec<String>,
     pub score: u32,
 }
 
-#[derive(Deserialize, Serialize, Clone)]
+fn default_sysdb_config() -> SysDbConfig {
+    SysDbConfig::Sqlite(Default::default())
+}
+
+fn default_log_config() -> LogConfig {
+    LogConfig::Sqlite(Default::default())
+}
+
+fn default_executor_config() -> ExecutorConfig {
+    ExecutorConfig::Local(LocalExecutorConfig {})
+}
+
+fn default_sqlitedb() -> Option<SqliteDBConfig> {
+    Some(SqliteDBConfig::default())
+}
+
+fn default_segment_manager_config() -> Option<LocalSegmentManagerConfig> {
+    Some(LocalSegmentManagerConfig {
+        hnsw_index_pool_cache_config: chroma_cache::CacheConfig::Memory(
+            chroma_cache::FoyerCacheConfig {
+                capacity: 65536,
+                ..Default::default()
+            },
+        ),
+        persist_path: None,
+    })
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct FrontendConfig {
     #[serde(default)]
     pub allow_reset: bool,
+    #[serde(default = "default_sqlitedb")]
     pub sqlitedb: Option<SqliteDBConfig>,
+    #[serde(default = "default_segment_manager_config")]
     pub segment_manager: Option<LocalSegmentManagerConfig>,
+    #[serde(default = "default_sysdb_config")]
     pub sysdb: SysDbConfig,
+    #[serde(default)]
     pub collections_with_segments_provider: CollectionsWithSegmentsProviderConfig,
+    #[serde(default = "default_log_config")]
     pub log: LogConfig,
+    #[serde(default = "default_executor_config")]
     pub executor: ExecutorConfig,
 }
 
@@ -33,7 +70,7 @@ pub struct OpenTelemetryConfig {
 }
 
 fn default_port() -> u16 {
-    3000
+    8000
 }
 
 fn default_listen_address() -> String {
@@ -44,7 +81,7 @@ fn default_max_payload_size_bytes() -> usize {
     40 * 1024 * 1024 // 40 MB
 }
 
-#[derive(Deserialize, Serialize, Clone)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct FrontendServerConfig {
     #[serde(flatten)]
     pub frontend: FrontendConfig,
