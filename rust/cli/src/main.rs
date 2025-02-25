@@ -1,4 +1,4 @@
-use chroma_frontend::{config::FrontendConfig, frontend_service_entrypoint_with_config};
+use chroma_frontend::{config::FrontendServerConfig, frontend_service_entrypoint_with_config};
 use clap::{Parser, Subcommand};
 use std::sync::Arc;
 
@@ -42,8 +42,8 @@ fn run(args: RunArgs) {
     println!("{}", LOGO);
 
     let config = match &args.config {
-        Some(path) => FrontendConfig::load_from_path(path),
-        None => FrontendConfig::single_node_default(),
+        Some(path) => FrontendServerConfig::load_from_path(path),
+        None => FrontendServerConfig::single_node_default(),
     };
 
     let runtime = tokio::runtime::Runtime::new().expect("Failed to start Chroma");

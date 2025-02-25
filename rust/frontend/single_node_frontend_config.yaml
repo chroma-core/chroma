@@ -20,8 +20,9 @@ collections_with_segments_provider:
   cache_invalidation_retry_policy:
     delay_ms: 0
     max_retries: 0
-service_name: "rust-frontend-service"
-otel_endpoint: "http://otel-collector:4317"
+open_telemetry:
+  service_name: "rust-frontend-service"
+  endpoint: "http://otel-collector:4317"
 log:
   Sqlite:
     tenant_id: "default"
