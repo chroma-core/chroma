@@ -1,6 +1,9 @@
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
-use chroma_system::{wrap, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator, TaskMessage, TaskResult};
+use chroma_system::{
+    wrap, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator, TaskMessage,
+    TaskResult,
+};
 use tokio::sync::oneshot::Sender;
 
 use crate::execution::operators::{
@@ -29,23 +32,23 @@ use super::knn_filter::{KnnError, KnnFilterOutput, KnnOutput, KnnResult};
 ///
 /// # Pipeline
 /// ```text
-///                                                           │                                                               
-///                                                           │                                                               
-///                                                           │                                                               
-///                                                           │                                                               
-///                                                           ▼                                                               
-///                                               ┌───────────────────────┐                                                   
-///                                               │                       │                                                   
-///                                               │ KnnFilterOrchestrator │                                                   
-///                                               │                       │                                                   
-///                                               └───────────┬───────────┘                                                   
-///                                                           │                                                               
-///                                                           │                                                               
-///                                                           │                                                               
-///                        ┌──────────────────────────────────┴─────────────────────────────────────┐                         
-///                        │                                                                        │                         
-///                        │                    ... One branch per embedding ...                    │                         
-///                        │                                                                        │                         
+///                                                           │
+///                                                           │
+///                                                           │
+///                                                           │
+///                                                           ▼
+///                                               ┌───────────────────────┐
+///                                               │                       │
+///                                               │ KnnFilterOrchestrator │
+///                                               │                       │
+///                                               └───────────┬───────────┘
+///                                                           │
+///                                                           │
+///                                                           │
+///                        ┌──────────────────────────────────┴─────────────────────────────────────┐
+///                        │                                                                        │
+///                        │                    ... One branch per embedding ...                    │
+///                        │                                                                        │
 /// ┌────────────────────  │  ─────────────────────┐                         ┌────────────────────  │  ─────────────────────┐
 /// │                      ▼                       │                         │                      ▼                       │
 /// │               ┌────────────┐ KnnOrchestrator │                         │               ┌────────────┐ KnnOrchestrator │
@@ -90,17 +93,17 @@ use super::knn_filter::{KnnError, KnnFilterOutput, KnnOutput, KnnResult};
 /// │             └────────┬─────────┘             │                         │             └────────┬─────────┘             │
 /// │                      │                       │                         │                      │                       │
 /// └────────────────────  │  ─────────────────────┘                         └────────────────────  │  ─────────────────────┘
-///                        │                                                                        │                         
-///                        │                                                                        │                         
-///                        │                                                                        │                         
-///                        │                           ┌────────────────┐                           │                         
-///                        │                           │                │                           │                         
-///                        └──────────────────────────►│  try_join_all  │◄──────────────────────────┘                         
-///                                                    │                │                                                     
-///                                                    └───────┬────────┘                                                     
-///                                                            │                                                              
-///                                                            │                                                              
-///                                                            ▼                                                              
+///                        │                                                                        │
+///                        │                                                                        │
+///                        │                                                                        │
+///                        │                           ┌────────────────┐                           │
+///                        │                           │                │                           │
+///                        └──────────────────────────►│  try_join_all  │◄──────────────────────────┘
+///                                                    │                │
+///                                                    └───────┬────────┘
+///                                                            │
+///                                                            │
+///                                                            ▼
 /// ```
 #[derive(Debug)]
 pub struct KnnOrchestrator {

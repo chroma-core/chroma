@@ -121,15 +121,7 @@ MetadataValue
 ===========================================
 */
 
-#[derive(
-    Clone,
-    Debug,
-    Deserialize,
-    PartialEq,
-    PartialOrd,
-    Serialize,
-    ToSchema,
-)]
+#[derive(Clone, Debug, Deserialize, PartialEq, PartialOrd, Serialize, ToSchema)]
 #[cfg_attr(feature = "pyo3", derive(FromPyObject, IntoPyObject))]
 #[serde(untagged)]
 pub enum MetadataValue {
