@@ -3,6 +3,7 @@ use std::{cmp::Ordering, collections::BinaryHeap};
 use async_trait::async_trait;
 
 use chroma_system::Operator;
+use thiserror::Error;
 
 use super::knn::RecordDistance;
 
@@ -22,7 +23,9 @@ pub struct SpannKnnMergeOutput {
     pub merged_records: Vec<RecordDistance>,
 }
 
-pub type SpannKnnMergeError = ();
+#[derive(Error, Debug)]
+#[error("Spann knn merge error (unreachable)")]
+pub struct SpannKnnMergeError;
 
 #[derive(Debug)]
 struct RecordHeapEntry {

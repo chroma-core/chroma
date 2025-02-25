@@ -9,6 +9,7 @@ segment_manager:
   hnsw_index_pool_cache_config:
     memory:
       capacity: 65536
+  persist_path: "./chroma/"
 sysdb:
   Sqlite:
     log_topic_namespace: "default"

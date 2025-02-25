@@ -99,6 +99,7 @@ pub async fn frontend_service_entrypoint_with_config(
         .map(rule_to_rule)
         .collect::<Result<Vec<_>, ScorecardRuleError>>()
         .expect("error creating scorecard");
-    let server = FrontendServer::new(config, frontend, rules, auth, quota_enforcer);
-    FrontendServer::run(server).await;
+    FrontendServer::new(config, frontend, rules, auth, quota_enforcer)
+        .run()
+        .await;
 }
