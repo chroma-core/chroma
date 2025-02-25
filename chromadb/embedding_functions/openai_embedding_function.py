@@ -130,17 +130,6 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
     def supported_spaces(self) -> List[Space]:
         return [Space.COSINE, Space.L2, Space.INNER_PRODUCT]
 
-    def max_tokens(self) -> int:
-        # Model-specific token limits
-        token_limits = {
-            "text-embedding-ada-002": 8191,
-            "text-embedding-3-small": 8191,
-            "text-embedding-3-large": 8191,
-        }
-        return token_limits.get(
-            self.model_name, 2048
-        )  # Default to 2048 if model not known
-
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
         # Extract parameters from config

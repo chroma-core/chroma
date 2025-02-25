@@ -73,10 +73,6 @@ class GooglePalmEmbeddingFunction(EmbeddingFunction[Documents]):
     def supported_spaces(self) -> List[Space]:
         return [Space.COSINE, Space.L2, Space.INNER_PRODUCT]
 
-    def max_tokens(self) -> int:
-        # Default token limit for Google PaLM models
-        return 2048
-
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
         api_key_env_var = config.get("api_key_env_var", "GOOGLE_PALM_API_KEY")
@@ -179,10 +175,6 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
 
     def supported_spaces(self) -> List[Space]:
         return [Space.COSINE, Space.L2, Space.INNER_PRODUCT]
-
-    def max_tokens(self) -> int:
-        # Default token limit for Google Generative AI models
-        return 8192
 
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
@@ -293,10 +285,6 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
 
     def supported_spaces(self) -> List[Space]:
         return [Space.COSINE, Space.L2, Space.INNER_PRODUCT]
-
-    def max_tokens(self) -> int:
-        # Default token limit for Google Vertex AI models
-        return 3072
 
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":

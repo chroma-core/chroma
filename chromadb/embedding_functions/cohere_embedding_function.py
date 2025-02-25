@@ -74,11 +74,6 @@ class CohereEmbeddingFunction(EmbeddingFunction[Documents]):
         else:
             return [Space.COSINE, Space.L2, Space.INNER_PRODUCT]
 
-    def max_tokens(self) -> int:
-        if self.model_name == "embed-multilingual-v2.0":
-            return 256
-        return 512
-
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
         api_key_env_var = config.get("api_key_env_var")

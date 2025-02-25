@@ -76,10 +76,6 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
     def supported_spaces(self) -> List[Space]:
         return [Space.COSINE, Space.L2, Space.INNER_PRODUCT]
 
-    def max_tokens(self) -> int:
-        # Default token limit for HuggingFace models
-        return 512
-
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
         api_key_env_var = config.get("api_key_env_var", "HUGGINGFACE_API_KEY")
@@ -159,10 +155,6 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
 
     def supported_spaces(self) -> List[Space]:
         return [Space.COSINE, Space.L2, Space.INNER_PRODUCT]
-
-    def max_tokens(self) -> int:
-        # Default token limit for HuggingFace models
-        return 512
 
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":

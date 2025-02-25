@@ -70,11 +70,6 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
     def supported_spaces(self) -> List[Space]:
         return [Space.COSINE, Space.L2, Space.INNER_PRODUCT]
 
-    def max_tokens(self) -> int:
-        # Default token limit for SentenceTransformer models
-        # This is a conservative estimate, actual limits vary by model
-        return 512
-
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
         model_name = config.get("model_name", "all-MiniLM-L6-v2")

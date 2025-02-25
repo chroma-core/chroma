@@ -64,11 +64,6 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
     def supported_spaces(self) -> List[Space]:
         return [Space.COSINE, Space.L2, Space.INNER_PRODUCT]
 
-    def max_tokens(self) -> int:
-        # Default token limit for VoyageAI models
-        # This is a conservative estimate, actual limits vary by model
-        return 8192
-
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
         api_key_env_var = config.get("api_key_env_var", "VOYAGE_API_KEY")
