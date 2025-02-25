@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{path::Path, sync::Arc};
 
 mod ac;
 pub mod auth;
@@ -79,7 +79,29 @@ pub async fn frontend_service_entrypoint_with_config(
     let system = System::new();
     let registry = Registry::new();
 
-    let frontend = Frontend::try_from_config(&(config.frontend.clone(), system), &registry)
+    let mut fe_cfg = config.frontend.clone();
+    if let (Some(path_str), Some(sql_cfg), Some(local_segman_cfg)) = (
+        &config.persist_path,
+        fe_cfg.sqlitedb.as_mut(),
+        fe_cfg.segment_manager.as_mut(),
+    ) {
+        let persist_root = Path::new(path_str);
+        let sqlite_url = persist_root.join("chroma.sqlite3");
+        local_segman_cfg.persist_path.get_or_insert(
+            persist_root
+                .to_str()
+                .expect("Persist path should be valid")
+                .to_string(),
+        );
+        sql_cfg.url.get_or_insert(
+            sqlite_url
+                .to_str()
+                .expect("Sqlite path should be valid")
+                .to_string(),
+        );
+    }
+
+    let frontend = Frontend::try_from_config(&(fe_cfg, system), &registry)
         .await
         .expect("Error creating Frontend Config");
     fn rule_to_rule(rule: &ScorecardRule) -> Result<Rule, ScorecardRuleError> {
