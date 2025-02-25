@@ -153,9 +153,14 @@ impl FrontendServer {
         }
     }
 
-    #[allow(dead_code)]
-    pub async fn run(server: FrontendServer) {
-        let config = server.config.clone();
+    pub async fn run(self) {
+        let FrontendServerConfig {
+            port,
+            listen_address,
+            max_payload_size_bytes,
+            circuit_breaker,
+            ..
+        } = self.config.clone();
 
         let (docs_router, docs_api) =
             OpenApiRouter::with_openapi(ApiDoc::openapi()).split_for_parts();
@@ -232,16 +237,16 @@ impl FrontendServer {
                 post(collection_query),
             )
             .merge(docs_router)
-            .with_state(server)
-            .layer(DefaultBodyLimit::max(config.max_payload_size_bytes));
+            .with_state(self)
+            .layer(DefaultBodyLimit::max(max_payload_size_bytes));
         let app = add_tracing_middleware(app);
 
         // TODO: tracing
-        let addr = format!("{}:{}", config.listen_address, config.port);
+        let addr = format!("{}:{}", listen_address, port);
         println!("Listening on {addr}");
         let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-        if config.circuit_breaker.enabled() {
-            let service = AdmissionControlledService::new(config.circuit_breaker, app);
+        if circuit_breaker.enabled() {
+            let service = AdmissionControlledService::new(circuit_breaker, app);
             axum::serve(listener, service.into_make_service())
                 .await
                 .unwrap();

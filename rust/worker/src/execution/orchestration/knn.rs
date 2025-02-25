@@ -282,9 +282,10 @@ impl Handler<TaskResult<KnnMergeOutput, KnnMergeError>> for KnnOrchestrator {
         message: TaskResult<KnnMergeOutput, KnnMergeError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let output = message
-            .into_inner()
-            .expect("KnnMergeOperator should not fail");
+        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+            Some(output) => output,
+            None => return,
+        };
 
         // Prefetch records before projection
         let prefetch_task = wrap(
