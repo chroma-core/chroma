@@ -37,6 +37,8 @@ func (s *SoftDeleteCleaner) Start() error {
 }
 
 func (s *SoftDeleteCleaner) run() {
+	log.Info("Starting soft delete cleaner", zap.Duration("cleanup_interval", s.cleanupInterval), zap.Duration("max_age", s.maxAge), zap.Uint("limit_per_check", s.limitPerCheck))
+
 	// Use configurable jitter instead of hard-coded 5000
 	if s.maxInitialJitter > 0 {
 		time.Sleep(time.Duration(rand.Int63n(int64(s.maxInitialJitter.Milliseconds())+1)) * time.Millisecond)
@@ -50,7 +52,6 @@ func (s *SoftDeleteCleaner) run() {
 		time.Sleep(time.Duration(rand.Int63n(1000)) * time.Millisecond)
 
 		collections, err := s.coordinator.GetSoftDeletedCollections(context.Background(), nil, "", "", int32(s.limitPerCheck))
-		log.Info("Fetched soft deleted collections", zap.Int("num_collections", len(collections)))
 		if err != nil {
 			log.Error("Error while getting soft deleted collections", zap.Error(err))
 			continue
@@ -58,7 +59,6 @@ func (s *SoftDeleteCleaner) run() {
 		numDeleted := 0
 		for _, collection := range collections {
 			timeSinceDelete := time.Since(time.Unix(collection.UpdatedAt, 0))
-			log.Info("Found soft deleted collection", zap.String("collection_id", collection.ID.String()), zap.Duration("time_since_delete", timeSinceDelete))
 			if timeSinceDelete > s.maxAge {
 				log.Info("Deleting soft deleted collection", zap.String("collection_id", collection.ID.String()), zap.Duration("time_since_delete", timeSinceDelete))
 				err := s.coordinator.CleanupSoftDeletedCollection(context.Background(), &model.DeleteCollection{
@@ -74,7 +74,6 @@ func (s *SoftDeleteCleaner) run() {
 				}
 			}
 		}
-		log.Info("Deleted soft deleted collections", zap.Int("numDeleted", numDeleted))
 	}
 }
 
