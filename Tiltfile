@@ -50,8 +50,7 @@ docker_build(
   'local:rust-frontend-service',
   '.',
   only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
-  dockerfile='./rust/frontend/Dockerfile',
-  target='frontend_service'
+  dockerfile='./rust/cli/Dockerfile',
 )
 
 

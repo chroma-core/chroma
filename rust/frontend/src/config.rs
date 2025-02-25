@@ -102,8 +102,8 @@ pub struct FrontendServerConfig {
     pub persist_path: Option<String>,
 }
 
-const DEFAULT_CONFIG_PATH: &str = "./frontend_config.yaml";
-const DEFAULT_SINGLE_NODE_CONFIG_FILENAME: &str = "single_node_frontend_config.yaml";
+const DEFAULT_CONFIG_PATH: &str = "./sample_configs/distributed.yaml";
+const DEFAULT_SINGLE_NODE_CONFIG_FILENAME: &str = "./sample_configs/single_node.yaml";
 
 #[derive(Embed)]
 #[folder = "./"]
