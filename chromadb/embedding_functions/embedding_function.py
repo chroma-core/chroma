@@ -43,19 +43,17 @@ class EmbeddingFunction(Protocol[D]):
         """
         ...
 
-    @abstractmethod
     def default_space(self) -> Space:
         """
         Return the default space for the embedding function.
         """
-        ...
+        return Space.COSINE
 
-    @abstractmethod
     def supported_spaces(self) -> List[Space]:
         """
         Return the supported spaces for the embedding function.
         """
-        ...
+        return [Space.COSINE, Space.L2, Space.INNER_PRODUCT]
 
     @staticmethod
     @abstractmethod
