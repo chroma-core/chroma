@@ -321,6 +321,16 @@ func (suite *CollectionServiceTestSuite) TestCreateCollection() {
 	// Clean up
 	err = dao.CleanUpTestCollection(suite.db, collectionID.String())
 	suite.NoError(err)
+
+	// Create a collection on a database that does not exist.
+	_, err = suite.s.CreateCollection(context.Background(), &coordinatorpb.CreateCollectionRequest{
+		Id:       types.UniqueID(uuid.New()).String(),
+		Name:     "test_collection",
+		Database: "non_existent_database",
+		Tenant:   suite.tenantName,
+	})
+	suite.Error(err)
+	suite.Equal(common.ErrDatabaseNotFound, err)
 }
 
 func (suite *CollectionServiceTestSuite) TestServer_FlushCollectionCompaction() {
