@@ -5,6 +5,8 @@ runs:
   steps:
     - name: Install Protoc
       uses: arduino/setup-protoc@v2
+      with:
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
     - name: Use sccache
       uses: mozilla-actions/sccache-action@v0.0.7
     - name: Enable sccache
