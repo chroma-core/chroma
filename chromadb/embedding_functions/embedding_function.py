@@ -31,7 +31,6 @@ class EmbeddingFunction(Protocol[D]):
     def supported_spaces(self) -> List[Space]:
         return [Space.COSINE, Space.L2, Space.INNER_PRODUCT]
 
-    @abstractmethod
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[D]":
         ...

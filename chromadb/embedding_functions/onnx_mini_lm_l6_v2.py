@@ -1,29 +1,24 @@
 import hashlib
 import importlib
+import logging
 import os
 import tarfile
 from functools import cached_property
 from pathlib import Path
 from typing import List, Dict, Any, Optional, cast
+
 import numpy as np
 import numpy.typing as npt
+import httpx
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_random
 
-from chromadb.embedding_functions.embedding_function import EmbeddingFunction, Space
-from chromadb.api.types import Embeddings, Documents
+from chromadb.api.types import Documents, Embeddings
+from chromadb.embedding_functions.embedding_function import Space, EmbeddingFunction
+
+logger = logging.getLogger(__name__)
 
 
 def _verify_sha256(fname: str, expected_sha256: str) -> bool:
-    """
-    Verify that a file has the expected SHA256 hash.
-
-    Args:
-        fname: The path to the file to verify.
-        expected_sha256: The expected SHA256 hash.
-
-    Returns:
-        True if the file has the expected SHA256 hash, False otherwise.
-    """
     sha256_hash = hashlib.sha256()
     with open(fname, "rb") as f:
         # Read and update hash in chunks to avoid using too much memory
@@ -39,10 +34,6 @@ def _verify_sha256(fname: str, expected_sha256: str) -> bool:
 # visit https://github.com/chroma-core/onnx-embedding for the source code to generate
 # and verify the ONNX model.
 class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
-    """
-    This class is used to generate embeddings for a list of texts using the ONNX MiniLM L6 V2 model.
-    """
-
     MODEL_NAME = "all-MiniLM-L6-v2"
     DOWNLOAD_PATH = Path.home() / ".cache" / "chroma" / "onnx_models" / MODEL_NAME
     EXTRACTED_FOLDER_NAME = "onnx"
@@ -71,7 +62,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
         ):
             raise ValueError("Preferred providers must be unique")
 
-        self.preferred_providers = preferred_providers
+        self._preferred_providers = preferred_providers
 
         try:
             # Equivalent to import onnxruntime
@@ -95,14 +86,6 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
                 "The tqdm python package is not installed. Please install it with `pip install tqdm`"
             )
 
-        try:
-            # Equivalent to import httpx
-            self.httpx = importlib.import_module("httpx")
-        except ImportError:
-            raise ValueError(
-                "The httpx python package is not installed. Please install it with `pip install httpx`"
-            )
-
     # Borrowed from https://gist.github.com/yanqd0/c13ed29e29432e3cf3e7c38467f42f51
     # Download with tqdm to preserve the sentence-transformers experience
     @retry(  # type: ignore
@@ -120,12 +103,12 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
             fname: The path to save the model to.
             chunk_size: The chunk size to use when downloading.
         """
-        with self.httpx.stream("GET", url) as resp:
+        with httpx.stream("GET", url) as resp:
             resp.raise_for_status()
             total = int(resp.headers.get("content-length", 0))
             # Can use tqdm to display a progress bar
             with open(fname, "wb") as file, self.tqdm(
-                desc=fname,
+                desc=str(fname),
                 total=total,
                 unit="iB",
                 unit_scale=True,
@@ -154,6 +137,8 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
             The normalized vector.
         """
         norm = np.linalg.norm(v, axis=1)
+        # Handle division by zero
+        norm[norm == 0] = 1e-12
         return cast(npt.NDArray[np.float32], v / norm[:, np.newaxis])
 
     def _forward(
@@ -172,26 +157,44 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
         all_embeddings = []
         for i in range(0, len(documents), batch_size):
             batch = documents[i : i + batch_size]
-            tokens = self.tokenizer.encode(batch)
-            if len(tokens) > self.max_tokens():
-                raise ValueError(
-                    f"Batch size {len(tokens)} is greater than the max tokens {self.max_tokens()}"
-                )
-            input_ids = np.array([e.ids for e in tokens])
-            attention_mask = np.array([e.attention_mask for e in tokens])
-            token_type_ids = np.array([e.type_ids for e in tokens])
 
-            model_inputs = {
-                "input_ids": input_ids,
-                "attention_mask": attention_mask,
-                "token_type_ids": token_type_ids,
+            # Encode each document separately
+            encoded = [self.tokenizer.encode(d) for d in batch]
+
+            # Check if any document exceeds the max tokens
+            for doc_tokens in encoded:
+                if len(doc_tokens.ids) > self.max_tokens():
+                    raise ValueError(
+                        f"Document length {len(doc_tokens.ids)} is greater than the max tokens {self.max_tokens()}"
+                    )
+
+            input_ids = np.array([e.ids for e in encoded])
+            attention_mask = np.array([e.attention_mask for e in encoded])
+
+            onnx_input = {
+                "input_ids": np.array(input_ids, dtype=np.int64),
+                "attention_mask": np.array(attention_mask, dtype=np.int64),
+                "token_type_ids": np.array(
+                    [np.zeros(len(e), dtype=np.int64) for e in input_ids],
+                    dtype=np.int64,
+                ),
             }
 
-            outputs = self.model.run(None, model_inputs)
-            embeddings = outputs[0]
-            embeddings = self._normalize(embeddings)
+            model_output = self.model.run(None, onnx_input)
+            last_hidden_state = model_output[0]
+
+            # Perform mean pooling with attention weighting
+            input_mask_expanded = np.broadcast_to(
+                np.expand_dims(attention_mask, -1), last_hidden_state.shape
+            )
+            embeddings = np.sum(last_hidden_state * input_mask_expanded, 1) / np.clip(
+                input_mask_expanded.sum(1), a_min=1e-9, a_max=None
+            )
+
+            embeddings = self._normalize(embeddings).astype(np.float32)
             all_embeddings.append(embeddings)
-        return np.vstack(all_embeddings)
+
+        return np.concatenate(all_embeddings)
 
     @cached_property
     def tokenizer(self) -> Any:
@@ -201,10 +204,15 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
         Returns:
             The tokenizer for the model.
         """
-        tokenizer_path = os.path.join(
-            self.DOWNLOAD_PATH, self.EXTRACTED_FOLDER_NAME, "tokenizer.json"
+        tokenizer = self.Tokenizer.from_file(
+            os.path.join(
+                self.DOWNLOAD_PATH, self.EXTRACTED_FOLDER_NAME, "tokenizer.json"
+            )
         )
-        return self.Tokenizer.from_file(tokenizer_path)
+        # max_seq_length = 256, for some reason sentence-transformers uses 256 even though the HF config has a max length of 128
+        tokenizer.enable_truncation(max_length=256)
+        tokenizer.enable_padding(pad_id=0, pad_token="[PAD]", length=256)
+        return tokenizer
 
     @cached_property
     def model(self) -> Any:
@@ -214,13 +222,29 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
         Returns:
             The model.
         """
+        if self._preferred_providers is None or len(self._preferred_providers) == 0:
+            if len(self.ort.get_available_providers()) > 0:
+                logger.debug(
+                    f"WARNING: No ONNX providers provided, defaulting to available providers: "
+                    f"{self.ort.get_available_providers()}"
+                )
+            self._preferred_providers = self.ort.get_available_providers()
+        elif not set(self._preferred_providers).issubset(
+            set(self.ort.get_available_providers())
+        ):
+            raise ValueError(
+                f"Preferred providers must be subset of available providers: {self.ort.get_available_providers()}"
+            )
+
+        # Suppress onnxruntime warnings
         so = self.ort.SessionOptions()
+        so.log_severity_level = 3
         so.graph_optimization_level = self.ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+
         return self.ort.InferenceSession(
             os.path.join(self.DOWNLOAD_PATH, self.EXTRACTED_FOLDER_NAME, "model.onnx"),
-            # Since 1.9 onnyx runtime requires providers to be specified when there are multiple available - https://onnxruntime.ai/docs/api/python/api_summary.html
-            # This is probably not ideal but will improve DX as no exceptions will be raised in multi-provider envs
-            providers=self.preferred_providers,
+            # Since 1.9 onnyx runtime requires providers to be specified when there are multiple available
+            providers=self._preferred_providers,
             sess_options=so,
         )
 
@@ -229,7 +253,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
         Generate embeddings for the given documents.
 
         Args:
-            input: Documents or images to generate embeddings for.
+            input: Documents to generate embeddings for.
 
         Returns:
             Embeddings for the documents.
@@ -242,10 +266,11 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
 
         # Only download the model when it is actually used
         self._download_model_if_not_exists()
-        # Cast to List[str] since we've verified all items are strings
-        embeddings = self._forward([str(item) for item in input])
 
-        # Convert to numpy arrays and cast to the expected Embeddings type
+        # Generate embeddings
+        embeddings = self._forward(input)
+
+        # Convert to list of numpy arrays for the expected Embeddings type
         return cast(
             Embeddings,
             [np.array(embedding, dtype=np.float32) for embedding in embeddings],
@@ -308,7 +333,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
         return ONNXMiniLM_L6_V2(preferred_providers=preferred_providers)
 
     def get_config(self) -> Dict[str, Any]:
-        return {"preferred_providers": self.preferred_providers}
+        return {"preferred_providers": self._preferred_providers}
 
     def validate_config_update(
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]

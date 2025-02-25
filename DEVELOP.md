@@ -17,6 +17,9 @@ pip install -r requirements_dev.txt
 pre-commit install # install the precommit hooks
 ```
 
+Install protobuf:
+for MacOS `brew install protobuf`
+
 You can also install `chromadb` the `pypi` package locally and in editable mode with `pip install -e .`.
 
 ## Running Chroma
