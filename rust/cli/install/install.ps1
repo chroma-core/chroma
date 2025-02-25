@@ -12,14 +12,6 @@ if ($isAdmin) {
 }
 $expectedInstallPath = Join-Path $expectedInstallDir "chroma.exe"
 
-$existing = Get-Command chroma.exe -ErrorAction SilentlyContinue
-if ($existing) {
-    if ($existing.Path -ne $expectedInstallPath) {
-        Write-Error "Error: Chroma CLI is already installed at '$($existing.Path)'.`nPlease remove the existing installation or adjust your PATH before proceeding."
-        exit 1
-    }
-}
-
 $repo    = "chroma-core/chroma"
 $release = "cli-0.1.0"
 $asset   = "chroma-windows.exe"
