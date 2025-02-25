@@ -105,7 +105,7 @@ class OpenCLIPEmbeddingFunction(EmbeddingFunction[Embeddable]):
             text_features /= text_features.norm(dim=-1, keepdim=True)
             return cast(Embedding, text_features.squeeze().cpu().numpy())
 
-    def __call__(self, input: Union[Documents, Images]) -> Embeddings:
+    def __call__(self, input: Embeddable) -> Embeddings:
         """
         Generate embeddings for the given documents or images.
 

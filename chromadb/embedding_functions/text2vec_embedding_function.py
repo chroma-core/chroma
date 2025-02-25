@@ -1,10 +1,10 @@
 from chromadb.embedding_functions.embedding_function import EmbeddingFunction, Space
-from chromadb.api.types import Embeddings, Embeddable
+from chromadb.api.types import Embeddings, Documents
 from typing import List, Dict, Any
 import numpy as np
 
 
-class Text2VecEmbeddingFunction(EmbeddingFunction[Embeddable]):
+class Text2VecEmbeddingFunction(EmbeddingFunction[Documents]):
     """
     This class is used to generate embeddings for a list of texts using the Text2Vec model.
     """
@@ -27,7 +27,7 @@ class Text2VecEmbeddingFunction(EmbeddingFunction[Embeddable]):
         self.model_name = model_name
         self._model = SentenceModel(model_name_or_path=model_name)
 
-    def __call__(self, input: Embeddable) -> Embeddings:
+    def __call__(self, input: Documents) -> Embeddings:
         """
         Generate embeddings for the given documents.
 
@@ -61,7 +61,7 @@ class Text2VecEmbeddingFunction(EmbeddingFunction[Embeddable]):
         return 512
 
     @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Embeddable]":
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
         model_name = config.get("model_name", "shibing624/text2vec-base-chinese")
 
         return Text2VecEmbeddingFunction(model_name=model_name)

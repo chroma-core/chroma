@@ -57,7 +57,7 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Embeddable]):
 
         self._httpx = importlib.import_module("httpx")
 
-    def __call__(self, input: Union[Documents, Images]) -> Embeddings:
+    def __call__(self, input: Embeddable) -> Embeddings:
         """
         Generate embeddings for the given documents or images.
 

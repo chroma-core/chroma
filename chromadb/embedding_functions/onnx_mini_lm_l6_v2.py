@@ -10,7 +10,7 @@ import numpy.typing as npt
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_random
 
 from chromadb.embedding_functions.embedding_function import EmbeddingFunction, Space
-from chromadb.api.types import Embeddings, Embeddable
+from chromadb.api.types import Embeddings, Documents
 
 
 def _verify_sha256(fname: str, expected_sha256: str) -> bool:
@@ -38,7 +38,7 @@ def _verify_sha256(fname: str, expected_sha256: str) -> bool:
 # implements the same functionality as "all-MiniLM-L6-v2" from sentence-transformers.
 # visit https://github.com/chroma-core/onnx-embedding for the source code to generate
 # and verify the ONNX model.
-class ONNXMiniLM_L6_V2(EmbeddingFunction[Embeddable]):
+class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
     """
     This class is used to generate embeddings for a list of texts using the ONNX MiniLM L6 V2 model.
     """
@@ -224,7 +224,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Embeddable]):
             sess_options=so,
         )
 
-    def __call__(self, input: Embeddable) -> Embeddings:
+    def __call__(self, input: Documents) -> Embeddings:
         """
         Generate embeddings for the given documents.
 
@@ -302,7 +302,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Embeddable]):
         return 256
 
     @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Embeddable]":
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
         preferred_providers = config.get("preferred_providers")
 
         return ONNXMiniLM_L6_V2(preferred_providers=preferred_providers)

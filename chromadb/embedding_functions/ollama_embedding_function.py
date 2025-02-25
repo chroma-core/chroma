@@ -1,5 +1,5 @@
 from chromadb.embedding_functions.embedding_function import EmbeddingFunction, Space
-from chromadb.api.types import Embeddings, Embeddable
+from chromadb.api.types import Embeddings, Documents
 from typing import List, Dict, Any
 import numpy as np
 from urllib.parse import urlparse
@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 DEFAULT_MODEL_NAME = "chroma/all-minilm-l6-v2-f32"
 
 
-class OllamaEmbeddingFunction(EmbeddingFunction[Embeddable]):
+class OllamaEmbeddingFunction(EmbeddingFunction[Documents]):
     """
     This class is used to generate embeddings for a list of texts using the Ollama Embedding API
     (https://github.com/ollama/ollama/blob/main/docs/api.md#generate-embeddings).
@@ -47,12 +47,12 @@ class OllamaEmbeddingFunction(EmbeddingFunction[Embeddable]):
 
         self._client = Client(host=self._base_url, timeout=timeout)
 
-    def __call__(self, input: Embeddable) -> Embeddings:
+    def __call__(self, input: Documents) -> Embeddings:
         """
         Get the embeddings for a list of texts.
 
         Args:
-            input (Embeddable): A list of texts to get embeddings for.
+            input (Documents): A list of texts to get embeddings for.
 
         Returns:
             Embeddings: The embeddings for the texts.
@@ -86,7 +86,7 @@ class OllamaEmbeddingFunction(EmbeddingFunction[Embeddable]):
         return 2048
 
     @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Embeddable]":
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
         url = config.get("url", "http://localhost:11434")
         model_name = config.get("model_name", DEFAULT_MODEL_NAME)
         timeout = config.get("timeout", 60)

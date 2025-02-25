@@ -1,11 +1,11 @@
 from chromadb.embedding_functions.embedding_function import EmbeddingFunction
-from chromadb.api.types import Embeddings, Embeddable
+from chromadb.api.types import Embeddings, Documents
 from typing import Dict, Any, cast
 import json
 import numpy as np
 
 
-class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Embeddable]):
+class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
     """
     This class is used to generate embeddings for a list of texts using Amazon Bedrock.
     """
@@ -53,7 +53,7 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Embeddable]):
             **kwargs,
         )
 
-    def __call__(self, input: Embeddable) -> Embeddings:
+    def __call__(self, input: Documents) -> Embeddings:
         """
         Generate embeddings for the given documents.
 
@@ -87,7 +87,7 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Embeddable]):
         return "amazon_bedrock"
 
     @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Embeddable]":
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
         try:
             import boto3
         except ImportError:

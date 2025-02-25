@@ -1,11 +1,11 @@
 from chromadb.embedding_functions.embedding_function import EmbeddingFunction, Space
-from chromadb.api.types import Embeddings, Embeddable
+from chromadb.api.types import Embeddings, Documents
 from typing import List, Dict, Any, Union
 import os
 import numpy as np
 
 
-class JinaEmbeddingFunction(EmbeddingFunction[Embeddable]):
+class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
     """
     This class is used to get embeddings for a list of texts using the Jina AI API.
     It requires an API key and a model name. The default model name is "jina-embeddings-v2-base-en".
@@ -45,12 +45,12 @@ class JinaEmbeddingFunction(EmbeddingFunction[Embeddable]):
             {"Authorization": f"Bearer {self.api_key}", "Accept-Encoding": "identity"}
         )
 
-    def __call__(self, input: Embeddable) -> Embeddings:
+    def __call__(self, input: Documents) -> Embeddings:
         """
         Get the embeddings for a list of texts.
 
         Args:
-            input (Embeddable): A list of texts or images to get embeddings for.
+            input (Documents): A list of texts or images to get embeddings for.
 
         Returns:
             Embeddings: The embeddings for the texts.
@@ -97,7 +97,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Embeddable]):
         return 8192
 
     @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Embeddable]":
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
         api_key_env_var = config.get("api_key_env_var", "JINA_API_KEY")
         model_name = config.get("model_name", "jina-embeddings-v2-base-en")
 

@@ -1,11 +1,11 @@
 from chromadb.embedding_functions.embedding_function import EmbeddingFunction, Space
-from chromadb.api.types import Embeddings, Embeddable
+from chromadb.api.types import Embeddings, Documents
 from typing import List, Dict, Any
 import os
 import numpy as np
 
 
-class CohereEmbeddingFunction(EmbeddingFunction[Embeddable]):
+class CohereEmbeddingFunction(EmbeddingFunction[Documents]):
     def __init__(
         self, api_key_env_var: str = "CHROMA_COHERE_API_KEY", model_name: str = "large"
     ):
@@ -25,7 +25,7 @@ class CohereEmbeddingFunction(EmbeddingFunction[Embeddable]):
 
         self.client = cohere.Client(self.api_key)
 
-    def __call__(self, input: Embeddable) -> Embeddings:
+    def __call__(self, input: Documents) -> Embeddings:
         """
         Generate embeddings for the given documents.
 
@@ -80,7 +80,7 @@ class CohereEmbeddingFunction(EmbeddingFunction[Embeddable]):
         return 512
 
     @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Embeddable]":
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
         api_key_env_var = config.get("api_key_env_var")
         model_name = config.get("model_name")
         if api_key_env_var is None or model_name is None:

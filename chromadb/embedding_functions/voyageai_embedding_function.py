@@ -1,11 +1,11 @@
 from chromadb.embedding_functions.embedding_function import EmbeddingFunction, Space
-from chromadb.api.types import Embeddings, Embeddable
+from chromadb.api.types import Embeddings, Documents
 from typing import List, Dict, Any
 import os
 import numpy as np
 
 
-class VoyageAIEmbeddingFunction(EmbeddingFunction[Embeddable]):
+class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
     """
     This class is used to generate embeddings for a list of texts using the VoyageAI API.
     """
@@ -40,7 +40,7 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Embeddable]):
 
         self._client = voyageai.Client(api_key=self.api_key)
 
-    def __call__(self, input: Embeddable) -> Embeddings:
+    def __call__(self, input: Documents) -> Embeddings:
         """
         Generate embeddings for the given documents.
 
@@ -70,7 +70,7 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Embeddable]):
         return 8192
 
     @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Embeddable]":
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
         api_key_env_var = config.get("api_key_env_var", "VOYAGE_API_KEY")
         model_name = config.get("model_name", "voyage-large-2")
 

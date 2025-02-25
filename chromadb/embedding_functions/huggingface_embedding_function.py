@@ -1,11 +1,11 @@
 from chromadb.embedding_functions.embedding_function import EmbeddingFunction, Space
-from chromadb.api.types import Embeddings, Embeddable
+from chromadb.api.types import Embeddings, Documents
 from typing import List, Dict, Any
 import os
 import numpy as np
 
 
-class HuggingFaceEmbeddingFunction(EmbeddingFunction[Embeddable]):
+class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
     """
     This class is used to get embeddings for a list of texts using the HuggingFace API.
     It requires an API key and a model name. The default model name is "sentence-transformers/all-MiniLM-L6-v2".
@@ -43,12 +43,12 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Embeddable]):
         self._session = httpx.Client()
         self._session.headers.update({"Authorization": f"Bearer {self.api_key}"})
 
-    def __call__(self, input: Embeddable) -> Embeddings:
+    def __call__(self, input: Documents) -> Embeddings:
         """
         Get the embeddings for a list of texts.
 
         Args:
-            input (Embeddable): A list of texts to get embeddings for.
+            input (Documents): A list of texts to get embeddings for.
 
         Returns:
             Embeddings: The embeddings for the texts.
@@ -81,7 +81,7 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Embeddable]):
         return 512
 
     @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Embeddable]":
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
         api_key_env_var = config.get("api_key_env_var", "HUGGINGFACE_API_KEY")
         model_name = config.get("model_name", "sentence-transformers/all-MiniLM-L6-v2")
 
@@ -105,7 +105,7 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Embeddable]):
         pass
 
 
-class HuggingFaceEmbeddingServer(EmbeddingFunction[Embeddable]):
+class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
     """
     This class is used to get embeddings for a list of texts using the HuggingFace Embedding server
     (https://github.com/huggingface/text-embeddings-inference).
@@ -130,12 +130,12 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Embeddable]):
         self._api_url = f"{url}"
         self._session = httpx.Client()
 
-    def __call__(self, input: Embeddable) -> Embeddings:
+    def __call__(self, input: Documents) -> Embeddings:
         """
         Get the embeddings for a list of texts.
 
         Args:
-            input (Embeddable): A list of texts to get embeddings for.
+            input (Documents): A list of texts to get embeddings for.
 
         Returns:
             Embeddings: The embeddings for the texts.
@@ -165,7 +165,7 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Embeddable]):
         return 512
 
     @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Embeddable]":
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
         url = config.get("url")
         if url is None:
             raise ValueError("URL must be provided for HuggingFaceEmbeddingServer")

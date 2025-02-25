@@ -1,6 +1,6 @@
 from typing import Dict, Any, Type
 from chromadb.embedding_functions.embedding_function import EmbeddingFunction, Space
-from chromadb.api.types import Embeddable
+from chromadb.api.types import Embeddable, Documents
 
 # Import all embedding functions
 from chromadb.embedding_functions.cohere_embedding_function import (
@@ -49,7 +49,7 @@ from chromadb.embedding_functions.chroma_langchain_embedding_function import (
 )
 
 # Dictionary of supported embedding functions
-supported_embedding_functions: Dict[str, Type[EmbeddingFunction[Embeddable]]] = {
+supported_embedding_functions: Dict[str, Type[EmbeddingFunction[Documents]]] = {
     "cohere": CohereEmbeddingFunction,
     "openai": OpenAIEmbeddingFunction,
     "huggingface": HuggingFaceEmbeddingFunction,
@@ -87,7 +87,7 @@ def register_embedding_function(ef_class: Type[EmbeddingFunction[Embeddable]]) -
 # Function to convert config to embedding function
 def config_to_embedding_function(
     config: Dict[str, Any]
-) -> EmbeddingFunction[Embeddable]:
+) -> EmbeddingFunction[Documents]:
     """Convert a config dictionary to an embedding function.
 
     Args:

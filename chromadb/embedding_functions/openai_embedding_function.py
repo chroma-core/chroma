@@ -1,11 +1,11 @@
 from chromadb.embedding_functions.embedding_function import EmbeddingFunction, Space
-from chromadb.api.types import Embeddings, Embeddable
+from chromadb.api.types import Embeddings, Documents
 from typing import List, Dict, Any, Optional
 import os
 import numpy as np
 
 
-class OpenAIEmbeddingFunction(EmbeddingFunction[Embeddable]):
+class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
     def __init__(
         self,
         api_key_env_var: str = "OPENAI_API_KEY",
@@ -80,6 +80,8 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Embeddable]):
                 raise ValueError("api_version must be specified for Azure OpenAI")
             if self.deployment_id is None:
                 raise ValueError("deployment_id must be specified for Azure OpenAI")
+            if self.api_base is None:
+                raise ValueError("api_base must be specified for Azure OpenAI")
 
             from openai import AzureOpenAI
 
@@ -91,7 +93,7 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Embeddable]):
                 default_headers=self.default_headers,
             )
 
-    def __call__(self, input: Embeddable) -> Embeddings:
+    def __call__(self, input: Documents) -> Embeddings:
         """
         Generate embeddings for the given documents.
         Args:
@@ -140,7 +142,7 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Embeddable]):
         )  # Default to 2048 if model not known
 
     @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Embeddable]":
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
         # Extract parameters from config
         api_key_env_var = config.get("api_key_env_var", "OPENAI_API_KEY")
         model_name = config.get("model_name", "text-embedding-ada-002")

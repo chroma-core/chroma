@@ -1,10 +1,10 @@
 from chromadb.embedding_functions.embedding_function import EmbeddingFunction, Space
-from chromadb.api.types import Embeddings, Embeddable
+from chromadb.api.types import Embeddings, Documents
 from typing import List, Dict, Any, Optional
 import numpy as np
 
 
-class InstructorEmbeddingFunction(EmbeddingFunction[Embeddable]):
+class InstructorEmbeddingFunction(EmbeddingFunction[Documents]):
     """
     This class is used to generate embeddings for a list of texts using the Instructor embedding model.
     """
@@ -41,7 +41,7 @@ class InstructorEmbeddingFunction(EmbeddingFunction[Embeddable]):
 
         self._model = INSTRUCTOR(model_name, device=device)
 
-    def __call__(self, input: Embeddable) -> Embeddings:
+    def __call__(self, input: Documents) -> Embeddings:
         """
         Generate embeddings for the given documents.
 
@@ -81,7 +81,7 @@ class InstructorEmbeddingFunction(EmbeddingFunction[Embeddable]):
         return 512
 
     @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Embeddable]":
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
         model_name = config.get("model_name", "hkunlp/instructor-base")
         device = config.get("device", "cpu")
         instruction = config.get("instruction")

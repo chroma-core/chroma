@@ -1,10 +1,10 @@
 from chromadb.embedding_functions.embedding_function import EmbeddingFunction, Space
-from chromadb.api.types import Embeddings, Embeddable
+from chromadb.api.types import Embeddings, Documents
 from typing import List, Dict, Any
 import numpy as np
 
 
-class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Embeddable]):
+class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
     # Since we do dynamic imports we have to type this as Any
     models: Dict[str, Any] = {}
 
@@ -43,7 +43,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Embeddable]):
             )
         self._model = self.models[model_name]
 
-    def __call__(self, input: Embeddable) -> Embeddings:
+    def __call__(self, input: Documents) -> Embeddings:
         """Generate embeddings for the given documents.
 
         Args:
@@ -76,7 +76,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Embeddable]):
         return 512
 
     @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Embeddable]":
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
         model_name = config.get("model_name", "all-MiniLM-L6-v2")
         device = config.get("device", "cpu")
         normalize_embeddings = config.get("normalize_embeddings", False)

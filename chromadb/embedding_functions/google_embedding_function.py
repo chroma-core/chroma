@@ -1,12 +1,12 @@
 from chromadb.embedding_functions.embedding_function import EmbeddingFunction, Space
-from chromadb.api.types import Embeddings, Embeddable
+from chromadb.api.types import Embeddings, Documents
 from typing import List, Dict, Any, cast
 import os
 import numpy as np
 import numpy.typing as npt
 
 
-class GooglePalmEmbeddingFunction(EmbeddingFunction[Embeddable]):
+class GooglePalmEmbeddingFunction(EmbeddingFunction[Documents]):
     """To use this EmbeddingFunction, you must have the google.generativeai Python package installed and have a PaLM API key."""
 
     def __init__(
@@ -40,7 +40,7 @@ class GooglePalmEmbeddingFunction(EmbeddingFunction[Embeddable]):
         palm.configure(api_key=self.api_key)
         self._palm = palm
 
-    def __call__(self, input: Embeddable) -> Embeddings:
+    def __call__(self, input: Documents) -> Embeddings:
         """
         Generate embeddings for the given documents.
 
@@ -78,7 +78,7 @@ class GooglePalmEmbeddingFunction(EmbeddingFunction[Embeddable]):
         return 2048
 
     @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Embeddable]":
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
         api_key_env_var = config.get("api_key_env_var", "GOOGLE_PALM_API_KEY")
         model_name = config.get("model_name", "models/embedding-gecko-001")
 
@@ -102,7 +102,7 @@ class GooglePalmEmbeddingFunction(EmbeddingFunction[Embeddable]):
         pass
 
 
-class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Embeddable]):
+class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
     """To use this EmbeddingFunction, you must have the google.generativeai Python package installed and have a Google API key."""
 
     def __init__(
@@ -141,7 +141,7 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Embeddable]):
         genai.configure(api_key=self.api_key)
         self._genai = genai
 
-    def __call__(self, input: Embeddable) -> Embeddings:
+    def __call__(self, input: Documents) -> Embeddings:
         """
         Generate embeddings for the given documents.
 
@@ -185,7 +185,7 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Embeddable]):
         return 8192
 
     @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Embeddable]":
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
         api_key_env_var = config.get("api_key_env_var", "GOOGLE_API_KEY")
         model_name = config.get("model_name", "models/embedding-001")
         task_type = config.get("task_type", "RETRIEVAL_DOCUMENT")
@@ -218,7 +218,7 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Embeddable]):
         pass
 
 
-class GoogleVertexEmbeddingFunction(EmbeddingFunction[Embeddable]):
+class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
     """To use this EmbeddingFunction, you must have the vertexai Python package installed and have Google Cloud credentials configured."""
 
     def __init__(
@@ -261,7 +261,7 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Embeddable]):
         vertexai.init(project=project_id, location=region)
         self._model = TextEmbeddingModel.from_pretrained(model_name)
 
-    def __call__(self, input: Embeddable) -> Embeddings:
+    def __call__(self, input: Documents) -> Embeddings:
         """
         Generate embeddings for the given documents.
 
@@ -299,7 +299,7 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Embeddable]):
         return 3072
 
     @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Embeddable]":
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
         api_key_env_var = config.get("api_key_env_var", "GOOGLE_API_KEY")
         model_name = config.get("model_name", "textembedding-gecko")
         project_id = config.get("project_id", "cloud-large-language-models")
