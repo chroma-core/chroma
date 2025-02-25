@@ -39,11 +39,11 @@ use uuid::Uuid;
 use crate::{
     ac::AdmissionControlledService,
     auth::{AuthenticateAndAuthorize, AuthzAction, AuthzResource},
+    config::FrontendServerConfig,
     frontend::Frontend,
     quota::{Action, QuotaEnforcer, QuotaPayload},
     tower_tracing::add_tracing_middleware,
     types::errors::{ErrorResponse, ServerError, ValidationError},
-    FrontendConfig,
 };
 
 struct ScorecardGuard {
@@ -119,7 +119,7 @@ impl Metrics {
 
 #[derive(Clone)]
 pub(crate) struct FrontendServer {
-    config: FrontendConfig,
+    config: FrontendServerConfig,
     frontend: Frontend,
     scorecard_enabled: Arc<AtomicBool>,
     scorecard: Arc<Scorecard<'static>>,
@@ -130,7 +130,7 @@ pub(crate) struct FrontendServer {
 
 impl FrontendServer {
     pub fn new(
-        config: FrontendConfig,
+        config: FrontendServerConfig,
         frontend: Frontend,
         rules: Vec<Rule>,
         auth: Arc<dyn AuthenticateAndAuthorize>,
@@ -155,7 +155,7 @@ impl FrontendServer {
 
     #[allow(dead_code)]
     pub async fn run(server: FrontendServer) {
-        let circuit_breaker_config = server.config.circuit_breaker.clone();
+        let config = server.config.clone();
 
         let (docs_router, docs_api) =
             OpenApiRouter::with_openapi(ApiDoc::openapi()).split_for_parts();
@@ -233,14 +233,15 @@ impl FrontendServer {
             )
             .merge(docs_router)
             .with_state(server)
-            .layer(DefaultBodyLimit::max(6000000 * 8)); // TODO: add to server configuration
+            .layer(DefaultBodyLimit::max(config.max_payload_size_bytes));
         let app = add_tracing_middleware(app);
 
-        // TODO: configuration for this
         // TODO: tracing
-        let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
-        if circuit_breaker_config.enabled() {
-            let service = AdmissionControlledService::new(circuit_breaker_config, app);
+        let addr = format!("{}:{}", config.listen_address, config.port);
+        println!("Listening on {addr}");
+        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+        if config.circuit_breaker.enabled() {
+            let service = AdmissionControlledService::new(config.circuit_breaker, app);
             axum::serve(listener, service.into_make_service())
                 .await
                 .unwrap();

@@ -20,6 +20,32 @@ pub struct OperationRecord {
     pub operation: Operation,
 }
 
+impl OperationRecord {
+    pub fn size_byte(&self) -> u64 {
+        let mut size_byte = 0;
+        size_byte += self.id.len();
+        if let Some(emb) = &self.embedding {
+            size_byte += size_of::<f32>() * emb.len();
+        }
+        if let Some(meta) = &self.metadata {
+            size_byte += meta.iter().fold(0, |acc, (k, v)| {
+                acc + k.len()
+                    + match v {
+                        UpdateMetadataValue::Bool(b) => size_of_val(b),
+                        UpdateMetadataValue::Int(i) => size_of_val(i),
+                        UpdateMetadataValue::Float(f) => size_of_val(f),
+                        UpdateMetadataValue::Str(s) => s.len(),
+                        UpdateMetadataValue::None => 0,
+                    }
+            });
+        }
+        if let Some(doc) = &self.document {
+            size_byte += doc.len();
+        }
+        size_byte as u64
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct LogRecord {
     pub log_offset: i64,

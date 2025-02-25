@@ -15,6 +15,12 @@ mod types;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
 use chroma_system::System;
+use chroma_tracing::{
+    init_global_filter_layer, init_otel_layer, init_panic_tracing_hook, init_stdout_layer,
+    init_tracing,
+    meter_event::{init_meter_event_handler, MeterEventHandler},
+};
+use config::FrontendServerConfig;
 use frontend::Frontend;
 use get_collection_with_segments_provider::*;
 use mdac::{Pattern, Rule};
@@ -42,24 +48,38 @@ impl ChromaError for ScorecardRuleError {
 pub async fn frontend_service_entrypoint(
     auth: Arc<dyn auth::AuthenticateAndAuthorize>,
     quota_enforcer: Arc<dyn QuotaEnforcer>,
+    meter_ingestor: impl MeterEventHandler + Send + Sync + 'static,
 ) {
     let config = match std::env::var(CONFIG_PATH_ENV_VAR) {
-        Ok(config_path) => FrontendConfig::load_from_path(&config_path),
-        Err(_) => FrontendConfig::load(),
+        Ok(config_path) => FrontendServerConfig::load_from_path(&config_path),
+        Err(_) => FrontendServerConfig::load(),
     };
-    frontend_service_entrypoint_with_config(auth, quota_enforcer, config).await;
+    frontend_service_entrypoint_with_config(auth, quota_enforcer, meter_ingestor, config).await;
 }
 
 pub async fn frontend_service_entrypoint_with_config(
     auth: Arc<dyn auth::AuthenticateAndAuthorize>,
     quota_enforcer: Arc<dyn QuotaEnforcer>,
-    config: FrontendConfig,
+    meter_ingestor: impl MeterEventHandler + Send + Sync + 'static,
+    config: FrontendServerConfig,
 ) {
-    chroma_tracing::init_otel_tracing(&config.service_name, &config.otel_endpoint);
+    if let Some(config) = &config.open_telemetry {
+        let tracing_layers = vec![
+            init_global_filter_layer(),
+            init_otel_layer(&config.service_name, &config.endpoint),
+            init_stdout_layer(&config.service_name),
+        ];
+        init_tracing(tracing_layers);
+        init_panic_tracing_hook();
+        init_meter_event_handler(meter_ingestor);
+    } else {
+        eprintln!("OpenTelemetry is not enabled because it is missing from the config.");
+    }
+
     let system = System::new();
     let registry = Registry::new();
 
-    let frontend = Frontend::try_from_config(&(config.clone(), system), &registry)
+    let frontend = Frontend::try_from_config(&(config.frontend.clone(), system), &registry)
         .await
         .expect("Error creating Frontend Config");
     fn rule_to_rule(rule: &ScorecardRule) -> Result<Rule, ScorecardRuleError> {

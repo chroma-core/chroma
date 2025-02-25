@@ -1671,12 +1671,14 @@ dependencies = [
 name = "chroma-tracing"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "fastrace",
  "fastrace-opentelemetry",
  "http 1.1.0",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
+ "tokio",
  "tonic",
  "tower 0.5.2",
  "tracing",
