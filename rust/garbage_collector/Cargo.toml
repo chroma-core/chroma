@@ -38,6 +38,7 @@ opentelemetry-otlp = { workspace = true }
 opentelemetry-http = { workspace = true }
 opentelemetry_sdk = { workspace = true }
 thiserror = { workspace = true }
+proptest = { workspace = true }
 
 chroma-config = { workspace = true }
 chroma-error = { workspace = true }
@@ -47,3 +48,7 @@ chroma-sysdb = { workspace = true }
 chroma-storage = { workspace = true }
 chroma-blockstore = { workspace = true }
 chroma-cache = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+rand = { workspace = true }

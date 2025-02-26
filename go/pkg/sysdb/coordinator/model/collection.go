@@ -23,6 +23,7 @@ type CollectionToGc struct {
 	ID              types.UniqueID
 	Name            string
 	VersionFilePath string
+	LatestVersion   int64
 }
 
 type CreateCollection struct {
