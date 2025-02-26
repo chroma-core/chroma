@@ -2,15 +2,16 @@
   "include": ["src"],
   "compilerOptions": {
     "declaration": true,
-    "module": "ESNext",
+    "module": "NodeNext",
     "lib": ["ES2017", "DOM"],
     "outDir": "dist/main",
     "sourceMap": true,
     "target": "ES2017",
     "strict": true,
     "esModuleInterop": true,
-    "moduleResolution": "Node",
+    "moduleResolution": "NodeNext",
     "forceConsistentCasingInFileNames": true,
-    "stripInternal": true
+    "stripInternal": true,
+    "noUncheckedIndexedAccess": true
   }
 }
