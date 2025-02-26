@@ -144,7 +144,7 @@ class TestONNXMiniLM_L6_V2:
             # Patch the download path
             with patch.object(ONNXMiniLM_L6_V2, "DOWNLOAD_PATH", temp_dir):
                 with patch(
-                    "chromadb.embedding_functions.onnx_mini_lm_l6_v2._verify_sha256",
+                    "chromadb.utils.embedding_functions.onnx_mini_lm_l6_v2._verify_sha256",
                     return_value=True,
                 ):
                     ef = ONNXMiniLM_L6_V2()
