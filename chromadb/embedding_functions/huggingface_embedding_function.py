@@ -78,8 +78,13 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
 
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
-        api_key_env_var = config.get("api_key_env_var", "HUGGINGFACE_API_KEY")
-        model_name = config.get("model_name", "sentence-transformers/all-MiniLM-L6-v2")
+        api_key_env_var = config.get("api_key_env_var")
+        model_name = config.get("model_name")
+
+        if api_key_env_var is None or model_name is None:
+            raise ValueError(
+                "This is a legacy config, please update your config to use the new config format."
+            )
 
         return HuggingFaceEmbeddingFunction(
             api_key_env_var=api_key_env_var, model_name=model_name

@@ -82,9 +82,14 @@ class OllamaEmbeddingFunction(EmbeddingFunction[Documents]):
 
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
-        url = config.get("url", "http://localhost:11434")
-        model_name = config.get("model_name", DEFAULT_MODEL_NAME)
-        timeout = config.get("timeout", 60)
+        url = config.get("url")
+        model_name = config.get("model_name")
+        timeout = config.get("timeout")
+
+        if url is None or model_name is None or timeout is None:
+            raise ValueError(
+                "This is a legacy config, please update your config to use the new config format."
+            )
 
         return OllamaEmbeddingFunction(url=url, model_name=model_name, timeout=timeout)
 

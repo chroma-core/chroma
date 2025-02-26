@@ -121,8 +121,13 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Embeddable]):
     def build_from_config(
         config: Dict[str, Any]
     ) -> "EmbeddingFunction[Union[Documents, Images]]":
-        api_key_env_var = config.get("api_key_env_var", "ROBOFLOW_API_KEY")
-        api_url = config.get("api_url", "https://infer.roboflow.com")
+        api_key_env_var = config.get("api_key_env_var")
+        api_url = config.get("api_url")
+
+        if api_key_env_var is None or api_url is None:
+            raise ValueError(
+                "This is a legacy config, please update your config to use the new config format."
+            )
 
         return RoboflowEmbeddingFunction(
             api_key_env_var=api_key_env_var, api_url=api_url

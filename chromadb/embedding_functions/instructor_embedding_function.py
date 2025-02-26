@@ -77,9 +77,14 @@ class InstructorEmbeddingFunction(EmbeddingFunction[Documents]):
 
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
-        model_name = config.get("model_name", "hkunlp/instructor-base")
-        device = config.get("device", "cpu")
+        model_name = config.get("model_name")
+        device = config.get("device")
         instruction = config.get("instruction")
+
+        if model_name is None or device is None:
+            raise ValueError(
+                "This is a legacy config, please update your config to use the new config format."
+            )
 
         return InstructorEmbeddingFunction(
             model_name=model_name, device=device, instruction=instruction

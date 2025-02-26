@@ -133,8 +133,8 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
         # Extract parameters from config
-        api_key_env_var = config.get("api_key_env_var", "OPENAI_API_KEY")
-        model_name = config.get("model_name", "text-embedding-ada-002")
+        api_key_env_var = config.get("api_key_env_var")
+        model_name = config.get("model_name")
         organization_id = config.get("organization_id")
         api_base = config.get("api_base")
         api_type = config.get("api_type")
@@ -142,6 +142,11 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
         deployment_id = config.get("deployment_id")
         default_headers = config.get("default_headers")
         dimensions = config.get("dimensions")
+
+        if api_key_env_var is None or model_name is None:
+            raise ValueError(
+                "This is a legacy config, please update your config to use the new config format."
+            )
 
         # Create and return the embedding function
         return OpenAIEmbeddingFunction(

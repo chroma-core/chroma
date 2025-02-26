@@ -178,9 +178,14 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
 
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
-        api_key_env_var = config.get("api_key_env_var", "GOOGLE_API_KEY")
-        model_name = config.get("model_name", "models/embedding-001")
-        task_type = config.get("task_type", "RETRIEVAL_DOCUMENT")
+        api_key_env_var = config.get("api_key_env_var")
+        model_name = config.get("model_name")
+        task_type = config.get("task_type")
+
+        if api_key_env_var is None or model_name is None or task_type is None:
+            raise ValueError(
+                "This is a legacy config, please update your config to use the new config format."
+            )
 
         return GoogleGenerativeAiEmbeddingFunction(
             api_key_env_var=api_key_env_var, model_name=model_name, task_type=task_type

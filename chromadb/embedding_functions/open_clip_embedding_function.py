@@ -141,9 +141,14 @@ class OpenCLIPEmbeddingFunction(EmbeddingFunction[Embeddable]):
     def build_from_config(
         config: Dict[str, Any]
     ) -> "EmbeddingFunction[Union[Documents, Images]]":
-        model_name = config.get("model_name", "ViT-B-32")
-        checkpoint = config.get("checkpoint", "laion2b_s34b_b79k")
-        device = config.get("device", "cpu")
+        model_name = config.get("model_name")
+        checkpoint = config.get("checkpoint")
+        device = config.get("device")
+
+        if model_name is None or checkpoint is None or device is None:
+            raise ValueError(
+                "This is a legacy config, please update your config to use the new config format."
+            )
 
         return OpenCLIPEmbeddingFunction(
             model_name=model_name, checkpoint=checkpoint, device=device

@@ -72,10 +72,15 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
 
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
-        model_name = config.get("model_name", "all-MiniLM-L6-v2")
-        device = config.get("device", "cpu")
-        normalize_embeddings = config.get("normalize_embeddings", False)
+        model_name = config.get("model_name")
+        device = config.get("device")
+        normalize_embeddings = config.get("normalize_embeddings")
         kwargs = config.get("kwargs", {})
+
+        if model_name is None or device is None or normalize_embeddings is None:
+            raise ValueError(
+                "This is a legacy config, please update your config to use the new config format."
+            )
 
         return SentenceTransformerEmbeddingFunction(
             model_name=model_name,

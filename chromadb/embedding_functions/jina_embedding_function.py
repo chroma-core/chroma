@@ -93,8 +93,13 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
 
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
-        api_key_env_var = config.get("api_key_env_var", "JINA_API_KEY")
-        model_name = config.get("model_name", "jina-embeddings-v2-base-en")
+        api_key_env_var = config.get("api_key_env_var")
+        model_name = config.get("model_name")
+
+        if api_key_env_var is None or model_name is None:
+            raise ValueError(
+                "This is a legacy config, please update your config to use the new config format."
+            )
 
         return JinaEmbeddingFunction(
             api_key_env_var=api_key_env_var, model_name=model_name

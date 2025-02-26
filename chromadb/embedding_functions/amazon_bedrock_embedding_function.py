@@ -95,8 +95,12 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
                 "The boto3 python package is not installed. Please install it with `pip install boto3`"
             )
 
-        model_name = config.get("model_name", "amazon.titan-embed-text-v1")
-        session_args = config.get("session_args", {})
+        model_name = config.get("model_name")
+        session_args = config.get("session_args")
+        if model_name is None or session_args is None:
+            raise ValueError(
+                "This is a legacy config, please update your config to use the new config format."
+            )
         kwargs = config.get("kwargs", {})
 
         session = boto3.Session(**session_args)

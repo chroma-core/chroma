@@ -57,7 +57,12 @@ class Text2VecEmbeddingFunction(EmbeddingFunction[Documents]):
 
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
-        model_name = config.get("model_name", "shibing624/text2vec-base-chinese")
+        model_name = config.get("model_name")
+
+        if model_name is None:
+            raise ValueError(
+                "This is a legacy config, please update your config to use the new config format."
+            )
 
         return Text2VecEmbeddingFunction(model_name=model_name)
 
