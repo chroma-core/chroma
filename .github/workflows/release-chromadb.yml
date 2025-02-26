@@ -98,8 +98,11 @@ jobs:
         uses: depot/build-push-action@v1
         with:
           context: .
+          file: rust/cli/Dockerfile
           platforms: ${{ env.PLATFORMS }}
           push: true
+          build-args: |
+            RELEASE_MODE=1
           tags: "${{ env.GHCR_IMAGE_NAME }}:${{ needs.get-version.outputs.version}},${{ env.DOCKERHUB_IMAGE_NAME }}:${{ needs.get-version.outputs.version }}"
           project: ${{ vars.DEPOT_PROJECT_ID }}
       - name: Build and push release Docker image
@@ -107,8 +110,11 @@ jobs:
         uses: depot/build-push-action@v1
         with:
           context: .
+          file: rust/cli/Dockerfile
           platforms: ${{ env.PLATFORMS }}
           push: true
+          build-args: |
+            RELEASE_MODE=1
           tags: "${{ env.GHCR_IMAGE_NAME }}:${{ needs.get-version.outputs.version }},${{ env.DOCKERHUB_IMAGE_NAME }}:${{ needs.get-version.outputs.version }},${{ env.GHCR_IMAGE_NAME }}:latest,${{ env.DOCKERHUB_IMAGE_NAME }}:latest"
           project: ${{ vars.DEPOT_PROJECT_ID }}
 
@@ -198,7 +204,7 @@ jobs:
             PIP Package: `chroma-${{needs.get-version.outputs.version}}.tar.gz`
             Github Container Registry Image: `${{ env.GHCR_IMAGE_NAME }}:${{ needs.get-version.outputs.version }}`
             DockerHub Image: `${{ env.DOCKERHUB_IMAGE_NAME }}:${{ needs.get-version.outputs.version }}`
-          artifacts: "dist/chromadb-${{needs.get-version.outputs.version}}.tar.gz"
+          artifacts: "dist/*"
           prerelease: false
           makeLatest: true
           generateReleaseNotes: true
@@ -222,7 +228,7 @@ jobs:
             PIP Package: `chroma-${{needs.get-version.outputs.version}}.tar.gz`
             Github Container Registry Image: `${{ env.GHCR_IMAGE_NAME }}:${{ needs.get-version.outputs.version }}`
             DockerHub Image: `${{ env.DOCKERHUB_IMAGE_NAME }}:${{ needs.get-version.outputs.version }}`
-          artifacts: "dist/chromadb-${{needs.get-version.outputs.version}}.tar.gz"
+          artifacts: "dist/*"
           allowUpdates: true
           removeArtifacts: true
           prerelease: true

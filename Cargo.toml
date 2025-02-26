@@ -48,7 +48,7 @@ pyo3 = { version = "0.23.3", features = ["abi3-py39"] }
 tower-http = { version = "0.6.2", features = ["trace"] }
 bytemuck = "1.21.0"
 validator = { version = "0.19", features = ["derive"] }
-rust-embed = { version = "8.5.0", features = ["include-exclude"] }
+rust-embed = { version = "8.5.0", features = ["include-exclude", "debug-embed"] }
 hnswlib = { version = "0.8.0", git = "https://github.com/chroma-core/hnswlib.git" }
 
 chroma-benchmark = { path = "rust/benchmark" }
