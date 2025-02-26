@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize, Clone, Serialize)]
+#[derive(Deserialize, Clone, Serialize, Debug)]
 pub struct GrpcLogConfig {
     #[serde(default = "GrpcLogConfig::default_host")]
     pub host: String,
@@ -41,13 +41,23 @@ impl Default for GrpcLogConfig {
     }
 }
 
-#[derive(Deserialize, Clone, Serialize)]
+#[derive(Deserialize, Clone, Serialize, Debug)]
 pub struct SqliteLogConfig {
     pub tenant_id: String,
     pub topic_namespace: String,
 }
 
-#[derive(Deserialize, Clone, Serialize)]
+impl Default for SqliteLogConfig {
+    fn default() -> Self {
+        SqliteLogConfig {
+            tenant_id: "default".to_string(),
+            topic_namespace: "default".to_string(),
+        }
+    }
+}
+
+#[derive(Deserialize, Clone, Serialize, Debug)]
+#[serde(rename_all = "snake_case")]
 pub enum LogConfig {
     Grpc(GrpcLogConfig),
     Sqlite(SqliteLogConfig),

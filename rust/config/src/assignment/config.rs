@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Default, Deserialize, Clone, Serialize)]
+#[derive(Default, Deserialize, Clone, Serialize, Debug)]
 /// The type of hasher to use.
 /// # Options
 /// - Murmur3: The murmur3 hasher.
@@ -9,7 +9,8 @@ pub enum HasherType {
     Murmur3,
 }
 
-#[derive(Deserialize, Clone, Serialize)]
+#[derive(Deserialize, Clone, Serialize, Debug)]
+#[serde(rename_all = "snake_case")]
 /// The configuration for the assignment policy.
 /// # Options
 /// - RendezvousHashing: The rendezvous hashing assignment policy.
@@ -26,7 +27,7 @@ impl Default for AssignmentPolicyConfig {
     }
 }
 
-#[derive(Default, Deserialize, Clone, Serialize)]
+#[derive(Default, Deserialize, Clone, Serialize, Debug)]
 /// The configuration for the rendezvous hashing assignment policy.
 /// # Fields
 /// - hasher: The type of hasher to use.

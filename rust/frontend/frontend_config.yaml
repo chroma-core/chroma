@@ -2,7 +2,7 @@ open_telemetry:
   service_name: "rust-frontend-service"
   endpoint: "http://otel-collector:4317"
 sysdb:
-  Grpc:
+  grpc:
     host: "sysdb.chroma"
     port: 50051
     connect_timeout_ms: 60000
@@ -16,22 +16,22 @@ collections_with_segments_provider:
     delay_ms: 0
     max_retries: 3
 log:
-  Grpc:
+  grpc:
     host: "logservice.chroma"
     port: 50051
     connect_timeout_ms: 5000
     request_timeout_ms: 5000
 executor:
-  Distributed:
+  distributed:
     connections_per_node: 5
     replication_factor: 2
     connect_timeout_ms: 5000
     request_timeout_ms: 5000
     assignment:
-      RendezvousHashing:
+      rendezvous_hashing:
         hasher: Murmur3
     memberlist_provider:
-      CustomResource:
+      custom_resource:
         kube_namespace: "chroma"
         memberlist_name: "query-service-memberlist"
         queue_size: 100

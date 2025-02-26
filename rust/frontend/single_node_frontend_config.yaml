@@ -1,33 +1,4 @@
-allow_reset: false
 persist_path: "./chroma"
-sqlitedb:
-  hash_type:
-    SHA256:
-  migration_mode:
-    Apply:
-segment_manager:
-  hnsw_index_pool_cache_config:
-    memory:
-      capacity: 65536
-sysdb:
-  Sqlite:
-    log_topic_namespace: "default"
-    log_tenant: "default"
-collections_with_segments_provider:
-  cache:
-    nop:
-  permitted_parallelism: 32
-  cache_invalidation_retry_policy:
-    delay_ms: 0
-    max_retries: 0
 open_telemetry:
   service_name: "rust-frontend-service"
   endpoint: "http://otel-collector:4317"
-log:
-  Sqlite:
-    tenant_id: "default"
-    topic_namespace: "default"
-executor:
-  Local:
-    LocalExecutorConfig:
-scorecard_enabled: false

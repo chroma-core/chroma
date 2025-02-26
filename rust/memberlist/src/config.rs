@@ -12,7 +12,8 @@ pub(crate) enum MemberlistProviderType {
 /// The configuration for the memberlist provider.
 /// # Options
 /// - CustomResource: Use a custom resource to get the memberlist
-#[derive(Deserialize, Clone, Serialize)]
+#[derive(Deserialize, Clone, Serialize, Debug)]
+#[serde(rename_all = "snake_case")]
 pub enum MemberlistProviderConfig {
     CustomResource(CustomResourceMemberlistProviderConfig),
 }
@@ -28,7 +29,7 @@ impl Default for MemberlistProviderConfig {
 /// - kube_namespace: The namespace to use for the custom resource.
 /// - memberlist_name: The name of the custom resource to use for the memberlist.
 /// - queue_size: The size of the queue to use for the channel.
-#[derive(Deserialize, Clone, Serialize)]
+#[derive(Deserialize, Clone, Serialize, Debug)]
 pub struct CustomResourceMemberlistProviderConfig {
     #[serde(default = "CustomResourceMemberlistProviderConfig::default_kube_namespace")]
     pub kube_namespace: String,
