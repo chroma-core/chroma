@@ -831,6 +831,10 @@ impl DataSet for ReferencingDataSet {
         }
         let keys = keys.iter().map(|k| k.as_str()).collect::<Vec<_>>();
         if let Some(res) = self.references.get_by_key(client, &keys).await? {
+            let mut keys = vec![];
+            for id in res.ids.iter() {
+                keys.push(id.as_str());
+            }
             let mut documents = vec![];
             if let Some(docs) = res.documents {
                 for (idx, doc) in docs.into_iter().enumerate() {
