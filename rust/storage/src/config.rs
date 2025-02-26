@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Debug, Serialize)]
-#[serde(rename_all = "snake_case")]
 /// The configuration for the chosen storage.
 /// # Options
 /// - S3: The configuration for the s3 storage.
@@ -17,6 +16,7 @@ pub enum StorageConfig {
     #[serde(alias = "local")]
     Local(LocalStorageConfig),
     #[serde(alias = "admissioncontrolleds3")]
+    #[serde(alias = "admission_controlled_s3")]
     AdmissionControlledS3(AdmissionControlledS3StorageConfig),
 }
 
@@ -165,8 +165,8 @@ impl Default for CountBasedPolicyConfig {
 }
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
-#[serde(rename_all = "snake_case")]
 pub enum RateLimitingConfig {
+    #[serde(alias = "count_based_policy")]
     CountBasedPolicy(CountBasedPolicyConfig),
 }
 

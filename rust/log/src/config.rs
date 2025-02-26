@@ -57,9 +57,10 @@ impl Default for SqliteLogConfig {
 }
 
 #[derive(Deserialize, Clone, Serialize, Debug)]
-#[serde(rename_all = "snake_case")]
 pub enum LogConfig {
+    #[serde(alias = "grpc")]
     Grpc(GrpcLogConfig),
+    #[serde(alias = "sqlite")]
     Sqlite(SqliteLogConfig),
 }
 

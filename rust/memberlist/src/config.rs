@@ -13,8 +13,8 @@ pub(crate) enum MemberlistProviderType {
 /// # Options
 /// - CustomResource: Use a custom resource to get the memberlist
 #[derive(Deserialize, Clone, Serialize, Debug)]
-#[serde(rename_all = "snake_case")]
 pub enum MemberlistProviderConfig {
+    #[serde(alias = "custom_resource")]
     CustomResource(CustomResourceMemberlistProviderConfig),
 }
 

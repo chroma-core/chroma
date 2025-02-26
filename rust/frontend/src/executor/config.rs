@@ -32,9 +32,10 @@ pub struct DistributedExecutorConfig {
 pub struct LocalExecutorConfig {}
 
 #[derive(Deserialize, Clone, Serialize, Debug)]
-#[serde(rename_all = "snake_case")]
 pub enum ExecutorConfig {
+    #[serde(alias = "distributed")]
     Distributed(DistributedExecutorConfig),
+    #[serde(alias = "local")]
     Local(LocalExecutorConfig),
 }
 

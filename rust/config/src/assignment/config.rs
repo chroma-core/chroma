@@ -10,7 +10,6 @@ pub enum HasherType {
 }
 
 #[derive(Deserialize, Clone, Serialize, Debug)]
-#[serde(rename_all = "snake_case")]
 /// The configuration for the assignment policy.
 /// # Options
 /// - RendezvousHashing: The rendezvous hashing assignment policy.
@@ -18,6 +17,7 @@ pub enum HasherType {
 /// See config.rs in the root of the worker crate for an example of how to use
 /// config files to configure the worker.
 pub enum AssignmentPolicyConfig {
+    #[serde(alias = "rendezvous_hashing")]
     RendezvousHashing(RendezvousHashingAssignmentPolicyConfig),
 }
 
