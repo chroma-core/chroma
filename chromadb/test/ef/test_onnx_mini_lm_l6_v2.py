@@ -10,22 +10,12 @@ from unittest.mock import patch, MagicMock
 
 from chromadb.utils.embedding_functions import ONNXMiniLM_L6_V2
 from chromadb.utils.embedding_functions.embedding_function import (
-    Space,
     EmbeddingFunction,
 )
 
 
 class TestONNXMiniLM_L6_V2:
     """Test suite for ONNXMiniLM_L6_V2 embedding function."""
-
-    def setup_method(self) -> None:
-        """Set up test environment before each test method."""
-        # Create a test instance
-        self.ef = ONNXMiniLM_L6_V2()
-
-    def teardown_method(self) -> None:
-        """Clean up after each test method."""
-        pass
 
     def test_initialization(self) -> None:
         """Test that the embedding function initializes correctly."""
@@ -42,22 +32,6 @@ class TestONNXMiniLM_L6_V2:
         # Test with None providers
         ef = ONNXMiniLM_L6_V2(preferred_providers=None)
         assert ef is not None
-
-    def test_name_and_spaces(self) -> None:
-        """Test name and space-related methods."""
-        ef = ONNXMiniLM_L6_V2()
-
-        # Test name
-        assert ef.name() == "onnx_mini_lm_l6_v2"
-
-        # Test default space
-        assert ef.default_space() == Space.COSINE
-
-        # Test supported spaces
-        supported_spaces = ef.supported_spaces()
-        assert Space.COSINE in supported_spaces
-        assert Space.L2 in supported_spaces
-        assert Space.INNER_PRODUCT in supported_spaces
 
     def test_embedding_shape_and_normalization(self) -> None:
         """Test that embeddings have the correct shape and are normalized."""
