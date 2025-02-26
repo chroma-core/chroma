@@ -73,21 +73,9 @@ def test_invalid_sha256() -> None:
     ef = ONNXMiniLM_L6_V2()
     shutil.rmtree(ef.DOWNLOAD_PATH)  # clean up any existing models
     with pytest.raises(ValueError) as e:
-        # Instead of modifying the class attribute directly, we'll mock the _verify_sha256 function
-        # to always return False, simulating an invalid SHA256 hash
-        import chromadb.embedding_functions.onnx_mini_lm_l6_v2 as onnx_module
-
-        original_verify_sha256 = onnx_module._verify_sha256
-
-        try:
-            # Replace the _verify_sha256 function with a function that always returns False
-            onnx_module._verify_sha256 = lambda *args, **kwargs: False
-            ef(["test"])
-        finally:
-            # Restore the original function
-            onnx_module._verify_sha256 = original_verify_sha256
-
-    assert "does not match expected SHA256" in str(e.value)
+        ef._MODEL_SHA256 = "invalid"
+        ef(["test"])
+    assert "does not match expected SHA256 hash" in str(e.value)
 
 
 def test_partial_download() -> None:
