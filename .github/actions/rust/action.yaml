@@ -1,10 +1,22 @@
 name: Setup Rust
 description: "This action sets up Rust"
+inputs:
+  github-token:
+    description: "GitHub token"
+    required: false
 runs:
   using: "composite"
   steps:
+    - name: Setup Rust
+      uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        toolchain: "1.81.0" # this should be kept in sync with the version in rust/worker/Dockerfile
+        cache: false # we use sccache instead
+        components: "clippy,rustfmt"
     - name: Install Protoc
       uses: arduino/setup-protoc@v2
+      with:
+        repo-token: ${{ inputs.github-token }}
     - name: Use sccache
       uses: mozilla-actions/sccache-action@v0.0.7
     - name: Enable sccache

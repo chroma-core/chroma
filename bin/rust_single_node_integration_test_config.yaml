@@ -4,7 +4,6 @@ sqlitedb:
     SHA256:
   migration_mode:
     Apply:
-  url: "./chroma_integration_test_tmp_dir/chroma.sqlite3"
 segment_manager:
   hnsw_index_pool_cache_config:
     memory:
@@ -20,13 +19,14 @@ collections_with_segments_provider:
   cache_invalidation_retry_policy:
     delay_ms: 0
     max_retries: 0
-service_name: "rust-frontend-service"
-otel_endpoint: "http://otel-collector:4317"
+open_telemetry:
+  service_name: "rust-frontend-service"
+  endpoint: "http://otel-collector:4317"
 log:
   Sqlite:
     tenant_id: "default"
     topic_namespace: "default"
 executor:
   Local:
-    LocalExecutorConfig:
+    local_executor_config:
 scorecard_enabled: false

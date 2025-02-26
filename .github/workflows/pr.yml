@@ -167,7 +167,7 @@ jobs:
 
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-22.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -176,6 +176,8 @@ jobs:
           python-version: "3.11"
       - name: Setup Rust
         uses: ./.github/actions/rust
+        with:
+          github-token: ${{ github.token }}
       - name: Run pre-commit
         shell: bash
         run: |
@@ -195,7 +197,6 @@ jobs:
       - name: Cargo fmt check
         shell: bash
         run: cargo fmt -- --check
-        continue-on-error: true
       - name: Clippy
         run: cargo clippy --all-targets --all-features --keep-going -- -D warnings
 

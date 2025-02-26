@@ -1,6 +1,6 @@
-use chroma_system::Operator;
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_system::Operator;
 use chroma_types::{Chunk, LogRecord};
 use std::collections::HashMap;
 use thiserror::Error;

@@ -9,6 +9,7 @@ webbrowser = "1.0.3"
 tokio = { workspace = true }
 
 chroma-frontend = { workspace = true }
+chroma-config = { workspace = true }
 
 colored = "3.0.0"
 dialoguer = "0.11.0"

@@ -1,2 +1,2 @@
-mod run;
-mod vacuum;
+pub mod run;
+pub mod vacuum;

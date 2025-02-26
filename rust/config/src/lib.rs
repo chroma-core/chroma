@@ -12,8 +12,8 @@ use thiserror::Error;
 /// This trait is used to configure structs from the config object.
 /// Components that need to be configured from the config object should implement this trait.
 #[async_trait]
-pub trait Configurable<T> {
-    async fn try_from_config(config: &T, registry: &Registry) -> Result<Self, Box<dyn ChromaError>>
+pub trait Configurable<T, E = Box<dyn ChromaError>> {
+    async fn try_from_config(config: &T, registry: &Registry) -> Result<Self, E>
     where
         Self: Sized;
 }

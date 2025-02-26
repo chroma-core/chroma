@@ -21,16 +21,48 @@ pub struct FrontendConfig {
     pub sqlitedb: Option<SqliteDBConfig>,
     pub segment_manager: Option<LocalSegmentManagerConfig>,
     pub sysdb: SysDbConfig,
-    #[serde(default = "CircuitBreakerConfig::default")]
-    pub circuit_breaker: CircuitBreakerConfig,
     pub collections_with_segments_provider: CollectionsWithSegmentsProviderConfig,
-    pub service_name: String,
-    pub otel_endpoint: String,
     pub log: LogConfig,
     pub executor: ExecutorConfig,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct OpenTelemetryConfig {
+    pub endpoint: String,
+    pub service_name: String,
+}
+
+fn default_port() -> u16 {
+    3000
+}
+
+fn default_listen_address() -> String {
+    "0.0.0.0".to_string()
+}
+
+fn default_max_payload_size_bytes() -> usize {
+    40 * 1024 * 1024 // 40 MB
+}
+
+#[derive(Deserialize, Serialize, Clone)]
+pub struct FrontendServerConfig {
+    #[serde(flatten)]
+    pub frontend: FrontendConfig,
+    #[serde(default = "default_port")]
+    pub port: u16,
+    #[serde(default = "default_listen_address")]
+    pub listen_address: String,
+    #[serde(default = "default_max_payload_size_bytes")]
+    pub max_payload_size_bytes: usize,
+    #[serde(default = "CircuitBreakerConfig::default")]
+    pub circuit_breaker: CircuitBreakerConfig,
+    #[serde(default)]
     pub scorecard_enabled: bool,
     #[serde(default)]
     pub scorecard: Vec<ScorecardRule>,
+    pub open_telemetry: Option<OpenTelemetryConfig>,
+    #[serde(default)]
+    pub persist_path: Option<String>,
 }
 
 const DEFAULT_CONFIG_PATH: &str = "./frontend_config.yaml";
@@ -41,7 +73,7 @@ const DEFAULT_SINGLE_NODE_CONFIG_FILENAME: &str = "single_node_frontend_config.y
 #[include = "*.yaml"]
 struct DefaultConfigurationsFolder;
 
-impl FrontendConfig {
+impl FrontendServerConfig {
     pub fn load() -> Self {
         Self::load_from_path(DEFAULT_CONFIG_PATH)
     }
@@ -79,13 +111,13 @@ impl FrontendConfig {
 
 #[cfg(test)]
 mod tests {
-    use crate::config::FrontendConfig;
+    use crate::config::FrontendServerConfig;
     use chroma_cache::CacheConfig;
 
     #[test]
     fn test_load_config() {
-        let config = FrontendConfig::load();
-        let sysdb_config = config.sysdb;
+        let config = FrontendServerConfig::load();
+        let sysdb_config = config.frontend.sysdb;
         let sysdb_config = match sysdb_config {
             chroma_sysdb::SysDbConfig::Grpc(grpc_sys_db_config) => grpc_sys_db_config,
             chroma_sysdb::SysDbConfig::Sqlite(_) => {
@@ -99,11 +131,12 @@ mod tests {
         assert_eq!(sysdb_config.num_channels, 5);
         assert_eq!(
             config
+                .frontend
                 .collections_with_segments_provider
                 .permitted_parallelism,
             180
         );
-        match config.collections_with_segments_provider.cache {
+        match config.frontend.collections_with_segments_provider.cache {
             CacheConfig::Memory(c) => {
                 assert_eq!(c.capacity, 1000);
             }

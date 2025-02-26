@@ -1,10 +1,10 @@
 allow_reset: false
+persist_path: "./chroma"
 sqlitedb:
   hash_type:
     SHA256:
   migration_mode:
     Apply:
-  url: "./chroma/chroma.sqlite3"
 segment_manager:
   hnsw_index_pool_cache_config:
     memory:
@@ -20,8 +20,9 @@ collections_with_segments_provider:
   cache_invalidation_retry_policy:
     delay_ms: 0
     max_retries: 0
-service_name: "rust-frontend-service"
-otel_endpoint: "http://otel-collector:4317"
+open_telemetry:
+  service_name: "rust-frontend-service"
+  endpoint: "http://otel-collector:4317"
 log:
   Sqlite:
     tenant_id: "default"

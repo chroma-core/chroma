@@ -19,10 +19,12 @@ use crate::execution::operators::{
     filter::{FilterError, FilterInput, FilterOperator, FilterOutput},
     knn_hnsw::KnnHnswError,
     knn_log::KnnLogError,
+    knn_merge::KnnMergeError,
     knn_projection::{KnnProjectionError, KnnProjectionOutput},
     spann_bf_pl::SpannBfPlError,
     spann_centers_search::SpannCentersSearchError,
     spann_fetch_pl::SpannFetchPlError,
+    spann_knn_merge::SpannKnnMergeError,
 };
 
 #[derive(Error, Debug)]
@@ -39,12 +41,8 @@ pub enum KnnError {
     KnnLog(#[from] KnnLogError),
     #[error("Error running Knn Hnsw Operator: {0}")]
     KnnHnsw(#[from] KnnHnswError),
-    #[error("Error running Spann Head search Operator: {0}")]
-    SpannHeadSearch(#[from] SpannCentersSearchError),
-    #[error("Error running Spann fetch posting list Operator: {0}")]
-    SpannFetchPl(#[from] SpannFetchPlError),
-    #[error("Error running Spann brute force posting list Operator: {0}")]
-    SpannBfPl(#[from] SpannBfPlError),
+    #[error("Error running Knn Merge Operator")]
+    KnnMerge(#[from] KnnMergeError),
     #[error("Error running Knn Projection Operator: {0}")]
     KnnProjection(#[from] KnnProjectionError),
     #[error("Error inspecting collection dimension")]
@@ -53,6 +51,14 @@ pub enum KnnError {
     Panic(#[from] PanicError),
     #[error("Error receiving final result: {0}")]
     Result(#[from] RecvError),
+    #[error("Error running Spann Bruteforce Postinglist Operator: {0}")]
+    SpannBfPl(#[from] SpannBfPlError),
+    #[error("Error running Spann Fetch Postinglist Operator: {0}")]
+    SpannFetchPl(#[from] SpannFetchPlError),
+    #[error("Error running Spann Head Search Operator: {0}")]
+    SpannHeadSearch(#[from] SpannCentersSearchError),
+    #[error("Error running Spann Knn Merge Operator")]
+    SpannKnnMerge(#[from] SpannKnnMergeError),
     #[error("Invalid distance function")]
     InvalidDistanceFunction,
     #[error("Operation aborted because resources exhausted")]
@@ -68,13 +74,15 @@ impl ChromaError for KnnError {
             KnnError::HnswReader(e) => e.code(),
             KnnError::KnnLog(e) => e.code(),
             KnnError::KnnHnsw(e) => e.code(),
-            KnnError::SpannHeadSearch(e) => e.code(),
-            KnnError::SpannFetchPl(e) => e.code(),
-            KnnError::SpannBfPl(e) => e.code(),
+            KnnError::KnnMerge(_) => ErrorCodes::Internal,
             KnnError::KnnProjection(e) => e.code(),
             KnnError::NoCollectionDimension => ErrorCodes::InvalidArgument,
             KnnError::Panic(_) => ErrorCodes::Aborted,
             KnnError::Result(_) => ErrorCodes::Internal,
+            KnnError::SpannBfPl(e) => e.code(),
+            KnnError::SpannFetchPl(e) => e.code(),
+            KnnError::SpannHeadSearch(e) => e.code(),
+            KnnError::SpannKnnMerge(_) => ErrorCodes::Internal,
             KnnError::InvalidDistanceFunction => ErrorCodes::InvalidArgument,
             KnnError::Aborted => ErrorCodes::ResourceExhausted,
         }

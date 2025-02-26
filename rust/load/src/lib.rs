@@ -428,7 +428,7 @@ impl WhereMixin {
                     Skew::Uniform => WORDS[uniform(0, WORDS.len() as u64)(guac) as usize],
                     Skew::Zipf { theta } => {
                         let z = ZIPF_CACHE.from_theta(WORDS.len() as u64, *theta);
-                        WORDS[z.next(guac) as usize]
+                        WORDS[z.next(guac) as usize % WORDS.len()]
                     }
                 };
                 serde_json::json!({"$contains": word.to_string()})

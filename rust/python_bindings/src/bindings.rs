@@ -22,7 +22,6 @@ use chroma_types::{
     ListCollectionsRequest, ListDatabasesRequest, Metadata, QueryResponse, UpdateCollectionRequest,
     UpdateMetadata,
 };
-use mdac::CircuitBreakerConfig;
 use pyo3::{exceptions::PyValueError, pyclass, pymethods, types::PyAnyMethods, PyObject, Python};
 use std::time::SystemTime;
 
@@ -103,19 +102,9 @@ impl Bindings {
             segment_manager: Some(segment_manager_config),
             sqlitedb: Some(sqlite_db_config),
             sysdb: sysdb_config,
-            // TODO: Move circuit breaker config to the server config, it has nothing
-            // to do with the frontend, only to do with the server
-            circuit_breaker: CircuitBreakerConfig::default(),
             collections_with_segments_provider: collection_cache_config,
-            // TODO: The following fields should be removed from FrontendConfig and into
-            // the server config. They have nothing to do with the frontend.
-            service_name: "chroma".to_string(),
-            otel_endpoint: "http://localhost:4317".to_string(),
             log: log_config,
             executor: executor_config,
-            scorecard_enabled: false,
-            // TODO: scorecard should be removed from the frontend config and moved to the server config
-            scorecard: vec![],
         };
 
         let frontend = runtime.block_on(async {
