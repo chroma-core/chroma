@@ -14,6 +14,7 @@ mod types;
 
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
+use chroma_sqlite::db::SqliteDb;
 use chroma_system::System;
 use frontend::Frontend;
 use get_collection_with_segments_provider::*;
@@ -62,6 +63,9 @@ pub async fn frontend_service_entrypoint_with_config(
     let frontend = Frontend::try_from_config(&(config.clone(), system), &registry)
         .await
         .expect("Error creating Frontend Config");
+    
+    let x = registry.get::<SqliteDb>();
+    
     fn rule_to_rule(rule: &ScorecardRule) -> Result<Rule, ScorecardRuleError> {
         let patterns = rule
             .patterns
