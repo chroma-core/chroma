@@ -61,6 +61,8 @@ pub struct FrontendServerConfig {
     #[serde(default)]
     pub scorecard: Vec<ScorecardRule>,
     pub open_telemetry: Option<OpenTelemetryConfig>,
+    #[serde(default)]
+    pub persist_path: Option<String>,
 }
 
 const DEFAULT_CONFIG_PATH: &str = "./frontend_config.yaml";
