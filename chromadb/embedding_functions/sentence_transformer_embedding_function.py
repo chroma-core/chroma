@@ -60,7 +60,8 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
 
         return [np.array(embedding, dtype=np.float32) for embedding in embeddings]
 
-    def name(self) -> str:
+    @staticmethod
+    def name() -> str:
         return "sentence_transformer"
 
     def default_space(self) -> Space:

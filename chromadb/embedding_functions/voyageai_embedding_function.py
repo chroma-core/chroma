@@ -55,7 +55,8 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
         # Convert to numpy arrays
         return [np.array(embedding, dtype=np.float32) for embedding in embeddings]
 
-    def name(self) -> str:
+    @staticmethod
+    def name() -> str:
         return "voyageai"
 
     def default_space(self) -> Space:

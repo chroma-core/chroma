@@ -48,7 +48,8 @@ class CohereEmbeddingFunction(EmbeddingFunction[Documents]):
             ).embeddings
         ]
 
-    def name(self) -> str:
+    @staticmethod
+    def name() -> str:
         return "cohere"
 
     def default_space(self) -> Space:

@@ -108,7 +108,8 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Embeddable]):
         # Cast to the expected Embeddings type
         return cast(Embeddings, embeddings)
 
-    def name(self) -> str:
+    @staticmethod
+    def name() -> str:
         return "roboflow"
 
     def default_space(self) -> Space:

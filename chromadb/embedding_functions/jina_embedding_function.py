@@ -82,7 +82,8 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
             for result in sorted_embeddings
         ]
 
-    def name(self) -> str:
+    @staticmethod
+    def name() -> str:
         return "jina"
 
     def default_space(self) -> Space:

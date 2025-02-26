@@ -49,7 +49,7 @@ from chromadb.embedding_functions.chroma_langchain_embedding_function import (
 )
 
 # Dictionary of supported embedding functions
-supported_embedding_functions: Dict[str, Type[EmbeddingFunction[Documents]]] = {
+known_embedding_functions: Dict[str, Type[EmbeddingFunction[Documents]]] = {
     "cohere": CohereEmbeddingFunction,
     "openai": OpenAIEmbeddingFunction,
     "huggingface": HuggingFaceEmbeddingFunction,
@@ -81,7 +81,7 @@ def register_embedding_function(ef_class: Type[EmbeddingFunction[Embeddable]]) -
     # Create an instance to get the name
     ef_instance = ef_class()
     name = ef_instance.name()
-    supported_embedding_functions[name] = ef_class
+    known_embedding_functions[name] = ef_class
 
 
 # Function to convert config to embedding function
@@ -100,51 +100,15 @@ def config_to_embedding_function(
         raise ValueError("Config must contain a 'name' field.")
 
     name = config["name"]
-    if name not in supported_embedding_functions:
+    if name not in known_embedding_functions:
         raise ValueError(f"Unsupported embedding function: {name}")
 
     ef_config = config.get("config", {})
 
-    # Handle each embedding function type specifically
-    if name == "cohere":
-        return CohereEmbeddingFunction.build_from_config(ef_config)
-    elif name == "openai":
-        return OpenAIEmbeddingFunction.build_from_config(ef_config)
-    elif name == "huggingface":
-        return HuggingFaceEmbeddingFunction.build_from_config(ef_config)
-    elif name == "huggingface_server":
-        return HuggingFaceEmbeddingServer.build_from_config(ef_config)
-    elif name == "sentence_transformer":
-        return SentenceTransformerEmbeddingFunction.build_from_config(ef_config)
-    elif name == "google_palm":
-        return GooglePalmEmbeddingFunction.build_from_config(ef_config)
-    elif name == "google_generative_ai":
-        return GoogleGenerativeAiEmbeddingFunction.build_from_config(ef_config)
-    elif name == "google_vertex":
-        return GoogleVertexEmbeddingFunction.build_from_config(ef_config)
-    elif name == "ollama":
-        return OllamaEmbeddingFunction.build_from_config(ef_config)
-    elif name == "instructor":
-        return InstructorEmbeddingFunction.build_from_config(ef_config)
-    elif name == "jina":
-        return JinaEmbeddingFunction.build_from_config(ef_config)
-    elif name == "voyageai":
-        return VoyageAIEmbeddingFunction.build_from_config(ef_config)
-    elif name == "onnx_mini_lm_l6_v2":
-        return ONNXMiniLM_L6_V2.build_from_config(ef_config)
-    elif name == "open_clip":
-        return OpenCLIPEmbeddingFunction.build_from_config(ef_config)
-    elif name == "roboflow":
-        return RoboflowEmbeddingFunction.build_from_config(ef_config)
-    elif name == "text2vec":
-        return Text2VecEmbeddingFunction.build_from_config(ef_config)
-    elif name == "amazon_bedrock":
-        return AmazonBedrockEmbeddingFunction.build_from_config(ef_config)
-    elif name == "chroma_langchain":
-        return ChromaLangchainEmbeddingFunction.build_from_config(ef_config)
-    else:
-        # This should never happen due to the check above
+    if known_embedding_functions[name] is None:
         raise ValueError(f"Unsupported embedding function: {name}")
+
+    return known_embedding_functions[name].build_from_config(ef_config)
 
 
 __all__ = [
@@ -170,5 +134,5 @@ __all__ = [
     "ChromaLangchainEmbeddingFunction",
     "register_embedding_function",
     "config_to_embedding_function",
-    "supported_embedding_functions",
+    "known_embedding_functions",
 ]

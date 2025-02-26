@@ -71,7 +71,8 @@ class OllamaEmbeddingFunction(EmbeddingFunction[Documents]):
             for embedding in response["embeddings"]
         ]
 
-    def name(self) -> str:
+    @staticmethod
+    def name() -> str:
         return "ollama"
 
     def default_space(self) -> Space:

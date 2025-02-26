@@ -64,7 +64,8 @@ class GooglePalmEmbeddingFunction(EmbeddingFunction[Documents]):
             for text in input
         ]
 
-    def name(self) -> str:
+    @staticmethod
+    def name() -> str:
         return "google_palm"
 
     def default_space(self) -> Space:
@@ -167,7 +168,8 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
         # Convert to the expected Embeddings type (List[Vector])
         return cast(Embeddings, embeddings_list)
 
-    def name(self) -> str:
+    @staticmethod
+    def name() -> str:
         return "google_generative_ai"
 
     def default_space(self) -> Space:
@@ -280,7 +282,8 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
         # Convert to the expected Embeddings type (List[Vector])
         return cast(Embeddings, embeddings_list)
 
-    def name(self) -> str:
+    @staticmethod
+    def name() -> str:
         return "google_vertex"
 
     def default_space(self) -> Space:

@@ -128,7 +128,8 @@ class OpenCLIPEmbeddingFunction(EmbeddingFunction[Embeddable]):
 
         return embeddings
 
-    def name(self) -> str:
+    @staticmethod
+    def name() -> str:
         return "open_clip"
 
     def default_space(self) -> Space:

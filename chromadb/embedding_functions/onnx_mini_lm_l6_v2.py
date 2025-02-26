@@ -313,7 +313,8 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
             ) as tar:
                 tar.extractall(path=self.DOWNLOAD_PATH)
 
-    def name(self) -> str:
+    @staticmethod
+    def name() -> str:
         return "onnx_mini_lm_l6_v2"
 
     def default_space(self) -> Space:

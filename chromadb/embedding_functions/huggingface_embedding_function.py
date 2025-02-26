@@ -67,7 +67,8 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
         # Convert to numpy arrays
         return [np.array(embedding, dtype=np.float32) for embedding in response]
 
-    def name(self) -> str:
+    @staticmethod
+    def name() -> str:
         return "huggingface"
 
     def default_space(self) -> Space:
@@ -150,7 +151,8 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
         # Convert to numpy arrays
         return [np.array(embedding, dtype=np.float32) for embedding in response]
 
-    def name(self) -> str:
+    @staticmethod
+    def name() -> str:
         return "huggingface_server"
 
     def default_space(self) -> Space:

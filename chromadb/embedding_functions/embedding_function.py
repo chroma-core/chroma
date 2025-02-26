@@ -36,8 +36,9 @@ class EmbeddingFunction(Protocol[D]):
     def __call__(self, input: D) -> Embeddings:
         ...
 
+    @staticmethod
     @abstractmethod
-    def name(self) -> str:
+    def name() -> str:
         """
         Return the name of the embedding function.
         """

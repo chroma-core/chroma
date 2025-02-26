@@ -120,7 +120,8 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
         # Extract embeddings from response
         return [np.array(data.embedding, dtype=np.float32) for data in response.data]
 
-    def name(self) -> str:
+    @staticmethod
+    def name() -> str:
         return "openai"
 
     def default_space(self) -> Space:
