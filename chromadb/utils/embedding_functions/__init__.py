@@ -88,9 +88,7 @@ def get_builtins() -> Set[str]:
 class DefaultEmbeddingFunction(EmbeddingFunction[Documents]):
     def __init__(self) -> None:
         if is_thin_client:
-            raise ValueError(
-                "DefaultEmbeddingFunction is not supported in thin client mode"
-            )
+            return
 
     def __call__(self, input: Documents) -> Embeddings:
         # Delegate to ONNXMiniLM_L6_V2
