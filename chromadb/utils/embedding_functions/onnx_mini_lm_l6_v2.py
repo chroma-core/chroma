@@ -107,9 +107,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
             chunk_size: The chunk size to use when downloading.
         """
         with httpx.stream("GET", url) as resp:
-            resp.raise_for_status()
             total = int(resp.headers.get("content-length", 0))
-            # Can use tqdm to display a progress bar
             with open(fname, "wb") as file, self.tqdm(
                 desc=str(fname),
                 total=total,
@@ -117,18 +115,18 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
                 unit_scale=True,
                 unit_divisor=1024,
             ) as bar:
-                downloaded = 0
                 for data in resp.iter_bytes(chunk_size=chunk_size):
                     size = file.write(data)
                     bar.update(size)
-                    downloaded += size
 
         if not _verify_sha256(fname, self._MODEL_SHA256):
             os.remove(fname)
             raise ValueError(
-                f"Downloaded file {fname} does not match expected SHA256 {self._MODEL_SHA256}"
+                f"Downloaded file {fname} does not match expected SHA256 hash. Corrupted download or malicious file."
             )
 
+    # Use pytorches default epsilon for division by zero
+    # https://pytorch.org/docs/stable/generated/torch.nn.functional.normalize.html
     def _normalize(self, v: npt.NDArray[np.float32]) -> npt.NDArray[np.float32]:
         """
         Normalize a vector.
@@ -213,6 +211,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
             )
         )
         # max_seq_length = 256, for some reason sentence-transformers uses 256 even though the HF config has a max length of 128
+        # https://github.com/UKPLab/sentence-transformers/blob/3e1929fddef16df94f8bc6e3b10598a98f46e62d/docs/_static/html/models_en_sentence_embeddings.html#LL480
         tokenizer.enable_truncation(max_length=256)
         tokenizer.enable_padding(pad_id=0, pad_token="[PAD]", length=256)
         return tokenizer
@@ -261,23 +260,9 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
         Returns:
             Embeddings for the documents.
         """
-        # ONNX Mini LM L6 V2 only works with text documents
-        if not all(isinstance(item, str) for item in input):
-            raise ValueError(
-                "ONNX Mini LM L6 V2 only supports text documents, not images"
-            )
-
         # Only download the model when it is actually used
         self._download_model_if_not_exists()
-
-        # Generate embeddings
-        embeddings = self._forward(input)
-
-        # Convert to list of numpy arrays for the expected Embeddings type
-        return cast(
-            Embeddings,
-            [np.array(embedding, dtype=np.float32) for embedding in embeddings],
-        )
+        return cast(Embeddings, self._forward(input))
 
     def _download_model_if_not_exists(self) -> None:
         """
