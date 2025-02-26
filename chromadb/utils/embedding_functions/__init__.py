@@ -92,9 +92,9 @@ class DefaultEmbeddingFunction(EmbeddingFunction[Documents]):
                 "DefaultEmbeddingFunction is not supported in thin client mode"
             )
 
-    def __call__(self, texts: Documents) -> Embeddings:
+    def __call__(self, input: Documents) -> Embeddings:
         # Delegate to ONNXMiniLM_L6_V2
-        return ONNXMiniLM_L6_V2()(texts)
+        return ONNXMiniLM_L6_V2()(input)
 
     @classmethod
     def build_from_config(cls, config: Dict[str, Any]) -> "DefaultEmbeddingFunction":
