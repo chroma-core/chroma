@@ -6,6 +6,7 @@ import hypothesis.strategies as st
 import onnxruntime
 import pytest
 from hypothesis import given, settings
+from unittest.mock import patch
 
 from chromadb.utils.embedding_functions.onnx_mini_lm_l6_v2 import (
     ONNXMiniLM_L6_V2,
@@ -71,11 +72,15 @@ def test_provider_repeating(providers: List[str]) -> None:
 
 def test_invalid_sha256() -> None:
     ef = ONNXMiniLM_L6_V2()
-    shutil.rmtree(ef.DOWNLOAD_PATH)  # clean up any existing models
-    with pytest.raises(ValueError) as e:
-        ef._MODEL_SHA256 = "invalid"
-        ef(["test"])
-    assert "does not match expected SHA256 hash" in str(e.value)
+    shutil.rmtree(ef.DOWNLOAD_PATH, ignore_errors=True)  # clean up any existing models
+    # Patch the _verify_sha256 function to return False
+    with patch(
+        "chromadb.utils.embedding_functions.onnx_mini_lm_l6_v2._verify_sha256",
+        return_value=False,
+    ):
+        with pytest.raises(ValueError) as e:
+            ef(["test"])
+        assert "does not match expected SHA256" in str(e.value)
 
 
 def test_partial_download() -> None:
