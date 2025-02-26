@@ -1,4 +1,5 @@
 black==23.3.0 # match what's in pyproject.toml
+boto3
 build
 grpcio-tools==1.67.1 # Later version not compatible with protobuf 4.25.5
 httpx
