@@ -31,12 +31,6 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
             >>> texts = ["Hello, world!", "How are you?"]
             >>> embeddings = bedrock(texts)
         """
-        # try:
-        #     import boto3  # type: ignore
-        # except ImportError:
-        #     raise ValueError(
-        #         "The boto3 python package is not installed. Please install it with `pip install boto3`"
-        #     )
 
         self.model_name = model_name
         self.kwargs = kwargs
