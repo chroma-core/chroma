@@ -1,6 +1,7 @@
 import pytest
-from typing import List, cast
-from chromadb.api.types import EmbeddingFunction, Documents, Image, Document, Embeddings
+from typing import List, cast, Dict, Any
+from chromadb.api.types import Documents, Image, Document, Embeddings
+from chromadb.embedding_functions import EmbeddingFunction
 import numpy as np
 
 
@@ -22,8 +23,30 @@ def test_embedding_function_results_format_when_response_is_valid() -> None:
     valid_embeddings = random_embeddings()
 
     class TestEmbeddingFunction(EmbeddingFunction[Documents]):
+        def __init__(self) -> None:
+            pass
+
+        @staticmethod
+        def name() -> str:
+            return "test"
+
+        @staticmethod
+        def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
+            return TestEmbeddingFunction()
+
+        def get_config(self) -> Dict[str, Any]:
+            return {}
+
         def __call__(self, input: Documents) -> Embeddings:
             return valid_embeddings
+
+        def validate_config(self, config: Dict[str, Any]) -> None:
+            pass
+
+        def validate_config_update(
+            self, old_config: Dict[str, Any], new_config: Dict[str, Any]
+        ) -> None:
+            pass
 
     ef = TestEmbeddingFunction()
 
@@ -36,6 +59,28 @@ def test_embedding_function_results_format_when_response_is_invalid() -> None:
     invalid_embedding = {"error": "test"}
 
     class TestEmbeddingFunction(EmbeddingFunction[Documents]):
+        def __init__(self) -> None:
+            pass
+
+        @staticmethod
+        def name() -> str:
+            return "test"
+
+        @staticmethod
+        def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
+            return TestEmbeddingFunction()
+
+        def get_config(self) -> Dict[str, Any]:
+            return {}
+
+        def validate_config(self, config: Dict[str, Any]) -> None:
+            pass
+
+        def validate_config_update(
+            self, old_config: Dict[str, Any], new_config: Dict[str, Any]
+        ) -> None:
+            pass
+
         def __call__(self, input: Documents) -> Embeddings:
             return cast(Embeddings, invalid_embedding)
 
