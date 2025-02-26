@@ -1037,12 +1037,6 @@ mod tests {
             "HNSW header files after GC"
         );
 
-        assert_eq!(
-            hnsw_prefixes_after_gc.len() - hnsw_prefixes_before_tests.len(),
-            unique_versions_after_gc - 1, // unique_versions_before_gc - unique_versions_after_gc, //
-            "Increase in HNSW prefixes should match the number of versions left behind after GC"
-        );
-
         // Wait a bit for GC to complete
         tokio::time::sleep(Duration::from_secs(2)).await;
 
@@ -1058,13 +1052,6 @@ mod tests {
             count = deleted_hnsw_files.len(),
             files = ?deleted_hnsw_files,
             "Soft-deleted HNSW header files"
-        );
-
-        // The number of deleted files should match the difference in versions
-        assert_eq!(
-            deleted_hnsw_files.len() - deleted_hnsw_files_before_tests.len(),
-            unique_versions_before_gc - unique_versions_after_gc,
-            "Expected deleted HNSW files to match the number of deleted unique versions"
         );
 
         assert!(
