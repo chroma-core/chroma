@@ -140,9 +140,7 @@ def register_embedding_function(ef_class: Type[EmbeddingFunction[Embeddable]]) -
     Args:
         ef_class: The embedding function class to register.
     """
-    # Create an instance to get the name
-    ef_instance = ef_class()
-    name = ef_instance.name()
+    name = ef_class.name()
     known_embedding_functions[name] = ef_class
 
 

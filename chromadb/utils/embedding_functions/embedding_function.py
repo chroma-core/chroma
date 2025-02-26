@@ -15,7 +15,7 @@ class Space(Enum):
 class EmbeddingFunction(Protocol[D]):
     """
     A protocol for embedding functions. To implement a new embedding function,
-    you need to implement the following methods:
+    you need to implement the following methods at minimum:
     - __init__
     - __call__
     - name
