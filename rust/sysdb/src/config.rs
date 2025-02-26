@@ -77,9 +77,10 @@ impl Default for SqliteSysDbConfig {
 //////////////////////// SYSDB CONFIG ////////////////////////
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
-#[serde(rename_all = "snake_case")]
 pub enum SysDbConfig {
+    #[serde(alias = "grpc")]
     Grpc(GrpcSysDbConfig),
+    #[serde(alias = "sqlite")]
     Sqlite(SqliteSysDbConfig),
 }
 
