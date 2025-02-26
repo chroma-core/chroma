@@ -11,7 +11,7 @@ import numpy as np
 class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
     def __init__(
         self,
-        api_key_env_var: str = "OPENAI_API_KEY",
+        api_key: Optional[str] = None,
         model_name: str = "text-embedding-ada-002",
         organization_id: Optional[str] = None,
         api_base: Optional[str] = None,
@@ -20,7 +20,7 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
         deployment_id: Optional[str] = None,
         default_headers: Optional[Dict[str, str]] = None,
         dimensions: Optional[int] = None,
-        api_key: Optional[str] = None,
+        api_key_env_var: str = "OPENAI_API_KEY",
     ):
         """
         Initialize the OpenAIEmbeddingFunction.

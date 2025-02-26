@@ -16,9 +16,9 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
 
     def __init__(
         self,
-        api_key_env_var: str = "JINA_API_KEY",
-        model_name: str = "jina-embeddings-v2-base-en",
         api_key: Optional[str] = None,
+        model_name: str = "jina-embeddings-v2-base-en",
+        api_key_env_var: str = "JINA_API_KEY",
     ):
         """
         Initialize the JinaEmbeddingFunction.

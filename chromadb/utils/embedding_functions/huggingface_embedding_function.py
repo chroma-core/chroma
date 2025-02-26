@@ -16,9 +16,9 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
 
     def __init__(
         self,
-        api_key_env_var: str = "HUGGINGFACE_API_KEY",
-        model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
         api_key: Optional[str] = None,
+        model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
+        api_key_env_var: str = "HUGGINGFACE_API_KEY",
     ):
         """
         Initialize the HuggingFaceEmbeddingFunction.

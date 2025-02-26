@@ -14,9 +14,9 @@ class GooglePalmEmbeddingFunction(EmbeddingFunction[Documents]):
 
     def __init__(
         self,
-        api_key_env_var: str = "GOOGLE_PALM_API_KEY",
-        model_name: str = "models/embedding-gecko-001",
         api_key: Optional[str] = None,
+        model_name: str = "models/embedding-gecko-001",
+        api_key_env_var: str = "GOOGLE_PALM_API_KEY",
     ):
         """
         Initialize the GooglePalmEmbeddingFunction.
@@ -108,10 +108,10 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
 
     def __init__(
         self,
-        api_key_env_var: str = "GOOGLE_API_KEY",
+        api_key: Optional[str] = None,
         model_name: str = "models/embedding-001",
         task_type: str = "RETRIEVAL_DOCUMENT",
-        api_key: Optional[str] = None,
+        api_key_env_var: str = "GOOGLE_API_KEY",
     ):
         """
         Initialize the GoogleGenerativeAiEmbeddingFunction.
@@ -225,11 +225,11 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
 
     def __init__(
         self,
-        api_key_env_var: str = "GOOGLE_API_KEY",
+        api_key: Optional[str] = None,
         model_name: str = "textembedding-gecko",
         project_id: str = "cloud-large-language-models",
         region: str = "us-central1",
-        api_key: Optional[str] = None,
+        api_key_env_var: str = "GOOGLE_API_KEY",
     ):
         """
         Initialize the GoogleVertexEmbeddingFunction.

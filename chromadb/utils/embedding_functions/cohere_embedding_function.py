@@ -11,9 +11,9 @@ import numpy as np
 class CohereEmbeddingFunction(EmbeddingFunction[Documents]):
     def __init__(
         self,
-        api_key_env_var: str = "CHROMA_COHERE_API_KEY",
-        model_name: str = "large",
         api_key: Optional[str] = None,
+        model_name: str = "large",
+        api_key_env_var: str = "CHROMA_COHERE_API_KEY",
     ):
         try:
             import cohere

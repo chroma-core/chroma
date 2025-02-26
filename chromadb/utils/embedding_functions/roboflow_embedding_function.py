@@ -25,9 +25,9 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Embeddable]):
 
     def __init__(
         self,
-        api_key_env_var: str = "ROBOFLOW_API_KEY",
-        api_url: str = "https://infer.roboflow.com",
         api_key: Optional[str] = None,
+        api_url: str = "https://infer.roboflow.com",
+        api_key_env_var: str = "ROBOFLOW_API_KEY",
     ) -> None:
         """
         Create a RoboflowEmbeddingFunction.

@@ -15,9 +15,9 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
 
     def __init__(
         self,
-        api_key_env_var: str = "VOYAGE_API_KEY",
-        model_name: str = "voyage-large-2",
         api_key: Optional[str] = None,
+        model_name: str = "voyage-large-2",
+        api_key_env_var: str = "VOYAGE_API_KEY",
     ):
         """
         Initialize the VoyageAIEmbeddingFunction.
