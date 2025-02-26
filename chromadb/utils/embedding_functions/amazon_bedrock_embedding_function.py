@@ -33,6 +33,10 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
         """
 
         self.model_name = model_name
+        # check kwargs are primitives only
+        for key, value in kwargs.items():
+            if not isinstance(value, (str, int, float, bool, list, dict, tuple)):
+                raise ValueError(f"Keyword argument {key} is not a primitive type")
         self.kwargs = kwargs
 
         # Store the session for serialization
