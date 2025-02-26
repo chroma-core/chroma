@@ -24,6 +24,7 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
                 Defaults to "VOYAGE_API_KEY".
             model_name (str, optional): The name of the model to use for text embeddings.
                 Defaults to "voyage-large-2".
+            api_key (str, optional): API key for the VoyageAI API. If not provided, will look for it in the environment variable.
         """
         try:
             import voyageai

@@ -1,5 +1,5 @@
 from chromadb.utils import embedding_functions
-from chromadb.api.types import EmbeddingFunction
+from chromadb.embedding_functions import EmbeddingFunction
 
 
 def test_get_builtins_holds() -> None:
