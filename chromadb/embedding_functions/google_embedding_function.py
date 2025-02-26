@@ -183,9 +183,7 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
         task_type = config.get("task_type")
 
         if api_key_env_var is None or model_name is None or task_type is None:
-            raise ValueError(
-                "This is a legacy config, please update your config to use the new config format."
-            )
+            assert False, "This code should not be reached"
 
         return GoogleGenerativeAiEmbeddingFunction(
             api_key_env_var=api_key_env_var, model_name=model_name, task_type=task_type

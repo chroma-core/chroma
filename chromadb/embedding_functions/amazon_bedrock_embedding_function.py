@@ -92,9 +92,7 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
         model_name = config.get("model_name")
         session_args = config.get("session_args")
         if model_name is None or session_args is None:
-            raise ValueError(
-                "This is a legacy config, please update your config to use the new config format."
-            )
+            assert False, "This code should not be reached"
         kwargs = config.get("kwargs", {})
 
         session = boto3.Session(**session_args)

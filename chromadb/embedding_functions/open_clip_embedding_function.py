@@ -146,9 +146,7 @@ class OpenCLIPEmbeddingFunction(EmbeddingFunction[Embeddable]):
         device = config.get("device")
 
         if model_name is None or checkpoint is None or device is None:
-            raise ValueError(
-                "This is a legacy config, please update your config to use the new config format."
-            )
+            assert False, "This code should not be reached"
 
         return OpenCLIPEmbeddingFunction(
             model_name=model_name, checkpoint=checkpoint, device=device

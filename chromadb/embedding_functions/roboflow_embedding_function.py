@@ -125,9 +125,7 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Embeddable]):
         api_url = config.get("api_url")
 
         if api_key_env_var is None or api_url is None:
-            raise ValueError(
-                "This is a legacy config, please update your config to use the new config format."
-            )
+            assert False, "This code should not be reached"
 
         return RoboflowEmbeddingFunction(
             api_key_env_var=api_key_env_var, api_url=api_url

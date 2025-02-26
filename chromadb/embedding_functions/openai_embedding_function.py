@@ -144,9 +144,7 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
         dimensions = config.get("dimensions")
 
         if api_key_env_var is None or model_name is None:
-            raise ValueError(
-                "This is a legacy config, please update your config to use the new config format."
-            )
+            assert False, "This code should not be reached"
 
         # Create and return the embedding function
         return OpenAIEmbeddingFunction(

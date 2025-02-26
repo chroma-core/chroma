@@ -82,9 +82,7 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
         model_name = config.get("model_name")
 
         if api_key_env_var is None or model_name is None:
-            raise ValueError(
-                "This is a legacy config, please update your config to use the new config format."
-            )
+            assert False, "This code should not be reached"
 
         return HuggingFaceEmbeddingFunction(
             api_key_env_var=api_key_env_var, model_name=model_name

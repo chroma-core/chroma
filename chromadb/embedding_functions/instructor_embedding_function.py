@@ -82,9 +82,7 @@ class InstructorEmbeddingFunction(EmbeddingFunction[Documents]):
         instruction = config.get("instruction")
 
         if model_name is None or device is None:
-            raise ValueError(
-                "This is a legacy config, please update your config to use the new config format."
-            )
+            assert False, "This code should not be reached"
 
         return InstructorEmbeddingFunction(
             model_name=model_name, device=device, instruction=instruction

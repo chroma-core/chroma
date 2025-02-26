@@ -87,9 +87,7 @@ class OllamaEmbeddingFunction(EmbeddingFunction[Documents]):
         timeout = config.get("timeout")
 
         if url is None or model_name is None or timeout is None:
-            raise ValueError(
-                "This is a legacy config, please update your config to use the new config format."
-            )
+            assert False, "This code should not be reached"
 
         return OllamaEmbeddingFunction(url=url, model_name=model_name, timeout=timeout)
 

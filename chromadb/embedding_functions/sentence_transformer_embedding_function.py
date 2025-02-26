@@ -78,9 +78,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
         kwargs = config.get("kwargs", {})
 
         if model_name is None or device is None or normalize_embeddings is None:
-            raise ValueError(
-                "This is a legacy config, please update your config to use the new config format."
-            )
+            assert False, "This code should not be reached"
 
         return SentenceTransformerEmbeddingFunction(
             model_name=model_name,
