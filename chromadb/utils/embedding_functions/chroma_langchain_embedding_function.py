@@ -16,12 +16,6 @@ def create_langchain_embedding(
     Returns:
         A ChromaLangchainEmbeddingFunction that wraps the langchain embedding function.
     """
-    # try:
-    #     import langchain_core.embeddings  # type: ignore
-    # except ImportError:
-    #     raise ValueError(
-    #         "The langchain_core python package is not installed. Please install it with `pip install langchain-core`"
-    #     )
 
     return ChromaLangchainEmbeddingFunction(embedding_function=langchain_embedding_fn)
 

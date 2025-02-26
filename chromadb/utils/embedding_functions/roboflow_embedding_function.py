@@ -38,12 +38,6 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Embeddable]):
             api_url (str, optional): The URL of the Roboflow API.
                 Defaults to "https://infer.roboflow.com".
         """
-        # try:
-        #     import httpx  # type: ignore
-        # except ImportError:
-        #     raise ValueError(
-        #         "The httpx python package is not installed. Please install it with `pip install httpx`"
-        #     )
 
         self.api_key_env_var = api_key_env_var
         self.api_key = api_key or os.getenv(api_key_env_var)
