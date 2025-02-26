@@ -11,7 +11,7 @@ from chromadb.utils.embedding_functions.onnx_mini_lm_l6_v2 import (
     ONNXMiniLM_L6_V2,
 )
 
-from chromadb.embedding_functions.onnx_mini_lm_l6_v2 import _verify_sha256
+from chromadb.utils.embedding_functions.onnx_mini_lm_l6_v2 import _verify_sha256
 
 
 def unique_by(x: Hashable) -> Hashable:

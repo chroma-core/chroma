@@ -79,10 +79,10 @@ class EmbeddingFunction(Protocol[D]):
         """
         Validate the update to the config.
         """
-        pass
+        return
 
     def validate_config(self, config: Dict[str, Any]) -> None:
         """
         Validate the config.
         """
-        pass
+        return
