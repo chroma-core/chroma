@@ -1,6 +1,6 @@
 from typing import Dict, Any, Type
 from chromadb.embedding_functions.embedding_function import EmbeddingFunction, Space
-from chromadb.api.types import Embeddable, Documents
+from chromadb.api.types import Embeddable, Documents, Embeddings
 
 # Import all embedding functions
 from chromadb.embedding_functions.cohere_embedding_function import (
@@ -48,6 +48,38 @@ from chromadb.embedding_functions.chroma_langchain_embedding_function import (
     ChromaLangchainEmbeddingFunction,
 )
 
+try:
+    from chromadb.is_thin_client import is_thin_client
+except ImportError:
+    is_thin_client = False
+
+
+class DefaultEmbeddingFunction(EmbeddingFunction[Documents]):
+    def __init__(self) -> None:
+        if is_thin_client:
+            raise ValueError(
+                "DefaultEmbeddingFunction is not supported in thin client mode"
+            )
+
+    def __call__(self, texts: Documents) -> Embeddings:
+        # Delegate to ONNXMiniLM_L6_V2
+        return ONNXMiniLM_L6_V2()(texts)
+
+    @classmethod
+    def build_from_config(cls, config: Dict[str, Any]) -> "DefaultEmbeddingFunction":
+        return cls()
+
+    @staticmethod
+    def name() -> str:
+        return "default"
+
+    def get_config(self) -> Dict[str, Any]:
+        return {}
+
+    def max_tokens(self) -> int:
+        return 256
+
+
 # Dictionary of supported embedding functions
 known_embedding_functions: Dict[str, Type[EmbeddingFunction[Documents]]] = {
     "cohere": CohereEmbeddingFunction,
@@ -68,6 +100,7 @@ known_embedding_functions: Dict[str, Type[EmbeddingFunction[Documents]]] = {
     "text2vec": Text2VecEmbeddingFunction,
     "amazon_bedrock": AmazonBedrockEmbeddingFunction,
     "chroma_langchain": ChromaLangchainEmbeddingFunction,
+    "default": DefaultEmbeddingFunction,
 }
 
 

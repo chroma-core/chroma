@@ -2,7 +2,6 @@ from chromadb.embedding_functions.embedding_function import EmbeddingFunction
 from chromadb.api.types import Embeddings, Documents
 from typing import Dict, Any, cast
 import json
-import boto3
 import numpy as np
 
 
@@ -13,7 +12,7 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
 
     def __init__(
         self,
-        session: boto3.Session,
+        session: Any,
         model_name: str = "amazon.titan-embed-text-v1",
         **kwargs: Any,
     ):
