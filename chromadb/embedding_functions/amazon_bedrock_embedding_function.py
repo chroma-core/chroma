@@ -21,7 +21,7 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
 
         Args:
             session (boto3.Session): The boto3 session to use. You need to have boto3
-                installed, `pip install boto3`. You must use a profile and region name, access & secret key are not supported.
+                installed, `pip install boto3`. Access & secret key are not supported.
             model_name (str, optional): Identifier of the model, defaults to "amazon.titan-embed-text-v1"
             **kwargs: Additional arguments to pass to the boto3 client.
 
