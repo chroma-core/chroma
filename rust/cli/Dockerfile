@@ -25,7 +25,9 @@ RUN --mount=type=cache,sharing=locked,target=/chroma/target/ \
   if [ "$RELEASE_MODE" = "1" ]; then mv target/release/chroma ./chroma; else mv target/debug/chroma ./chroma; fi
 
 
-FROM scratch AS runner
+FROM alpine AS runner
+
+RUN apk add --no-cache dumb-init
 
 COPY --from=builder /chroma/rust/frontend/sample_configs /sample_configs
 COPY --from=builder /chroma/rust/frontend/sample_configs/docker_single_node.yaml /config.yaml
@@ -33,5 +35,5 @@ COPY --from=builder /chroma/chroma /usr/local/bin/chroma
 
 EXPOSE 8000
 
-ENTRYPOINT [ "chroma" ]
+ENTRYPOINT [ "dumb-init", "--", "chroma" ]
 CMD [ "run", "/config.yaml" ]
