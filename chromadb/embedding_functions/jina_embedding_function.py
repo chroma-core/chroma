@@ -1,6 +1,6 @@
 from chromadb.embedding_functions.embedding_function import EmbeddingFunction, Space
 from chromadb.api.types import Embeddings, Documents
-from typing import List, Dict, Any, Union
+from typing import List, Dict, Any, Union, Optional
 import os
 import numpy as np
 
@@ -15,6 +15,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
         self,
         api_key_env_var: str = "JINA_API_KEY",
         model_name: str = "jina-embeddings-v2-base-en",
+        api_key: Optional[str] = None,
     ):
         """
         Initialize the JinaEmbeddingFunction.
@@ -33,7 +34,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
             )
 
         self.api_key_env_var = api_key_env_var
-        self.api_key = os.getenv(api_key_env_var)
+        self.api_key = api_key or os.getenv(api_key_env_var)
         if not self.api_key:
             raise ValueError(f"The {api_key_env_var} environment variable is not set.")
 

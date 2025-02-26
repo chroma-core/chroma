@@ -1,6 +1,6 @@
 from chromadb.embedding_functions.embedding_function import EmbeddingFunction, Space
 from chromadb.api.types import Embeddings, Documents
-from typing import List, Dict, Any, cast
+from typing import List, Dict, Any, cast, Optional
 import os
 import numpy as np
 import numpy.typing as npt
@@ -13,6 +13,7 @@ class GooglePalmEmbeddingFunction(EmbeddingFunction[Documents]):
         self,
         api_key_env_var: str = "GOOGLE_PALM_API_KEY",
         model_name: str = "models/embedding-gecko-001",
+        api_key: Optional[str] = None,
     ):
         """
         Initialize the GooglePalmEmbeddingFunction.
@@ -31,7 +32,7 @@ class GooglePalmEmbeddingFunction(EmbeddingFunction[Documents]):
             )
 
         self.api_key_env_var = api_key_env_var
-        self.api_key = os.getenv(api_key_env_var)
+        self.api_key = api_key or os.getenv(api_key_env_var)
         if not self.api_key:
             raise ValueError(f"The {api_key_env_var} environment variable is not set.")
 
@@ -107,6 +108,7 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
         api_key_env_var: str = "GOOGLE_API_KEY",
         model_name: str = "models/embedding-001",
         task_type: str = "RETRIEVAL_DOCUMENT",
+        api_key: Optional[str] = None,
     ):
         """
         Initialize the GoogleGenerativeAiEmbeddingFunction.
@@ -128,7 +130,7 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
             )
 
         self.api_key_env_var = api_key_env_var
-        self.api_key = os.getenv(api_key_env_var)
+        self.api_key = api_key or os.getenv(api_key_env_var)
         if not self.api_key:
             raise ValueError(f"The {api_key_env_var} environment variable is not set.")
 
@@ -224,6 +226,7 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
         model_name: str = "textembedding-gecko",
         project_id: str = "cloud-large-language-models",
         region: str = "us-central1",
+        api_key: Optional[str] = None,
     ):
         """
         Initialize the GoogleVertexEmbeddingFunction.
@@ -247,7 +250,7 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
             )
 
         self.api_key_env_var = api_key_env_var
-        self.api_key = os.getenv(api_key_env_var)
+        self.api_key = api_key or os.getenv(api_key_env_var)
         if not self.api_key:
             raise ValueError(f"The {api_key_env_var} environment variable is not set.")
 

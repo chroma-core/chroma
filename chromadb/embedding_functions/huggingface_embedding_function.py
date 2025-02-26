@@ -1,6 +1,6 @@
 from chromadb.embedding_functions.embedding_function import EmbeddingFunction, Space
 from chromadb.api.types import Embeddings, Documents
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import os
 import numpy as np
 
@@ -15,6 +15,7 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
         self,
         api_key_env_var: str = "HUGGINGFACE_API_KEY",
         model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
+        api_key: Optional[str] = None,
     ):
         """
         Initialize the HuggingFaceEmbeddingFunction.
@@ -33,7 +34,7 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
             )
 
         self.api_key_env_var = api_key_env_var
-        self.api_key = os.getenv(api_key_env_var)
+        self.api_key = api_key or os.getenv(api_key_env_var)
         if not self.api_key:
             raise ValueError(f"The {api_key_env_var} environment variable is not set.")
 

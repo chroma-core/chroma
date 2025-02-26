@@ -1,13 +1,16 @@
 from chromadb.embedding_functions.embedding_function import EmbeddingFunction, Space
 from chromadb.api.types import Embeddings, Documents
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import os
 import numpy as np
 
 
 class CohereEmbeddingFunction(EmbeddingFunction[Documents]):
     def __init__(
-        self, api_key_env_var: str = "CHROMA_COHERE_API_KEY", model_name: str = "large"
+        self,
+        api_key_env_var: str = "CHROMA_COHERE_API_KEY",
+        model_name: str = "large",
+        api_key: Optional[str] = None,
     ):
         try:
             import cohere
@@ -17,7 +20,7 @@ class CohereEmbeddingFunction(EmbeddingFunction[Documents]):
             )
 
         self.api_key_env_var = api_key_env_var
-        self.api_key = os.getenv(api_key_env_var)
+        self.api_key = api_key or os.getenv(api_key_env_var)
         if not self.api_key:
             raise ValueError(f"The {api_key_env_var} environment variable is not set.")
 

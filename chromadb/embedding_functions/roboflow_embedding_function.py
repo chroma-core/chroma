@@ -7,7 +7,7 @@ from chromadb.api.types import (
     is_image,
     Embeddable,
 )
-from typing import List, Dict, Any, Union, cast
+from typing import List, Dict, Any, Union, cast, Optional
 import os
 import importlib
 import base64
@@ -24,6 +24,7 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Embeddable]):
         self,
         api_key_env_var: str = "ROBOFLOW_API_KEY",
         api_url: str = "https://infer.roboflow.com",
+        api_key: Optional[str] = None,
     ) -> None:
         """
         Create a RoboflowEmbeddingFunction.
@@ -42,7 +43,7 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Embeddable]):
         #     )
 
         self.api_key_env_var = api_key_env_var
-        self.api_key = os.getenv(api_key_env_var)
+        self.api_key = api_key or os.getenv(api_key_env_var)
         if not self.api_key:
             raise ValueError(f"The {api_key_env_var} environment variable is not set.")
 
