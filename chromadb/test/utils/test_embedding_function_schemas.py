@@ -13,14 +13,14 @@ from chromadb.utils.embedding_functions import (
 )
 
 # Set dummy environment variables for API keys
-os.environ["OPENAI_API_KEY"] = "dummy_openai_key"
-os.environ["HUGGINGFACE_API_KEY"] = "dummy_huggingface_key"
-os.environ["JINA_API_KEY"] = "dummy_jina_key"
-os.environ["COHERE_API_KEY"] = "dummy_cohere_key"
-os.environ["GOOGLE_PALM_API_KEY"] = "dummy_google_palm_key"
-os.environ["GOOGLE_API_KEY"] = "dummy_google_key"
-os.environ["VOYAGEAI_API_KEY"] = "dummy_voyageai_key"
-os.environ["ROBOFLOW_API_KEY"] = "dummy_roboflow_key"
+os.environ["OPENAI_CHROMA_API_KEY"] = "dummy_openai_key"
+os.environ["HUGGINGFACE_CHROMA_API_KEY"] = "dummy_huggingface_key"
+os.environ["JINA_CHROMA_API_KEY"] = "dummy_jina_key"
+os.environ["COHERE_CHROMA_API_KEY"] = "dummy_cohere_key"
+os.environ["GOOGLE_PALM_CHROMA_API_KEY"] = "dummy_google_palm_key"
+os.environ["GOOGLE_CHROMA_API_KEY"] = "dummy_google_key"
+os.environ["VOYAGEAI_CHROMA_API_KEY"] = "dummy_voyageai_key"
+os.environ["ROBOFLOW_CHROMA_API_KEY"] = "dummy_roboflow_key"
 os.environ["AWS_ACCESS_KEY_ID"] = "dummy_aws_access_key"
 os.environ["AWS_SECRET_ACCESS_KEY"] = "dummy_aws_secret_key"
 os.environ["AWS_REGION"] = "us-east-1"
@@ -74,10 +74,10 @@ EMBEDDING_FUNCTION_CONFIGS: Dict[str, Dict[str, Any]] = {
         "args": {
             "api_key": "dummy_key",
             "model_name": "text-embedding-ada-002",
-            "api_key_env_var": "OPENAI_API_KEY",
+            "api_key_env_var": "OPENAI_CHROMA_API_KEY",
         },
         "config": {
-            "api_key_env_var": "OPENAI_API_KEY",
+            "api_key_env_var": "OPENAI_CHROMA_API_KEY",
             "model_name": "text-embedding-ada-002",
         },
     },
@@ -85,11 +85,11 @@ EMBEDDING_FUNCTION_CONFIGS: Dict[str, Dict[str, Any]] = {
         "args": {
             "api_key": "dummy_key",
             "model_name": "sentence-transformers/all-MiniLM-L6-v2",
-            "api_key_env_var": "HUGGINGFACE_API_KEY",
+            "api_key_env_var": "HUGGINGFACE_CHROMA_API_KEY",
         },
         "config": {
             "model_name": "sentence-transformers/all-MiniLM-L6-v2",
-            "api_key_env_var": "HUGGINGFACE_API_KEY",
+            "api_key_env_var": "HUGGINGFACE_CHROMA_API_KEY",
         },
     },
     "sentence_transformer": {
@@ -104,10 +104,10 @@ EMBEDDING_FUNCTION_CONFIGS: Dict[str, Dict[str, Any]] = {
         "args": {
             "api_key": "dummy_key",
             "model_name": "embed-english-v3.0",
-            "api_key_env_var": "COHERE_API_KEY",
+            "api_key_env_var": "COHERE_CHROMA_API_KEY",
         },
         "config": {
-            "api_key_env_var": "COHERE_API_KEY",
+            "api_key_env_var": "COHERE_CHROMA_API_KEY",
             "model_name": "embed-english-v3.0",
         },
     },
@@ -115,10 +115,10 @@ EMBEDDING_FUNCTION_CONFIGS: Dict[str, Dict[str, Any]] = {
         "args": {
             "api_key": "dummy_key",
             "model_name": "models/embedding-gecko-001",
-            "api_key_env_var": "GOOGLE_PALM_API_KEY",
+            "api_key_env_var": "GOOGLE_PALM_CHROMA_API_KEY",
         },
         "config": {
-            "api_key_env_var": "GOOGLE_PALM_API_KEY",
+            "api_key_env_var": "GOOGLE_PALM_CHROMA_API_KEY",
             "model_name": "models/embedding-gecko-001",
         },
     },
@@ -127,10 +127,10 @@ EMBEDDING_FUNCTION_CONFIGS: Dict[str, Dict[str, Any]] = {
             "api_key": "dummy_key",
             "model_name": "models/embedding-001",
             "task_type": "RETRIEVAL_DOCUMENT",
-            "api_key_env_var": "GOOGLE_API_KEY",
+            "api_key_env_var": "GOOGLE_CHROMA_API_KEY",
         },
         "config": {
-            "api_key_env_var": "GOOGLE_API_KEY",
+            "api_key_env_var": "GOOGLE_CHROMA_API_KEY",
             "model_name": "models/embedding-001",
             "task_type": "RETRIEVAL_DOCUMENT",
         },
@@ -164,10 +164,10 @@ EMBEDDING_FUNCTION_CONFIGS: Dict[str, Dict[str, Any]] = {
         "args": {
             "api_key": "dummy_key",
             "model_name": "jina-embeddings-v2-base-en",
-            "api_key_env_var": "JINA_API_KEY",
+            "api_key_env_var": "JINA_CHROMA_API_KEY",
         },
         "config": {
-            "api_key_env_var": "JINA_API_KEY",
+            "api_key_env_var": "JINA_CHROMA_API_KEY",
             "model_name": "jina-embeddings-v2-base-en",
         },
     },
@@ -175,10 +175,10 @@ EMBEDDING_FUNCTION_CONFIGS: Dict[str, Dict[str, Any]] = {
         "args": {
             "api_key": "dummy_key",
             "model_name": "voyage-2",
-            "api_key_env_var": "VOYAGEAI_API_KEY",
+            "api_key_env_var": "VOYAGEAI_CHROMA_API_KEY",
         },
         "config": {
-            "api_key_env_var": "VOYAGEAI_API_KEY",
+            "api_key_env_var": "VOYAGEAI_CHROMA_API_KEY",
             "model_name": "voyage-2",
         },
     },
@@ -208,10 +208,10 @@ EMBEDDING_FUNCTION_CONFIGS: Dict[str, Dict[str, Any]] = {
     "roboflow": {
         "args": {
             "api_key": "dummy_key",
-            "api_key_env_var": "ROBOFLOW_API_KEY",
+            "api_key_env_var": "ROBOFLOW_CHROMA_API_KEY",
         },
         "config": {
-            "api_key_env_var": "ROBOFLOW_API_KEY",
+            "api_key_env_var": "ROBOFLOW_CHROMA_API_KEY",
         },
     },
     "text2vec": {

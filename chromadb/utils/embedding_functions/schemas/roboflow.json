@@ -20,7 +20,7 @@
     "api_key_env_var": {
       "type": "string",
       "description": "Parameter api_key_env_var for the roboflow embedding function",
-      "default": "ROBOFLOW_API_KEY"
+      "default": "ROBOFLOW_CHROMA_API_KEY"
     }
   },
   "required": [

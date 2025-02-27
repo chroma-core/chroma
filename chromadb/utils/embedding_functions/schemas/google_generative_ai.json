@@ -25,7 +25,7 @@
     "api_key_env_var": {
       "type": "string",
       "description": "Environment variable name that contains your API key for the Google Generative AI API",
-      "default": "GOOGLE_API_KEY"
+      "default": "GOOGLE_CHROMA_API_KEY"
     }
   },
   "required": [

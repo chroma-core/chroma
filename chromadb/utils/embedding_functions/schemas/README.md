@@ -46,7 +46,7 @@ from chromadb.utils.embedding_functions.schemas import validate_config
 
 # Validate a configuration
 config = {
-    "api_key_env_var": "OPENAI_API_KEY",
+    "api_key_env_var": "OPENAI_CHROMA_API_KEY",
     "model_name": "text-embedding-ada-002"
 }
 validate_config(config, "openai")

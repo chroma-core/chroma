@@ -28,14 +28,14 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Embeddable]):
         self,
         api_key: Optional[str] = None,
         api_url: str = "https://infer.roboflow.com",
-        api_key_env_var: str = "ROBOFLOW_API_KEY",
+        api_key_env_var: str = "ROBOFLOW_CHROMA_API_KEY",
     ) -> None:
         """
         Create a RoboflowEmbeddingFunction.
 
         Args:
             api_key_env_var (str, optional): Environment variable name that contains your API key for the Roboflow API.
-                Defaults to "ROBOFLOW_API_KEY".
+                Defaults to "ROBOFLOW_CHROMA_API_KEY".
             api_url (str, optional): The URL of the Roboflow API.
                 Defaults to "https://infer.roboflow.com".
         """

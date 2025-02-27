@@ -14,7 +14,7 @@ class CohereEmbeddingFunction(EmbeddingFunction[Documents]):
         self,
         api_key: Optional[str] = None,
         model_name: str = "large",
-        api_key_env_var: str = "COHERE_API_KEY",
+        api_key_env_var: str = "COHERE_CHROMA_API_KEY",
     ):
         try:
             import cohere

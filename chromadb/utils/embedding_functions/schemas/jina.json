@@ -20,7 +20,7 @@
     "api_key_env_var": {
       "type": "string",
       "description": "Parameter api_key_env_var for the jina embedding function",
-      "default": "JINA_API_KEY"
+      "default": "JINA_CHROMA_API_KEY"
     }
   },
   "required": [

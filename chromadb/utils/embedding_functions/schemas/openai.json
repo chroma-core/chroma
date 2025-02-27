@@ -69,7 +69,7 @@
         "api_key_env_var": {
             "type": "string",
             "description": "Environment variable name that contains your API key for the OpenAI API",
-            "default": "OPENAI_API_KEY"
+            "default": "OPENAI_CHROMA_API_KEY"
         }
     },
     "required": [
