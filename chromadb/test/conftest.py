@@ -38,6 +38,7 @@ from chromadb.api.async_client import (
 )
 from chromadb.utils.async_to_sync import async_class_to_sync
 import logging
+import sys
 
 logger = logging.getLogger(__name__)
 
@@ -617,6 +618,7 @@ def rust_ephemeral_fixture() -> Generator[System, None, None]:
     yield system
     system.stop()
 
+
 def rust_persistent_fixture() -> Generator[System, None, None]:
     """Fixture generator for system using Rust bindings"""
     save_path = tempfile.TemporaryDirectory()
@@ -636,12 +638,20 @@ def rust_persistent_fixture() -> Generator[System, None, None]:
     system.stop()
 
 
-@pytest.fixture(params=[rust_ephemeral_fixture] if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ else [sqlite_fixture])
+@pytest.fixture(
+    params=[rust_ephemeral_fixture]
+    if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ
+    else [sqlite_fixture]
+)
 def sqlite(request: pytest.FixtureRequest) -> Generator[System, None, None]:
     yield from request.param()
 
 
-@pytest.fixture(params=[rust_persistent_fixture] if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ else [sqlite_persistent_fixture])
+@pytest.fixture(
+    params=[rust_persistent_fixture]
+    if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ
+    else [sqlite_persistent_fixture]
+)
 def sqlite_persistent(request: pytest.FixtureRequest) -> Generator[System, None, None]:
     yield from request.param()
 
@@ -669,7 +679,8 @@ def system_http_server_fixtures() -> List[Callable[[], Generator[System, None, N
     fixtures = [
         fixture
         for fixture in system_fixtures()
-        if fixture not in [
+        if fixture
+        not in [
             sqlite_fixture,
             sqlite_persistent_fixture,
             rust_ephemeral_fixture,
@@ -802,7 +813,9 @@ class ClientFactories:
             self._system.settings.chroma_api_impl
             == "chromadb.api.async_fastapi.AsyncFastAPI"
         ):
-            client = cast(ClientCreator, AsyncClientCreatorSync.from_system_async(self._system))
+            client = cast(
+                ClientCreator, AsyncClientCreatorSync.from_system_async(self._system)
+            )
             self._created_clients.append(client)
             return client
 
@@ -982,3 +995,47 @@ def log_tests(request: pytest.FixtureRequest) -> Generator[None, None, None]:
     yield
 
     logger.debug(f"Finished test: {test_name}")
+
+
+@pytest.fixture(scope="session")
+def embedding_function_dependencies() -> Generator[None, None, None]:
+    """
+    Fixture to install and uninstall dependencies required for embedding function tests.
+    This fixture has session scope to ensure dependencies are installed only once
+    for the entire test session and cleaned up afterward.
+    """
+    # List of packages to install
+    packages = [
+        "openai",
+        "cohere",
+        "sentence_transformers",
+        "google-generativeai",
+        "ollama",
+        "pillow",
+        "voyageai",
+        "open-clip-torch",
+        "text2vec",
+    ]
+
+    # Install packages
+    logger.info("Installing embedding function dependencies...")
+    for package in packages:
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+            logger.info(f"Installed {package}")
+        except subprocess.CalledProcessError as e:
+            logger.warning(f"Failed to install {package}: {e}")
+
+    # Yield control back to the tests
+    yield
+
+    # Uninstall packages after tests complete
+    logger.info("Uninstalling embedding function dependencies...")
+    for package in packages:
+        try:
+            subprocess.check_call(
+                [sys.executable, "-m", "pip", "uninstall", "-y", package]
+            )
+            logger.info(f"Uninstalled {package}")
+        except subprocess.CalledProcessError as e:
+            logger.warning(f"Failed to uninstall {package}: {e}")

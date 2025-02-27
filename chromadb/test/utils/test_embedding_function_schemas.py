@@ -39,20 +39,6 @@ def get_all_schema_names() -> List[str]:
     return [os.path.splitext(f)[0] for f in schema_files]
 
 
-def test_all_schemas_are_valid_json() -> None:
-    """Test that all schemas are valid JSON"""
-    schema_names = get_all_schema_names()
-    for schema_name in schema_names:
-        # This will raise an exception if the schema is not valid JSON
-        schema: Dict[str, Any] = load_schema(schema_name)
-        assert isinstance(schema, dict)
-        assert "$schema" in schema
-        assert "title" in schema
-        assert "description" in schema
-        assert "version" in schema
-        assert "properties" in schema
-
-
 # Mock for embedding functions to avoid actual API calls
 class MockEmbeddings:
     @staticmethod
@@ -248,191 +234,202 @@ SKIP_EMBEDDING_FUNCTIONS = [
 ]
 
 
-@pytest.mark.parametrize(
-    "ef_name",
-    [
-        name
-        for name in known_embedding_functions.keys()
-        if name not in SKIP_EMBEDDING_FUNCTIONS
-    ],
-)
-def test_embedding_function_config_roundtrip(
-    ef_name: str, monkeypatch: MonkeyPatch
-) -> None:
-    """
-    Test that embedding functions can be:
-    1. Created with arguments
-    2. Get their config
-    3. Be recreated from that config
-    4. Validate their config
-    """
-    if ef_name not in EMBEDDING_FUNCTION_CONFIGS:
-        pytest.skip(f"No test configuration for {ef_name}")
-
-    # Get the embedding function class
-    ef_class = known_embedding_functions[ef_name]
-
-    # Apply mocks if needed
-    test_config: Dict[str, Any] = EMBEDDING_FUNCTION_CONFIGS[ef_name]
-    if "mocks" in test_config:
-        for module_path, mock_obj in test_config["mocks"]:
-            if "." in module_path:
-                module_name, attr_name = module_path.rsplit(".", 1)
-                monkeypatch.setattr(f"{module_name}.{attr_name}", mock_obj)
-            else:
-                sys.modules[module_path] = mock_obj
-
-    # Mock the __call__ method to avoid actual API calls
-    monkeypatch.setattr(ef_class, "__call__", MockEmbeddings.mock_embeddings)
-
-    # 1. Create embedding function with arguments
-    ef_instance = ef_class(**test_config["args"])
-
-    # 2. Get config from the instance
-    config: Dict[str, Any] = ef_instance.get_config()
-
-    # Check that config contains expected values
-    for key, value in test_config["config"].items():
-        assert key in config, f"Key {key} not found in config for {ef_name}"
-        assert (
-            config[key] == value
-        ), f"Config value mismatch for {ef_name}.{key}: expected {value}, got {config[key]}"
-
-    # 3. Create a new instance from the config
-    new_ef_instance = ef_class.build_from_config(config)
-
-    # 4. Validate the config
-    new_ef_instance.validate_config(config)
-
-    # 5. Get config from the new instance and verify it matches
-    new_config: Dict[str, Any] = new_ef_instance.get_config()
-    for key, value in config.items():
-        assert key in new_config, f"Key {key} not found in new config for {ef_name}"
-        assert (
-            new_config[key] == value
-        ), f"New config value mismatch for {ef_name}.{key}: expected {value}, got {new_config[key]}"
-
-
-@pytest.mark.parametrize(
-    "ef_name",
-    [
-        name
-        for name in known_embedding_functions.keys()
-        if name not in SKIP_EMBEDDING_FUNCTIONS
-    ],
-)
-def test_embedding_function_invalid_config(
-    ef_name: str, monkeypatch: MonkeyPatch
-) -> None:
-    """Test that embedding functions reject invalid configurations"""
-    if ef_name not in EMBEDDING_FUNCTION_CONFIGS:
-        pytest.skip(f"No test configuration for {ef_name}")
-
-    # Get the embedding function class
-    ef_class = known_embedding_functions[ef_name]
-
-    # Apply mocks if needed
-    test_config: Dict[str, Any] = EMBEDDING_FUNCTION_CONFIGS[ef_name]
-    if "mocks" in test_config:
-        for module_path, mock_obj in test_config["mocks"]:
-            if "." in module_path:
-                module_name, attr_name = module_path.rsplit(".", 1)
-                monkeypatch.setattr(f"{module_name}.{attr_name}", mock_obj)
-            else:
-                sys.modules[module_path] = mock_obj
-
-    # Mock the __call__ method to avoid actual API calls
-    monkeypatch.setattr(ef_class, "__call__", MockEmbeddings.mock_embeddings)
-
-    # Create embedding function with arguments
-    ef_instance = ef_class(**test_config["args"])
-
-    # Test with invalid property
-    invalid_config: Dict[str, Any] = test_config["config"].copy()
-    invalid_config["invalid_property"] = "invalid_value"
-
-    # Some embedding functions might allow additional properties, so we can't always expect this to fail
-    try:
-        ef_instance.validate_config(invalid_config)
-    except (ValidationError, ValueError, AssertionError):
-        # If it raises an exception, that's expected for many embedding functions
-        pass
-
-
-def test_schema_required_fields() -> None:
-    """Test that schemas enforce required fields"""
+def test_all_schemas_are_valid_json() -> None:
+    """Test that all schemas are valid JSON"""
     schema_names = get_all_schema_names()
     for schema_name in schema_names:
-        schema = load_schema(schema_name)
-        if "required" in schema:
-            required_fields = schema["required"]
-            for field in required_fields:
-                # Create a config with all required fields
-                config: Dict[str, Any] = {}
-                for req_field in required_fields:
+        # This will raise an exception if the schema is not valid JSON
+        schema: Dict[str, Any] = load_schema(schema_name)
+        assert isinstance(schema, dict)
+        assert "$schema" in schema
+        assert "title" in schema
+        assert "description" in schema
+        assert "version" in schema
+        assert "properties" in schema
+
+
+@pytest.fixture(scope="module")
+def embedding_function_names() -> List[str]:
+    """Get all embedding function names to test"""
+    return [
+        name
+        for name in known_embedding_functions.keys()
+        if name not in SKIP_EMBEDDING_FUNCTIONS
+    ]
+
+
+@pytest.mark.usefixtures("embedding_function_dependencies")
+class TestEmbeddingFunctions:
+    """Combined test class for all embedding function tests"""
+
+    @pytest.mark.parametrize("ef_name", embedding_function_names())
+    def test_embedding_function_config_roundtrip(
+        self, ef_name: str, monkeypatch: MonkeyPatch
+    ) -> None:
+        """
+        Test that embedding functions can be:
+        1. Created with arguments
+        2. Get their config
+        3. Be recreated from that config
+        4. Validate their config
+        """
+        if ef_name not in EMBEDDING_FUNCTION_CONFIGS:
+            pytest.skip(f"No test configuration for {ef_name}")
+
+        # Get the embedding function class
+        ef_class = known_embedding_functions[ef_name]
+
+        # Apply mocks if needed
+        test_config: Dict[str, Any] = EMBEDDING_FUNCTION_CONFIGS[ef_name]
+        if "mocks" in test_config:
+            for module_path, mock_obj in test_config["mocks"]:
+                if "." in module_path:
+                    module_name, attr_name = module_path.rsplit(".", 1)
+                    monkeypatch.setattr(f"{module_name}.{attr_name}", mock_obj)
+                else:
+                    sys.modules[module_path] = mock_obj
+
+        # Mock the __call__ method to avoid actual API calls
+        monkeypatch.setattr(ef_class, "__call__", MockEmbeddings.mock_embeddings)
+
+        # 1. Create embedding function with arguments
+        ef_instance = ef_class(**test_config["args"])
+
+        # 2. Get config from the instance
+        config: Dict[str, Any] = ef_instance.get_config()
+
+        # Check that config contains expected values
+        for key, value in test_config["config"].items():
+            assert key in config, f"Key {key} not found in config for {ef_name}"
+            assert (
+                config[key] == value
+            ), f"Config value mismatch for {ef_name}.{key}: expected {value}, got {config[key]}"
+
+        # 3. Create a new instance from the config
+        new_ef_instance = ef_class.build_from_config(config)
+
+        # 4. Validate the config
+        new_ef_instance.validate_config(config)
+
+        # 5. Get config from the new instance and verify it matches
+        new_config: Dict[str, Any] = new_ef_instance.get_config()
+        for key, value in config.items():
+            assert key in new_config, f"Key {key} not found in new config for {ef_name}"
+            assert (
+                new_config[key] == value
+            ), f"New config value mismatch for {ef_name}.{key}: expected {value}, got {new_config[key]}"
+
+    @pytest.mark.parametrize("ef_name", embedding_function_names())
+    def test_embedding_function_invalid_config(
+        self, ef_name: str, monkeypatch: MonkeyPatch
+    ) -> None:
+        """Test that embedding functions reject invalid configurations"""
+        if ef_name not in EMBEDDING_FUNCTION_CONFIGS:
+            pytest.skip(f"No test configuration for {ef_name}")
+
+        # Get the embedding function class
+        ef_class = known_embedding_functions[ef_name]
+
+        # Apply mocks if needed
+        test_config: Dict[str, Any] = EMBEDDING_FUNCTION_CONFIGS[ef_name]
+        if "mocks" in test_config:
+            for module_path, mock_obj in test_config["mocks"]:
+                if "." in module_path:
+                    module_name, attr_name = module_path.rsplit(".", 1)
+                    monkeypatch.setattr(f"{module_name}.{attr_name}", mock_obj)
+                else:
+                    sys.modules[module_path] = mock_obj
+
+        # Mock the __call__ method to avoid actual API calls
+        monkeypatch.setattr(ef_class, "__call__", MockEmbeddings.mock_embeddings)
+
+        # Create embedding function with arguments
+        ef_instance = ef_class(**test_config["args"])
+
+        # Test with invalid property
+        invalid_config: Dict[str, Any] = test_config["config"].copy()
+        invalid_config["invalid_property"] = "invalid_value"
+
+        # Some embedding functions might allow additional properties, so we can't always expect this to fail
+        try:
+            ef_instance.validate_config(invalid_config)
+        except (ValidationError, ValueError, AssertionError):
+            # If it raises an exception, that's expected for many embedding functions
+            pass
+
+    def test_schema_required_fields(self) -> None:
+        """Test that schemas enforce required fields"""
+        schema_names = get_all_schema_names()
+        for schema_name in schema_names:
+            schema = load_schema(schema_name)
+            if "required" in schema:
+                required_fields = schema["required"]
+                for field in required_fields:
+                    # Create a config with all required fields
+                    config: Dict[str, Any] = {}
+                    for req_field in required_fields:
+                        # Add a dummy value of the correct type
+                        field_schema = schema["properties"][req_field]
+                        if isinstance(field_schema["type"], list):
+                            field_type = field_schema["type"][0]
+                        else:
+                            field_type = field_schema["type"]
+
+                        if field_type == "string":
+                            config[req_field] = "dummy"
+                        elif field_type == "integer":
+                            config[req_field] = 0
+                        elif field_type == "number":
+                            config[req_field] = 0.0
+                        elif field_type == "boolean":
+                            config[req_field] = False
+                        elif field_type == "object":
+                            config[req_field] = {}
+                        elif field_type == "array":
+                            config[req_field] = []
+
+                    # Remove the current field to test that it's required
+                    test_config = config.copy()
+                    del test_config[field]
+
+                    # Validation should fail
+                    with pytest.raises(ValidationError):
+                        validate_config(test_config, schema_name)
+
+    def test_schema_additional_properties(self) -> None:
+        """Test that schemas reject additional properties"""
+        schema_names = get_all_schema_names()
+        for schema_name in schema_names:
+            schema = load_schema(schema_name)
+            # Create a minimal valid config
+            config: Dict[str, Any] = {}
+            if "required" in schema:
+                for field in schema["required"]:
                     # Add a dummy value of the correct type
-                    field_schema = schema["properties"][req_field]
+                    field_schema = schema["properties"][field]
                     if isinstance(field_schema["type"], list):
                         field_type = field_schema["type"][0]
                     else:
                         field_type = field_schema["type"]
 
                     if field_type == "string":
-                        config[req_field] = "dummy"
+                        config[field] = "dummy"
                     elif field_type == "integer":
-                        config[req_field] = 0
+                        config[field] = 0
                     elif field_type == "number":
-                        config[req_field] = 0.0
+                        config[field] = 0.0
                     elif field_type == "boolean":
-                        config[req_field] = False
+                        config[field] = False
                     elif field_type == "object":
-                        config[req_field] = {}
+                        config[field] = {}
                     elif field_type == "array":
-                        config[req_field] = []
+                        config[field] = []
 
-                # Remove the current field to test that it's required
-                test_config = config.copy()
-                del test_config[field]
+            # Add an additional property
+            test_config = config.copy()
+            test_config["additional_property"] = "value"
 
-                # Validation should fail
+            # Validation should fail if additionalProperties is false
+            if schema.get("additionalProperties", True) is False:
                 with pytest.raises(ValidationError):
                     validate_config(test_config, schema_name)
-
-
-def test_schema_additional_properties() -> None:
-    """Test that schemas reject additional properties"""
-    schema_names = get_all_schema_names()
-    for schema_name in schema_names:
-        schema = load_schema(schema_name)
-        # Create a minimal valid config
-        config: Dict[str, Any] = {}
-        if "required" in schema:
-            for field in schema["required"]:
-                # Add a dummy value of the correct type
-                field_schema = schema["properties"][field]
-                if isinstance(field_schema["type"], list):
-                    field_type = field_schema["type"][0]
-                else:
-                    field_type = field_schema["type"]
-
-                if field_type == "string":
-                    config[field] = "dummy"
-                elif field_type == "integer":
-                    config[field] = 0
-                elif field_type == "number":
-                    config[field] = 0.0
-                elif field_type == "boolean":
-                    config[field] = False
-                elif field_type == "object":
-                    config[field] = {}
-                elif field_type == "array":
-                    config[field] = []
-
-        # Add an additional property
-        test_config = config.copy()
-        test_config["additional_property"] = "value"
-
-        # Validation should fail if additionalProperties is false
-        if schema.get("additionalProperties", True) is False:
-            with pytest.raises(ValidationError):
-                validate_config(test_config, schema_name)
