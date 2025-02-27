@@ -1015,6 +1015,7 @@ def embedding_function_dependencies() -> Generator[None, None, None]:
         "voyageai",
         "open-clip-torch",
         "text2vec",
+        "InstructorEmbedding",
     ]
 
     # Install packages
