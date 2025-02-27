@@ -1,12 +1,20 @@
-import logging
-
-from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
-
-logger = logging.getLogger(__name__)
+from chromadb.utils.embedding_functions.embedding_function import (
+    EmbeddingFunction,
+    Space,
+)
+from chromadb.api.types import Embeddings, Documents
+from typing import List, Dict, Any, Optional
+import os
+import numpy as np
 
 
 class CohereEmbeddingFunction(EmbeddingFunction[Documents]):
-    def __init__(self, api_key: str, model_name: str = "large"):
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        model_name: str = "large",
+        api_key_env_var: str = "CHROMA_COHERE_API_KEY",
+    ):
         try:
             import cohere
         except ImportError:
@@ -14,14 +22,86 @@ class CohereEmbeddingFunction(EmbeddingFunction[Documents]):
                 "The cohere python package is not installed. Please install it with `pip install cohere`"
             )
 
-        self._client = cohere.Client(api_key)
-        self._model_name = model_name
+        self.api_key_env_var = api_key_env_var
+        self.api_key = api_key or os.getenv(api_key_env_var)
+        if not self.api_key:
+            raise ValueError(f"The {api_key_env_var} environment variable is not set.")
+
+        self.model_name = model_name
+
+        self.client = cohere.Client(self.api_key)
 
     def __call__(self, input: Documents) -> Embeddings:
-        # Call Cohere Embedding API for each document.
+        """
+        Generate embeddings for the given documents.
+
+        Args:
+            input: Documents or images to generate embeddings for.
+
+        Returns:
+            Embeddings for the documents.
+        """
+        # Cohere only works with text documents
+        if not all(isinstance(item, str) for item in input):
+            raise ValueError("Cohere only supports text documents, not images")
+
         return [
-            embeddings
-            for embeddings in self._client.embed(
-                texts=input, model=self._model_name, input_type="search_document"
+            np.array(embeddings, dtype=np.float32)
+            for embeddings in self.client.embed(
+                texts=[str(item) for item in input],
+                model=self.model_name,
+                input_type="search_document",
             ).embeddings
         ]
+
+    @staticmethod
+    def name() -> str:
+        return "cohere"
+
+    def default_space(self) -> Space:
+        if self.model_name == "embed-multilingual-v2.0":
+            return Space.INNER_PRODUCT
+        return Space.COSINE
+
+    def supported_spaces(self) -> List[Space]:
+        if self.model_name == "embed-english-v3.0":
+            return [Space.COSINE, Space.L2, Space.INNER_PRODUCT]
+        elif self.model_name == "embed-english-light-v3.0":
+            return [Space.COSINE, Space.INNER_PRODUCT, Space.L2]
+        elif self.model_name == "embed-english-v2.0":
+            return [Space.COSINE]
+        elif self.model_name == "embed-english-light-v2.0":
+            return [Space.COSINE]
+        elif self.model_name == "embed-multilingual-v3.0":
+            return [Space.COSINE, Space.L2, Space.INNER_PRODUCT]
+        elif self.model_name == "embed-multilingual-light-v3.0":
+            return [Space.COSINE, Space.L2, Space.INNER_PRODUCT]
+        elif self.model_name == "embed-multilingual-v2.0":
+            return [Space.INNER_PRODUCT]
+        else:
+            return [Space.COSINE, Space.L2, Space.INNER_PRODUCT]
+
+    @staticmethod
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
+        api_key_env_var = config.get("api_key_env_var")
+        model_name = config.get("model_name")
+        if api_key_env_var is None or model_name is None:
+            assert False, "This code should not be reached"
+        return CohereEmbeddingFunction(
+            api_key_env_var=api_key_env_var, model_name=model_name
+        )
+
+    def get_config(self) -> Dict[str, Any]:
+        return {"api_key_env_var": self.api_key_env_var, "model_name": self.model_name}
+
+    def validate_config_update(
+        self, old_config: Dict[str, Any], new_config: Dict[str, Any]
+    ) -> None:
+        if "model_name" in new_config:
+            raise ValueError(
+                "The model name cannot be changed after the embedding function has been initialized."
+            )
+
+    def validate_config(self, config: Dict[str, Any]) -> None:
+        # TODO validate with json schema
+        pass
