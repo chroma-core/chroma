@@ -16,7 +16,7 @@ pub const LOGO: &str = "
 ";
 
 pub const DEFAULT_PERSISTENT_PATH: &str = "./chroma";
-pub const SQLITE_FILENAME: &str = "chroma.sqlite";
+pub const SQLITE_FILENAME: &str = "chroma.sqlite3";
 
 #[derive(Parser, Debug)]
 pub struct LocalFrontendCommandArgs {
@@ -41,6 +41,18 @@ pub fn get_frontend_config(
     };
 
     config.persist_path = persistent_path;
+
+    if let Some(ref mut sqlite_config) = config.frontend.sqlitedb {
+        sqlite_config.url = Some(format!(
+            "{}/{}",
+            config
+                .persist_path
+                .as_ref()
+                .unwrap_or(&DEFAULT_PERSISTENT_PATH.to_string()),
+            SQLITE_FILENAME
+        ));
+    }
+    
     config.port = port.unwrap_or(config.port);
 
     Ok(config)

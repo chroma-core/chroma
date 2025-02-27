@@ -1839,9 +1839,16 @@ version = "0.1.0"
 dependencies = [
  "chroma-config",
  "chroma-frontend",
+ "chroma-log",
+ "chroma-segment",
+ "chroma-sqlite",
+ "chroma-sysdb",
+ "chroma-system",
+ "chroma-types",
  "clap",
  "colored",
  "dialoguer",
+ "sqlx",
  "tokio",
  "webbrowser",
 ]

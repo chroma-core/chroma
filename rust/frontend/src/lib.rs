@@ -14,7 +14,6 @@ mod types;
 
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
-use chroma_sqlite::db::SqliteDb;
 use chroma_system::System;
 use chroma_tracing::{
     init_global_filter_layer, init_otel_layer, init_panic_tracing_hook, init_stdout_layer,
@@ -105,8 +104,6 @@ pub async fn frontend_service_entrypoint_with_config(
     let frontend = Frontend::try_from_config(&(fe_cfg, system), &registry)
         .await
         .expect("Error creating Frontend Config");
-    
-    let x = registry.get::<SqliteDb>();
     
     fn rule_to_rule(rule: &ScorecardRule) -> Result<Rule, ScorecardRuleError> {
         let patterns = rule
