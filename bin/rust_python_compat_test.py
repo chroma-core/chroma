@@ -12,6 +12,7 @@ import urllib
 
 from chromadb import RustClient
 from chromadb.config import Settings
+from chromadb.segment.impl.manager.local import LocalSegmentManager
 from chromadb.test.property.test_cross_version_persist import api_import_for_version
 from chromadb.test.utils.cross_version import install_version, switch_to_version
 from packaging import version
@@ -61,14 +62,22 @@ def persist_with_old_version(ver: str, path: str):
 
     print(f"Persisting data with old client to {path}")
     coll = api.create_collection(collection_name)
-    for start in tqdm.tqdm(range(0, persist_size, batch_size)):
+    for start in tqdm.tqdm(range(0, persist_size // 2, batch_size)):
         id_vals = range(start, start + batch_size)
         documents = [f"DOC-{i}" for i in id_vals]
         embeddings = [[i, i] for i in id_vals]
         ids = [str(i) for i in id_vals]
         metadatas = [{"int": i, "float": i / 2.0, "str": f"<{i}>"} for i in id_vals]
         coll.add(ids=ids, documents=documents, embeddings=embeddings, metadatas=metadatas)
-    assert coll.count() == persist_size
+    assert coll.count() == persist_size // 2
+    system.instance(LocalSegmentManager).stop()
+    for start in tqdm.tqdm(range(persist_size // 2, persist_size, batch_size)):
+        id_vals = range(start, start + batch_size)
+        documents = [f"DOC-{i}" for i in id_vals]
+        embeddings = [[i, i] for i in id_vals]
+        ids = [str(i) for i in id_vals]
+        metadatas = [{"int": i, "float": i / 2.0, "str": f"<{i}>"} for i in id_vals]
+        coll.add(ids=ids, documents=documents, embeddings=embeddings, metadatas=metadatas)
 
 def verify_collection_content(path: str):
     print("Loading collection from rust client")
