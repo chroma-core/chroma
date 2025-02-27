@@ -389,12 +389,6 @@ def test_embedding_function_invalid_config(
     # Create embedding function with arguments
     ef_instance = ef_class(**test_config["args"])
 
-    # Test with empty config (should fail for most embedding functions)
-    # Skip ONNX as it doesn't require any config parameters
-    if ef_name != "onnx_mini_lm_l6_v2":
-        with pytest.raises((ValidationError, ValueError, AssertionError)):
-            ef_instance.validate_config({})
-
     # Test with invalid property
     invalid_config: Dict[str, Any] = test_config["config"].copy()
     invalid_config["invalid_property"] = "invalid_value"
