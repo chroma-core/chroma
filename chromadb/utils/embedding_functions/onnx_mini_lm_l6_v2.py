@@ -260,9 +260,18 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
         Returns:
             Embeddings for the documents.
         """
+
         # Only download the model when it is actually used
         self._download_model_if_not_exists()
-        return cast(Embeddings, self._forward(input))
+
+        # Generate embeddings
+        embeddings = self._forward(input)
+
+        # Convert to list of numpy arrays for the expected Embeddings type
+        return cast(
+            Embeddings,
+            [np.array(embedding, dtype=np.float32) for embedding in embeddings],
+        )
 
     def _download_model_if_not_exists(self) -> None:
         """
