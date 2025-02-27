@@ -1,7 +1,7 @@
 import pytest
 import os
 import sys
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from jsonschema import ValidationError
 import numpy as np
 from unittest.mock import MagicMock
@@ -63,12 +63,12 @@ class MockEmbeddings:
 
 # Mock INSTRUCTOR for InstructorEmbeddingFunction
 class MockINSTRUCTOR:
-    def __init__(self: Any, model_name: str, device: str | None = None) -> None:
+    def __init__(self: Any, model_name: str, device: str = "cpu") -> None:
         self.model_name = model_name
         self.device = device
 
     def encode(
-        self: Any, texts: List[str], instruction: str | None = None
+        self: Any, texts: List[str], instruction: Optional[str] = None
     ) -> np.ndarray[Any, np.dtype[np.float32]]:
         return np.array([[0.1, 0.2, 0.3] for _ in range(len(texts))])
 
