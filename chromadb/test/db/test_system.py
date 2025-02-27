@@ -23,6 +23,7 @@ from pytest import FixtureRequest
 import uuid
 from chromadb.api.configuration import CollectionConfigurationInternal
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -251,11 +252,16 @@ def test_create_get_delete_collections(sysdb: SysDB) -> None:
     # They are deleted by the clean up thread in sysdb.
     assert len(by_collection_result) >= 0
 
+    # Wait for cleanup thread to run
+    time.sleep(5)
+
+    # Check that all segments are deleted
+    by_collection_result = sysdb.get_segments(collection=c1.id)
+    assert len(by_collection_result) == 0
 
     # Duplicate delete throws an exception
     with pytest.raises(NotFoundError):
         sysdb.delete_collection(c1.id)
-
 
     # Create a new collection with two segments that have same id.
     # Creation should fail.
