@@ -8246,6 +8246,7 @@ version = "0.1.0"
 dependencies = [
  "arrow",
  "async-trait",
+ "backtrace",
  "chroma-benchmark",
  "chroma-blockstore",
  "chroma-cache",
@@ -8269,6 +8270,7 @@ dependencies = [
  "flatbuffers",
  "futures",
  "indicatif",
+ "libc",
  "ndarray",
  "num_cpus",
  "opentelemetry",

@@ -137,8 +137,12 @@ impl From<::object_store::Error> for RenameError {
 impl Storage {
     pub async fn get(&self, key: &str) -> Result<Arc<Vec<u8>>, GetError> {
         match self {
-            Storage::ObjectStore(object_store) => object_store.get(key).await,
+            Storage::ObjectStore(object_store) => {
+                println!("(Sanket-temp) Getting from object store key {}", key);
+                object_store.get(key).await
+            }
             Storage::S3(s3) => {
+                println!("(Sanket-temp) Getting from S3 key {}", key);
                 let res = s3.get(key).await;
                 match res {
                     Ok(res) => Ok(res),
@@ -149,13 +153,25 @@ impl Storage {
                 }
             }
             Storage::Local(local) => {
+                println!("(Sanket-temp) Getting from local key {}", key);
                 let res = local.get(key).await;
                 match res {
-                    Ok(res) => Ok(res),
+                    Ok(res) => {
+                        println!(
+                            "(Sanket-temp) Got from local key {} size_bytes {}",
+                            key,
+                            res.len()
+                        );
+                        Ok(res)
+                    }
                     Err(e) => Err(GetError::LocalError(e)),
                 }
             }
             Storage::AdmissionControlledS3(admission_controlled_storage) => {
+                println!(
+                    "(Sanket-temp) Getting from admissioncontrolleds3 key {}",
+                    key
+                );
                 let res = admission_controlled_storage.get(key.to_string()).await;
                 match res {
                     Ok(res) => Ok(res),
@@ -172,8 +188,15 @@ impl Storage {
 
     pub async fn get_parallel(&self, key: &str) -> Result<Arc<Vec<u8>>, GetError> {
         match self {
-            Storage::ObjectStore(object_store) => object_store.get_parallel(key).await,
+            Storage::ObjectStore(object_store) => {
+                println!(
+                    "(Sanket-temp) Getting from object store parallel key {}",
+                    key
+                );
+                object_store.get_parallel(key).await
+            }
             Storage::S3(s3) => {
+                println!("(Sanket-temp) Getting from S3 parallel key {}", key);
                 let res = s3.get_parallel(key).await;
                 match res {
                     Ok(res) => Ok(res),
@@ -184,6 +207,7 @@ impl Storage {
                 }
             }
             Storage::Local(local) => {
+                println!("(Sanket-temp) Getting from local parallel key {}", key);
                 let res = local.get(key).await;
                 match res {
                     Ok(res) => Ok(res),
@@ -191,6 +215,10 @@ impl Storage {
                 }
             }
             Storage::AdmissionControlledS3(admission_controlled_storage) => {
+                println!(
+                    "(Sanket-temp) Getting from admissioncontrolled parallel key {}",
+                    key
+                );
                 let res = admission_controlled_storage
                     .get_parallel(key.to_string())
                     .await;

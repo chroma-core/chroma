@@ -1,5 +1,5 @@
 use core::num;
-use std::{path::PathBuf, sync::Arc};
+use std::{io::stderr, path::PathBuf, result, sync::Arc};
 
 use chroma_benchmark::{benchmark::tokio_multi_thread, datasets::gist::Gist1MDataset};
 use chroma_blockstore::{arrow::provider::ArrowBlockfileProvider, provider::BlockfileProvider};
@@ -31,21 +31,34 @@ use worker::execution::{
     orchestration::{knn_filter::KnnFilterOutput, spann_knn::SpannKnnOrchestrator},
 };
 
-fn get_flat_records(runtime: &tokio::runtime::Runtime, num_records: usize) -> (usize, Vec<f32>) {
+fn get_flat_records(
+    runtime: &tokio::runtime::Runtime,
+    num_write_records: usize,
+    num_query_records: usize,
+) -> (usize, Vec<f32>, Vec<f32>) {
     runtime.block_on(async {
         let gist_dataset = Gist1MDataset::init()
             .await
             .expect("Failed to initialize Gist dataset");
         let mut records_stream = gist_dataset
-            .create_records_stream(num_records)
+            .create_records_stream(num_write_records + num_query_records)
             .await
             .expect("Failed to create records stream");
-        let mut records = Vec::new();
+        let mut write_records = Vec::with_capacity(num_write_records * Gist1MDataset::DIMENSION);
+        let mut query_records = Vec::with_capacity(num_query_records * Gist1MDataset::DIMENSION);
+        let mut num_records = 0;
         while let Some(record) = records_stream.next().await {
+            if num_records >= num_write_records {
+                let unerred_record = record.expect("Failed to get record");
+                query_records.extend(unerred_record.embedding.unwrap());
+                num_records += 1;
+                continue;
+            }
             let unerred_record = record.expect("Failed to get record");
-            records.extend(unerred_record.embedding.unwrap());
+            write_records.extend(unerred_record.embedding.unwrap());
+            num_records += 1;
         }
-        (Gist1MDataset::DIMENSION, records)
+        (Gist1MDataset::DIMENSION, write_records, query_records)
     })
 }
 
@@ -129,35 +142,15 @@ fn add_to_index_and_get_flusher(
     runtime: &tokio::runtime::Runtime,
     records: &Array2<f32>,
     dim: usize,
+    blockfile_provider: BlockfileProvider,
+    hnsw_provider: HnswIndexProvider,
+    collection_id: CollectionUuid,
+    distance_function: chroma_distance::DistanceFunction,
 ) -> SpannIndexIds {
-    let tmp_dir = tempfile::tempdir().unwrap();
-    let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-    println!("(Sanket-temp) tmp_dir: {:?}", tmp_dir.path());
-    let block_cache = new_cache_for_test();
-    let sparse_index_cache = new_cache_for_test();
-    let max_block_size_bytes = 8388608; // 8 MB.
-    let arrow_blockfile_provider = ArrowBlockfileProvider::new(
-        storage.clone(),
-        max_block_size_bytes,
-        block_cache,
-        sparse_index_cache,
-    );
-    let blockfile_provider = BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
     let m = 32;
     let ef_construction = 100;
     let ef_search = 100;
-    let collection_id = CollectionUuid::new();
-    let distance_function = chroma_distance::DistanceFunction::Euclidean;
     let writer = runtime.block_on(async {
-        let hnsw_cache = new_non_persistent_cache_for_test();
-        let (_, rx) = tokio::sync::mpsc::unbounded_channel();
-        let hnsw_provider = HnswIndexProvider::new(
-            storage.clone(),
-            PathBuf::from(tmp_dir.path().to_str().unwrap()),
-            hnsw_cache,
-            16,
-            rx,
-        );
         SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
@@ -251,10 +244,11 @@ fn add_to_index_and_get_flusher_sequential(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn query_parallel(
     runtime: &tokio::runtime::Runtime,
-    query: &Array2<f32>,
-    flusher_paths: &SpannIndexIds,
+    queries: &Array2<f32>,
+    flusher_paths: SpannIndexIds,
     collection_id: CollectionUuid,
     distance_function: chroma_distance::DistanceFunction,
     tmp_dir: TempDir,
@@ -263,55 +257,105 @@ fn query_parallel(
     hnsw_provider: HnswIndexProvider,
     dim: usize,
 ) {
-    // Get all the heads.
-    let probe_nbr = 128;
-    let k = 10;
-    let rng_epsilon = 10.0;
-    let rng_factor = 1.0;
-    let distance_function = chroma_distance::DistanceFunction::Euclidean;
-    runtime.block_on(async {
-        let mut avg_recall = 0.0;
-        for row in query_emb.rows() {
-            let (head_ids, _, _) = rng_query(
-                row.as_slice().expect("Expected to get slice"),
-                spann_reader.hnsw_index.clone(),
-                probe_nbr,
-                rng_epsilon,
-                rng_factor,
-                distance_function.clone(),
-                false,
-            )
-            .await
-            .expect("Error running rng query");
-            let mut merge_list = Vec::new();
-            for head_id in head_ids {
-                let pl = spann_reader
-                    .fetch_posting_list(head_id as u32)
-                    .await
-                    .expect("Error fetching posting list");
-                let bf_operator_input = SpannBfPlInput {
-                    posting_list: pl,
-                    k,
-                    query: row.as_slice().expect("Expected to get slice").to_vec(),
-                    distance_function: distance_function.clone(),
-                    filter: chroma_types::SignedRoaringBitmap::Exclude(RoaringBitmap::new()),
-                };
-                let bf_operator_operator = SpannBfPlOperator::new();
-                let bf_output = bf_operator_operator
-                    .run(&bf_operator_input)
-                    .await
-                    .expect("Error running operator");
-                merge_list.push(bf_output.records);
+    runtime.block_on(async move {
+        let probe_nbr = 128;
+        let k = 10;
+        let rng_epsilon = 10.0;
+        let rng_factor = 1.0;
+        let num_queries = queries.nrows();
+        let hnsw_provider_clone = hnsw_provider.clone();
+        let blockfile_provider_clone = blockfile_provider.clone();
+        let distance_function_clone = distance_function.clone();
+        let reader = SpannIndexReader::from_id(
+            Some(&flusher_paths.hnsw_id),
+            &hnsw_provider_clone,
+            &collection_id,
+            distance_function_clone.clone(),
+            dim,
+            Some(&flusher_paths.pl_id),
+            Some(&flusher_paths.versions_map_id),
+            &blockfile_provider_clone,
+        )
+        .await
+        .expect("Error creating spann index reader");
+        for batch in 0..(num_queries / 10) {
+            println!("Running batch {} of queries", batch);
+            let start = batch * 10;
+            let end = std::cmp::min((batch + 1) * 10, num_queries);
+            let handles = (start..end)
+                .map(|idx| {
+                    println!("Running query {} of {}", idx, num_queries);
+                    let query = queries.row(idx).to_owned().to_vec();
+                    let distance_function_clone = distance_function.clone();
+                    let reader_clone = reader.clone();
+                    tokio::spawn(async move {
+                        // Get the head.
+                        let (head_ids, _, _) = rng_query(
+                            &query,
+                            reader_clone.hnsw_index.clone(),
+                            probe_nbr,
+                            rng_epsilon,
+                            rng_factor,
+                            distance_function_clone.clone(),
+                            false,
+                        )
+                        .await
+                        .expect("Error running rng query");
+                        println!("head_ids: {:?}", head_ids);
+                        let mut merge_list = Vec::new();
+                        let mut bf_list = Vec::new();
+                        for head_id in head_ids {
+                            let query_clone = query.clone();
+                            let distance_function_clone_clone = distance_function_clone.clone();
+                            let reader_clone_clone = reader_clone.clone();
+                            let bf_task = tokio::spawn(async move {
+                                println!("Fetching pl for head_id: {}", head_id);
+                                let pl = reader_clone_clone
+                                    .fetch_posting_list(head_id as u32)
+                                    .await
+                                    .expect("Error fetching posting list");
+                                println!("Running bf operator for head_id: {}", head_id);
+                                let bf_operator_input = SpannBfPlInput {
+                                    posting_list: pl,
+                                    k,
+                                    query: query_clone,
+                                    distance_function: distance_function_clone_clone,
+                                    filter: chroma_types::SignedRoaringBitmap::Exclude(
+                                        RoaringBitmap::new(),
+                                    ),
+                                };
+                                let bf_operator_operator = SpannBfPlOperator::new();
+                                bf_operator_operator
+                                    .run(&bf_operator_input)
+                                    .await
+                                    .expect("Error running operator")
+                            });
+                            bf_list.push(bf_task);
+                        }
+                        println!("Awaiting all bf futures for query {}", idx);
+                        let bf_results = futures::future::join_all(bf_list).await;
+                        for bf_result in bf_results {
+                            let bf_output = bf_result.expect("Error running bf operator");
+                            merge_list.push(bf_output.records);
+                        }
+                        // Now merge.
+                        let knn_input = SpannKnnMergeInput {
+                            records: merge_list,
+                        };
+                        let knn_operator = SpannKnnMergeOperator { k: k as u32 };
+                        knn_operator
+                            .run(&knn_input)
+                            .await
+                            .expect("Error running knn merge operator")
+                    })
+                })
+                .collect::<Vec<_>>();
+            println!("Awaiting all queries in batch {} of {}", batch, num_queries);
+            // Wait for all the handles to finish.
+            let results = futures::future::join_all(handles).await;
+            for result in results {
+                result.expect("Error running query");
             }
-            // Now merge.
-            let knn_input = SpannKnnMergeInput {
-                records: merge_list,
-            };
-            let knn_operator = SpannKnnMergeOperator { k: k as u32 };
-            let knn_output = knn_operator
-                .run(&knn_input)
-                .await
-                .expect("Error running knn merge operator");
         }
     });
 }
@@ -492,7 +536,7 @@ fn calculate_recall<'a>(
     query_emb: &'a Array2<f32>,
     base_emb: &'a Array2<f32>,
 ) {
-    let probe_nbr = 128;
+    let probe_nbr = 64;
     let k = 10;
     let rng_epsilon = 10.0;
     let rng_factor = 1.0;
@@ -573,6 +617,240 @@ fn calculate_recall<'a>(
     });
 }
 
+mod signal_handler {
+    use backtrace::Backtrace;
+    use std::io::{self, Write};
+    use std::panic;
+    use std::process;
+    use std::sync::Once;
+
+    static INIT_HANDLER: Once = Once::new();
+
+    pub fn install() {
+        INIT_HANDLER.call_once(|| {
+            // Set up custom panic handler
+            panic::set_hook(Box::new(|panic_info| {
+                let backtrace = Backtrace::new();
+                let thread = std::thread::current();
+                let thread_name = thread.name().unwrap_or("<unnamed>");
+
+                let stderr = io::stderr();
+                let mut stderr = stderr.lock();
+                let _ = writeln!(stderr, "Thread '{thread_name}' panicked: {panic_info}");
+                let _ = writeln!(stderr, "Backtrace:\n{:?}", backtrace);
+            }));
+
+            // Set up signal handlers
+            #[cfg(unix)]
+            unsafe {
+                use libc::{c_int, c_void, sigaction, siginfo_t, SA_SIGINFO};
+                use std::mem::{self, MaybeUninit};
+
+                extern "C" fn handle_signal(
+                    sig: c_int,
+                    info: *mut siginfo_t,
+                    _context: *mut c_void,
+                ) {
+                    let stderr = io::stderr();
+                    let mut stderr = stderr.lock();
+
+                    let signal_name = match sig {
+                        libc::SIGSEGV => "SIGSEGV",
+                        libc::SIGBUS => "SIGBUS",
+                        libc::SIGILL => "SIGILL",
+                        libc::SIGABRT => "SIGABRT",
+                        libc::SIGFPE => "SIGFPE",
+                        _ => "UNKNOWN",
+                    };
+
+                    let fault_addr = if !info.is_null() {
+                        unsafe { (*info).si_addr() as usize }
+                    } else {
+                        0
+                    };
+
+                    let thread = std::thread::current();
+                    let thread_name = thread.name().unwrap_or("<unnamed>");
+
+                    let _ = writeln!(stderr, "\n==== FATAL SIGNAL RECEIVED ====");
+                    let _ = writeln!(
+                        stderr,
+                        "Thread '{}' received signal: {} ({})",
+                        thread_name, signal_name, sig
+                    );
+                    let _ = writeln!(stderr, "Fault address: 0x{:x}", fault_addr);
+
+                    // Get and print backtrace
+                    let backtrace = Backtrace::new();
+                    let _ = writeln!(stderr, "Backtrace:\n{:?}", backtrace);
+
+                    // Ensure output is flushed
+                    let _ = stderr.flush();
+
+                    // Re-raise the signal with default handler to generate core dump
+                    unsafe {
+                        libc::signal(sig, libc::SIG_DFL);
+                        libc::raise(sig);
+                    }
+
+                    // Just in case we get here
+                    process::exit(128 + sig as i32);
+                }
+
+                // Install handler for various signals
+                for &signal in &[
+                    libc::SIGSEGV,
+                    libc::SIGBUS,
+                    libc::SIGILL,
+                    libc::SIGABRT,
+                    libc::SIGFPE,
+                ] {
+                    let mut sa: sigaction = mem::zeroed();
+                    sa.sa_sigaction = handle_signal as usize;
+                    sa.sa_flags = SA_SIGINFO;
+
+                    // Create empty signal mask
+                    let _ = libc::sigemptyset(&mut sa.sa_mask as *mut _);
+
+                    // Set the signal handler
+                    let mut old_sa = MaybeUninit::<sigaction>::uninit();
+                    if libc::sigaction(signal, &sa, old_sa.as_mut_ptr()) != 0 {
+                        let stderr = io::stderr();
+                        let mut stderr = stderr.lock();
+                        let _ = writeln!(stderr, "Failed to set signal handler for {}", signal);
+                    }
+                }
+            }
+        });
+    }
+}
+
+// Call this early in your benchmark setup
+pub fn setup() {
+    signal_handler::install();
+}
+
+fn bench_qps(c: &mut Criterion) {
+    setup();
+    let runtime = tokio_multi_thread();
+
+    let num_write_records = std::env::var("NUM_WRITE_RECORDS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(10000);
+    let num_query_records = std::env::var("NUM_QUERY_RECORDS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1000);
+
+    let (dim, flat_records, query_records) =
+        get_flat_records(&runtime, num_write_records, num_query_records);
+
+    println!(
+        "Benchmarking {} records with dimension {} for compaction time",
+        flat_records.len() / dim,
+        dim
+    );
+
+    let base_set = Array2::from_shape_vec((flat_records.len() / dim, dim), flat_records)
+        .expect("Expected to convert to ndarray");
+    let query_set = Array2::from_shape_vec((query_records.len() / dim, dim), query_records)
+        .expect("Expected to convert to ndarray");
+
+    println!("Base set shape: {:?}", base_set.shape());
+    println!("Query set shape: {:?}", query_set.shape());
+
+    c.bench_function("spann_qps", |b| {
+        b.iter(|| {
+            let start_time = std::time::Instant::now();
+            println!("Adding {:?} records to spann segment", base_set.nrows());
+            let tmp_dir = tempfile::tempdir().unwrap();
+            let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+            println!("(Sanket-temp) tmp_dir: {:?}", tmp_dir.path());
+            let block_cache = new_cache_for_test();
+            let sparse_index_cache = new_cache_for_test();
+            let max_block_size_bytes = 8388608; // 8 MB.
+            let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+                storage.clone(),
+                max_block_size_bytes,
+                block_cache,
+                sparse_index_cache,
+            );
+            let blockfile_provider =
+                BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+            let collection_id = CollectionUuid::new();
+            let distance_function = chroma_distance::DistanceFunction::Euclidean;
+            let hnsw_provider = runtime.block_on(async {
+                let hnsw_cache = new_non_persistent_cache_for_test();
+                let (_, rx) = tokio::sync::mpsc::unbounded_channel();
+                HnswIndexProvider::new(
+                    storage.clone(),
+                    PathBuf::from(tmp_dir.path().to_str().unwrap()),
+                    hnsw_cache,
+                    16,
+                    rx,
+                )
+            });
+            let flusher_paths = add_to_index_and_get_flusher(
+                &runtime,
+                &base_set,
+                dim,
+                blockfile_provider.clone(),
+                hnsw_provider.clone(),
+                collection_id,
+                distance_function.clone(),
+            );
+            println!(
+                "Added {:?} records to spann segment in {:?} ms",
+                base_set.nrows(),
+                start_time.elapsed().as_millis()
+            );
+            // Clear cache for next run.
+            let block_cache2 = new_cache_for_test();
+            let sparse_index_cache2 = new_cache_for_test();
+            let arrow_blockfile_provider2 = ArrowBlockfileProvider::new(
+                storage.clone(),
+                max_block_size_bytes,
+                block_cache2,
+                sparse_index_cache2,
+            );
+            let blockfile_provider2 =
+                BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider2);
+            let hnsw_provider2 = runtime.block_on(async {
+                let hnsw_cache = new_non_persistent_cache_for_test();
+                let (_, rx) = tokio::sync::mpsc::unbounded_channel();
+                HnswIndexProvider::new(
+                    storage.clone(),
+                    PathBuf::from(tmp_dir.path().to_str().unwrap()),
+                    hnsw_cache,
+                    16,
+                    rx,
+                )
+            });
+            println!("Running query on {} records", query_set.nrows());
+            let start_time = std::time::Instant::now();
+            // Now query.
+            query_parallel(
+                &runtime,
+                &query_set,
+                flusher_paths,
+                collection_id,
+                distance_function,
+                tmp_dir,
+                storage,
+                blockfile_provider2,
+                hnsw_provider2,
+                dim,
+            );
+            println!(
+                "Queried {} records in {:?} ms",
+                query_set.nrows(),
+                start_time.elapsed().as_millis()
+            );
+        })
+    });
+}
+
 fn bench_compaction(c: &mut Criterion) {
     let runtime = tokio_multi_thread();
 
@@ -581,7 +859,7 @@ fn bench_compaction(c: &mut Criterion) {
         .and_then(|s| s.parse().ok())
         .unwrap_or(10000);
 
-    let (dim, flat_records) = get_flat_records(&runtime, num_records);
+    let (dim, flat_records, _) = get_flat_records(&runtime, num_records, 0);
 
     println!(
         "Benchmarking {} records with dimension {} for compaction time",
@@ -598,7 +876,40 @@ fn bench_compaction(c: &mut Criterion) {
         b.iter(|| {
             let start_time = std::time::Instant::now();
             println!("Adding {:?} records to spann segment", base_set.nrows());
-            let _ = add_to_index_and_get_flusher(&runtime, &base_set, dim);
+            let tmp_dir = tempfile::tempdir().unwrap();
+            let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+            println!("(Sanket-temp) tmp_dir: {:?}", tmp_dir.path());
+            let block_cache = new_cache_for_test();
+            let sparse_index_cache = new_cache_for_test();
+            let max_block_size_bytes = 8388608; // 8 MB.
+            let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+                storage.clone(),
+                max_block_size_bytes,
+                block_cache,
+                sparse_index_cache,
+            );
+            let blockfile_provider =
+                BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+            let collection_id = CollectionUuid::new();
+            let distance_function = chroma_distance::DistanceFunction::Euclidean;
+            let hnsw_cache = new_non_persistent_cache_for_test();
+            let (_, rx) = tokio::sync::mpsc::unbounded_channel();
+            let hnsw_provider = HnswIndexProvider::new(
+                storage.clone(),
+                PathBuf::from(tmp_dir.path().to_str().unwrap()),
+                hnsw_cache,
+                16,
+                rx,
+            );
+            let _ = add_to_index_and_get_flusher(
+                &runtime,
+                &base_set,
+                dim,
+                blockfile_provider.clone(),
+                hnsw_provider.clone(),
+                collection_id,
+                distance_function.clone(),
+            );
             println!(
                 "Added {:?} records to spann segment in {:?} ms",
                 base_set.nrows(),
@@ -621,7 +932,7 @@ fn bench_compaction_n_runs(c: &mut Criterion) {
         .and_then(|s| s.parse().ok())
         .unwrap_or(2);
 
-    let (dim, flat_records) = get_flat_records(&runtime, num_records);
+    let (dim, flat_records, _) = get_flat_records(&runtime, num_records, 0);
 
     println!(
         "Benchmarking {} records with dimension {} for compaction time for {} runs",
@@ -709,8 +1020,8 @@ fn bench_compaction_n_runs(c: &mut Criterion) {
 
 criterion_group! {
     name = benches;
-    config = Criterion::default().sample_size(10);
-    targets = bench_compaction, bench_compaction_n_runs
+    config = Criterion::default().sample_size(20);
+    targets = bench_compaction, bench_compaction_n_runs, bench_qps
 }
 
 criterion_main!(benches);

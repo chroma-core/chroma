@@ -80,6 +80,8 @@ rand = { workspace = true }
 rand_xorshift = { workspace = true }
 rayon = "1.10.0"
 tempfile = { workspace = true }
+backtrace = "0.3"
+libc = "0.2"
 
 chroma-benchmark = { workspace = true }
 

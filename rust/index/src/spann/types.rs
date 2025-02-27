@@ -1439,7 +1439,10 @@ impl<'me> SpannIndexReader<'me> {
                     .await
                 {
                     Ok(index) => Ok(index),
-                    Err(_) => Err(SpannIndexReaderError::HnswIndexConstructionError),
+                    Err(e) => {
+                        println!("Error opening hnsw index: {:?}", e);
+                        Err(SpannIndexReaderError::HnswIndexConstructionError)
+                    }
                 }
             }
         }
@@ -1538,6 +1541,7 @@ impl<'me> SpannIndexReader<'me> {
             .await
             .map_err(|_| SpannIndexReaderError::PostingListReadError)?
             .ok_or(SpannIndexReaderError::PostingListReadError)?;
+        println!("Fetched posting list for head {}", head_id);
 
         let mut posting_lists = Vec::with_capacity(res.doc_offset_ids.len());
         for (index, doc_offset_id) in res.doc_offset_ids.iter().enumerate() {
@@ -1554,6 +1558,7 @@ impl<'me> SpannIndexReader<'me> {
                     .to_vec(),
             });
         }
+        println!("Cleaned up posting list for head {}", head_id);
         Ok(posting_lists)
     }
 }

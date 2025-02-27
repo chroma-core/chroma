@@ -94,7 +94,9 @@ pub struct Block {
 impl Block {
     /// Create a concrete block from an id and the underlying record batch of data
     pub fn from_record_batch(id: Uuid, data: RecordBatch) -> Self {
+        println!("(Sanket-temp) Creating block {} from record batch", id);
         let data = data.into();
+        println!("(Sanket-temp) Block {} created with rows", id);
         Self { id, data }
     }
 
@@ -151,6 +153,10 @@ impl Block {
         F: FnMut((&'me str, K)) -> Ordering,
     {
         let mut size = self.len();
+        println!(
+            "(Sanket-temp) Block {} binary search size: {}",
+            self.id, size
+        );
         if size == 0 {
             return Err(0);
         }
@@ -334,6 +340,10 @@ impl Block {
         key: K,
     ) -> Option<V> {
         match self.binary_search_by::<K, _>(|(p, k)| {
+            println!(
+                "(Sanket-temp) Block {} binary search prefix: {}, key: {}",
+                self.id, p, k
+            );
             p.cmp(prefix).then_with(|| {
                 k.partial_cmp(&key)
                     // The key type does not have a total order because of floating point values.
@@ -528,7 +538,8 @@ impl Block {
 
     /// Load a block from bytes in Arrow IPC format with the given id
     pub fn from_bytes(bytes: &[u8], id: Uuid) -> Result<Self, BlockLoadError> {
-        Self::from_bytes_internal(bytes, id, false)
+        println!("Loading block {} from bytes", id);
+        Self::from_bytes_internal(bytes, id, true)
     }
 
     /// Load a block from bytes in Arrow IPC format with the given id and validate the layout
