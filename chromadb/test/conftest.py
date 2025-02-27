@@ -1040,3 +1040,32 @@ def embedding_function_dependencies() -> Generator[None, None, None]:
             logger.info(f"Uninstalled {package}")
         except subprocess.CalledProcessError as e:
             logger.warning(f"Failed to uninstall {package}: {e}")
+
+
+@pytest.fixture(scope="session")
+def openai_dependency() -> Generator[None, None, None]:
+    """
+    Fixture to install and uninstall only the OpenAI dependency.
+    This is a lighter-weight alternative to embedding_function_dependencies
+    when only OpenAI functionality is being tested.
+    """
+    # Install OpenAI package
+    logger.info("Installing OpenAI dependency...")
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "openai"])
+        logger.info("Installed openai")
+    except subprocess.CalledProcessError as e:
+        logger.warning(f"Failed to install openai: {e}")
+
+    # Yield control back to the tests
+    yield
+
+    # Uninstall OpenAI package after tests complete
+    logger.info("Uninstalling OpenAI dependency...")
+    try:
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "uninstall", "-y", "openai"]
+        )
+        logger.info("Uninstalled openai")
+    except subprocess.CalledProcessError as e:
+        logger.warning(f"Failed to uninstall openai: {e}")
