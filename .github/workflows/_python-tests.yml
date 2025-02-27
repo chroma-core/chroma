@@ -49,6 +49,7 @@ jobs:
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
+          CHROMA_API_IMPL: "chromadb.api.segment.SegmentAPI"
 
   test-rust-bindings:
     timeout-minutes: 90
@@ -130,6 +131,7 @@ jobs:
       env:
         ENV_FILE: ${{ matrix.env-file }}
         PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
+        CHROMA_API_IMPL: "chromadb.api.segment.SegmentAPI"
 
   test-rust-single-node-integration:
     strategy:
@@ -229,7 +231,7 @@ jobs:
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
           CHROMA_RUST_FRONTEND_TEST_ONLY: "1"
-          CHROMA_SERVER_HOST: "localhost:8000"
+          CHROMA_SERVER_HOST: "localhost:3000"
       - name: Compute artifact name
         if: always()
         id: compute-artifact-name
@@ -271,6 +273,7 @@ jobs:
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
+          CHROMA_API_IMPL: "chromadb.api.segment.SegmentAPI"
       - name: Compute artifact name
         if: always()
         id: compute-artifact-name
