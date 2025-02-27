@@ -25,7 +25,7 @@ def mock_embedding_functions() -> Generator[None, Any, None]:
     """Mock the embedding function classes for testing."""
 
     # Create a mock embedding function that returns dummy embeddings
-    def mock_call(input: Documents) -> Embeddings:
+    def mock_call(self: Any, input: Documents) -> Embeddings:
         return [np.array([0.1, 0.2, 0.3, 0.4, 0.5], dtype=np.float32) for _ in input]
 
     # Mock the embedding function classes and their imports
