@@ -59,7 +59,6 @@ impl Bindings {
         hnsw_cache_size: usize,
         persist_path: Option<String>,
     ) -> ChromaPyResult<Self> {
-        // TODO: runtime config
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let _guard = runtime.enter();
         let system = System::new();
@@ -115,7 +114,6 @@ impl Bindings {
     }
 
     /// Returns the current eopch time in ns
-    /// TODO(hammadb): This should proxy to ServerAPI
     #[allow(dead_code)]
     fn heartbeat(&self) -> ChromaPyResult<u128> {
         let duration_since_epoch = std::time::SystemTime::now()
@@ -128,11 +126,6 @@ impl Bindings {
     fn get_max_batch_size(&self) -> u32 {
         self.frontend.clone().get_max_batch_size()
     }
-
-    // TODO(hammadb): Determine our pattern for optional arguments in python
-    // options include using Option or passing defaults from python
-    // or using pyargs annotations such as
-    // #[pyargs(limit = "None", offset = "None")]
 
     ////////////////////////////// Admin API //////////////////////////////
 

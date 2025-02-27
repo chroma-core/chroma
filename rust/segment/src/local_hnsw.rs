@@ -8,6 +8,7 @@ use chroma_types::{
     operator::RecordDistance, Chunk, HnswParametersFromSegmentError, LogRecord, Operation, Segment,
     SegmentUuid, SingleNodeHnswParameters,
 };
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use sea_query::{Expr, OnConflict, Query, SqliteQueryBuilder};
 use sea_query_binder::SqlxBinder;
 use serde::{Deserialize, Serialize};
@@ -520,6 +521,8 @@ impl LocalHnswSegmentWriter {
             return Ok(next_label);
         }
         let mut max_seq_id = u64::MIN;
+        // In order to insert into hnsw index in parallel, we need to collect all the embeddings
+        let mut hsnw_batch = Vec::with_capacity(log_chunk.len());
         for (log, _) in log_chunk.iter() {
             guard.num_elements_since_last_persist += 1;
             max_seq_id = max_seq_id.max(log.log_offset as u64);
@@ -528,7 +531,7 @@ impl LocalHnswSegmentWriter {
                     // only update if the id is not already present
                     if !guard.id_map.id_to_label.contains_key(&log.record.id) {
                         match &log.record.embedding {
-                            Some(embedding) => {
+                            Some(_embedding) => {
                                 guard
                                     .id_map
                                     .id_to_label
@@ -537,17 +540,7 @@ impl LocalHnswSegmentWriter {
                                     .id_map
                                     .label_to_id
                                     .insert(next_label, log.record.id.clone());
-                                let index_len = guard.index.len_with_deleted();
-                                let index_capacity = guard.index.capacity();
-                                if index_len + 1 > index_capacity {
-                                    guard.index.resize(index_capacity * 2).map_err(|_| {
-                                        LocalHnswSegmentWriterError::HnswIndexResizeError
-                                    })?;
-                                }
-                                guard
-                                    .index
-                                    .add(next_label as usize, embedding.as_slice())
-                                    .map_err(|_| LocalHnswSegmentWriterError::HnwsIndexAddError)?;
+                                hsnw_batch.push((next_label as usize, &log.record));
                                 next_label += 1;
                             }
                             None => {
@@ -558,7 +551,7 @@ impl LocalHnswSegmentWriter {
                 }
                 Operation::Update => {
                     if let Some(label) = guard.id_map.id_to_label.get(&log.record.id).cloned() {
-                        if let Some(embedding) = &log.record.embedding {
+                        if let Some(_embedding) = &log.record.embedding {
                             let index_len = guard.index.len_with_deleted();
                             let index_capacity = guard.index.capacity();
                             if index_len + 1 > index_capacity {
@@ -566,10 +559,7 @@ impl LocalHnswSegmentWriter {
                                     LocalHnswSegmentWriterError::HnswIndexResizeError
                                 })?;
                             }
-                            guard
-                                .index
-                                .add(label as usize, embedding.as_slice())
-                                .map_err(|_| LocalHnswSegmentWriterError::HnwsIndexAddError)?;
+                            hsnw_batch.push((label as usize, &log.record));
                         }
                     }
                 }
@@ -577,10 +567,7 @@ impl LocalHnswSegmentWriter {
                     if let Some(label) = guard.id_map.id_to_label.get(&log.record.id).cloned() {
                         guard.id_map.id_to_label.remove(&log.record.id);
                         guard.id_map.label_to_id.remove(&label);
-                        guard
-                            .index
-                            .delete(label as usize)
-                            .map_err(|_| LocalHnswSegmentWriterError::HnswIndexDeleteError)?;
+                        hsnw_batch.push((label as usize, &log.record));
                     }
                 }
                 Operation::Upsert => {
@@ -593,7 +580,7 @@ impl LocalHnswSegmentWriter {
                         }
                     };
                     match &log.record.embedding {
-                        Some(embedding) => {
+                        Some(_embedding) => {
                             guard
                                 .id_map
                                 .id_to_label
@@ -602,17 +589,7 @@ impl LocalHnswSegmentWriter {
                                 .id_map
                                 .label_to_id
                                 .insert(label, log.record.id.clone());
-                            let index_len = guard.index.len_with_deleted();
-                            let index_capacity = guard.index.capacity();
-                            if index_len + 1 > index_capacity {
-                                guard.index.resize(index_capacity * 2).map_err(|_| {
-                                    LocalHnswSegmentWriterError::HnswIndexResizeError
-                                })?;
-                            }
-                            guard
-                                .index
-                                .add(label as usize, embedding.as_slice())
-                                .map_err(|_| LocalHnswSegmentWriterError::HnwsIndexAddError)?;
+                            hsnw_batch.push((label as usize, &log.record));
                             if update_label {
                                 next_label += 1;
                             }
@@ -624,6 +601,38 @@ impl LocalHnswSegmentWriter {
                 }
             }
         }
+
+        // Add to hnsw index in parallel using rayon.
+        // Resize the index if needed
+        let index_len = guard.index.len_with_deleted();
+        let index_capacity = guard.index.capacity();
+        if index_len + hsnw_batch.len() >= index_capacity {
+            guard
+                .index
+                .resize(index_capacity * 2)
+                .map_err(|_| LocalHnswSegmentWriterError::HnswIndexResizeError)?;
+        }
+        let index_for_pool = &guard.index;
+        (0..hsnw_batch.len()).into_par_iter().for_each(|i| {
+            let (label, log_record) = hsnw_batch[i];
+            match log_record.operation {
+                Operation::Add | Operation::Upsert | Operation::Update => {
+                    let embedding = log_record
+                        .embedding
+                        .as_ref()
+                        .expect("Add, update or upsert should have an embedding at this point");
+                    let _ = index_for_pool
+                        .add(label, embedding)
+                        .map_err(|_| LocalHnswSegmentWriterError::HnwsIndexAddError);
+                }
+                Operation::Delete => {
+                    let _ = index_for_pool
+                        .delete(label)
+                        .map_err(|_| LocalHnswSegmentWriterError::HnswIndexDeleteError);
+                }
+            }
+        });
+
         guard.id_map.total_elements_added = next_label - 1;
         if guard.num_elements_since_last_persist >= guard.sync_threshold as u64 {
             guard = persist(guard).await?;

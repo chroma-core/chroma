@@ -19,6 +19,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
 serde_json = { workspace = true }
+rayon = { workspace = true }
 
 chroma-blockstore = { workspace = true }
 chroma-cache = { workspace = true }
