@@ -68,7 +68,7 @@ fastrace = "0.7"
 fastrace-opentelemetry = "0.8"
 
 [dev-dependencies]
-random-port = "0.1.1"
+random-port = { workspace = true }
 serial_test = { workspace = true }
 criterion = { workspace = true }
 indicatif = { workspace = true }
