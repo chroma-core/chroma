@@ -15,14 +15,15 @@ spec:
     spec:
       containers:
         - name: rust-frontend-service
+          command: ["chroma", "run", "$(CONFIG_PATH)"]
           image: "{{ .Values.rustFrontendService.image.repository }}:{{ .Values.rustFrontendService.image.tag }}"
           imagePullPolicy: IfNotPresent
           readinessProbe:
             httpGet:
-              port: 3000
+              port: 8000
               path: /api/v2/healthcheck
           ports:
-            - containerPort: 3000
+            - containerPort: 8000
           {{ if .Values.rustFrontendService.resources }}
           resources:
             limits:
@@ -32,10 +33,16 @@ spec:
               cpu: {{ .Values.rustFrontendService.resources.requests.cpu }}
               memory: {{ .Values.rustFrontendService.resources.requests.memory }}
           {{ end }}
-{{ if .Values.frontendService.otherEnvConfig }}
           env:
-{{ .Values.frontendService.otherEnvConfig | nindent 12 }}
-{{ end }}
+            - name: CONFIG_PATH
+              value: "/sample_configs/distributed.yaml"
+            {{ if .Values.frontendService.otherEnvConfig }}
+              {{ .Values.frontendService.otherEnvConfig | nindent 12 }}
+            {{ end }}
+            {{ if .Values.rustFrontendService.otherEnvConfig }}
+              {{ .Values.rustFrontendService.otherEnvConfig | nindent 12 }}
+            {{ end }}
+
       {{if .Values.rustFrontendService.tolerations}}
       tolerations:
         {{ toYaml .Values.rustFrontendService.tolerations | nindent 8 }}
@@ -55,8 +62,8 @@ metadata:
 spec:
   ports:
     - name: server-port
-      port: 3000
-      targetPort: 3000
+      port: 8000
+      targetPort: 8000
   selector:
     app: rust-frontend-service
   type: ClusterIP

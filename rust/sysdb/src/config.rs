@@ -65,11 +65,22 @@ pub struct SqliteSysDbConfig {
     pub log_tenant: String,
 }
 
+impl Default for SqliteSysDbConfig {
+    fn default() -> Self {
+        SqliteSysDbConfig {
+            log_topic_namespace: "default".to_string(),
+            log_tenant: "default".to_string(),
+        }
+    }
+}
+
 //////////////////////// SYSDB CONFIG ////////////////////////
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
 pub enum SysDbConfig {
+    #[serde(alias = "grpc")]
     Grpc(GrpcSysDbConfig),
+    #[serde(alias = "sqlite")]
     Sqlite(SqliteSysDbConfig),
 }
 

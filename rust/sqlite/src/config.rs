@@ -13,20 +13,40 @@ use tokio::fs::create_dir_all;
 #[cfg(feature = "pyo3")]
 use pyo3::{pyclass, pymethods};
 
-#[derive(Serialize, Deserialize, Clone)]
+fn default_hash_type() -> MigrationHash {
+    MigrationHash::MD5
+}
+
+fn default_migration_mode() -> MigrationMode {
+    MigrationMode::Apply
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct SqliteDBConfig {
+    #[serde(default = "default_hash_type")]
     pub hash_type: MigrationHash,
+    #[serde(default = "default_migration_mode")]
     pub migration_mode: MigrationMode,
     // The SQLite database URL
     // If unspecified, then the database is in memory only
     pub url: Option<String>,
 }
 
+impl Default for SqliteDBConfig {
+    fn default() -> Self {
+        SqliteDBConfig {
+            hash_type: default_hash_type(),
+            migration_mode: default_migration_mode(),
+            url: None,
+        }
+    }
+}
+
 /// Migration mode for the database
 /// - Apply: Apply the migrations
 /// - Validate: Validate the applied migrations and ensure none are unappliued
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 #[cfg_attr(feature = "pyo3", pyclass(eq, eq_int))]
 pub enum MigrationMode {
     Apply,

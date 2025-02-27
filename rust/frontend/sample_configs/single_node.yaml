@@ -1,0 +1,4 @@
+persist_path: "./chroma"
+open_telemetry:
+  service_name: "rust-frontend-service"
+  endpoint: "http://otel-collector:4317"

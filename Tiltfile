@@ -50,8 +50,7 @@ docker_build(
   'local:rust-frontend-service',
   '.',
   only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
-  dockerfile='./rust/frontend/Dockerfile',
-  target='frontend_service'
+  dockerfile='./rust/cli/Dockerfile',
 )
 
 
@@ -76,7 +75,9 @@ k8s_yaml(
     'k8s/distributed-chroma',
     namespace='chroma',
     values=[
-      'k8s/distributed-chroma/values.yaml'
+      'k8s/distributed-chroma/values.yaml',
+      # Values for local development, and for CI/CD testing.
+      'k8s/distributed-chroma/values.dev.yaml'
     ]
   )
 )
@@ -144,7 +145,7 @@ k8s_resource('logservice-migration-logservice-migration', resource_deps=['postgr
 k8s_resource('logservice', resource_deps=['sysdb-migration-sysdb-migration'], labels=["chroma"], port_forwards='50052:50051')
 k8s_resource('sysdb', resource_deps=['sysdb-migration-sysdb-migration'], labels=["chroma"], port_forwards='50051:50051')
 k8s_resource('frontend-service', resource_deps=['sysdb', 'logservice'],labels=["chroma"], port_forwards='8000:8000')
-k8s_resource('rust-frontend-service', resource_deps=['sysdb', 'logservice'], labels=["chroma"], port_forwards='3000:3000')
+k8s_resource('rust-frontend-service', resource_deps=['sysdb', 'logservice'], labels=["chroma"], port_forwards='3000:8000')
 k8s_resource('query-service', resource_deps=['sysdb'], labels=["chroma"], port_forwards='50053:50051')
 k8s_resource('compaction-service', resource_deps=['sysdb'], labels=["chroma"])
 

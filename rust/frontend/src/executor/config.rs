@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 /// - `request_timeout_ms` - The timeout for the request
 /// - `assignment` - The assignment policy to use for routing requests
 /// - `memberlist_provider` - The memberlist provider to use for getting the list of nodes
-#[derive(Deserialize, Clone, Serialize)]
+#[derive(Deserialize, Clone, Serialize, Debug)]
 pub struct DistributedExecutorConfig {
     pub connections_per_node: usize,
     pub replication_factor: usize,
@@ -28,12 +28,14 @@ pub struct DistributedExecutorConfig {
     pub memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig,
 }
 
-#[derive(Deserialize, Clone, Serialize)]
+#[derive(Deserialize, Clone, Serialize, Debug)]
 pub struct LocalExecutorConfig {}
 
-#[derive(Deserialize, Clone, Serialize)]
+#[derive(Deserialize, Clone, Serialize, Debug)]
 pub enum ExecutorConfig {
+    #[serde(alias = "distributed")]
     Distributed(DistributedExecutorConfig),
+    #[serde(alias = "local")]
     Local(LocalExecutorConfig),
 }
 
@@ -69,7 +71,7 @@ impl Configurable<(ExecutorConfig, System)> for Executor {
 /// - `min_delay_ms` - The minimum delay in milliseconds
 /// - `max_delay_ms` - The maximum delay in milliseconds
 /// - `max_attempts` - The maximum number of attempts
-#[derive(Deserialize, Clone, Serialize)]
+#[derive(Deserialize, Clone, Serialize, Debug)]
 pub struct RetryConfig {
     pub factor: f32,
     pub min_delay_ms: u64,

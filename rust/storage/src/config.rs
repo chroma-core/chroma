@@ -16,6 +16,7 @@ pub enum StorageConfig {
     #[serde(alias = "local")]
     Local(LocalStorageConfig),
     #[serde(alias = "admissioncontrolleds3")]
+    #[serde(alias = "admission_controlled_s3")]
     AdmissionControlledS3(AdmissionControlledS3StorageConfig),
 }
 
@@ -165,6 +166,7 @@ impl Default for CountBasedPolicyConfig {
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
 pub enum RateLimitingConfig {
+    #[serde(alias = "count_based_policy")]
     CountBasedPolicy(CountBasedPolicyConfig),
 }
 

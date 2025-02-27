@@ -75,7 +75,6 @@ pub async fn frontend_service_entrypoint_with_config(
     } else {
         eprintln!("OpenTelemetry is not enabled because it is missing from the config.");
     }
-
     let system = System::new();
     let registry = Registry::new();
 

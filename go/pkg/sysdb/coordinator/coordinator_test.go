@@ -362,6 +362,18 @@ func (suite *APIsTestSuite) TestCreateCollectionAndSegments() {
 	collections, err := suite.coordinator.GetCollections(ctx, newCollection.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
 	suite.Empty(collections)
+
+	// Create a collection on a database that does not exist.
+	_, _, err = suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
+		ID:           types.NewUniqueID(),
+		Name:         "test_collection_and_segments",
+		TenantID:     suite.tenantName,
+		DatabaseName: "non_existent_database",
+	})
+	suite.Error(err)
+	// Check the error code is ErrDatabaseNotFound
+	suite.Equal(common.ErrDatabaseNotFound, err)
+	suite.Assertions.Contains(err.Error(), "database not found")
 }
 
 // TestCreateGetDeleteCollections tests the create, get and delete collection APIs.

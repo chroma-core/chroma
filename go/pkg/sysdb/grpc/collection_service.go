@@ -111,6 +111,9 @@ func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.Create
 		if err == common.ErrCollectionUniqueConstraintViolation {
 			return res, grpcutils.BuildAlreadyExistsGrpcError(err.Error())
 		}
+		if err == common.ErrDatabaseNotFound {
+			return res, grpcutils.BuildNotFoundGrpcError(err.Error())
+		}
 		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	res.Collection = convertCollectionToProto(collection)
