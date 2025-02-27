@@ -7,6 +7,7 @@ from typing import List, Dict, Any, cast, Optional
 import os
 import numpy as np
 import numpy.typing as npt
+from chromadb.utils.embedding_functions.schemas import validate_config
 
 
 class GooglePalmEmbeddingFunction(EmbeddingFunction[Documents]):
@@ -99,8 +100,16 @@ class GooglePalmEmbeddingFunction(EmbeddingFunction[Documents]):
             )
 
     def validate_config(self, config: Dict[str, Any]) -> None:
-        # TODO: Validate with JSON schema
-        pass
+        """
+        Validate the configuration using the JSON schema.
+
+        Args:
+            config: Configuration to validate
+
+        Raises:
+            ValidationError: If the configuration does not match the schema
+        """
+        validate_config(config, "google_palm")
 
 
 class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
@@ -216,8 +225,16 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
             )
 
     def validate_config(self, config: Dict[str, Any]) -> None:
-        # TODO: Validate with JSON schema
-        pass
+        """
+        Validate the configuration using the JSON schema.
+
+        Args:
+            config: Configuration to validate
+
+        Raises:
+            ValidationError: If the configuration does not match the schema
+        """
+        validate_config(config, "google_generative_ai")
 
 
 class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
@@ -337,5 +354,13 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
             )
 
     def validate_config(self, config: Dict[str, Any]) -> None:
-        # TODO: Validate with JSON schema
-        pass
+        """
+        Validate the configuration using the JSON schema.
+
+        Args:
+            config: Configuration to validate
+
+        Raises:
+            ValidationError: If the configuration does not match the schema
+        """
+        validate_config(config, "google_vertex")

@@ -2,6 +2,7 @@ from chromadb.utils.embedding_functions.embedding_function import (
     EmbeddingFunction,
     Space,
 )
+from chromadb.utils.embedding_functions.schemas import validate_config
 from chromadb.api.types import Embeddings, Documents
 from typing import List, Dict, Any, Union, Optional
 import os
@@ -120,5 +121,13 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
             )
 
     def validate_config(self, config: Dict[str, Any]) -> None:
-        # TODO: Validate with JSON schema
-        pass
+        """
+        Validate the configuration using the JSON schema.
+
+        Args:
+            config: Configuration to validate
+
+        Raises:
+            ValidationError: If the configuration does not match the schema
+        """
+        validate_config(config, "jina")

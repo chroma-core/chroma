@@ -5,6 +5,7 @@ graphlib_backport==1.0.3; python_version < '3.9'
 grpcio>=1.58.0
 httpx>=0.27.0
 importlib-resources
+jsonschema>=4.19.0
 kubernetes>=28.1.0
 mmh3>=4.0.1
 numpy>=1.22.5
