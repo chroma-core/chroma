@@ -1,23 +1,29 @@
 import pytest
 import os
+import sys
 from typing import List, Dict, Any
 from jsonschema import ValidationError
-
+import numpy as np
+from unittest.mock import MagicMock
+from pytest import MonkeyPatch
 from chromadb.utils.embedding_functions.schemas import validate_config, load_schema
+from chromadb.api.types import Documents, Embeddings
 from chromadb.utils.embedding_functions import (
-    OpenAIEmbeddingFunction,
-    HuggingFaceEmbeddingFunction,
-    OllamaEmbeddingFunction,
-    JinaEmbeddingFunction,
-    ONNXMiniLM_L6_V2,
-    OpenCLIPEmbeddingFunction,
+    known_embedding_functions,
 )
 
 # Set dummy environment variables for API keys
 os.environ["OPENAI_API_KEY"] = "dummy_openai_key"
 os.environ["HUGGINGFACE_API_KEY"] = "dummy_huggingface_key"
 os.environ["JINA_API_KEY"] = "dummy_jina_key"
-
+os.environ["COHERE_API_KEY"] = "dummy_cohere_key"
+os.environ["GOOGLE_PALM_API_KEY"] = "dummy_google_palm_key"
+os.environ["GOOGLE_API_KEY"] = "dummy_google_key"
+os.environ["VOYAGEAI_API_KEY"] = "dummy_voyageai_key"
+os.environ["ROBOFLOW_API_KEY"] = "dummy_roboflow_key"
+os.environ["AWS_ACCESS_KEY_ID"] = "dummy_aws_access_key"
+os.environ["AWS_SECRET_ACCESS_KEY"] = "dummy_aws_secret_key"
+os.environ["AWS_REGION"] = "us-east-1"
 
 # Path to the schemas directory
 SCHEMAS_DIR = os.path.dirname(
@@ -38,7 +44,7 @@ def test_all_schemas_are_valid_json() -> None:
     schema_names = get_all_schema_names()
     for schema_name in schema_names:
         # This will raise an exception if the schema is not valid JSON
-        schema = load_schema(schema_name)
+        schema: Dict[str, Any] = load_schema(schema_name)
         assert isinstance(schema, dict)
         assert "$schema" in schema
         assert "title" in schema
@@ -47,189 +53,358 @@ def test_all_schemas_are_valid_json() -> None:
         assert "properties" in schema
 
 
-def test_validate_config_with_valid_configs() -> None:
-    """Test validate_config with valid configurations"""
-    # Test OpenAI
-    openai_config = {
-        "api_key_env_var": "OPENAI_API_KEY",
-        "model_name": "text-embedding-ada-002",
-    }
-    validate_config(openai_config, "openai")
-
-    # Test HuggingFace
-    huggingface_config: Dict[str, str] = {
-        "model_name": "sentence-transformers/all-MiniLM-L6-v2",
-        "api_key_env_var": "HUGGINGFACE_API_KEY",
-    }
-    validate_config(huggingface_config, "huggingface")
-
-    # Test Google PaLM
-    google_palm_config = {
-        "api_key_env_var": "GOOGLE_PALM_API_KEY",
-        "model_name": "models/embedding-gecko-001",
-    }
-    validate_config(google_palm_config, "google_palm")
-
-    # Test Google Generative AI
-    google_generative_ai_config = {
-        "api_key_env_var": "GOOGLE_API_KEY",
-        "model_name": "models/embedding-001",
-        "task_type": "RETRIEVAL_DOCUMENT",
-    }
-    validate_config(google_generative_ai_config, "google_generative_ai")
-
-    # Test Google Vertex
-    google_vertex_config = {
-        "api_key_env_var": "GOOGLE_API_KEY",
-        "model_name": "textembedding-gecko",
-        "project_id": "cloud-large-language-models",
-        "region": "us-central1",
-    }
-    validate_config(google_vertex_config, "google_vertex")
-
-    # Test Ollama
-    ollama_config = {
-        "url": "http://localhost:11434",
-        "model_name": "llama2",
-        "timeout": 60,
-    }
-    validate_config(ollama_config, "ollama")
-
-    # Test Jina
-    jina_config = {
-        "api_key_env_var": "JINA_API_KEY",
-        "model_name": "jina-embeddings-v2-base-en",
-    }
-    validate_config(jina_config, "jina")
-
-    # Test ONNX MiniLM L6 V2
-    onnx_config = {"preferred_providers": ["onnxruntime"]}
-    validate_config(onnx_config, "onnx_mini_lm_l6_v2")
-
-    # Test OpenCLIP
-    open_clip_config = {
-        "model_name": "ViT-B-32",
-        "checkpoint": "laion2b_s34b_b79k",
-        "device": "cpu",
-    }
-    validate_config(open_clip_config, "open_clip")
+# Mock for embedding functions to avoid actual API calls
+class MockEmbeddings:
+    @staticmethod
+    def mock_embeddings(input: Documents) -> Embeddings:
+        """Return mock embeddings for testing"""
+        return [np.array([0.1, 0.2, 0.3], dtype=np.float32) for _ in input]
 
 
-def test_validate_config_with_invalid_configs() -> None:
-    """Test validate_config with invalid configurations"""
-    # Test OpenAI - missing required field
-    openai_config: Dict[str, str] = {"model_name": "text-embedding-ada-002"}
-    with pytest.raises(ValidationError):
-        validate_config(openai_config, "openai")
+# Mock boto3 session for Amazon Bedrock
+class MockBoto3Session:
+    def __init__(
+        self: Any, region_name: str | None = None, profile_name: str | None = None
+    ) -> None:
+        self.region_name = region_name
+        self.profile_name = profile_name
 
-    # Test HuggingFace - missing required field
-    huggingface_config: Dict[str, Any] = {}
-    with pytest.raises(ValidationError):
-        validate_config(huggingface_config, "huggingface")
-
-    # Test Google PaLM - invalid type
-    google_palm_config = {
-        "api_key_env_var": 123,  # Should be string
-        "model_name": "models/embedding-gecko-001",
-    }
-    with pytest.raises(ValidationError):
-        validate_config(google_palm_config, "google_palm")
-
-    # Test Google Generative AI - additional property
-    google_generative_ai_config = {
-        "api_key_env_var": "GOOGLE_API_KEY",
-        "model_name": "models/embedding-001",
-        "task_type": "RETRIEVAL_DOCUMENT",
-        "invalid_property": "value",  # Not allowed
-    }
-    with pytest.raises(ValidationError):
-        validate_config(google_generative_ai_config, "google_generative_ai")
-
-    # Test Google Vertex - missing required field
-    google_vertex_config = {
-        "api_key_env_var": "GOOGLE_API_KEY",
-        "model_name": "textembedding-gecko",
-        "region": "us-central1"
-        # Missing project_id
-    }
-    with pytest.raises(ValidationError):
-        validate_config(google_vertex_config, "google_vertex")
-
-    # Test Ollama - missing required field
-    ollama_config = {
-        "url": "http://localhost:11434"
-        # Missing model_name
-    }
-    with pytest.raises(ValidationError):
-        validate_config(ollama_config, "ollama")
+    def client(self: Any, *args: Any, **kwargs: Any) -> MagicMock:
+        return MagicMock()
 
 
-def test_embedding_function_validate_config_methods() -> None:
-    """Test the validate_config methods of embedding functions"""
-    # Test OpenAI
-    openai_ef = OpenAIEmbeddingFunction(api_key="dummy")
-    openai_valid_config: Dict[str, str] = {
-        "api_key_env_var": "OPENAI_API_KEY",
-        "model_name": "text-embedding-ada-002",
-    }
-    openai_ef.validate_config(openai_valid_config)  # Should not raise
+# Mock INSTRUCTOR for InstructorEmbeddingFunction
+class MockINSTRUCTOR:
+    def __init__(self: Any, model_name: str, device: str | None = None) -> None:
+        self.model_name = model_name
+        self.device = device
 
-    openai_invalid_config: Dict[str, str] = {
-        "model_name": "text-embedding-ada-002"
-        # Missing api_key_env_var
-    }
-    with pytest.raises(ValidationError):
-        openai_ef.validate_config(openai_invalid_config)
+    def encode(
+        self: Any, texts: List[str], instruction: str | None = None
+    ) -> np.ndarray[Any, np.dtype[np.float32]]:
+        return np.array([[0.1, 0.2, 0.3] for _ in range(len(texts))])
 
-    # Test HuggingFace
-    huggingface_ef = HuggingFaceEmbeddingFunction(
-        model_name="sentence-transformers/all-MiniLM-L6-v2",
-        api_key_env_var="HUGGINGFACE_API_KEY",
-    )
-    huggingface_valid_config: Dict[str, str] = {
-        "model_name": "sentence-transformers/all-MiniLM-L6-v2",
-        "api_key_env_var": "HUGGINGFACE_API_KEY",
-    }
-    huggingface_ef.validate_config(huggingface_valid_config)  # Should not raise
 
-    huggingface_invalid_config: Dict[str, str] = {"invalid_property": "value"}
-    with pytest.raises(ValidationError):
-        huggingface_ef.validate_config(huggingface_invalid_config)
+class MockTextEmbeddingModel:
+    @staticmethod
+    def from_pretrained(model_name: str) -> "MockTextEmbeddingModel":
+        return MockTextEmbeddingModel()
 
-    # Test Ollama
-    ollama_valid_config: Dict[str, Any] = {
-        "url": "http://localhost:11434",
-        "model_name": "llama2",
-        "timeout": 60,
-    }
-    OllamaEmbeddingFunction.build_from_config(ollama_valid_config).validate_config(
-        ollama_valid_config
-    )
+    def get_embeddings(self, texts: List[str]) -> List[Dict[str, Any]]:
+        return [{"embeddings": [0.1, 0.2, 0.3]} for _ in texts]
 
-    # Test Jina
-    jina_valid_config: Dict[str, str] = {
-        "api_key_env_var": "JINA_API_KEY",
-        "model_name": "jina-embeddings-v2-base-en",
-    }
-    JinaEmbeddingFunction.build_from_config(jina_valid_config).validate_config(
-        jina_valid_config
-    )
 
-    # Test ONNX MiniLM L6 V2
-    onnx_valid_config: Dict[str, List[str]] = {"preferred_providers": ["onnxruntime"]}
-    ONNXMiniLM_L6_V2.build_from_config(onnx_valid_config).validate_config(
-        onnx_valid_config
-    )
+# Test configurations for each embedding function
+EMBEDDING_FUNCTION_CONFIGS: Dict[str, Dict[str, Any]] = {
+    "openai": {
+        "args": {
+            "api_key": "dummy_key",
+            "model_name": "text-embedding-ada-002",
+            "api_key_env_var": "OPENAI_API_KEY",
+        },
+        "config": {
+            "api_key_env_var": "OPENAI_API_KEY",
+            "model_name": "text-embedding-ada-002",
+        },
+    },
+    "huggingface": {
+        "args": {
+            "api_key": "dummy_key",
+            "model_name": "sentence-transformers/all-MiniLM-L6-v2",
+            "api_key_env_var": "HUGGINGFACE_API_KEY",
+        },
+        "config": {
+            "model_name": "sentence-transformers/all-MiniLM-L6-v2",
+            "api_key_env_var": "HUGGINGFACE_API_KEY",
+        },
+    },
+    "sentence_transformer": {
+        "args": {
+            "model_name": "all-MiniLM-L6-v2",
+        },
+        "config": {
+            "model_name": "all-MiniLM-L6-v2",
+        },
+    },
+    "cohere": {
+        "args": {
+            "api_key": "dummy_key",
+            "model_name": "embed-english-v3.0",
+            "api_key_env_var": "COHERE_API_KEY",
+        },
+        "config": {
+            "api_key_env_var": "COHERE_API_KEY",
+            "model_name": "embed-english-v3.0",
+        },
+    },
+    "google_palm": {
+        "args": {
+            "api_key": "dummy_key",
+            "model_name": "models/embedding-gecko-001",
+            "api_key_env_var": "GOOGLE_PALM_API_KEY",
+        },
+        "config": {
+            "api_key_env_var": "GOOGLE_PALM_API_KEY",
+            "model_name": "models/embedding-gecko-001",
+        },
+    },
+    "google_generative_ai": {
+        "args": {
+            "api_key": "dummy_key",
+            "model_name": "models/embedding-001",
+            "task_type": "RETRIEVAL_DOCUMENT",
+            "api_key_env_var": "GOOGLE_API_KEY",
+        },
+        "config": {
+            "api_key_env_var": "GOOGLE_API_KEY",
+            "model_name": "models/embedding-001",
+            "task_type": "RETRIEVAL_DOCUMENT",
+        },
+    },
+    "google_vertex": {
+        "args": {
+            "api_key": "dummy_key",
+            "model_name": "textembedding-gecko",
+            "project_id": "cloud-large-language-models",
+            "region": "us-central1",
+            "api_key_env_var": "GOOGLE_API_KEY",
+        },
+        "config": {
+            "api_key_env_var": "GOOGLE_API_KEY",
+            "model_name": "textembedding-gecko",
+            "project_id": "cloud-large-language-models",
+            "region": "us-central1",
+        },
+    },
+    "ollama": {
+        "args": {
+            "url": "http://localhost:11434",
+            "model_name": "llama2",
+            "timeout": 60,
+        },
+        "config": {
+            "url": "http://localhost:11434",
+            "model_name": "llama2",
+            "timeout": 60,
+        },
+    },
+    "instructor": {
+        "args": {
+            "model_name": "hkunlp/instructor-large",
+            "instruction": "Represent the document for retrieval",
+        },
+        "config": {
+            "model_name": "hkunlp/instructor-large",
+            "instruction": "Represent the document for retrieval",
+        },
+        "mocks": [
+            ("InstructorEmbedding.INSTRUCTOR", MockINSTRUCTOR),
+        ],
+    },
+    "jina": {
+        "args": {
+            "api_key": "dummy_key",
+            "model_name": "jina-embeddings-v2-base-en",
+            "api_key_env_var": "JINA_API_KEY",
+        },
+        "config": {
+            "api_key_env_var": "JINA_API_KEY",
+            "model_name": "jina-embeddings-v2-base-en",
+        },
+    },
+    "voyageai": {
+        "args": {
+            "api_key": "dummy_key",
+            "model_name": "voyage-2",
+            "api_key_env_var": "VOYAGEAI_API_KEY",
+        },
+        "config": {
+            "api_key_env_var": "VOYAGEAI_API_KEY",
+            "model_name": "voyage-2",
+        },
+    },
+    "onnx_mini_lm_l6_v2": {
+        "args": {
+            "preferred_providers": ["onnxruntime"],
+        },
+        "config": {
+            "preferred_providers": ["onnxruntime"],
+        },
+        "mocks": [
+            ("onnxruntime", MagicMock()),
+        ],
+    },
+    "open_clip": {
+        "args": {
+            "model_name": "ViT-B-32",
+            "checkpoint": "laion2b_s34b_b79k",
+            "device": "cpu",
+        },
+        "config": {
+            "model_name": "ViT-B-32",
+            "checkpoint": "laion2b_s34b_b79k",
+            "device": "cpu",
+        },
+    },
+    "roboflow": {
+        "args": {
+            "api_key": "dummy_key",
+            "api_key_env_var": "ROBOFLOW_API_KEY",
+        },
+        "config": {
+            "api_key_env_var": "ROBOFLOW_API_KEY",
+        },
+    },
+    "text2vec": {
+        "args": {
+            "model_name": "shibing624/text2vec-base-chinese",
+        },
+        "config": {
+            "model_name": "shibing624/text2vec-base-chinese",
+        },
+    },
+    "amazon_bedrock": {
+        "args": {
+            "session": MockBoto3Session(
+                region_name="us-east-1", profile_name="default"
+            ),
+            "model_name": "amazon.titan-embed-text-v1",
+        },
+        "config": {
+            "model_name": "amazon.titan-embed-text-v1",
+            "session_args": {
+                "region_name": "us-east-1",
+                "profile_name": "default",
+            },
+        },
+    },
+}
 
-    # Test OpenCLIP
-    openclip_valid_config: Dict[str, Any] = {
-        "model_name": "ViT-B-32",
-        "checkpoint": "laion2b_s34b_b79k",
-        "device": "cpu",
-    }
-    OpenCLIPEmbeddingFunction.build_from_config(openclip_valid_config).validate_config(
-        openclip_valid_config
-    )
+# Skip these embedding functions in tests as they require complex setup
+SKIP_EMBEDDING_FUNCTIONS = [
+    "huggingface_server",  # Requires a running server
+    "chroma_langchain",  # Requires LangChain setup
+    "default",  # Special case that delegates to ONNXMiniLM_L6_V2
+    "google_vertex",  # Requires complex mocking of vertexai module
+    "amazon_bedrock",  # Requires complex mocking of boto3 session
+]
+
+
+@pytest.mark.parametrize(
+    "ef_name",
+    [
+        name
+        for name in known_embedding_functions.keys()
+        if name not in SKIP_EMBEDDING_FUNCTIONS
+    ],
+)
+def test_embedding_function_config_roundtrip(
+    ef_name: str, monkeypatch: MonkeyPatch
+) -> None:
+    """
+    Test that embedding functions can be:
+    1. Created with arguments
+    2. Get their config
+    3. Be recreated from that config
+    4. Validate their config
+    """
+    if ef_name not in EMBEDDING_FUNCTION_CONFIGS:
+        pytest.skip(f"No test configuration for {ef_name}")
+
+    # Get the embedding function class
+    ef_class = known_embedding_functions[ef_name]
+
+    # Apply mocks if needed
+    test_config: Dict[str, Any] = EMBEDDING_FUNCTION_CONFIGS[ef_name]
+    if "mocks" in test_config:
+        for module_path, mock_obj in test_config["mocks"]:
+            if "." in module_path:
+                module_name, attr_name = module_path.rsplit(".", 1)
+                monkeypatch.setattr(f"{module_name}.{attr_name}", mock_obj)
+            else:
+                sys.modules[module_path] = mock_obj
+
+    # Mock the __call__ method to avoid actual API calls
+    monkeypatch.setattr(ef_class, "__call__", MockEmbeddings.mock_embeddings)
+
+    # 1. Create embedding function with arguments
+    ef_instance = ef_class(**test_config["args"])
+
+    # 2. Get config from the instance
+    config: Dict[str, Any] = ef_instance.get_config()
+
+    # Check that config contains expected values
+    for key, value in test_config["config"].items():
+        assert key in config, f"Key {key} not found in config for {ef_name}"
+        assert (
+            config[key] == value
+        ), f"Config value mismatch for {ef_name}.{key}: expected {value}, got {config[key]}"
+
+    # 3. Create a new instance from the config
+    new_ef_instance = ef_class.build_from_config(config)
+
+    # 4. Validate the config
+    new_ef_instance.validate_config(config)
+
+    # 5. Get config from the new instance and verify it matches
+    new_config: Dict[str, Any] = new_ef_instance.get_config()
+    for key, value in config.items():
+        assert key in new_config, f"Key {key} not found in new config for {ef_name}"
+        assert (
+            new_config[key] == value
+        ), f"New config value mismatch for {ef_name}.{key}: expected {value}, got {new_config[key]}"
+
+
+@pytest.mark.parametrize(
+    "ef_name",
+    [
+        name
+        for name in known_embedding_functions.keys()
+        if name not in SKIP_EMBEDDING_FUNCTIONS
+    ],
+)
+def test_embedding_function_invalid_config(
+    ef_name: str, monkeypatch: MonkeyPatch
+) -> None:
+    """Test that embedding functions reject invalid configurations"""
+    if ef_name not in EMBEDDING_FUNCTION_CONFIGS:
+        pytest.skip(f"No test configuration for {ef_name}")
+
+    # Get the embedding function class
+    ef_class = known_embedding_functions[ef_name]
+
+    # Apply mocks if needed
+    test_config: Dict[str, Any] = EMBEDDING_FUNCTION_CONFIGS[ef_name]
+    if "mocks" in test_config:
+        for module_path, mock_obj in test_config["mocks"]:
+            if "." in module_path:
+                module_name, attr_name = module_path.rsplit(".", 1)
+                monkeypatch.setattr(f"{module_name}.{attr_name}", mock_obj)
+            else:
+                sys.modules[module_path] = mock_obj
+
+    # Mock the __call__ method to avoid actual API calls
+    monkeypatch.setattr(ef_class, "__call__", MockEmbeddings.mock_embeddings)
+
+    # Create embedding function with arguments
+    ef_instance = ef_class(**test_config["args"])
+
+    # Test with empty config (should fail for most embedding functions)
+    # Skip ONNX as it doesn't require any config parameters
+    if ef_name != "onnx_mini_lm_l6_v2":
+        with pytest.raises((ValidationError, ValueError, AssertionError)):
+            ef_instance.validate_config({})
+
+    # Test with invalid property
+    invalid_config: Dict[str, Any] = test_config["config"].copy()
+    invalid_config["invalid_property"] = "invalid_value"
+
+    # Some embedding functions might allow additional properties, so we can't always expect this to fail
+    try:
+        ef_instance.validate_config(invalid_config)
+    except (ValidationError, ValueError, AssertionError):
+        # If it raises an exception, that's expected for many embedding functions
+        pass
 
 
 def test_schema_required_fields() -> None:

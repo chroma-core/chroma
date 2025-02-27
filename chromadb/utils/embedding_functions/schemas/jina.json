@@ -6,16 +6,21 @@
   "type": "object",
   "properties": {
     "api_key": {
-      "type": "string",
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "Parameter api_key for the jina embedding function"
     },
     "model_name": {
       "type": "string",
-      "description": "Parameter model_name for the jina embedding function"
+      "description": "Parameter model_name for the jina embedding function",
+      "default": "jina-embeddings-v2-base-en"
     },
     "api_key_env_var": {
       "type": "string",
-      "description": "Parameter api_key_env_var for the jina embedding function"
+      "description": "Parameter api_key_env_var for the jina embedding function",
+      "default": "JINA_API_KEY"
     }
   },
   "required": [

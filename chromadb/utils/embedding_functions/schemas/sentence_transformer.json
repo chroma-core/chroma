@@ -7,15 +7,18 @@
     "properties": {
         "model_name": {
             "type": "string",
-            "description": "Identifier of the SentenceTransformer model"
+            "description": "Identifier of the SentenceTransformer model",
+            "default": "all-MiniLM-L6-v2"
         },
         "device": {
             "type": "string",
-            "description": "Device used for computation"
+            "description": "Device used for computation",
+            "default": "cpu"
         },
         "normalize_embeddings": {
             "type": "boolean",
-            "description": "Whether to normalize returned vectors"
+            "description": "Whether to normalize returned vectors",
+            "default": false
         },
         "kwargs": {
             "type": "object",

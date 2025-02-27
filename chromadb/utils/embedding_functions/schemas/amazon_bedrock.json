@@ -5,18 +5,24 @@
   "version": "1.0.0",
   "type": "object",
   "properties": {
-    "session": {
-      "type": "string",
-      "description": "The boto3 session to use for the Amazon Bedrock client"
+    "session_args": {
+      "type": "object",
+      "description": "The arguments to pass to the boto3 session"
     },
     "model_name": {
       "type": "string",
-      "description": "The name of the model to use for embeddings"
+      "description": "The name of the model to use for embeddings",
+      "default": "amazon.titan-embed-text-v1"
+    },
+    "kwargs": {
+      "type": "object",
+      "description": "Additional arguments to pass to the Amazon Bedrock client"
     }
   },
   "required": [
-    "session",
-    "model_name"
+    "session_args",
+    "model_name",
+    "kwargs"
   ],
   "additionalProperties": false
 }

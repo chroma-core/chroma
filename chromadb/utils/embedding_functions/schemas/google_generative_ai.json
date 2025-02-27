@@ -14,15 +14,18 @@
     },
     "model_name": {
       "type": "string",
-      "description": "The name of the model to use for text embeddings"
+      "description": "The name of the model to use for text embeddings",
+      "default": "models/embedding-001"
     },
     "task_type": {
       "type": "string",
-      "description": "The task type for the embeddings (e.g., RETRIEVAL_DOCUMENT)"
+      "description": "The task type for the embeddings (e.g., RETRIEVAL_DOCUMENT)",
+      "default": "RETRIEVAL_DOCUMENT"
     },
     "api_key_env_var": {
       "type": "string",
-      "description": "Environment variable name that contains your API key for the Google Generative AI API"
+      "description": "Environment variable name that contains your API key for the Google Generative AI API",
+      "default": "GOOGLE_API_KEY"
     }
   },
   "required": [

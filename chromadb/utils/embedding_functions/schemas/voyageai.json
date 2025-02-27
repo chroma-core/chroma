@@ -6,16 +6,21 @@
   "type": "object",
   "properties": {
     "api_key": {
-      "type": "string",
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "Parameter api_key for the voyageai embedding function"
     },
     "model_name": {
       "type": "string",
-      "description": "Parameter model_name for the voyageai embedding function"
+      "description": "Parameter model_name for the voyageai embedding function",
+      "default": "voyage-large-2"
     },
     "api_key_env_var": {
       "type": "string",
-      "description": "Parameter api_key_env_var for the voyageai embedding function"
+      "description": "Parameter api_key_env_var for the voyageai embedding function",
+      "default": "VOYAGE_API_KEY"
     }
   },
   "required": [

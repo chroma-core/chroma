@@ -14,7 +14,8 @@
         },
         "model_name": {
             "type": "string",
-            "description": "The name of the model to use for text embeddings"
+            "description": "The name of the model to use for text embeddings",
+            "default": "text-embedding-ada-002"
         },
         "organization_id": {
             "type": [
@@ -67,7 +68,8 @@
         },
         "api_key_env_var": {
             "type": "string",
-            "description": "Environment variable name that contains your API key for the OpenAI API"
+            "description": "Environment variable name that contains your API key for the OpenAI API",
+            "default": "OPENAI_API_KEY"
         }
     },
     "required": [

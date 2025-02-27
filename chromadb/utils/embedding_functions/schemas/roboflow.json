@@ -6,16 +6,21 @@
   "type": "object",
   "properties": {
     "api_key": {
-      "type": "string",
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "Parameter api_key for the roboflow embedding function"
     },
     "api_url": {
       "type": "string",
-      "description": "Parameter api_url for the roboflow embedding function"
+      "description": "Parameter api_url for the roboflow embedding function",
+      "default": "https://infer.roboflow.com"
     },
     "api_key_env_var": {
       "type": "string",
-      "description": "Parameter api_key_env_var for the roboflow embedding function"
+      "description": "Parameter api_key_env_var for the roboflow embedding function",
+      "default": "ROBOFLOW_API_KEY"
     }
   },
   "required": [

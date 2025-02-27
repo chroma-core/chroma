@@ -14,11 +14,13 @@
         },
         "model_name": {
             "type": "string",
-            "description": "The name of the model to use for text embeddings"
+            "description": "The name of the model to use for text embeddings",
+            "default": "large"
         },
         "api_key_env_var": {
             "type": "string",
-            "description": "Environment variable name that contains your API key for the Cohere API"
+            "description": "Environment variable name that contains your API key for the Cohere API",
+            "default": "COHERE_API_KEY"
         }
     },
     "required": [
