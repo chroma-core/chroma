@@ -248,8 +248,8 @@ def test_all_schemas_are_valid_json() -> None:
         assert "properties" in schema
 
 
-@pytest.fixture(scope="module")
-def embedding_function_names() -> List[str]:
+# Get embedding function names for parametrization
+def get_embedding_function_names() -> List[str]:
     """Get all embedding function names to test"""
     return [
         name
@@ -262,7 +262,7 @@ def embedding_function_names() -> List[str]:
 class TestEmbeddingFunctions:
     """Combined test class for all embedding function tests"""
 
-    @pytest.mark.parametrize("ef_name", embedding_function_names())
+    @pytest.mark.parametrize("ef_name", get_embedding_function_names())
     def test_embedding_function_config_roundtrip(
         self, ef_name: str, monkeypatch: MonkeyPatch
     ) -> None:
@@ -319,7 +319,7 @@ class TestEmbeddingFunctions:
                 new_config[key] == value
             ), f"New config value mismatch for {ef_name}.{key}: expected {value}, got {new_config[key]}"
 
-    @pytest.mark.parametrize("ef_name", embedding_function_names())
+    @pytest.mark.parametrize("ef_name", get_embedding_function_names())
     def test_embedding_function_invalid_config(
         self, ef_name: str, monkeypatch: MonkeyPatch
     ) -> None:
