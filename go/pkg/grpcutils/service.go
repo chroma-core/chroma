@@ -4,10 +4,11 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"github.com/chroma-core/chroma/go/shared/otel"
 	"io"
 	"net"
 	"os"
+
+	"github.com/chroma-core/chroma/go/shared/otel"
 
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
@@ -80,10 +81,12 @@ func newDefaultGrpcProvider(name string, grpcConfig *GrpcConfig, registerFunc fu
 	}
 	opts = append(opts, grpc.UnaryInterceptor(otel.ServerGrpcInterceptor))
 	OPTL_TRACING_ENDPOINT := os.Getenv("OPTL_TRACING_ENDPOINT")
+	OPTL_METRIC_ENDPOINT := os.Getenv("OPTL_METRIC_ENDPOINT")
 	if OPTL_TRACING_ENDPOINT != "" {
 		otel.InitTracing(context.Background(), &otel.TracingConfig{
-			Service:  "sysdb-service",
-			Endpoint: OPTL_TRACING_ENDPOINT,
+			Service:        "sysdb-service",
+			TraceEndpoint:  OPTL_TRACING_ENDPOINT,
+			MetricEndpoint: OPTL_METRIC_ENDPOINT,
 		})
 	}
 
