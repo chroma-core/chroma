@@ -61,18 +61,6 @@ class MockEmbeddings:
         return [np.array([0.1, 0.2, 0.3], dtype=np.float32) for _ in input]
 
 
-# Mock boto3 session for Amazon Bedrock
-class MockBoto3Session:
-    def __init__(
-        self: Any, region_name: str | None = None, profile_name: str | None = None
-    ) -> None:
-        self.region_name = region_name
-        self.profile_name = profile_name
-
-    def client(self: Any, *args: Any, **kwargs: Any) -> MagicMock:
-        return MagicMock()
-
-
 # Mock INSTRUCTOR for InstructorEmbeddingFunction
 class MockINSTRUCTOR:
     def __init__(self: Any, model_name: str, device: str | None = None) -> None:
@@ -161,21 +149,6 @@ EMBEDDING_FUNCTION_CONFIGS: Dict[str, Dict[str, Any]] = {
             "task_type": "RETRIEVAL_DOCUMENT",
         },
     },
-    "google_vertex": {
-        "args": {
-            "api_key": "dummy_key",
-            "model_name": "textembedding-gecko",
-            "project_id": "cloud-large-language-models",
-            "region": "us-central1",
-            "api_key_env_var": "GOOGLE_API_KEY",
-        },
-        "config": {
-            "api_key_env_var": "GOOGLE_API_KEY",
-            "model_name": "textembedding-gecko",
-            "project_id": "cloud-large-language-models",
-            "region": "us-central1",
-        },
-    },
     "ollama": {
         "args": {
             "url": "http://localhost:11434",
@@ -261,21 +234,6 @@ EMBEDDING_FUNCTION_CONFIGS: Dict[str, Dict[str, Any]] = {
         },
         "config": {
             "model_name": "shibing624/text2vec-base-chinese",
-        },
-    },
-    "amazon_bedrock": {
-        "args": {
-            "session": MockBoto3Session(
-                region_name="us-east-1", profile_name="default"
-            ),
-            "model_name": "amazon.titan-embed-text-v1",
-        },
-        "config": {
-            "model_name": "amazon.titan-embed-text-v1",
-            "session_args": {
-                "region_name": "us-east-1",
-                "profile_name": "default",
-            },
         },
     },
 }
