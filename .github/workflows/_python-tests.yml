@@ -49,6 +49,7 @@ jobs:
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
+          CHROMA_API_IMPL: "chromadb.api.segment.SegmentAPI"
 
   test-rust-bindings:
     timeout-minutes: 90

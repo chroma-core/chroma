@@ -135,6 +135,7 @@ def test_vacuum_errors_if_locked(sqlite_persistent: System) -> None:
                 sqlite_persistent.settings.persist_directory,
                 "--force",
             ],
+            env={"CHROMA_API_IMPL": "chromadb.api.segment.SegmentAPI"},
         )
         assert result.exit_code == 1
         assert "database is locked" in result.stdout
