@@ -46,6 +46,10 @@ fn default_segment_manager_config() -> Option<LocalSegmentManagerConfig> {
     })
 }
 
+fn default_compaction_client_config() -> CompactionClientConfig {
+    CompactionClientConfig::Local
+}
+
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct FrontendConfig {
     #[serde(default)]
@@ -62,6 +66,7 @@ pub struct FrontendConfig {
     pub log: LogConfig,
     #[serde(default = "default_executor_config")]
     pub executor: ExecutorConfig,
+    #[serde(default = "default_compaction_client_config")]
     pub compaction_client: CompactionClientConfig,
 }
 
@@ -104,8 +109,8 @@ pub struct FrontendServerConfig {
     pub persist_path: Option<String>,
 }
 
-const DEFAULT_CONFIG_PATH: &str = "./sample_configs/distributed.yaml";
-const DEFAULT_SINGLE_NODE_CONFIG_FILENAME: &str = "./sample_configs/single_node.yaml";
+const DEFAULT_CONFIG_PATH: &str = "sample_configs/distributed.yaml";
+const DEFAULT_SINGLE_NODE_CONFIG_FILENAME: &str = "sample_configs/single_node.yaml";
 
 #[derive(Embed)]
 #[folder = "./"]
