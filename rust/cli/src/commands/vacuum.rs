@@ -194,7 +194,7 @@ pub fn vacuum(args: VacuumArgs) {
     // If you recently upgraded Chroma from a version below 0.5.6 to 0.5.6 or above, you should run this command once to greatly reduce the size of your database and enable continuous database pruning. In most other cases, vacuuming will save very little disk space.
     // The execution time of this command scales with the size of your database. It blocks both reads and writes to the database while it is running.
     println!("{}", "\nChroma Vacuum\n".underline().bold());
-    
+
     let config = match get_frontend_config(
         args.frontend_args.config_path,
         args.frontend_args.persistent_path,
@@ -230,14 +230,19 @@ pub fn vacuum(args: VacuumArgs) {
     let proceed = match args.force {
         true => true,
         false => {
-            println!("{}", "Are you sure you want to vacuum the database?".bold().blue());
+            println!(
+                "{}",
+                "Are you sure you want to vacuum the database?"
+                    .bold()
+                    .blue()
+            );
             Confirm::new()
                 .with_prompt("This will block both reads and writes to the database and may take a while. We recommend shutting down the server before running this command. Continue?")
                 .interact()
                 .unwrap_or(false)
-        },
+        }
     };
-    
+
     println!();
 
     if !proceed {
