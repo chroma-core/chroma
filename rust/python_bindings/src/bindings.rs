@@ -544,8 +544,8 @@ impl Bindings {
         include: Vec<String>,
         tenant: String,
         database: String,
+        py: Python<'_>,
     ) -> ChromaPyResult<GetResponse> {
-        // TODO: Rethink the error handling strategy
         let r#where = chroma_types::RawWhereFields::from_json_str(
             r#where.as_deref(),
             where_document.as_deref(),
@@ -570,9 +570,10 @@ impl Bindings {
         )?;
 
         let mut frontend_clone = self.frontend.clone();
-        let result = self
-            .runtime
-            .block_on(async { frontend_clone.get(request).await })?;
+        let result = py.allow_threads(move || {
+            self.runtime
+                .block_on(async { frontend_clone.get(request).await })
+        })?;
         Ok(result)
     }
 
@@ -590,9 +591,8 @@ impl Bindings {
         include: Vec<String>,
         tenant: String,
         database: String,
+        py: Python<'_>,
     ) -> ChromaPyResult<QueryResponse> {
-        // let query_embeddings = py_embeddings_to_vec_f32(query_embeddings).map_err(WrappedPyErr)?;
-
         let r#where = chroma_types::RawWhereFields::from_json_str(
             r#where.as_deref(),
             where_document.as_deref(),
@@ -617,9 +617,10 @@ impl Bindings {
         )?;
 
         let mut frontend_clone = self.frontend.clone();
-        let response = self
-            .runtime
-            .block_on(async { frontend_clone.query(request).await })?;
+        let response = py.allow_threads(move || {
+            self.runtime
+                .block_on(async { frontend_clone.query(request).await })
+        })?;
         Ok(response)
     }
 
