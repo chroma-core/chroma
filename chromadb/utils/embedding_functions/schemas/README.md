@@ -1,6 +1,6 @@
 # Embedding Function Schemas
 
-This directory contains JSON schemas for all embedding functions in Chroma. These schemas are used to validate the configuration of embedding functions and ensure that they are properly configured. The purpose of having this schema is to support cross language compatibility, and to validate that changes in one client library do not accidentally diverge from others.
+This directory contains JSON schemas for all embedding functions in Chroma. The purpose of having this schema is to support cross language compatibility, and to validate that changes in one client library do not accidentally diverge from others.
 
 ## Schema Structure
 
@@ -27,10 +27,6 @@ config = {
 }
 validate_config(config, "openai")
 ```
-
-## Cross-Language Support
-
-These schemas are designed to be used across different client libraries. They can be loaded and used by any language that supports JSON Schema validation.
 
 ## Adding New Schemas
 
