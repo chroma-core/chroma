@@ -5,7 +5,9 @@ import jsonschema
 from jsonschema import ValidationError
 
 # Path to the schemas directory
-SCHEMAS_DIR = os.path.dirname(os.path.abspath(__file__))
+SCHEMAS_DIR = os.path.dirname(__file__)
+
+cached_schemas: Dict[str, Dict[str, Any]] = {}
 
 
 def load_schema(schema_name: str) -> Dict[str, Any]:
@@ -22,9 +24,13 @@ def load_schema(schema_name: str) -> Dict[str, Any]:
         FileNotFoundError: If the schema file does not exist
         json.JSONDecodeError: If the schema file is not valid JSON
     """
+    if schema_name in cached_schemas:
+        return cached_schemas[schema_name]
     schema_path = os.path.join(SCHEMAS_DIR, f"{schema_name}.json")
     with open(schema_path, "r") as f:
-        return cast(Dict[str, Any], json.load(f))
+        schema = cast(Dict[str, Any], json.load(f))
+        cached_schemas[schema_name] = schema
+        return schema
 
 
 def validate_config(config: Dict[str, Any], schema_name: str) -> None:

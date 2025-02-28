@@ -1020,26 +1020,23 @@ def embedding_function_dependencies() -> Generator[None, None, None]:
 
     # Install packages
     logger.info("Installing embedding function dependencies...")
-    for package in packages:
-        try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", package])
-            logger.info(f"Installed {package}")
-        except subprocess.CalledProcessError as e:
-            logger.warning(f"Failed to install {package}: {e}")
+
+    executable_command = [sys.executable, "-m", "pip", "install"] + packages
+    try:
+        subprocess.check_call(executable_command)
+    except subprocess.CalledProcessError as e:
+        logger.warning(f"Failed to install embedding function dependencies: {e}")
 
     # Yield control back to the tests
     yield
 
     # Uninstall packages after tests complete
     logger.info("Uninstalling embedding function dependencies...")
-    for package in packages:
-        try:
-            subprocess.check_call(
-                [sys.executable, "-m", "pip", "uninstall", "-y", package]
-            )
-            logger.info(f"Uninstalled {package}")
-        except subprocess.CalledProcessError as e:
-            logger.warning(f"Failed to uninstall {package}: {e}")
+    executable_command = [sys.executable, "-m", "pip", "uninstall", "-y"] + packages
+    try:
+        subprocess.check_call(executable_command)
+    except subprocess.CalledProcessError as e:
+        logger.warning(f"Failed to uninstall embedding function dependencies: {e}")
 
 
 @pytest.fixture(scope="session")

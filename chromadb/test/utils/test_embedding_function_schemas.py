@@ -6,7 +6,11 @@ from jsonschema import ValidationError
 import numpy as np
 from unittest.mock import MagicMock
 from pytest import MonkeyPatch
-from chromadb.utils.embedding_functions.schemas import validate_config, load_schema
+from chromadb.utils.embedding_functions.schemas import (
+    validate_config,
+    load_schema,
+    get_available_schemas,
+)
 from chromadb.api.types import Documents, Embeddings
 from chromadb.utils.embedding_functions import (
     known_embedding_functions,
@@ -34,22 +38,8 @@ SCHEMAS_DIR = os.path.dirname(
 )
 
 
-def get_all_schema_names() -> List[str]:
-    """Get all schema names from the schemas directory"""
-    schema_files = [f for f in os.listdir(SCHEMAS_DIR) if f.endswith(".json")]
-    return [os.path.splitext(f)[0] for f in schema_files]
-
-
-# Mock for embedding functions to avoid actual API calls
-class MockEmbeddings:
-    @staticmethod
-    def mock_embeddings(input: Documents) -> Embeddings:
-        """Return mock embeddings for testing"""
-        return [np.array([0.1, 0.2, 0.3], dtype=np.float32) for _ in input]
-
-
-# Mock INSTRUCTOR for InstructorEmbeddingFunction
-class MockINSTRUCTOR:
+# Mock InstructorEmbeddingFunction, since the embedding function is not up to date with package requirements of InstructorEmbedding
+class MockInstructorEmbeddingFunction:
     def __init__(self: Any, model_name: str, device: str = "cpu") -> None:
         self.model_name = model_name
         self.device = device
@@ -58,6 +48,14 @@ class MockINSTRUCTOR:
         self: Any, texts: List[str], instruction: Optional[str] = None
     ) -> np.ndarray[Any, np.dtype[np.float32]]:
         return np.array([[0.1, 0.2, 0.3] for _ in range(len(texts))])
+
+
+# Mock for embedding functions to avoid actual API calls
+class MockEmbeddings:
+    @staticmethod
+    def mock_embeddings(input: Documents) -> Embeddings:
+        """Return mock embeddings for testing"""
+        return [np.array([0.1, 0.2, 0.3], dtype=np.float32) for _ in input]
 
 
 class MockTextEmbeddingModel:
@@ -128,12 +126,23 @@ EMBEDDING_FUNCTION_CONFIGS: Dict[str, Dict[str, Any]] = {
             "api_key": "dummy_key",
             "model_name": "models/embedding-001",
             "task_type": "RETRIEVAL_DOCUMENT",
-            "api_key_env_var": "CHROMA_GOOGLE_API_KEY",
+            "api_key_env_var": "CHROMA_GOOGLE_GENAI_API_KEY",
         },
         "config": {
-            "api_key_env_var": "CHROMA_GOOGLE_API_KEY",
+            "api_key_env_var": "CHROMA_GOOGLE_GENAI_API_KEY",
             "model_name": "models/embedding-001",
             "task_type": "RETRIEVAL_DOCUMENT",
+        },
+    },
+    "google_vertex": {
+        "args": {
+            "api_key": "dummy_key",
+            "model_name": "models/embedding-001",
+            "api_key_env_var": "CHROMA_GOOGLE_VERTEX_API_KEY",
+        },
+        "config": {
+            "api_key_env_var": "CHROMA_GOOGLE_VERTEX_API_KEY",
+            "model_name": "models/embedding-001",
         },
     },
     "ollama": {
@@ -158,7 +167,7 @@ EMBEDDING_FUNCTION_CONFIGS: Dict[str, Dict[str, Any]] = {
             "instruction": "Represent the document for retrieval",
         },
         "mocks": [
-            ("InstructorEmbedding.INSTRUCTOR", MockINSTRUCTOR),
+            ("InstructorEmbedding.INSTRUCTOR", MockInstructorEmbeddingFunction),
         ],
     },
     "jina": {
@@ -237,7 +246,7 @@ SKIP_EMBEDDING_FUNCTIONS = [
 
 def test_all_schemas_are_valid_json() -> None:
     """Test that all schemas are valid JSON"""
-    schema_names = get_all_schema_names()
+    schema_names = get_available_schemas()
     for schema_name in schema_names:
         # This will raise an exception if the schema is not valid JSON
         schema: Dict[str, Any] = load_schema(schema_name)
@@ -360,7 +369,7 @@ class TestEmbeddingFunctions:
 
     def test_schema_required_fields(self) -> None:
         """Test that schemas enforce required fields"""
-        schema_names = get_all_schema_names()
+        schema_names = get_available_schemas()
         for schema_name in schema_names:
             schema = load_schema(schema_name)
             if "required" in schema:
@@ -399,7 +408,7 @@ class TestEmbeddingFunctions:
 
     def test_schema_additional_properties(self) -> None:
         """Test that schemas reject additional properties"""
-        schema_names = get_all_schema_names()
+        schema_names = get_available_schemas()
         for schema_name in schema_names:
             schema = load_schema(schema_name)
             # Create a minimal valid config
