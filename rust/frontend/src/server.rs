@@ -29,6 +29,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
+use tower_http::cors::CorsLayer;
 use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityScheme};
 use utoipa::ToSchema;
 use utoipa::{Modify, OpenApi};
@@ -159,6 +160,7 @@ impl FrontendServer {
             listen_address,
             max_payload_size_bytes,
             circuit_breaker,
+            cors_allow_origins,
             ..
         } = self.config.clone();
 
@@ -239,7 +241,20 @@ impl FrontendServer {
             .merge(docs_router)
             .with_state(self)
             .layer(DefaultBodyLimit::max(max_payload_size_bytes));
-        let app = add_tracing_middleware(app);
+        let mut app = add_tracing_middleware(app);
+
+        if let Some(cors_allow_origins) = cors_allow_origins {
+            let origins = cors_allow_origins
+                .into_iter()
+                .map(|origin| origin.parse().unwrap())
+                .collect::<Vec<_>>();
+
+            let cors = CorsLayer::new()
+                .allow_origin(origins)
+                .allow_headers(tower_http::cors::Any)
+                .allow_methods(tower_http::cors::Any);
+            app = app.layer(cors);
+        }
 
         // TODO: tracing
         let addr = format!("{}:{}", listen_address, port);
@@ -1628,3 +1643,52 @@ impl Modify for ChromaTokenSecurityAddon {
     modifiers(&ChromaTokenSecurityAddon)
 )]
 struct ApiDoc;
+
+#[cfg(test)]
+mod tests {
+    use crate::{config::FrontendServerConfig, frontend::Frontend, FrontendServer};
+    use chroma_config::{registry::Registry, Configurable};
+    use chroma_system::System;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn test_cors() {
+        let registry = Registry::new();
+        let system = System::new();
+
+        let port = random_port::PortPicker::new().pick().unwrap();
+
+        let mut config = FrontendServerConfig::single_node_default();
+        config.port = port;
+        config.cors_allow_origins = Some(vec!["http://localhost:3000".to_string()]);
+
+        let frontend = Frontend::try_from_config(&(config.clone().frontend, system), &registry)
+            .await
+            .unwrap();
+        let app = FrontendServer::new(config, frontend, vec![], Arc::new(()), Arc::new(()));
+        tokio::task::spawn(async move {
+            app.run().await;
+        });
+
+        let client = reqwest::Client::new();
+        let res = client
+            .request(
+                reqwest::Method::OPTIONS,
+                format!("http://localhost:{}/api/v2/heartbeat", port),
+            )
+            .header("Origin", "http://localhost:3000")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+
+        let allow_origin = res.headers().get("Access-Control-Allow-Origin");
+        assert_eq!(allow_origin.unwrap(), "http://localhost:3000");
+
+        let allow_methods = res.headers().get("Access-Control-Allow-Methods");
+        assert_eq!(allow_methods.unwrap(), "*");
+
+        let allow_headers = res.headers().get("Access-Control-Allow-Headers");
+        assert_eq!(allow_headers.unwrap(), "*");
+    }
+}
