@@ -1555,6 +1555,7 @@ dependencies = [
  "futures",
  "parking_lot",
  "proptest",
+ "rayon",
  "roaring",
  "sea-query",
  "sea-query-binder",
