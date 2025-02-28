@@ -387,6 +387,9 @@ func (s *Server) FlushCollectionCompaction(ctx context.Context, req *coordinator
 	flushCollectionInfo, err := s.coordinator.FlushCollectionCompaction(ctx, FlushCollectionCompaction)
 	if err != nil {
 		log.Error("FlushCollectionCompaction failed", zap.Error(err), zap.String("collection_id", req.CollectionId), zap.Int32("collection_version", req.CollectionVersion), zap.Int64("log_position", req.LogPosition))
+		if err == common.ErrCollectionSoftDeleted {
+			return nil, grpcutils.BuildFailedPreconditionGrpcError(err.Error())
+		}
 		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	res := &coordinatorpb.FlushCollectionCompactionResponse{
