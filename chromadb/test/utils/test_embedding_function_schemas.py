@@ -30,13 +30,6 @@ os.environ["AWS_ACCESS_KEY_ID"] = "dummy_aws_access_key"
 os.environ["AWS_SECRET_ACCESS_KEY"] = "dummy_aws_secret_key"
 os.environ["AWS_REGION"] = "us-east-1"
 
-# Path to the schemas directory
-SCHEMAS_DIR = os.path.dirname(
-    os.path.abspath(
-        os.path.join(__file__, "../../../utils/embedding_functions/schemas")
-    )
-)
-
 
 # Mock InstructorEmbeddingFunction, since the embedding function is not up to date with package requirements of InstructorEmbedding
 class MockInstructorEmbeddingFunction:
