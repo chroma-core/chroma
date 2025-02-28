@@ -1,10 +1,9 @@
 mod commands;
 mod utils;
 
-use clap::{Parser, Subcommand};
 use crate::commands::run::{run, RunArgs};
 use crate::commands::vacuum::{vacuum, VacuumArgs};
-use crate::utils::LocalFrontendCommandArgs;
+use clap::{Parser, Subcommand};
 
 #[derive(Subcommand, Debug)]
 enum Command {
@@ -24,35 +23,26 @@ struct Cli {
 }
 
 fn main() {
-    // let cli = Cli::parse();
-    
-    // remove pub
-    vacuum(VacuumArgs { 
-        frontend_args: LocalFrontendCommandArgs { 
-            config_path: None, 
-            persistent_path: Some("/Users/itaismith/Developer/playground/simple-chroma/chroma_data".to_string())
-        },
-        force: false,
-    });
+    let cli = Cli::parse();
 
-    // match cli.command {
-    //     Command::Docs => {
-    //         let url = "https://docs.trychroma.com";
-    //         if webbrowser::open(url).is_err() {
-    //             eprintln!("Error: Failed to open the browser. Visit {}.", url);
-    //         }
-    //     }
-    //     Command::Run(args) => {
-    //         run(args);
-    //     }
-    //     Command::Support => {
-    //         let url = "https://discord.gg/MMeYNTmh3x";
-    //         if webbrowser::open(url).is_err() {
-    //             eprintln!("Error: Failed to open the browser. Visit {}.", url);
-    //         }
-    //     }
-    //     Command::Vacuum(args) => {
-    //         vacuum(args);
-    //     }
-    // }
+    match cli.command {
+        Command::Docs => {
+            let url = "https://docs.trychroma.com";
+            if webbrowser::open(url).is_err() {
+                eprintln!("Error: Failed to open the browser. Visit {}.", url);
+            }
+        }
+        Command::Run(args) => {
+            run(args);
+        }
+        Command::Support => {
+            let url = "https://discord.gg/MMeYNTmh3x";
+            if webbrowser::open(url).is_err() {
+                eprintln!("Error: Failed to open the browser. Visit {}.", url);
+            }
+        }
+        Command::Vacuum(args) => {
+            vacuum(args);
+        }
+    }
 }

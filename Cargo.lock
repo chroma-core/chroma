@@ -1848,6 +1848,8 @@ dependencies = [
  "clap",
  "colored",
  "dialoguer",
+ "indicatif",
+ "serde_json",
  "sqlx",
  "tokio",
  "webbrowser",

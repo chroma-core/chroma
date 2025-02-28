@@ -1,5 +1,5 @@
-use clap::Parser;
 use chroma_frontend::config::FrontendServerConfig;
+use clap::Parser;
 
 pub const LOGO: &str = "
                 \x1b[38;5;069m(((((((((    \x1b[38;5;203m(((((\x1b[38;5;220m####
@@ -22,7 +22,7 @@ pub const SQLITE_FILENAME: &str = "chroma.sqlite3";
 pub struct LocalFrontendCommandArgs {
     #[arg(long = "config-path")]
     pub config_path: Option<String>,
-    #[arg(long)]
+    #[arg(long = "path")]
     pub persistent_path: Option<String>,
 }
 
@@ -52,9 +52,8 @@ pub fn get_frontend_config(
             SQLITE_FILENAME
         ));
     }
-    
+
     config.port = port.unwrap_or(config.port);
 
     Ok(config)
 }
-

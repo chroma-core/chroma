@@ -120,7 +120,6 @@ impl Configurable<SqliteDBConfig, SqliteCreationError> for SqliteDb {
         let db = SqliteDb::new(conn, config.hash_type);
 
         db.initialize_migrations_table().await?;
-        println!("HI");
         match config.migration_mode {
             MigrationMode::Apply => {
                 db.apply_all_migration().await?;
