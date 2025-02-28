@@ -373,35 +373,36 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
 
     async def delete_all(
                 self,
-                confirm: bool = False
+                confirm: str = None
         ) -> None:
-            """Delete all the embeddings in this collection.
-            Args:
-                confirm: If False, function raises an Error, this is done to make sure the user wants to confirm deletion.
-            Returns:
-                None
-            Raises:
-                ValueError: If you don't provide confirmation
-            """
+        """Delete all the embeddings in this collection. To confirm you need to set confirm to "I am sure I want to delete all the data in {self.name}!"
+        Args:
+            confirm: If not equal to the confirmation string ""I am sure I want to delete all the data in {self.name}!",
+                    function raises an Error, this is done to make sure the user wants to confirm deletion.
+        Returns:
+            None
+        Raises:
+            ValueError: If you don't provide confirmation
+        """
 
-            if not confirm:
-                raise ValueError(
-                    "You need to confirm deletion of all Embeddings, set confirm to True!"
-                )
+        if confirm != f"I am sure I want to delete all the data in {self.name}!":
+            raise ValueError(
+                "You need to confirm deletion of all embeddings, please enter the correct string!"
+            )
 
-            else:
-                embeddings = await self.get()
-                delete_request = self._validate_and_prepare_delete_request(
-                    ids=embeddings["ids"],
-                    where=None,
-                    where_document=None
-                )
+        else:
+            embeddings = await self.get()
+            delete_request = self._validate_and_prepare_delete_request(
+                ids=embeddings["ids"],
+                where=None,
+                where_document=None
+            )
 
-                await self._client._delete(
-                    collection_id=self.id,
-                    ids=delete_request["ids"],
-                    where=delete_request["where"],
-                    where_document=delete_request["where_document"],
-                    tenant=self.tenant,
-                    database=self.database,
-                )
+            await self._client._delete(
+                collection_id=self.id,
+                ids=delete_request["ids"],
+                where=delete_request["where"],
+                where_document=delete_request["where_document"],
+                tenant=self.tenant,
+                database=self.database,
+            )

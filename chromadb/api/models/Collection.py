@@ -386,20 +386,21 @@ class Collection(CollectionCommon["ServerAPI"]):
 
     def  delete_all(
             self,
-            confirm: bool = False
+            confirm: str = None
     ) -> None:
-        """Delete all the embeddings in this collection.
+        """Delete all the embeddings in this collection. To confirm you need to set confirm to "I am sure I want to delete all the data in {self.name}!"
         Args:
-            confirm: If False, function raises an Error, this is done to make sure the user wants to confirm deletion.
+            confirm: If not equal to the confirmation string ""I am sure I want to delete all the data in {self.name}!",
+                    function raises an Error, this is done to make sure the user wants to confirm deletion.
         Returns:
             None
         Raises:
             ValueError: If you don't provide confirmation
         """
 
-        if not confirm:
+        if confirm != f"I am sure I want to delete all the data in {self.name}!":
             raise ValueError(
-                "You need to confirm deletion of all Embeddings, set confirm to True!"
+                "You need to confirm deletion of all embeddings, please enter the correct string!"
             )
 
         else:

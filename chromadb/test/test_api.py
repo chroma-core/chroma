@@ -378,7 +378,8 @@ def test_delete_all(client):
     collection = client.create_collection("testspace")
     collection.add(**batch_records)
     assert collection.count() == 2
-    assert collection.delete_all(confirm=True) is None
+    assert collection.delete_all(confirm="I am sure I want to delete all the data in testspace!") is None
+    assert collection.count() == 0
 
 def test_collection_delete_with_invalid_collection_throws(client):
     client.reset()
