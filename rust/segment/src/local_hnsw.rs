@@ -8,10 +8,7 @@ use chroma_types::{
     operator::RecordDistance, Chunk, HnswParametersFromSegmentError, LogRecord, Operation,
     OperationRecord, Segment, SegmentUuid, SingleNodeHnswParameters,
 };
-use rayon::{
-    iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator},
-    ThreadPoolBuilder,
-};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use sea_query::{Expr, OnConflict, Query, SqliteQueryBuilder};
 use sea_query_binder::SqlxBinder;
 use serde::{Deserialize, Serialize};
