@@ -32,6 +32,8 @@ spec:
             - name: chroma
               mountPath: /test
           env:
+            - name: CHROMA_API_IMPL
+              value: "chromadb.api.segment.SegmentAPI"
             - name: IS_PERSISTENT
               {{ .Values.frontendService.isPersistent }}
             - name: CHROMA_PRODUCER_IMPL
