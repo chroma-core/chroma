@@ -607,9 +607,10 @@ impl LocalHnswSegmentWriter {
         let index_len = guard.index.len_with_deleted();
         let index_capacity = guard.index.capacity();
         if index_len + hsnw_batch.len() >= index_capacity {
+            let needed_capacity = (index_len + hsnw_batch.len()).next_power_of_two();
             guard
                 .index
-                .resize(index_capacity * 2)
+                .resize(needed_capacity)
                 .map_err(|_| LocalHnswSegmentWriterError::HnswIndexResizeError)?;
         }
         let index_for_pool = &guard.index;
