@@ -19,14 +19,14 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
         self,
         api_key: Optional[str] = None,
         model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
-        api_key_env_var: str = "HUGGINGFACE_CHROMA_API_KEY",
+        api_key_env_var: str = "CHROMA_HUGGINGFACE_API_KEY",
     ):
         """
         Initialize the HuggingFaceEmbeddingFunction.
 
         Args:
             api_key_env_var (str, optional): Environment variable name that contains your API key for the HuggingFace API.
-                Defaults to "HUGGINGFACE_CHROMA_API_KEY".
+                Defaults to "CHROMA_HUGGINGFACE_API_KEY".
             model_name (str, optional): The name of the model to use for text embeddings.
                 Defaults to "sentence-transformers/all-MiniLM-L6-v2".
         """
@@ -59,7 +59,7 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
             Embeddings: The embeddings for the texts.
 
         Example:
-            >>> hugging_face = HuggingFaceEmbeddingFunction(api_key_env_var="HUGGINGFACE_CHROMA_API_KEY")
+            >>> hugging_face = HuggingFaceEmbeddingFunction(api_key_env_var="CHROMA_HUGGINGFACE_API_KEY")
             >>> texts = ["Hello, world!", "How are you?"]
             >>> embeddings = hugging_face(texts)
         """

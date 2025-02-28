@@ -21,13 +21,13 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
         deployment_id: Optional[str] = None,
         default_headers: Optional[Dict[str, str]] = None,
         dimensions: Optional[int] = None,
-        api_key_env_var: str = "OPENAI_CHROMA_API_KEY",
+        api_key_env_var: str = "CHROMA_OPENAI_API_KEY",
     ):
         """
         Initialize the OpenAIEmbeddingFunction.
         Args:
             api_key_env_var (str, optional): Environment variable name that contains your API key for the OpenAI API.
-                Defaults to "OPENAI_CHROMA_API_KEY".
+                Defaults to "CHROMA_OPENAI_API_KEY".
             model_name (str, optional): The name of the model to use for text
                 embeddings. Defaults to "text-embedding-ada-002".
             organization_id(str, optional): The OpenAI organization ID if applicable
