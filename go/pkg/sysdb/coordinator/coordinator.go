@@ -250,3 +250,8 @@ func (s *Coordinator) MarkVersionForDeletion(ctx context.Context, req *coordinat
 func (s *Coordinator) DeleteCollectionVersion(ctx context.Context, req *coordinatorpb.DeleteCollectionVersionRequest) (*coordinatorpb.DeleteCollectionVersionResponse, error) {
 	return s.catalog.DeleteCollectionVersion(ctx, req)
 }
+
+// SetDeleteMode sets the delete mode for testing
+func (c *Coordinator) SetDeleteMode(mode DeleteMode) {
+	c.deleteMode = mode
+}
