@@ -73,8 +73,6 @@ class RustBindingsAPI(ServerAPI):
     def start(self) -> None:
         # Construct the SqliteConfig
         # TOOD: We should add a "config converter"
-        # TODO: How to name this file?
-        # TODO: proper path handling
         if self._system.settings.require("is_persistent"):
             persist_path = self._system.settings.require("persist_directory")
             sqlite_persist_path = persist_path + "/chroma.sqlite3"
@@ -500,7 +498,8 @@ class RustBindingsAPI(ServerAPI):
             CollectionDeleteEvent(
                 # NOTE: the delete amount is not observable from python
                 # TODO: Fix this when posthog is pushed into Rust frontend
-                collection_uuid=str(collection_id), delete_amount=0
+                collection_uuid=str(collection_id),
+                delete_amount=0,
             )
         )
 
