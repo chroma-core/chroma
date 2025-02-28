@@ -14,13 +14,11 @@
     },
     "model_name": {
       "type": "string",
-      "description": "The name of the model to use for text embeddings",
-      "default": "models/embedding-gecko-001"
+      "description": "The name of the model to use for text embeddings"
     },
     "api_key_env_var": {
       "type": "string",
-      "description": "Environment variable name that contains your API key for the Google PaLM API",
-      "default": "GOOGLE_PALM_CHROMA_API_KEY"
+      "description": "Environment variable name that contains your API key for the Google PaLM API"
     }
   },
   "required": [

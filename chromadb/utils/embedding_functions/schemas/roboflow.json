@@ -14,13 +14,11 @@
     },
     "api_url": {
       "type": "string",
-      "description": "Parameter api_url for the roboflow embedding function",
-      "default": "https://infer.roboflow.com"
+      "description": "Parameter api_url for the roboflow embedding function"
     },
     "api_key_env_var": {
       "type": "string",
-      "description": "Parameter api_key_env_var for the roboflow embedding function",
-      "default": "ROBOFLOW_CHROMA_API_KEY"
+      "description": "Parameter api_key_env_var for the roboflow embedding function"
     }
   },
   "required": [

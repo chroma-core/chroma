@@ -7,18 +7,15 @@
   "properties": {
     "model_name": {
       "type": "string",
-      "description": "Parameter model_name for the open_clip embedding function",
-      "default": "ViT-B-32"
+      "description": "Parameter model_name for the open_clip embedding function"
     },
     "checkpoint": {
       "type": "string",
-      "description": "Parameter checkpoint for the open_clip embedding function",
-      "default": "laion2b_s34b_b79k"
+      "description": "Parameter checkpoint for the open_clip embedding function"
     },
     "device": {
       "type": "string",
-      "description": "Parameter device for the open_clip embedding function",
-      "default": "cpu"
+      "description": "Parameter device for the open_clip embedding function"
     }
   },
   "required": [

@@ -14,13 +14,11 @@
     },
     "model_name": {
       "type": "string",
-      "description": "Parameter model_name for the jina embedding function",
-      "default": "jina-embeddings-v2-base-en"
+      "description": "Parameter model_name for the jina embedding function"
     },
     "api_key_env_var": {
       "type": "string",
-      "description": "Parameter api_key_env_var for the jina embedding function",
-      "default": "JINA_CHROMA_API_KEY"
+      "description": "Parameter api_key_env_var for the jina embedding function"
     }
   },
   "required": [

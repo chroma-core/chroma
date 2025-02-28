@@ -14,13 +14,11 @@
     },
     "model_name": {
       "type": "string",
-      "description": "Parameter model_name for the voyageai embedding function",
-      "default": "voyage-large-2"
+      "description": "Parameter model_name for the voyageai embedding function"
     },
     "api_key_env_var": {
       "type": "string",
-      "description": "Parameter api_key_env_var for the voyageai embedding function",
-      "default": "VOYAGE_CHROMA_API_KEY"
+      "description": "Parameter api_key_env_var for the voyageai embedding function"
     }
   },
   "required": [

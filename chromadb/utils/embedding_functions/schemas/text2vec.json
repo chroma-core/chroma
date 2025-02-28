@@ -7,8 +7,7 @@
   "properties": {
     "model_name": {
       "type": "string",
-      "description": "Parameter model_name for the text2vec embedding function",
-      "default": "shibing624/text2vec-base-chinese"
+      "description": "Parameter model_name for the text2vec embedding function"
     }
   },
   "required": [

@@ -14,23 +14,19 @@
     },
     "model_name": {
       "type": "string",
-      "description": "The name of the model to use for text embeddings",
-      "default": "textembedding-gecko"
+      "description": "The name of the model to use for text embeddings"
     },
     "project_id": {
       "type": "string",
-      "description": "The Google Cloud project ID",
-      "default": "cloud-large-language-models"
+      "description": "The Google Cloud project ID"
     },
     "region": {
       "type": "string",
-      "description": "The Google Cloud region",
-      "default": "us-central1"
+      "description": "The Google Cloud region"
     },
     "api_key_env_var": {
       "type": "string",
-      "description": "Environment variable name that contains your API key for the Google Vertex API",
-      "default": "GOOGLE_CHROMA_API_KEY"
+      "description": "Environment variable name that contains your API key for the Google Vertex API"
     }
   },
   "required": [

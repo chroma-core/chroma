@@ -7,13 +7,11 @@
   "properties": {
     "model_name": {
       "type": "string",
-      "description": "Parameter model_name for the instructor embedding function",
-      "default": "BAAI/bge-base-en-v1.5"
+      "description": "Parameter model_name for the instructor embedding function"
     },
     "device": {
       "type": "string",
-      "description": "Parameter device for the instructor embedding function",
-      "default": "cpu"
+      "description": "Parameter device for the instructor embedding function"
     },
     "instruction": {
       "type": "string",
