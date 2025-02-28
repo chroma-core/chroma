@@ -373,6 +373,12 @@ def test_delete_with_index(client):
     assert collection.count() == 2
     collection.query(query_embeddings=[[1.1, 2.3, 3.2]], n_results=1)
 
+def test_delete_all(client):
+    client.reset()
+    collection = client.create_collection("testspace")
+    collection.add(**batch_records)
+    assert collection.count() == 2
+    assert collection.delete_all(confirm=True) is None
 
 def test_collection_delete_with_invalid_collection_throws(client):
     client.reset()

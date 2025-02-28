@@ -1,6 +1,8 @@
 import inspect
 from typing import TYPE_CHECKING, Optional, Union
 
+from certifi import where
+
 from chromadb.api.models.CollectionCommon import CollectionCommon
 from chromadb.api.types import (
     URI,
@@ -381,6 +383,40 @@ class Collection(CollectionCommon["ServerAPI"]):
             tenant=self.tenant,
             database=self.database,
         )
+
+    def  delete_all(
+            self,
+            confirm: bool = False
+    ) -> None:
+        """Delete all the embeddings in this collection.
+        Args:
+            confirm: If False, function raises an Error, this is done to make sure the user wants to confirm deletion.
+        Returns:
+            None
+        Raises:
+            ValueError: If you don't provide confirmation
+        """
+
+        if not confirm:
+            raise ValueError(
+                "You need to confirm deletion of all Embeddings, set confirm to True!"
+            )
+
+        else:
+            delete_request = self._validate_and_prepare_delete_request(
+                ids=self.get()["ids"],
+                where=None,
+                where_document=None
+            )
+
+            self._client._delete(
+                collection_id=self.id,
+                ids=delete_request["ids"],
+                where=delete_request["where"],
+                where_document=delete_request["where_document"],
+                tenant=self.tenant,
+                database=self.database,
+            )
 
 
 class CollectionName(str):
