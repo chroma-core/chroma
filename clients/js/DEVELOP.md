@@ -19,24 +19,24 @@ environment:
 
 To get started developing on the JS client libraries, you'll want to run the examples.
 
-1. `yarn` to install deps.
-1. `yarn build` to build the library.
+1. `pnpm install` to install deps.
+1. `pnpm build` to build the library.
 1. `cd examples/browser` or `cd examples/node`
-1. `yarn` to install example deps.
-1. `yarn dev` to run the example.
+1. `pnpm install` to install example deps.
+1. `pnpm dev` to run the example.
 
 ### Generating REST Client Code
 
 If you modify the REST API, you'll need to regenerate the generated code that underlies the JavaScript client libraries.
 
-1. `yarn` to install deps
-2. `yarn genapi`
-3. Examples are in the `examples` folder. There is one for the browser and one for node. Run them with `yarn dev`, eg `cd examples/browser && yarn dev`
+1. `pnpm install` to install deps
+2. `pnpm genapi`
+3. Examples are in the `examples` folder. There is one for the browser and one for node. Run them with `pnpm dev`, eg `cd examples/browser && pnpm dev`
 
 ### Running tests
 
-`yarn test` will launch a test docker backend, run a db cleanup and run tests.
-`yarn test:run` will run against the docker backend you have running. But CAUTION, it will delete data. This is the easiest and fastest way to run tests.
+`pnpm test` will launch a test docker backend, run a db cleanup and run tests.
+`pnpm test:run` will run against the docker backend you have running. But CAUTION, it will delete data. This is the easiest and fastest way to run tests.
 
 ### Pushing to npm
 
@@ -76,7 +76,7 @@ git push origin js_release_alpha_A.B.C
 
 #### Manually
 
-`npm run release` pushes the `package.json` defined packaged to the package manager for authenticated users. It will build, test, and then publish the new version.
+`pnpm run release` pushes the `package.json` defined packaged to the package manager for authenticated users. It will build, test, and then publish the new version.
 
 ### Useful links
 

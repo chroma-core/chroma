@@ -75,7 +75,9 @@ k8s_yaml(
     'k8s/distributed-chroma',
     namespace='chroma',
     values=[
-      'k8s/distributed-chroma/values.yaml'
+      'k8s/distributed-chroma/values.yaml',
+      # Values for local development, and for CI/CD testing.
+      'k8s/distributed-chroma/values.dev.yaml'
     ]
   )
 )
