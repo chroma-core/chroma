@@ -279,9 +279,9 @@ pub fn vacuum(args: VacuumArgs) {
 
     println!("🧼 {}", "Vacuum complete!".green().bold());
     println!(
-        "Database size reduced by {} (⬇️ {:.1}%)",
+        "Database size reduced by {} (⬇️{:.1}%)",
         sizeof_fmt(size_diff, None).to_string().green(),
-        ((size_diff as f64 * 100.0) / (initial_size as f64))
+        (((size_diff as f64) / (initial_size as f64)) * 100.0)
             .to_string()
             .green()
     );
