@@ -1,12 +1,11 @@
-FROM rust:1.81.0-alpine AS builder
+FROM rust:1.81.0 AS builder
 
 ARG RELEASE_MODE=
 
 WORKDIR /chroma
 
 ENV PROTOC_ZIP=protoc-25.1-linux-x86_64.zip
-RUN apk add curl musl-dev alpine-sdk \
-  && curl -OL https://github.com/protocolbuffers/protobuf/releases/download/v25.1/$PROTOC_ZIP \
+RUN curl -OL https://github.com/protocolbuffers/protobuf/releases/download/v25.1/$PROTOC_ZIP \
   && unzip -o $PROTOC_ZIP -d /usr/local bin/protoc \
   && unzip -o $PROTOC_ZIP -d /usr/local 'include/*' \
   && rm -f $PROTOC_ZIP
@@ -25,7 +24,9 @@ RUN --mount=type=cache,sharing=locked,target=/chroma/target/ \
   if [ "$RELEASE_MODE" = "1" ]; then mv target/release/chroma ./chroma; else mv target/debug/chroma ./chroma; fi
 
 
-FROM scratch AS runner
+FROM debian:stable-slim AS runner
+
+RUN apt-get update && apt-get install -y dumb-init && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /chroma/rust/frontend/sample_configs /sample_configs
 COPY --from=builder /chroma/rust/frontend/sample_configs/docker_single_node.yaml /config.yaml
@@ -33,5 +34,5 @@ COPY --from=builder /chroma/chroma /usr/local/bin/chroma
 
 EXPOSE 8000
 
-ENTRYPOINT [ "chroma" ]
+ENTRYPOINT [ "dumb-init", "--", "chroma" ]
 CMD [ "run", "/config.yaml" ]

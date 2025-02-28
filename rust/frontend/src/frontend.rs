@@ -838,7 +838,6 @@ impl Frontend {
             ..
         }: CountRequest,
     ) -> Result<CountResponse, QueryError> {
-        tracing::info!("Retrying count() request for collection {}", collection_id);
         let collection_and_segments = self
             .collections_with_segments_provider
             .get_collection_with_segments(collection_id)
@@ -903,6 +902,10 @@ impl Frontend {
             .retry(self.collections_with_segments_provider.get_retry_backoff())
             .when(|e| e.code() == ErrorCodes::NotFound)
             .notify(|_, _| {
+                tracing::info!(
+                    "Retrying count() request for collection {}",
+                    request.collection_id
+                );
                 retries.fetch_add(1, Ordering::Relaxed);
             })
             .await;
@@ -926,7 +929,6 @@ impl Frontend {
             ..
         }: GetRequest,
     ) -> Result<GetResponse, QueryError> {
-        tracing::info!("Retrying get() request for collection {}", collection_id);
         let collection_and_segments = self
             .collections_with_segments_provider
             .get_collection_with_segments(collection_id)
@@ -1006,6 +1008,10 @@ impl Frontend {
             .retry(self.collections_with_segments_provider.get_retry_backoff())
             .when(|e| e.code() == ErrorCodes::NotFound)
             .notify(|_, _| {
+                tracing::info!(
+                    "Retrying get() request for collection {}",
+                    request.collection_id
+                );
                 retries.fetch_add(1, Ordering::Relaxed);
             })
             .await;
@@ -1029,7 +1035,6 @@ impl Frontend {
             ..
         }: QueryRequest,
     ) -> Result<QueryResponse, QueryError> {
-        tracing::info!("Retrying query() request for collection {}", collection_id);
         let collection_and_segments = self
             .collections_with_segments_provider
             .get_collection_with_segments(collection_id)
@@ -1121,6 +1126,10 @@ impl Frontend {
             .retry(self.collections_with_segments_provider.get_retry_backoff())
             .when(|e| e.code() == ErrorCodes::NotFound)
             .notify(|_, _| {
+                tracing::info!(
+                    "Retrying query() request for collection {}",
+                    request.collection_id
+                );
                 retries.fetch_add(1, Ordering::Relaxed);
             })
             .await;
