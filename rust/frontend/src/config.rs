@@ -100,6 +100,8 @@ pub struct FrontendServerConfig {
     pub open_telemetry: Option<OpenTelemetryConfig>,
     #[serde(default)]
     pub persist_path: Option<String>,
+    #[serde(default)]
+    pub cors_allow_origins: Option<Vec<String>>,
 }
 
 const DEFAULT_CONFIG_PATH: &str = "sample_configs/distributed.yaml";
