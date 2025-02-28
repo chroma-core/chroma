@@ -343,7 +343,6 @@ impl Bindings {
         tenant: String,
         database: String,
     ) -> ChromaPyResult<bool> {
-        // TODO: Create proper error type for this
         if self.get_max_batch_size() < ids.len() as u32 {
             return Err(WrappedPyErr::from(PyValueError::new_err(format!(
                 "Batch size of {} is greater than max batch size of {}",
@@ -389,7 +388,6 @@ impl Bindings {
         tenant: String,
         database: String,
     ) -> ChromaPyResult<bool> {
-        // TODO: Create proper error type for this
         if self.get_max_batch_size() < ids.len() as u32 {
             return Err(WrappedPyErr::from(PyValueError::new_err(format!(
                 "Batch size of {} is greater than max batch size of {}",
@@ -437,7 +435,6 @@ impl Bindings {
         tenant: String,
         database: String,
     ) -> ChromaPyResult<bool> {
-        // TODO: Create proper error type for this
         if self.get_max_batch_size() < ids.len() as u32 {
             return Err(WrappedPyErr::from(PyValueError::new_err(format!(
                 "Batch size of {} is greater than max batch size of {}",
@@ -482,7 +479,6 @@ impl Bindings {
         tenant: String,
         database: String,
     ) -> ChromaPyResult<()> {
-        // TODO: Rethink the error handling strategy
         let r#where = chroma_types::RawWhereFields::from_json_str(
             r#where.as_deref(),
             where_document.as_deref(),
