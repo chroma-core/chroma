@@ -5,13 +5,6 @@
   "version": "1.0.0",
   "type": "object",
   "properties": {
-    "api_key": {
-      "type": [
-        "string",
-        "null"
-      ],
-      "description": "API key for the Google Generative AI API"
-    },
     "model_name": {
       "type": "string",
       "description": "The name of the model to use for text embeddings"
