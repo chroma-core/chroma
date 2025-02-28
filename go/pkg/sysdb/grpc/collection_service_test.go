@@ -10,6 +10,7 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/grpcutils"
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/coordinator"
+	"github.com/chroma-core/chroma/go/pkg/sysdb/coordinator/model"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dao"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbcore"
 	"github.com/chroma-core/chroma/go/pkg/types"
@@ -484,6 +485,29 @@ func (suite *CollectionServiceTestSuite) TestServer_FlushCollectionCompaction() 
 	}
 	// nothing else should change in DB
 	validateDatabase(suite, collectionID, collection, filePaths)
+
+	// Send FlushCollectionCompaction for a collection that is soft deleted.
+	// It should fail with a failed precondition error.
+	// Create collection and soft-delete it.
+	suite.s.coordinator.SetDeleteMode(coordinator.SoftDelete)
+	collectionID, err = dao.CreateTestCollection(suite.db, "test_flush_collection_compaction_soft_delete", 128, suite.databaseId)
+	suite.NoError(err)
+	suite.s.coordinator.DeleteCollection(context.Background(), &model.DeleteCollection{
+		ID:           types.MustParse(collectionID),
+		DatabaseName: suite.databaseName,
+		TenantID:     suite.tenantName,
+	})
+	// Send FlushCollectionCompaction for the soft-deleted collection.
+	// It should fail with a failed precondition error.
+	req = &coordinatorpb.FlushCollectionCompactionRequest{
+		TenantId:          suite.tenantName,
+		CollectionId:      collectionID,
+		LogPosition:       100,
+		CollectionVersion: 1,
+	}
+	_, err = suite.s.FlushCollectionCompaction(context.Background(), req)
+	suite.Error(err)
+	suite.Equal(status.Error(codes.Code(code.Code_FAILED_PRECONDITION), common.ErrCollectionSoftDeleted.Error()), err)
 
 	// clean up
 	err = dao.CleanUpTestCollection(suite.db, collectionID)
