@@ -3,7 +3,7 @@ use crate::in_memory_log::InMemoryLog;
 use crate::sqlite_log::SqliteLog;
 use crate::types::CollectionInfo;
 use chroma_error::ChromaError;
-use chroma_types::{CollectionUuid, LogRecord, OperationRecord};
+use chroma_types::{CollectionUuid, LogRecord, OperationRecord, ResetError, ResetResponse};
 use std::fmt::Debug;
 
 #[derive(Clone, Debug)]
@@ -129,6 +129,14 @@ impl Log {
                 .map_err(|err| Box::new(err) as Box<dyn ChromaError>),
             Log::Grpc(_) => Ok(100),
             Log::InMemory(_) => todo!(),
+        }
+    }
+
+    pub async fn reset(&mut self) -> Result<ResetResponse, ResetError> {
+        match self {
+            Log::Sqlite(log) => log.reset().await,
+            Log::Grpc(_) => Ok(ResetResponse {}),
+            Log::InMemory(_) => Ok(ResetResponse {}),
         }
     }
 }

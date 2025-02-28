@@ -273,7 +273,9 @@ impl Frontend {
             .await
             .map_err(|err| ResetError::Cache(Box::new(err)))?;
         self.executor.reset().await.map_err(|err| err.boxed())?;
-        self.sysdb_client.reset().await
+        self.sysdb_client.reset().await?;
+        self.log_client.reset().await?;
+        Ok(ResetResponse {})
     }
 
     pub async fn create_tenant(
