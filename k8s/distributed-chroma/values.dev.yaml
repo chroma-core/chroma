@@ -1,0 +1,4 @@
+sysdb:
+  flags:
+    version-file-enabled: true
+

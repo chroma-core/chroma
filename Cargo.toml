@@ -45,11 +45,14 @@ sha2 = "0.10.8"
 md5 = "0.7.0"
 regex = "1.11.1"
 pyo3 = { version = "0.23.3", features = ["abi3-py39"] }
-tower-http = { version = "0.6.2", features = ["trace"] }
+tower-http = { version = "0.6.2", features = ["trace", "cors"] }
 bytemuck = "1.21.0"
+rayon = "1.10.0"
 validator = { version = "0.19", features = ["derive"] }
 rust-embed = { version = "8.5.0", features = ["include-exclude", "debug-embed"] }
 hnswlib = { version = "0.8.0", git = "https://github.com/chroma-core/hnswlib.git" }
+reqwest = { version = "0.12.9" }
+random-port = "0.1.1"
 
 chroma-benchmark = { path = "rust/benchmark" }
 chroma-blockstore = { path = "rust/blockstore" }
@@ -79,7 +82,6 @@ proptest-state-machine = "0.3.0"
 proptest-derive = "0.5.1"
 rand = "0.8.5"
 rand_xorshift = "0.3.0"
-rayon = "1.10.0"
 shuttle = "0.7.1"
 tempfile = "3.14.0"
 itertools = "0.13.0"

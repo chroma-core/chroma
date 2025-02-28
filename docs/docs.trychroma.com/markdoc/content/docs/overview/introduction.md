@@ -85,6 +85,7 @@ Continue with the full [getting started guide](./getting-started).
 | PHP (Laravel) | [from @HelgeSverre](https://github.com/helgeSverre/chromadb)                                                             |
 | Clojure       | [from @levand](https://github.com/levand/clojure-chroma-client)                                                          |
 | R             | [from @cynkra](https://cynkra.github.io/rchroma/)                                                                       |
+| C++           | [from @BlackyDrum](https://github.com/BlackyDrum/chromadb-cpp)                                                           |
 
 
 {% br %}{% /br %}
