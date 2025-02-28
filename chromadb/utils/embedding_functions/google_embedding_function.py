@@ -17,14 +17,14 @@ class GooglePalmEmbeddingFunction(EmbeddingFunction[Documents]):
         self,
         api_key: Optional[str] = None,
         model_name: str = "models/embedding-gecko-001",
-        api_key_env_var: str = "GOOGLE_PALM_CHROMA_API_KEY",
+        api_key_env_var: str = "CHROMA_GOOGLE_PALM_API_KEY",
     ):
         """
         Initialize the GooglePalmEmbeddingFunction.
 
         Args:
             api_key_env_var (str, optional): Environment variable name that contains your API key for the Google PaLM API.
-                Defaults to "GOOGLE_PALM_CHROMA_API_KEY".
+                Defaults to "CHROMA_GOOGLE_PALM_API_KEY".
             model_name (str, optional): The name of the model to use for text embeddings.
                 Defaults to "models/embedding-gecko-001".
         """
@@ -81,8 +81,11 @@ class GooglePalmEmbeddingFunction(EmbeddingFunction[Documents]):
 
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
-        api_key_env_var = config.get("api_key_env_var", "GOOGLE_PALM_CHROMA_API_KEY")
-        model_name = config.get("model_name", "models/embedding-gecko-001")
+        api_key_env_var = config.get("api_key_env_var")
+        model_name = config.get("model_name")
+
+        if api_key_env_var is None or model_name is None:
+            assert False, "This code should not be reached"
 
         return GooglePalmEmbeddingFunction(
             api_key_env_var=api_key_env_var, model_name=model_name
@@ -120,14 +123,14 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
         api_key: Optional[str] = None,
         model_name: str = "models/embedding-001",
         task_type: str = "RETRIEVAL_DOCUMENT",
-        api_key_env_var: str = "GOOGLE_CHROMA_API_KEY",
+        api_key_env_var: str = "CHROMA_GOOGLE_GENAI_API_KEY",
     ):
         """
         Initialize the GoogleGenerativeAiEmbeddingFunction.
 
         Args:
             api_key_env_var (str, optional): Environment variable name that contains your API key for the Google Generative AI API.
-                Defaults to "GOOGLE_CHROMA_API_KEY".
+                Defaults to "CHROMA_GOOGLE_GENAI_API_KEY".
             model_name (str, optional): The name of the model to use for text embeddings.
                 Defaults to "models/embedding-001".
             task_type (str, optional): The task type for the embeddings.
@@ -246,14 +249,14 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
         model_name: str = "textembedding-gecko",
         project_id: str = "cloud-large-language-models",
         region: str = "us-central1",
-        api_key_env_var: str = "GOOGLE_CHROMA_API_KEY",
+        api_key_env_var: str = "CHROMA_GOOGLE_VERTEX_API_KEY",
     ):
         """
         Initialize the GoogleVertexEmbeddingFunction.
 
         Args:
             api_key_env_var (str, optional): Environment variable name that contains your API key for the Google Vertex AI API.
-                Defaults to "GOOGLE_CHROMA_API_KEY".
+                Defaults to "CHROMA_GOOGLE_VERTEX_API_KEY".
             model_name (str, optional): The name of the model to use for text embeddings.
                 Defaults to "textembedding-gecko".
             project_id (str, optional): The Google Cloud project ID.
@@ -317,10 +320,18 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
 
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
-        api_key_env_var = config.get("api_key_env_var", "GOOGLE_CHROMA_API_KEY")
-        model_name = config.get("model_name", "textembedding-gecko")
-        project_id = config.get("project_id", "cloud-large-language-models")
-        region = config.get("region", "us-central1")
+        api_key_env_var = config.get("api_key_env_var")
+        model_name = config.get("model_name")
+        project_id = config.get("project_id")
+        region = config.get("region")
+
+        if (
+            api_key_env_var is None
+            or model_name is None
+            or project_id is None
+            or region is None
+        ):
+            assert False, "This code should not be reached"
 
         return GoogleVertexEmbeddingFunction(
             api_key_env_var=api_key_env_var,
