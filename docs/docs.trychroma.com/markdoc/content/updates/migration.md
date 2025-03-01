@@ -18,6 +18,41 @@ We will aim to provide:
 
 ## Migration Log
 
+### v1.0.0
+
+In this release, we've rewritten much of Chroma in Rust. Performance has significantly improved across the board.
+
+**Chroma in-process changes**
+
+This section is applicable to you if you use Chroma via
+
+```python
+import chromadb
+
+client = chromadb.Client()
+# or
+client = chromadb.EphemeralClient()
+# or
+client = chromadb.PersistentClient()
+```
+
+The new Rust implementation ignores these settings:
+
+- `chroma_server_nofile`
+- `chroma_server_thread_pool_size`
+- `chroma_memory_limit_bytes`
+- `chroma_segment_cache_policy`
+
+**Chroma in Docker changes**
+
+This section is applicable to you if you run Chroma using a Docker container.
+
+The Docker container no longer has built-in auth implementations. Environment variable parameter changes:
+
+- `CHROMA_OTEL_GRANULARITY` is no longer supported.
+- `CHROMA_OTEL_COLLECTION_ENDPOINT` was renamed to `CHROMA_OPEN_TELEMETRY__ENDPOINT`.
+- `CHROMA_OTEL_SERVICE_NAME` was renamed to `CHROMA_OPEN_TELEMETRY__SERVICE_NAME`.
+
 ### v0.6.0
 
 Previously, `list_collections` returned a list of `Collection` objects. This could lead to some errors if any of your collections were created with a custom embedding function (i.e. not the default). So moving forward, `list_collections` will only return collections names.
