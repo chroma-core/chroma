@@ -2,6 +2,7 @@ from chromadb.utils.embedding_functions.embedding_function import (
     EmbeddingFunction,
     Space,
 )
+from chromadb.utils.embedding_functions.schemas import validate_config
 from chromadb.api.types import Embeddings, Documents
 from typing import List, Dict, Any, Optional
 import os
@@ -17,14 +18,14 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
         self,
         api_key: Optional[str] = None,
         model_name: str = "voyage-large-2",
-        api_key_env_var: str = "VOYAGE_API_KEY",
+        api_key_env_var: str = "CHROMA_VOYAGE_API_KEY",
     ):
         """
         Initialize the VoyageAIEmbeddingFunction.
 
         Args:
             api_key_env_var (str, optional): Environment variable name that contains your API key for the VoyageAI API.
-                Defaults to "VOYAGE_API_KEY".
+                Defaults to "CHROMA_VOYAGE_API_KEY".
             model_name (str, optional): The name of the model to use for text embeddings.
                 Defaults to "voyage-large-2".
             api_key (str, optional): API key for the VoyageAI API. If not provided, will look for it in the environment variable.
@@ -94,5 +95,13 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
             )
 
     def validate_config(self, config: Dict[str, Any]) -> None:
-        # TODO: Validate with JSON schema
-        pass
+        """
+        Validate the configuration using the JSON schema.
+
+        Args:
+            config: Configuration to validate
+
+        Raises:
+            ValidationError: If the configuration does not match the schema
+        """
+        validate_config(config, "voyageai")

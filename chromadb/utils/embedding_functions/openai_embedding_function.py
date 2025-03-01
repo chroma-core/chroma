@@ -6,6 +6,7 @@ from chromadb.api.types import Embeddings, Documents
 from typing import List, Dict, Any, Optional
 import os
 import numpy as np
+from chromadb.utils.embedding_functions.schemas import validate_config
 
 
 class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
@@ -20,13 +21,13 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
         deployment_id: Optional[str] = None,
         default_headers: Optional[Dict[str, str]] = None,
         dimensions: Optional[int] = None,
-        api_key_env_var: str = "OPENAI_API_KEY",
+        api_key_env_var: str = "CHROMA_OPENAI_API_KEY",
     ):
         """
         Initialize the OpenAIEmbeddingFunction.
         Args:
             api_key_env_var (str, optional): Environment variable name that contains your API key for the OpenAI API.
-                Defaults to "OPENAI_API_KEY".
+                Defaults to "CHROMA_OPENAI_API_KEY".
             model_name (str, optional): The name of the model to use for text
                 embeddings. Defaults to "text-embedding-ada-002".
             organization_id(str, optional): The OpenAI organization ID if applicable
@@ -186,5 +187,13 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
             )
 
     def validate_config(self, config: Dict[str, Any]) -> None:
-        # TODO: Validate with JSON schema
-        pass
+        """
+        Validate the configuration using the JSON schema.
+
+        Args:
+            config: Configuration to validate
+
+        Raises:
+            ValidationError: If the configuration does not match the schema
+        """
+        validate_config(config, "openai")

@@ -6,6 +6,7 @@ from chromadb.api.types import Embeddings, Documents
 from typing import List, Dict, Any, Optional
 import os
 import numpy as np
+from chromadb.utils.embedding_functions.schemas import validate_config
 
 
 class CohereEmbeddingFunction(EmbeddingFunction[Documents]):
@@ -103,5 +104,13 @@ class CohereEmbeddingFunction(EmbeddingFunction[Documents]):
             )
 
     def validate_config(self, config: Dict[str, Any]) -> None:
-        # TODO validate with json schema
-        pass
+        """
+        Validate the configuration using the JSON schema.
+
+        Args:
+            config: Configuration to validate
+
+        Raises:
+            ValidationError: If the configuration does not match the schema
+        """
+        validate_config(config, "cohere")
