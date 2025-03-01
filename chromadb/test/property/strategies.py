@@ -548,14 +548,19 @@ def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
     key = draw(st.sampled_from(known_keys))
     value = collection.known_metadata_keys[key]
 
-    # This is hacky, but the distributed system does not support $in or $in so we
-    # need to avoid generating these operators for now in that case.
-    # TODO: Remove this once the distributed system supports $in and $nin
-    legal_ops: List[Optional[str]]
-    legal_ops = [None, "$eq", "$ne", "$in", "$nin"]
+    legal_ops: List[Optional[str]] = [None]
 
-    if not isinstance(value, str) and not isinstance(value, bool):
+    if isinstance(value, bool):
+        legal_ops.extend(["$eq", "$ne", "$in", "$nin"])
+    elif isinstance(value, float):
         legal_ops.extend(["$gt", "$lt", "$lte", "$gte"])
+    elif isinstance(value, int):
+        legal_ops.extend(["$gt", "$lt", "$lte", "$gte", "$eq", "$ne", "$in", "$nin"])
+    elif isinstance(value, str):
+        legal_ops.extend(["$eq", "$ne", "$in", "$nin"])
+    else:
+        assert False, f"Unsupported type: {type(value)}"
+
     if isinstance(value, float):
         # Add or subtract a small number to avoid floating point rounding errors
         value = value + draw(st.sampled_from([1e-6, -1e-6]))
