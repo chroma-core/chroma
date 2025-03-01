@@ -66,6 +66,18 @@ This section is applicable to you if you run Chroma using a Docker container.
 
 Settings that you previously provided to the container using environment variables, like `CHROMA_SERVER_CORS_ALLOW_ORIGINS` or `CHROMA_OTEL_COLLECTION_ENDPOINT`, are now provided to the container using a configuration file. See the [Docker documentation](../production/containers/docker#configuration) for more information.
 
+The default data location in the container has changed from `/chroma/chroma` to `/data`. For example, if you previously started the container with:
+
+```terminal
+docker run -p 8000:8000 -v ./chroma:/chroma/chroma chroma-core/chroma
+```
+
+you should now start it with:
+
+```terminal
+docker run -p 8000:8000 -v ./chroma:/data chroma-core/chroma
+```
+
 
 ### v0.6.0
 
