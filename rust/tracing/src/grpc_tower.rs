@@ -5,9 +5,9 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-use tonic::body::BoxBody;
+use tonic::{body::BoxBody, Code, Status};
 use tower::{Layer, Service};
-use tracing::{info_span, Instrument};
+use tracing::{field::Empty, info_span, Instrument, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 const TRACE_ID_HEADER_KEY: &str = "chroma-traceid";
@@ -32,7 +32,10 @@ pub struct GrpcTraceService<S> {
 
 impl<S, ReqBody> Service<http::Request<ReqBody>> for GrpcTraceService<S>
 where
-    S: Service<http::Request<ReqBody>, Response = http::Response<BoxBody>> + Clone + Send + 'static,
+    S: Service<http::Request<ReqBody>, Response = http::Response<BoxBody>, Error = Status>
+        + Clone
+        + Send
+        + 'static,
     S::Future: Send + 'static,
 {
     type Response = S::Response;
@@ -51,6 +54,8 @@ where
             otel.name = format!("Request {}", req.uri().path()),
             grpc.method = ?req.uri().path(),
             grpc.headers = ?req.headers(),
+            grpc.status_code_name = Empty,
+            grpc.status_code_value = Empty,
         );
 
         if let Ok(header) =
@@ -66,6 +71,20 @@ where
         }
 
         let fut = self.inner.call(req);
-        Box::pin(async move { fut.instrument(span).await })
+        Box::pin(
+            async move {
+                let res = fut.await;
+                let span = Span::current();
+                if let Err(status) = res.as_ref() {
+                    span.record("status_code_description", status.code().description());
+                    span.record("status_code_value", status.code() as u8);
+                } else {
+                    span.record("status_code_description", Code::Ok.description());
+                    span.record("status_code_value", Code::Ok as u8);
+                }
+                res
+            }
+            .instrument(span),
+        )
     }
 }

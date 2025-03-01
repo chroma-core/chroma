@@ -442,7 +442,7 @@ impl Configurable<GrpcSysDbConfig> for GrpcSysDb {
     ) -> Result<Self, Box<dyn ChromaError>> {
         let host = &my_config.host;
         let port = &my_config.port;
-        println!("Connecting to sysdb at {}:{}", host, port);
+        tracing::info!("Connecting to sysdb at {}:{}", host, port);
         let connection_string = format!("http://{}:{}", host, port);
         let endpoint = match Endpoint::from_shared(connection_string) {
             Ok(endpoint) => endpoint,
@@ -459,6 +459,7 @@ impl Configurable<GrpcSysDbConfig> for GrpcSysDb {
             .layer(chroma_tracing::GrpcTraceLayer)
             .service(channel);
         let client = SysDbClient::new(channel);
+        let client_ser = ServiceBuilder::new().service(client.clone());
         Ok(GrpcSysDb { client })
     }
 }
