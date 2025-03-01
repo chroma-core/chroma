@@ -22,6 +22,8 @@ We will aim to provide:
 
 In this release, we've rewritten much of Chroma in Rust. Performance has significantly improved across the board.
 
+**Breaking changes**
+
 Chroma no longer provides built-in authentication implementations.
 
 **Chroma in-process changes**
