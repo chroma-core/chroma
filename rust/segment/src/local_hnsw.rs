@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::Path, sync::Arc};
+use std::{collections::HashMap, io::Write, path::Path, sync::Arc};
 
 use chroma_cache::Weighted;
 use chroma_error::{ChromaError, ErrorCodes};
@@ -708,6 +708,7 @@ async fn persist(
         // Using serde_pickle results in lots of small writes
         let mut buffered_file = std::io::BufWriter::new(&mut file);
         serde_pickle::to_writer(&mut buffered_file, &guard.id_map, SerOptions::new())?;
+        buffered_file.flush()?;
     }
     Ok(guard)
 }
