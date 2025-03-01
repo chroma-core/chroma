@@ -47,11 +47,10 @@ The new Rust implementation ignores these settings:
 
 This section is applicable to you if you run Chroma using a Docker container.
 
-The Docker container no longer has built-in auth implementations. Environment variable parameter changes:
+The Docker container no longer has built-in auth implementations.
 
-- `CHROMA_OTEL_GRANULARITY` is no longer supported.
-- `CHROMA_OTEL_COLLECTION_ENDPOINT` was renamed to `CHROMA_OPEN_TELEMETRY__ENDPOINT`.
-- `CHROMA_OTEL_SERVICE_NAME` was renamed to `CHROMA_OPEN_TELEMETRY__SERVICE_NAME`.
+Settings that you previously provided to the container using environment variables, like `CHROMA_SERVER_CORS_ALLOW_ORIGINS` or `CHROMA_OTEL_COLLECTION_ENDPOINT`, are now provided to the container using a configuration file. See the [Docker documentation](../production/containers/docker#configuration) for more information.
+
 
 ### v0.6.0
 

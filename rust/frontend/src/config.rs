@@ -191,4 +191,10 @@ mod tests {
             _ => {}
         }
     }
+
+    #[test]
+    fn single_node_full_config_valid() {
+        let config = FrontendServerConfig::load_from_path("sample_configs/single_node_full.yaml");
+        assert_eq!(config.port, 8000);
+    }
 }
