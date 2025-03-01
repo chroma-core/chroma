@@ -6,12 +6,9 @@ import MarkdocRenderer from "@/components/markdoc/markdoc-renderer";
 export async function generateMetadata({
   params,
 }: {
-  params: { slug: string[] };
+  params: { slug: string };
 }): Promise<Metadata> {
-  const title = `${params.slug[params.slug.length - 1]
-    .split("-")
-    .map((s) => capitalize(s))
-    .join(" ")} - Chroma Docs`;
+  const title = `${capitalize(params.slug)} - Chroma Docs`;
   return {
     title,
   };

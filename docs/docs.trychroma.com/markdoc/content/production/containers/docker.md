@@ -63,6 +63,17 @@ chromaClient.heartbeat()
 If you're using Python, you may want to use the [client-only package](../chroma-server/python-thin-client) for a smaller install size.
 {% /Banner %}
 
+## Configuration
+
+Chroma is configured using a YAML file. Check out [this config file](https://github.com/chroma-core/chroma/blob/main/rust/frontend/sample_configs/single_node_full.yaml) detailing all available options.
+
+To use a custom config file, mount it into the container at `/config.yaml` like so:
+
+```terminal
+echo "allow_reset: true" > config.yaml # the server will now allow clients to reset its state
+docker run -v ./chroma-data:/data -v ./config.yaml:/config.yaml -p 8000:8000 chroma-core/chroma
+```
+
 ## Observability with Docker
 
 Chroma is instrumented with [OpenTelemetry](https://opentelemetry.io/) hooks for observability. OpenTelemetry traces allow you to understand how requests flow through the system and quickly identify bottlenecks. Check out the [observability docs](../administration/observability) for a full explanation of the available parameters.
