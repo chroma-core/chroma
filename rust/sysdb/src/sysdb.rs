@@ -459,7 +459,6 @@ impl Configurable<GrpcSysDbConfig> for GrpcSysDb {
             .layer(chroma_tracing::GrpcTraceLayer)
             .service(channel);
         let client = SysDbClient::new(channel);
-        let client_ser = ServiceBuilder::new().service(client.clone());
         Ok(GrpcSysDb { client })
     }
 }

@@ -5,7 +5,7 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-use tonic::{body::BoxBody, Code, Status};
+use tonic::{body::BoxBody, transport::Error, Code};
 use tower::{Layer, Service};
 use tracing::{field::Empty, info_span, Instrument, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
@@ -32,7 +32,7 @@ pub struct GrpcTraceService<S> {
 
 impl<S, ReqBody> Service<http::Request<ReqBody>> for GrpcTraceService<S>
 where
-    S: Service<http::Request<ReqBody>, Response = http::Response<BoxBody>, Error = Status>
+    S: Service<http::Request<ReqBody>, Response = http::Response<BoxBody>, Error = Error>
         + Clone
         + Send
         + 'static,
@@ -75,9 +75,9 @@ where
             async move {
                 let res = fut.await;
                 let span = Span::current();
-                if let Err(status) = res.as_ref() {
-                    span.record("status_code_description", status.code().description());
-                    span.record("status_code_value", status.code() as u8);
+                if let Err(err) = res.as_ref() {
+                    span.record("status_code_description", err.to_string());
+                    span.record("status_code_value", 0);
                 } else {
                     span.record("status_code_description", Code::Ok.description());
                     span.record("status_code_value", Code::Ok as u8);
