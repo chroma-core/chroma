@@ -703,11 +703,11 @@ async fn persist(
             .map_err(|_| LocalHnswSegmentWriterError::HnswIndexPersistError)?;
         // Persist id map.
         let metadata_file_path = Path::new(path).join(METADATA_FILE);
-        let mut file = tokio::fs::File::create(metadata_file_path)
-            .await?
-            .into_std()
-            .await;
-        serde_pickle::to_writer(&mut file, &guard.id_map, SerOptions::new())?;
+
+        let mut file = std::fs::File::create(metadata_file_path)?;
+        // Using serde_pickle results in lots of small writes
+        let mut buffered_file = std::io::BufWriter::new(&mut file);
+        serde_pickle::to_writer(&mut buffered_file, &guard.id_map, SerOptions::new())?;
     }
     Ok(guard)
 }
