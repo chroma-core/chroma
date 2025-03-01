@@ -127,7 +127,6 @@ const sidebarConfig: AppSection[] = [
         name: "Administration",
         pages: [
           { id: "performance", name: "Performance" },
-          { id: "auth", name: "Auth" },
           { id: "observability", name: "Observability" },
         ],
       },
