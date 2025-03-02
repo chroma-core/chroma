@@ -14,7 +14,6 @@ mod tests {
     use proptest::prelude::*;
     use std::str::FromStr;
     use std::time::Duration;
-    use tracing_subscriber;
     use uuid::Uuid;
 
     // Helper function to create random embeddings
@@ -59,9 +58,6 @@ mod tests {
         let (sender, _receiver) = tokio::sync::oneshot::channel();
         orchestrator.set_result_channel(sender);
         orchestrator.run(system).await?;
-
-        // Wait for GC to complete
-        // let _ = receiver.await?;
 
         Ok(())
     }
