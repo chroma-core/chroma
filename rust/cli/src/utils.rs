@@ -20,7 +20,7 @@ pub const SQLITE_FILENAME: &str = "chroma.sqlite3";
 
 #[derive(Parser, Debug)]
 pub struct LocalFrontendCommandArgs {
-    #[arg(long = "config-path")]
+    #[arg(long = "config")]
     pub config_path: Option<String>,
     #[arg(long = "path")]
     pub persistent_path: Option<String>,
