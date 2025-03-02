@@ -1,6 +1,6 @@
 use chroma_types::{
-    Collection, CollectionUuid, FlushCompactionResponse, GetSegmentsError, Segment,
-    SegmentFlushInfo, SegmentScope, SegmentType, Tenant,
+    Collection, CollectionUuid, FlushCompactionResponse, GetCollectionSizeError, GetSegmentsError,
+    Segment, SegmentFlushInfo, SegmentScope, SegmentType, Tenant,
 };
 use chroma_types::{GetCollectionsError, SegmentUuid};
 use parking_lot::Mutex;
@@ -40,6 +40,15 @@ impl TestSysDb {
         inner
             .collections
             .insert(collection.collection_id, collection);
+    }
+
+    pub fn update_collection_size(&mut self, collection_id: CollectionUuid, collection_size: u64) {
+        let mut inner = self.inner.lock();
+        let coll = inner
+            .collections
+            .get_mut(&collection_id)
+            .expect("Expected collection");
+        coll.total_records_post_compaction = collection_size;
     }
 
     pub fn add_segment(&mut self, segment: Segment) {
@@ -237,5 +246,19 @@ impl TestSysDb {
             results.insert(version_list.collection_id, true);
         }
         results
+    }
+
+    pub(crate) async fn get_collection_size(
+        &self,
+        collection_id: CollectionUuid,
+    ) -> Result<usize, GetCollectionSizeError> {
+        let inner = self.inner.lock();
+        let collection = inner.collections.get(&collection_id);
+        match collection {
+            Some(collection) => Ok(collection.total_records_post_compaction as usize),
+            None => Err(GetCollectionSizeError::NotFound(
+                "Collection not found".to_string(),
+            )),
+        }
     }
 }
