@@ -13,7 +13,7 @@ import {
   MultiGetResponse,
   DeleteParams,
   Embeddings,
-  CollectionParams,
+  CollectionParams, AddResponse,
 } from "./types";
 import { prepareRecordRequest, toArray, toArrayOfArrays } from "./utils";
 import { Api as GeneratedApi } from "./generated";
@@ -55,7 +55,7 @@ export class Collection {
    * @param {Embedding | Embeddings} [params.embeddings] - Optional embeddings of the items to add.
    * @param {Metadata | Metadatas} [params.metadatas] - Optional metadata of the items to add.
    * @param {Document | Documents} [params.documents] - Optional documents of the items to add.
-   * @returns {Promise<AddResponse>} - The response from the API. True if successful.
+   * @returns {Promise<void>}
    *
    * @example
    * ```typescript
@@ -232,7 +232,7 @@ export class Collection {
    * @param {WhereDocument} [params.whereDocument] - Optional query condition to filter results based on document content.
    * @param {IncludeEnum[]} [params.include] - Optional array of fields to include in the result, such as "metadata" and "document".
    *
-   * @returns {Promise<QueryResponse>} A promise that resolves to the query results.
+   * @returns {Promise<MultiQueryResponse>} A promise that resolves to the query results.
    * @throws {Error} If there is an issue executing the query.
    * @example
    * // Query the collection using embeddings
@@ -295,7 +295,7 @@ export class Collection {
    * @param {Object} params - The parameters for the query.
    * @param {string} [params.name] - Optional new name for the collection.
    * @param {CollectionMetadata} [params.metadata] - Optional new metadata for the collection.
-   * @returns {Promise<void>} - The response from the API.
+   * @returns {Promise<CollectionParams>} - The response from the API.
    *
    * @example
    * ```typescript
@@ -342,7 +342,7 @@ export class Collection {
    * Peek inside the collection
    * @param {Object} params - The parameters for the query.
    * @param {PositiveInteger} [params.limit] - Optional number of results to return (default is 10).
-   * @returns {Promise<GetResponse>} A promise that resolves to the query results.
+   * @returns {Promise<MultiGetResponse>} A promise that resolves to the query results.
    * @throws {Error} If there is an issue executing the query.
    *
    * @example
@@ -371,7 +371,7 @@ export class Collection {
    * @param {ID | IDs} [params.ids] - Optional ID or array of IDs of items to delete.
    * @param {Where} [params.where] - Optional query condition to filter items to delete based on metadata values.
    * @param {WhereDocument} [params.whereDocument] - Optional query condition to filter items to delete based on document content.
-   * @returns {Promise<string[]>} A promise that resolves to the IDs of the deleted items.
+   * @returns {Promise<void>} A promise that resolves to the IDs of the deleted items.
    * @throws {Error} If there is an issue deleting items from the collection.
    *
    * @example
