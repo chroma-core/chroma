@@ -96,6 +96,7 @@ func New(config Config) (*Server, error) {
 }
 
 func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider) (*Server, error) {
+	log.Info("Creating new GRPC server with config", zap.Any("config", config))
 	ctx := context.Background()
 	s := &Server{
 		healthServer: health.NewServer(),
@@ -120,6 +121,7 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider) (*Serve
 	if err != nil {
 		return nil, err
 	}
+
 	coordinator, err := coordinator.NewCoordinator(ctx, deleteMode, s3MetaStore, config.VersionFileEnabled)
 	if err != nil {
 		return nil, err
@@ -151,14 +153,16 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider) (*Serve
 			return nil, err
 		}
 
+		log.Info("Starting soft delete cleaner", zap.Duration("cleanup_interval", s.softDeleteCleaner.cleanupInterval), zap.Duration("max_age", s.softDeleteCleaner.maxAge), zap.Uint("limit_per_check", s.softDeleteCleaner.limitPerCheck))
+		s.softDeleteCleaner.Start()
+
+		log.Info("Starting GRPC server")
 		s.grpcServer, err = provider.StartGrpcServer("coordinator", config.GrpcConfig, func(registrar grpc.ServiceRegistrar) {
 			coordinatorpb.RegisterSysDBServer(registrar, s)
 		})
 		if err != nil {
 			return nil, err
 		}
-
-		s.softDeleteCleaner.Start()
 	}
 	return s, nil
 }
