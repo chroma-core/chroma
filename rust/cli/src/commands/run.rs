@@ -52,3 +52,52 @@ pub fn run(args: RunArgs) {
         frontend_service_entrypoint_with_config(Arc::new(()), Arc::new(()), (), config).await;
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::Value;
+    use std::panic;
+    use std::thread;
+
+    #[tokio::test]
+    async fn test_run() {
+        let args = RunArgs {
+            frontend_args: LocalFrontendCommandArgs {
+                config_path: None,
+                persistent_path: None,
+            },
+            port: None,
+        };
+
+        let handle = thread::spawn(move || {
+            let result = panic::catch_unwind(|| {
+                run(args);
+            });
+            result.unwrap();
+        });
+
+        let url = "http://localhost:8000/api/v2/heartbeat";
+        let heartbeat_key = "nanosecond heartbeat";
+
+        let response = reqwest::get(url)
+            .await
+            .expect("Failed to send heartbeat request");
+
+        assert!(response.status().is_success(), "Heartbeat request failed");
+
+        let body = response.text().await.expect("Failed to read response body");
+
+        let response_json =
+            serde_json::from_str::<Value>(&body).expect("Failed to deserialize response");
+
+        let heartbeat = response_json
+            .get(heartbeat_key)
+            .and_then(Value::as_u64)
+            .expect("Heartbeat not found or not a u64");
+
+        assert!(heartbeat > 0, "Heartbeat not found");
+
+        std::mem::forget(handle);
+    }
+}
