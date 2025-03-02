@@ -26,7 +26,7 @@ RUN --mount=type=cache,sharing=locked,target=/chroma/target/ \
 
 FROM debian:stable-slim AS runner
 
-RUN apt-get update && apt-get install -y dumb-init && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y dumb-init libssl3 && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /chroma/rust/frontend/sample_configs /sample_configs
 COPY --from=builder /chroma/rust/frontend/sample_configs/docker_single_node.yaml /config.yaml
@@ -35,4 +35,4 @@ COPY --from=builder /chroma/chroma /usr/local/bin/chroma
 EXPOSE 8000
 
 ENTRYPOINT [ "dumb-init", "--", "chroma" ]
-CMD [ "run", "/config.yaml" ]
+CMD [ "run", "--config", "/config.yaml" ]

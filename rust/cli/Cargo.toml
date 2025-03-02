@@ -22,6 +22,7 @@ colored = "3.0.0"
 dialoguer = "0.11.0"
 indicatif.workspace = true
 serde_json.workspace = true
+reqwest = "0.12.12"
 
 [[bin]]
 name = "chroma"
