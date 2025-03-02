@@ -247,15 +247,24 @@ def test_create_get_delete_collections(sysdb: SysDB) -> None:
     assert by_id_result == []
 
     # Check that the segment was deleted
-    by_collection_result = sysdb.get_segments(collection=c1.id)
     # Note: Segments are not immediately deleted because of soft deletes.
     # They are deleted by the clean up thread in sysdb.
-    assert len(by_collection_result) >= 0
+    # in order to avoid flaky tests, we wait until the segments are deleted.
 
-    # Wait for cleanup thread to run
-    time.sleep(5)
+    # Poll until segments are deleted or timeout occurs
+    start_time = time.time()
+    timeout = 30  # Maximum wait time in seconds
+    poll_interval = 1  # Time between checks in seconds
 
-    # Check that all segments are deleted
+    while time.time() - start_time < timeout:
+        by_collection_result = sysdb.get_segments(collection=c1.id)
+        if len(by_collection_result) == 0:
+            break
+        time.sleep(poll_interval)
+    else:
+        raise TimeoutError(f"Segments were not deleted within {timeout} seconds")
+
+    # Verify that all segments are deleted
     by_collection_result = sysdb.get_segments(collection=c1.id)
     assert len(by_collection_result) == 0
 
