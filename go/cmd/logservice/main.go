@@ -35,8 +35,9 @@ func main() {
 	log.Info("Starting log service")
 	config := configuration.NewLogServiceConfiguration()
 	err := otel.InitTracing(ctx, &otel.TracingConfig{
-		Service:  "log-service",
-		Endpoint: config.OPTL_TRACING_ENDPOINT,
+		Service:        "log-service",
+		TraceEndpoint:  config.OPTL_TRACING_ENDPOINT,
+		MetricEndpoint: config.OPTL_METRIC_ENDPOINT,
 	})
 	if err != nil {
 		log.Fatal("failed to initialize tracing", zap.Error(err))
