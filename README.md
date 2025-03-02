@@ -15,7 +15,7 @@
       <img src="https://img.shields.io/static/v1?label=license&message=Apache 2.0&color=white" alt="License">
   </a> |
   <a href="https://docs.trychroma.com/" target="_blank">
-      Docs
+      <img src="https://img.shields.io/badge/docs-up-green" alt="Docs">
   </a> |
   <a href="https://www.trychroma.com/" target="_blank">
       Homepage
