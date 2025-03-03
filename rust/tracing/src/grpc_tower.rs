@@ -5,9 +5,9 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-use tonic::body::BoxBody;
+use tonic::{body::BoxBody, transport::Error, Code};
 use tower::{Layer, Service};
-use tracing::{info_span, Instrument};
+use tracing::{field::Empty, info_span, Instrument, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 const TRACE_ID_HEADER_KEY: &str = "chroma-traceid";
@@ -32,7 +32,10 @@ pub struct GrpcTraceService<S> {
 
 impl<S, ReqBody> Service<http::Request<ReqBody>> for GrpcTraceService<S>
 where
-    S: Service<http::Request<ReqBody>, Response = http::Response<BoxBody>> + Clone + Send + 'static,
+    S: Service<http::Request<ReqBody>, Response = http::Response<BoxBody>, Error = Error>
+        + Clone
+        + Send
+        + 'static,
     S::Future: Send + 'static,
 {
     type Response = S::Response;
@@ -51,6 +54,8 @@ where
             otel.name = format!("Request {}", req.uri().path()),
             grpc.method = ?req.uri().path(),
             grpc.headers = ?req.headers(),
+            grpc.status_description = Empty,
+            grpc.status_code_value = Empty,
         );
 
         if let Ok(header) =
@@ -66,6 +71,42 @@ where
         }
 
         let fut = self.inner.call(req);
-        Box::pin(async move { fut.instrument(span).await })
+        Box::pin(
+            async move {
+                let span = Span::current();
+                let res = fut.await;
+                match res.as_ref() {
+                    Ok(resp) => match resp.headers().get("grpc-status") {
+                        Some(val) => match val
+                            .to_str()
+                            .map_err(|e| e.to_string())
+                            .and_then(|s| s.parse::<u8>().map_err(|e| e.to_string()))
+                        {
+                            Ok(code) => {
+                                span.record(
+                                    "grpc.status_description",
+                                    Code::from_i32(code as i32).description(),
+                                );
+                                span.record("grpc.status_code_value", code);
+                            }
+                            Err(err) => {
+                                span.record("grpc.status_description", err);
+                                span.record("grpc.status_code_value", Code::InvalidArgument as u8);
+                            }
+                        },
+                        None => {
+                            span.record("grpc.status_description", Code::Ok.description());
+                            span.record("grpc.status_code_value", Code::Ok as u8);
+                        }
+                    },
+                    Err(err) => {
+                        span.record("grpc.status_description", err.to_string());
+                        span.record("grpc.status_code_value", Code::Internal as u8);
+                    }
+                }
+                res
+            }
+            .instrument(span),
+        )
     }
 }

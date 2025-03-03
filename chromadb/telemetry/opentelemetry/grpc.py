@@ -67,6 +67,7 @@ class OtelInterceptor(
                 if hasattr(result, "details") and result.details():
                     span.set_attribute("rpc.detail", result.details())
                 span.set_attribute("rpc.status_code", result.code().name.lower())
+                span.set_attribute("rpc.status_code_value", result.code().value[0])
                 # Set span status based on gRPC call result
                 if result.code() != grpc.StatusCode.OK:
                     span.set_status(StatusCode.ERROR, description=str(result.code()))
