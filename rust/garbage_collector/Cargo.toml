@@ -53,3 +53,4 @@ chroma-index = {workspace = true}
 [dev-dependencies]
 proptest = { workspace = true }
 rand = { workspace = true }
+tokio-test = "0.4"
