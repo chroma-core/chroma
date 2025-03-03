@@ -1,4 +1,4 @@
-from typing import Generator, cast
+from typing import Generator, cast, Any
 import numpy as np
 import pytest
 import chromadb
@@ -26,6 +26,17 @@ class hashing_multimodal_ef(EmbeddingFunction[Embeddable]):
         # This is so we can generate random unit vectors and have them be close to the embeddings
         embeddings /= np.linalg.norm(embeddings, axis=1, keepdims=True)  # type: ignore[misc]
         return cast(Embeddings, embeddings.tolist())
+
+    @staticmethod
+    def name() -> str:
+        return "hashing_multimodal_ef"
+
+    @staticmethod
+    def build_from_config(config: dict[str, Any]) -> "EmbeddingFunction[Embeddable]":
+        return hashing_multimodal_ef()
+
+    def get_config(self) -> dict[str, Any]:
+        return {}
 
 
 def random_image() -> Image:

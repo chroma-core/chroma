@@ -462,6 +462,16 @@ class IndexMetadata(TypedDict):
 
 @runtime_checkable
 class EmbeddingFunction(Protocol[D]):
+    """
+    A protocol for embedding functions. To implement a new embedding function,
+    you need to implement the following methods at minimum:
+    - __init__
+    - __call__
+    - name
+    - build_from_config
+    - get_config
+    """
+
     @abstractmethod
     def __call__(self, input: D) -> Embeddings:
         ...
@@ -482,6 +492,15 @@ class EmbeddingFunction(Protocol[D]):
         self, input: D, **retry_kwargs: Dict[str, Any]
     ) -> Embeddings:
         return cast(Embeddings, retry(**retry_kwargs)(self.__call__)(input))
+
+    @abstractmethod
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        """
+        Initialize the embedding function.
+        Pass any arguments that will be needed to build the embedding function
+        config.
+        """
+        ...
 
     @staticmethod
     @abstractmethod
