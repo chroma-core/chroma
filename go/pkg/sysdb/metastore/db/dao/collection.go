@@ -233,7 +233,7 @@ func (s *collectionDb) CountCollections(tenantID string, databaseName *string) (
 	var count int64
 	query := s.db.Table("collections").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
-		Where("databases.tenant_id = ?", tenantID)
+		Where("databases.tenant_id = ? AND collections.is_deleted = ?", tenantID, false)
 
 	if databaseName != nil {
 		query = query.Where("databases.name = ?", databaseName)

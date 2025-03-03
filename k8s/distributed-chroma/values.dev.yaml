@@ -1,4 +1,6 @@
 sysdb:
   flags:
     version-file-enabled: true
+    soft-delete-max-age: 1s
+    soft-delete-cleanup-interval: 2s
 
