@@ -2,6 +2,31 @@
 
 This readme is helpful for local dev.
 
+### Monorepo Structure
+
+This project is now structured as a monorepo with multiple packages:
+
+- `packages/chromadb-core`: Internal package with shared code (not published)
+- `packages/chromadb`: Public package with bundled dependencies for embedding models
+- `packages/chromadb-client`: Public package with peer dependencies for embedding models
+
+### Building
+
+To build all packages:
+```bash
+pnpm build
+```
+
+To build just the core package:
+```bash
+pnpm build:core
+```
+
+To build the public packages:
+```bash
+pnpm build:packages
+```
+
 ### Prereqs:
 
 - Make sure you have Java installed (for the generator). You can download it from [java.com](https://java.com)
@@ -46,6 +71,12 @@ If you modify the REST API, you'll need to regenerate the generated code that un
 
 1. Create a new PR for the release that upgrades the version in code. Name it `js_release/A.B.C` for production releases and `js_release_alpha/A.B.C` for alpha releases. In the package.json update the version number to the new version. For production releases this is just the version number, for alpha
    releases this is the version number with '-alphaX' appended to it. For example, if the current version is 1.0.0, the alpha release would be 1.0.0-alpha1 for the first alpha release, 1.0.0-alpha2 for the second alpha release, etc.
+
+   **Important:** Make sure to update version numbers in all package.json files:
+   - packages/chromadb-core/package.json
+   - packages/chromadb/package.json
+   - packages/chromadb-client/package.json
+
 2. Add the "release" label to this PR
 3. Once the PR is merged, tag your commit SHA with the release version
 
@@ -76,7 +107,7 @@ git push origin js_release_alpha_A.B.C
 
 #### Manually
 
-`pnpm run release` pushes the `package.json` defined packaged to the package manager for authenticated users. It will build, test, and then publish the new version.
+`pnpm publish:packages` pushes the public packages to the package manager for authenticated users.
 
 ### Useful links
 

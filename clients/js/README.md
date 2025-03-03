@@ -15,6 +15,16 @@ This package gives you a JS/TS interface to talk to a backend Chroma DB over RES
 
 Chroma needs to be running in order for this client to talk to it. Please see the [🧪 Usage Guide](https://docs.trychroma.com/guides) to learn how to quickly stand this up.
 
+## Available Packages
+
+This repository is structured as a monorepo with multiple packages:
+
+- `chromadb`: The main package with bundled dependencies for embedding models
+- `chromadb-client`: An alternative package with peer dependencies for embedding models
+
+Choose `chromadb` if you want a simpler setup with all dependencies included.
+Choose `chromadb-client` if you want to manage embedding model dependencies yourself.
+
 ## Small example
 
 ```js

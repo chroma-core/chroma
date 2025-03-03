@@ -1,0 +1,46 @@
+{
+  "name": "chromadb",
+  "version": "1.10.4",
+  "description": "A JavaScript interface for chroma - With bundled dependencies",
+  "type": "module",
+  "main": "dist/cjs/chromadb.cjs",
+  "types": "dist/chromadb.d.ts",
+  "module": "dist/chromadb.legacy-esm.js",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/chromadb.d.ts",
+        "default": "./dist/chromadb.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/chromadb.d.cts",
+        "default": "./dist/cjs/chromadb.cjs"
+      }
+    }
+  },
+  "files": [
+    "src",
+    "dist"
+  ],
+  "scripts": {
+    "prebuild": "rimraf dist",
+    "build": "tsup"
+  },
+  "engines": {
+    "node": ">=14.17.0"
+  },
+  "dependencies": {
+    "@internal/chromadb-core": "workspace:*",
+    "@google/generative-ai": "^0.1.1",
+    "cohere-ai": "^7.0.0",
+    "openai": "^4.0.0",
+    "voyageai": "^0.0.3-1",
+    "ollama": "^0.5.0"
+  },
+  "devDependencies": {
+    "rimraf": "^5.0.0",
+    "tsup": "^7.2.0",
+    "typescript": "^5.0.4"
+  },
+  "license": "Apache-2.0"
+}
