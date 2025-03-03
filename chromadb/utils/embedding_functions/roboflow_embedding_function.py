@@ -1,7 +1,3 @@
-from chromadb.utils.embedding_functions.embedding_function import (
-    EmbeddingFunction,
-    Space,
-)
 from chromadb.utils.embedding_functions.schemas import validate_config
 from chromadb.api.types import (
     Documents,
@@ -10,6 +6,8 @@ from chromadb.api.types import (
     is_document,
     is_image,
     Embeddable,
+    EmbeddingFunction,
+    Space,
 )
 from typing import List, Dict, Any, Union, cast, Optional
 import os

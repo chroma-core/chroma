@@ -20,6 +20,8 @@ from chromadb.types import (
 )
 from inspect import signature
 from tenacity import retry
+from abc import abstractmethod
+
 
 # Re-export types from chromadb.types
 __all__ = ["Metadata", "Where", "WhereDocument", "UpdateCollectionMetadata"]
@@ -49,6 +51,12 @@ PyEmbedding = PyVector
 PyEmbeddings = List[PyEmbedding]
 Embedding = Vector
 Embeddings = List[Embedding]
+
+
+class Space(Enum):
+    COSINE = "cosine"
+    L2 = "l2"
+    INNER_PRODUCT = "inner_product"
 
 
 def normalize_embeddings(
@@ -454,6 +462,19 @@ class IndexMetadata(TypedDict):
 
 @runtime_checkable
 class EmbeddingFunction(Protocol[D]):
+    """
+    A protocol for embedding functions. To implement a new embedding function,
+    you need to implement the following methods at minimum:
+    - __call__
+
+    For future compatibility, it is strongly recommended to also implement:
+    - __init__
+    - name
+    - build_from_config
+    - get_config
+    """
+
+    @abstractmethod
     def __call__(self, input: D) -> Embeddings:
         ...
 
@@ -473,6 +494,111 @@ class EmbeddingFunction(Protocol[D]):
         self, input: D, **retry_kwargs: Dict[str, Any]
     ) -> Embeddings:
         return cast(Embeddings, retry(**retry_kwargs)(self.__call__)(input))
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        """
+        Initialize the embedding function.
+        Pass any arguments that will be needed to build the embedding function
+        config.
+
+        Note: This method is provided for backward compatibility.
+        Future implementations should override this method.
+        """
+        import warnings
+
+        warnings.warn(
+            f"The class {self.__class__.__name__} does not implement __init__. "
+            "This will be required in a future version.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
+    @staticmethod
+    def name() -> str:
+        """
+        Return the name of the embedding function.
+
+        Note: This method is provided for backward compatibility.
+        Future implementations should override this method.
+        """
+        import warnings
+
+        warnings.warn(
+            "The EmbeddingFunction class does not implement name(). "
+            "This will be required in a future version.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        raise NotImplementedError(
+            "name() is not implemented for this embedding function."
+        )
+
+    def default_space(self) -> Space:
+        """
+        Return the default space for the embedding function.
+        """
+        return Space.COSINE
+
+    def supported_spaces(self) -> List[Space]:
+        """
+        Return the supported spaces for the embedding function.
+        """
+        return [Space.COSINE, Space.L2, Space.INNER_PRODUCT]
+
+    @staticmethod
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[D]":
+        """
+        Build the embedding function from a config, which will be used to
+        deserialize the embedding function.
+
+        Note: This method is provided for backward compatibility.
+        Future implementations should override this method.
+        """
+        import warnings
+
+        warnings.warn(
+            "The EmbeddingFunction class does not implement build_from_config(). "
+            "This will be required in a future version.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        raise NotImplementedError(
+            "build_from_config() is not implemented for this embedding function."
+        )
+
+    def get_config(self) -> Dict[str, Any]:
+        """
+        Return the config for the embedding function, which will be used to
+        serialize the embedding function.
+
+        Note: This method is provided for backward compatibility.
+        Future implementations should override this method.
+        """
+        import warnings
+
+        warnings.warn(
+            f"The class {self.__class__.__name__} does not implement get_config(). "
+            "This will be required in a future version.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        raise NotImplementedError(
+            "get_config() is not implemented for this embedding function."
+        )
+
+    def validate_config_update(
+        self, old_config: Dict[str, Any], new_config: Dict[str, Any]
+    ) -> None:
+        """
+        Validate the update to the config.
+        """
+        return
+
+    def validate_config(self, config: Dict[str, Any]) -> None:
+        """
+        Validate the config.
+        """
+        return
 
 
 def validate_embedding_function(
@@ -836,7 +962,8 @@ def validate_batch(
 
 
 def convert_np_embeddings_to_list(embeddings: Embeddings) -> PyEmbeddings:
-    return [embedding.tolist() for embedding in embeddings]
+    # Cast the result to PyEmbeddings to ensure type compatibility
+    return cast(PyEmbeddings, [embedding.tolist() for embedding in embeddings])
 
 
 def convert_list_embeddings_to_np(embeddings: PyEmbeddings) -> Embeddings:

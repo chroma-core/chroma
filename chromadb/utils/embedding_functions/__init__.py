@@ -1,9 +1,5 @@
 from typing import Dict, Any, Type, Set
-from chromadb.utils.embedding_functions.embedding_function import (
-    EmbeddingFunction,
-    Space,
-)
-from chromadb.api.types import Embeddable, Documents, Embeddings
+from chromadb.api.types import EmbeddingFunction, Embeddings, Documents, Embeddable
 
 # Import all embedding functions
 from chromadb.utils.embedding_functions.cohere_embedding_function import (
@@ -78,6 +74,7 @@ _all_classes: Set[str] = {
     "Text2VecEmbeddingFunction",
     "AmazonBedrockEmbeddingFunction",
     "ChromaLangchainEmbeddingFunction",
+    "DefaultEmbeddingFunction",
 }
 
 
@@ -173,7 +170,7 @@ def config_to_embedding_function(
 
 __all__ = [
     "EmbeddingFunction",
-    "Space",
+    "DefaultEmbeddingFunction",
     "CohereEmbeddingFunction",
     "OpenAIEmbeddingFunction",
     "HuggingFaceEmbeddingFunction",
