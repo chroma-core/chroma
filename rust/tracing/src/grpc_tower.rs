@@ -52,10 +52,10 @@ where
         let span = info_span!(
             "grpc_request",
             otel.name = format!("Request {}", req.uri().path()),
-            grpc.method = ?req.uri().path(),
-            grpc.headers = ?req.headers(),
-            grpc.status_description = Empty,
-            grpc.status_code_value = Empty,
+            rpc.method = ?req.uri().path(),
+            rpc.headers = ?req.headers(),
+            rpc.status_description = Empty,
+            rpc.status_code_value = Empty,
         );
 
         if let Ok(header) =
@@ -83,25 +83,35 @@ where
                             .and_then(|s| s.parse::<u8>().map_err(|e| e.to_string()))
                         {
                             Ok(code) => {
+                                let code_enum = Code::from_i32(code as i32);
                                 span.record(
-                                    "grpc.status_description",
-                                    Code::from_i32(code as i32).description(),
+                                    "rpc.status_description",
+                                    format!("[{:?}] {}", code_enum, code_enum),
                                 );
-                                span.record("grpc.status_code_value", code);
+                                span.record("rpc.status_code_value", code);
                             }
                             Err(err) => {
-                                span.record("grpc.status_description", err);
-                                span.record("grpc.status_code_value", Code::InvalidArgument as u8);
+                                span.record(
+                                    "rpc.status_description",
+                                    format!("[StatusCodeParsingError] {err}"),
+                                );
+                                span.record("rpc.status_code_value", Code::InvalidArgument as u8);
                             }
                         },
                         None => {
-                            span.record("grpc.status_description", Code::Ok.description());
-                            span.record("grpc.status_code_value", Code::Ok as u8);
+                            span.record(
+                                "rpc.status_description",
+                                format!("[{:?}] {}", Code::Ok, Code::Ok),
+                            );
+                            span.record("rpc.status_code_value", Code::Ok as u8);
                         }
                     },
                     Err(err) => {
-                        span.record("grpc.status_description", err.to_string());
-                        span.record("grpc.status_code_value", Code::Internal as u8);
+                        span.record(
+                            "rpc.status_description",
+                            format!("[HttpResponseError] {err}"),
+                        );
+                        span.record("rpc.status_code_value", Code::Internal as u8);
                     }
                 }
                 res
