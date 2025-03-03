@@ -8,10 +8,18 @@ def find_chroma_cli_binary():
     """
     Look for the chroma binary in the default install locations.
     """
-    default_paths = [
-        "/usr/local/bin/chroma",
-        os.path.expanduser("~/.local/bin/chroma")
-    ]
+    default_paths = []
+    if platform.system() == "Windows":
+        default_paths.extend([
+            os.path.join(os.environ.get("ProgramFiles", "C:\\Program Files"), "Chroma", "chroma.exe"),
+            os.path.join(os.environ.get("USERPROFILE", ""), "bin", "chroma.exe")
+        ])
+    else:
+        default_paths = [
+            "/usr/local/bin/chroma",
+            os.path.expanduser("~/.local/bin/chroma")
+        ]
+
     for path in default_paths:
         if os.path.isfile(path) and os.access(path, os.X_OK):
             return path

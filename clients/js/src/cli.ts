@@ -6,10 +6,20 @@ import { spawnSync } from 'child_process';
 import process from 'process';
 
 function findChromaCliBinary(): string | null {
-    const defaultPaths: string[] = [
-        '/usr/local/bin/chroma',
-        path.join(os.homedir(), '.local/bin/chroma')
-    ];
+    let defaultPaths: string[] = [];
+
+    if (process.platform === 'win32') {
+        defaultPaths = [
+            path.join(process.env['ProgramFiles'] || 'C:\\Program Files', 'Chroma', 'chroma.exe'),
+            path.join(process.env['USERPROFILE'] || '', 'bin', 'chroma.exe')
+        ];
+    } else {
+        defaultPaths = [
+            '/usr/local/bin/chroma',
+            path.join(os.homedir(), '.local/bin/chroma')
+        ];
+    }
+
     for (const p of defaultPaths) {
         try {
             if (fs.existsSync(p)) {
