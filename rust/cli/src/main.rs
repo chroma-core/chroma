@@ -1,3 +1,5 @@
+#![windows_subsystem = "console"]
+
 mod commands;
 mod utils;
 
