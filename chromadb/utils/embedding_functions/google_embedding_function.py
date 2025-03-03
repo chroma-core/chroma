@@ -1,8 +1,4 @@
-from chromadb.utils.embedding_functions.embedding_function import (
-    EmbeddingFunction,
-    Space,
-)
-from chromadb.api.types import Embeddings, Documents
+from chromadb.api.types import Embeddings, Documents, EmbeddingFunction, Space
 from typing import List, Dict, Any, cast, Optional
 import os
 import numpy as np

@@ -1,9 +1,5 @@
-from chromadb.utils.embedding_functions.embedding_function import (
-    EmbeddingFunction,
-    Space,
-)
+from chromadb.api.types import Embeddings, Documents, EmbeddingFunction, Space
 from chromadb.utils.embedding_functions.schemas import validate_config
-from chromadb.api.types import Embeddings, Documents
 from typing import List, Dict, Any
 import numpy as np
 from urllib.parse import urlparse
