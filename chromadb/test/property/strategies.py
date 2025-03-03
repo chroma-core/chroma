@@ -232,35 +232,10 @@ class hashing_embedding_function(types.EmbeddingFunction[Documents]):
     def __repr__(self) -> str:
         return f"hashing_embedding_function(dim={self.dim}, dtype={self.dtype})"
 
-    @staticmethod
-    def name() -> str:
-        return "hashing_embedding_function"
-
-    @staticmethod
-    def build_from_config(config: dict[str, Any]) -> "EmbeddingFunction[Documents]":
-        return hashing_embedding_function(config["dim"], config["dtype"])
-
-    def get_config(self) -> dict[str, Any]:
-        return {"dim": self.dim, "dtype": self.dtype}
-
 
 class not_implemented_embedding_function(types.EmbeddingFunction[Documents]):
     def __call__(self, input: Documents) -> Embeddings:
         assert False, "This embedding function is not implemented"
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        pass
-
-    @staticmethod
-    def name() -> str:
-        return "not_implemented_embedding_function"
-
-    @staticmethod
-    def build_from_config(config: dict[str, Any]) -> "EmbeddingFunction[Documents]":
-        return not_implemented_embedding_function()
-
-    def get_config(self) -> dict[str, Any]:
-        return {}
 
 
 def embedding_function_strategy(

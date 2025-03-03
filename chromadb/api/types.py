@@ -465,8 +465,10 @@ class EmbeddingFunction(Protocol[D]):
     """
     A protocol for embedding functions. To implement a new embedding function,
     you need to implement the following methods at minimum:
-    - __init__
     - __call__
+
+    For future compatibility, it is strongly recommended to also implement:
+    - __init__
     - name
     - build_from_config
     - get_config
@@ -493,22 +495,41 @@ class EmbeddingFunction(Protocol[D]):
     ) -> Embeddings:
         return cast(Embeddings, retry(**retry_kwargs)(self.__call__)(input))
 
-    @abstractmethod
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         """
         Initialize the embedding function.
         Pass any arguments that will be needed to build the embedding function
         config.
+
+        Note: This method is provided for backward compatibility.
+        Future implementations should override this method.
         """
-        ...
+        import warnings
+
+        warnings.warn(
+            f"The class {self.__class__.__name__} does not implement __init__. "
+            "This will be required in a future version.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
     @staticmethod
-    @abstractmethod
     def name() -> str:
         """
         Return the name of the embedding function.
+
+        Note: This method is provided for backward compatibility.
+        Future implementations should override this method.
         """
-        ...
+        import warnings
+
+        warnings.warn(
+            "The EmbeddingFunction class does not implement name(). "
+            "This will be required in a future version.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return "unnamed_embedding_function"
 
     def default_space(self) -> Space:
         """
@@ -523,21 +544,43 @@ class EmbeddingFunction(Protocol[D]):
         return [Space.COSINE, Space.L2, Space.INNER_PRODUCT]
 
     @staticmethod
-    @abstractmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[D]":
         """
         Build the embedding function from a config, which will be used to
         deserialize the embedding function.
-        """
-        ...
 
-    @abstractmethod
+        Note: This method is provided for backward compatibility.
+        Future implementations should override this method.
+        """
+        import warnings
+
+        warnings.warn(
+            "The EmbeddingFunction class does not implement build_from_config(). "
+            "This will be required in a future version.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        raise NotImplementedError(
+            "build_from_config() is not implemented for this embedding function."
+        )
+
     def get_config(self) -> Dict[str, Any]:
         """
         Return the config for the embedding function, which will be used to
         serialize the embedding function.
+
+        Note: This method is provided for backward compatibility.
+        Future implementations should override this method.
         """
-        ...
+        import warnings
+
+        warnings.warn(
+            f"The class {self.__class__.__name__} does not implement get_config(). "
+            "This will be required in a future version.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return {}
 
     def validate_config_update(
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
