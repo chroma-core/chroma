@@ -248,6 +248,20 @@ class not_implemented_embedding_function(types.EmbeddingFunction[Documents]):
     def __call__(self, input: Documents) -> Embeddings:
         assert False, "This embedding function is not implemented"
 
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
+    @staticmethod
+    def name() -> str:
+        return "not_implemented_embedding_function"
+
+    @staticmethod
+    def build_from_config(config: dict[str, Any]) -> "EmbeddingFunction[Documents]":
+        return not_implemented_embedding_function()
+
+    def get_config(self) -> dict[str, Any]:
+        return {}
+
 
 def embedding_function_strategy(
     dim: int, dtype: npt.DTypeLike
