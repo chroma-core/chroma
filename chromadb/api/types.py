@@ -529,7 +529,9 @@ class EmbeddingFunction(Protocol[D]):
             DeprecationWarning,
             stacklevel=2,
         )
-        return "unnamed_embedding_function"
+        raise NotImplementedError(
+            "name() is not implemented for this embedding function."
+        )
 
     def default_space(self) -> Space:
         """
@@ -580,7 +582,9 @@ class EmbeddingFunction(Protocol[D]):
             DeprecationWarning,
             stacklevel=2,
         )
-        return {}
+        raise NotImplementedError(
+            "get_config() is not implemented for this embedding function."
+        )
 
     def validate_config_update(
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
