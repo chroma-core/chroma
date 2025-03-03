@@ -41,10 +41,89 @@
         "types": "./dist/cjs/chromadb.d.cts",
         "default": "./dist/cjs/chromadb.cjs"
       }
+    },
+    "./embeddings/cohere": {
+      "import": {
+        "types": "./dist/embeddings/cohere.d.ts",
+        "default": "./dist/embeddings/cohere.mjs"
+      },
+      "require": {
+        "types": "./dist/embeddings/cohere.d.cts",
+        "default": "./dist/cjs/embeddings/cohere.cjs"
+      }
+    },
+    "./embeddings/google-gemini": {
+      "import": {
+        "types": "./dist/embeddings/google-gemini.d.ts",
+        "default": "./dist/embeddings/google-gemini.mjs"
+      },
+      "require": {
+        "types": "./dist/embeddings/google-gemini.d.cts",
+        "default": "./dist/cjs/embeddings/google-gemini.cjs"
+      }
+    },
+    "./embeddings/hugging-face": {
+      "import": {
+        "types": "./dist/embeddings/hugging-face.d.ts",
+        "default": "./dist/embeddings/hugging-face.mjs"
+      },
+      "require": {
+        "types": "./dist/embeddings/hugging-face.d.cts",
+        "default": "./dist/cjs/embeddings/hugging-face.cjs"
+      }
+    },
+    "./embeddings/jina": {
+      "import": {
+        "types": "./dist/embeddings/jina.d.ts",
+        "default": "./dist/embeddings/jina.mjs"
+      },
+      "require": {
+        "types": "./dist/embeddings/jina.d.cts",
+        "default": "./dist/cjs/embeddings/jina.cjs"
+      }
+    },
+    "./embeddings/ollama": {
+      "import": {
+        "types": "./dist/embeddings/ollama.d.ts",
+        "default": "./dist/embeddings/ollama.mjs"
+      },
+      "require": {
+        "types": "./dist/embeddings/ollama.d.cts",
+        "default": "./dist/cjs/embeddings/ollama.cjs"
+      }
+    },
+    "./embeddings/openai": {
+      "import": {
+        "types": "./dist/embeddings/openai.d.ts",
+        "default": "./dist/embeddings/openai.mjs"
+      },
+      "require": {
+        "types": "./dist/embeddings/openai.d.cts",
+        "default": "./dist/cjs/embeddings/openai.cjs"
+      }
+    },
+    "./embeddings/transformers": {
+      "import": {
+        "types": "./dist/embeddings/transformers.d.ts",
+        "default": "./dist/embeddings/transformers.mjs"
+      },
+      "require": {
+        "types": "./dist/embeddings/transformers.d.cts",
+        "default": "./dist/cjs/embeddings/transformers.cjs"
+      }
+    },
+    "./embeddings/voyageai": {
+      "import": {
+        "types": "./dist/embeddings/voyageai.d.ts",
+        "default": "./dist/embeddings/voyageai.mjs"
+      },
+      "require": {
+        "types": "./dist/embeddings/voyageai.d.cts",
+        "default": "./dist/cjs/embeddings/voyageai.cjs"
+      }
     }
   },
   "files": [
-    "src",
     "dist"
   ],
   "scripts": {
@@ -64,7 +143,6 @@
     "node": ">=14.17.0"
   },
   "dependencies": {
-    "cliui": "^8.0.1",
     "isomorphic-fetch": "^3.0.0"
   },
   "peerDependencies": {
@@ -72,7 +150,8 @@
     "cohere-ai": "^5.0.0 || ^6.0.0 || ^7.0.0",
     "openai": "^3.0.0 || ^4.0.0",
     "voyageai": "^0.0.3-1",
-    "ollama": "^0.5.0"
+    "ollama": "^0.5.0",
+    "chromadb-default-embed": "^2.13.0"
   },
   "peerDependenciesMeta": {
     "@google/generative-ai": {
