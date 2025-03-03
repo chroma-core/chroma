@@ -177,14 +177,15 @@ def create_embeddings(
     count: int,
     dtype: npt.DTypeLike,
 ) -> types.Embeddings:
-    array = np.random.uniform(
+    arr = np.random.uniform(
         low=-1.0,
         high=1.0,
         size=(count, dim),
     ).astype(dtype)
 
-    # Convert to list of numpy arrays to match Embeddings type
-    return [array[i] for i in range(count)]
+    embeddings: types.Embeddings = [arr[i] for i in range(count)]
+
+    return embeddings
 
 
 def create_embeddings_ndarray(
@@ -223,19 +224,19 @@ class hashing_embedding_function(types.EmbeddingFunction[Documents]):
 
         return embeddings
 
+    def __repr__(self) -> str:
+        return f"hashing_embedding_function(dim={self.dim}, dtype={self.dtype})"
+
     @staticmethod
     def name() -> str:
-        return "hashing_multimodal_ef"
+        return "hashing_embedding_function"
 
     @staticmethod
     def build_from_config(config: dict[str, Any]) -> "EmbeddingFunction[Documents]":
         return hashing_embedding_function(config["dim"], config["dtype"])
 
     def get_config(self) -> dict[str, Any]:
-        return {}
-
-    def __repr__(self) -> str:
-        return f"hashing_embedding_function(dim={self.dim}, dtype={self.dtype})"
+        return {"dim": self.dim, "dtype": self.dtype}
 
 
 class not_implemented_embedding_function(types.EmbeddingFunction[Documents]):
