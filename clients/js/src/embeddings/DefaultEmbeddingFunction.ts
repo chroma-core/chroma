@@ -5,6 +5,8 @@ import { IEmbeddingFunction } from "./IEmbeddingFunction";
 let TransformersApi: Promise<any>;
 
 export class DefaultEmbeddingFunction implements IEmbeddingFunction {
+  name = "onnx_mini_lm_l6_v2";
+
   private pipelinePromise?: Promise<any> | null;
   private transformersApi: any;
   private model: string;

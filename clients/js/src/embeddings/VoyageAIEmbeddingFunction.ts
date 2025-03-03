@@ -28,24 +28,41 @@ class VoyageAIAPI {
     return await this.client
       .embed({ input: params.input, model: params.model })
       .then((response: any) => {
-        return response.data.map((item: { embedding: number[]; }) => item.embedding);
+        return response.data.map(
+          (item: { embedding: number[] }) => item.embedding,
+        );
       });
   }
 }
 
+type StoredConfig = {
+  api_key_env_var: string;
+  model_name: string;
+};
+
 export class VoyageAIEmbeddingFunction implements IEmbeddingFunction {
+  name = "voyageai";
+
   private voyageAiApi?: VoyageAIAPI;
   private model: string;
   private apiKey: string;
   constructor({
     api_key,
     model,
+    api_key_env_var = "VOYAGE_API_KEY",
   }: {
-    api_key: string;
+    api_key?: string;
     model: string;
+    api_key_env_var: string;
   }) {
+    const apiKey = api_key ?? process.env[api_key_env_var];
+    if (!apiKey) {
+      throw new Error(
+        `VoyageAI API key is required. Please provide it in the constructor or set the environment variable ${api_key_env_var}.`,
+      );
+    }
+    this.apiKey = apiKey;
     this.model = model;
-    this.apiKey = api_key;
   }
 
   private async initClient() {
@@ -54,7 +71,7 @@ export class VoyageAIEmbeddingFunction implements IEmbeddingFunction {
       // @ts-ignore
       this.voyageAiApi = await import("voyageai").then((voyageai) => {
         // @ts-ignore
-          return new VoyageAIAPI({ apiKey: this.apiKey });
+        return new VoyageAIAPI({ apiKey: this.apiKey });
       });
     } catch (e) {
       // @ts-ignore
@@ -74,5 +91,25 @@ export class VoyageAIEmbeddingFunction implements IEmbeddingFunction {
       model: this.model,
       input: texts,
     });
+  }
+
+  buildFromConfig(config: StoredConfig): VoyageAIEmbeddingFunction {
+    return new VoyageAIEmbeddingFunction({
+      api_key_env_var: config.api_key_env_var,
+      model: config.model_name,
+    });
+  }
+
+  getConfig(): StoredConfig {
+    return {
+      api_key_env_var: this.apiKey,
+      model_name: this.model,
+    };
+  }
+
+  validateConfigUpdate(oldConfig: StoredConfig, newConfig: StoredConfig): void {
+    if (oldConfig.model_name !== newConfig.model_name) {
+      throw new Error("Cannot change the model of the embedding function.");
+    }
   }
 }

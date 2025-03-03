@@ -3,7 +3,15 @@ import { IEmbeddingFunction } from "./IEmbeddingFunction";
 // Dynamically import module
 let TransformersApi: Promise<any>;
 
+type StoredConfig = {
+  model: string;
+  revision: string;
+  quantized: boolean;
+};
+
 export class TransformersEmbeddingFunction implements IEmbeddingFunction {
+  name = "transformers";
+
   private pipelinePromise?: Promise<any> | null;
   private transformersApi: any;
   private model: string;
@@ -95,6 +103,36 @@ export class TransformersEmbeddingFunction implements IEmbeddingFunction {
     } catch (e) {
       throw new Error(
         "Please install @xenova/transformers as a dependency with, e.g. `npm install @xenova/transformers`",
+      );
+    }
+  }
+
+  buildFromConfig(config: StoredConfig): TransformersEmbeddingFunction {
+    return new TransformersEmbeddingFunction({
+      model: config.model,
+      revision: config.revision,
+      quantized: config.quantized,
+    });
+  }
+
+  getConfig(): StoredConfig {
+    return {
+      model: this.model,
+      revision: this.revision,
+      quantized: this.quantized,
+    };
+  }
+
+  validateConfigUpdate(oldConfig: StoredConfig, newConfig: StoredConfig): void {
+    if (oldConfig.model !== newConfig.model) {
+      throw new Error("Cannot change the model of the embedding function.");
+    }
+    if (oldConfig.revision !== newConfig.revision) {
+      throw new Error("Cannot change the revision of the embedding function.");
+    }
+    if (oldConfig.quantized !== newConfig.quantized) {
+      throw new Error(
+        "Cannot change the quantization of the embedding function.",
       );
     }
   }
