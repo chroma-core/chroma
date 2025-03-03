@@ -177,13 +177,18 @@ def create_embeddings(
     count: int,
     dtype: npt.DTypeLike,
 ) -> types.Embeddings:
-    arr = np.random.uniform(
-        low=-1.0,
-        high=1.0,
-        size=(count, dim),
-    ).astype(dtype)
-
-    embeddings: types.Embeddings = [arr[i] for i in range(count)]
+    embeddings: types.Embeddings = cast(
+        types.Embeddings,
+        (
+            np.random.uniform(
+                low=-1.0,
+                high=1.0,
+                size=(count, dim),
+            )
+            .astype(dtype)
+            .tolist()
+        ),
+    )
 
     return embeddings
 
