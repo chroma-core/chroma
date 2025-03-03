@@ -93,9 +93,8 @@ export class DefaultEmbeddingFunction implements IEmbeddingFunction {
       let importResult;
       if (isBrowser()) {
         importResult = await import(
-          // todo: we can't import chromadb-default-embed here yet because the `build` script was not run before publishing our fork to NPM, so the entrypoint in our forked package points to a non-existent file.
           // @ts-expect-error
-          "https://unpkg.com/@xenova/transformers@2.13.2"
+          "https://unpkg.com/chromadb-default-embed@2.14.0"
         );
       } else {
         // @ts-expect-error
