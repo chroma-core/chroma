@@ -1,3 +1,5 @@
+use std::ops::Sub;
+
 use arrow::util::bit_util;
 
 /// A simple size tracker for use internally in Arrow Deltas that
@@ -8,12 +10,25 @@ use arrow::util::bit_util;
 /// ## Note
 /// This struct is not thread safe and users are expected to handle
 /// synchronization themselves.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct SingleColumnSizeTracker {
     num_items: usize,
     prefix_size: usize,
     key_size: usize,
     value_size: usize,
+}
+
+impl Sub for SingleColumnSizeTracker {
+    type Output = SingleColumnSizeTracker;
+
+    fn sub(self, rhs: SingleColumnSizeTracker) -> Self::Output {
+        SingleColumnSizeTracker {
+            num_items: self.num_items - rhs.num_items,
+            prefix_size: self.prefix_size - rhs.prefix_size,
+            key_size: self.key_size - rhs.key_size,
+            value_size: self.value_size - rhs.value_size,
+        }
+    }
 }
 
 impl SingleColumnSizeTracker {
