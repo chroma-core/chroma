@@ -1,6 +1,11 @@
-from chromadb.utils.embedding_functions.embedding_function import EmbeddingFunction
+from chromadb.api.types import (
+    Documents,
+    Embeddings,
+    Images,
+    Embeddable,
+    EmbeddingFunction,
+)
 from chromadb.utils.embedding_functions.schemas import validate_config
-from chromadb.api.types import Documents, Embeddings, Images, Embeddable
 from typing import List, Dict, Any, Union, cast, Sequence
 import numpy as np
 

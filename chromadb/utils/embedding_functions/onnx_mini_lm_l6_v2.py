@@ -12,11 +12,7 @@ import numpy.typing as npt
 import httpx
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_random
 
-from chromadb.api.types import Documents, Embeddings
-from chromadb.utils.embedding_functions.embedding_function import (
-    EmbeddingFunction,
-    Space,
-)
+from chromadb.api.types import Documents, Embeddings, EmbeddingFunction, Space
 from chromadb.utils.embedding_functions.schemas import validate_config
 
 logger = logging.getLogger(__name__)
