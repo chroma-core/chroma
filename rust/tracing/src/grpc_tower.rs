@@ -54,7 +54,7 @@ where
             otel.name = format!("Request {}", req.uri().path()),
             grpc.method = ?req.uri().path(),
             grpc.headers = ?req.headers(),
-            grpc.status_code_name = Empty,
+            grpc.status_description = Empty,
             grpc.status_code_value = Empty,
         );
 
@@ -73,14 +73,36 @@ where
         let fut = self.inner.call(req);
         Box::pin(
             async move {
-                let res = fut.await;
                 let span = Span::current();
-                if let Err(err) = res.as_ref() {
-                    span.record("status_code_description", err.to_string());
-                    span.record("status_code_value", 0);
-                } else {
-                    span.record("status_code_description", Code::Ok.description());
-                    span.record("status_code_value", Code::Ok as u8);
+                let res = fut.await;
+                match res.as_ref() {
+                    Ok(resp) => match resp.headers().get("grpc-status") {
+                        Some(val) => match val
+                            .to_str()
+                            .map_err(|e| e.to_string())
+                            .and_then(|s| s.parse::<u8>().map_err(|e| e.to_string()))
+                        {
+                            Ok(code) => {
+                                span.record(
+                                    "grpc.status_description",
+                                    Code::from_i32(code as i32).description(),
+                                );
+                                span.record("grpc.status_code_value", code);
+                            }
+                            Err(err) => {
+                                span.record("grpc.status_description", err);
+                                span.record("grpc.status_code_value", Code::InvalidArgument as u8);
+                            }
+                        },
+                        None => {
+                            span.record("grpc.status_description", Code::Ok.description());
+                            span.record("grpc.status_code_value", Code::Ok as u8);
+                        }
+                    },
+                    Err(err) => {
+                        span.record("grpc.status_description", err.to_string());
+                        span.record("grpc.status_code_value", Code::Internal as u8);
+                    }
                 }
                 res
             }
