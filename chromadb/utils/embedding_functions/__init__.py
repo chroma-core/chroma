@@ -169,6 +169,7 @@ def config_to_embedding_function(
 
 
 __all__ = [
+    "EmbeddingFunction",
     "DefaultEmbeddingFunction",
     "CohereEmbeddingFunction",
     "OpenAIEmbeddingFunction",
