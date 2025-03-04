@@ -247,6 +247,16 @@ impl Frontend {
             Frontend::InMemory(frontend) => frontend.healthcheck().await,
         }
     }
+
+    pub async fn manually_compact(
+        &mut self,
+        request: chroma_types::ManualCompactionRequest,
+    ) -> Result<chroma_types::ManualCompactionResponse, chroma_types::ManualCompactionError> {
+        match self {
+            Frontend::ServiceBased(frontend) => frontend.manually_compact(request).await,
+            Frontend::InMemory(_) => Ok(chroma_types::ManualCompactionResponse {}),
+        }
+    }
 }
 #[async_trait::async_trait]
 impl Configurable<(FrontendConfig, System)> for Frontend {
