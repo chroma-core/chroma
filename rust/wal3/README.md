@@ -78,8 +78,8 @@ The Manifest is a JSON file that contains the following fields:
 
 - setsum:  A setsum of the log data.  This is the setsum of everything in the log.  Every update to
   the log computes a new setsum and updates the manifest to reflect the checksum.
-- collected:  A setsum of the log data that has been collected and thrown away.  The fragments of
-  the log plus the `collected` value must equal `setsum`
+- pruned:  A setsum of the log data that has been pruned and thrown away.  The fragments of
+  the log plus the `pruned` value must equal `setsum`
 - fragments:  A list of fragments.  Each fragment contains the following fields:
     - path:  The path to the fragment relative to the root of the log.  The full path is specified
       here so that any bugs or changes in the path layout don't invalidate past logs.
@@ -91,7 +91,7 @@ The Manifest is a JSON file that contains the following fields:
 
 Invariants of the manifest:
 
-- The setsum of all fragments in a manifest plus `collected` must add up to the `setsum` of the
+- The setsum of all fragments in a manifest plus `pruned` must add up to the `setsum` of the
   manifest.
 - fragments.seq_no is sequential.
 - fragment.start < fragment.limit for all fragments.
