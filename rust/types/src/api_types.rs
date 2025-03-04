@@ -1186,13 +1186,13 @@ impl GetRequest {
 #[derive(Clone, Deserialize, Serialize, Debug, ToSchema)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct GetResponse {
-    ids: Vec<String>,
-    embeddings: Option<Vec<Vec<f32>>>,
-    documents: Option<Vec<Option<String>>>,
-    uris: Option<Vec<Option<String>>>,
+    pub ids: Vec<String>,
+    pub embeddings: Option<Vec<Vec<f32>>>,
+    pub documents: Option<Vec<Option<String>>>,
+    pub uris: Option<Vec<Option<String>>>,
     // TODO(hammadb): Add metadata & include to the response
-    metadatas: Option<Vec<Option<Metadata>>>,
-    include: Vec<Include>,
+    pub metadatas: Option<Vec<Option<Metadata>>>,
+    pub include: Vec<Include>,
 }
 
 #[cfg(feature = "pyo3")]
