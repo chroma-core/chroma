@@ -17,7 +17,11 @@ from chromadb.api.configuration import (
     ConfigurationInternal,
 )
 from chromadb.serde import BaseModelJSONSerializable
-
+from chromadb.api.collection_configuration import (
+    CollectionConfiguration,
+    create_collection_config_to_json,
+    load_collection_config_from_json,
+)
 
 Metadata = Mapping[str, Union[str, int, float, bool]]
 UpdateMetadata = Mapping[str, Union[int, float, str, bool, None]]
@@ -55,7 +59,6 @@ class Configurable(Generic[C], ABC):
 
 class Collection(
     BaseModel,
-    Configurable[CollectionConfigurationInternal],
     BaseModelJSONSerializable["Collection"],
 ):
     """A model of a collection used for transport, serialization, and storage"""
@@ -78,7 +81,7 @@ class Collection(
         self,
         id: UUID,
         name: str,
-        configuration: CollectionConfigurationInternal,
+        configuration: CollectionConfiguration,
         metadata: Optional[Metadata],
         dimension: Optional[int],
         tenant: str,
@@ -90,7 +93,7 @@ class Collection(
             id=id,
             name=name,
             metadata=metadata,
-            configuration_json=configuration.to_json(),
+            configuration_json=create_collection_config_to_json(configuration),
             dimension=dimension,
             tenant=tenant,
             database=database,
@@ -153,7 +156,7 @@ class Collection(
         params_map = json_map.copy()
 
         # Get the CollectionConfiguration from the JSON map, and remove it from the map
-        configuration = CollectionConfigurationInternal.from_json(
+        configuration = load_collection_config_from_json(
             params_map.pop("configuration_json", None)
         )
 
@@ -178,9 +181,11 @@ class Segment(TypedDict):
     metadata: Optional[Metadata]
     file_paths: Mapping[str, Sequence[str]]
 
+
 class CollectionAndSegments(TypedDict):
     collection: Collection
     segments: Sequence[Segment]
+
 
 # SeqID can be one of three types of value in our current and future plans:
 # 1. A Pulsar MessageID encoded as a 192-bit integer - This is no longer used as we removed pulsar
