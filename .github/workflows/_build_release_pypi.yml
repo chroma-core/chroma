@@ -67,7 +67,7 @@ jobs:
         platform:
           - { os: linux, runner: depot-ubuntu-22.04, target: x86_64 }
           - { os: linux, runner: depot-ubuntu-22.04-arm, target: aarch64 }
-          - { os: windows, runner: windows-latest, target: x64 }
+          - { os: windows, runner: depot-windows-2022-4, target: x64 }
           - { os: macos, runner: depot-macos-14, target: x86_64 }
           - { os: macos, runner: depot-macos-14, target: aarch64 }
 
