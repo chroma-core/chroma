@@ -133,7 +133,7 @@ struct Metrics {
 }
 
 #[derive(Clone, Debug)]
-pub struct Frontend {
+pub struct ServiceBasedFrontend {
     allow_reset: bool,
     executor: Executor,
     log_client: Log,
@@ -143,7 +143,7 @@ pub struct Frontend {
     metrics: Arc<Metrics>,
 }
 
-impl Frontend {
+impl ServiceBasedFrontend {
     pub fn new(
         allow_reset: bool,
         sysdb_client: SysDb,
@@ -163,7 +163,7 @@ impl Frontend {
             query_retries_counter,
             get_retries_counter,
         });
-        Frontend {
+        ServiceBasedFrontend {
             allow_reset,
             executor,
             log_client,
@@ -1130,7 +1130,7 @@ impl Frontend {
 }
 
 #[async_trait::async_trait]
-impl Configurable<(FrontendConfig, System)> for Frontend {
+impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
     async fn try_from_config(
         (config, system): &(FrontendConfig, System),
         registry: &registry::Registry,
@@ -1173,7 +1173,7 @@ impl Configurable<(FrontendConfig, System)> for Frontend {
         let executor =
             Executor::try_from_config(&(config.executor.clone(), system.clone()), registry).await?;
 
-        Ok(Frontend::new(
+        Ok(ServiceBasedFrontend::new(
             config.allow_reset,
             sysdb,
             collections_with_segments_provider,
