@@ -10,7 +10,15 @@ use std::sync::Arc;
 
 use super::sysdb::FlushCompactionError;
 use super::sysdb::GetLastCompactionTimeError;
+use chroma_types::chroma_proto::collection_version_info::VersionChangeReason;
+use chroma_types::chroma_proto::CollectionInfoImmutable;
+use chroma_types::chroma_proto::CollectionSegmentInfo;
+use chroma_types::chroma_proto::CollectionVersionFile;
+use chroma_types::chroma_proto::CollectionVersionHistory;
+use chroma_types::chroma_proto::CollectionVersionInfo;
+use chroma_types::chroma_proto::FlushSegmentCompactionInfo;
 use chroma_types::chroma_proto::VersionListForCollection;
+use chrono;
 
 #[derive(Clone, Debug)]
 pub struct TestSysDb {
@@ -22,6 +30,7 @@ struct Inner {
     collections: HashMap<CollectionUuid, Collection>,
     segments: HashMap<SegmentUuid, Segment>,
     tenant_last_compaction_time: HashMap<String, i64>,
+    collection_to_version_file: HashMap<CollectionUuid, CollectionVersionFile>,
 }
 
 impl TestSysDb {
@@ -32,6 +41,7 @@ impl TestSysDb {
                 collections: HashMap::new(),
                 segments: HashMap::new(),
                 tenant_last_compaction_time: HashMap::new(),
+                collection_to_version_file: HashMap::new(),
             })),
         }
     }
@@ -206,6 +216,71 @@ impl TestSysDb {
         Ok(tenants)
     }
 
+    // NOTE: This function does not acquire the mutex and expect the caller to do so.
+    async fn update_collection_version_file(
+        &mut self,
+        collection_id: CollectionUuid,
+        segment_flush_info: Arc<[SegmentFlushInfo]>,
+    ) {
+        // Check if version file already exists for the collection.
+        // If it does not, then create a new one with version 0.
+        // Update the version file by adding a new entry for the new version.
+        // The new entry should have the correct file paths for the segment,
+        // and the version number should be the next number in the sequence.
+
+        // Get the current verison file for the collection.
+        let version_file = match inner.collection_to_version_file.get(&collection_id) {
+            Some(version_file) => version_file,
+            None => {
+                // Initialize new CollectionVersionFile with version 0
+                let mut version_file = CollectionVersionFile::default();
+                version_file.collection_info_immutable = Some(CollectionInfoImmutable::default());
+                version_file
+                    .collection_info_immutable
+                    .unwrap()
+                    .collection_id = collection_id.to_string();
+                let mut version_history = CollectionVersionHistory::default();
+                version_history.versions = Vec::new();
+                // Set version history as version 0
+                let mut version_info = CollectionVersionInfo::default();
+                version_info.version = 0;
+                version_info.created_at_secs = chrono::Utc::now().timestamp();
+                version_info.version_change_reason = VersionChangeReason::DataCompaction as i32;
+                version_history.versions.push(version_info);
+                version_file.version_history = Some(version_history);
+                &mut version_file
+            }
+        };
+
+        // Get current version history
+        let mut version_history = version_file.version_history.clone().unwrap();
+        let next_version = version_history.versions.last().unwrap().version + 1;
+
+        // Create new version info with segment file paths
+        let mut version_info = CollectionVersionInfo::default();
+        version_info.version = next_version;
+        version_info.created_at_secs = chrono::Utc::now().timestamp();
+        version_info.version_change_reason = VersionChangeReason::DataCompaction as i32;
+
+        let mut flush_compaction_info: FlushSegmentCompactionInfo = (&segment_flush_info[0])
+            .try_into()
+            .expect("Failed to convert SegmentFlushInfo");
+
+        let mut segment_info = CollectionSegmentInfo::default();
+        segment_info.segment_compaction_info = vec![flush_compaction_info];
+        version_info.segment_info = Some(segment_info);
+
+        // Add new version to history
+        version_history.versions.push(version_info);
+        version_file.version_history = Some(version_history);
+
+        tracing::info!("version_file: {:?}", version_file);
+
+        inner
+            .collection_to_version_file
+            .insert(collection_id, version_file.clone());
+    }
+
     pub(crate) async fn flush_compaction(
         &mut self,
         tenant_id: String,
@@ -245,6 +320,8 @@ impl TestSysDb {
             segment.file_path = segment_flush_info.file_paths.clone();
             inner.segments.insert(segment.id, segment);
         }
+
+        self.update_collection_version_file(collection_id, segment_flush_info);
 
         Ok(FlushCompactionResponse::new(
             collection_id,
