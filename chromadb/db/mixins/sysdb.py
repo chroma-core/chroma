@@ -39,6 +39,10 @@ from chromadb.types import (
     Unspecified,
     UpdateMetadata,
 )
+from chromadb.api.collection_configuration import (
+    CreateCollectionConfiguration,
+    create_collection_config_to_json_str,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -272,7 +276,7 @@ class SqlSysDB(SqlDB, SysDB):
         self,
         id: UUID,
         name: str,
-        configuration: CollectionConfigurationInternal,
+        configuration: CreateCollectionConfiguration,
         segments: Sequence[Segment],
         metadata: Optional[Metadata] = None,
         dimension: Optional[int] = None,
@@ -306,7 +310,7 @@ class SqlSysDB(SqlDB, SysDB):
         collection = Collection(
             id=id,
             name=name,
-            configuration=configuration,
+            configuration=CollectionConfigurationInternal(),
             metadata=metadata,
             dimension=dimension,
             tenant=tenant,
@@ -331,7 +335,7 @@ class SqlSysDB(SqlDB, SysDB):
                 .insert(
                     ParameterValue(self.uuid_to_db(collection["id"])),
                     ParameterValue(collection["name"]),
-                    ParameterValue(configuration.to_json_str()),
+                    ParameterValue(create_collection_config_to_json_str(configuration)),
                     ParameterValue(collection["dimension"]),
                     # Get the database id for the database with the given name and tenant
                     self.querybuilder()
@@ -962,7 +966,7 @@ class SqlSysDB(SqlDB, SysDB):
     @override
     def get_collection_size(self, id: UUID) -> int:
         raise NotImplementedError
-    
+
     @override
     def count_collections(
         self,
@@ -975,7 +979,5 @@ class SqlSysDB(SqlDB, SysDB):
         # to be specified. In the sysdb implementation in go code, it does not
         # filter on database if it is set to "". This is a bad API and
         # should be fixed. For now, we will replicate the behavior.
-        request_database = database
-        if database == None or database == "":
-            request_database = ""
+        request_database: str = "" if database is None or database == "" else database
         return len(self.get_collections(tenant=tenant, database=request_database))
