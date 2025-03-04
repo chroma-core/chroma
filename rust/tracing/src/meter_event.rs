@@ -82,16 +82,6 @@ impl MeterEvent {
 
 pub static METER_EVENT_SENDER: OnceLock<UnboundedSender<Option<MeterEvent>>> = OnceLock::new();
 
-impl MeterEvent {
-    pub async fn submit(self) {
-        if let Some(handler) = METER_EVENT_SENDER.get() {
-            if let Err(err) = handler.send(Some(self)) {
-                tracing::error!("Unable to send meter event: {err}")
-            }
-        }
-    }
-}
-
 #[async_trait]
 pub trait MeterEventHandler {
     async fn handle(&mut self, _event: MeterEvent) {}
@@ -108,16 +98,34 @@ pub trait MeterEventHandler {
 #[async_trait]
 impl MeterEventHandler for () {}
 
-pub fn init_meter_event_handler(mut handler: impl MeterEventHandler + Send + Sync + 'static) {
-    let (tx, rx) = unbounded_channel();
-    if METER_EVENT_SENDER.set(tx).is_err() {
-        tracing::error!("Meter event handler is already initialized")
+impl MeterEvent {
+    pub fn submit(self) {
+        if let Some(handler) = METER_EVENT_SENDER.get() {
+            if let Err(err) = handler.send(Some(self)) {
+                tracing::error!("Unable to send meter event: {err}")
+            }
+        }
     }
-    let runtime_handle = Handle::current();
-    runtime_handle.spawn(async move {
-        handler.on_start().await;
-        handler.listen(rx).await;
-    });
+
+    pub fn init_handler(mut handler: impl MeterEventHandler + Send + Sync + 'static) {
+        let (tx, rx) = unbounded_channel();
+        if METER_EVENT_SENDER.set(tx).is_err() {
+            tracing::error!("Meter event handler is already initialized")
+        }
+        let runtime_handle = Handle::current();
+        runtime_handle.spawn(async move {
+            handler.on_start().await;
+            handler.listen(rx).await;
+        });
+    }
+
+    pub fn stop_handler() {
+        if let Some(handler) = METER_EVENT_SENDER.get() {
+            if let Err(err) = handler.send(None) {
+                tracing::error!("Unable to stop meter event handler: {err}")
+            }
+        }
+    }
 }
 
 #[cfg(test)]
