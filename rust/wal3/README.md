@@ -345,7 +345,8 @@ contain data that is not to be garbage collected.  This is complex.
 
 To side-step this problem we will introduce intentional fragmentation of the manifest and snapshots
 to align to the garbage collection interval.  This will guarantee that at most one interval worth of
-garbage that could be compacted is left uncompacted.
+garbage that could be compacted is left uncompacted.  In practice, this means constructing fragments
+such that they are pre-aligned to garbage collection boundaries.
 
 ### Interplay Between Snapshots and Setsum
 
