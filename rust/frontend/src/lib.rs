@@ -5,8 +5,8 @@ pub mod auth;
 pub mod config;
 #[allow(dead_code)]
 pub mod executor;
-pub mod frontend;
 pub mod get_collection_with_segments_provider;
+pub mod impls;
 pub mod quota;
 mod server;
 mod tower_tracing;
@@ -21,13 +21,13 @@ use chroma_tracing::{
     meter_event::{MeterEvent, MeterEventHandler},
 };
 use config::FrontendServerConfig;
-use frontend::Frontend;
 use get_collection_with_segments_provider::*;
 use mdac::{Pattern, Rule};
 use quota::QuotaEnforcer;
 use server::FrontendServer;
 
 pub use config::{FrontendConfig, ScorecardRule};
+pub use impls::Frontend;
 
 const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
 
