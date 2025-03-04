@@ -1,12 +1,6 @@
 import { describe, it, expect } from "@jest/globals";
 import { ChromaClient } from "../src";
 
-describe("Basic test", () => {
-  it("should pass a simple test", () => {
-    expect(1 + 1).toBe(2);
-  });
-});
-
 describe("ChromaDB Integration", () => {
   it("should properly import and instantiate ChromaClient", () => {
     const client = new ChromaClient();
