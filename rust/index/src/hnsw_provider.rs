@@ -16,10 +16,11 @@ use chroma_types::CollectionUuid;
 use parking_lot::RwLock;
 use std::fmt::Debug;
 use std::path::Path;
+use std::time::Instant;
 use std::{path::PathBuf, sync::Arc};
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
-use tracing::{instrument, Span};
+use tracing::{instrument, Instrument, Span};
 use uuid::Uuid;
 
 // These are the files hnswlib writes to disk. This is strong coupling, but we need to know
@@ -118,17 +119,29 @@ impl HnswIndexProvider {
     ) -> Self {
         let cache: Arc<dyn Cache<CollectionUuid, HnswIndexRef>> = cache.into();
         let temporary_storage_path = storage_path.to_path_buf();
-        let purger = Some(Arc::new(tokio::task::spawn(async move {
-            while let Some((_, index_ref)) = evicted.recv().await {
+        let task = async move {
+            while let Some((collection_id, index_ref)) = evicted.recv().await {
                 let index_id = {
                     let index = index_ref.inner.read();
                     index.id
                 };
                 let weight = index_ref.weight();
-                tracing::info!("Purging index: {} with weight: {}", index_id, weight);
+                tracing::info!(
+                    "[Cache Eviction] Purging index: {} for collection {} with weight: {} at ts {}",
+                    index_id,
+                    collection_id,
+                    weight,
+                    Instant::now().elapsed().as_nanos()
+                );
                 let _ = Self::purge_one_id(&temporary_storage_path, index_id).await;
             }
-        })));
+        };
+        let purger = Some(Arc::new(tokio::task::spawn(task.instrument(
+            tracing::info_span!(
+                "HnswIndex Cache Eviction Purger",
+                tag = "hnsw_cache_eviction_purger"
+            ),
+        ))));
         Self {
             cache,
             storage,
@@ -457,8 +470,19 @@ impl HnswIndexProvider {
                 .flatten()
                 .map(|r| r.inner.read().id)
             else {
+                tracing::info!(
+                    "[End of compaction purging] No index found for collection: {} at ts {}",
+                    collection_uuid,
+                    Instant::now().elapsed().as_nanos()
+                );
                 continue;
             };
+            tracing::info!(
+                "[End of compaction purging] Purging index: {} for collection {} at ts {}",
+                index_id,
+                collection_uuid,
+                Instant::now().elapsed().as_nanos()
+            );
             match self.remove_temporary_files(&index_id).await {
                 Ok(_) => {}
                 Err(e) => {
@@ -470,7 +494,12 @@ impl HnswIndexProvider {
 
     pub async fn purge_one_id(path: &Path, id: IndexUuid) -> tokio::io::Result<()> {
         let index_storage_path = path.join(id.to_string());
-        tracing::info!("Purging index: {}", index_storage_path.to_str().unwrap());
+        tracing::info!(
+            "[Cache eviction] Purging index id: {}, path: {}, ts: {}",
+            id,
+            index_storage_path.to_str().unwrap(),
+            Instant::now().elapsed().as_nanos()
+        );
         tokio::fs::remove_dir_all(index_storage_path).await?;
         Ok(())
     }
