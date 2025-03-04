@@ -16,6 +16,7 @@ use chroma_types::{
     DocumentExpression, DocumentOperator, LogRecord, Metadata, MetadataComparison,
     MetadataExpression, MetadataSetValue, MetadataValue, Operation, OperationRecord,
     PrimitiveOperator, Segment, SegmentScope, SegmentUuid, SetOperator, UpdateMetadata, Where,
+    CHROMA_KEY,
 };
 use std::collections::BinaryHeap;
 use std::{
@@ -150,7 +151,7 @@ impl ChromaError for TestReferenceSegmentError {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug, Clone)]
 pub struct TestReferenceSegment {
     max_id: u32,
     record: HashMap<SegmentUuid, HashMap<String, (u32, ProjectionRecord)>>,
@@ -175,6 +176,7 @@ impl TestReferenceSegment {
         } else {
             (HashSet::new(), None)
         };
+        let new_meta = new_meta.and_then(|meta| if meta.is_empty() { None } else { Some(meta) });
         match (old_meta, new_meta) {
             (None, None) => None,
             (None, Some(m)) | (Some(m), None) => Some(m),
@@ -185,6 +187,24 @@ impl TestReferenceSegment {
                     .collect(),
             ),
         }
+    }
+
+    fn filter_metadata(metadata: Option<UpdateMetadata>) -> Option<UpdateMetadata> {
+        metadata.and_then(|metadata| {
+            let filtered: UpdateMetadata = metadata
+                .into_iter()
+                .filter(|(k, _)| !k.starts_with(CHROMA_KEY))
+                .collect();
+            if filtered.is_empty() {
+                None
+            } else {
+                Some(filtered)
+            }
+        })
+    }
+
+    pub fn create_segment(&mut self, segment: Segment) {
+        self.record.insert(segment.id, HashMap::new());
     }
 
     pub fn apply_logs(&mut self, logs: Vec<LogRecord>, segment_id: SegmentUuid) {
@@ -215,27 +235,41 @@ impl TestReferenceSegment {
             match operation {
                 Operation::Add => {
                     if let Entry::Vacant(entry) = coll.entry(id) {
-                        record.metadata = Self::merge_meta(None, metadata);
+                        record.metadata = Self::merge_meta(None, Self::filter_metadata(metadata));
                         entry.insert((self.max_id, record));
                         self.max_id += 1;
                     }
                 }
                 Operation::Update => {
                     if let Some((_, old_record)) = coll.get_mut(&id) {
-                        old_record.document = record.document;
-                        old_record.embedding = record.embedding;
-                        old_record.metadata =
-                            Self::merge_meta(old_record.metadata.clone(), metadata);
+                        if record.document.is_some() {
+                            old_record.document = record.document;
+                        }
+
+                        if record.embedding.is_some() {
+                            old_record.embedding = record.embedding;
+                        }
+
+                        old_record.metadata = Self::merge_meta(
+                            old_record.metadata.clone(),
+                            Self::filter_metadata(metadata),
+                        );
                     }
                 }
                 Operation::Upsert => {
                     if let Some((_, old_record)) = coll.get_mut(&id) {
-                        old_record.document = record.document;
+                        if record.document.is_some() {
+                            old_record.document = record.document;
+                        }
+
                         old_record.embedding = record.embedding;
-                        old_record.metadata =
-                            Self::merge_meta(old_record.metadata.clone(), metadata);
+
+                        old_record.metadata = Self::merge_meta(
+                            old_record.metadata.clone(),
+                            Self::filter_metadata(metadata),
+                        );
                     } else {
-                        record.metadata = Self::merge_meta(None, metadata);
+                        record.metadata = Self::merge_meta(None, Self::filter_metadata(metadata));
                         coll.insert(id, (self.max_id, record));
                         self.max_id += 1;
                     }
@@ -310,7 +344,11 @@ impl TestReferenceSegment {
         })
     }
 
-    pub fn knn(&self, plan: Knn) -> Result<KnnBatchResult, Box<dyn ChromaError>> {
+    pub fn knn(
+        &self,
+        plan: Knn,
+        distance_function: DistanceFunction,
+    ) -> Result<KnnBatchResult, Box<dyn ChromaError>> {
         let coll = self
             .record
             .get(&plan.scan.collection_and_segments.metadata_segment.id)
@@ -347,24 +385,25 @@ impl TestReferenceSegment {
         }
         impl Ord for RecordWithDistance {
             fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-                self.partial_cmp(other).unwrap()
+                self.0.partial_cmp(&other.0).unwrap()
             }
         }
 
         let mut result = KnnBatchResult::default();
 
         for embedding in plan.knn.embeddings {
-            let mut max_heap = BinaryHeap::with_capacity(plan.knn.fetch as usize);
+            let mut max_heap: BinaryHeap<RecordWithDistance> =
+                BinaryHeap::with_capacity(plan.knn.fetch as usize * 100);
             let target_vector = normalize(&embedding);
 
             for (_, record) in &filtered_records {
-                let distance = DistanceFunction::Cosine.distance(
-                    &target_vector,
-                    record
-                        .embedding
-                        .as_ref()
-                        .expect("Embedding should be present"),
-                );
+                let distance = match &distance_function {
+                    DistanceFunction::Cosine => distance_function.distance(
+                        &target_vector,
+                        &normalize(record.embedding.as_ref().unwrap()),
+                    ),
+                    other => other.distance(&embedding, record.embedding.as_ref().unwrap()),
+                };
 
                 if max_heap.len() < plan.knn.fetch as usize {
                     max_heap.push(RecordWithDistance(distance, record.clone()));

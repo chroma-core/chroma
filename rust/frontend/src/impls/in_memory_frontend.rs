@@ -1,3 +1,5 @@
+use super::utils::to_records;
+use chroma_distance::DistanceFunction;
 use chroma_error::ChromaError;
 use chroma_segment::test::TestReferenceSegment;
 use chroma_types::operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan};
@@ -6,12 +8,9 @@ use chroma_types::{
     test_segment, Collection, CollectionAndSegments, Database, Include, IncludeList,
     InternalCollectionConfiguration, Segment,
 };
-use parking_lot::Mutex;
 use std::collections::HashSet;
-use std::sync::Arc;
 
-use super::utils::to_records;
-
+#[derive(Debug, Clone)]
 struct InMemoryCollection {
     collection: Collection,
     metadata_segment: Segment,
@@ -20,16 +19,16 @@ struct InMemoryCollection {
     reference_impl: TestReferenceSegment,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug, Clone)]
 struct Inner {
     tenants: HashSet<String>,
     databases: Vec<Database>,
     collections: Vec<InMemoryCollection>,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct InMemoryFrontend {
-    inner: Arc<Mutex<Inner>>,
+    inner: Inner,
 }
 
 impl InMemoryFrontend {
@@ -37,14 +36,12 @@ impl InMemoryFrontend {
         Default::default()
     }
 
-    pub async fn reset(&mut self) -> Result<chroma_types::ResetResponse, chroma_types::ResetError> {
-        let mut inner = self.inner.lock();
-        *inner = Inner::default();
-
+    pub fn reset(&mut self) -> Result<chroma_types::ResetResponse, chroma_types::ResetError> {
+        self.inner = Inner::default();
         Ok(chroma_types::ResetResponse {})
     }
 
-    pub async fn heartbeat(
+    pub fn heartbeat(
         &self,
     ) -> Result<chroma_types::HeartbeatResponse, chroma_types::HeartbeatError> {
         Ok(chroma_types::HeartbeatResponse {
@@ -53,16 +50,14 @@ impl InMemoryFrontend {
     }
 
     pub fn get_max_batch_size(&mut self) -> u32 {
-        1024 // Example placeholder
+        1024
     }
 
-    pub async fn create_tenant(
+    pub fn create_tenant(
         &mut self,
         request: chroma_types::CreateTenantRequest,
     ) -> Result<chroma_types::CreateTenantResponse, chroma_types::CreateTenantError> {
-        let mut inner = self.inner.lock();
-
-        let was_new = inner.tenants.insert(request.name.clone());
+        let was_new = self.inner.tenants.insert(request.name.clone());
         if !was_new {
             return Err(chroma_types::CreateTenantError::AlreadyExists(request.name));
         }
@@ -70,25 +65,22 @@ impl InMemoryFrontend {
         Ok(chroma_types::CreateTenantResponse {})
     }
 
-    pub async fn get_tenant(
+    pub fn get_tenant(
         &mut self,
         request: chroma_types::GetTenantRequest,
     ) -> Result<chroma_types::GetTenantResponse, chroma_types::GetTenantError> {
-        let inner = self.inner.lock();
-        if inner.tenants.contains(&request.name) {
+        if self.inner.tenants.contains(&request.name) {
             Ok(chroma_types::GetTenantResponse { name: request.name })
         } else {
             Err(chroma_types::GetTenantError::NotFound(request.name))
         }
     }
 
-    pub async fn create_database(
+    pub fn create_database(
         &mut self,
         request: chroma_types::CreateDatabaseRequest,
     ) -> Result<chroma_types::CreateDatabaseResponse, chroma_types::CreateDatabaseError> {
-        let mut inner = self.inner.lock();
-
-        if inner.databases.iter().any(|db| {
+        if self.inner.databases.iter().any(|db| {
             db.id == request.database_id
                 || (db.name == request.database_name && db.tenant == request.tenant_id)
         }) {
@@ -97,7 +89,7 @@ impl InMemoryFrontend {
             ));
         }
 
-        inner.databases.push(Database {
+        self.inner.databases.push(Database {
             id: request.database_id,
             name: request.database_name,
             tenant: request.tenant_id,
@@ -106,29 +98,29 @@ impl InMemoryFrontend {
         Ok(chroma_types::CreateDatabaseResponse {})
     }
 
-    pub async fn list_databases(
+    pub fn list_databases(
         &mut self,
         request: chroma_types::ListDatabasesRequest,
     ) -> Result<chroma_types::ListDatabasesResponse, chroma_types::ListDatabasesError> {
-        let inner = self.inner.lock();
-        let databases: Vec<_> = inner
+        let databases: Vec<_> = self
+            .inner
             .databases
             .iter()
             .filter(|db| db.tenant == request.tenant_id)
+            .skip(request.offset as usize)
+            .take(request.limit.unwrap_or(10000000) as usize)
             .cloned()
             .collect();
 
-        Ok(databases[request.offset as usize
-            ..request.offset as usize + request.limit.unwrap_or(10000000) as usize]
-            .to_vec())
+        Ok(databases)
     }
 
-    pub async fn get_database(
+    pub fn get_database(
         &mut self,
         request: chroma_types::GetDatabaseRequest,
     ) -> Result<chroma_types::GetDatabaseResponse, chroma_types::GetDatabaseError> {
-        let inner = self.inner.lock();
-        if let Some(db) = inner
+        if let Some(db) = self
+            .inner
             .databases
             .iter()
             .find(|db| db.name == request.database_name && db.tenant == request.tenant_id)
@@ -141,17 +133,17 @@ impl InMemoryFrontend {
         }
     }
 
-    pub async fn delete_database(
+    pub fn delete_database(
         &mut self,
         request: chroma_types::DeleteDatabaseRequest,
     ) -> Result<chroma_types::DeleteDatabaseResponse, chroma_types::DeleteDatabaseError> {
-        let mut inner = self.inner.lock();
-        if let Some(pos) = inner
+        if let Some(pos) = self
+            .inner
             .databases
             .iter()
             .position(|db| db.name == request.database_name && db.tenant == request.tenant_id)
         {
-            inner.databases.remove(pos);
+            self.inner.databases.remove(pos);
             Ok(chroma_types::DeleteDatabaseResponse {})
         } else {
             Err(chroma_types::DeleteDatabaseError::NotFound(
@@ -160,32 +152,32 @@ impl InMemoryFrontend {
         }
     }
 
-    pub async fn list_collections(
+    pub fn list_collections(
         &mut self,
         request: chroma_types::ListCollectionsRequest,
     ) -> Result<chroma_types::ListCollectionsResponse, chroma_types::GetCollectionsError> {
-        let inner = self.inner.lock();
-        let collections: Vec<_> = inner
+        let collections: Vec<_> = self
+            .inner
             .collections
             .iter()
             .filter(|c| {
                 c.collection.tenant == request.tenant_id
                     && c.collection.database == request.database_name
             })
+            .skip(request.offset as usize)
+            .take(request.limit.unwrap_or(10000000) as usize)
             .map(|c| c.collection.clone())
             .collect();
 
-        Ok(collections[request.offset as usize
-            ..request.offset as usize + request.limit.unwrap_or(10000000) as usize]
-            .to_vec())
+        Ok(collections)
     }
 
-    pub async fn count_collections(
+    pub fn count_collections(
         &mut self,
         request: chroma_types::CountCollectionsRequest,
     ) -> Result<chroma_types::CountCollectionsResponse, chroma_types::CountCollectionsError> {
-        let inner = self.inner.lock();
-        let count = inner
+        let count = self
+            .inner
             .collections
             .iter()
             .filter(|c| {
@@ -197,12 +189,11 @@ impl InMemoryFrontend {
         Ok(count as u32)
     }
 
-    pub async fn get_collection(
+    pub fn get_collection(
         &mut self,
         request: chroma_types::GetCollectionRequest,
     ) -> Result<chroma_types::GetCollectionResponse, chroma_types::GetCollectionError> {
-        let inner = self.inner.lock();
-        if let Some(collection) = inner.collections.iter().find(|c| {
+        if let Some(collection) = self.inner.collections.iter().find(|c| {
             c.collection.name == request.collection_name && c.collection.tenant == request.tenant_id
         }) {
             Ok(collection.collection.clone())
@@ -213,13 +204,11 @@ impl InMemoryFrontend {
         }
     }
 
-    pub async fn create_collection(
+    pub fn create_collection(
         &mut self,
         request: chroma_types::CreateCollectionRequest,
     ) -> Result<chroma_types::CreateCollectionResponse, chroma_types::CreateCollectionError> {
-        let mut inner = self.inner.lock();
-
-        if inner.collections.iter().any(|c| {
+        if self.inner.collections.iter().any(|c| {
             c.collection.name == request.name
                 && c.collection.tenant == request.tenant_id
                 && c.collection.database == request.database_name
@@ -240,41 +229,44 @@ impl InMemoryFrontend {
             ..Default::default()
         };
 
-        let reference_impl = TestReferenceSegment::default();
+        let metadata_segment = test_segment(
+            collection.collection_id,
+            chroma_types::SegmentScope::METADATA,
+        );
+        let vector_segment =
+            test_segment(collection.collection_id, chroma_types::SegmentScope::VECTOR);
+        let record_segment =
+            test_segment(collection.collection_id, chroma_types::SegmentScope::RECORD);
 
-        inner.collections.push(InMemoryCollection {
+        let mut reference_impl = TestReferenceSegment::default();
+        reference_impl.create_segment(metadata_segment.clone());
+        reference_impl.create_segment(vector_segment.clone());
+        reference_impl.create_segment(record_segment.clone());
+
+        self.inner.collections.push(InMemoryCollection {
             collection: collection.clone(),
-            metadata_segment: test_segment(
-                collection.collection_id,
-                chroma_types::SegmentScope::METADATA,
-            ),
-            vector_segment: test_segment(
-                collection.collection_id,
-                chroma_types::SegmentScope::VECTOR,
-            ),
-            record_segment: test_segment(
-                collection.collection_id,
-                chroma_types::SegmentScope::RECORD,
-            ),
+            metadata_segment,
+            vector_segment,
+            record_segment,
             reference_impl,
         });
 
         Ok(collection)
     }
 
-    pub async fn update_collection(
+    pub fn update_collection(
         &mut self,
         _request: chroma_types::UpdateCollectionRequest,
     ) -> Result<chroma_types::UpdateCollectionResponse, chroma_types::UpdateCollectionError> {
         unimplemented!()
     }
 
-    pub async fn delete_collection(
+    pub fn delete_collection(
         &mut self,
         request: chroma_types::DeleteCollectionRequest,
     ) -> Result<chroma_types::DeleteCollectionRecordsResponse, chroma_types::DeleteCollectionError>
     {
-        let mut inner = self.inner.lock();
+        let inner = &mut self.inner;
         if let Some(pos) = inner.collections.iter().position(|c| {
             c.collection.name == request.collection_name
                 && c.collection.tenant == request.tenant_id
@@ -289,13 +281,13 @@ impl InMemoryFrontend {
         }
     }
 
-    pub async fn add(
+    pub fn add(
         &mut self,
         request: chroma_types::AddCollectionRecordsRequest,
     ) -> Result<chroma_types::AddCollectionRecordsResponse, chroma_types::AddCollectionRecordsError>
     {
-        let mut inner = self.inner.lock();
-        let collection = inner
+        let collection = self
+            .inner
             .collections
             .iter_mut()
             .find(|c| {
@@ -335,15 +327,15 @@ impl InMemoryFrontend {
         Ok(chroma_types::AddCollectionRecordsResponse {})
     }
 
-    pub async fn update(
+    pub fn update(
         &mut self,
         request: chroma_types::UpdateCollectionRecordsRequest,
     ) -> Result<
         chroma_types::UpdateCollectionRecordsResponse,
         chroma_types::UpdateCollectionRecordsError,
     > {
-        let mut inner = self.inner.lock();
-        let collection = inner
+        let collection = self
+            .inner
             .collections
             .iter_mut()
             .find(|c| {
@@ -382,15 +374,15 @@ impl InMemoryFrontend {
         Ok(chroma_types::UpdateCollectionRecordsResponse {})
     }
 
-    pub async fn upsert(
+    pub fn upsert(
         &mut self,
         request: chroma_types::UpsertCollectionRecordsRequest,
     ) -> Result<
         chroma_types::UpsertCollectionRecordsResponse,
         chroma_types::UpsertCollectionRecordsError,
     > {
-        let mut inner = self.inner.lock();
-        let collection = inner
+        let collection = self
+            .inner
             .collections
             .iter_mut()
             .find(|c| {
@@ -420,7 +412,7 @@ impl InMemoryFrontend {
             documents,
             uris,
             metadatas,
-            chroma_types::Operation::Add,
+            chroma_types::Operation::Upsert,
         )
         .map_err(|e| e.boxed())?;
 
@@ -431,13 +423,17 @@ impl InMemoryFrontend {
         Ok(chroma_types::UpsertCollectionRecordsResponse {})
     }
 
-    pub async fn delete(
+    pub fn delete(
         &mut self,
         request: chroma_types::DeleteCollectionRecordsRequest,
     ) -> Result<
         chroma_types::DeleteCollectionRecordsResponse,
         chroma_types::DeleteCollectionRecordsError,
     > {
+        if request.ids.is_none() && request.r#where.is_none() {
+            return Ok(chroma_types::DeleteCollectionRecordsResponse {});
+        }
+
         let ids_to_delete = self
             .get(
                 chroma_types::GetRequest::try_new(
@@ -452,12 +448,11 @@ impl InMemoryFrontend {
                 )
                 .unwrap(),
             )
-            .await
             .map_err(|e| e.boxed())
             .map(|response| response.ids)?;
 
-        let mut inner = self.inner.lock();
-        let collection = inner
+        let collection = self
+            .inner
             .collections
             .iter_mut()
             .find(|c| {
@@ -488,12 +483,12 @@ impl InMemoryFrontend {
         Ok(chroma_types::DeleteCollectionRecordsResponse {})
     }
 
-    pub async fn count(
+    pub fn count(
         &mut self,
         request: chroma_types::CountRequest,
     ) -> Result<chroma_types::CountResponse, chroma_types::QueryError> {
-        let inner = self.inner.lock();
-        let collection = inner
+        let collection = self
+            .inner
             .collections
             .iter()
             .find(|c| {
@@ -523,12 +518,12 @@ impl InMemoryFrontend {
         Ok(count.count)
     }
 
-    pub async fn get(
-        &mut self,
+    pub fn get(
+        &self,
         request: chroma_types::GetRequest,
     ) -> Result<chroma_types::GetResponse, chroma_types::QueryError> {
-        let inner = self.inner.lock();
-        let collection = inner
+        let collection = self
+            .inner
             .collections
             .iter()
             .find(|c| {
@@ -584,12 +579,12 @@ impl InMemoryFrontend {
         Ok((get_response, include).into())
     }
 
-    pub async fn query(
+    pub fn query(
         &mut self,
         request: chroma_types::QueryRequest,
     ) -> Result<chroma_types::QueryResponse, chroma_types::QueryError> {
-        let inner = self.inner.lock();
-        let collection = inner
+        let collection = self
+            .inner
             .collections
             .iter()
             .find(|c| {
@@ -616,39 +611,50 @@ impl InMemoryFrontend {
             where_clause: r#where,
         };
 
+        let params = collection
+            .collection
+            .config
+            .get_hnsw_config_with_legacy_fallback(&collection.vector_segment)
+            .map_err(|e| e.boxed())?
+            .unwrap();
+        let distance_function: DistanceFunction = params.space.into();
+
         let query_response = collection
             .reference_impl
-            .knn(Knn {
-                scan: Scan {
-                    collection_and_segments: CollectionAndSegments {
-                        collection: collection.collection.clone(),
-                        metadata_segment: collection.metadata_segment.clone(),
-                        vector_segment: collection.vector_segment.clone(),
-                        record_segment: collection.record_segment.clone(),
+            .knn(
+                Knn {
+                    scan: Scan {
+                        collection_and_segments: CollectionAndSegments {
+                            collection: collection.collection.clone(),
+                            metadata_segment: collection.metadata_segment.clone(),
+                            vector_segment: collection.vector_segment.clone(),
+                            record_segment: collection.record_segment.clone(),
+                        },
+                    },
+                    filter,
+                    knn: KnnBatch {
+                        embeddings,
+                        fetch: n_results,
+                    },
+                    proj: KnnProjection {
+                        projection: Projection {
+                            document: include.0.contains(&Include::Document),
+                            embedding: include.0.contains(&Include::Embedding),
+                            // If URI is requested, metadata is also requested so we can extract the URI.
+                            metadata: (include.0.contains(&Include::Metadata)
+                                || include.0.contains(&Include::Uri)),
+                        },
+                        distance: include.0.contains(&Include::Distance),
                     },
                 },
-                filter,
-                knn: KnnBatch {
-                    embeddings,
-                    fetch: n_results,
-                },
-                proj: KnnProjection {
-                    projection: Projection {
-                        document: include.0.contains(&Include::Document),
-                        embedding: include.0.contains(&Include::Embedding),
-                        // If URI is requested, metadata is also requested so we can extract the URI.
-                        metadata: (include.0.contains(&Include::Metadata)
-                            || include.0.contains(&Include::Uri)),
-                    },
-                    distance: include.0.contains(&Include::Distance),
-                },
-            })
+                distance_function,
+            )
             .map_err(|e| e.boxed())?;
 
         Ok((query_response, include).into())
     }
 
-    pub async fn healthcheck(&self) -> chroma_types::HealthCheckResponse {
+    pub fn healthcheck(&self) -> chroma_types::HealthCheckResponse {
         chroma_types::HealthCheckResponse {
             is_executor_ready: true,
         }
@@ -664,21 +670,21 @@ mod tests {
 
     use super::*;
 
-    async fn create_test_collection() -> (InMemoryFrontend, Collection) {
+    fn create_test_collection() -> (InMemoryFrontend, Collection) {
         let tenant_name = "test".to_string();
         let database_name = "test".to_string();
         let collection_name = "test".to_string();
 
         let mut frontend = InMemoryFrontend::new();
         let request = chroma_types::CreateTenantRequest::try_new(tenant_name.clone()).unwrap();
-        frontend.create_tenant(request).await.unwrap();
+        frontend.create_tenant(request).unwrap();
 
         let request = chroma_types::CreateDatabaseRequest::try_new(
             tenant_name.clone(),
             database_name.clone(),
         )
         .unwrap();
-        frontend.create_database(request).await.unwrap();
+        frontend.create_database(request).unwrap();
 
         let request = chroma_types::CreateCollectionRequest::try_new(
             tenant_name.clone(),
@@ -689,15 +695,14 @@ mod tests {
             false,
         )
         .unwrap();
-        (
-            frontend.clone(),
-            frontend.create_collection(request).await.unwrap(),
-        )
+
+        let collection = frontend.create_collection(request).unwrap();
+        (frontend, collection)
     }
 
-    #[tokio::test]
-    async fn test_collection_get_query() {
-        let (mut frontend, collection) = create_test_collection().await;
+    #[test]
+    fn test_collection_get_query() {
+        let (mut frontend, collection) = create_test_collection();
         let ids = vec!["id1".to_string(), "id2".to_string()];
         let embeddings = vec![vec![-1.0, -1.0, -1.0], vec![0.0, 0.0, 0.0]];
         let documents = vec![Some("doc1".to_string()), Some("doc2".to_string())];
@@ -723,7 +728,7 @@ mod tests {
             Some(metadatas),
         )
         .unwrap();
-        frontend.add(request).await.unwrap();
+        frontend.add(request).unwrap();
 
         // Test count
         let count = frontend
@@ -735,7 +740,6 @@ mod tests {
                 )
                 .unwrap(),
             )
-            .await
             .unwrap();
         assert_eq!(count, 2);
 
@@ -757,7 +761,7 @@ mod tests {
             IncludeList::default_get(),
         )
         .unwrap();
-        let response = frontend.get(request).await.unwrap();
+        let response = frontend.get(request).unwrap();
         assert_eq!(response.ids.len(), 1);
         assert_eq!(response.ids[0], "id1");
 
@@ -776,7 +780,7 @@ mod tests {
             IncludeList::default_get(),
         )
         .unwrap();
-        let response = frontend.get(request).await.unwrap();
+        let response = frontend.get(request).unwrap();
         assert_eq!(response.ids.len(), 1);
         assert_eq!(response.ids[0], "id2");
 
@@ -792,7 +796,7 @@ mod tests {
             IncludeList::default_query(),
         )
         .unwrap();
-        let response = frontend.query(request).await.unwrap();
+        let response = frontend.query(request).unwrap();
         assert_eq!(response.ids[0].len(), 2);
         assert_eq!(response.ids[0], vec!["id2", "id1"]);
     }
