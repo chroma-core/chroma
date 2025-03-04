@@ -34,6 +34,7 @@
   },
   "peerDependencies": {
     "@google/generative-ai": "^0.1.1",
+    "chromadb-default-embed": "^2.14.0",
     "cohere-ai": "^5.0.0 || ^6.0.0 || ^7.0.0",
     "openai": "^3.0.0 || ^4.0.0",
     "voyageai": "^0.0.3-1",
@@ -41,6 +42,9 @@
   },
   "peerDependenciesMeta": {
     "@google/generative-ai": {
+      "optional": true
+    },
+    "chromadb-default-embed": {
       "optional": true
     },
     "cohere-ai": {

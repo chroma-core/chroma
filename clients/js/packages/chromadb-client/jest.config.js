@@ -4,9 +4,6 @@ export default {
   clearMocks: true,
   collectCoverage: false,
   testTimeout: 15000,
-  testMatch: [
-    "**/test/basic.test.ts"
-  ],
   transform: {
     "^.+\\.(ts|tsx)$": ["ts-jest", {
       tsconfig: "tsconfig.json"

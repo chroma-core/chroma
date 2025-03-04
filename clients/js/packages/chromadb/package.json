@@ -32,6 +32,7 @@
   "dependencies": {
     "@internal/chromadb-core": "workspace:*",
     "@google/generative-ai": "^0.1.1",
+    "chromadb-default-embed": "^2.14.0",
     "cohere-ai": "^7.0.0",
     "openai": "^4.0.0",
     "voyageai": "^0.0.3-1",
