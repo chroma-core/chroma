@@ -1037,6 +1037,10 @@ impl TryFrom<&str> for Include {
 pub struct IncludeList(pub Vec<Include>);
 
 impl IncludeList {
+    pub fn empty() -> Self {
+        Self(Vec::new())
+    }
+
     pub fn default_query() -> Self {
         Self(vec![
             Include::Document,
