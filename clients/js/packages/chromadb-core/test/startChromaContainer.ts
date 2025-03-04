@@ -6,7 +6,6 @@ import chalk from "chalk";
 
 const CHROMADB_PORT = 8000;
 
-// Adjust path to account for monorepo structure
 const BUILD_CONTEXT_DIR = path.join(__dirname, "../../../../..");
 
 /** See [this page](https://httpd.apache.org/docs/2.4/misc/password_encryptions.html) for more information about the format of this file. */
