@@ -4,12 +4,13 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-async-trait = "0.1"
-bytes = "1.7"
-futures = "0.3.31"
-futures-core = "0.3"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-setsum = "0.7"
-tokio = { version = "1.40", features = ["full"] }
-uuid = "1.10"
+async-trait = { workspace = true }
+bytes = { workspace = true }
+futures = { workspace = true }
+futures-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+setsum = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+uuid = { workspace = true }
