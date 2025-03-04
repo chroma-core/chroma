@@ -155,6 +155,39 @@ The write path is:
     `apply_delta` on the manifest manager.
 6.  The write is durable.
 
+## Cursoring
+
+wal3's scan API intentionally resembles a cursor API.  To facilitate easy use of the scan API, wal3
+has an explicit cursor store.  Although it is possible to store cursors anywhere, using the built-in
+wal3 cursor store has one advantage:  wal3 uses cursors to drive garbage collection.  Each cursor
+pins a position in the stream of appends, and preserves every append subsequent to the cursor.
+
+Cursors are integral to utility of wal3 to Chroma, so we'll briefly revisit how Chroma's log works
+today to see how it could work with Chroma.  In Chroma, the log maintains two positions:  The
+compaction offset and the tail of the log.  At any time, a reader must brute force or scan the data
+on the log to be strongly consistent.  To counteract this from growing without bound, compaction
+periodically rewrites a snapshot of the data that includes the last compaction's snapshot and all
+data on the log.
+
+In wal3 terminology, the compaction offset is a cursor.  It pins the log in place.  Cursors are just
+files stored in object storage like so:
+
+```text
+wal3/Cursor/compaction.json
+wal3/Cursor/emergency.json
+```
+
+Here we see two cursors:  One for compaction and one named emergency.  The emergency cursor could
+e.g. have been from an emergency situation in which data needs to be retained regardless of
+compaction activity.  wal3 garbage collects only things in the past for all cursors.
+
+The cursor API needs to expose a compare-and-swap like interface for its update so that the client
+can move cursors.  Chroma's usage of wal3 would then look like this:
+
+- read compaction cursor
+- read log manifest
+- from the compaction cursor, determine the set of files to compact.
+
 ## Timing Assumptions
 
 wal3 is designed to be used in a distributed system where clocks are not synchronized.  Further, S3
@@ -218,12 +251,6 @@ The big idea is to use positive, affirmative signals to delete files.  There's a
 synchronization between writer and garbage collector; an alternative design to consider would be to
 have the garbage collector stomp on a manifest and let the writer pick up the pieces, but that
 requires strictly more computer work to recover.
-
-# Optimizations
-
-wal3 is designed to be fast and efficient.  It is designed to scale to the limits of a single
-machine and to have low variance in its latency profile.  This section details optimizations that
-we could employ to make wal3 perform with higher throughput and/or lower latency.
 
 # Non-Obvious Design Considerations
 
@@ -353,6 +380,17 @@ reads of a subset of the log without having to race with garbage collection, and
 stall garbage collection for everyone.  The subset to be scanned gets pinned temporarily and
 addressed at the first garbage collection after the snapshot is removed.
 
+## Sealing the Log
+
+The log provides an additional seal method (not provided on the writer, but will be a separate
+sealer class) by which a log can be marked as "sealed".  A sealed log is a log that will not accept
+any further writes.  The seal is a JSON blob in the manifest that is checked by the writer before it
+writes a new manifest.
+
+The purpose of the seal is to allow for the log to be migrated to a new log.  The seal is a way to
+consistently ensure that writes are in total order.  The new log gets initialized only after sealing
+the old log.
+
 # Failure Scenarios
 
 wal3 is designed to be resilient to failure.  This section details the failure scenarios that wal3
@@ -465,3 +503,69 @@ will indicate a problem.
 
 To do this, we will construct an end-to-end, variable throughput test that we can run against wal3
 to ensure that data written is readable exactly as written.
+
+# Multiple wal3 Instances
+
+Thus far we've presented wal3 as if it is a singleton.  In this section, we look at considerations
+for maintaining a herd of wal3 instances in a single object store bucket.
+
+## Serverless Behavior
+
+First off, wal3 is intended to run multiple wal3 instances in parallel and open at the same time.
+The over head per stream is single digit megabytes (manifest and a buffer of writes), meaning that
+we can handle hundreds or thousands of concurrent logs per stream.  We cannot open every log for
+every customer on a single machine and have it fit memory.  We will have to open and close logs.
+
+Therefore the following considerations fall out:
+- Opening and closing of logs must not be expensive.
+- Opening and closing of logs must be provably safe.
+
+These come from the design of wal3 and are covered above.
+
+There's one additional non-obvious constraint:  We could, in theory, write `\forall log \in logs
+query_log_size()` to determine which logs have data, but this will require O(logs) read activity to
+object store.  This becomes expensive as the number of logs grows, especially if logs are not
+written to regularly.  To facilitate this, we need a mechanism that scales O(logs written) instead
+of the more general O(logs).
+
+To do this, wal3 will provide a structure that can track whether a wal3 is dirty across thousands,
+millions, or even billions of collections.
+
+One potential straw-man approach considered would be to hash each log's prefix and then insert into
+a prefix of dirty logs.  It looks something like this:
+
+```text
+wal3/dirty/ea8cd5d4f1b2ed79d8415c832e2fd2cef87e6ebcecde12aa01b2ccc5aceaab55
+wal3/dirty/ea47843f7d677b67d7364c2b34322770988e91e2b21df4d7c98064dfb14ae68d
+```
+
+The problem with this approach is that listing `wal3/dirty` becomes expensive as things grow.  With
+1e9 collections, simply knowing which are dirty would cost $10k to LIST.  What if we knew every
+potential log name and could enumerate them?  We could do a GET/HEAD on each dirty "bit" to see if
+it exists in object storage.  This comes out to $5k per pass for 1e9 objects, but violates the
+requirement that work be proportional to the data written.
+
+The observation to have is that if collection dirty bits are 1:1 with files in object storage, then
+there will be O(dirty collections) files to list.  One straw man approach considered was to make a
+hierarchy in S3 like a B+-tree:
+
+```text
+wal3/dirty/ea/8c/d5/d4/f1b2ed79d8415c832e2fd2cef87e6ebcecde12aa01b2ccc5aceaab55
+wal3/dirty/ea/47/84/3f/7d677b67d7364c2b34322770988e91e2b21df4d7c98064dfb14ae68d
+```
+
+This strictly increases the number of list operations, but brings a useful property:  We can
+partition the space of dirty bits so that multiple scanners can pass over them in parallel.  This
+doesn't reduce the cost of finding dirty logs, but does make it faster.
+
+To compromise, we want the following:
+- Tracking dirty per collection _written_, not _existing_.
+- Partitioning over dirty collections.
+- A way to support more collections in the future should costs be too great.
+
+```text
+wal3/dirty/<prefix bits>/<suffix bits>
+```
+
+The number of prefix bits must be configurable, but shouldn't change much in practice.  Should it
+change, it is a straw-man away from being recreated.
