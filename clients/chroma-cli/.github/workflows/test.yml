@@ -1,0 +1,71 @@
+name: Test
+
+run-name: |
+  ${{ (github.event_name == 'pull_request' && format('Test (PR #{0}): {1}', github.event.number, github.event.pull_request.title))
+   || format('Test: {0}', github.event.head_commit.message) }}
+
+on:
+  # Event: A maintainer has pushed commits or merged a PR to main.
+  push:
+    # Limiting push events to 'main' prevents duplicate runs of this workflow
+    # when maintainers push to internal PRs.
+    branches:
+      - main
+
+  # Event: A contributor has created or updated a PR.
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    branches:
+      - main
+
+jobs:
+  pr:
+    name: Pull Request Details
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'pull_request' }}
+    outputs:
+      branch: ${{ steps.pr-ref.outputs.branch || github.event.repository.default_branch }}
+    steps:
+      - name: PR Branch
+        id: pr-ref
+        shell: bash
+        run: echo "branch=$(gh pr view $PR_NO --repo $REPO --json headRefName --jq '.headRefName')" | tee -a "$GITHUB_OUTPUT"
+        env:
+          REPO: ${{ github.repository }}
+          PR_NO: ${{ github.event.number }}
+          GH_TOKEN: ${{ github.token }}
+
+  # Labeling a PR with a `ci:full-matrix` label does a full matrix build on
+  # every run of this workflow for that PR, in addition to the other tests.
+  full-matrix:
+    name: Build
+    if: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:full-matrix') }}
+    needs: [pr]
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build.yml
+    with:
+      ref: ${{ needs.pr.outputs.branch }}
+      update-version: true
+      github-release: false
+
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+      - name: Setup Neon Environment
+        id: neon
+        uses: ./.github/actions/setup
+        with:
+          platform: linux-x64-gnu
+      - name: Build
+        shell: bash
+        env:
+          CARGO_BUILD_TARGET: ${{ steps.neon.outputs.target }}
+          NEON_BUILD_PLATFORM: linux-x64-gnu
+        run: npm run debug
+      - name: Test
+        shell: bash
+        run: npm test

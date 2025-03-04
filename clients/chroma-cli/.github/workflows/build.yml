@@ -1,0 +1,137 @@
+name: Build
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: 'The branch, tag, or SHA to check out'
+        required: true
+        type: string
+      update-version:
+        description: 'Update version before building?'
+        required: false
+        type: boolean
+        default: false
+      version:
+        description: 'Version update (ignored if update-version is false)'
+        required: false
+        type: string
+        default: 'patch'
+      github-release:
+        description: 'Publish GitHub release?'
+        required: false
+        type: boolean
+        default: false
+      tag:
+        description: 'The release tag (ignored if github-release is false)'
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  matrix:
+    name: Matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.result }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Setup Neon Environment
+        uses: ./.github/actions/setup
+        with:
+          use-rust: false
+      - name: Look Up Matrix Data
+        id: matrixData
+        shell: bash
+        run: echo "json=$(npx neon show ci github | jq -rc)" | tee -a $GITHUB_OUTPUT
+      - name: Compute Matrix
+        id: matrix
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const platforms = ${{ steps.matrixData.outputs.json }};
+            const macOS = platforms.macOS.map(platform => {
+              return { os: "macos-latest", platform, script: "build" };
+            });
+            const windows = platforms.Windows.map(platform => {
+              return { os: "windows-latest", platform, script: "build" };
+            });
+            const linux = platforms.Linux.map(platform => {
+              return { os: "ubuntu-latest", platform, script: "cross" };
+            });
+            return [...macOS, ...windows, ...linux];
+
+  binaries:
+    name: Binaries
+    needs: [matrix]
+    strategy:
+      matrix:
+        cfg: ${{ fromJSON(needs.matrix.outputs.matrix) }}
+    runs-on: ${{ matrix.cfg.os }}
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Setup Neon Environment
+        id: neon
+        uses: ./.github/actions/setup
+        with:
+          use-cross: ${{ matrix.cfg.script == 'cross' }}
+          platform: ${{ matrix.cfg.platform }}
+      - name: Update Version
+        if: ${{ inputs.update-version }}
+        shell: bash
+        run: |
+          git config --global user.name $ACTIONS_USER
+          git config --global user.email $ACTIONS_EMAIL
+          npm version ${{ inputs.version }} -m "v%s"
+      - name: Build
+        shell: bash
+        env:
+          CARGO_BUILD_TARGET: ${{ steps.neon.outputs.target }}
+          NEON_BUILD_PLATFORM: ${{ matrix.cfg.platform }}
+        run: npm run ${{ matrix.cfg.script }}
+      - name: Pack
+        id: pack
+        shell: bash
+        run: |
+          mkdir -p dist
+          echo filename=$(basename $(npm pack ./platforms/${{ matrix.cfg.platform }} --silent --pack-destination=./dist --json | jq -r '.[0].filename')) | tee -a $GITHUB_OUTPUT
+      - name: Release
+        if: ${{ inputs.github-release }}
+        uses: softprops/action-gh-release@9d7c94cfd0a1f3ed45544c887983e9fa900f0564 # v2.0.4
+        with:
+          files: ./dist/${{ steps.pack.outputs.filename }}
+          tag_name: ${{ inputs.tag }}
+
+  main:
+    name: Main
+    needs: [matrix]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Setup Neon Environment
+        uses: ./.github/actions/setup
+        with:
+          use-rust: false
+      - name: Pack
+        id: pack
+        shell: bash
+        run: |
+          mkdir -p dist
+          echo "filename=$(npm pack --silent --pack-destination=./dist)" | tee -a $GITHUB_OUTPUT
+      - name: Release
+        if: ${{ inputs.github-release }}
+        uses: softprops/action-gh-release@9d7c94cfd0a1f3ed45544c887983e9fa900f0564 # v2.0.4
+        with:
+          files: ./dist/${{ steps.pack.outputs.filename }}
+          tag_name: ${{ inputs.tag }}

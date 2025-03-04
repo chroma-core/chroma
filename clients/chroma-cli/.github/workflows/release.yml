@@ -1,0 +1,135 @@
+name: Release
+
+run-name: |
+  ${{ (inputs.dryrun && 'Dry run')
+   || format('Release: {0}', (inputs.version == 'custom' && inputs.custom) || inputs.version) }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      dryrun:
+        description: 'Dry run (no npm publish)'
+        required: false
+        type: boolean
+        default: true
+      version:
+        description: 'Version component to update (or "custom" to provide exact version)'
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - prepatch
+          - preminor
+          - premajor
+          - prerelease
+          - custom
+      custom:
+        description: 'Custom version'
+        required: false
+        default: ''
+
+jobs:
+  setup:
+    name: Setup
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      dryrun: ${{ steps.dryrun.outputs.dryrun }}
+      publish: ${{ steps.publish.outputs.publish }}
+      ref: ${{ steps.tag.outputs.tag || github.event.repository.default_branch }}
+      tag: ${{ steps.tag.outputs.tag || '' }}
+    steps:
+      - name: Validate Workflow Inputs
+        if: ${{ inputs.version == 'custom' && inputs.custom == '' }}
+        shell: bash
+        run: |
+          echo '::error::No custom version number provided'
+          exit 1
+      - id: dryrun
+        name: Validate Dry Run Event
+        if: ${{ inputs.dryrun }}
+        shell: bash
+        run: echo dryrun=true | tee -a $GITHUB_OUTPUT
+      - id: publish
+        name: Validate Publish Event
+        if: ${{ !inputs.dryrun }}
+        shell: bash
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [[ -z $NPM_TOKEN ]]; then
+            echo "::error::Secret NPM_TOKEN is not defined for this GitHub repo."
+            echo "::error::To publish to npm, this action requires:"
+            echo "::error:: • an npm access token;"
+            echo "::error:: • with Read-Write access to this project's npm packages;"
+            echo "::error:: • stored as a repo secret named NPM_TOKEN."
+            echo "::error::See https://docs.npmjs.com/about-access-tokens for info about creating npm tokens."
+            echo "::error:: 💡 The simplest method is to create a Classic npm token of type Automation."
+            echo "::error:: 💡 For greater security, consider using a Granual access token."
+            echo "::error::See https://docs.github.com/en/actions/security-guides/using-secrets-in-github-actions for info about how to store GitHub repo secrets."
+            exit 1
+          fi
+          echo publish=true | tee -a $GITHUB_OUTPUT
+      - name: Checkout Code
+        uses: actions/checkout@v3
+      - name: Setup Neon Environment
+        uses: ./.github/actions/setup
+        with:
+          use-rust: false
+      - name: Tag Release
+        if: ${{ !inputs.dryrun }}
+        id: tag
+        shell: bash
+        run: |
+          git config --global user.name $ACTIONS_USER
+          git config --global user.email $ACTIONS_EMAIL
+          npm version -m 'v%s' '${{ (inputs.version == 'custom' && inputs.custom) || inputs.version }}'
+          git push --follow-tags
+          echo tag=$(git describe --abbrev=0) | tee -a $GITHUB_OUTPUT
+
+  build:
+    name: Build
+    needs: [setup]
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build.yml
+    with:
+      ref: ${{ needs.setup.outputs.ref }}
+      tag: ${{ needs.setup.outputs.tag }}
+      update-version: ${{ !!needs.setup.outputs.dryrun }}
+      version: ${{ (inputs.version == 'custom' && inputs.custom) || inputs.version }}
+      github-release: ${{ !!needs.setup.outputs.publish }}
+
+  publish:
+    name: Publish
+    if: ${{ needs.setup.outputs.publish }}
+    needs: [setup, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ needs.setup.outputs.ref }}
+      - name: Setup Neon Environment
+        uses: ./.github/actions/setup
+        with:
+          use-rust: false
+      - name: Fetch
+        uses: robinraju/release-downloader@c39a3b234af58f0cf85888573d361fb6fa281534 # v1.10
+        with:
+          tag: ${{ needs.setup.outputs.tag }}
+          fileName: "*.tgz"
+          out-file-path: ./dist
+      - name: Publish
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          for p in ./dist/*.tgz ; do
+            npm publish --access public $p
+          done

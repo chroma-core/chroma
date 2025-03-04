@@ -1,0 +1,25 @@
+{
+  "name": "@chroma-cli/darwin-x64",
+  "description": "Prebuilt binary package for `chroma-cli` on `darwin-x64`.",
+  "version": "0.1.0",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "main": "index.node",
+  "files": [
+    "index.node"
+  ],
+  "neon": {
+    "type": "binary",
+    "rust": "x86_64-apple-darwin",
+    "node": "darwin-x64",
+    "os": "darwin",
+    "arch": "x64",
+    "abi": null
+  },
+  "author": "",
+  "license": "ISC"
+}
