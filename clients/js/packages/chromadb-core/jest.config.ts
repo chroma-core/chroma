@@ -4,7 +4,7 @@ export default {
   clearMocks: true,
   collectCoverage: false,
   testTimeout: 15000,
-  // Commenting out globalSetup and globalTeardown for now since they require Docker
+  // Docker bindings for tests
   globalSetup: "./test/testEnvSetup.ts",
   globalTeardown: "./test/testEnvTeardown.ts",
   coverageDirectory: "./test/coverage",
@@ -19,4 +19,11 @@ export default {
     "!**/node_modules/**",
     "!**/vendor/**",
   ],
+  // Make tests find the src modules
+  moduleNameMapper: {
+    "^@src/(.*)$": "<rootDir>/src/$1"
+  },
+  testPathIgnorePatterns: [
+    "node_modules/"
+  ]
 };
