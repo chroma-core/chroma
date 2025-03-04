@@ -100,7 +100,7 @@ export class CohereEmbeddingFunction implements IEmbeddingFunction {
   }) {
     this.model = model;
 
-    const apiKey = cohere_api_key ?? process.env[cohere_api_key_env_var!];
+    const apiKey = cohere_api_key ?? process.env[cohere_api_key_env_var];
     if (!apiKey) {
       throw new Error(
         `Cohere API key is required. Please provide it in the constructor or set the environment variable ${cohere_api_key_env_var}.`,
