@@ -60,6 +60,8 @@ wal3 is built around the following data structures:
 - A `Fragment` is a single, immutable file that contains a subsequence of data for a log.
 - A `Manifest` is a file that contains the metadata for the log.  It contains the list of fragments
   that comprise the current state of the log.
+- A `Cursor` holds a position in the log, pinning that position and all subsequent positions from
+  being garbage collected.
 
 The manifest ties the log together.  It transitively contains a complete reference to every file
 that has been written to the log and not yet garbage collected.
