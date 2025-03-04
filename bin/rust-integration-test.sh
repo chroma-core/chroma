@@ -12,7 +12,7 @@ else
 fi
 
 cargo build --bin chroma
-cargo run --bin chroma -- run bin/rust_single_node_integration_test_config.yaml &
+cargo run --bin chroma -- run --config bin/rust_single_node_integration_test_config.yaml &
 
 echo "Waiting for Chroma server to be available..."
 for i in {1..30}; do
