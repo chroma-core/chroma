@@ -1,9 +1,4 @@
-import {
-  expect,
-  test,
-  describe,
-  beforeEach,
-} from "@jest/globals";
+import { expect, test, describe, beforeEach } from "@jest/globals";
 import { DOCUMENTS, EMBEDDINGS, IDS } from "./data";
 import { METADATAS } from "./data";
 import { IncludeEnum } from "../src/types";
@@ -128,6 +123,7 @@ describe("add collections", () => {
     test("it should add Cohere embeddings", async () => {
       const embedder = new CohereEmbeddingFunction({
         cohere_api_key: process.env.COHERE_API_KEY || "",
+        cohere_api_key_env_var: "COHERE_API_KEY",
       });
       const collection = await client.createCollection({
         name: "test",
@@ -151,7 +147,8 @@ describe("add collections", () => {
     test("it should add VoyageAI embeddings", async () => {
       const embedder = new VoyageAIEmbeddingFunction({
         api_key: process.env.VOYAGE_API_KEY || "",
-        model: "voyage-3-large"
+        model: "voyage-3-large",
+        api_key_env_var: "VOYAGE_API_KEY",
       });
       const collection = await client.createCollection({
         name: "test",
