@@ -11,6 +11,7 @@
 use super::config::StorageConfig;
 use super::stream::ByteStreamItem;
 use super::stream::S3ByteStream;
+use super::PutOptions;
 use super::StorageConfigError;
 use crate::GetError;
 use async_trait::async_trait;
@@ -57,11 +58,17 @@ pub enum S3PutError {
     S3PutError(String),
     #[error("S3 Dispatch failure error")]
     S3DispatchFailure,
+    #[error("Condition did not match")]
+    ConditionNotMet,
 }
 
 impl ChromaError for S3PutError {
     fn code(&self) -> ErrorCodes {
-        ErrorCodes::Internal
+        match self {
+            S3PutError::S3PutError(_) => ErrorCodes::Internal,
+            S3PutError::S3DispatchFailure => ErrorCodes::Internal,
+            S3PutError::ConditionNotMet => ErrorCodes::FailedPrecondition,
+        }
     }
 }
 
@@ -134,10 +141,16 @@ impl S3Storage {
         }
     }
 
-    async fn get_stream(
+    async fn get_stream_and_e_tag(
         &self,
         key: &str,
-    ) -> Result<Box<dyn Stream<Item = ByteStreamItem> + Unpin + Send>, S3GetError> {
+    ) -> Result<
+        (
+            Box<dyn Stream<Item = ByteStreamItem> + Unpin + Send>,
+            Option<String>,
+        ),
+        S3GetError,
+    > {
         let res = self
             .client
             .get_object()
@@ -148,7 +161,7 @@ impl S3Storage {
         match res {
             Ok(res) => {
                 let byte_stream = res.body;
-                Ok(Box::new(S3ByteStream::new(byte_stream)))
+                Ok((Box::new(S3ByteStream::new(byte_stream)), res.e_tag))
             }
             Err(e) => {
                 tracing::error!("error: {}", e);
@@ -179,7 +192,7 @@ impl S3Storage {
     pub(super) async fn get_key_ranges(
         &self,
         key: &str,
-    ) -> Result<(i64, Vec<(i64, i64)>), S3GetError> {
+    ) -> Result<(i64, Vec<(i64, i64)>, Option<String>), S3GetError> {
         let part_size = self.download_part_size_bytes as i64;
         let head_res = self
             .client
@@ -188,9 +201,9 @@ impl S3Storage {
             .key(key)
             .send()
             .await;
-        let content_length = match head_res {
+        let (content_length, e_tag) = match head_res {
             Ok(res) => match res.content_length {
-                Some(len) => len,
+                Some(len) => (len, res.e_tag),
                 None => {
                     return Err(S3GetError::S3GetError("No content length".to_string()));
                 }
@@ -211,7 +224,7 @@ impl S3Storage {
             };
             ranges.push((start, end));
         }
-        Ok((content_length, ranges))
+        Ok((content_length, ranges, e_tag))
     }
 
     pub(super) async fn fetch_range(
@@ -252,12 +265,15 @@ impl S3Storage {
         }
     }
 
-    pub(super) async fn get_parallel(&self, key: &str) -> Result<Arc<Vec<u8>>, S3GetError> {
-        let (content_length, ranges) = self.get_key_ranges(key).await?;
+    pub(super) async fn get_parallel(
+        &self,
+        key: &str,
+    ) -> Result<(Arc<Vec<u8>>, Option<String>), S3GetError> {
+        let (content_length, ranges, e_tag) = self.get_key_ranges(key).await?;
 
         // .buffer_unordered() below will hang if the range is empty (https://github.com/rust-lang/futures-rs/issues/2740), so we short-circuit here
         if content_length == 0 {
-            return Ok(Arc::new(Vec::new()));
+            return Ok((Arc::new(Vec::new()), None));
         }
 
         let part_size = self.download_part_size_bytes;
@@ -293,12 +309,16 @@ impl S3Storage {
             .buffer_unordered(num_parts)
             .collect::<Vec<_>>()
             .await;
-        Ok(Arc::new(output_buffer))
+        Ok((Arc::new(output_buffer), e_tag))
     }
 
     pub async fn get(&self, key: &str) -> Result<Arc<Vec<u8>>, S3GetError> {
-        let mut stream = self
-            .get_stream(key)
+        self.get_e_tag(key).await.map(|(buf, _)| buf)
+    }
+
+    pub async fn get_e_tag(&self, key: &str) -> Result<(Arc<Vec<u8>>, Option<String>), S3GetError> {
+        let (mut stream, e_tag) = self
+            .get_stream_and_e_tag(key)
             .instrument(tracing::trace_span!(parent: Span::current(), "S3 get stream"))
             .await?;
         let read_block_span = tracing::trace_span!(parent: Span::current(), "S3 read bytes to end");
@@ -323,6 +343,11 @@ impl S3Storage {
                                     return Err(S3GetError::NoSuchKey(e));
                                 }
                                 GetError::LocalError(_) => unreachable!(),
+                                GetError::ConditionNotMet => {
+                                    return Err(S3GetError::S3GetError(
+                                        "Condition not met".to_string(),
+                                    ));
+                                }
                             }
                         }
                     }
@@ -332,10 +357,10 @@ impl S3Storage {
             })
             .await?;
         match buf {
-            Some(buf) => Ok(Arc::new(buf)),
+            Some(buf) => Ok((Arc::new(buf), e_tag)),
             None => {
                 // Buffer is empty. Nothing interesting to do.
-                Ok(Arc::new(vec![]))
+                Ok((Arc::new(vec![]), None))
             }
         }
     }
@@ -347,10 +372,15 @@ impl S3Storage {
     pub async fn put_bytes(&self, key: &str, bytes: Vec<u8>) -> Result<(), S3PutError> {
         let bytes = Arc::new(Bytes::from(bytes));
 
-        self.put_object(key, bytes.len(), move |range| {
-            let bytes = bytes.clone();
-            async move { Ok(ByteStream::from(bytes.slice(range))) }.boxed()
-        })
+        self.put_object(
+            key,
+            bytes.len(),
+            move |range| {
+                let bytes = bytes.clone();
+                async move { Ok(ByteStream::from(bytes.slice(range))) }.boxed()
+            },
+            PutOptions::default(),
+        )
         .await
     }
 
@@ -362,20 +392,25 @@ impl S3Storage {
 
         let path = path.to_string();
 
-        self.put_object(key, file_size as usize, move |range| {
-            let path = path.clone();
+        self.put_object(
+            key,
+            file_size as usize,
+            move |range| {
+                let path = path.clone();
 
-            async move {
-                ByteStream::read_from()
-                    .path(path)
-                    .offset(range.start as u64)
-                    .length(Length::Exact(range.len() as u64))
-                    .build()
-                    .await
-                    .map_err(|err| S3PutError::S3PutError(err.to_string()))
-            }
-            .boxed()
-        })
+                async move {
+                    ByteStream::read_from()
+                        .path(path)
+                        .offset(range.start as u64)
+                        .length(Length::Exact(range.len() as u64))
+                        .build()
+                        .await
+                        .map_err(|err| S3PutError::S3PutError(err.to_string()))
+                }
+                .boxed()
+            },
+            PutOptions::default(),
+        )
         .await
     }
 
@@ -386,14 +421,15 @@ impl S3Storage {
         create_bytestream_fn: impl Fn(
             Range<usize>,
         ) -> BoxFuture<'static, Result<ByteStream, S3PutError>>,
+        options: PutOptions,
     ) -> Result<(), S3PutError> {
         if self.is_oneshot_upload(total_size_bytes) {
             return self
-                .oneshot_upload(key, total_size_bytes, create_bytestream_fn)
+                .oneshot_upload(key, total_size_bytes, create_bytestream_fn, options)
                 .await;
         }
 
-        self.multipart_upload(key, total_size_bytes, create_bytestream_fn)
+        self.multipart_upload(key, total_size_bytes, create_bytestream_fn, options)
             .await
     }
 
@@ -404,15 +440,32 @@ impl S3Storage {
         create_bytestream_fn: impl Fn(
             Range<usize>,
         ) -> BoxFuture<'static, Result<ByteStream, S3PutError>>,
+        options: PutOptions,
     ) -> Result<(), S3PutError> {
-        self.client
+        let req = self
+            .client
             .put_object()
             .bucket(&self.bucket)
             .key(key)
-            .body(create_bytestream_fn(0..total_size_bytes).await?)
-            .send()
-            .await
-            .map_err(|err| S3PutError::S3PutError(err.to_string()))?;
+            .body(create_bytestream_fn(0..total_size_bytes).await?);
+        let req = match options.if_not_exists {
+            true => req.if_none_match('*'),
+            false => req,
+        };
+
+        let req = match options.if_match {
+            Some(e_tag) => req.if_match(e_tag),
+            None => req,
+        };
+
+        req.send().await.map_err(|err| {
+            let err = err.into_service_error();
+            if err.meta().code() == Some("PreconditionFailed") {
+                S3PutError::ConditionNotMet
+            } else {
+                S3PutError::S3PutError(format!("{:?}", err))
+            }
+        })?;
 
         Ok(())
     }
@@ -495,8 +548,10 @@ impl S3Storage {
         key: &str,
         upload_id: &str,
         upload_parts: Vec<CompletedPart>,
+        options: PutOptions,
     ) -> Result<(), S3PutError> {
-        self.client
+        let complete_req = self
+            .client
             .complete_multipart_upload()
             .bucket(&self.bucket)
             .key(key)
@@ -505,7 +560,19 @@ impl S3Storage {
                     .set_parts(Some(upload_parts))
                     .build(),
             )
-            .upload_id(upload_id)
+            .upload_id(upload_id);
+
+        let complete_req = match options.if_not_exists {
+            true => complete_req.if_none_match('*'),
+            false => complete_req,
+        };
+
+        let complete_req = match options.if_match {
+            Some(e_tag) => complete_req.if_match(e_tag),
+            None => complete_req,
+        };
+
+        complete_req
             .send()
             .await
             .map_err(|err| S3PutError::S3PutError(err.to_string()))?;
@@ -520,6 +587,7 @@ impl S3Storage {
         create_bytestream_fn: impl Fn(
             Range<usize>,
         ) -> BoxFuture<'static, Result<ByteStream, S3PutError>>,
+        options: PutOptions,
     ) -> Result<(), S3PutError> {
         let (part_count, size_of_last_part, upload_id) =
             self.prepare_multipart_upload(key, total_size_bytes).await?;
@@ -540,7 +608,7 @@ impl S3Storage {
             upload_parts.push(completed_part);
         }
 
-        self.finish_multipart_upload(key, &upload_id, upload_parts)
+        self.finish_multipart_upload(key, &upload_id, upload_parts, options)
             .await
     }
 
@@ -677,6 +745,8 @@ impl Configurable<StorageConfig> for S3Storage {
 
 #[cfg(test)]
 mod tests {
+    use std::future::ready;
+
     use super::*;
     use rand::{distributions::Alphanumeric, Rng, SeedableRng};
     use std::io::Write;
@@ -728,11 +798,10 @@ mod tests {
         assert_eq!(buf, test_data);
     }
 
-    async fn test_put_file(
-        file_size: usize,
+    async fn setup_with_bucket(
         upload_part_size_bytes: usize,
         download_part_size_bytes: usize,
-    ) {
+    ) -> S3Storage {
         let client = get_s3_client();
 
         let storage = S3Storage {
@@ -742,6 +811,15 @@ mod tests {
             download_part_size_bytes,
         };
         storage.create_bucket().await.unwrap();
+        storage
+    }
+
+    async fn test_put_file(
+        file_size: usize,
+        upload_part_size_bytes: usize,
+        download_part_size_bytes: usize,
+    ) {
+        let storage = setup_with_bucket(upload_part_size_bytes, download_part_size_bytes).await;
 
         let mut temp_file = NamedTempFile::new().unwrap();
 
@@ -803,7 +881,7 @@ mod tests {
         );
 
         // Parallel fetch.
-        let buf = storage.get_parallel(&test_data_key).await.unwrap();
+        let (buf, _e_tag) = storage.get_parallel(&test_data_key).await.unwrap();
 
         let buf = String::from_utf8(Arc::unwrap_or_clone(buf)).unwrap();
         assert_eq!(buf, test_data_value_string);
@@ -852,7 +930,110 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_k8s_integration_if_not_exist() {
+        let storage = setup_with_bucket(1024 * 1024 * 8, 1024 * 1024 * 8).await;
+        storage
+            .oneshot_upload(
+                "test",
+                0,
+                |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
+                PutOptions {
+                    if_not_exists: true,
+                    if_match: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let err = storage
+            .oneshot_upload(
+                "test",
+                0,
+                |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
+                PutOptions {
+                    if_not_exists: true,
+                    if_match: None,
+                },
+            )
+            .await
+            .unwrap_err();
+        eprintln!("{:?}", err);
+        assert!(matches!(err, S3PutError::ConditionNotMet));
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_e_tag_succeed() {
+        let storage = setup_with_bucket(1024 * 1024 * 8, 1024 * 1024 * 8).await;
+        storage
+            .oneshot_upload(
+                "test",
+                0,
+                |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
+                PutOptions {
+                    if_not_exists: true,
+                    if_match: None,
+                },
+            )
+            .await
+            .unwrap();
+        let (_, e_tag) = storage.get_e_tag("test").await.unwrap();
+        assert!(e_tag.is_some());
+
+        storage
+            .oneshot_upload(
+                "test",
+                0,
+                |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
+                PutOptions {
+                    if_not_exists: false,
+                    if_match: e_tag,
+                },
+            )
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_e_tag_fail() {
+        let storage = setup_with_bucket(1024 * 1024 * 8, 1024 * 1024 * 8).await;
+        storage
+            .oneshot_upload(
+                "test",
+                0,
+                |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
+                PutOptions {
+                    if_not_exists: true,
+                    if_match: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let err = storage
+            .oneshot_upload(
+                "test",
+                0,
+                |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
+                PutOptions {
+                    if_not_exists: false,
+                    if_match: Some("e_tag".to_string()),
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, S3PutError::ConditionNotMet));
+    }
+
+    #[tokio::test]
     async fn test_k8s_integration_empty_file() {
         test_multipart_get_for_size(0).await;
+    }
+
+    #[test]
+    fn test_put_options_default() {
+        let default = PutOptions::default();
+
+        assert!(!default.if_not_exists);
+        assert_eq!(default.if_match, None);
     }
 }
