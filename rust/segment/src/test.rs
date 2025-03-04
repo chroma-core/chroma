@@ -340,23 +340,26 @@ impl TestReferenceSegment {
         }
         impl Ord for RecordWithDistance {
             fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-                self.partial_cmp(other).unwrap()
+                self.0.partial_cmp(&other.0).unwrap()
             }
         }
 
         let mut result = KnnBatchResult::default();
 
         for embedding in plan.knn.embeddings {
-            let mut max_heap = BinaryHeap::with_capacity(plan.knn.fetch as usize);
+            let mut max_heap: BinaryHeap<RecordWithDistance> =
+                BinaryHeap::with_capacity(plan.knn.fetch as usize * 100);
             let target_vector = normalize(&embedding);
 
             for (_, record) in &filtered_records {
                 let distance = DistanceFunction::Cosine.distance(
                     &target_vector,
-                    record
-                        .embedding
-                        .as_ref()
-                        .expect("Embedding should be present"),
+                    &normalize(
+                        record
+                            .embedding
+                            .as_ref()
+                            .expect("Embedding should be present"),
+                    ),
                 );
 
                 if max_heap.len() < plan.knn.fetch as usize {
