@@ -9,19 +9,28 @@ use backoff::ExponentialBackoff;
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
 /// Error captures the different error conditions that can occur when interacting with the log.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, thiserror::Error)]
 pub enum Error {
     #[default]
+    #[error("success")]
     Success,
+    #[error("uninitialized log")]
     UninitializedLog,
+    #[error("already initialized log")]
     AlreadyInitialized,
+    #[error("scanned region is garbage collected")]
     GarbageCollected,
+    #[error("log contention fails a write")]
     LogContention,
+    #[error("the log is full")]
     LogFull,
-    EndOfLog,
+    #[error("an internal, otherwise unclassifiable error")]
     Internal,
+    #[error("corrupt manifest: {0}")]
     CorruptManifest(String),
+    #[error("corrupt cursor: {0}")]
     CorruptCursor(String),
+    #[error("missing cursor: {0}")]
     NoSuchCursor(String),
 }
 
@@ -70,9 +79,9 @@ impl LogPosition {
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct ThrottleOptions {
     /// The maximum number of bytes to batch.  Defaults to 8MB.
-    pub batch_size: usize,
-    /// The maximum number of microseconds to batch.  Defaults to 20ms.
-    pub batch_interval: usize,
+    pub batch_size_bytes: usize,
+    /// The maximum number of microseconds to batch.  Defaults to 20ms or 20_000us.
+    pub batch_interval_us: usize,
     /// The maximum number of operations per second to allow.  Defaults to 2_000.
     pub throughput: usize,
     /// The number of operations per second to reserve for backoff/retry.  Defaults to 1_500.
@@ -85,9 +94,9 @@ impl Default for ThrottleOptions {
     fn default() -> Self {
         ThrottleOptions {
             // Batch for at least 20ms.
-            batch_interval: 20_000,
+            batch_interval_us: 20_000,
             // Set a batch size of 8MB.
-            batch_size: 8 * 1_000_000,
+            batch_size_bytes: 8 * 1_000_000,
             // Set a throughput that's approximately 5/7th the throughput of the throughput S3
             // allows.  If we hit throttle errors at this throughput we have a case for support.
             throughput: 2_000,
@@ -128,13 +137,15 @@ impl Default for SnapshotOptions {
 
 /////////////////////////////////////////// FragmentSeqNo //////////////////////////////////////////
 
-/// A FragmentSeqNo is the offset of the log position of the first record in a fragment.
+/// A FragmentSeqNo is an identifier that corresponds to the the number of fragments that have been
+/// issued prior to the segment with this FragmentSeqNo.
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd, Hash, serde::Deserialize, serde::Serialize,
 )]
 pub struct FragmentSeqNo(pub usize);
 
 impl FragmentSeqNo {
+    /// Returns the successor of this FragmentSeqNo, or None if this FragmentSeqNo is the maximum
     pub fn successor(&self) -> Option<Self> {
         if self.0 == usize::MAX {
             None
