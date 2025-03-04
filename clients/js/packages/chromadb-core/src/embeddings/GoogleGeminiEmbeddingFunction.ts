@@ -1,27 +1,46 @@
-import { IEmbeddingFunction } from "./IEmbeddingFunction";
+import {
+  EmbeddingFunctionSpace,
+  IEmbeddingFunction,
+} from "./IEmbeddingFunction";
+
+interface StoredConfig {
+  api_key_env_var: string;
+  model_name: string;
+}
 
 let googleGenAiApi: any;
 
 export class GoogleGenerativeAiEmbeddingFunction implements IEmbeddingFunction {
+  name = "google_generative_ai";
+
   private api_key: string;
+  private api_key_env_var: string;
   private model: string;
   private googleGenAiApi?: any;
   private taskType: string;
 
   constructor({
     googleApiKey,
-    model,
-    taskType,
+    model = "embedding-001",
+    taskType = "RETRIEVAL_DOCUMENT",
+    apiKeyEnvVar = "GOOGLE_API_KEY",
   }: {
-    googleApiKey: string;
+    googleApiKey?: string;
     model?: string;
     taskType?: string;
+    apiKeyEnvVar: string;
   }) {
-    // we used to construct the client here, but we need to async import the types
-    // for the openai npm package, and the constructor can not be async
-    this.api_key = googleApiKey;
-    this.model = model || "embedding-001";
-    this.taskType = taskType || "RETRIEVAL_DOCUMENT";
+    const apiKey = googleApiKey ?? process.env[apiKeyEnvVar];
+    if (!apiKey) {
+      throw new Error(
+        `Google API key is required. Please provide it in the constructor or set the environment variable ${apiKeyEnvVar}.`,
+      );
+    }
+
+    this.api_key = apiKey;
+    this.api_key_env_var = apiKeyEnvVar;
+    this.model = model;
+    this.taskType = taskType;
   }
 
   private async loadClient() {
@@ -74,6 +93,33 @@ export class GoogleGenerativeAiEmbeddingFunction implements IEmbeddingFunction {
       throw new Error(
         "Please install @google/generative-ai as a dependency with, e.g. `npm install @google/generative-ai`",
       );
+    }
+  }
+
+  buildFromConfig(config: StoredConfig): GoogleGenerativeAiEmbeddingFunction {
+    return new GoogleGenerativeAiEmbeddingFunction({
+      model: config.model_name,
+      apiKeyEnvVar: config.api_key_env_var,
+    });
+  }
+
+  getConfig(): StoredConfig {
+    return {
+      api_key_env_var: this.api_key_env_var,
+      model_name: this.model,
+    };
+  }
+
+  validateConfigUpdate(
+    oldConfig: Record<string, any>,
+    newConfig: Record<string, any>,
+  ): void {
+    if (oldConfig.model_name !== newConfig.model_name) {
+      throw new Error("The model name cannot be changed after initialization.");
+    }
+
+    if (oldConfig.taskType !== newConfig.taskType) {
+      throw new Error("The task type cannot be changed after initialization.");
     }
   }
 }
