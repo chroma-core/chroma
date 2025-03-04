@@ -28,12 +28,12 @@ pub enum IoEvent {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct MeterEvent {
     #[serde(rename = "idempotency_key")]
-    event_id: Uuid,
-    timestamp: DateTime<Utc>,
-    tenant: String,
-    database: String,
+    pub event_id: Uuid,
+    pub timestamp: DateTime<Utc>,
+    pub tenant: String,
+    pub database: String,
     #[serde(flatten)]
-    io: IoEvent,
+    pub io: IoEvent,
 }
 
 impl MeterEvent {
