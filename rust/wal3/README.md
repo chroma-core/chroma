@@ -57,8 +57,7 @@ will succeed.
 wal3 is built around the following data structures:
 
 - A log is the unit of data isolation in wal3 and the unit of API instantiation.
-- A `Fragment` or `Fragment` is a single, immutable file that contains a subsequence of data for a
-  log.
+- A `Fragment` is a single, immutable file that contains a subsequence of data for a log.
 - A `Manifest` is a file that contains the metadata for the log.  It contains the list of fragments
   that comprise the current state of the log.
 
