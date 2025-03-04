@@ -66,7 +66,9 @@ pub struct Collection {
     pub version: i32,
     #[serde(skip)]
     pub total_records_post_compaction: u64,
+    #[serde(skip)]
     pub size_bytes_post_compaction: u64,
+    #[serde(skip)]
     pub last_compaction_time_secs: u64,
 }
 
