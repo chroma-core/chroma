@@ -268,7 +268,7 @@ impl ChromaError for CreateDatabaseError {
     }
 }
 
-#[derive(Serialize, Debug, ToSchema)]
+#[derive(Serialize, Debug, ToSchema, Clone)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct Database {
     pub id: Uuid,
@@ -1037,6 +1037,10 @@ impl TryFrom<&str> for Include {
 pub struct IncludeList(pub Vec<Include>);
 
 impl IncludeList {
+    pub fn empty() -> Self {
+        Self(Vec::new())
+    }
+
     pub fn default_query() -> Self {
         Self(vec![
             Include::Document,
@@ -1140,13 +1144,13 @@ impl GetRequest {
 #[derive(Clone, Deserialize, Serialize, Debug, ToSchema)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct GetResponse {
-    ids: Vec<String>,
-    embeddings: Option<Vec<Vec<f32>>>,
-    documents: Option<Vec<Option<String>>>,
-    uris: Option<Vec<Option<String>>>,
+    pub ids: Vec<String>,
+    pub embeddings: Option<Vec<Vec<f32>>>,
+    pub documents: Option<Vec<Option<String>>>,
+    pub uris: Option<Vec<Option<String>>>,
     // TODO(hammadb): Add metadata & include to the response
-    metadatas: Option<Vec<Option<Metadata>>>,
-    include: Vec<Include>,
+    pub metadatas: Option<Vec<Option<Metadata>>>,
+    pub include: Vec<Include>,
 }
 
 #[cfg(feature = "pyo3")]
@@ -1276,16 +1280,16 @@ impl QueryRequest {
     }
 }
 
-#[derive(Clone, Deserialize, Serialize, ToSchema)]
+#[derive(Clone, Deserialize, Serialize, ToSchema, Debug)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct QueryResponse {
-    ids: Vec<Vec<String>>,
-    embeddings: Option<Vec<Vec<Option<Vec<f32>>>>>,
-    documents: Option<Vec<Vec<Option<String>>>>,
-    uris: Option<Vec<Vec<Option<String>>>>,
-    metadatas: Option<Vec<Vec<Option<Metadata>>>>,
-    distances: Option<Vec<Vec<Option<f32>>>>,
-    include: Vec<Include>,
+    pub ids: Vec<Vec<String>>,
+    pub embeddings: Option<Vec<Vec<Option<Vec<f32>>>>>,
+    pub documents: Option<Vec<Vec<Option<String>>>>,
+    pub uris: Option<Vec<Vec<Option<String>>>>,
+    pub metadatas: Option<Vec<Vec<Option<Metadata>>>>,
+    pub distances: Option<Vec<Vec<Option<f32>>>>,
+    pub include: Vec<Include>,
 }
 
 #[cfg(feature = "pyo3")]
