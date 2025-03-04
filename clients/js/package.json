@@ -1,5 +1,6 @@
 {
-  "name": "chromadb",
+  "name": "chromadb-root",
+  "private": true,
   "version": "1.10.5",
   "description": "A JavaScript interface for chroma",
   "keywords": [],
@@ -48,17 +49,14 @@
     "dist"
   ],
   "scripts": {
-    "test": "jest --runInBand",
-    "test:functional": "jest --runInBand --testPathIgnorePatterns=test/auth.*.test.ts",
-    "test:update": "jest --runInBand --updateSnapshot",
-    "prebuild": "rimraf dist",
-    "build": "tsup",
-    "watch": "tsup --watch",
+    "build": "pnpm -r build",
+    "build:core": "NODE_OPTIONS=--enable-source-maps pnpm --filter @internal/chromadb-core build",
+    "build:packages": "NODE_OPTIONS=--enable-source-maps pnpm --filter \"!@internal/chromadb-core\" build",
+    "test": "pnpm -r test",
+    "setup": "./setup-monorepo.sh",
+    "publish:packages": "pnpm publish -r --access public --no-git-checks --filter \"!@internal/chromadb-core\"",
     "genapi": "./genapi.sh",
-    "prettier": "prettier --write .",
-    "release": "run-s build test && npm publish",
-    "release_alpha": "run-s build test && npm publish --tag alpha",
-    "release_dev": "run-s build test && npm version ${NEW_VERSION} --no-git-tag-version && npm publish"
+    "prettier": "prettier --write ."
   },
   "engines": {
     "node": ">=14.17.0"
