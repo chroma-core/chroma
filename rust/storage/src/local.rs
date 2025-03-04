@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
+use std::path::Path;
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -88,6 +89,22 @@ impl LocalStorage {
                 Err(e.to_string())
             }
         }
+    }
+
+    pub async fn list_prefix(&self, prefix: &str) -> Result<Vec<String>, String> {
+        let search_path = Path::new(&self.root).join(prefix);
+        let entries = std::fs::read_dir(search_path).map_err(|e| e.to_string())?;
+        entries
+            .into_iter()
+            .map(|e| {
+                e.map_err(|e| e.to_string()).and_then(|e| {
+                    e.file_name()
+                        .to_str()
+                        .map(|s| s.to_string())
+                        .ok_or("Unable to convert path to string".to_string())
+                })
+            })
+            .collect()
     }
 }
 
