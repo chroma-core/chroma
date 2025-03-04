@@ -557,6 +557,7 @@ impl TryFrom<KnnProjectionOutput> for chroma_proto::KnnResult {
     }
 }
 
+#[derive(Default)]
 pub struct KnnBatchResult {
     pub pulled_log_bytes: u64,
     pub results: Vec<KnnProjectionOutput>,

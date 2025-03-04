@@ -1,26 +1,29 @@
-use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
-    ops::{BitAnd, BitOr},
-    sync::atomic::AtomicU32,
+use super::{
+    blockfile_metadata::MetadataSegmentWriter, blockfile_record::RecordSegmentWriter,
+    distributed_hnsw::DistributedHNSWSegmentWriter, types::materialize_logs,
 };
-
 use chroma_blockstore::{provider::BlockfileProvider, test_arrow_blockfile_provider};
+use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::ChromaError;
 use chroma_index::{hnsw_provider::HnswIndexProvider, test_hnsw_index_provider};
 use chroma_types::{
-    operator::{CountResult, GetResult, Projection, ProjectionOutput, ProjectionRecord},
-    plan::{Count, Get},
+    operator::{
+        CountResult, GetResult, KnnBatchResult, KnnProjectionOutput, KnnProjectionRecord,
+        Projection, ProjectionOutput, ProjectionRecord,
+    },
+    plan::{Count, Get, Knn},
     test_segment, BooleanOperator, Chunk, Collection, CollectionAndSegments, CompositeExpression,
     DocumentExpression, DocumentOperator, LogRecord, Metadata, MetadataComparison,
     MetadataExpression, MetadataSetValue, MetadataValue, Operation, OperationRecord,
     PrimitiveOperator, Segment, SegmentScope, SegmentUuid, SetOperator, UpdateMetadata, Where,
 };
-use thiserror::Error;
-
-use super::{
-    blockfile_metadata::MetadataSegmentWriter, blockfile_record::RecordSegmentWriter,
-    distributed_hnsw::DistributedHNSWSegmentWriter, types::materialize_logs,
+use std::collections::BinaryHeap;
+use std::{
+    collections::{hash_map::Entry, HashMap, HashSet},
+    ops::{BitAnd, BitOr},
+    sync::atomic::AtomicU32,
 };
+use thiserror::Error;
 
 #[derive(Clone)]
 pub struct TestDistributedSegment {
@@ -305,6 +308,85 @@ impl TestReferenceSegment {
                     .collect(),
             },
         })
+    }
+
+    pub fn knn(&self, plan: Knn) -> Result<KnnBatchResult, Box<dyn ChromaError>> {
+        let coll = self
+            .record
+            .get(&plan.scan.collection_and_segments.metadata_segment.id)
+            .ok_or(TestReferenceSegmentError::NotFound)
+            .map_err(|e| e.boxed())?;
+
+        let filtered_records = coll
+            .iter()
+            .filter(|(k, (_, rec))| {
+                plan.filter
+                    .query_ids
+                    .as_ref()
+                    .map_or(true, |ids| ids.contains(k))
+                    && plan
+                        .filter
+                        .where_clause
+                        .as_ref()
+                        .map_or(true, |w| w.eval(rec))
+            })
+            .map(|(_, v)| v.clone())
+            .collect::<Vec<_>>();
+
+        struct RecordWithDistance(f32, ProjectionRecord);
+        impl PartialEq for RecordWithDistance {
+            fn eq(&self, other: &Self) -> bool {
+                self.0 == other.0
+            }
+        }
+        impl Eq for RecordWithDistance {}
+        impl PartialOrd for RecordWithDistance {
+            fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+                Some(self.cmp(other))
+            }
+        }
+        impl Ord for RecordWithDistance {
+            fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+                self.partial_cmp(other).unwrap()
+            }
+        }
+
+        let mut result = KnnBatchResult::default();
+
+        for embedding in plan.knn.embeddings {
+            let mut max_heap = BinaryHeap::with_capacity(plan.knn.fetch as usize);
+            let target_vector = normalize(&embedding);
+
+            for (_, record) in &filtered_records {
+                let distance = DistanceFunction::Cosine.distance(
+                    &target_vector,
+                    record
+                        .embedding
+                        .as_ref()
+                        .expect("Embedding should be present"),
+                );
+
+                if max_heap.len() < plan.knn.fetch as usize {
+                    max_heap.push(RecordWithDistance(distance, record.clone()));
+                } else if distance < max_heap.peek().unwrap().0 {
+                    max_heap.pop();
+                    max_heap.push(RecordWithDistance(distance, record.clone()));
+                }
+            }
+
+            result.results.push(KnnProjectionOutput {
+                records: max_heap
+                    .into_sorted_vec()
+                    .into_iter()
+                    .map(|RecordWithDistance(distance, record)| KnnProjectionRecord {
+                        distance: Some(distance),
+                        record,
+                    })
+                    .collect(),
+            });
+        }
+
+        Ok(result)
     }
 }
 
