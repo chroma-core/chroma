@@ -1,0 +1,25 @@
+{
+  "name": "@chroma-cli/linux-x64-gnu",
+  "description": "Prebuilt binary package for `chroma-cli` on `linux-x64-gnu`.",
+  "version": "0.1.0",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "main": "index.node",
+  "files": [
+    "index.node"
+  ],
+  "neon": {
+    "type": "binary",
+    "rust": "x86_64-unknown-linux-gnu",
+    "node": "linux-x64-gnu",
+    "os": "linux",
+    "arch": "x64",
+    "abi": "gnu"
+  },
+  "author": "",
+  "license": "ISC"
+}

@@ -1,0 +1,25 @@
+{
+  "name": "@chroma-cli/win32-x64-msvc",
+  "description": "Prebuilt binary package for `chroma-cli` on `win32-x64-msvc`.",
+  "version": "0.1.0",
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "main": "index.node",
+  "files": [
+    "index.node"
+  ],
+  "neon": {
+    "type": "binary",
+    "rust": "x86_64-pc-windows-msvc",
+    "node": "win32-x64-msvc",
+    "os": "win32",
+    "arch": "x64",
+    "abi": "msvc"
+  },
+  "author": "",
+  "license": "ISC"
+}

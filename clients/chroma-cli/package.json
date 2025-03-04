@@ -1,0 +1,64 @@
+{
+  "name": "javascript_bindings",
+  "version": "0.1.0",
+  "description": "",
+  "main": "./lib/index.cjs",
+  "scripts": {
+    "cli": "chroma",
+    "test": "tsc &&cargo test",
+    "cargo-build": "tsc && cd ../../rust/javascript_bindings && cargo build --message-format=json-render-diagnostics > ../../clients/chroma-cli/cargo.log",
+    "cross-build": "tsc &&cross build --message-format=json-render-diagnostics > cross.log",
+    "postcargo-build": "neon dist < cargo.log",
+    "postcross-build": "neon dist -m /target < cross.log",
+    "debug": "npm run cargo-build --",
+    "build": "npm run cargo-build -- --release",
+    "cross": "npm run cross-build -- --release",
+    "prepack": "tsc &&neon update",
+    "version": "neon bump --binaries platforms && git add .",
+    "release": "gh workflow run release.yml -f dryrun=false -f version=patch",
+    "dryrun": "gh workflow run publish.yml -f dryrun=true"
+  },
+  "author": "",
+  "license": "ISC",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./lib/index.d.mts",
+        "default": "./lib/index.mjs"
+      },
+      "require": {
+        "types": "./lib/index.d.cts",
+        "default": "./lib/index.cjs"
+      }
+    }
+  },
+  "types": "./lib/index.d.cts",
+  "files": [
+    "lib/**/*.?({c,m}){t,j}s"
+  ],
+  "neon": {
+    "type": "library",
+    "org": "@chroma-cli",
+    "platforms": "common",
+    "load": "./src/load.cts"
+  },
+  "devDependencies": {
+    "@neon-rs/cli": "^0.1.82",
+    "@tsconfig/node20": "^20.1.4",
+    "@types/node": "^20.11.16",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "@neon-rs/load": "^0.1.82"
+  },
+  "bin": {
+    "chroma": "bin-entrypoint.cjs"
+  },
+  "optionalDependencies": {
+    "@chroma-cli/win32-x64-msvc": "0.1.0",
+    "@chroma-cli/darwin-x64": "0.1.0",
+    "@chroma-cli/darwin-arm64": "0.1.0",
+    "@chroma-cli/linux-x64-gnu": "0.1.0",
+    "@chroma-cli/linux-arm64-gnu": "0.1.0"
+  }
+}

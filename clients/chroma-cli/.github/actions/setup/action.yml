@@ -1,0 +1,76 @@
+name: 'Setup Neon'
+description: 'Setup the Neon toolchain.'
+inputs:
+  platform:
+    description: 'Platform being built for.'
+    required: false
+    default: ''
+  use-rust:
+    description: 'Install Rust?'
+    required: false
+    default: 'true'
+  use-cross:
+    description: 'Install cross-rs?'
+    required: false
+    default: 'false'
+  workspace:
+    description: 'Path to workspace being setup.'
+    required: false
+    default: '.'
+outputs:
+  rust:
+    description: 'Rust version installed.'
+    value: ${{ steps.rust.outputs.version }}
+  node:
+    description: 'Node version installed.'
+    value: ${{ steps.node.outputs.version }}
+  target:
+    description: 'Rust target architecture installed.'
+    value: ${{ steps.target.outputs.target }}
+runs:
+  using: "composite"
+  steps:
+    - name: Set Environment Variables
+      uses: falti/dotenv-action@d1cd55661714e830a6e26f608f81d36e23424fed # v1.1.2
+      with:
+        path: ./.github/.env
+        export-variables: true
+        keys-case: bypass
+    - name: Install Node
+      uses: actions/setup-node@v3
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        registry-url: ${{ env.NPM_REGISTRY }}
+        cache: npm
+    - name: Install Dependencies
+      shell: bash
+      run: npm ci
+    - name: Compute Rust Target
+      if: ${{ inputs['use-rust'] == 'true' }}
+      id: target
+      shell: bash
+      run: echo target=$(npx neon list-platforms | jq -r '.["${{ inputs.platform }}"]') | tee -a $GITHUB_OUTPUT
+      working-directory: ${{ inputs.workspace }}
+    - name: Install Rust
+      if: ${{ inputs['use-rust'] == 'true' }}
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: ${{ env.RUST_VERSION }}
+        target: ${{ steps.target.outputs.target }}
+        override: true
+    - name: Install cross-rs
+      if: ${{ inputs['use-cross'] == 'true' }}
+      uses: baptiste0928/cargo-install@v2
+      with:
+        crate: cross
+    - name: Node Version
+      id: node
+      shell: bash
+      run: |
+        echo version=$(node -e 'console.log(process.versions.node)') | tee -a $GITHUB_OUTPUT
+    - name: Rust Version
+      if: ${{ inputs['use-rust'] == 'true' }}
+      id: rust
+      shell: bash
+      run: |
+        echo version=$(cargo -Vv | fgrep release: | cut -d' ' -f2) | tee -a $GITHUB_OUTPUT
