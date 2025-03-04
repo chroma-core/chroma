@@ -11,6 +11,8 @@ http = { version = "1", optional = true }
 opentelemetry = { workspace = true }
 opentelemetry-otlp = { workspace = true }
 opentelemetry_sdk = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 tokio = { workspace = true }
 tonic = { workspace = true }
 tower = { workspace = true, optional = true }
@@ -18,6 +20,7 @@ tracing-bunyan-formatter = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 tracing-subscriber = { workspace = true }
 tracing.workspace = true
+uuid = { workspace = true }
 
 [features]
 grpc = ["dep:tower", "dep:http"]
