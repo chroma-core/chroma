@@ -20,6 +20,8 @@ type Collection struct {
 	Version                    int32           `gorm:"version;default:0"`
 	VersionFileName            string          `gorm:"version_file_name"`
 	TotalRecordsPostCompaction uint64          `gorm:"total_records_post_compaction;default:0"`
+	SizeBytesPostCompaction    uint64          `gorm:"size_bytes_post_compaction;default:0"`
+	LastCompactionTimeSecs     uint64          `gorm:"last_compaction_time_secs;default:0"`
 }
 
 type CollectionToGc struct {

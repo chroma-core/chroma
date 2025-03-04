@@ -66,6 +66,10 @@ pub struct Collection {
     pub version: i32,
     #[serde(skip)]
     pub total_records_post_compaction: u64,
+    #[serde(skip)]
+    pub size_bytes_post_compaction: u64,
+    #[serde(skip)]
+    pub last_compaction_time_secs: u64,
 }
 
 #[cfg(feature = "pyo3")]
@@ -130,6 +134,8 @@ impl Collection {
             log_position: 0,
             version: 0,
             total_records_post_compaction: 0,
+            size_bytes_post_compaction: 0,
+            last_compaction_time_secs: 0,
         }
     }
 }
@@ -181,6 +187,8 @@ impl TryFrom<chroma_proto::Collection> for Collection {
             log_position: proto_collection.log_position,
             version: proto_collection.version,
             total_records_post_compaction: proto_collection.total_records_post_compaction,
+            size_bytes_post_compaction: proto_collection.size_bytes_post_compaction,
+            last_compaction_time_secs: proto_collection.last_compaction_time_secs,
         })
     }
 }
@@ -199,6 +207,8 @@ impl From<Collection> for chroma_proto::Collection {
             log_position: value.log_position,
             version: value.version,
             total_records_post_compaction: value.total_records_post_compaction,
+            size_bytes_post_compaction: value.size_bytes_post_compaction,
+            last_compaction_time_secs: value.last_compaction_time_secs,
         }
     }
 }
@@ -242,6 +252,8 @@ mod test {
             log_position: 0,
             version: 0,
             total_records_post_compaction: 0,
+            size_bytes_post_compaction: 0,
+            last_compaction_time_secs: 0,
         };
         let converted_collection: Collection = proto_collection.try_into().unwrap();
         assert_eq!(

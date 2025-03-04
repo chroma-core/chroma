@@ -144,6 +144,8 @@ func CreateTestCollection(db *gorm.DB, collectionName string, dimension int32, d
 		DatabaseID:                 databaseID,
 		CreatedAt:                  time.Now(),
 		TotalRecordsPostCompaction: uint64(100),
+		SizeBytesPostCompaction:    uint64(500000),
+		LastCompactionTimeSecs:     uint64(1741037006),
 	})
 	if err != nil {
 		return "", err

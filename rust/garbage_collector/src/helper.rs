@@ -174,6 +174,8 @@ impl ChromaGrpcClients {
                     log_position: 0,
                     version: 0,
                     total_records_post_compaction: 0,
+                    size_bytes_post_compaction: 0,
+                    last_compaction_time_secs: 0,
                 }),
                 knn: None,
                 metadata: None,

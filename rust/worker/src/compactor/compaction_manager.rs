@@ -438,6 +438,8 @@ mod tests {
             log_position: -1,
             version: 0,
             total_records_post_compaction: 0,
+            size_bytes_post_compaction: 0,
+            last_compaction_time_secs: 0,
         };
 
         let tenant_2 = "tenant_2".to_string();
@@ -452,6 +454,8 @@ mod tests {
             log_position: -1,
             version: 0,
             total_records_post_compaction: 0,
+            size_bytes_post_compaction: 0,
+            last_compaction_time_secs: 0,
         };
         match sysdb {
             SysDb::Test(ref mut sysdb) => {

@@ -79,6 +79,8 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 	suite.Equal(metadata.Key, collections[0].CollectionMetadata[0].Key)
 	suite.Equal(metadata.StrValue, collections[0].CollectionMetadata[0].StrValue)
 	suite.Equal(uint64(100), collections[0].Collection.TotalRecordsPostCompaction)
+	suite.Equal(uint64(500000), collections[0].Collection.SizeBytesPostCompaction)
+	suite.Equal(uint64(1741037006), collections[0].Collection.LastCompactionTimeSecs)
 	suite.Equal(collections[0].DatabaseName, suite.databaseName)
 	suite.Equal(collections[0].TenantID, suite.tenantName)
 	suite.Equal(collections[0].Collection.Dimension, &dim)

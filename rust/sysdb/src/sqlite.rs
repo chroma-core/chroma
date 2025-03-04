@@ -339,6 +339,8 @@ impl SqliteSysDb {
             log_position: 0,
             total_records_post_compaction: 0,
             version: 0,
+            size_bytes_post_compaction: 0,
+            last_compaction_time_secs: 0,
         })
     }
 
@@ -687,6 +689,8 @@ impl SqliteSysDb {
                     name: first_row.get(1),
                     tenant: first_row.get(4),
                     database: first_row.get(5),
+                    size_bytes_post_compaction: 0,
+                    last_compaction_time_secs: 0,
                 }))
             })
             .collect::<Result<Vec<_>, GetCollectionsError>>()?;
