@@ -1,4 +1,3 @@
-import type { Ollama } from "ollama";
 import type { IEmbeddingFunction } from "./IEmbeddingFunction";
 
 type StoredConfig = {
@@ -11,7 +10,7 @@ export class OllamaEmbeddingFunction implements IEmbeddingFunction {
 
   private readonly url: string;
   private readonly model: string;
-  private ollamaClient?: Ollama;
+  private ollamaClient?: any;
 
   constructor({
     url = "http://localhost:11434",
