@@ -323,13 +323,14 @@ impl Configurable<LocalExecutorConfig> for LocalExecutor {
 
 #[cfg(test)]
 mod tests {
-    use chroma_config::{registry::Registry, Configurable};
+    use chroma_config::registry::Registry;
+    use chroma_config::Configurable;
     use chroma_system::System;
     use chroma_types::{
         AddCollectionRecordsRequest, CreateCollectionRequest, IncludeList, QueryRequest,
     };
 
-    use crate::{frontend::Frontend, FrontendConfig};
+    use crate::{Frontend, FrontendConfig};
 
     #[tokio::test]
     async fn test_query() {

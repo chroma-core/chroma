@@ -5,6 +5,7 @@ use std::{
 };
 
 use chroma_blockstore::{provider::BlockfileProvider, test_arrow_blockfile_provider};
+use chroma_error::ChromaError;
 use chroma_index::{hnsw_provider::HnswIndexProvider, test_hnsw_index_provider};
 use chroma_types::{
     operator::{CountResult, GetResult, Projection, ProjectionOutput, ProjectionRecord},
@@ -138,6 +139,14 @@ pub enum TestReferenceSegmentError {
     NotFound,
 }
 
+impl ChromaError for TestReferenceSegmentError {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        match self {
+            TestReferenceSegmentError::NotFound => chroma_error::ErrorCodes::NotFound,
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct TestReferenceSegment {
     max_id: u32,
@@ -175,20 +184,24 @@ impl TestReferenceSegment {
         }
     }
 
-    pub fn apply_logs(&mut self, logs: Vec<LogRecord>, segmemt_id: SegmentUuid) {
-        let coll = self.record.entry(segmemt_id).or_default();
-        for LogRecord {
-            log_offset: _,
-            record:
-                OperationRecord {
-                    id,
-                    embedding,
-                    encoding: _,
-                    metadata,
-                    document,
-                    operation,
-                },
-        } in logs
+    pub fn apply_logs(&mut self, logs: Vec<LogRecord>, segment_id: SegmentUuid) {
+        self.apply_operation_records(logs.into_iter().map(|l| l.record).collect(), segment_id);
+    }
+
+    pub fn apply_operation_records(
+        &mut self,
+        operations: Vec<OperationRecord>,
+        segment_id: SegmentUuid,
+    ) {
+        let coll = self.record.entry(segment_id).or_default();
+        for OperationRecord {
+            id,
+            embedding,
+            encoding: _,
+            metadata,
+            document,
+            operation,
+        } in operations
         {
             let mut record = ProjectionRecord {
                 id: id.clone(),
