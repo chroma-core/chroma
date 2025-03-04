@@ -4,7 +4,15 @@ import { IEmbeddingFunction } from "./IEmbeddingFunction";
 // Dynamically import module
 let TransformersApi: Promise<any>;
 
+interface StoredConfig {
+  model_name: string;
+  revision: string;
+  quantized: boolean;
+}
+
 export class DefaultEmbeddingFunction implements IEmbeddingFunction {
+  name = "default";
+
   private pipelinePromise?: Promise<any> | null;
   private transformersApi: any;
   private model: string;
@@ -64,6 +72,30 @@ export class DefaultEmbeddingFunction implements IEmbeddingFunction {
     let pipe = await this.pipelinePromise;
     let output = await pipe(texts, { pooling: "mean", normalize: true });
     return output.tolist();
+  }
+
+  getConfig(): StoredConfig {
+    return {
+      model_name: this.model,
+      revision: this.revision,
+      quantized: this.quantized,
+    };
+  }
+
+  buildFromConfig(config: StoredConfig): DefaultEmbeddingFunction {
+    return new DefaultEmbeddingFunction({
+      model: config.model_name,
+      revision: config.revision,
+      quantized: config.quantized,
+    });
+  }
+
+  validateConfigUpdate(oldConfig: StoredConfig, newConfig: StoredConfig): void {
+    if (oldConfig.model_name !== newConfig.model_name) {
+      throw new Error(
+        "DefaultEmbeddingFunction model_name cannot be changed after initialization.",
+      );
+    }
   }
 
   private async loadClient() {
