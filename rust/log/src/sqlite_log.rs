@@ -507,15 +507,20 @@ impl SqliteLog {
 
         Ok(default_config)
     }
-    
-    pub async fn update_legacy_embeddings_queue_config(&self, config: LegacyEmbeddingsQueueConfig) -> Result<LegacyEmbeddingsQueueConfig, SqliteGetLegacyEmbeddingsQueueConfigError> {
+
+    pub async fn update_legacy_embeddings_queue_config(
+        &self,
+        config: LegacyEmbeddingsQueueConfig,
+    ) -> Result<LegacyEmbeddingsQueueConfig, SqliteGetLegacyEmbeddingsQueueConfigError> {
         let mut tx = self.db.get_conn().begin().await.map_err(WrappedSqlxError)?;
         let value = serde_json::to_string(&config)?;
-        sqlx::query("INSERT OR REPLACE INTO embeddings_queue_config (id, config_json_str) VALUES (1, ?)")
-            .bind(value)
-            .execute(&mut *tx)
-            .await
-            .map_err(WrappedSqlxError)?;
+        sqlx::query(
+            "INSERT OR REPLACE INTO embeddings_queue_config (id, config_json_str) VALUES (1, ?)",
+        )
+        .bind(value)
+        .execute(&mut *tx)
+        .await
+        .map_err(WrappedSqlxError)?;
         tx.commit().await.map_err(WrappedSqlxError)?;
         Ok(config)
     }

@@ -17,7 +17,7 @@ name: distributed-chroma
 description: A helm chart for distributed Chroma
 type: application
 version: 0.1.20
-appVersion: "0.4.24"
+appVersion: "0.4.25"
 keywords:
   - chroma
   - vector

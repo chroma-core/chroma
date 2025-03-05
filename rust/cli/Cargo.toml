@@ -1,6 +1,6 @@
 [package]
 name = "cli"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 
 [dependencies]
@@ -22,6 +22,9 @@ colored = "3.0.0"
 dialoguer = "0.11.0"
 indicatif.workspace = true
 serde_json.workspace = true
+reqwest = "0.12.12"
+regex = "1.11.1"
+semver = "1.0.26"
 
 [[bin]]
 name = "chroma"

@@ -133,6 +133,14 @@ jobs:
         uses: actions/checkout@v4
       - name: Set up Python (${{ matrix.python }})
         uses: ./.github/actions/python
+      - name: Build Rust bindings
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          sccache: true
+      - name: Install built wheel
+        shell: bash
+        run: pip install --no-index --find-links target/wheels/ chromadb
       - name: Integration Test
         run: bin/python-integration-test ${{ matrix.test-globs }}
         shell: bash

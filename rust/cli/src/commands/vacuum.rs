@@ -5,6 +5,9 @@ use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_frontend::frontend::Frontend;
 use chroma_frontend::FrontendConfig;
+use chroma_log::sqlite_log::{
+    legacy_embeddings_queue_config_default_kind, LegacyEmbeddingsQueueConfig, SqliteLog,
+};
 use chroma_log::Log;
 use chroma_segment::local_segment_manager::LocalSegmentManager;
 use chroma_sqlite::db::SqliteDb;
@@ -20,7 +23,6 @@ use std::error::Error;
 use std::path::Path;
 use std::str::FromStr;
 use std::{fs, io};
-use chroma_log::sqlite_log::{legacy_embeddings_queue_config_default_kind, LegacyEmbeddingsQueueConfig, SqliteLog};
 
 #[derive(Parser, Debug)]
 pub struct VacuumArgs {
@@ -105,7 +107,7 @@ async fn trigger_vector_segments_max_seq_id_migration(
 async fn configure_sql_embedding_queue(log: &SqliteLog) -> Result<(), Box<dyn Error>> {
     let config = LegacyEmbeddingsQueueConfig {
         automatically_purge: true,
-        kind: legacy_embeddings_queue_config_default_kind()
+        kind: legacy_embeddings_queue_config_default_kind(),
     };
 
     log.update_legacy_embeddings_queue_config(config).await?;
@@ -142,9 +144,9 @@ pub async fn vacuum_chroma(config: FrontendConfig) -> Result<(), Box<dyn Error>>
     if let Log::Sqlite(ref log) = log {
         configure_sql_embedding_queue(log).await?;
     } else {
-        return Err("Expected a Sqlite log for vacuum".into())
+        return Err("Expected a Sqlite log for vacuum".into());
     }
-    
+
     for collection in collections {
         let seq_ids = sqlx::query(
             r#"
@@ -188,7 +190,7 @@ pub async fn vacuum_chroma(config: FrontendConfig) -> Result<(), Box<dyn Error>>
     )
     .execute(sqlite.get_conn())
     .await?;
-    
+
     Ok(())
 }
 
