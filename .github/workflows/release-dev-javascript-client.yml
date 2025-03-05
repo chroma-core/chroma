@@ -89,7 +89,7 @@ jobs:
           jq --arg org "$ORG_NAME" --arg name "$PACKAGE_NAME" '.name = "\($org)/\($name)"' $CLIENT_PKG > tmp.$$.json && mv tmp.$$.json $CLIENT_PKG
         working-directory: ./clients/js/
       - name: Publish dev packages
-        run: pnpm publish -r --access public --no-git-checks --filter "!@internal/chromadb-core" --tag dev
+        run: pnpm publish -r --access public --no-git-checks --tag dev
         working-directory: ./clients/js/
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
