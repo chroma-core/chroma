@@ -49,6 +49,8 @@ func convertCollectionToProto(collection *model.Collection) *coordinatorpb.Colle
 		LogPosition:                collection.LogPosition,
 		Version:                    collection.Version,
 		TotalRecordsPostCompaction: collection.TotalRecordsPostCompaction,
+		SizeBytesPostCompaction:    collection.SizeBytesPostCompaction,
+		LastCompactionTimeSecs:     collection.LastCompactionTimeSecs,
 	}
 	if collection.Metadata == nil {
 		return collectionpb
