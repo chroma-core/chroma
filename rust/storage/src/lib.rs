@@ -355,11 +355,16 @@ impl PutOptions {
         Self::new(true, None).unwrap()
     }
 
+    pub fn if_matches(e_tag: &ETag) -> Self {
+        // SAFETY(rescrv):  This is always safe because of a unit test.
+        Self::new(false, Some(e_tag.clone())).unwrap()
+    }
+
     pub fn new(
         if_not_exists: bool,
         if_match: Option<ETag>,
     ) -> Result<PutOptions, PutOptionsCreateError> {
-        if !if_not_exists && if_match.is_some() {
+        if if_not_exists && if_match.is_some() {
             return Err(PutOptionsCreateError::IfNotExistsAndIfMatchEnabled);
         }
         Ok(PutOptions {
@@ -369,8 +374,8 @@ impl PutOptions {
     }
 }
 
-#[derive(Clone, Eq, PartialEq, Debug)]
-pub struct ETag(String);
+#[derive(Clone, Eq, PartialEq, Debug, serde::Deserialize, serde::Serialize)]
+pub struct ETag(pub String);
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
 
@@ -381,5 +386,6 @@ mod tests {
     #[test]
     fn put_options_ctors() {
         let _x = PutOptions::if_not_exists();
+        let _x = PutOptions::if_matches(&ETag("123".to_string()));
     }
 }
