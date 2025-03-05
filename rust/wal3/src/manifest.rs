@@ -7,6 +7,7 @@ use crate::{
 
 /////////////////////////////////////////////// paths //////////////////////////////////////////////
 
+#[allow(dead_code)]
 fn manifest_path() -> String {
     "manifest/MANIFEST".to_string()
 }
@@ -25,11 +26,11 @@ fn snapshot_setsum(path: &str) -> Result<Setsum, Error> {
     Ok(setsum)
 }
 
-//////////////////////////////////////////// SnapPointer ///////////////////////////////////////////
+////////////////////////////////////////// SnapshotPointer /////////////////////////////////////////
 
-/// A SnapPointer is a pointer to a snapshot.
+/// A SnapshotPointer is a pointer to a snapshot.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
-pub struct SnapPointer {
+pub struct SnapshotPointer {
     #[serde(
         deserialize_with = "super::deserialize_setsum",
         serialize_with = "super::serialize_setsum"
@@ -41,7 +42,7 @@ pub struct SnapPointer {
     pub limit: LogPosition,
 }
 
-impl SnapPointer {
+impl SnapshotPointer {
     pub const JSON_SIZE_ESTIMATE: usize = 142;
 }
 
@@ -58,7 +59,7 @@ pub struct Snapshot {
     )]
     pub setsum: Setsum,
     pub writer: String,
-    pub snapshots: Vec<SnapPointer>,
+    pub snapshots: Vec<SnapshotPointer>,
     pub fragments: Vec<Fragment>,
 }
 
@@ -125,7 +126,7 @@ impl Snapshot {
         Ok(acc)
     }
 
-    pub async fn install(&self, options: &ThrottleOptions) -> Result<(), Error> {
+    pub async fn install(&self, _: &ThrottleOptions) -> Result<(), Error> {
         todo!("robert will implement");
     }
 }
@@ -140,7 +141,7 @@ pub struct Manifest {
     )]
     pub setsum: Setsum,
     pub writer: String,
-    pub snapshots: Vec<SnapPointer>,
+    pub snapshots: Vec<SnapshotPointer>,
     pub fragments: Vec<Fragment>,
 }
 
@@ -240,7 +241,7 @@ impl Manifest {
         self.snapshots
             .retain(|s| !snapshot.snapshots.iter().any(|t| t.setsum == s.setsum));
         self.fragments = self.fragments.split_off(snapshot.fragments.len());
-        self.snapshots.push(SnapPointer {
+        self.snapshots.push(SnapshotPointer {
             setsum: snapshot.setsum,
             path_to_snapshot: snapshot.path.clone(),
             depth: snapshot.depth,
@@ -376,7 +377,7 @@ impl Manifest {
     }
 
     /// Install a manifest to object storage.
-    pub async fn install(&self, options: &ThrottleOptions, new: &Manifest) -> Result<(), Error> {
+    pub async fn install(&self, _: &ThrottleOptions, _: &Manifest) -> Result<(), Error> {
         todo!("robert will implement");
     }
 }

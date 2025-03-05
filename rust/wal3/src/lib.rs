@@ -7,6 +7,7 @@ mod backoff;
 mod manifest;
 
 pub use backoff::ExponentialBackoff;
+pub use manifest::{Manifest, Snapshot};
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
@@ -38,12 +39,11 @@ pub enum Error {
 
 //////////////////////////////////////////// ScrubError ////////////////////////////////////////////
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, thiserror::Error)]
 pub enum ScrubError {
-    CorruptManifest {
-        manifest: String,
-        what: String,
-    },
+    #[error("CorruptManifest: {what}")]
+    CorruptManifest { manifest: String, what: String },
+    #[error("CorruptFragment: {seq_no} {what}")]
     CorruptFragment {
         manifest: String,
         seq_no: FragmentSeqNo,
@@ -181,17 +181,30 @@ impl From<ThrottleOptions> for ExponentialBackoff {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct SnapshotOptions {
     /// The maximum number of outbound snapshot pointers to embed in a snapshot or manifest.
+    #[serde(default = "SnapshotOptions::default_snapshot_rollover_threshold")]
     pub snapshot_rollover_threshold: usize,
     /// The maximum number of fragment pointers to embed in a snapshot or manifest.
+    #[serde(default = "SnapshotOptions::default_fragment_rollover_threshold")]
     pub fragment_rollover_threshold: usize,
+}
+
+impl SnapshotOptions {
+    fn default_snapshot_rollover_threshold() -> usize {
+        // TODO(rescrv):  Commented out values are better.
+        2048 // (1 << 18) / SnapPointer::JSON_SIZE_ESTIMATE,
+    }
+
+    fn default_fragment_rollover_threshold() -> usize {
+        // TODO(rescrv):  Commented out values are better.
+        1536 // (1 << 19) / Fragment::JSON_SIZE_ESTIMATE,
+    }
 }
 
 impl Default for SnapshotOptions {
     fn default() -> Self {
         SnapshotOptions {
-            // TODO(rescrv):  Commented out values are better.
-            snapshot_rollover_threshold: 2048, // (1 << 18) / SnapPointer::JSON_SIZE_ESTIMATE,
-            fragment_rollover_threshold: 1536, // (1 << 19) / Fragment::JSON_SIZE_ESTIMATE,
+            snapshot_rollover_threshold: Self::default_snapshot_rollover_threshold(),
+            fragment_rollover_threshold: Self::default_fragment_rollover_threshold(),
         }
     }
 }
@@ -199,13 +212,16 @@ impl Default for SnapshotOptions {
 ///////////////////////////////////////// LogWriterOptions /////////////////////////////////////////
 
 /// LogWriterOptions control the behavior of the log writer.
-#[derive(Clone, Default, Eq, PartialEq)]
+#[derive(Clone, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct LogWriterOptions {
     /// Default throttling options for fragments.
+    #[serde(default)]
     pub throttle_fragment: ThrottleOptions,
     /// Default throttling options for manifest.
+    #[serde(default)]
     pub throttle_manifest: ThrottleOptions,
     /// Default snapshot options for manifest.
+    #[serde(default)]
     pub snapshot_manifest: SnapshotOptions,
 }
 
@@ -226,6 +242,12 @@ impl FragmentSeqNo {
         } else {
             Some(FragmentSeqNo(self.0 + 1))
         }
+    }
+}
+
+impl std::fmt::Display for FragmentSeqNo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
