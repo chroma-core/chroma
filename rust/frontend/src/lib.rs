@@ -52,7 +52,7 @@ pub async fn frontend_service_entrypoint(
         Ok(config_path) => FrontendServerConfig::load_from_path(&config_path),
         Err(_) => FrontendServerConfig::load(),
     };
-    frontend_service_entrypoint_with_config(auth, quota_enforcer, config).await;
+    frontend_service_entrypoint_with_config(auth, quota_enforcer, &config).await;
 }
 
 pub async fn frontend_service_entrypoint_with_config_system_registry(
@@ -116,7 +116,7 @@ pub async fn frontend_service_entrypoint_with_config_system_registry(
         .map(rule_to_rule)
         .collect::<Result<Vec<_>, ScorecardRuleError>>()
         .expect("error creating scorecard");
-    FrontendServer::new(config, frontend, rules, auth, quota_enforcer)
+    FrontendServer::new(config.clone(), frontend, rules, auth, quota_enforcer)
         .run()
         .await;
 }
@@ -124,7 +124,7 @@ pub async fn frontend_service_entrypoint_with_config_system_registry(
 pub async fn frontend_service_entrypoint_with_config(
     auth: Arc<dyn auth::AuthenticateAndAuthorize>,
     quota_enforcer: Arc<dyn QuotaEnforcer>,
-    config: FrontendServerConfig,
+    config: &FrontendServerConfig,
 ) {
     let system = System::new();
     let registry = Registry::new();
