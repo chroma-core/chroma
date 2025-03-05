@@ -1674,6 +1674,7 @@ dependencies = [
 name = "chroma-tracing"
 version = "0.1.0"
 dependencies = [
+ "chroma-system",
  "chrono",
  "fastrace",
  "fastrace-opentelemetry",

@@ -1,23 +1,21 @@
 use std::sync::OnceLock;
 
+use chroma_system::{ChannelError, ReceiverForMessage};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use tokio::{
-    runtime::Handle,
-    sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
-};
 use tonic::async_trait;
+use tracing::Span;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "event_name")]
-pub enum IoEvent {
+pub enum MeterEventType {
     CollectionRead {
         collection_id: Uuid,
-        collection_record_count: u64,
         collection_dimension: u64,
-        metadata: u64,
-        vector: u64,
+        latest_collection_record_count: u64,
+        metadata_bytes_read: u64,
+        vector_bytes_read: u64,
     },
     CollectionWrite {
         collection_id: Uuid,
@@ -33,7 +31,17 @@ pub struct MeterEvent {
     pub tenant: String,
     pub database: String,
     #[serde(flatten)]
-    pub io: IoEvent,
+    pub io: MeterEventType,
+}
+
+pub static METER_EVENT_RECEIVER: OnceLock<Box<dyn ReceiverForMessage<MeterEvent>>> =
+    OnceLock::new();
+
+#[async_trait]
+impl ReceiverForMessage<MeterEvent> for () {
+    async fn send(&self, _: MeterEvent, _: Option<Span>) -> Result<(), ChannelError> {
+        Ok(())
+    }
 }
 
 impl MeterEvent {
@@ -41,22 +49,25 @@ impl MeterEvent {
         tenant: String,
         database: String,
         collection_id: Uuid,
-        collection_record_count: u64,
         collection_dimension: u64,
-        metadata: u64,
-        vector: u64,
+        latest_collection_record_count: u64,
+        metadata_complexity: u64,
+        vector_complexity: u64,
     ) -> Self {
+        // TODO: Properly calculate number of bytes read
         Self {
             event_id: Uuid::new_v4(),
             timestamp: Utc::now(),
             tenant,
             database,
-            io: IoEvent::CollectionRead {
+            io: MeterEventType::CollectionRead {
                 collection_id,
-                collection_record_count,
                 collection_dimension,
-                metadata,
-                vector,
+                latest_collection_record_count,
+                metadata_bytes_read: metadata_complexity * latest_collection_record_count,
+                vector_bytes_read: vector_complexity
+                    * collection_dimension
+                    * latest_collection_record_count,
             },
         }
     }
@@ -72,57 +83,23 @@ impl MeterEvent {
             timestamp: Utc::now(),
             tenant,
             database,
-            io: IoEvent::CollectionWrite {
+            io: MeterEventType::CollectionWrite {
                 collection_id,
                 log_bytes,
             },
         }
     }
-}
 
-pub static METER_EVENT_SENDER: OnceLock<UnboundedSender<Option<MeterEvent>>> = OnceLock::new();
-
-#[async_trait]
-pub trait MeterEventHandler {
-    async fn handle(&mut self, _event: MeterEvent) {}
-    async fn listen(&mut self, mut rx: UnboundedReceiver<Option<MeterEvent>>) {
-        while let Some(event) = rx.recv().await.flatten() {
-            self.handle(event).await
-        }
-        self.on_stop().await;
-    }
-    async fn on_start(&mut self) {}
-    async fn on_stop(&mut self) {}
-}
-
-#[async_trait]
-impl MeterEventHandler for () {}
-
-impl MeterEvent {
-    pub fn submit(self) {
-        if let Some(handler) = METER_EVENT_SENDER.get() {
-            if let Err(err) = handler.send(Some(self)) {
-                tracing::error!("Unable to send meter event: {err}")
-            }
-        }
-    }
-
-    pub fn init_handler(mut handler: impl MeterEventHandler + Send + Sync + 'static) {
-        let (tx, rx) = unbounded_channel();
-        if METER_EVENT_SENDER.set(tx).is_err() {
+    pub fn init_receiver(receiver: Box<dyn ReceiverForMessage<MeterEvent>>) {
+        if METER_EVENT_RECEIVER.set(receiver).is_err() {
             tracing::error!("Meter event handler is already initialized")
         }
-        let runtime_handle = Handle::current();
-        runtime_handle.spawn(async move {
-            handler.on_start().await;
-            handler.listen(rx).await;
-        });
     }
 
-    pub fn stop_handler() {
-        if let Some(handler) = METER_EVENT_SENDER.get() {
-            if let Err(err) = handler.send(None) {
-                tracing::error!("Unable to stop meter event handler: {err}")
+    pub async fn submit(self) {
+        if let Some(handler) = METER_EVENT_RECEIVER.get() {
+            if let Err(err) = handler.send(self, Some(Span::current())).await {
+                tracing::error!("Unable to send meter event: {err}")
             }
         }
     }

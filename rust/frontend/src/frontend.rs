@@ -596,7 +596,9 @@ impl Frontend {
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
-        MeterEvent::collection_write(tenant_id, database_name, collection_id.0, log_bytes).submit();
+        MeterEvent::collection_write(tenant_id, database_name, collection_id.0, log_bytes)
+            .submit()
+            .await;
 
         Ok(AddCollectionRecordsResponse {})
     }
@@ -636,7 +638,9 @@ impl Frontend {
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
-        MeterEvent::collection_write(tenant_id, database_name, collection_id.0, log_bytes).submit();
+        MeterEvent::collection_write(tenant_id, database_name, collection_id.0, log_bytes)
+            .submit()
+            .await;
 
         Ok(UpdateCollectionRecordsResponse {})
     }
@@ -678,7 +682,9 @@ impl Frontend {
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
-        MeterEvent::collection_write(tenant_id, database_name, collection_id.0, log_bytes).submit();
+        MeterEvent::collection_write(tenant_id, database_name, collection_id.0, log_bytes)
+            .submit()
+            .await;
 
         Ok(UpsertCollectionRecordsResponse {})
     }
@@ -760,7 +766,9 @@ impl Frontend {
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
-        MeterEvent::collection_write(tenant_id, database_name, collection_id.0, log_bytes).submit();
+        MeterEvent::collection_write(tenant_id, database_name, collection_id.0, log_bytes)
+            .submit()
+            .await;
 
         Ok(DeleteCollectionRecordsResponse {})
     }
@@ -845,7 +853,7 @@ impl Frontend {
                 },
             })
             .await?;
-        meter_event.submit();
+        meter_event.submit().await;
         Ok(res)
     }
 
@@ -950,7 +958,7 @@ impl Frontend {
                 },
             })
             .await?;
-        meter_event.submit();
+        meter_event.submit().await;
         Ok((get_result, include).into())
     }
 
@@ -1058,7 +1066,7 @@ impl Frontend {
                 },
             })
             .await?;
-        meter_event.submit();
+        meter_event.submit().await;
         Ok((query_result, include).into())
     }
 

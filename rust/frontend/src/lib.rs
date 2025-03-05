@@ -14,11 +14,10 @@ mod types;
 
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
-use chroma_system::System;
+use chroma_system::{ReceiverForMessage, System};
 use chroma_tracing::{
     init_global_filter_layer, init_otel_layer, init_panic_tracing_hook, init_stdout_layer,
-    init_tracing,
-    meter_event::{MeterEvent, MeterEventHandler},
+    init_tracing, meter_event::MeterEvent,
 };
 use config::FrontendServerConfig;
 use frontend::Frontend;
@@ -48,19 +47,19 @@ impl ChromaError for ScorecardRuleError {
 pub async fn frontend_service_entrypoint(
     auth: Arc<dyn auth::AuthenticateAndAuthorize>,
     quota_enforcer: Arc<dyn QuotaEnforcer>,
-    meter_ingestor: impl MeterEventHandler + Send + Sync + 'static,
+    meter_receiver: impl ReceiverForMessage<MeterEvent> + 'static,
 ) {
     let config = match std::env::var(CONFIG_PATH_ENV_VAR) {
         Ok(config_path) => FrontendServerConfig::load_from_path(&config_path),
         Err(_) => FrontendServerConfig::load(),
     };
-    frontend_service_entrypoint_with_config(auth, quota_enforcer, meter_ingestor, config).await;
+    frontend_service_entrypoint_with_config(auth, quota_enforcer, meter_receiver, config).await;
 }
 
 pub async fn frontend_service_entrypoint_with_config(
     auth: Arc<dyn auth::AuthenticateAndAuthorize>,
     quota_enforcer: Arc<dyn QuotaEnforcer>,
-    meter_ingestor: impl MeterEventHandler + Send + Sync + 'static,
+    meter_receiver: impl ReceiverForMessage<MeterEvent> + 'static,
     config: FrontendServerConfig,
 ) {
     if let Some(config) = &config.open_telemetry {
@@ -71,7 +70,7 @@ pub async fn frontend_service_entrypoint_with_config(
         ];
         init_tracing(tracing_layers);
         init_panic_tracing_hook();
-        MeterEvent::init_handler(meter_ingestor);
+        MeterEvent::init_receiver(Box::new(meter_receiver));
     } else {
         eprintln!("OpenTelemetry is not enabled because it is missing from the config.");
     }
@@ -123,5 +122,4 @@ pub async fn frontend_service_entrypoint_with_config(
     FrontendServer::new(config, frontend, rules, auth, quota_enforcer)
         .run()
         .await;
-    MeterEvent::stop_handler();
 }
