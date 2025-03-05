@@ -1,6 +1,6 @@
 {
-  "name": "chromadb",
-  "version": "1.11.2",
+  "name": "@philipithomas/chromadb",
+  "version": "1.11.3",
   "description": "A JavaScript interface for chroma with embedding functions as bundled dependencies",
   "license": "Apache-2.0",
   "type": "module",
@@ -35,10 +35,10 @@
     "cohere-ai": "^7.0.0",
     "openai": "^4.0.0",
     "voyageai": "^0.0.3-1",
-    "ollama": "^0.5.0"
+    "ollama": "^0.5.0",
+    "@internal/chromadb-core": "workspace:*"
   },
   "devDependencies": {
-    "@internal/chromadb-core": "workspace:*",
     "jest": "^29.5.0",
     "rimraf": "^5.0.0",
     "ts-jest": "^29.1.0",

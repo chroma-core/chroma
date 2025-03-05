@@ -1,5 +1,5 @@
 {
-  "name": "chromadb-client",
+  "name": "@philipithomas/chromadb-client",
   "version": "1.11.2",
   "description": "A JavaScript interface for chroma with embedding functions as peer dependencies",
   "license": "Apache-2.0",
@@ -30,6 +30,7 @@
     "test": "jest --runInBand"
   },
   "dependencies": {
+    "@internal/chromadb-core": "workspace:*"
   },
   "peerDependencies": {
     "@google/generative-ai": "^0.1.1",
@@ -60,7 +61,6 @@
     }
   },
   "devDependencies": {
-    "@internal/chromadb-core": "workspace:*",
     "jest": "^29.5.0",
     "rimraf": "^5.0.0",
     "ts-jest": "^29.1.0",
