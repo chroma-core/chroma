@@ -48,7 +48,7 @@ fn run(args: RunArgs) {
 
     let runtime = tokio::runtime::Runtime::new().expect("Failed to start Chroma");
     runtime.block_on(async {
-        frontend_service_entrypoint_with_config(Arc::new(()), Arc::new(()), config).await;
+        frontend_service_entrypoint_with_config(Arc::new(()), Arc::new(()), (), config).await;
     });
 }
 
