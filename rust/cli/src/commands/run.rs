@@ -23,7 +23,7 @@ pub fn run(args: RunArgs) {
     ) {
         Ok(config) => config,
         Err(e) => {
-            println!("{}", e.red());
+            eprintln!("{}", e.red());
             return;
         }
     };
@@ -49,6 +49,11 @@ pub fn run(args: RunArgs) {
 
     let runtime = tokio::runtime::Runtime::new().expect("Failed to start Chroma");
     runtime.block_on(async {
-        frontend_service_entrypoint_with_config(Arc::new(()), Arc::new(()), (), config).await;
+        tokio::select! {
+            _ = frontend_service_entrypoint_with_config(Arc::new(()), Arc::new(()), (), config) => {},
+            _ = tokio::signal::ctrl_c() => {
+                println!();
+            }
+        }
     });
 }

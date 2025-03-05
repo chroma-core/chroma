@@ -60,9 +60,6 @@
     "release_alpha": "run-s build test && npm publish --tag alpha",
     "release_dev": "run-s build test && npm version ${NEW_VERSION} --no-git-tag-version && npm publish"
   },
-  "bin": {
-    "chroma": "./dist/cli.js"
-  },
   "engines": {
     "node": ">=14.17.0"
   },

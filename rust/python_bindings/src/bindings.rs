@@ -22,8 +22,9 @@ use chroma_types::{
     ListCollectionsRequest, ListDatabasesRequest, Metadata, QueryResponse, UpdateCollectionRequest,
     UpdateMetadata,
 };
-use pyo3::{exceptions::PyValueError, pyclass, pymethods, types::PyAnyMethods, PyObject, Python};
+use pyo3::{exceptions::PyValueError, pyclass, pyfunction, pymethods, types::PyAnyMethods, PyObject, Python};
 use std::time::SystemTime;
+use cli::chroma_cli;
 
 const DEFAULT_DATABASE: &str = "default_database";
 const DEFAULT_TENANT: &str = "default_tenant";
@@ -38,6 +39,20 @@ pub(crate) struct Bindings {
 pub struct PythonBindingsConfig {
     #[pyo3(get, set)]
     sqlite_db_config: SqliteDBConfig,
+}
+
+#[pyfunction]
+#[pyo3(signature = (py_args=None))]
+#[allow(dead_code)]
+pub fn run_cli(py_args: Option<Vec<String>>) -> ChromaPyResult<()> {
+    let args = py_args.unwrap_or_else(|| std::env::args().collect());
+    let args = if args.is_empty() {
+        vec!["chroma".to_string()]
+    } else {
+        args
+    };
+    chroma_cli(args);
+    Ok(())
 }
 
 #[pymethods]

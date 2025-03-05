@@ -58,11 +58,7 @@ fn get_dir_size(path: &Path) -> io::Result<u64> {
     Ok(total_size)
 }
 
-async fn trigger_vector_segments_max_seq_id_migration(
-    sqlite: &SqliteDb,
-    sysdb: &mut SysDb,
-    segment_manager: &LocalSegmentManager,
-) -> Result<(), Box<dyn Error>> {
+async fn get_collection_ids_to_migrate(sqlite: &SqliteDb) -> Result<Vec<CollectionUuid>, Box<dyn Error>> {
     let rows = sqlx::query(
         r#"
                 SELECT collection FROM "segments"
@@ -76,6 +72,17 @@ async fn trigger_vector_segments_max_seq_id_migration(
         .collect();
 
     let collection_ids = collection_ids?;
+    
+    Ok(collection_ids)
+    
+}
+
+async fn trigger_vector_segments_max_seq_id_migration(
+    sqlite: &SqliteDb,
+    sysdb: &mut SysDb,
+    segment_manager: &LocalSegmentManager,
+) -> Result<(), Box<dyn Error>> {
+    let collection_ids = get_collection_ids_to_migrate(sqlite).await?;
 
     for collection_id in collection_ids {
         let collection = sysdb.get_collection_with_segments(collection_id).await?;
@@ -106,7 +113,7 @@ async fn configure_sql_embedding_queue(sqlite: &SqliteDb) -> Result<(), Box<dyn 
             VALUES (1, ?)
         "#,
     )
-    .bind(config.to_string()) // convert the JSON to a string
+    .bind(config.to_string())
     .execute(sqlite.get_conn())
     .await?;
 
