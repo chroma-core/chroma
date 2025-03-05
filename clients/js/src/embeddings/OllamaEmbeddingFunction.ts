@@ -1,28 +1,29 @@
-import { IEmbeddingFunction } from "./IEmbeddingFunction";
-const DEFAULT_MODEL = "chroma/all-minilm-l6-v2-f32";
-const DEFAULT_LOCAL_URL = "http://localhost:11434";
-export class OllamaEmbeddingFunction implements IEmbeddingFunction {
-  private readonly url?: string | undefined;
-  private readonly model: string;
-  private ollamaClient: any;
+import type { IEmbeddingFunction } from "./IEmbeddingFunction";
 
-  constructor(
-    {
-      url = DEFAULT_LOCAL_URL,
-      model = DEFAULT_MODEL,
-    }: { url?: string; model?: string } = {
-      url: DEFAULT_LOCAL_URL,
-      model: DEFAULT_MODEL,
-    },
-  ) {
+type StoredConfig = {
+  url: string;
+  model_name: string;
+};
+
+export class OllamaEmbeddingFunction implements IEmbeddingFunction {
+  name = "ollama";
+
+  private readonly url: string;
+  private readonly model: string;
+  private ollamaClient?: any;
+
+  constructor({
+    url = "http://localhost:11434",
+    model = "chroma/all-minilm-l6-v2-f32",
+  }: { url?: string; model?: string } = {}) {
     // we used to construct the client here, but we need to async import the types
     // for the openai npm package, and the constructor can not be async
     if (url && url.endsWith("/api/embeddings")) {
       this.url = url.slice(0, -"/api/embeddings".length);
     } else {
-      this.url = url || DEFAULT_LOCAL_URL;
+      this.url = url;
     }
-    this.model = model || DEFAULT_MODEL;
+    this.model = model;
   }
 
   private async initClient() {
@@ -61,13 +62,25 @@ export class OllamaEmbeddingFunction implements IEmbeddingFunction {
 
   public async generate(texts: string[]) {
     await this.initClient();
-    return await this.ollamaClient
-      .embed({
-        model: this.model,
-        input: texts,
-      })
-      .then((response: any) => {
-        return response.embeddings;
-      });
+    return await this.ollamaClient!.embed({
+      model: this.model,
+      input: texts,
+    }).then((response: any) => {
+      return response.embeddings;
+    });
+  }
+
+  buildFromConfig(config: StoredConfig): OllamaEmbeddingFunction {
+    return new OllamaEmbeddingFunction({
+      url: config.url,
+      model: config.model_name,
+    });
+  }
+
+  getConfig(): StoredConfig {
+    return {
+      url: this.url,
+      model_name: this.model,
+    };
   }
 }

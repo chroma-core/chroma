@@ -5,9 +5,9 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-use tonic::body::BoxBody;
+use tonic::{body::BoxBody, transport::Error, Code};
 use tower::{Layer, Service};
-use tracing::{info_span, Instrument};
+use tracing::{field::Empty, info_span, Instrument, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 const TRACE_ID_HEADER_KEY: &str = "chroma-traceid";
@@ -32,7 +32,10 @@ pub struct GrpcTraceService<S> {
 
 impl<S, ReqBody> Service<http::Request<ReqBody>> for GrpcTraceService<S>
 where
-    S: Service<http::Request<ReqBody>, Response = http::Response<BoxBody>> + Clone + Send + 'static,
+    S: Service<http::Request<ReqBody>, Response = http::Response<BoxBody>, Error = Error>
+        + Clone
+        + Send
+        + 'static,
     S::Future: Send + 'static,
 {
     type Response = S::Response;
@@ -49,8 +52,10 @@ where
         let span = info_span!(
             "grpc_request",
             otel.name = format!("Request {}", req.uri().path()),
-            grpc.method = ?req.uri().path(),
-            grpc.headers = ?req.headers(),
+            rpc.method = ?req.uri().path(),
+            rpc.headers = ?req.headers(),
+            rpc.status_description = Empty,
+            rpc.status_code_value = Empty,
         );
 
         if let Ok(header) =
@@ -66,6 +71,52 @@ where
         }
 
         let fut = self.inner.call(req);
-        Box::pin(async move { fut.instrument(span).await })
+        Box::pin(
+            async move {
+                let span = Span::current();
+                let res = fut.await;
+                match res.as_ref() {
+                    Ok(resp) => match resp.headers().get("grpc-status") {
+                        Some(val) => match val
+                            .to_str()
+                            .map_err(|e| e.to_string())
+                            .and_then(|s| s.parse::<u8>().map_err(|e| e.to_string()))
+                        {
+                            Ok(code) => {
+                                let code_enum = Code::from_i32(code as i32);
+                                span.record(
+                                    "rpc.status_description",
+                                    format!("[{:?}] {}", code_enum, code_enum),
+                                );
+                                span.record("rpc.status_code_value", code);
+                            }
+                            Err(err) => {
+                                span.record(
+                                    "rpc.status_description",
+                                    format!("[StatusCodeParsingError] {err}"),
+                                );
+                                span.record("rpc.status_code_value", Code::InvalidArgument as u8);
+                            }
+                        },
+                        None => {
+                            span.record(
+                                "rpc.status_description",
+                                format!("[{:?}] {}", Code::Ok, Code::Ok),
+                            );
+                            span.record("rpc.status_code_value", Code::Ok as u8);
+                        }
+                    },
+                    Err(err) => {
+                        span.record(
+                            "rpc.status_description",
+                            format!("[HttpResponseError] {err}"),
+                        );
+                        span.record("rpc.status_code_value", Code::Internal as u8);
+                    }
+                }
+                res
+            }
+            .instrument(span),
+        )
     }
 }

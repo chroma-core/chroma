@@ -8,10 +8,7 @@ import pytest
 import onnxruntime
 from unittest.mock import patch, MagicMock
 
-from chromadb.utils.embedding_functions import ONNXMiniLM_L6_V2
-from chromadb.utils.embedding_functions.embedding_function import (
-    EmbeddingFunction,
-)
+from chromadb.utils.embedding_functions import ONNXMiniLM_L6_V2, EmbeddingFunction
 
 
 class TestONNXMiniLM_L6_V2:

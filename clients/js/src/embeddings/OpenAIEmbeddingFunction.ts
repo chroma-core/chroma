@@ -76,7 +76,16 @@ class OpenAIAPIv4 implements OpenAIAPI {
   }
 }
 
+type StoredConfig = {
+  api_key_env_var: string;
+  model_name: string;
+  organization_id: string;
+  dimensions: number;
+};
+
 export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
+  name = "openai";
+
   private api_key: string;
   private org_id: string;
   private model: string;
@@ -85,21 +94,28 @@ export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
 
   constructor({
     openai_api_key,
-    openai_model,
+    openai_model = "text-embedding-ada-002",
     openai_organization_id,
     openai_embedding_dimensions,
+    openai_api_key_env_var = "OPENAI_API_KEY",
   }: {
-    openai_api_key: string;
+    openai_api_key?: string;
     openai_model?: string;
     openai_organization_id?: string;
     openai_embedding_dimensions?: number;
+    openai_api_key_env_var?: string;
   }) {
-    // we used to construct the client here, but we need to async import the types
-    // for the openai npm package, and the constructor can not be async
-    this.api_key = openai_api_key;
-    this.org_id = openai_organization_id || "";
-    this.model = openai_model || "text-embedding-ada-002";
-    this.dimensions = openai_embedding_dimensions;
+    const apiKey = openai_api_key ?? process.env[openai_api_key_env_var];
+    if (!apiKey) {
+      throw new Error(
+        `OpenAI API key is required. Please provide it in the constructor or set the environment variable ${openai_api_key_env_var}.`,
+      );
+    }
+    this.api_key = apiKey;
+
+    this.org_id = openai_organization_id ?? "";
+    this.model = openai_model;
+    this.dimensions = openai_embedding_dimensions ?? 1536;
   }
 
   private async loadClient() {
@@ -161,6 +177,30 @@ export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
       throw new Error(
         "Please install the openai package to use the OpenAIEmbeddingFunction, e.g. `npm install openai`",
       );
+    }
+  }
+
+  buildFromConfig(config: StoredConfig): OpenAIEmbeddingFunction {
+    return new OpenAIEmbeddingFunction({
+      openai_api_key: config.api_key_env_var,
+      openai_model: config.model_name,
+      openai_organization_id: config.organization_id,
+      openai_embedding_dimensions: config.dimensions,
+    });
+  }
+
+  getConfig(): StoredConfig {
+    return {
+      api_key_env_var: this.api_key,
+      model_name: this.model,
+      organization_id: this.org_id,
+      dimensions: this.dimensions ?? 1536,
+    };
+  }
+
+  validateConfigUpdate(oldConfig: StoredConfig, newConfig: StoredConfig): void {
+    if (oldConfig.model_name !== newConfig.model_name) {
+      throw new Error("Cannot change model name.");
     }
   }
 }

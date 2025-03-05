@@ -63,9 +63,14 @@ pub struct FrontendConfig {
     pub executor: ExecutorConfig,
 }
 
+fn default_otel_service_name() -> String {
+    "chromadb".to_string()
+}
+
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct OpenTelemetryConfig {
     pub endpoint: String,
+    #[serde(default = "default_otel_service_name")]
     pub service_name: String,
 }
 
@@ -185,5 +190,11 @@ mod tests {
             CacheConfig::Nop => {}
             _ => {}
         }
+    }
+
+    #[test]
+    fn single_node_full_config_valid() {
+        let config = FrontendServerConfig::load_from_path("sample_configs/single_node_full.yaml");
+        assert_eq!(config.port, 8000);
     }
 }

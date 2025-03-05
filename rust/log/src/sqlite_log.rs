@@ -8,10 +8,11 @@ use chroma_error::{ChromaError, ErrorCodes, WrappedSqlxError};
 use chroma_sqlite::{db::SqliteDb, helpers::get_embeddings_queue_topic_name};
 use chroma_system::{ChannelError, ComponentHandle, RequestError};
 use chroma_types::{
-    CollectionUuid, LogRecord, Operation, OperationRecord, ScalarEncoding,
-    ScalarEncodingConversionError, UpdateMetadata, UpdateMetadataValue,
+    CollectionUuid, LogRecord, Operation, OperationRecord, ResetError, ResetResponse,
+    ScalarEncoding, ScalarEncodingConversionError, UpdateMetadata, UpdateMetadataValue,
 };
 use futures::TryStreamExt;
+use serde::{Deserialize, Serialize};
 use sqlx::{QueryBuilder, Row};
 use std::{str::FromStr, sync::OnceLock};
 use thiserror::Error;
@@ -101,6 +102,37 @@ impl ChromaError for SqliteUpdateCollectionLogOffsetError {
             SqliteUpdateCollectionLogOffsetError::QueryError(err) => err.code(),
         }
     }
+}
+
+#[derive(Error, Debug)]
+pub enum SqliteGetLegacyEmbeddingsQueueConfigError {
+    #[error("Query error: {0}")]
+    QueryError(#[from] WrappedSqlxError),
+    #[error("Failed to parse legacy config: {0}")]
+    InvalidConfig(#[from] serde_json::Error),
+}
+
+impl ChromaError for SqliteGetLegacyEmbeddingsQueueConfigError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            SqliteGetLegacyEmbeddingsQueueConfigError::QueryError(err) => err.code(),
+            SqliteGetLegacyEmbeddingsQueueConfigError::InvalidConfig(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
+fn legacy_embeddings_queue_config_default_kind() -> String {
+    "EmbeddingsQueueConfigurationInternal".to_owned()
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct LegacyEmbeddingsQueueConfig {
+    automatically_purge: bool,
+    #[serde(
+        default = "legacy_embeddings_queue_config_default_kind",
+        rename = "_type"
+    )]
+    kind: String,
 }
 
 #[derive(Clone, Debug)]
@@ -389,6 +421,12 @@ impl SqliteLog {
         collection_id: CollectionUuid,
         seq_id: u64,
     ) -> Result<(), SqlitePurgeLogsError> {
+        let legacy_config = self.get_legacy_embeddings_queue_config().await?;
+        // Skip purge if not enabled
+        if !legacy_config.automatically_purge {
+            return Ok(());
+        }
+
         let topic =
             get_embeddings_queue_topic_name(&self.tenant_id, &self.topic_namespace, collection_id);
 
@@ -423,10 +461,58 @@ impl SqliteLog {
             .fold(DEFAULT_VAR_OPT, |_, opt| opt);
         Ok(max_variable_number / VARIABLE_PER_RECORD)
     }
+
+    pub async fn reset(&mut self) -> Result<ResetResponse, ResetError> {
+        // Populate default config
+        self.get_legacy_embeddings_queue_config()
+            .await
+            .map_err(|e| e.boxed())?;
+        Ok(ResetResponse {})
+    }
+
+    async fn get_legacy_embeddings_queue_config(
+        &mut self,
+    ) -> Result<LegacyEmbeddingsQueueConfig, SqliteGetLegacyEmbeddingsQueueConfigError> {
+        let mut tx = self.db.get_conn().begin().await.map_err(WrappedSqlxError)?;
+
+        let row = sqlx::query("SELECT * FROM embeddings_queue_config")
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(WrappedSqlxError)?;
+
+        if let Some(row) = row {
+            let value: String = row.get("config_json_str");
+            let config: LegacyEmbeddingsQueueConfig = serde_json::from_str(&value)?;
+            return Ok(config);
+        }
+
+        // Insert default
+        let log_size = sqlx::query("SELECT COUNT(*) from embeddings_queue")
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(WrappedSqlxError)?;
+        let log_size = log_size.get::<i64, _>(0);
+
+        let default_config = LegacyEmbeddingsQueueConfig {
+            automatically_purge: log_size == 0,
+            kind: legacy_embeddings_queue_config_default_kind(),
+        };
+        let value = serde_json::to_string(&default_config)?;
+        sqlx::query("INSERT INTO embeddings_queue_config (config_json_str) VALUES (?)")
+            .bind(value)
+            .execute(&mut *tx)
+            .await
+            .map_err(WrappedSqlxError)?;
+        tx.commit().await.map_err(WrappedSqlxError)?;
+
+        Ok(default_config)
+    }
 }
 
 #[derive(Error, Debug)]
 pub enum SqlitePurgeLogsError {
+    #[error("Could not get legacy embedding queue config: {0}")]
+    GetLegacyConfigError(#[from] SqliteGetLegacyEmbeddingsQueueConfigError),
     #[error("Delete query error: {0}")]
     DeleteQueryError(#[from] WrappedSqlxError),
 }
@@ -434,6 +520,7 @@ pub enum SqlitePurgeLogsError {
 impl ChromaError for SqlitePurgeLogsError {
     fn code(&self) -> ErrorCodes {
         match self {
+            SqlitePurgeLogsError::GetLegacyConfigError(err) => err.code(),
             SqlitePurgeLogsError::DeleteQueryError(err) => err.code(),
         }
     }
@@ -483,11 +570,18 @@ impl Configurable<SqliteLogConfig> for SqliteLog {
         registry: &chroma_config::registry::Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let sqlite_db = registry.get::<SqliteDb>().map_err(|e| e.boxed())?;
-        Ok(Self::new(
+        let mut log = Self::new(
             sqlite_db,
             config.tenant_id.clone(),
             config.topic_namespace.clone(),
-        ))
+        );
+
+        // This populates the legacy config if not present (when upgrading from an old version)
+        log.get_legacy_embeddings_queue_config()
+            .await
+            .map_err(|e| e.boxed())?;
+
+        Ok(log)
     }
 }
 

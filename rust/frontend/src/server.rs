@@ -398,7 +398,7 @@ async fn version(State(server): State<FrontendServer>) -> Json<String> {
     server.metrics.version.add(1, &[]);
     // TODO: Decide on how to handle versioning across python / rust frontend
     // for now return a hardcoded version
-    Json("0.7.0".to_string())
+    Json("1.0.0".to_string())
 }
 
 /// Retrieves the current user's identity, tenant, and databases.

@@ -80,6 +80,8 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 		Version                    int32      `gorm:"column:version"`
 		VersionFileName            string     `gorm:"column:version_file_name"`
 		TotalRecordsPostCompaction uint64     `gorm:"column:total_records_post_compaction"`
+		SizeBytesPostCompaction    uint64     `gorm:"column:size_bytes_post_compaction"`
+		LastCompactionTimeSecs     uint64     `gorm:"column:last_compaction_time_secs"`
 		DatabaseName               string     `gorm:"column:database_name"`
 		TenantID                   string     `gorm:"column:tenant_id"`
 		// Metadata fields
@@ -94,7 +96,7 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 	}
 
 	query := s.db.Table("collections").
-		Select("collections.id as collection_id, collections.name as collection_name, collections.configuration_json_str, collections.dimension, collections.database_id, collections.ts as collection_ts, collections.is_deleted, collections.created_at as collection_created_at, collections.updated_at as collection_updated_at, collections.log_position, collections.version, collections.version_file_name, collections.total_records_post_compaction, databases.name as database_name, databases.tenant_id as tenant_id").
+		Select("collections.id as collection_id, collections.name as collection_name, collections.configuration_json_str, collections.dimension, collections.database_id, collections.ts as collection_ts, collections.is_deleted, collections.created_at as collection_created_at, collections.updated_at as collection_updated_at, collections.log_position, collections.version, collections.version_file_name, collections.total_records_post_compaction, collections.size_bytes_post_compaction, collections.last_compaction_time_secs, databases.name as database_name, databases.tenant_id as tenant_id").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
 		Order("collections.created_at ASC")
 
@@ -156,6 +158,8 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 				Version:                    r.Version,
 				VersionFileName:            r.VersionFileName,
 				TotalRecordsPostCompaction: r.TotalRecordsPostCompaction,
+				SizeBytesPostCompaction:    r.SizeBytesPostCompaction,
+				LastCompactionTimeSecs:     r.LastCompactionTimeSecs,
 			}
 			if r.CollectionTs != nil {
 				col.Ts = *r.CollectionTs
@@ -233,7 +237,7 @@ func (s *collectionDb) CountCollections(tenantID string, databaseName *string) (
 	var count int64
 	query := s.db.Table("collections").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
-		Where("databases.tenant_id = ?", tenantID)
+		Where("databases.tenant_id = ? AND collections.is_deleted = ?", tenantID, false)
 
 	if databaseName != nil {
 		query = query.Where("databases.name = ?", databaseName)

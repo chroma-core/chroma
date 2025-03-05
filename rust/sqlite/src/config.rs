@@ -48,6 +48,7 @@ impl Default for SqliteDBConfig {
 /// - Validate: Validate the applied migrations and ensure none are unappliued
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 #[cfg_attr(feature = "pyo3", pyclass(eq, eq_int))]
+#[serde(rename_all = "lowercase")]
 pub enum MigrationMode {
     Apply,
     Validate,
@@ -58,6 +59,7 @@ pub enum MigrationMode {
 /// - MD5: Use MD5 hash
 #[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "pyo3", pyclass(eq, eq_int))]
+#[serde(rename_all = "lowercase")]
 pub enum MigrationHash {
     SHA256,
     MD5,

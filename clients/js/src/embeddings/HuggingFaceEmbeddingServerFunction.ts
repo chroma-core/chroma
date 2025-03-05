@@ -1,8 +1,12 @@
 import { IEmbeddingFunction } from "./IEmbeddingFunction";
 
-let CohereAiApi: any;
+type StoredConfig = {
+  url: string;
+};
 
 export class HuggingFaceEmbeddingServerFunction implements IEmbeddingFunction {
+  name = "huggingface_server";
+
   private url: string;
 
   constructor({ url }: { url: string }) {
@@ -26,5 +30,24 @@ export class HuggingFaceEmbeddingServerFunction implements IEmbeddingFunction {
 
     const data = await response.json();
     return data;
+  }
+
+  buildFromConfig(config: StoredConfig): HuggingFaceEmbeddingServerFunction {
+    return new HuggingFaceEmbeddingServerFunction(config);
+  }
+
+  toConfig(): StoredConfig {
+    return {
+      url: this.url,
+    };
+  }
+
+  validateConfigUpdate(
+    oldConfig: Record<string, any>,
+    newConfig: Record<string, any>,
+  ): void {
+    if (oldConfig.url !== newConfig.url) {
+      throw new Error("Changing the URL is not allowed.");
+    }
   }
 }

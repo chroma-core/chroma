@@ -1,8 +1,5 @@
-from chromadb.utils.embedding_functions.embedding_function import (
-    EmbeddingFunction,
-    Space,
-)
-from chromadb.api.types import Embeddings, Documents
+from chromadb.api.types import Embeddings, Documents, EmbeddingFunction, Space
+from chromadb.utils.embedding_functions.schemas import validate_config
 from typing import List, Dict, Any, Union, Optional
 import os
 import numpy as np
@@ -18,14 +15,14 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
         self,
         api_key: Optional[str] = None,
         model_name: str = "jina-embeddings-v2-base-en",
-        api_key_env_var: str = "JINA_API_KEY",
+        api_key_env_var: str = "CHROMA_JINA_API_KEY",
     ):
         """
         Initialize the JinaEmbeddingFunction.
 
         Args:
             api_key_env_var (str, optional): Environment variable name that contains your API key for the Jina AI API.
-                Defaults to "JINA_API_KEY".
+                Defaults to "CHROMA_JINA_API_KEY".
             model_name (str, optional): The name of the model to use for text embeddings.
                 Defaults to "jina-embeddings-v2-base-en".
         """
@@ -60,7 +57,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
             Embeddings: The embeddings for the texts.
 
         Example:
-            >>> jina_ai_fn = JinaEmbeddingFunction(api_key_env_var="JINA_API_KEY")
+            >>> jina_ai_fn = JinaEmbeddingFunction(api_key_env_var="CHROMA_JINA_API_KEY")
             >>> input = ["Hello, world!", "How are you?"]
         """
         # Jina AI only works with text documents
@@ -120,5 +117,13 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
             )
 
     def validate_config(self, config: Dict[str, Any]) -> None:
-        # TODO: Validate with JSON schema
-        pass
+        """
+        Validate the configuration using the JSON schema.
+
+        Args:
+            config: Configuration to validate
+
+        Raises:
+            ValidationError: If the configuration does not match the schema
+        """
+        validate_config(config, "jina")

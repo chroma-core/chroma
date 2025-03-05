@@ -12,11 +12,8 @@ import numpy.typing as npt
 import httpx
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_random
 
-from chromadb.api.types import Documents, Embeddings
-from chromadb.utils.embedding_functions.embedding_function import (
-    Space,
-    EmbeddingFunction,
-)
+from chromadb.api.types import Documents, Embeddings, EmbeddingFunction, Space
+from chromadb.utils.embedding_functions.schemas import validate_config
 
 logger = logging.getLogger(__name__)
 
@@ -340,5 +337,13 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
         pass
 
     def validate_config(self, config: Dict[str, Any]) -> None:
-        # TODO: Validate with JSON schema
-        pass
+        """
+        Validate the configuration using the JSON schema.
+
+        Args:
+            config: Configuration to validate
+
+        Raises:
+            ValidationError: If the configuration does not match the schema
+        """
+        validate_config(config, "onnx_mini_lm_l6_v2")

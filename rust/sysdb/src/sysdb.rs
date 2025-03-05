@@ -442,7 +442,7 @@ impl Configurable<GrpcSysDbConfig> for GrpcSysDb {
     ) -> Result<Self, Box<dyn ChromaError>> {
         let host = &my_config.host;
         let port = &my_config.port;
-        println!("Connecting to sysdb at {}:{}", host, port);
+        tracing::info!("Connecting to sysdb at {}:{}", host, port);
         let connection_string = format!("http://{}:{}", host, port);
         let endpoint = match Endpoint::from_shared(connection_string) {
             Ok(endpoint) => endpoint,
@@ -468,6 +468,7 @@ pub struct CollectionToGcInfo {
     pub id: CollectionUuid,
     pub name: String,
     pub version_file_path: String,
+    pub latest_version: i64,
 }
 
 #[derive(Debug, Error)]
@@ -500,6 +501,7 @@ impl TryFrom<chroma_proto::CollectionToGcInfo> for CollectionToGcInfo {
             id: collection_id,
             name: value.name,
             version_file_path: value.version_file_path,
+            latest_version: value.latest_version,
         })
     }
 }

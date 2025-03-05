@@ -1,18 +1,20 @@
 [workspace]
 resolver = "2"
 
-members = ["rust/benchmark", "rust/blockstore", "rust/cache", "rust/chroma", "rust/config", "rust/distance", "rust/error", "rust/frontend", "rust/garbage_collector", "rust/index", "rust/load", "rust/log", "rust/memberlist", "rust/storage", "rust/system", "rust/sysdb", "rust/types", "rust/worker", "rust/segment", "rust/python_bindings", "rust/mdac", "rust/tracing", "rust/sqlite", "rust/cli"]
+members = ["rust/benchmark", "rust/blockstore", "rust/cache", "rust/chroma", "rust/config", "rust/distance", "rust/error", "rust/frontend", "rust/garbage_collector", "rust/index", "rust/load", "rust/log", "rust/memberlist", "rust/storage", "rust/system", "rust/sysdb", "rust/types", "rust/worker", "rust/segment", "rust/python_bindings", "rust/mdac", "rust/tracing", "rust/sqlite", "rust/cli", "rust/wal3"]
 
 [workspace.dependencies]
 arrow = "52.2.0"
 async-trait = "0.1"
 axum = { version = "0.8", features = ["macros"] }
+bytes = "1.7"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 criterion = { version = "0.5", features = ["async_tokio"] }
 figment = { version = "0.10.12", features = ["env", "yaml", "test"] }
 flatbuffers = "24.3.25"
 futures = "0.3"
+futures-core = "0.3"
 lazy_static = { version = "1.4" }
 num_cpus = "1.16.0"
 opentelemetry = { version = "0.27.0", default-features = false, features = ["trace", "metrics"] }
@@ -27,6 +29,7 @@ sea-query = "0.32"
 sea-query-binder = "0.7"
 serde = { version = "1.0.215", features = ["derive"] }
 serde_json = "1.0.133"
+setsum = "0.7"
 tantivy = "0.22.0"
 thiserror = "1.0.69"
 tokio = { version = "1.41", features = ["fs", "macros", "rt-multi-thread"] }
@@ -72,6 +75,7 @@ chroma-tracing = { path = "rust/tracing" }
 chroma-types = { path = "rust/types" }
 chroma-sqlite = { path = "rust/sqlite" }
 mdac = { path = "rust/mdac" }
+wal3 = { path = "rust/wal3" }
 worker = { path = "rust/worker" }
 cli = { path = "rust/cli" }
 

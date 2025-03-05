@@ -1,7 +1,4 @@
-from chromadb.utils.embedding_functions.embedding_function import (
-    EmbeddingFunction,
-    Space,
-)
+from chromadb.utils.embedding_functions.schemas import validate_config
 from chromadb.api.types import (
     Documents,
     Embeddings,
@@ -9,6 +6,8 @@ from chromadb.api.types import (
     is_document,
     is_image,
     Embeddable,
+    EmbeddingFunction,
+    Space,
 )
 from typing import List, Dict, Any, Union, cast, Optional
 import os
@@ -27,14 +26,14 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Embeddable]):
         self,
         api_key: Optional[str] = None,
         api_url: str = "https://infer.roboflow.com",
-        api_key_env_var: str = "ROBOFLOW_API_KEY",
+        api_key_env_var: str = "CHROMA_ROBOFLOW_API_KEY",
     ) -> None:
         """
         Create a RoboflowEmbeddingFunction.
 
         Args:
             api_key_env_var (str, optional): Environment variable name that contains your API key for the Roboflow API.
-                Defaults to "ROBOFLOW_API_KEY".
+                Defaults to "CHROMA_ROBOFLOW_API_KEY".
             api_url (str, optional): The URL of the Roboflow API.
                 Defaults to "https://infer.roboflow.com".
         """
@@ -140,5 +139,13 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Embeddable]):
         pass
 
     def validate_config(self, config: Dict[str, Any]) -> None:
-        # TODO: Validate with JSON schema
-        pass
+        """
+        Validate the configuration using the JSON schema.
+
+        Args:
+            config: Configuration to validate
+
+        Raises:
+            ValidationError: If the configuration does not match the schema
+        """
+        validate_config(config, "roboflow")

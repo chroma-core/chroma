@@ -1,10 +1,7 @@
-from chromadb.utils.embedding_functions.embedding_function import (
-    EmbeddingFunction,
-    Space,
-)
-from chromadb.api.types import Embeddings, Documents
+from chromadb.api.types import EmbeddingFunction, Space, Embeddings, Documents
 from typing import List, Dict, Any
 import numpy as np
+from chromadb.utils.embedding_functions.schemas import validate_config
 
 
 class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
@@ -111,5 +108,13 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
             )
 
     def validate_config(self, config: Dict[str, Any]) -> None:
-        # TODO: Validate with JSON schema
-        pass
+        """
+        Validate the configuration using the JSON schema.
+
+        Args:
+            config: Configuration to validate
+
+        Raises:
+            ValidationError: If the configuration does not match the schema
+        """
+        validate_config(config, "sentence_transformer")

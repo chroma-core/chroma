@@ -30,14 +30,14 @@ from hypothesis.stateful import (
 )
 import os
 import shutil
-import tempfile
 from chromadb.api.client import Client as ClientCreator
 from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
 import numpy as np
 
 CreatePersistAPI = Callable[[], ServerAPI]
 
-configurations = [
+configurations = (
+    [
         Settings(
             chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
             chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
@@ -47,7 +47,9 @@ configurations = [
             allow_reset=True,
             is_persistent=True,
         )
-    ] if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ else [
+    ]
+    if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ
+    else [
         Settings(
             chroma_api_impl="chromadb.api.segment.SegmentAPI",
             chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
@@ -58,6 +60,7 @@ configurations = [
             is_persistent=True,
         ),
     ]
+)
 
 
 @pytest.fixture(scope="module", params=configurations)

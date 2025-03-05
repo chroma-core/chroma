@@ -25,6 +25,8 @@ func convertCollectionToModel(collectionAndMetadataList []*dbmodel.CollectionAnd
 			LogPosition:                collectionAndMetadata.Collection.LogPosition,
 			Version:                    collectionAndMetadata.Collection.Version,
 			TotalRecordsPostCompaction: collectionAndMetadata.Collection.TotalRecordsPostCompaction,
+			SizeBytesPostCompaction:    collectionAndMetadata.Collection.SizeBytesPostCompaction,
+			LastCompactionTimeSecs:     collectionAndMetadata.Collection.LastCompactionTimeSecs,
 		}
 		collection.Metadata = convertCollectionMetadataToModel(collectionAndMetadata.CollectionMetadata)
 		collections = append(collections, collection)
@@ -43,6 +45,7 @@ func convertCollectionToGcToModel(collectionToGc []*dbmodel.CollectionToGc) []*m
 			ID:              types.MustParse(collectionInfo.ID),
 			Name:            collectionInfo.Name,
 			VersionFilePath: collectionInfo.VersionFileName,
+			LatestVersion:   int64(collectionInfo.Version),
 		}
 		collections = append(collections, &collection)
 	}
