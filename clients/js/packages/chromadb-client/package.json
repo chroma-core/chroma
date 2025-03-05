@@ -1,6 +1,6 @@
 {
   "name": "chromadb-client",
-  "version": "1.10.5",
+  "version": "1.11.0",
   "description": "A JavaScript interface for chroma with peer dependencies",
   "license": "Apache-2.0",
   "type": "module",

@@ -1,6 +1,6 @@
 {
   "name": "chromadb",
-  "version": "1.10.5",
+  "version": "1.11.0",
   "description": "A JavaScript interface for chroma with bundled dependencies",
   "license": "Apache-2.0",
   "type": "module",
