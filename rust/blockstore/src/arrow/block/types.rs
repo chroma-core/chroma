@@ -94,9 +94,9 @@ pub struct Block {
 impl Block {
     /// Create a concrete block from an id and the underlying record batch of data
     pub fn from_record_batch(id: Uuid, data: RecordBatch) -> Self {
-        println!("(Sanket-temp) Creating block {} from record batch", id);
+        // println!("(Sanket-temp) Creating block {} from record batch", id);
         let data = data.into();
-        println!("(Sanket-temp) Block {} created with rows", id);
+        // println!("(Sanket-temp) Block {} created with rows", id);
         Self { id, data }
     }
 
@@ -538,7 +538,7 @@ impl Block {
 
     /// Load a block from bytes in Arrow IPC format with the given id
     pub fn from_bytes(bytes: &[u8], id: Uuid) -> Result<Self, BlockLoadError> {
-        println!("Loading block {} from bytes", id);
+        // println!("Loading block {} from bytes", id);
         Self::from_bytes_internal(bytes, id, true)
     }
 

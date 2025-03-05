@@ -153,15 +153,15 @@ impl Storage {
                 }
             }
             Storage::Local(local) => {
-                println!("(Sanket-temp) Getting from local key {}", key);
+                // println!("(Sanket-temp) Getting from local key {}", key);
                 let res = local.get(key).await;
                 match res {
                     Ok(res) => {
-                        println!(
-                            "(Sanket-temp) Got from local key {} size_bytes {}",
-                            key,
-                            res.len()
-                        );
+                        // println!(
+                        //     "(Sanket-temp) Got from local key {} size_bytes {}",
+                        //     key,
+                        //     res.len()
+                        // );
                         Ok(res)
                     }
                     Err(e) => Err(GetError::LocalError(e)),
@@ -207,7 +207,7 @@ impl Storage {
                 }
             }
             Storage::Local(local) => {
-                println!("(Sanket-temp) Getting from local parallel key {}", key);
+                // println!("(Sanket-temp) Getting from local parallel key {}", key);
                 let res = local.get(key).await;
                 match res {
                     Ok(res) => Ok(res),

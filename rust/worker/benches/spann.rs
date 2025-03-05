@@ -279,12 +279,12 @@ fn query_parallel(
         .await
         .expect("Error creating spann index reader");
         for batch in 0..(num_queries / 10) {
-            println!("Running batch {} of queries", batch);
+            // println!("Running batch {} of queries", batch);
             let start = batch * 10;
             let end = std::cmp::min((batch + 1) * 10, num_queries);
             let handles = (start..end)
                 .map(|idx| {
-                    println!("Running query {} of {}", idx, num_queries);
+                    // println!("Running query {} of {}", idx, num_queries);
                     let query = queries.row(idx).to_owned().to_vec();
                     let distance_function_clone = distance_function.clone();
                     let reader_clone = reader.clone();
@@ -301,7 +301,7 @@ fn query_parallel(
                         )
                         .await
                         .expect("Error running rng query");
-                        println!("head_ids: {:?}", head_ids);
+                        // println!("head_ids: {:?}", head_ids);
                         let mut merge_list = Vec::new();
                         let mut bf_list = Vec::new();
                         for head_id in head_ids {
@@ -309,12 +309,12 @@ fn query_parallel(
                             let distance_function_clone_clone = distance_function_clone.clone();
                             let reader_clone_clone = reader_clone.clone();
                             let bf_task = tokio::spawn(async move {
-                                println!("Fetching pl for head_id: {}", head_id);
+                                // println!("Fetching pl for head_id: {}", head_id);
                                 let pl = reader_clone_clone
                                     .fetch_posting_list(head_id as u32)
                                     .await
                                     .expect("Error fetching posting list");
-                                println!("Running bf operator for head_id: {}", head_id);
+                                // println!("Running bf operator for head_id: {}", head_id);
                                 let bf_operator_input = SpannBfPlInput {
                                     posting_list: pl,
                                     k,
@@ -332,7 +332,7 @@ fn query_parallel(
                             });
                             bf_list.push(bf_task);
                         }
-                        println!("Awaiting all bf futures for query {}", idx);
+                        // println!("Awaiting all bf futures for query {}", idx);
                         let bf_results = futures::future::join_all(bf_list).await;
                         for bf_result in bf_results {
                             let bf_output = bf_result.expect("Error running bf operator");
@@ -350,7 +350,7 @@ fn query_parallel(
                     })
                 })
                 .collect::<Vec<_>>();
-            println!("Awaiting all queries in batch {} of {}", batch, num_queries);
+            // println!("Awaiting all queries in batch {} of {}", batch, num_queries);
             // Wait for all the handles to finish.
             let results = futures::future::join_all(handles).await;
             for result in results {
@@ -1021,7 +1021,7 @@ fn bench_compaction_n_runs(c: &mut Criterion) {
 
 criterion_group! {
     name = benches;
-    config = Criterion::default().sample_size(20);
+    config = Criterion::default().sample_size(200);
     targets = bench_compaction, bench_compaction_n_runs, bench_qps
 }
 
