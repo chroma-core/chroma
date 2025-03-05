@@ -15,7 +15,6 @@ export default defineConfig((options: Options) => {
       '@google/generative-ai',
       '@xenova/transformers',
       'chromadb-default-embed',
-      'cohere-ai',
       'openai',
       'voyageai',
       'ollama',
