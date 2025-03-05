@@ -136,6 +136,8 @@ func TestConvertCollectionToModel(t *testing.T) {
 	colllectionConfigurationJsonStr := "{\"a\": \"param\", \"b\": \"param2\", \"3\": true}"
 	collectionDimension := int32(3)
 	collectionTotalRecordsPostCompaction := uint64(100)
+	collectionSizeBytesPostCompaction := uint64(500000)
+	collectionLastCompactionTimeSecs := uint64(1741037006)
 	collectionAndMetadata := &dbmodel.CollectionAndMetadata{
 		Collection: &dbmodel.Collection{
 			ID:                         collectionID.String(),
@@ -143,6 +145,8 @@ func TestConvertCollectionToModel(t *testing.T) {
 			ConfigurationJsonStr:       &colllectionConfigurationJsonStr,
 			Dimension:                  &collectionDimension,
 			TotalRecordsPostCompaction: collectionTotalRecordsPostCompaction,
+			SizeBytesPostCompaction:    collectionSizeBytesPostCompaction,
+			LastCompactionTimeSecs:     collectionLastCompactionTimeSecs,
 		},
 		CollectionMetadata: []*dbmodel.CollectionMetadata{},
 	}
@@ -154,5 +158,7 @@ func TestConvertCollectionToModel(t *testing.T) {
 	assert.Equal(t, colllectionConfigurationJsonStr, modelCollections[0].ConfigurationJsonStr)
 	assert.Equal(t, collectionDimension, *modelCollections[0].Dimension)
 	assert.Equal(t, collectionTotalRecordsPostCompaction, modelCollections[0].TotalRecordsPostCompaction)
+	assert.Equal(t, collectionSizeBytesPostCompaction, modelCollections[0].SizeBytesPostCompaction)
+	assert.Equal(t, collectionLastCompactionTimeSecs, modelCollections[0].LastCompactionTimeSecs)
 	assert.Nil(t, modelCollections[0].Metadata)
 }

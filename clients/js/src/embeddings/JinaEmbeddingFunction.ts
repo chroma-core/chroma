@@ -1,18 +1,37 @@
 import { IEmbeddingFunction } from "./IEmbeddingFunction";
 
+type StoredConfig = {
+  api_key_env_var: string;
+  model_name: string;
+};
+
 export class JinaEmbeddingFunction implements IEmbeddingFunction {
+  name = "jina";
+
+  private api_key_env_var: string;
   private model_name: string;
   private api_url: string;
   private headers: { [key: string]: string };
 
   constructor({
     jinaai_api_key,
-    model_name,
+    model_name = "jina-embeddings-v2-base-en",
+    api_key_env_var = "JINAAI_API_KEY",
   }: {
-    jinaai_api_key: string;
+    jinaai_api_key?: string;
     model_name?: string;
+    api_key_env_var: string;
   }) {
-    this.model_name = model_name || "jina-embeddings-v2-base-en";
+    const apiKey = jinaai_api_key ?? process.env[api_key_env_var];
+    if (!apiKey) {
+      throw new Error(
+        `Jina AI API key is required. Please provide it in the constructor or set the environment variable ${api_key_env_var}.`,
+      );
+    }
+
+    this.model_name = model_name;
+    this.api_key_env_var = api_key_env_var;
+
     this.api_url = "https://api.jina.ai/v1/embeddings";
     this.headers = {
       Authorization: `Bearer ${jinaai_api_key}`,
@@ -48,5 +67,19 @@ export class JinaEmbeddingFunction implements IEmbeddingFunction {
         throw new Error(`Error calling Jina AI API: ${error}`);
       }
     }
+  }
+
+  buildFromConfig(config: StoredConfig): JinaEmbeddingFunction {
+    return new JinaEmbeddingFunction({
+      model_name: config.model_name,
+      api_key_env_var: config.api_key_env_var,
+    });
+  }
+
+  getConfig(): StoredConfig {
+    return {
+      api_key_env_var: this.api_key_env_var,
+      model_name: this.model_name,
+    };
   }
 }

@@ -444,6 +444,8 @@ mod tests {
                 log_position: 0,
                 version: 0,
                 total_records_post_compaction: 0,
+                size_bytes_post_compaction: 0,
+                last_compaction_time_secs: 0,
             }),
             knn: Some(chroma_proto::Segment {
                 id: Uuid::new_v4().to_string(),
@@ -547,6 +549,8 @@ mod tests {
             log_position: 0,
             version: 0,
             total_records_post_compaction: 0,
+            size_bytes_post_compaction: 0,
+            last_compaction_time_secs: 0,
         });
         let request = chroma_proto::GetPlan {
             scan: Some(scan_operator.clone()),

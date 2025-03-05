@@ -1674,6 +1674,7 @@ dependencies = [
 name = "chroma-tracing"
 version = "0.1.0"
 dependencies = [
+ "chroma-system",
  "chrono",
  "fastrace",
  "fastrace-opentelemetry",
@@ -1681,6 +1682,8 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
+ "serde",
+ "serde_json",
  "tokio",
  "tonic",
  "tower 0.5.2",
@@ -1688,6 +1691,7 @@ dependencies = [
  "tracing-bunyan-formatter",
  "tracing-opentelemetry",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
@@ -2850,7 +2854,9 @@ dependencies = [
  "opentelemetry-http",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
+ "proptest",
  "prost 0.13.3",
+ "rand",
  "serde",
  "serde_json",
  "tempfile",
