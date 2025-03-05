@@ -90,8 +90,8 @@ impl MeterEvent {
         }
     }
 
-    pub fn init_receiver(receiver: impl ReceiverForMessage<MeterEvent> + 'static) {
-        if METER_EVENT_RECEIVER.set(Box::new(receiver)).is_err() {
+    pub fn init_receiver(receiver: Box<dyn ReceiverForMessage<MeterEvent>>) {
+        if METER_EVENT_RECEIVER.set(receiver).is_err() {
             tracing::error!("Meter event handler is already initialized")
         }
     }
