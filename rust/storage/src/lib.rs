@@ -29,6 +29,8 @@ pub enum Storage {
 pub enum GetError {
     #[error("No such key: {0}")]
     NoSuchKey(String),
+    #[error("Precondition not met")]
+    ConditionNotMet,
     #[error("ObjectStore error: {0}")]
     ObjectStoreError(Arc<::object_store::Error>),
     #[error("S3 error: {0}")]
@@ -44,6 +46,7 @@ impl ChromaError for GetError {
             GetError::ObjectStoreError(_) => ErrorCodes::Internal,
             GetError::S3Error(_) => ErrorCodes::Internal,
             GetError::LocalError(_) => ErrorCodes::Internal,
+            GetError::ConditionNotMet => ErrorCodes::FailedPrecondition,
         }
     }
 }
@@ -170,13 +173,47 @@ impl Storage {
         }
     }
 
+    pub async fn get_with_e_tag(
+        &self,
+        key: &str,
+    ) -> Result<(Arc<Vec<u8>>, Option<ETag>), GetError> {
+        match self {
+            Storage::ObjectStore(_) => Err(GetError::ConditionNotMet),
+            Storage::S3(s3) => {
+                let res = s3.get_with_e_tag(key).await;
+                match res {
+                    Ok(res) => Ok(res),
+                    Err(e) => match e {
+                        S3GetError::NoSuchKey(_) => Err(GetError::NoSuchKey(key.to_string())),
+                        _ => Err(GetError::S3Error(e)),
+                    },
+                }
+            }
+            Storage::Local(_) => Err(GetError::ConditionNotMet),
+            Storage::AdmissionControlledS3(admission_controlled_storage) => {
+                let res = admission_controlled_storage
+                    .get_with_e_tag(key.to_string())
+                    .await;
+                match res {
+                    Ok(res) => Ok(res),
+                    Err(e) => match e {
+                        AdmissionControlledS3StorageError::S3GetError(e) => match e {
+                            S3GetError::NoSuchKey(_) => Err(GetError::NoSuchKey(key.to_string())),
+                            _ => Err(GetError::S3Error(e)),
+                        },
+                    },
+                }
+            }
+        }
+    }
+
     pub async fn get_parallel(&self, key: &str) -> Result<Arc<Vec<u8>>, GetError> {
         match self {
             Storage::ObjectStore(object_store) => object_store.get_parallel(key).await,
             Storage::S3(s3) => {
                 let res = s3.get_parallel(key).await;
                 match res {
-                    Ok(res) => Ok(res),
+                    Ok(res) => Ok(res.0),
                     Err(e) => match e {
                         S3GetError::NoSuchKey(_) => Err(GetError::NoSuchKey(key.to_string())),
                         _ => Err(GetError::S3Error(e)),
@@ -322,3 +359,33 @@ pub fn test_storage() -> Storage {
             .expect("Should be able to convert temporary directory path to string"),
     ))
 }
+
+#[derive(Default)]
+pub struct PutOptions {
+    if_not_exists: bool,
+    if_match: Option<ETag>,
+}
+
+#[derive(Error, Debug)]
+pub enum PutOptionsCreateError {
+    #[error("If not exists and if match cannot both be used")]
+    IfNotExistsAndIfMatchEnabled,
+}
+
+impl PutOptions {
+    pub fn new(
+        if_not_exists: bool,
+        if_match: Option<ETag>,
+    ) -> Result<PutOptions, PutOptionsCreateError> {
+        if !if_not_exists && if_match.is_some() {
+            return Err(PutOptionsCreateError::IfNotExistsAndIfMatchEnabled);
+        }
+        Ok(PutOptions {
+            if_not_exists,
+            if_match,
+        })
+    }
+}
+
+#[derive(Clone, Eq, PartialEq, Debug)]
+pub struct ETag(String);
