@@ -166,7 +166,7 @@ impl AdmissionControlledS3Storage {
         // Acquire permit.
         let _permit = rate_limiter.enter().await;
         let bytes_res = storage
-            .get_e_tag(&key)
+            .get_with_e_tag(&key)
             .instrument(tracing::trace_span!(parent: Span::current(), "S3 get"))
             .await;
         match bytes_res {
@@ -221,10 +221,10 @@ impl AdmissionControlledS3Storage {
         &self,
         key: String,
     ) -> Result<Arc<Vec<u8>>, AdmissionControlledS3StorageError> {
-        self.get_e_tag(key).await.map(|(bytes, _e_tag)| bytes)
+        self.get_with_e_tag(key).await.map(|(bytes, _e_tag)| bytes)
     }
 
-    pub async fn get_e_tag(
+    pub async fn get_with_e_tag(
         &self,
         key: String,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), AdmissionControlledS3StorageError> {

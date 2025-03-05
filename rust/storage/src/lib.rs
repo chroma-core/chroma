@@ -173,11 +173,11 @@ impl Storage {
         }
     }
 
-    pub async fn get_e_tag(&self, key: &str) -> Result<(Arc<Vec<u8>>, Option<ETag>), GetError> {
+    pub async fn get_with_e_tag(&self, key: &str) -> Result<(Arc<Vec<u8>>, Option<ETag>), GetError> {
         match self {
             Storage::ObjectStore(_) => Err(GetError::ConditionNotMet),
             Storage::S3(s3) => {
-                let res = s3.get_e_tag(key).await;
+                let res = s3.get_with_e_tag(key).await;
                 match res {
                     Ok(res) => Ok(res),
                     Err(e) => match e {
@@ -189,7 +189,7 @@ impl Storage {
             Storage::Local(_) => Err(GetError::ConditionNotMet),
             Storage::AdmissionControlledS3(admission_controlled_storage) => {
                 let res = admission_controlled_storage
-                    .get_e_tag(key.to_string())
+                    .get_with_e_tag(key.to_string())
                     .await;
                 match res {
                     Ok(res) => Ok(res),
