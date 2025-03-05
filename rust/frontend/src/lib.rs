@@ -56,10 +56,12 @@ pub async fn frontend_service_entrypoint(
     frontend_service_entrypoint_with_config(auth, quota_enforcer, meter_receiver, config).await;
 }
 
-pub async fn frontend_service_entrypoint_with_config(
+pub async fn frontend_service_entrypoint_with_config_system_registry(
     auth: Arc<dyn auth::AuthenticateAndAuthorize>,
     quota_enforcer: Arc<dyn QuotaEnforcer>,
     meter_receiver: impl ReceiverForMessage<MeterEvent> + 'static,
+    system: System,
+    registry: Registry,
     config: FrontendServerConfig,
 ) {
     if let Some(config) = &config.open_telemetry {
@@ -74,8 +76,6 @@ pub async fn frontend_service_entrypoint_with_config(
     } else {
         eprintln!("OpenTelemetry is not enabled because it is missing from the config.");
     }
-    let system = System::new();
-    let registry = Registry::new();
 
     let mut fe_cfg = config.frontend.clone();
     if let (Some(path_str), Some(sql_cfg), Some(local_segman_cfg)) = (
@@ -122,4 +122,23 @@ pub async fn frontend_service_entrypoint_with_config(
     FrontendServer::new(config, frontend, rules, auth, quota_enforcer)
         .run()
         .await;
+}
+
+pub async fn frontend_service_entrypoint_with_config(
+    auth: Arc<dyn auth::AuthenticateAndAuthorize>,
+    quota_enforcer: Arc<dyn QuotaEnforcer>,
+    meter_receiver: impl ReceiverForMessage<MeterEvent> + 'static,
+    config: FrontendServerConfig,
+) {
+    let system = System::new();
+    let registry = Registry::new();
+    frontend_service_entrypoint_with_config_system_registry(
+        auth,
+        quota_enforcer,
+        meter_receiver,
+        system,
+        registry,
+        config,
+    )
+    .await;
 }
