@@ -1,0 +1,16 @@
+[package]
+name = "javascript_bindings"
+version = "0.1.0"
+license = "ISC"
+edition = "2021"
+exclude = ["index.node"]
+
+[lib]
+crate-type = ["cdylib"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+neon = "1"
+chroma-cli = { workspace = true }
+clap = { workspace = true }
