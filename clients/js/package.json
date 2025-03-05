@@ -54,6 +54,9 @@
     "build:packages": "NODE_OPTIONS=--enable-source-maps pnpm --filter \"!@internal/chromadb-core\" build",
     "test": "pnpm -r -v test",
     "publish:packages": "pnpm publish -r --access public --no-git-checks --filter \"!@internal/chromadb-core\"",
+    "release": "pnpm build && pnpm publish:packages",
+    "release_alpha": "pnpm build && pnpm publish:packages --tag alpha",
+    "release_dev": "pnpm build && pnpm publish:packages --tag dev",
     "genapi": "./genapi.sh",
     "prettier": "prettier --write ."
   },

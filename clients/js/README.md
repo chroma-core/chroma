@@ -20,7 +20,7 @@ There are two packages available for using ChromaDB in your JavaScript/TypeScrip
    - Install with: `npm install chromadb` or `pnpm add chromadb`
 
 2. **chromadb-client**: Provides embedding libraries as peer dependencies.
-   - Use this if you want to manage your own versions of embedding libraries, or embed outsid eof Chroma.
+   - Use this if you want to manage your own versions of embedding libraries, or embed outside of Chroma.
    - Keeps your dependency tree lean by not bundling dependencies you don't use.
    - Install with: `npm install chromadb-client` or `pnpm add chromadb-client`
    - You'll need to install any required embedding libraries separately, e.g., `npm install chromadb-client chromadb-default-embed`
