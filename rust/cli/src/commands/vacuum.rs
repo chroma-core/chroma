@@ -15,12 +15,12 @@ use clap::Parser;
 use colored::Colorize;
 use dialoguer::Confirm;
 use indicatif::{ProgressBar, ProgressStyle};
-use serde_json::json;
 use sqlx::Row;
 use std::error::Error;
 use std::path::Path;
 use std::str::FromStr;
 use std::{fs, io};
+use chroma_log::sqlite_log::{legacy_embeddings_queue_config_default_kind, LegacyEmbeddingsQueueConfig, SqliteLog};
 
 #[derive(Parser, Debug)]
 pub struct VacuumArgs {
@@ -102,22 +102,13 @@ async fn trigger_vector_segments_max_seq_id_migration(
     Ok(())
 }
 
-async fn configure_sql_embedding_queue(sqlite: &SqliteDb) -> Result<(), Box<dyn Error>> {
-    let config = json!({
-        "automatically_purge": true,
-        "_type": "EmbeddingsQueueConfigurationInternal"
-    });
+async fn configure_sql_embedding_queue(log: &SqliteLog) -> Result<(), Box<dyn Error>> {
+    let config = LegacyEmbeddingsQueueConfig {
+        automatically_purge: true,
+        kind: legacy_embeddings_queue_config_default_kind()
+    };
 
-    sqlx::query(
-        r#"
-            INSERT OR REPLACE INTO embeddings_queue_config (id, config_json_str)
-            VALUES (1, ?)
-        "#,
-    )
-    .bind(config.to_string())
-    .execute(sqlite.get_conn())
-    .await?;
-
+    log.update_legacy_embeddings_queue_config(config).await?;
     Ok(())
 }
 
@@ -148,6 +139,12 @@ pub async fn vacuum_chroma(config: FrontendConfig) -> Result<(), Box<dyn Error>>
             .progress_chars("=>-"),
     );
 
+    if let Log::Sqlite(ref log) = log {
+        configure_sql_embedding_queue(log).await?;
+    } else {
+        return Err("Expected a Sqlite log for vacuum".into())
+    }
+    
     for collection in collections {
         let seq_ids = sqlx::query(
             r#"
@@ -191,9 +188,7 @@ pub async fn vacuum_chroma(config: FrontendConfig) -> Result<(), Box<dyn Error>>
     )
     .execute(sqlite.get_conn())
     .await?;
-
-    configure_sql_embedding_queue(&sqlite).await?;
-
+    
     Ok(())
 }
 

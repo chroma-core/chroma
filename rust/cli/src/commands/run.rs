@@ -50,7 +50,7 @@ pub fn run(args: RunArgs) {
     let runtime = tokio::runtime::Runtime::new().expect("Failed to start Chroma");
     runtime.block_on(async {
         tokio::select! {
-            _ = frontend_service_entrypoint_with_config(Arc::new(()), Arc::new(()), (), config) => {},
+            _ = frontend_service_entrypoint_with_config(Arc::new(()), Arc::new(()), &config) => {},
             _ = tokio::signal::ctrl_c() => {
                 println!();
             }
