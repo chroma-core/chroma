@@ -6,6 +6,7 @@ use axum::{
     routing::{get, post},
     Json, Router, ServiceExt,
 };
+use chroma_system::System;
 use chroma_types::RawWhereFields;
 use chroma_types::{
     AddCollectionRecordsResponse, ChecklistResponse, Collection, CollectionMetadataUpdate,
@@ -29,6 +30,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
+use tokio::{select, signal};
 use tower_http::cors::CorsLayer;
 use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityScheme};
 use utoipa::ToSchema;
@@ -58,6 +60,17 @@ impl Drop for ScorecardGuard {
             self.scorecard.untrack(ticket);
         }
     }
+}
+
+async fn graceful_shutdown(system: System) {
+    select! {
+        // Kubernetes will send SIGTERM to stop the pod gracefully
+        // TODO: add more signal handling
+        _ = signal::ctrl_c() => {
+            system.stop().await;
+            system.join().await;
+        },
+    };
 }
 
 pub struct Metrics {
@@ -127,6 +140,7 @@ pub(crate) struct FrontendServer {
     metrics: Arc<Metrics>,
     auth: Arc<dyn AuthenticateAndAuthorize>,
     quota_enforcer: Arc<dyn QuotaEnforcer>,
+    system: System,
 }
 
 impl FrontendServer {
@@ -136,6 +150,7 @@ impl FrontendServer {
         rules: Vec<Rule>,
         auth: Arc<dyn AuthenticateAndAuthorize>,
         quota_enforcer: Arc<dyn QuotaEnforcer>,
+        system: System,
     ) -> FrontendServer {
         // NOTE(rescrv):  Assume statically no more than 128 threads because we won't deploy on
         // hardware with that many threads anytime soon for frontends, if ever.
@@ -151,10 +166,13 @@ impl FrontendServer {
             metrics,
             auth,
             quota_enforcer,
+            system,
         }
     }
 
     pub async fn run(self) {
+        let system = self.system.clone();
+
         let FrontendServerConfig {
             port,
             listen_address,
@@ -263,10 +281,14 @@ impl FrontendServer {
         if circuit_breaker.enabled() {
             let service = AdmissionControlledService::new(circuit_breaker, app);
             axum::serve(listener, service.into_make_service())
+                .with_graceful_shutdown(graceful_shutdown(system))
                 .await
                 .unwrap();
         } else {
-            axum::serve(listener, app).await.unwrap();
+            axum::serve(listener, app)
+                .with_graceful_shutdown(graceful_shutdown(system))
+                .await
+                .unwrap();
         };
     }
 
@@ -1665,7 +1687,14 @@ mod tests {
         let frontend = Frontend::try_from_config(&(config.clone().frontend, system), &registry)
             .await
             .unwrap();
-        let app = FrontendServer::new(config, frontend, vec![], Arc::new(()), Arc::new(()));
+        let app = FrontendServer::new(
+            config,
+            frontend,
+            vec![],
+            Arc::new(()),
+            Arc::new(()),
+            System::new(),
+        );
         tokio::task::spawn(async move {
             app.run().await;
         });
