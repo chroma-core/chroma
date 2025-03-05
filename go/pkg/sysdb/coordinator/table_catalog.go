@@ -540,13 +540,16 @@ func (tc *Catalog) softDeleteCollection(ctx context.Context, deleteCollection *m
 		// Generate new name with timestamp and random number
 		oldName := *collections[0].Collection.Name
 		newName := fmt.Sprintf("_deleted_%s_%s", oldName, *types.FromUniqueID(deleteCollection.ID))
+		compactionTime := time.Now()
 
 		dbCollection := &dbmodel.Collection{
-			ID:        deleteCollection.ID.String(),
-			Name:      &newName,
-			IsDeleted: true,
-			Ts:        deleteCollection.Ts,
-			UpdatedAt: time.Now(),
+			ID:                      deleteCollection.ID.String(),
+			Name:                    &newName,
+			IsDeleted:               true,
+			Ts:                      deleteCollection.Ts,
+			UpdatedAt:               compactionTime,
+			SizeBytesPostCompaction: 0,
+			LastCompactionTimeSecs:  uint64(compactionTime.Unix()),
 		}
 		err = tc.metaDomain.CollectionDb(txCtx).Update(dbCollection)
 		if err != nil {

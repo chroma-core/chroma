@@ -1242,6 +1242,8 @@ func (suite *APIsTestSuite) TestSoftAndHardDeleteCollection() {
 	_, _, err = suite.coordinator.CreateCollection(ctx, testCollection)
 	suite.NoError(err)
 
+	// TODO: Flush a compaction so the SizeBytesPostCompaction is updated
+
 	// Soft delete the collection
 	err = suite.coordinator.DeleteCollection(ctx, &model.DeleteCollection{
 		ID:           testCollection.ID,
@@ -1299,6 +1301,9 @@ func (suite *APIsTestSuite) TestSoftAndHardDeleteCollection() {
 	suite.Equal(id, softDeletedResults[0].ID.String())
 	renamedCollectionNamePrefix := fmt.Sprintf("deleted_%s_", testCollection.Name)
 	suite.Contains(softDeletedResults[0].Name, renamedCollectionNamePrefix)
+
+	// Verify the soft deleted collection has a size of 0
+	suite.Equal(uint64(0), softDeletedResults[0].SizeBytesPostCompaction)
 }
 
 func (suite *APIsTestSuite) TestCollectionVersioningWithMinio() {
