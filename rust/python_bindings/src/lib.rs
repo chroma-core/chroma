@@ -5,8 +5,8 @@ use bindings::{Bindings, PythonBindingsConfig};
 use pyo3::prelude::*;
 
 //////////////////////// Config Imports ////////////////////////
-use chroma_sqlite::config::{MigrationHash, MigrationMode, SqliteDBConfig};
 use crate::bindings::run_cli;
+use chroma_sqlite::config::{MigrationHash, MigrationMode, SqliteDBConfig};
 
 #[pymodule]
 fn chromadb_rust_bindings(m: &Bound<'_, PyModule>) -> PyResult<()> {

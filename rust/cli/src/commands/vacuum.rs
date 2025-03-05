@@ -58,7 +58,9 @@ fn get_dir_size(path: &Path) -> io::Result<u64> {
     Ok(total_size)
 }
 
-async fn get_collection_ids_to_migrate(sqlite: &SqliteDb) -> Result<Vec<CollectionUuid>, Box<dyn Error>> {
+async fn get_collection_ids_to_migrate(
+    sqlite: &SqliteDb,
+) -> Result<Vec<CollectionUuid>, Box<dyn Error>> {
     let rows = sqlx::query(
         r#"
                 SELECT collection FROM "segments"
@@ -72,9 +74,8 @@ async fn get_collection_ids_to_migrate(sqlite: &SqliteDb) -> Result<Vec<Collecti
         .collect();
 
     let collection_ids = collection_ids?;
-    
+
     Ok(collection_ids)
-    
 }
 
 async fn trigger_vector_segments_max_seq_id_migration(

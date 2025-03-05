@@ -22,9 +22,11 @@ use chroma_types::{
     ListCollectionsRequest, ListDatabasesRequest, Metadata, QueryResponse, UpdateCollectionRequest,
     UpdateMetadata,
 };
-use pyo3::{exceptions::PyValueError, pyclass, pyfunction, pymethods, types::PyAnyMethods, PyObject, Python};
-use std::time::SystemTime;
 use cli::chroma_cli;
+use pyo3::{
+    exceptions::PyValueError, pyclass, pyfunction, pymethods, types::PyAnyMethods, PyObject, Python,
+};
+use std::time::SystemTime;
 
 const DEFAULT_DATABASE: &str = "default_database";
 const DEFAULT_TENANT: &str = "default_tenant";

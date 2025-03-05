@@ -1,7 +1,6 @@
 mod commands;
 mod utils;
 
-
 use crate::commands::run::{run, RunArgs};
 use crate::commands::vacuum::{vacuum, VacuumArgs};
 use clap::{Parser, Subcommand};

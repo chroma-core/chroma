@@ -103,7 +103,7 @@ pub async fn frontend_service_entrypoint_with_config(
     let frontend = Frontend::try_from_config(&(fe_cfg, system), &registry)
         .await
         .expect("Error creating Frontend Config");
-    
+
     fn rule_to_rule(rule: &ScorecardRule) -> Result<Rule, ScorecardRuleError> {
         let patterns = rule
             .patterns
