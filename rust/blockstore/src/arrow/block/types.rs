@@ -153,10 +153,10 @@ impl Block {
         F: FnMut((&'me str, K)) -> Ordering,
     {
         let mut size = self.len();
-        println!(
-            "(Sanket-temp) Block {} binary search size: {}",
-            self.id, size
-        );
+        // println!(
+        //     "(Sanket-temp) Block {} binary search size: {}",
+        //     self.id, size
+        // );
         if size == 0 {
             return Err(0);
         }
@@ -340,10 +340,10 @@ impl Block {
         key: K,
     ) -> Option<V> {
         match self.binary_search_by::<K, _>(|(p, k)| {
-            println!(
-                "(Sanket-temp) Block {} binary search prefix: {}, key: {}",
-                self.id, p, k
-            );
+            // println!(
+            //     "(Sanket-temp) Block {} binary search prefix: {}, key: {}",
+            //     self.id, p, k
+            // );
             p.cmp(prefix).then_with(|| {
                 k.partial_cmp(&key)
                     // The key type does not have a total order because of floating point values.

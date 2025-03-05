@@ -671,18 +671,19 @@ mod signal_handler {
 
                     let thread = std::thread::current();
                     let thread_name = thread.name().unwrap_or("<unnamed>");
+                    let thread_id = thread.id();
 
                     let _ = writeln!(stderr, "\n==== FATAL SIGNAL RECEIVED ====");
                     let _ = writeln!(
                         stderr,
-                        "Thread '{}' received signal: {} ({})",
-                        thread_name, signal_name, sig
+                        "Thread '{}' with id {:?} received signal: {} ({})",
+                        thread_name, thread_id, signal_name, sig
                     );
                     let _ = writeln!(stderr, "Fault address: 0x{:x}", fault_addr);
 
                     // Get and print backtrace
                     let backtrace = Backtrace::new();
-                    let _ = writeln!(stderr, "Backtrace:\n{:?}", backtrace);
+                    let _ = writeln!(stderr, "[{:?}] Backtrace:\n{:?}", thread_id, backtrace);
 
                     // Ensure output is flushed
                     let _ = stderr.flush();

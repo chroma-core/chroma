@@ -1522,12 +1522,24 @@ impl<'me> SpannIndexReader<'me> {
         doc_offset_id: u32,
         doc_version: u32,
     ) -> Result<bool, SpannIndexReaderError> {
+        println!(
+            "(Sanket-temp) [{:?}]: Checking if doc {} is outdated, doc version {}",
+            std::thread::current().id(),
+            doc_offset_id,
+            doc_version
+        );
         let actual_version = self
             .versions_map
             .get("", doc_offset_id)
             .await
             .map_err(|_| SpannIndexReaderError::PostingListReadError)?
             .ok_or(SpannIndexReaderError::PostingListReadError)?;
+        println!(
+            "(Sanket-temp) [{:?}]: Actual version of doc {}, version {}",
+            std::thread::current().id(),
+            doc_offset_id,
+            actual_version
+        );
         Ok(actual_version == 0 || doc_version < actual_version)
     }
 
@@ -1535,13 +1547,22 @@ impl<'me> SpannIndexReader<'me> {
         &self,
         head_id: u32,
     ) -> Result<Vec<SpannPosting>, SpannIndexReaderError> {
+        println!(
+            "(Sanket-temp) [{:?}] Fetching posting list for head {}",
+            std::thread::current().id(),
+            head_id
+        );
         let res = self
             .posting_lists
             .get("", head_id)
             .await
             .map_err(|_| SpannIndexReaderError::PostingListReadError)?
             .ok_or(SpannIndexReaderError::PostingListReadError)?;
-        println!("Fetched posting list for head {}", head_id);
+        println!(
+            "[{:?}] Fetched posting list for head {}",
+            std::thread::current().id(),
+            head_id
+        );
 
         let mut posting_lists = Vec::with_capacity(res.doc_offset_ids.len());
         for (index, doc_offset_id) in res.doc_offset_ids.iter().enumerate() {
@@ -1558,7 +1579,11 @@ impl<'me> SpannIndexReader<'me> {
                     .to_vec(),
             });
         }
-        println!("Cleaned up posting list for head {}", head_id);
+        println!(
+            "[{:?}] Cleaned up posting list for head {}",
+            std::thread::current().id(),
+            head_id
+        );
         Ok(posting_lists)
     }
 }
