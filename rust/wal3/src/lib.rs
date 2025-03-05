@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 mod backoff;
 
-use backoff::ExponentialBackoff;
+pub use backoff::ExponentialBackoff;
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
@@ -76,34 +76,64 @@ impl LogPosition {
 ////////////////////////////////////////// ThrottleOptions /////////////////////////////////////////
 
 /// ThrottleOptions control admission to S3 and batch size/interval.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+///
+/// These are per logical grouping in S3 (which maps to a prefix), so they can be set differently
+/// for different prefixes.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct ThrottleOptions {
     /// The maximum number of bytes to batch.  Defaults to 8MB.
+    #[serde(default = "ThrottleOptions::default_batch_size_bytes")]
     pub batch_size_bytes: usize,
     /// The maximum number of microseconds to batch.  Defaults to 20ms or 20_000us.
+    #[serde(default = "ThrottleOptions::default_batch_interval_us")]
     pub batch_interval_us: usize,
     /// The maximum number of operations per second to allow.  Defaults to 2_000.
+    #[serde(default = "ThrottleOptions::default_throughput")]
     pub throughput: usize,
     /// The number of operations per second to reserve for backoff/retry.  Defaults to 1_500.
+    #[serde(default = "ThrottleOptions::default_headroom")]
     pub headroom: usize,
     /// The maximum number of outstanding requests to allow.  Defaults to 100.
+    #[serde(default = "ThrottleOptions::default_outstanding")]
     pub outstanding: usize,
+}
+
+impl ThrottleOptions {
+    fn default_batch_size_bytes() -> usize {
+        8 * 1_000_000
+    }
+
+    fn default_batch_interval_us() -> usize {
+        20_000
+    }
+
+    fn default_throughput() -> usize {
+        2_000
+    }
+
+    fn default_headroom() -> usize {
+        1_500
+    }
+
+    fn default_outstanding() -> usize {
+        100
+    }
 }
 
 impl Default for ThrottleOptions {
     fn default() -> Self {
         ThrottleOptions {
             // Batch for at least 20ms.
-            batch_interval_us: 20_000,
+            batch_interval_us: Self::default_batch_interval_us(),
             // Set a batch size of 8MB.
-            batch_size_bytes: 8 * 1_000_000,
+            batch_size_bytes: Self::default_batch_size_bytes(),
             // Set a throughput that's approximately 5/7th the throughput of the throughput S3
             // allows.  If we hit throttle errors at this throughput we have a case for support.
-            throughput: 2_000,
+            throughput: Self::default_throughput(),
             // How much headroom we have for retries.
-            headroom: 1_500,
+            headroom: Self::default_headroom(),
             // Allow up to 100 requests to be outstanding.
-            outstanding: 100,
+            outstanding: Self::default_outstanding(),
         }
     }
 }
