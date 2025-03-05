@@ -47,10 +47,8 @@ spec:
               memory: {{ .Values.rustFrontendService.resources.requests.memory }}
           {{ end }}
           env:
-            {{if .Values.rustFrontendService.configuration}}
             - name: CONFIG_PATH
               value: "/config/config.yaml"
-            {{ end }}
             {{ if .Values.frontendService.otherEnvConfig }}
               {{ .Values.frontendService.otherEnvConfig | nindent 12 }}
             {{ end }}
