@@ -25,6 +25,8 @@ func convertCollectionToModel(collectionAndMetadataList []*dbmodel.CollectionAnd
 			LogPosition:                collectionAndMetadata.Collection.LogPosition,
 			Version:                    collectionAndMetadata.Collection.Version,
 			TotalRecordsPostCompaction: collectionAndMetadata.Collection.TotalRecordsPostCompaction,
+			SizeBytesPostCompaction:    collectionAndMetadata.Collection.SizeBytesPostCompaction,
+			LastCompactionTimeSecs:     collectionAndMetadata.Collection.LastCompactionTimeSecs,
 		}
 		collection.Metadata = convertCollectionMetadataToModel(collectionAndMetadata.CollectionMetadata)
 		collections = append(collections, collection)

@@ -17,6 +17,8 @@ type Collection struct {
 	Version                    int32
 	UpdatedAt                  types.Timestamp
 	TotalRecordsPostCompaction uint64
+	SizeBytesPostCompaction    uint64 // Note: This represents the size of the records off the log
+	LastCompactionTimeSecs     uint64
 }
 
 type CollectionToGc struct {
