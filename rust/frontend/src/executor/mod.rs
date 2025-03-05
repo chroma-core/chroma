@@ -42,7 +42,7 @@ impl Executor {
     pub async fn is_ready(&self) -> bool {
         match self {
             Executor::Distributed(distributed_executor) => distributed_executor.is_ready().await,
-            Executor::Local(_local_executor) => todo!(),
+            Executor::Local(_) => true,
         }
     }
     pub async fn reset(&mut self) -> Result<(), ExecutorError> {
