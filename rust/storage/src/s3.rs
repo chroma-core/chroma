@@ -319,7 +319,10 @@ impl S3Storage {
         self.get_with_e_tag(key).await.map(|(buf, _)| buf)
     }
 
-    pub async fn get_with_e_tag(&self, key: &str) -> Result<(Arc<Vec<u8>>, Option<ETag>), S3GetError> {
+    pub async fn get_with_e_tag(
+        &self,
+        key: &str,
+    ) -> Result<(Arc<Vec<u8>>, Option<ETag>), S3GetError> {
         let (mut stream, e_tag) = self
             .get_stream_and_e_tag(key)
             .instrument(tracing::trace_span!(parent: Span::current(), "S3 get stream"))

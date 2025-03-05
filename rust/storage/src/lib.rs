@@ -173,7 +173,10 @@ impl Storage {
         }
     }
 
-    pub async fn get_with_e_tag(&self, key: &str) -> Result<(Arc<Vec<u8>>, Option<ETag>), GetError> {
+    pub async fn get_with_e_tag(
+        &self,
+        key: &str,
+    ) -> Result<(Arc<Vec<u8>>, Option<ETag>), GetError> {
         match self {
             Storage::ObjectStore(_) => Err(GetError::ConditionNotMet),
             Storage::S3(s3) => {
