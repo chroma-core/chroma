@@ -1,3 +1,14 @@
+//! Manifests, and their immutable cousin, snapshots, are the metadata that describe a log.
+//!
+//! A manifest transitively names every file in object storage that is part of the log.
+//!
+//! Snapshots are content-addressable and immutable, while manifests get overwritten.  For that
+//! reason, manifests embed the ETag for conditional writes while snapshots do not.
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use chroma_storage::{ETag, PutError, PutOptions, Storage};
 use setsum::Setsum;
 
 use crate::{
@@ -8,7 +19,7 @@ use crate::{
 /////////////////////////////////////////////// paths //////////////////////////////////////////////
 
 #[allow(dead_code)]
-fn manifest_path() -> String {
+pub fn manifest_path() -> String {
     "manifest/MANIFEST".to_string()
 }
 
@@ -127,10 +138,41 @@ impl Snapshot {
         Ok(acc)
     }
 
-    pub async fn install(&self, _: &ThrottleOptions) -> Result<(), Error> {
-        todo!("robert will implement");
+    pub async fn install(&self, options: &ThrottleOptions, storage: &Storage) -> Result<(), Error> {
+        let exp_backoff = crate::backoff::ExponentialBackoff::new(
+            options.throughput as f64,
+            options.headroom as f64,
+        );
+        loop {
+            let payload = serde_json::to_string(&self)
+                .map_err(|e| {
+                    Error::CorruptManifest(format!("could not encode JSON manifest: {e:?}"))
+                })?
+                .into_bytes();
+            let options = PutOptions::if_not_exists();
+            match storage.put_bytes(&self.path, payload, options).await {
+                Ok(()) => return Ok(()),
+                Err(PutError::ConditionNotMet) => {
+                    // NOTE(rescrv):  This is something of a lie.  We know that someone put the
+                    // file before us, and we know the setsum of the file is embedded in the path.
+                    // Because the setsum is only calculable if you have the file and we assume
+                    // non-malicious code, anyone who puts the same setsum as us has, in all
+                    // likelihood, put something referencing the same content as us.
+                    return Ok(());
+                }
+                Err(e) => {
+                    tracing::error!("error uploading manifest: {e:?}");
+                    let mut backoff = exp_backoff.next();
+                    if backoff > Duration::from_secs(3_600) {
+                        backoff = Duration::from_secs(3_600);
+                    }
+                    tokio::time::sleep(backoff).await;
+                }
+            }
+        }
     }
 }
+
 ///////////////////////////////////////////// Manifest /////////////////////////////////////////////
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
@@ -144,6 +186,7 @@ pub struct Manifest {
     pub writer: String,
     pub snapshots: Vec<SnapshotPointer>,
     pub fragments: Vec<Fragment>,
+    pub(crate) e_tag: Option<ETag>,
 }
 
 impl Manifest {
@@ -368,18 +411,74 @@ impl Manifest {
     }
 
     /// Initialize the log with an empty manifest.
-    pub async fn initialize(_: &LogWriterOptions) -> Result<(), Error> {
-        todo!("robert will implement once storage supports If-Match");
+    pub async fn initialize(_: &LogWriterOptions, storage: &Storage) -> Result<(), Error> {
+        let initial = Manifest {
+            path: manifest_path(),
+            writer: "TODO".to_string(),
+            setsum: Setsum::default(),
+            snapshots: vec![],
+            fragments: vec![],
+            e_tag: None,
+        };
+        let payload = serde_json::to_string(&initial)
+            .map_err(|e| Error::CorruptManifest(format!("could not encode JSON manifest: {e:?}")))?
+            .into_bytes();
+        Ok(storage
+            .put_bytes(&manifest_path(), payload, PutOptions::if_not_exists())
+            .await
+            .map_err(Arc::new)?)
     }
 
     /// Load the latest manifest from object storage.
-    pub async fn load() -> Result<Option<Manifest>, Error> {
-        todo!("robert will implement");
+    pub async fn load(storage: &Storage) -> Result<Option<Manifest>, Error> {
+        let (manifest, e_tag) = storage
+            .get_with_e_tag(&manifest_path())
+            .await
+            .map_err(Arc::new)?;
+        serde_json::from_slice(&manifest)
+            .map_err(|e| Error::CorruptManifest(format!("could not decode JSON manifest: {e:?}")))
+            .map(|m| Some(Manifest { e_tag, ..m }))
     }
 
     /// Install a manifest to object storage.
-    pub async fn install(&self, _: &ThrottleOptions, _: &Manifest) -> Result<(), Error> {
-        todo!("robert will implement");
+    pub async fn install(
+        &self,
+        options: &ThrottleOptions,
+        storage: &Storage,
+        new: &Manifest,
+    ) -> Result<(), Error> {
+        let exp_backoff = crate::backoff::ExponentialBackoff::new(
+            options.throughput as f64,
+            options.headroom as f64,
+        );
+        loop {
+            let payload = serde_json::to_string(&new)
+                .map_err(|e| {
+                    Error::CorruptManifest(format!("could not encode JSON manifest: {e:?}"))
+                })?
+                .into_bytes();
+            let options = if let Some(e_tag) = self.e_tag.as_ref() {
+                PutOptions::if_matches(e_tag)
+            } else {
+                PutOptions::if_not_exists()
+            };
+            match storage.put_bytes(&self.path, payload, options).await {
+                Ok(()) => {
+                    return Ok(());
+                }
+                Err(PutError::ConditionNotMet) => {
+                    return Err(Error::LogContention);
+                }
+                Err(e) => {
+                    tracing::error!("error uploading manifest: {e:?}");
+                    let mut backoff = exp_backoff.next();
+                    if backoff > Duration::from_secs(3_600) {
+                        backoff = Duration::from_secs(3_600);
+                    }
+                    tokio::time::sleep(backoff).await;
+                }
+            }
+        }
     }
 }
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
@@ -431,6 +530,7 @@ mod tests {
             setsum: Setsum::default(),
             snapshots: vec![],
             fragments: vec![fragment1, fragment2],
+            e_tag: None,
         };
         assert!(!manifest.contains_position(LogPosition::uni(0)));
         assert!(manifest.contains_position(LogPosition::uni(1)));
@@ -471,6 +571,7 @@ mod tests {
             .unwrap(),
             snapshots: vec![],
             fragments: vec![fragment1.clone(), fragment2.clone()],
+            e_tag: None,
         };
         assert!(manifest.scrub().is_ok());
         let manifest = Manifest {
@@ -482,6 +583,7 @@ mod tests {
             .unwrap(),
             snapshots: vec![],
             fragments: vec![fragment1, fragment2],
+            e_tag: None,
         };
         assert!(manifest.scrub().is_err());
     }
@@ -514,6 +616,7 @@ mod tests {
             setsum: Setsum::default(),
             snapshots: vec![],
             fragments: vec![],
+            e_tag: None,
         };
         assert!(!manifest.can_apply_fragment(&fragment2));
         assert!(manifest.can_apply_fragment(&fragment1));
@@ -551,6 +654,7 @@ mod tests {
                         .unwrap()
                     }
                 ],
+                e_tag: None,
             },
             manifest
         );

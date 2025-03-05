@@ -4,13 +4,23 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+arrow = { workspace = true }
 async-trait = { workspace = true }
 bytes = { workspace = true }
 futures = { workspace = true }
 futures-core = { workspace = true }
+parquet = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 setsum = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time"] }
+tracing.workspace = true
 uuid = { workspace = true }
+
+chroma-storage = { workspace = true }
+rand.workspace = true
+chroma-error.workspace = true
+
+[dev-dependencies]
+guacamole = { version = "0.11", default-features = false }
