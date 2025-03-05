@@ -22,17 +22,17 @@ jobs:
         python: ${{fromJson(inputs.python_versions)}}
         platform: [depot-ubuntu-22.04, windows-latest]
         test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
-                   "chromadb/test/auth/test_simple_rbac_authz.py",
-                   "chromadb/test/property/test_add.py",
-                   "chromadb/test/property/test_collections.py",
-                   "chromadb/test/property/test_collections_with_database_tenant.py",
-                   "chromadb/test/property/test_collections_with_database_tenant_overwrite.py",
-                   "chromadb/test/property/test_cross_version_persist.py",
-                   "chromadb/test/property/test_embeddings.py",
-                   "chromadb/test/property/test_filtering.py",
-                   "chromadb/test/property/test_persist.py",
-                   "chromadb/test/property/test_sysdb.py",
-                   "chromadb/test/property/test_restart_persist.py"]
+                     "chromadb/test/auth/test_simple_rbac_authz.py",
+                     "chromadb/test/property/test_add.py",
+                     "chromadb/test/property/test_collections.py",
+                     "chromadb/test/property/test_collections_with_database_tenant.py",
+                     "chromadb/test/property/test_collections_with_database_tenant_overwrite.py",
+                     "chromadb/test/property/test_cross_version_persist.py",
+                     "chromadb/test/property/test_embeddings.py",
+                     "chromadb/test/property/test_filtering.py",
+                     "chromadb/test/property/test_persist.py",
+                     "chromadb/test/property/test_sysdb.py",
+                     "chromadb/test/property/test_restart_persist.py"]
         include:
           - test-globs: "chromadb/test/property/test_embeddings.py"
             parallelized: true
@@ -44,6 +44,11 @@ jobs:
         uses: ./.github/actions/python
         with:
           python-version: ${{ matrix.python }}
+      - name: Build Rust bindings
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          sccache: true
       - name: Test
         run: python -m pytest ${{ matrix.parallelized && '-n auto' || '' }} ${{ matrix.test-globs }}
         shell: bash
@@ -59,17 +64,17 @@ jobs:
         python: ${{fromJson(inputs.python_versions)}}
         platform: [depot-ubuntu-22.04, windows-latest]
         test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
-                   "chromadb/test/auth/test_simple_rbac_authz.py",
-                   "chromadb/test/property/test_add.py",
-                   "chromadb/test/property/test_collections.py",
-                   "chromadb/test/property/test_collections_with_database_tenant.py",
-                   "chromadb/test/property/test_collections_with_database_tenant_overwrite.py",
-                   "chromadb/test/property/test_cross_version_persist.py",
-                   "chromadb/test/property/test_embeddings.py",
-                   "chromadb/test/property/test_filtering.py",
-                   "chromadb/test/property/test_persist.py",
-                   "chromadb/test/property/test_sysdb.py",
-                   "chromadb/test/property/test_restart_persist.py"]
+                     "chromadb/test/auth/test_simple_rbac_authz.py",
+                     "chromadb/test/property/test_add.py",
+                     "chromadb/test/property/test_collections.py",
+                     "chromadb/test/property/test_collections_with_database_tenant.py",
+                     "chromadb/test/property/test_collections_with_database_tenant_overwrite.py",
+                     "chromadb/test/property/test_cross_version_persist.py",
+                     "chromadb/test/property/test_embeddings.py",
+                     "chromadb/test/property/test_filtering.py",
+                     "chromadb/test/property/test_persist.py",
+                     "chromadb/test/property/test_sysdb.py",
+                     "chromadb/test/property/test_restart_persist.py"]
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
@@ -103,17 +108,17 @@ jobs:
         python: ${{fromJson(inputs.python_versions)}}
         platform: [depot-ubuntu-22.04, windows-latest]
         test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore='chromadb/test/test_cli.py' --ignore-glob 'chromadb/test/distributed/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
-                   "chromadb/test/property/test_add.py",
-                   "chromadb/test/test_cli.py",
-                   "chromadb/test/auth/test_simple_rbac_authz.py",
-                   "chromadb/test/property/test_collections.py",
-                   "chromadb/test/property/test_collections_with_database_tenant.py",
-                   "chromadb/test/property/test_cross_version_persist.py",
-                   "chromadb/test/property/test_embeddings.py",
-                   "chromadb/test/property/test_filtering.py",
-                   "chromadb/test/property/test_persist.py",
-                   "chromadb/test/property/test_sysdb.py",
-                   "chromadb/test/stress"]
+                     "chromadb/test/property/test_add.py",
+                     "chromadb/test/test_cli.py",
+                     "chromadb/test/auth/test_simple_rbac_authz.py",
+                     "chromadb/test/property/test_collections.py",
+                     "chromadb/test/property/test_collections_with_database_tenant.py",
+                     "chromadb/test/property/test_cross_version_persist.py",
+                     "chromadb/test/property/test_embeddings.py",
+                     "chromadb/test/property/test_filtering.py",
+                     "chromadb/test/property/test_persist.py",
+                     "chromadb/test/property/test_sysdb.py",
+                     "chromadb/test/stress"]
         include:
           - platform: depot-ubuntu-22.04
             env-file: compose-env.linux
@@ -121,16 +126,16 @@ jobs:
             env-file: compose-env.windows
     runs-on: ${{ matrix.platform }}
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-    - name: Set up Python (${{ matrix.python }})
-      uses: ./.github/actions/python
-    - name: Integration Test
-      run: bin/python-integration-test ${{ matrix.test-globs }}
-      shell: bash
-      env:
-        ENV_FILE: ${{ matrix.env-file }}
-        PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python (${{ matrix.python }})
+        uses: ./.github/actions/python
+      - name: Integration Test
+        run: bin/python-integration-test ${{ matrix.test-globs }}
+        shell: bash
+        env:
+          ENV_FILE: ${{ matrix.env-file }}
+          PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
 
   test-rust-single-node-integration:
     strategy:
@@ -139,34 +144,34 @@ jobs:
         python: ${{fromJson(inputs.python_versions)}}
         platform: [depot-ubuntu-22.04, windows-latest]
         test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore='chromadb/test/test_cli.py' --ignore-glob 'chromadb/test/distributed/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
-                   "chromadb/test/property/test_add.py",
-                   "chromadb/test/property/test_collections.py",
-                   "chromadb/test/property/test_collections_with_database_tenant.py",
-                   "chromadb/test/property/test_cross_version_persist.py",
-                   "chromadb/test/property/test_embeddings.py",
-                   "chromadb/test/property/test_filtering.py",
-                   "chromadb/test/property/test_persist.py",
-                   "chromadb/test/property/test_sysdb.py",
-                   "chromadb/test/stress"]
+                     "chromadb/test/property/test_add.py",
+                     "chromadb/test/property/test_collections.py",
+                     "chromadb/test/property/test_collections_with_database_tenant.py",
+                     "chromadb/test/property/test_cross_version_persist.py",
+                     "chromadb/test/property/test_embeddings.py",
+                     "chromadb/test/property/test_filtering.py",
+                     "chromadb/test/property/test_persist.py",
+                     "chromadb/test/property/test_sysdb.py",
+                     "chromadb/test/stress"]
         include:
           - platform: depot-ubuntu-22.04
             env-file: compose-env.linux
     runs-on: ${{ matrix.platform }}
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-    - name: Set up Python (${{ matrix.python }})
-      uses: ./.github/actions/python
-    - name: Setup Rust
-      uses: ./.github/actions/rust
-      with:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python (${{ matrix.python }})
+        uses: ./.github/actions/python
+      - name: Setup Rust
+        uses: ./.github/actions/rust
+        with:
           github-token: ${{ github.token }}
-    - name: Rust Integration Test
-      run: bin/rust-integration-test.sh ${{ matrix.test-globs }}
-      shell: bash
-      env:
-        ENV_FILE: ${{ matrix.env-file }}
-        PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
+      - name: Rust Integration Test
+        run: bin/rust-integration-test.sh ${{ matrix.test-globs }}
+        shell: bash
+        env:
+          ENV_FILE: ${{ matrix.env-file }}
+          PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
 
   test-rust-thin-client:
     strategy:
@@ -174,11 +179,11 @@ jobs:
         python: ${{fromJson(inputs.python_versions)}}
         platform: [depot-ubuntu-22.04, windows-latest]
         test-globs: ["chromadb/test/property/test_add.py",
-                   "chromadb/test/property/test_collections.py",
-                   "chromadb/test/property/test_collections_with_database_tenant.py",
-                   "chromadb/test/property/test_embeddings.py",
-                   "chromadb/test/property/test_filtering.py",
-                   "chromadb/test/property/test_sysdb.py"]
+                     "chromadb/test/property/test_collections.py",
+                     "chromadb/test/property/test_collections_with_database_tenant.py",
+                     "chromadb/test/property/test_embeddings.py",
+                     "chromadb/test/property/test_filtering.py",
+                     "chromadb/test/property/test_sysdb.py"]
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
@@ -205,18 +210,18 @@ jobs:
         python: ${{fromJson(inputs.python_versions)}}
         platform: ["depot-ubuntu-22.04-4"]
         test-globs: ["chromadb/test/api",
-                   "chromadb/test/db/test_system.py",
-                   "chromadb/test/api/test_collection.py",
-                   "chromadb/test/api/test_limit_offset.py",
-                   "chromadb/test/property/test_collections.py",
-                   "chromadb/test/property/test_add.py",
-                   "chromadb/test/property/test_filtering.py",
-                   "chromadb/test/property/test_embeddings.py",
-                   "chromadb/test/property/test_collections_with_database_tenant.py",
-                   "chromadb/test/property/test_collections_with_database_tenant_overwrite.py",
-                   "chromadb/test/property/test_sysdb.py",
-                   "chromadb/test/test_logservice.py",
-                   "chromadb/test/distributed/test_sanity.py"]
+                     "chromadb/test/db/test_system.py",
+                     "chromadb/test/api/test_collection.py",
+                     "chromadb/test/api/test_limit_offset.py",
+                     "chromadb/test/property/test_collections.py",
+                     "chromadb/test/property/test_add.py",
+                     "chromadb/test/property/test_filtering.py",
+                     "chromadb/test/property/test_embeddings.py",
+                     "chromadb/test/property/test_collections_with_database_tenant.py",
+                     "chromadb/test/property/test_collections_with_database_tenant_overwrite.py",
+                     "chromadb/test/property/test_sysdb.py",
+                     "chromadb/test/test_logservice.py",
+                     "chromadb/test/distributed/test_sanity.py"]
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
@@ -248,18 +253,18 @@ jobs:
         python: ${{fromJson(inputs.python_versions)}}
         platform: ["depot-ubuntu-22.04-4"]
         test-globs: ["chromadb/test/api",
-                   "chromadb/test/db/test_system.py",
-                   "chromadb/test/property/test_collections.py",
-                   "chromadb/test/property/test_add.py",
-                   "chromadb/test/property/test_filtering.py",
-                   "chromadb/test/property/test_embeddings.py",
-                   "chromadb/test/property/test_collections_with_database_tenant.py",
-                   "chromadb/test/property/test_collections_with_database_tenant_overwrite.py",
-                   "chromadb/test/property/test_sysdb.py",
-                   "chromadb/test/ingest/test_producer_consumer.py",
-                   "chromadb/test/segment/distributed/test_memberlist_provider.py",
-                   "chromadb/test/test_logservice.py",
-                   "chromadb/test/distributed/test_sanity.py"]
+                     "chromadb/test/db/test_system.py",
+                     "chromadb/test/property/test_collections.py",
+                     "chromadb/test/property/test_add.py",
+                     "chromadb/test/property/test_filtering.py",
+                     "chromadb/test/property/test_embeddings.py",
+                     "chromadb/test/property/test_collections_with_database_tenant.py",
+                     "chromadb/test/property/test_collections_with_database_tenant_overwrite.py",
+                     "chromadb/test/property/test_sysdb.py",
+                     "chromadb/test/ingest/test_producer_consumer.py",
+                     "chromadb/test/segment/distributed/test_memberlist_provider.py",
+                     "chromadb/test/test_logservice.py",
+                     "chromadb/test/distributed/test_sanity.py"]
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
