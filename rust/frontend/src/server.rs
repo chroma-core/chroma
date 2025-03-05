@@ -30,10 +30,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
-use tokio::{
-    select,
-    signal::unix::{signal, SignalKind},
-};
+use tokio::{select, signal};
 use tower_http::cors::CorsLayer;
 use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityScheme};
 use utoipa::ToSchema;
@@ -66,18 +63,10 @@ impl Drop for ScorecardGuard {
 }
 
 async fn graceful_shutdown(system: System) {
-    let mut sigterm = match signal(SignalKind::terminate()) {
-        Ok(sigterm) => sigterm,
-        Err(e) => {
-            tracing::error!("Failed to create SIGTERM signal handler for axum server: {e}");
-            return;
-        }
-    };
-
     select! {
         // Kubernetes will send SIGTERM to stop the pod gracefully
         // TODO: add more signal handling
-        _ = sigterm.recv() => {
+        _ = signal::ctrl_c() => {
             system.stop().await;
             system.join().await;
         },
