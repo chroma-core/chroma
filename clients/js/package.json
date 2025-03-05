@@ -90,5 +90,10 @@
     "ollama": {
       "optional": true
     }
+  },
+  "pnpm": {
+    "overrides": {
+      "whatwg-url": "13.0.0"
+    }
   }
 }
