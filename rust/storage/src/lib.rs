@@ -173,7 +173,7 @@ impl Storage {
         }
     }
 
-    pub async fn get_e_tag(&self, key: &str) -> Result<(Arc<Vec<u8>>, Option<String>), GetError> {
+    pub async fn get_e_tag(&self, key: &str) -> Result<(Arc<Vec<u8>>, Option<ETag>), GetError> {
         match self {
             Storage::ObjectStore(_) => Err(GetError::ConditionNotMet),
             Storage::S3(s3) => {
@@ -359,7 +359,7 @@ pub fn test_storage() -> Storage {
 #[derive(Default)]
 pub struct PutOptions {
     if_not_exists: bool,
-    if_match: Option<String>,
+    if_match: Option<ETag>,
 }
 
 #[derive(Error, Debug)]
@@ -371,7 +371,7 @@ pub enum PutOptionsCreateError {
 impl PutOptions {
     pub fn new(
         if_not_exists: bool,
-        if_match: Option<String>,
+        if_match: Option<ETag>,
     ) -> Result<PutOptions, PutOptionsCreateError> {
         if !if_not_exists && if_match.is_some() {
             return Err(PutOptionsCreateError::IfNotExistsAndIfMatchEnabled);
@@ -382,3 +382,6 @@ impl PutOptions {
         })
     }
 }
+
+#[derive(Clone, Eq, PartialEq, Debug)]
+pub struct ETag(String);

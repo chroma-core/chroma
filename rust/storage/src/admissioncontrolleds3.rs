@@ -2,7 +2,7 @@ use crate::{
     config::{RateLimitingConfig, StorageConfig},
     s3::{S3GetError, S3PutError, S3Storage},
 };
-use crate::{PutOptions, StorageConfigError};
+use crate::{ETag, PutOptions, StorageConfigError};
 use async_trait::async_trait;
 use aws_sdk_s3::primitives::{ByteStream, Length};
 use bytes::Bytes;
@@ -39,7 +39,7 @@ pub struct AdmissionControlledS3Storage {
                         Box<
                             dyn Future<
                                     Output = Result<
-                                        (Arc<Vec<u8>>, Option<String>),
+                                        (Arc<Vec<u8>>, Option<ETag>),
                                         AdmissionControlledS3StorageError,
                                     >,
                                 > + Send
@@ -88,7 +88,7 @@ impl AdmissionControlledS3Storage {
         storage: S3Storage,
         rate_limiter: Arc<RateLimitPolicy>,
         key: String,
-    ) -> Result<(Arc<Vec<u8>>, Option<String>), AdmissionControlledS3StorageError> {
+    ) -> Result<(Arc<Vec<u8>>, Option<ETag>), AdmissionControlledS3StorageError> {
         let (content_length, ranges, e_tag) = match storage.get_key_ranges(&key).await {
             Ok(ranges) => ranges,
             Err(e) => {
@@ -162,7 +162,7 @@ impl AdmissionControlledS3Storage {
         storage: S3Storage,
         rate_limiter: Arc<RateLimitPolicy>,
         key: String,
-    ) -> Result<(Arc<Vec<u8>>, Option<String>), AdmissionControlledS3StorageError> {
+    ) -> Result<(Arc<Vec<u8>>, Option<ETag>), AdmissionControlledS3StorageError> {
         // Acquire permit.
         let _permit = rate_limiter.enter().await;
         let bytes_res = storage
@@ -227,7 +227,7 @@ impl AdmissionControlledS3Storage {
     pub async fn get_e_tag(
         &self,
         key: String,
-    ) -> Result<(Arc<Vec<u8>>, Option<String>), AdmissionControlledS3StorageError> {
+    ) -> Result<(Arc<Vec<u8>>, Option<ETag>), AdmissionControlledS3StorageError> {
         // If there is a duplicate request and the original request finishes
         // before we look it up in the map below then we will end up with another
         // request to S3.

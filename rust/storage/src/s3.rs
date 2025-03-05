@@ -13,7 +13,7 @@ use super::stream::ByteStreamItem;
 use super::stream::S3ByteStream;
 use super::PutOptions;
 use super::StorageConfigError;
-use crate::GetError;
+use crate::{ETag, GetError};
 use async_trait::async_trait;
 use aws_config::retry::RetryConfig;
 use aws_config::timeout::TimeoutConfigBuilder;
@@ -147,7 +147,7 @@ impl S3Storage {
     ) -> Result<
         (
             Box<dyn Stream<Item = ByteStreamItem> + Unpin + Send>,
-            Option<String>,
+            Option<ETag>,
         ),
         S3GetError,
     > {
@@ -161,7 +161,10 @@ impl S3Storage {
         match res {
             Ok(res) => {
                 let byte_stream = res.body;
-                Ok((Box::new(S3ByteStream::new(byte_stream)), res.e_tag))
+                Ok((
+                    Box::new(S3ByteStream::new(byte_stream)),
+                    res.e_tag.map(ETag),
+                ))
             }
             Err(e) => {
                 tracing::error!("error: {}", e);
@@ -192,7 +195,7 @@ impl S3Storage {
     pub(super) async fn get_key_ranges(
         &self,
         key: &str,
-    ) -> Result<(i64, Vec<(i64, i64)>, Option<String>), S3GetError> {
+    ) -> Result<(i64, Vec<(i64, i64)>, Option<ETag>), S3GetError> {
         let part_size = self.download_part_size_bytes as i64;
         let head_res = self
             .client
@@ -224,7 +227,7 @@ impl S3Storage {
             };
             ranges.push((start, end));
         }
-        Ok((content_length, ranges, e_tag))
+        Ok((content_length, ranges, e_tag.map(ETag)))
     }
 
     pub(super) async fn fetch_range(
@@ -268,7 +271,7 @@ impl S3Storage {
     pub(super) async fn get_parallel(
         &self,
         key: &str,
-    ) -> Result<(Arc<Vec<u8>>, Option<String>), S3GetError> {
+    ) -> Result<(Arc<Vec<u8>>, Option<ETag>), S3GetError> {
         let (content_length, ranges, e_tag) = self.get_key_ranges(key).await?;
 
         // .buffer_unordered() below will hang if the range is empty (https://github.com/rust-lang/futures-rs/issues/2740), so we short-circuit here
@@ -316,7 +319,7 @@ impl S3Storage {
         self.get_e_tag(key).await.map(|(buf, _)| buf)
     }
 
-    pub async fn get_e_tag(&self, key: &str) -> Result<(Arc<Vec<u8>>, Option<String>), S3GetError> {
+    pub async fn get_e_tag(&self, key: &str) -> Result<(Arc<Vec<u8>>, Option<ETag>), S3GetError> {
         let (mut stream, e_tag) = self
             .get_stream_and_e_tag(key)
             .instrument(tracing::trace_span!(parent: Span::current(), "S3 get stream"))
@@ -454,7 +457,7 @@ impl S3Storage {
         };
 
         let req = match options.if_match {
-            Some(e_tag) => req.if_match(e_tag),
+            Some(e_tag) => req.if_match(e_tag.0),
             None => req,
         };
 
@@ -568,7 +571,7 @@ impl S3Storage {
         };
 
         let complete_req = match options.if_match {
-            Some(e_tag) => complete_req.if_match(e_tag),
+            Some(e_tag) => complete_req.if_match(e_tag.0),
             None => complete_req,
         };
 
@@ -1016,7 +1019,7 @@ mod tests {
                 |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
                 PutOptions {
                     if_not_exists: false,
-                    if_match: Some("e_tag".to_string()),
+                    if_match: Some(ETag("e_tag".to_string())),
                 },
             )
             .await
