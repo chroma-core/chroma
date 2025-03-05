@@ -70,7 +70,6 @@ pub async fn frontend_service_entrypoint_with_config(
         ];
         init_tracing(tracing_layers);
         init_panic_tracing_hook();
-        MeterEvent::init_receiver(Box::new(meter_receiver));
     } else {
         eprintln!("OpenTelemetry is not enabled because it is missing from the config.");
     }
