@@ -17,6 +17,8 @@ use local::LocalStorage;
 use tempfile::TempDir;
 use thiserror::Error;
 
+pub use s3::s3_client_for_test_with_new_bucket;
+
 #[derive(Clone)]
 pub enum Storage {
     ObjectStore(object_store::ObjectStore),
@@ -258,17 +260,26 @@ impl Storage {
         }
     }
 
-    pub async fn put_bytes(&self, key: &str, bytes: Vec<u8>) -> Result<(), PutError> {
+    pub async fn put_bytes(
+        &self,
+        key: &str,
+        bytes: Vec<u8>,
+        options: PutOptions,
+    ) -> Result<(), PutError> {
         match self {
-            Storage::ObjectStore(object_store) => object_store.put_bytes(key, bytes).await,
-            Storage::S3(s3) => s3.put_bytes(key, bytes).await.map_err(PutError::S3Error),
+            Storage::ObjectStore(object_store) => object_store.put_bytes(key, bytes, options).await,
+            Storage::S3(s3) => s3
+                .put_bytes(key, bytes, options)
+                .await
+                .map_err(PutError::S3Error),
             Storage::Local(local) => local
-                .put_bytes(key, &bytes)
+                .put_bytes(key, &bytes, options)
                 .await
                 .map_err(PutError::LocalError),
-            Storage::AdmissionControlledS3(as3) => {
-                as3.put_bytes(key, bytes).await.map_err(PutError::S3Error)
-            }
+            Storage::AdmissionControlledS3(as3) => as3
+                .put_bytes(key, bytes, options)
+                .await
+                .map_err(PutError::S3Error),
         }
     }
 
@@ -360,7 +371,7 @@ pub fn test_storage() -> Storage {
     ))
 }
 
-#[derive(Default)]
+#[derive(Debug, Default, Eq, PartialEq)]
 pub struct PutOptions {
     if_not_exists: bool,
     if_match: Option<ETag>,
@@ -373,6 +384,11 @@ pub enum PutOptionsCreateError {
 }
 
 impl PutOptions {
+    pub fn if_not_exists() -> Self {
+        // SAFETY(rescrv):  This is always safe because of a unit test.
+        Self::new(true, None).unwrap()
+    }
+
     pub fn new(
         if_not_exists: bool,
         if_match: Option<ETag>,
@@ -389,3 +405,15 @@ impl PutOptions {
 
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub struct ETag(String);
+
+/////////////////////////////////////////////// tests //////////////////////////////////////////////
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn put_options_ctors() {
+        let _x = PutOptions::if_not_exists();
+    }
+}

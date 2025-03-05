@@ -362,7 +362,12 @@ impl AdmissionControlledS3Storage {
         .await
     }
 
-    pub async fn put_bytes(&self, key: &str, bytes: Vec<u8>) -> Result<(), S3PutError> {
+    pub async fn put_bytes(
+        &self,
+        key: &str,
+        bytes: Vec<u8>,
+        options: PutOptions,
+    ) -> Result<(), S3PutError> {
         let bytes = Arc::new(Bytes::from(bytes));
 
         self.put_object(
@@ -372,7 +377,7 @@ impl AdmissionControlledS3Storage {
                 let bytes = bytes.clone();
                 async move { Ok(ByteStream::from(bytes.slice(range))) }.boxed()
             },
-            PutOptions::default(),
+            options,
         )
         .await
     }
@@ -513,6 +518,7 @@ mod tests {
             .put_bytes(
                 test_data_key.as_str(),
                 test_data_value_string.as_bytes().to_vec(),
+                crate::PutOptions::default(),
             )
             .await
             .unwrap();
@@ -549,7 +555,11 @@ mod tests {
 
         let test_data = "test data";
         admission_controlled_storage
-            .put_bytes("test", test_data.as_bytes().to_vec())
+            .put_bytes(
+                "test",
+                test_data.as_bytes().to_vec(),
+                crate::PutOptions::default(),
+            )
             .await
             .unwrap();
 
