@@ -1,6 +1,6 @@
 {
   "name": "@philipithomas/chromadb-client",
-  "version": "1.11.2",
+  "version": "1.11.11",
   "description": "A JavaScript interface for chroma with embedding functions as peer dependencies",
   "license": "Apache-2.0",
   "type": "module",
@@ -30,10 +30,12 @@
     "test": "jest --runInBand"
   },
   "dependencies": {
-    "@internal/chromadb-core": "workspace:*"
+    "cliui": "^8.0.1",
+    "isomorphic-fetch": "^3.0.0"
   },
   "peerDependencies": {
     "@google/generative-ai": "^0.1.1",
+    "@xenova/transformers": "^2.17.2",
     "chromadb-default-embed": "^2.14.0",
     "cohere-ai": "^5.0.0 || ^6.0.0 || ^7.0.0",
     "openai": "^3.0.0 || ^4.0.0",
@@ -42,6 +44,9 @@
   },
   "peerDependenciesMeta": {
     "@google/generative-ai": {
+      "optional": true
+    },
+    "@xenova/transformers": {
       "optional": true
     },
     "chromadb-default-embed": {
@@ -61,6 +66,7 @@
     }
   },
   "devDependencies": {
+    "@internal/chromadb-core": "workspace:*",
     "jest": "^29.5.0",
     "rimraf": "^5.0.0",
     "ts-jest": "^29.1.0",

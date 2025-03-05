@@ -1,5 +1,5 @@
 import { defineConfig, Options } from "tsup";
-import * as fs from "fs";
+import fs from "fs";
 
 export default defineConfig((options: Options) => {
   const commonOptions: Partial<Options> = {
@@ -9,6 +9,18 @@ export default defineConfig((options: Options) => {
     sourcemap: true,
     dts: true,
     target: "es2020",
+    // Only bundle the core, keep embedding packages as external
+    noExternal: ['@internal/chromadb-core', 'isomorphic-fetch', 'cliui'],
+    // Ensure all embedding packages remain external
+    external: [
+      '@google/generative-ai',
+      '@xenova/transformers',
+      'chromadb-default-embed',
+      'cohere-ai',
+      'openai',
+      'voyageai',
+      'ollama'
+    ],
     ...options,
   };
 
