@@ -1,13 +1,10 @@
-use std::{sync::OnceLock, time::Duration};
+use std::sync::OnceLock;
 
+use chroma_system::{ChannelError, ReceiverForMessage};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use tokio::{
-    runtime::Handle,
-    sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
-    time::{error::Elapsed, timeout},
-};
 use tonic::async_trait;
+use tracing::Span;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -37,38 +34,15 @@ pub struct MeterEvent {
     pub io: MeterEventType,
 }
 
-#[derive(Clone, Debug)]
-pub enum MeterMessage {
-    Event(MeterEvent),
-    Stop,
-}
-
-pub static METER_EVENT_SENDER: OnceLock<UnboundedSender<MeterMessage>> = OnceLock::new();
+pub static METER_EVENT_RECEIVER: OnceLock<Box<dyn ReceiverForMessage<MeterEvent>>> =
+    OnceLock::new();
 
 #[async_trait]
-pub trait MeterEventHandler {
-    fn heartbeat_interval(&self) -> Duration {
-        Duration::from_secs(60)
+impl ReceiverForMessage<MeterEvent> for () {
+    async fn send(&self, _: MeterEvent, _: Option<Span>) -> Result<(), ChannelError> {
+        Ok(())
     }
-    async fn handle(&mut self, _event: MeterEvent) {}
-    async fn listen(&mut self, mut rx: UnboundedReceiver<MeterMessage>) {
-        self.on_start().await;
-        loop {
-            match timeout(self.heartbeat_interval(), rx.recv()).await {
-                Ok(Some(MeterMessage::Event(event))) => self.handle(event).await,
-                Ok(Some(MeterMessage::Stop)) | Ok(None) => break,
-                Err(elapsed) => self.on_heartbeat(elapsed).await,
-            }
-        }
-        self.on_stop().await;
-    }
-    async fn on_heartbeat(&mut self, _elapsed: Elapsed) {}
-    async fn on_start(&mut self) {}
-    async fn on_stop(&mut self) {}
 }
-
-#[async_trait]
-impl MeterEventHandler for () {}
 
 impl MeterEvent {
     pub fn collection_read(
@@ -116,27 +90,16 @@ impl MeterEvent {
         }
     }
 
-    pub fn submit(self) {
-        if let Some(handler) = METER_EVENT_SENDER.get() {
-            if let Err(err) = handler.send(MeterMessage::Event(self)) {
-                tracing::error!("Unable to send meter event: {err}")
-            }
-        }
-    }
-
-    pub fn init_handler(mut handler: impl MeterEventHandler + Send + Sync + 'static) {
-        let (tx, rx) = unbounded_channel();
-        if METER_EVENT_SENDER.set(tx).is_err() {
+    pub fn init_receiver(receiver: impl ReceiverForMessage<MeterEvent> + 'static) {
+        if METER_EVENT_RECEIVER.set(Box::new(receiver)).is_err() {
             tracing::error!("Meter event handler is already initialized")
         }
-        let runtime_handle = Handle::current();
-        runtime_handle.spawn(async move { handler.listen(rx).await });
     }
 
-    pub fn stop_handler() {
-        if let Some(handler) = METER_EVENT_SENDER.get() {
-            if let Err(err) = handler.send(MeterMessage::Stop) {
-                tracing::error!("Unable to stop meter event handler: {err}")
+    pub async fn submit(self) {
+        if let Some(handler) = METER_EVENT_RECEIVER.get() {
+            if let Err(err) = handler.send(self, Some(Span::current())).await {
+                tracing::error!("Unable to send meter event: {err}")
             }
         }
     }
