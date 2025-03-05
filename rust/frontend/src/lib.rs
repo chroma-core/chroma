@@ -60,7 +60,7 @@ pub async fn frontend_service_entrypoint_with_config_system_registry(
     quota_enforcer: Arc<dyn QuotaEnforcer>,
     system: System,
     registry: Registry,
-    config: FrontendServerConfig,
+    config: &FrontendServerConfig,
 ) {
     if let Some(config) = &config.open_telemetry {
         let tracing_layers = vec![
