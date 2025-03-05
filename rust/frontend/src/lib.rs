@@ -28,7 +28,7 @@ use server::FrontendServer;
 
 pub use config::{FrontendConfig, ScorecardRule};
 
-const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
+pub const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
 
 #[derive(thiserror::Error, Debug)]
 pub enum ScorecardRuleError {
