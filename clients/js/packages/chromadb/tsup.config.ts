@@ -1,5 +1,6 @@
 import { defineConfig, Options } from "tsup";
 import * as fs from "fs";
+import * as path from "path";
 
 export default defineConfig((options: Options) => {
   const commonOptions: Partial<Options> = {
@@ -9,6 +10,9 @@ export default defineConfig((options: Options) => {
     sourcemap: true,
     dts: true,
     target: "es2020",
+    // Bundle @internal/chromadb-core into the output
+    noExternal: ["@internal/chromadb-core"],
+    treeshake: true,
     ...options,
   };
 
