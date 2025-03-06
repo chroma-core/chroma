@@ -26,6 +26,7 @@ spec:
       labels:
         app: rust-frontend-service
     spec:
+      serviceAccountName: rust-frontend-service-serviceaccount
       containers:
         - name: rust-frontend-service
           {{ if .Values.rustFrontendService.command }}
