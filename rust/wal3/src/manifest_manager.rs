@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
-use chroma_storage::Storage;
+use chroma_storage::{ETag, Storage};
 use setsum::Setsum;
 
 use crate::manifest::{Manifest, Snapshot};
@@ -79,6 +79,10 @@ impl Staging {
             if self.snapshots_staged.contains(&s.setsum) {
                 if let Err(err) = new_manifest.apply_snapshot(s) {
                     tracing::error!("Failed to apply snapshot: {:?}", err);
+                    for notifier in notifiers {
+                        let _ = notifier.send(Some(err.clone()));
+                    }
+                    return None;
                 } else {
                     self.snapshots_staged.retain(|ss| ss != &s.setsum);
                     snapshot = None;
@@ -177,6 +181,7 @@ impl ManifestManager {
         }
     }
 
+    /// Given a delta to the manifest, batch its application and wait for it to apply.
     pub async fn apply_delta(
         &self,
         delta: Fragment,
@@ -191,6 +196,7 @@ impl ManifestManager {
         }
     }
 
+    /// Add the delta to the queue/vector of deltas waiting to be applied.
     fn push_delta(
         &self,
         delta: Fragment,
@@ -208,6 +214,8 @@ impl ManifestManager {
         }
     }
 
+    /// At a periodic interval consistent with throttle options, pump the notifier to wake up the
+    /// background thread.  This drives the batching.
     async fn timer(staging: Arc<Mutex<Staging>>, notifier: Arc<tokio::sync::Notify>) {
         loop {
             let (throttle, last_batch) = {
@@ -226,11 +234,13 @@ impl ManifestManager {
         }
     }
 
+    /// The background thread for installing manifests.
     async fn background(
         staging: Arc<Mutex<Staging>>,
         storage: Arc<Storage>,
         notifier: Arc<tokio::sync::Notify>,
     ) {
+        /*
         let mut in_flight = LinkedList::default();
         loop {
             notifier.notified().await;
@@ -244,11 +254,13 @@ impl ManifestManager {
                 }
             };
             if let Some((old_manifest, new_manifest, snapshot, notifiers)) = work {
+                let old_e_tag = todo!();
                 let done = Arc::new(AtomicBool::new(false));
                 let install_one = Self::install_one(
                     throttle,
                     Arc::clone(&storage),
                     old_manifest,
+                    old_e_tag,
                     new_manifest.clone(),
                     Arc::clone(&notifier),
                     Arc::clone(&done),
@@ -278,34 +290,36 @@ impl ManifestManager {
                 if let Some((_, handle, notifiers)) = in_flight.pop_front() {
                     let err = handle.await.unwrap();
                     for notifier in notifiers {
-                        let _ = notifier.send(err.clone());
+                        let _ = notifier.send(err.clone().err());
                     }
                 }
             }
         }
+        */
     }
 
     async fn install_one(
         throttle: ThrottleOptions,
         storage: Arc<Storage>,
         old_manifest: Manifest,
+        old_e_tag: &ETag,
         new_manifest: Manifest,
         notifier: Arc<tokio::sync::Notify>,
         done: Arc<AtomicBool>,
-    ) -> Option<Error> {
+    ) -> Result<ETag, Error> {
         match old_manifest
-            .install(&throttle, &storage, &new_manifest)
+            .install(&throttle, &storage, Some(old_e_tag), &new_manifest)
             .await
         {
-            Ok(_) => {
+            Ok(e_tag) => {
                 done.store(true, Ordering::Relaxed);
                 notifier.notify_one();
-                None
+                Ok(e_tag)
             }
             Err(e) => {
                 done.store(true, Ordering::Relaxed);
                 notifier.notify_one();
-                Some(e)
+                Err(e)
             }
         }
     }
@@ -372,7 +386,6 @@ mod tests {
             setsum: Setsum::default(),
             snapshots: vec![],
             fragments: vec![],
-            e_tag: Some(ETag("etag".to_string())),
         };
         let storage = Arc::new(test_storage());
         let mut manager = ManifestManager::new(
@@ -452,7 +465,6 @@ mod tests {
                         setsum: Setsum::default(),
                     }
                 ],
-                e_tag: Some(ETag("etag".to_string())),
             },
             staging.manifest
         );
