@@ -44,7 +44,7 @@ impl LocalStorage {
         key: &str,
         bytes: &[u8],
         options: PutOptions,
-    ) -> Result<(), StorageError> {
+    ) -> Result<Option<ETag>, StorageError> {
         assert_eq!(
             options,
             PutOptions::default(),
@@ -58,14 +58,14 @@ impl LocalStorage {
         std::fs::create_dir_all(parent).unwrap();
         let res = std::fs::write(&path, bytes);
         match res {
-            Ok(_) => Ok(()),
+            Ok(_) => Ok(None),
             Err(e) => Err(StorageError::Generic {
                 source: Arc::new(e),
             }),
         }
     }
 
-    pub async fn put_file(&self, key: &str, path: &str) -> Result<(), StorageError> {
+    pub async fn put_file(&self, key: &str, path: &str) -> Result<Option<ETag>, StorageError> {
         let file = std::fs::read(path);
         match file {
             Ok(bytes_u8) => self.put_bytes(key, &bytes_u8, PutOptions::default()).await,
