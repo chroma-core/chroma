@@ -189,7 +189,6 @@ pub struct Manifest {
     pub writer: String,
     pub snapshots: Vec<SnapshotPointer>,
     pub fragments: Vec<Fragment>,
-    pub(crate) e_tag: Option<ETag>,
 }
 
 impl Manifest {
@@ -421,7 +420,6 @@ impl Manifest {
             setsum: Setsum::default(),
             snapshots: vec![],
             fragments: vec![],
-            e_tag: None,
         };
         let payload = serde_json::to_string(&initial)
             .map_err(|e| Error::CorruptManifest(format!("could not encode JSON manifest: {e:?}")))?
@@ -441,7 +439,7 @@ impl Manifest {
             .map_err(Arc::new)?;
         serde_json::from_slice(&manifest)
             .map_err(|e| Error::CorruptManifest(format!("could not decode JSON manifest: {e:?}")))
-            .map(|m| Some(Manifest { e_tag, ..m }))
+            .map(Some)
     }
 
     /// Install a manifest to object storage.
@@ -449,6 +447,7 @@ impl Manifest {
         &self,
         options: &ThrottleOptions,
         storage: &Storage,
+        current: Option<&ETag>,
         new: &Manifest,
     ) -> Result<ETag, Error> {
         let exp_backoff = crate::backoff::ExponentialBackoff::new(
@@ -461,7 +460,7 @@ impl Manifest {
                     Error::CorruptManifest(format!("could not encode JSON manifest: {e:?}"))
                 })?
                 .into_bytes();
-            let options = if let Some(e_tag) = self.e_tag.as_ref() {
+            let options = if let Some(e_tag) = current {
                 PutOptions::if_matches(e_tag)
             } else {
                 PutOptions::if_not_exists()
@@ -542,7 +541,6 @@ mod tests {
             setsum: Setsum::default(),
             snapshots: vec![],
             fragments: vec![fragment1, fragment2],
-            e_tag: None,
         };
         assert!(!manifest.contains_position(LogPosition::uni(0)));
         assert!(manifest.contains_position(LogPosition::uni(1)));
@@ -583,7 +581,6 @@ mod tests {
             .unwrap(),
             snapshots: vec![],
             fragments: vec![fragment1.clone(), fragment2.clone()],
-            e_tag: None,
         };
         assert!(manifest.scrub().is_ok());
         let manifest = Manifest {
@@ -595,7 +592,6 @@ mod tests {
             .unwrap(),
             snapshots: vec![],
             fragments: vec![fragment1, fragment2],
-            e_tag: None,
         };
         assert!(manifest.scrub().is_err());
     }
@@ -628,7 +624,6 @@ mod tests {
             setsum: Setsum::default(),
             snapshots: vec![],
             fragments: vec![],
-            e_tag: None,
         };
         assert!(!manifest.can_apply_fragment(&fragment2));
         assert!(manifest.can_apply_fragment(&fragment1));
@@ -666,7 +661,6 @@ mod tests {
                         .unwrap()
                     }
                 ],
-                e_tag: None,
             },
             manifest
         );
