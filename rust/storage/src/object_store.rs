@@ -8,11 +8,66 @@ use object_store::{GetOptions, GetRange, ObjectStore as ObjectStoreTrait, PutOpt
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::sync::Mutex;
 
-use super::{ETag, StorageConfigError, StorageError};
+use super::{ETag, PathError, StorageConfigError, StorageError};
 
 impl From<object_store::Error> for StorageError {
-    fn from(_: object_store::Error) -> Self {
-        todo!();
+    fn from(err: object_store::Error) -> Self {
+        match err {
+            object_store::Error::Generic { store: _, source } => StorageError::Generic {
+                source: source.into(),
+            },
+            object_store::Error::NotFound { path, source } => StorageError::NotFound {
+                path,
+                source: source.into(),
+            },
+            object_store::Error::InvalidPath { source } => match source {
+                object_store::path::Error::NonUnicode { path, source } => {
+                    StorageError::InvalidPath {
+                        source: PathError::NonUnicode { path, source },
+                    }
+                }
+                _ => StorageError::Generic {
+                    source: Arc::new(source),
+                },
+            },
+            object_store::Error::JoinError { source: _ } => StorageError::JoinError,
+            object_store::Error::NotSupported { source } => StorageError::NotSupported {
+                source: source.into(),
+            },
+            object_store::Error::AlreadyExists { path, source } => StorageError::AlreadyExists {
+                path,
+                source: source.into(),
+            },
+            object_store::Error::Precondition { path, source } => {
+                StorageError::Precondition {
+                    path,
+                    source: source.into(),
+                }
+            }
+            object_store::Error::NotModified { path, source } => StorageError::NotModified {
+                path,
+                source: source.into(),
+            },
+            object_store::Error::NotImplemented => StorageError::NotImplemented,
+            object_store::Error::PermissionDenied { path, source } => {
+                StorageError::PermissionDenied {
+                    path,
+                    source: source.into(),
+                }
+            }
+            object_store::Error::Unauthenticated { path, source } => {
+                StorageError::Unauthenticated {
+                    path,
+                    source: source.into(),
+                }
+            }
+            object_store::Error::UnknownConfigurationKey { store, key } => {
+                StorageError::UnknownConfigurationKey { store, key }
+            }
+            err => StorageError::Generic {
+                source: Arc::new(err),
+            },
+        }
     }
 }
 
