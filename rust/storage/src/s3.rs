@@ -351,7 +351,7 @@ impl S3Storage {
         key: &str,
         bytes: Vec<u8>,
         options: PutOptions,
-    ) -> Result<(), StorageError> {
+    ) -> Result<Option<ETag>, StorageError> {
         let bytes = Arc::new(Bytes::from(bytes));
 
         self.put_object(
@@ -366,7 +366,7 @@ impl S3Storage {
         .await
     }
 
-    pub async fn put_file(&self, key: &str, path: &str) -> Result<(), StorageError> {
+    pub async fn put_file(&self, key: &str, path: &str) -> Result<Option<ETag>, StorageError> {
         let file_size = tokio::fs::metadata(path)
             .await
             .map_err(|err| StorageError::Generic {
@@ -408,13 +408,12 @@ impl S3Storage {
             Range<usize>,
         ) -> BoxFuture<'static, Result<ByteStream, StorageError>>,
         options: PutOptions,
-    ) -> Result<(), StorageError> {
+    ) -> Result<Option<ETag>, StorageError> {
         if self.is_oneshot_upload(total_size_bytes) {
             return self
                 .oneshot_upload(key, total_size_bytes, create_bytestream_fn, options)
                 .await;
         }
-
         self.multipart_upload(key, total_size_bytes, create_bytestream_fn, options)
             .await
     }
@@ -427,7 +426,7 @@ impl S3Storage {
             Range<usize>,
         ) -> BoxFuture<'static, Result<ByteStream, StorageError>>,
         options: PutOptions,
-    ) -> Result<(), StorageError> {
+    ) -> Result<Option<ETag>, StorageError> {
         let req = self
             .client
             .put_object()
@@ -444,7 +443,7 @@ impl S3Storage {
             None => req,
         };
 
-        req.send().await.map_err(|err| {
+        let resp = req.send().await.map_err(|err| {
             let err = err.into_service_error();
             if err.meta().code() == Some("PreconditionFailed") {
                 StorageError::Precondition {
@@ -457,8 +456,7 @@ impl S3Storage {
                 }
             }
         })?;
-
-        Ok(())
+        Ok(resp.e_tag.map(ETag))
     }
 
     pub(super) async fn prepare_multipart_upload(
@@ -544,7 +542,7 @@ impl S3Storage {
         upload_id: &str,
         upload_parts: Vec<CompletedPart>,
         options: PutOptions,
-    ) -> Result<(), StorageError> {
+    ) -> Result<Option<ETag>, StorageError> {
         let complete_req = self
             .client
             .complete_multipart_upload()
@@ -567,14 +565,13 @@ impl S3Storage {
             None => complete_req,
         };
 
-        complete_req
+        let resp = complete_req
             .send()
             .await
             .map_err(|err| StorageError::Generic {
                 source: Arc::new(err.into_service_error()),
             })?;
-
-        Ok(())
+        Ok(resp.e_tag.map(ETag))
     }
 
     async fn multipart_upload(
@@ -585,7 +582,7 @@ impl S3Storage {
             Range<usize>,
         ) -> BoxFuture<'static, Result<ByteStream, StorageError>>,
         options: PutOptions,
-    ) -> Result<(), StorageError> {
+    ) -> Result<Option<ETag>, StorageError> {
         let (part_count, size_of_last_part, upload_id) =
             self.prepare_multipart_upload(key, total_size_bytes).await?;
 

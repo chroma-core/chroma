@@ -246,7 +246,7 @@ impl Storage {
         }
     }
 
-    pub async fn put_file(&self, key: &str, path: &str) -> Result<(), StorageError> {
+    pub async fn put_file(&self, key: &str, path: &str) -> Result<Option<ETag>, StorageError> {
         match self {
             Storage::ObjectStore(object_store) => object_store.put_file(key, path).await,
             Storage::S3(s3) => s3.put_file(key, path).await,
@@ -260,7 +260,7 @@ impl Storage {
         key: &str,
         bytes: Vec<u8>,
         options: PutOptions,
-    ) -> Result<(), StorageError> {
+    ) -> Result<Option<ETag>, StorageError> {
         match self {
             Storage::ObjectStore(object_store) => object_store.put_bytes(key, bytes, options).await,
             Storage::S3(s3) => s3.put_bytes(key, bytes, options).await,
