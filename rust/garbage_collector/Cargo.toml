@@ -49,8 +49,11 @@ chroma-storage = { workspace = true }
 chroma-blockstore = { workspace = true }
 chroma-cache = { workspace = true }
 chroma-index = {workspace = true}
+chroma-segment = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
-rand = { workspace = true }
+proptest-state-machine = "0.3"
+proptest-derive = "0.3"
 tokio-test = "0.4"
+rand = { workspace = true }

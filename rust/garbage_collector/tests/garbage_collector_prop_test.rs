@@ -405,8 +405,7 @@ mod tests {
                 let records_per_batch = num_records / num_batches;
                 let (all_embeddings, all_ids) = create_random_embeddings(num_records);
 
-                let mut current_version = 0;
-                for i in 0..num_batches {
+                for (current_version, i) in (0..num_batches).enumerate() {
                     let start_idx = i * records_per_batch;
                     let end_idx = if i == num_batches - 1 {
                         num_records
@@ -424,11 +423,11 @@ mod tests {
                         &tenant_id,
                         batch_embeddings,
                         batch_ids,
-                        current_version + 1,
+                        (current_version + 1) as i64,
                         10,
                     ).await.unwrap();
 
-                    current_version += 1;
+                    // No need to increment current_version as it's handled by enumerate
 
                     // Add artificial delay between batches
                     tokio::time::sleep(Duration::from_secs(1)).await;

@@ -64,6 +64,7 @@ pub struct Collection {
     pub database: String,
     pub log_position: i64,
     pub version: i32,
+    pub version_file_name: String,
     #[serde(skip)]
     pub total_records_post_compaction: u64,
     #[serde(skip)]

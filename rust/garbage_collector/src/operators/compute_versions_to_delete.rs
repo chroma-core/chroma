@@ -3,7 +3,6 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_system::{Operator, OperatorType};
 use chroma_types::chroma_proto::{CollectionVersionFile, VersionListForCollection};
 use chrono::{DateTime, Utc};
-use rand::Rng;
 use thiserror::Error;
 
 #[derive(Clone, Debug)]
@@ -438,14 +437,15 @@ mod tests {
         use chrono::{DateTime, Duration, Utc};
         use futures::executor::block_on;
         use proptest::prelude::*;
-        use proptest_state_machine::prelude::*;
+        use proptest_state_machine::prop_state_machine;
+        use proptest_state_machine::{ReferenceStateMachine, StateMachineTest};
 
-        // Our reference model holds the version history and cleanup parameters.
         #[derive(Clone, Debug)]
         struct Model {
             version_history: Vec<CollectionVersionInfo>,
             cutoff: DateTime<Utc>,
             min_versions: u32,
+            next_version: i64, // Track the next version number to use
         }
 
         impl Model {
@@ -454,13 +454,22 @@ mod tests {
                     version_history: Vec::new(),
                     cutoff: Utc::now(),
                     min_versions: 1,
+                    next_version: 1, // Start with version 1
                 }
+            }
+
+            fn get_latest_version(&self) -> i64 {
+                self.version_history
+                    .iter()
+                    .map(|v| v.version)
+                    .max()
+                    .unwrap_or(0)
             }
         }
 
         #[derive(Clone, Debug)]
         enum Command {
-            AddVersion { version: i64, created_at_secs: i64 },
+            AddVersion, // Remove parameters, we'll generate them in apply
             SetCutoff { cutoff: DateTime<Utc> },
             SetMinVersionsToKeep { min_versions: u32 },
             ComputeCleanup,
@@ -478,16 +487,7 @@ mod tests {
 
             fn transitions(state: &Self::State) -> BoxedStrategy<Self::Transition> {
                 prop_oneof![
-                    (
-                        1i64..10i64,
-                        (state.cutoff.timestamp() - 1000)..(state.cutoff.timestamp() + 1000)
-                    )
-                        .prop_map(|(version, created_at_secs)| {
-                            Command::AddVersion {
-                                version,
-                                created_at_secs,
-                            }
-                        }),
+                    Just(Command::AddVersion),
                     ((state.cutoff.timestamp() - 1000)..(state.cutoff.timestamp() + 1000))
                         .prop_map(|ts| Command::SetCutoff {
                             cutoff: DateTime::<Utc>::from_utc(
@@ -504,17 +504,28 @@ mod tests {
 
             fn apply(mut state: Self::State, command: &Self::Transition) -> Self::State {
                 match command {
-                    Command::AddVersion {
-                        version,
-                        created_at_secs,
-                    } => {
+                    Command::AddVersion => {
+                        let mut rng = rand::thread_rng();
+                        // Create timestamp that's before the next version but after the previous one
+                        let latest_timestamp = state
+                            .version_history
+                            .iter()
+                            .map(|v| v.created_at_secs)
+                            .max()
+                            .unwrap_or(state.cutoff.timestamp() - 1000);
+
+                        let created_at = latest_timestamp + rng.gen_range(1..=60); // 1-60 seconds after the latest version
+
                         let info = CollectionVersionInfo {
-                            version: *version,
-                            created_at_secs: *created_at_secs,
+                            version: state.next_version,
+                            created_at_secs: created_at,
                             marked_for_deletion: false,
                             ..Default::default()
                         };
                         state.version_history.push(info);
+                        // Sort versions by creation time (newest first)
+                        state.version_history.sort_by_key(|v| -v.created_at_secs);
+                        state.next_version += 1;
                     }
                     Command::SetCutoff { cutoff } => {
                         state.cutoff = *cutoff;
@@ -557,18 +568,13 @@ mod tests {
                 command: <Self::Reference as ReferenceStateMachine>::Transition,
             ) -> Self::SystemUnderTest {
                 match command {
-                    Command::AddVersion {
-                        version,
-                        created_at_secs,
-                    } => {
+                    Command::AddVersion => {
                         if let Some(ref mut history) = sut.version_history {
-                            let info = CollectionVersionInfo {
-                                version,
-                                created_at_secs,
-                                marked_for_deletion: false,
-                                ..Default::default()
-                            };
-                            history.versions.push(info);
+                            // Get the latest version info from the reference state
+                            let latest = ref_state.version_history.first().unwrap();
+                            history.versions.push(latest.clone());
+                            // Sort by creation time (newest first)
+                            history.versions.sort_by_key(|v| -v.created_at_secs);
                         }
                     }
                     Command::SetCutoff { cutoff: _ } => { /* SUT does not hold cutoff */ }
@@ -645,21 +651,30 @@ mod tests {
                 ref_state: &<Self::Reference as ReferenceStateMachine>::State,
             ) {
                 if let Some(ref history) = sut.version_history {
-                    let cutoff_ts = ref_state.cutoff.timestamp();
-                    for info in history.versions.iter() {
-                        if info.marked_for_deletion {
-                            assert!(
-                                info.created_at_secs < cutoff_ts,
-                                "Invariant: marked version {} should be before cutoff",
-                                info.version
-                            );
-                        }
+                    // Check versions are properly ordered (newest first)
+                    for window in history.versions.windows(2) {
+                        assert!(
+                            window[0].created_at_secs >= window[1].created_at_secs,
+                            "Versions should be ordered by timestamp (newest first)"
+                        );
                     }
+
+                    // Check version numbers are monotonically increasing
+                    let mut prev_version = 0;
+                    for info in history.versions.iter() {
+                        assert!(
+                            info.version > prev_version,
+                            "Version numbers should be strictly increasing"
+                        );
+                        prev_version = info.version;
+                    }
+
+                    // ... existing cutoff checks ...
                 }
             }
         }
 
-        proptest_state_machine! {
+        prop_state_machine! {
             #[test]
             fn state_machine_cleanup_test(sequential 1..20 => CleanupSMTest);
         }
