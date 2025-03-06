@@ -1,5 +1,3 @@
-{{ $frontEndConfig := mergeOverwrite $$source1 $source2 }}
-
 {{if .Values.rustFrontendService.configuration}}
 apiVersion: v1
 kind: ConfigMap
