@@ -90,3 +90,14 @@ spec:
   selector:
     app: rust-frontend-service
   type: ClusterIP
+
+
+---
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: rust-frontend-service-serviceaccount
+  namespace: {{ .Values.namespace }}
+
+---
