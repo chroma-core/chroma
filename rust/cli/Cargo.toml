@@ -25,6 +25,8 @@ serde_json.workspace = true
 reqwest = "0.12.12"
 regex = "1.11.1"
 semver = "1.0.26"
+dirs = "6.0.0"
+serde = { version = "1.0.215", features = ["derive"] }
 
 [[bin]]
 name = "chroma"

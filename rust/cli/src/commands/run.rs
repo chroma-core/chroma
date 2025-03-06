@@ -42,7 +42,7 @@ pub fn run(args: RunArgs) {
     );
     println!(
         "Getting started guide: {}",
-        "https://docs.trychroma.com/docs/overview/getting-started"
+        "https://docs.trychroma.com/docs/overview/getting-started\n"
             .underline()
             .blue()
     );
