@@ -1,8 +1,6 @@
 mod commands;
 mod utils;
 
-use crate::commands::login::{login, LoginArgs};
-use crate::commands::profile::{profile_command, ProfileCommand};
 use crate::commands::run::{run, RunArgs};
 use crate::commands::update::update;
 use crate::commands::vacuum::{vacuum, VacuumArgs};

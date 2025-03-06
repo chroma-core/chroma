@@ -6,8 +6,8 @@ use clap::Parser;
 use colored::Colorize;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{Input, Select};
+use std::io;
 use std::io::Write;
-use std::{io};
 
 #[derive(Parser, Debug)]
 pub struct LoginArgs {
