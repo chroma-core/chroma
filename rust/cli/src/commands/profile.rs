@@ -6,12 +6,12 @@ use clap::{Args, Subcommand};
 use colored::Colorize;
 
 #[derive(Args, Debug)]
-struct DeleteArgs {
+pub struct DeleteArgs {
     name: String,
 }
 
 #[derive(Args, Debug)]
-struct UseArgs {
+pub struct UseArgs {
     name: String,
 }
 
@@ -22,6 +22,7 @@ pub enum ProfileCommand {
     Use(UseArgs),
 }
 
+#[allow(dead_code)]
 fn delete_profile(args: DeleteArgs) {
     let credentials_file = get_or_create_credentials_file();
     let mut profiles =
@@ -45,6 +46,7 @@ fn delete_profile(args: DeleteArgs) {
     println!("\nProfile {} successfully removed\n", profile);
 }
 
+#[allow(dead_code)]
 fn list_profiles() {
     println!("{}", "\nAvailable profiles:\n".blue().bold());
     let credentials_file = get_or_create_credentials_file();
@@ -56,10 +58,12 @@ fn list_profiles() {
     println!();
 }
 
+#[allow(dead_code)]
 fn use_profile(args: UseArgs) {
     write_cli_config(args.name)
 }
 
+#[allow(dead_code)]
 pub fn profile_command(command: ProfileCommand) {
     match command {
         ProfileCommand::Delete(args) => delete_profile(args),

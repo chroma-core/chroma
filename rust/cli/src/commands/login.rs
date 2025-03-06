@@ -21,6 +21,7 @@ pub struct LoginArgs {
     tenant_id: Option<String>,
 }
 
+#[allow(dead_code)]
 pub fn login(args: LoginArgs) {
     let credentials_file = get_or_create_credentials_file();
     let mut profiles =
