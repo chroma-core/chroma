@@ -27,6 +27,7 @@ tower = { workspace = true }
 sqlx = { workspace = true }
 sea-query = { workspace = true }
 sea-query-binder = { workspace = true, features = ["sqlx-sqlite"] }
+chrono = { workspace = true }
 
 chroma-config = { workspace = true }
 chroma-error = { workspace = true, features = ["tonic", "sqlx"] }

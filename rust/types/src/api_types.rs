@@ -759,6 +759,23 @@ impl ChromaError for GetCollectionSizeError {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum ListCollectionVersionsError {
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+    #[error("Collection [{0}] does not exists")]
+    NotFound(String),
+}
+
+impl ChromaError for ListCollectionVersionsError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            ListCollectionVersionsError::Internal(err) => err.code(),
+            ListCollectionVersionsError::NotFound(_) => ErrorCodes::NotFound,
+        }
+    }
+}
+
 ////////////////////////// Metadata Key Constants //////////////////////////
 
 pub const CHROMA_KEY: &str = "chroma:";
