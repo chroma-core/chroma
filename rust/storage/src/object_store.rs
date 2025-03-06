@@ -187,7 +187,7 @@ impl ObjectStore {
         Ok(Arc::new(output_buffer))
     }
 
-    pub async fn put_file(&self, key: &str, path: &str) -> Result<(), StorageError> {
+    pub async fn put_file(&self, key: &str, path: &str) -> Result<Option<ETag>, StorageError> {
         let multipart = self.object_store.put_multipart(&Path::from(key)).await?;
         let multipart = Arc::new(Mutex::new(multipart));
         let file_size = tokio::fs::metadata(path)
@@ -236,8 +236,8 @@ impl ObjectStore {
         }
         futures::future::try_join_all(pieces).await?;
         let mut multipart = multipart.lock().await;
-        multipart.complete().await?;
-        Ok(())
+        let result = multipart.complete().await?;
+        Ok(result.e_tag.map(ETag))
     }
 
     pub async fn put_bytes(
@@ -245,7 +245,7 @@ impl ObjectStore {
         key: &str,
         bytes: Vec<u8>,
         options: crate::PutOptions,
-    ) -> Result<(), StorageError> {
+    ) -> Result<Option<ETag>, StorageError> {
         let mut object_store_put_options = PutOptions::default();
         if options.if_not_exists {
             object_store_put_options.mode = object_store::PutMode::Create;
@@ -261,7 +261,7 @@ impl ObjectStore {
         self.object_store
             .put_opts(&Path::from(key), bytes.into(), object_store_put_options)
             .await?;
-        Ok(())
+        Ok(None)
     }
 
     pub async fn delete(&self, key: &str) -> Result<(), StorageError> {

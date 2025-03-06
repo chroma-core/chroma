@@ -233,7 +233,7 @@ impl AdmissionControlledS3Storage {
             Range<usize>,
         ) -> BoxFuture<'static, Result<ByteStream, StorageError>>,
         options: PutOptions,
-    ) -> Result<(), StorageError> {
+    ) -> Result<Option<ETag>, StorageError> {
         // Acquire permit.
         let _permit = self.rate_limiter.enter().await;
         self.storage
@@ -250,7 +250,7 @@ impl AdmissionControlledS3Storage {
             Range<usize>,
         ) -> BoxFuture<'static, Result<ByteStream, StorageError>>,
         options: PutOptions,
-    ) -> Result<(), StorageError> {
+    ) -> Result<Option<ETag>, StorageError> {
         let (part_count, size_of_last_part, upload_id) = self
             .storage
             .prepare_multipart_upload(key, total_size_bytes)
@@ -287,7 +287,7 @@ impl AdmissionControlledS3Storage {
             Range<usize>,
         ) -> BoxFuture<'static, Result<ByteStream, StorageError>>,
         options: PutOptions,
-    ) -> Result<(), StorageError> {
+    ) -> Result<Option<ETag>, StorageError> {
         if self.storage.is_oneshot_upload(total_size_bytes) {
             return self
                 .oneshot_upload(key, total_size_bytes, create_bytestream_fn, options)
@@ -295,10 +295,11 @@ impl AdmissionControlledS3Storage {
         }
 
         self.multipart_upload(key, total_size_bytes, create_bytestream_fn, options)
-            .await
+            .await?;
+        Ok(None)
     }
 
-    pub async fn put_file(&self, key: &str, path: &str) -> Result<(), StorageError> {
+    pub async fn put_file(&self, key: &str, path: &str) -> Result<Option<ETag>, StorageError> {
         let file_size = tokio::fs::metadata(path)
             .await
             .map_err(|err| StorageError::Generic {
@@ -337,7 +338,7 @@ impl AdmissionControlledS3Storage {
         key: &str,
         bytes: Vec<u8>,
         options: PutOptions,
-    ) -> Result<(), StorageError> {
+    ) -> Result<Option<ETag>, StorageError> {
         let bytes = Arc::new(Bytes::from(bytes));
 
         self.put_object(
