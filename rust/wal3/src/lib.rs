@@ -6,6 +6,8 @@ use setsum::Setsum;
 mod backoff;
 mod manifest;
 
+use manifest::SnapshotPointer;
+
 pub use backoff::ExponentialBackoff;
 pub use manifest::{Manifest, Snapshot};
 
@@ -189,14 +191,16 @@ pub struct SnapshotOptions {
 }
 
 impl SnapshotOptions {
+    /// Corresponds to [SnapshotOptions::snapshot_rollover_threshold], or the number of snapshot
+    /// pointers to embed in a snapshot or manifest.
     fn default_snapshot_rollover_threshold() -> usize {
-        // TODO(rescrv):  Commented out values are better.
-        2048 // (1 << 18) / SnapPointer::JSON_SIZE_ESTIMATE,
+        (1 << 18) / SnapshotPointer::JSON_SIZE_ESTIMATE
     }
 
+    /// Corresponds to [SnapshotOptions::fragment_rollover_threshold], or the number of fragment
+    /// pointers to embed in a snapshot or manifest.
     fn default_fragment_rollover_threshold() -> usize {
-        // TODO(rescrv):  Commented out values are better.
-        1536 // (1 << 19) / Fragment::JSON_SIZE_ESTIMATE,
+        (1 << 19) / Fragment::JSON_SIZE_ESTIMATE
     }
 }
 
@@ -290,6 +294,7 @@ pub struct Fragment {
 }
 
 impl Fragment {
+    /// An estimate on the number of bytes required to serialize this object as JSON.
     pub const JSON_SIZE_ESTIMATE: usize = 256;
 
     pub fn possibly_contains_position(&self, position: LogPosition) -> bool {
