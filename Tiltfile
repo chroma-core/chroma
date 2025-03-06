@@ -135,6 +135,7 @@ k8s_resource(
     'test-memberlist-reader-binding:ClusterRoleBinding',
     'lease-watcher:role',
     'logservice-serviceaccount-rolebinding:rolebinding',
+    'rust-frontend-service-config:ConfigMap',
   ],
   new_name='k8s_setup',
   labels=["infrastructure"],
