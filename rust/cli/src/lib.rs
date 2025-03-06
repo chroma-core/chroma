@@ -11,9 +11,6 @@ use clap::{Parser, Subcommand};
 #[derive(Subcommand, Debug)]
 enum Command {
     Docs,
-    #[command(subcommand)]
-    Profile(ProfileCommand),
-    Login(LoginArgs),
     Run(RunArgs),
     Support,
     Update,
@@ -38,12 +35,6 @@ pub fn chroma_cli(args: Vec<String>) {
             if webbrowser::open(url).is_err() {
                 eprintln!("Error: Failed to open the browser. Visit {}.", url);
             }
-        }
-        Command::Profile(profile_subcommand) => {
-            profile_command(profile_subcommand);
-        }
-        Command::Login(args) => {
-            login(args);
         }
         Command::Run(args) => {
             run(args);
