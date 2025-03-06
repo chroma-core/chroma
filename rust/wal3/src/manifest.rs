@@ -151,7 +151,7 @@ impl Snapshot {
                 .into_bytes();
             let options = PutOptions::if_not_exists();
             match storage.put_bytes(&self.path, payload, options).await {
-                Ok(()) => {
+                Ok(_) => {
                     println!("installed snapshot");
                     return Ok(());
                 }
@@ -426,10 +426,11 @@ impl Manifest {
         let payload = serde_json::to_string(&initial)
             .map_err(|e| Error::CorruptManifest(format!("could not encode JSON manifest: {e:?}")))?
             .into_bytes();
-        Ok(storage
+        storage
             .put_bytes(&manifest_path(), payload, PutOptions::if_not_exists())
             .await
-            .map_err(Arc::new)?)
+            .map_err(Arc::new)?;
+        Ok(())
     }
 
     /// Load the latest manifest from object storage.
@@ -449,7 +450,7 @@ impl Manifest {
         options: &ThrottleOptions,
         storage: &Storage,
         new: &Manifest,
-    ) -> Result<(), Error> {
+    ) -> Result<ETag, Error> {
         let exp_backoff = crate::backoff::ExponentialBackoff::new(
             options.throughput as f64,
             options.headroom as f64,
@@ -466,9 +467,16 @@ impl Manifest {
                 PutOptions::if_not_exists()
             };
             match storage.put_bytes(&self.path, payload, options).await {
-                Ok(()) => {
+                Ok(Some(e_tag)) => {
                     println!("installed manifest");
-                    return Ok(());
+                    return Ok(e_tag);
+                }
+                Ok(None) => {
+                    // NOTE(rescrv):  This is something of a lie.  We know that we put the log, but
+                    // without an e_tag we cannot do anything.  The log contention backoff protocol
+                    // cares for this case, rather than having to error-handle it separately
+                    // because it "crashes" the log and reinitializes.
+                    return Err(Error::LogContention);
                 }
                 Err(StorageError::Precondition { path: _, source: _ }) => {
                     return Err(Error::LogContention);
