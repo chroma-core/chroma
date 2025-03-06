@@ -50,10 +50,8 @@ pub enum Error {
     NoSuchCursor(String),
     #[error("parquet error: {0}")]
     ParquetError(#[from] Arc<parquet::errors::ParquetError>),
-    #[error("put error: {0}")]
-    PutError(#[from] Arc<chroma_storage::PutError>),
-    #[error("put error: {0}")]
-    GetError(#[from] Arc<chroma_storage::GetError>),
+    #[error("storage error: {0}")]
+    StorageError(#[from] Arc<chroma_storage::StorageError>),
 }
 
 //////////////////////////////////////////// ScrubError ////////////////////////////////////////////

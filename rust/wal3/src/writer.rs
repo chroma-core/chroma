@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use arrow::array::{ArrayRef, BinaryArray, RecordBatch, UInt64Array};
-use chroma_storage::{PutError, PutOptions, Storage};
+use chroma_storage::{PutOptions, Storage, StorageError};
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
@@ -237,9 +237,10 @@ impl LogWriter {
                 .await
             {
                 Ok(_) => {
+                    println!("installed fragment");
                     break;
                 }
-                Err(PutError::ConditionNotMet) => {
+                Err(StorageError::Precondition { path: _, source: _ }) => {
                     return Err(Error::LogContention);
                 }
                 Err(_) => {
