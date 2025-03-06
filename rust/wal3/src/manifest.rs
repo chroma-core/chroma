@@ -432,14 +432,20 @@ impl Manifest {
     }
 
     /// Load the latest manifest from object storage.
-    pub async fn load(storage: &Storage) -> Result<Option<Manifest>, Error> {
+    pub async fn load(storage: &Storage) -> Result<Option<(Manifest, ETag)>, Error> {
         let (manifest, e_tag) = storage
             .get_with_e_tag(&manifest_path())
             .await
             .map_err(Arc::new)?;
+        let Some(e_tag) = e_tag else {
+            return Err(Error::CorruptManifest(format!(
+                "no ETag for manifest at {}",
+                manifest_path()
+            )));
+        };
         serde_json::from_slice(&manifest)
             .map_err(|e| Error::CorruptManifest(format!("could not decode JSON manifest: {e:?}")))
-            .map(Some)
+            .map(|m| Some((m, e_tag)))
     }
 
     /// Install a manifest to object storage.
