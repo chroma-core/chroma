@@ -28,7 +28,6 @@ spec:
     spec:
       containers:
         - name: rust-frontend-service
-          command: ["chroma", "run", "$(CONFIG_PATH)"]
           image: "{{ .Values.rustFrontendService.image.repository }}:{{ .Values.rustFrontendService.image.tag }}"
           imagePullPolicy: IfNotPresent
           readinessProbe:
