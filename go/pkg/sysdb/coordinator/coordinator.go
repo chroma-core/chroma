@@ -235,8 +235,8 @@ func (s *Coordinator) FlushCollectionCompaction(ctx context.Context, flushCollec
 	return s.catalog.FlushCollectionCompaction(ctx, flushCollectionCompaction)
 }
 
-func (s *Coordinator) ListCollectionsToGc(ctx context.Context) ([]*model.CollectionToGc, error) {
-	return s.catalog.ListCollectionsToGc(ctx)
+func (s *Coordinator) ListCollectionsToGc(ctx context.Context, cutoffTimeSecs *uint64, limit *uint64) ([]*model.CollectionToGc, error) {
+	return s.catalog.ListCollectionsToGc(ctx, cutoffTimeSecs, limit)
 }
 
 func (s *Coordinator) ListCollectionVersions(ctx context.Context, collectionID types.UniqueID, tenantID string, maxCount *int64, versionsBefore *int64, versionsAtOrAfter *int64) ([]*coordinatorpb.CollectionVersionInfo, error) {

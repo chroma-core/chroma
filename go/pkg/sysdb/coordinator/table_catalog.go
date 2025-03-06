@@ -409,14 +409,14 @@ func (tc *Catalog) GetCollectionSize(ctx context.Context, collectionID types.Uni
 	return total_records_post_compaction, nil
 }
 
-func (tc *Catalog) ListCollectionsToGc(ctx context.Context) ([]*model.CollectionToGc, error) {
+func (tc *Catalog) ListCollectionsToGc(ctx context.Context, cutoffTimeSecs *uint64, limit *uint64) ([]*model.CollectionToGc, error) {
 	tracer := otel.Tracer
 	if tracer != nil {
 		_, span := tracer.Start(ctx, "Catalog.ListCollectionsToGc")
 		defer span.End()
 	}
 
-	collectionsToGc, err := tc.metaDomain.CollectionDb(ctx).ListCollectionsToGc()
+	collectionsToGc, err := tc.metaDomain.CollectionDb(ctx).ListCollectionsToGc(cutoffTimeSecs, limit)
 
 	if err != nil {
 		return nil, err
@@ -1403,7 +1403,7 @@ func (tc *Catalog) markVersionForDeletionInSingleCollection(
 
 		// Update the version file name in Postgres table as a CAS operation.
 		// TODO(rohit): Investigate if we really need a Tx here.
-		rowsAffected, err := tc.metaDomain.CollectionDb(ctx).UpdateVersionFileName(collectionID, existingVersionFileName, newVerFileFullPath)
+		rowsAffected, err := tc.metaDomain.CollectionDb(ctx).UpdateVersionRelatedFields(collectionID, existingVersionFileName, newVerFileFullPath, nil, nil)
 		if err != nil {
 			// Delete the newly created version file from S3 since it is not needed.
 			tc.s3Store.DeleteVersionFile(tenantID, collectionID, newVersionFileName)
@@ -1463,6 +1463,25 @@ func (tc *Catalog) updateProtoRemoveVersionEntries(versionFilePb *coordinatorpb.
 	return nil
 }
 
+func (tc *Catalog) getNumberOfActiveVersions(versionFilePb *coordinatorpb.CollectionVersionFile) int {
+	// Use a map to track unique active versions
+	activeVersions := make(map[int64]bool)
+	for _, version := range versionFilePb.GetVersionHistory().Versions {
+		activeVersions[version.Version] = true
+	}
+	return len(activeVersions)
+}
+
+func (tc *Catalog) getOldestVersionTs(versionFilePb *coordinatorpb.CollectionVersionFile) time.Time {
+	if versionFilePb.GetVersionHistory() == nil || len(versionFilePb.GetVersionHistory().Versions) <= 1 {
+		// Returning a zero timestamp that represents an unset value.
+		return time.Time{}
+	}
+	oldestVersionTs := versionFilePb.GetVersionHistory().Versions[1].CreatedAtSecs
+
+	return time.Unix(oldestVersionTs, 0)
+}
+
 func (tc *Catalog) DeleteVersionEntriesForCollection(ctx context.Context, tenantID string, collectionID string, versions []int64) error {
 	// Limit the loop to 5 attempts to avoid infinite loops
 	numAttempts := 0
@@ -1493,6 +1512,21 @@ func (tc *Catalog) DeleteVersionEntriesForCollection(ctx context.Context, tenant
 			return err
 		}
 
+		numActiveVersions := tc.getNumberOfActiveVersions(versionFilePb)
+		if numActiveVersions <= 1 {
+			// No remaining valid versions after GC.
+			return errors.New("no valid versions after gc")
+		}
+
+		// Get the creation time of the oldest version.
+		oldestVersionTs := tc.getOldestVersionTs(versionFilePb)
+		if oldestVersionTs.IsZero() {
+			// This should never happen.
+			log.Error("oldest version timestamp is zero after GC.", zap.String("collection_id", collectionID))
+			// No versions to delete.
+			return errors.New("oldest version timestamp is zero after GC")
+		}
+
 		// Write the new version file to S3
 		// Create the new version file name with the format: <version_number>_<uuid>_gc_delete
 		newVersionFileName := fmt.Sprintf(
@@ -1506,7 +1540,7 @@ func (tc *Catalog) DeleteVersionEntriesForCollection(ctx context.Context, tenant
 		}
 
 		// Update the version file name in Postgres table as a CAS operation
-		rowsAffected, err := tc.metaDomain.CollectionDb(ctx).UpdateVersionFileName(collectionID, existingVersionFileName, newVerFileFullPath)
+		rowsAffected, err := tc.metaDomain.CollectionDb(ctx).UpdateVersionRelatedFields(collectionID, existingVersionFileName, newVerFileFullPath, &oldestVersionTs, &numActiveVersions)
 		if err != nil {
 			// Delete the newly created version file from S3 since it is not needed
 			tc.s3Store.DeleteVersionFile(tenantID, collectionID, newVersionFileName)
