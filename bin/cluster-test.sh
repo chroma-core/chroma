@@ -2,6 +2,7 @@
 set -e
 
 # TODO make url configuration consistent.
+export CHROMA_ALLOW_RESET=true
 export CHROMA_CLUSTER_TEST_ONLY=1
 export CHROMA_SERVER_HOST="${CHROMA_SERVER_HOST:-localhost:8000}"
 export CHROMA_COORDINATOR_HOST="${CHROMA_COORDINATOR_HOST:-localhost}"
