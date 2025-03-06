@@ -1,3 +1,5 @@
+{{ $frontEndConfig := mergeOverwrite $$source1 $source2 }}
+
 {{if .Values.rustFrontendService.configuration}}
 apiVersion: v1
 kind: ConfigMap
@@ -49,9 +51,6 @@ spec:
           env:
             - name: CONFIG_PATH
               value: "/config/config.yaml"
-            {{ if .Values.frontendService.otherEnvConfig }}
-              {{ .Values.frontendService.otherEnvConfig | nindent 12 }}
-            {{ end }}
             {{ if .Values.rustFrontendService.otherEnvConfig }}
               {{ .Values.rustFrontendService.otherEnvConfig | nindent 12 }}
             {{ end }}
