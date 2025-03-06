@@ -38,12 +38,10 @@ impl From<object_store::Error> for StorageError {
                 path,
                 source: source.into(),
             },
-            object_store::Error::Precondition { path, source } => {
-                StorageError::Precondition {
-                    path,
-                    source: source.into(),
-                }
-            }
+            object_store::Error::Precondition { path, source } => StorageError::Precondition {
+                path,
+                source: source.into(),
+            },
             object_store::Error::NotModified { path, source } => StorageError::NotModified {
                 path,
                 source: source.into(),
