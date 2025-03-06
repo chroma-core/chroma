@@ -8,7 +8,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use chroma_storage::{ETag, PutError, PutOptions, Storage};
+use chroma_storage::{ETag, PutOptions, Storage, StorageError};
 use setsum::Setsum;
 
 use crate::{
@@ -151,8 +151,11 @@ impl Snapshot {
                 .into_bytes();
             let options = PutOptions::if_not_exists();
             match storage.put_bytes(&self.path, payload, options).await {
-                Ok(()) => return Ok(()),
-                Err(PutError::ConditionNotMet) => {
+                Ok(()) => {
+                    println!("installed snapshot");
+                    return Ok(());
+                }
+                Err(StorageError::Precondition { path: _, source: _ }) => {
                     // NOTE(rescrv):  This is something of a lie.  We know that someone put the
                     // file before us, and we know the setsum of the file is embedded in the path.
                     // Because the setsum is only calculable if you have the file and we assume
@@ -464,9 +467,10 @@ impl Manifest {
             };
             match storage.put_bytes(&self.path, payload, options).await {
                 Ok(()) => {
+                    println!("installed manifest");
                     return Ok(());
                 }
-                Err(PutError::ConditionNotMet) => {
+                Err(StorageError::Precondition { path: _, source: _ }) => {
                     return Err(Error::LogContention);
                 }
                 Err(e) => {
