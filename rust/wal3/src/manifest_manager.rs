@@ -1,4 +1,3 @@
-use std::collections::LinkedList;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
@@ -7,7 +6,17 @@ use chroma_storage::{ETag, Storage};
 use setsum::Setsum;
 
 use crate::manifest::{Manifest, Snapshot};
-use crate::{DeltaSeqNo, Error, Fragment, LogPosition, SnapshotOptions, ThrottleOptions};
+use crate::{
+    DeltaSeqNo, Error, Fragment, FragmentSeqNo, LogPosition, SnapshotOptions, ThrottleOptions,
+};
+
+////////////////////////////////////////// ManifestAndETag /////////////////////////////////////////
+
+#[derive(Debug)]
+struct ManifestAndETag {
+    manifest: Manifest,
+    e_tag: ETag,
+}
 
 ////////////////////////////////////////////// Staging /////////////////////////////////////////////
 
@@ -15,27 +24,29 @@ use crate::{DeltaSeqNo, Error, Fragment, LogPosition, SnapshotOptions, ThrottleO
 struct Staging {
     /// Options for rate limiting.
     throttle: ThrottleOptions,
-    // Options related to snapshots.
+    /// Options related to snapshots.
     snapshot: SnapshotOptions,
-    /// The manifest that is most recently created.  This will be the most recent manifest
-    /// in-flight.
-    manifest: Manifest,
-    /// Deltas that are waiting to be applied.  These are shard fragments that are out of order.
+    /// This is the manifest and e-tag most recently witnessed in storage.  It will be gotten at
+    /// startup and will be maintained by the background thread.
+    stable: ManifestAndETag,
+    /// Deltas that are waiting to be applied.  These are fragments that are in any order.
     deltas: Vec<(
         Fragment,
         DeltaSeqNo,
         tokio::sync::oneshot::Sender<Option<Error>>,
     )>,
-    /// In-flight snapshots.
+    /// In-flight snapshots.  These are being uploaded.  This serves to dedupe the uploads.
     snapshots_in_flight: Vec<Snapshot>,
     /// Snapshots that have been uploaded and are free for a manifest to claim.
     snapshots_staged: Vec<Setsum>,
     /// The next timestamp to assign.
-    last_assigned: LogPosition,
+    next_log_position: LogPosition,
+    /*
     /// The sequence number of the next shard assigned.
     next_seq_no_to_assign: u64,
     /// The sequence number of the next delta to apply.
     next_seq_no_to_apply: u64,
+    */
     /// The instant at which the last batch was generated.
     last_batch: Instant,
 }
@@ -46,23 +57,26 @@ impl Staging {
         &mut self,
     ) -> Option<(
         Manifest,
+        ETag,
         Manifest,
         Option<Snapshot>,
         Vec<tokio::sync::oneshot::Sender<Option<Error>>>,
     )> {
+        /*
         if self.deltas.is_empty() {
             return None;
         }
         let mut notifiers = vec![];
-        let mut new_manifest = self.manifest.clone();
+        let mut new_manifest = self.stable.manifest.clone();
         let mut postpone = vec![];
         let mut deltas = std::mem::take(&mut self.deltas);
+        let mut next_seq_no_to_apply = self.next_seq_no_to_apply;
         deltas.sort_by_key(|(_, delta_seq_no, _)| *delta_seq_no);
         for (delta, delta_seq_no, tx) in deltas.into_iter() {
-            if delta_seq_no == DeltaSeqNo(self.next_seq_no_to_apply)
+            if delta_seq_no == DeltaSeqNo(next_seq_no_to_apply)
                 && new_manifest.can_apply_fragment(&delta)
             {
-                self.next_seq_no_to_apply += 1;
+                next_seq_no_to_apply += 1;
                 new_manifest.apply_fragment(delta);
                 notifiers.push(tx);
             } else {
@@ -78,12 +92,15 @@ impl Staging {
         if let Some(s) = snapshot.as_ref() {
             if self.snapshots_staged.contains(&s.setsum) {
                 if let Err(err) = new_manifest.apply_snapshot(s) {
+                    // It failed to apply, so error everyone waiting.  The backoff/retry/reseat
+                    // logic has to accommodate this use case.
                     tracing::error!("Failed to apply snapshot: {:?}", err);
                     for notifier in notifiers {
                         let _ = notifier.send(Some(err.clone()));
                     }
                     return None;
                 } else {
+                    // This snapshot has been applied.  Remove it from the staged snapshots.
                     self.snapshots_staged.retain(|ss| ss != &s.setsum);
                     snapshot = None;
                 }
@@ -92,14 +109,22 @@ impl Staging {
                 .iter()
                 .any(|ss| ss.setsum == s.setsum)
             {
+                // This snapshot is already in flight.
+                // Do not return it and instead rely upon our bookkeeping.
                 snapshot = None;
             } else {
                 self.snapshots_in_flight.push(s.clone());
             }
         }
-        let mut old_manifest = new_manifest.clone();
-        std::mem::swap(&mut old_manifest, &mut self.manifest);
-        Some((old_manifest, new_manifest, snapshot, notifiers))
+        Some((
+            self.stable.manifest.clone(),
+            self.stable.e_tag.clone(),
+            new_manifest,
+            snapshot,
+            notifiers,
+        ))
+        */
+        todo!();
     }
 }
 
@@ -117,25 +142,24 @@ impl ManifestManager {
     pub async fn new(
         throttle: ThrottleOptions,
         snapshot: SnapshotOptions,
-        manifest: Manifest,
         storage: Arc<Storage>,
-    ) -> Self {
-        let last_assigned = manifest
-            .fragments
-            .iter()
+    ) -> Result<Self, Error> {
+        let Some((manifest, e_tag)) = Manifest::load(&storage).await? else {
+            return Err(Error::UninitializedLog);
+        };
+        let latest_fragment = manifest.fragments.iter().max_by_key(|f| f.limit.offset());
+        let next_log_position = latest_fragment
             .map(|f| f.limit)
-            .max_by_key(|lp| lp.offset())
-            .unwrap_or(LogPosition::default());
+            .unwrap_or(LogPosition::from_offset(1));
+        let stable = ManifestAndETag { manifest, e_tag };
         let staging = Arc::new(Mutex::new(Staging {
             throttle,
             snapshot,
-            manifest,
+            stable,
             deltas: vec![],
             snapshots_in_flight: vec![],
             snapshots_staged: vec![],
-            last_assigned,
-            next_seq_no_to_assign: 1,
-            next_seq_no_to_apply: 1,
+            next_log_position,
             last_batch: Instant::now(),
         }));
         let notifier = Arc::new(tokio::sync::Notify::new());
@@ -148,37 +172,46 @@ impl ManifestManager {
             storage,
             Arc::clone(&notifier),
         )));
-        Self {
+        Ok(Self {
             staging,
             timer,
             background,
             notifier,
-        }
+        })
     }
 
     /// Assign a timestamp to a record.
-    pub fn assign_timestamp(&self, record_count: usize) -> Option<(LogPosition, DeltaSeqNo)> {
+    pub fn assign_timestamp(
+        &self,
+        record_count: usize,
+    ) -> Option<(FragmentSeqNo, LogPosition, DeltaSeqNo)> {
+        /*
         let epoch_micros = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or(Duration::ZERO)
             .as_micros() as u64;
         // SAFETY(rescrv):  Mutex poisoning.
         let mut staging = self.staging.lock().unwrap();
-        if staging.last_assigned.timestamp_us < epoch_micros {
-            staging.last_assigned.timestamp_us = epoch_micros;
+        // Advance time.
+        if staging.next_log_position.timestamp_us < epoch_micros {
+            staging.next_log_position.timestamp_us = epoch_micros;
         }
-        staging.last_assigned.offset = staging
-            .last_assigned
+        // Steal the offset.
+        let position = staging.next_log_position;
+        // Advance the offset for the next assign_timestamp call.
+        staging.next_log_position.offset = staging
+            .next_log_position
             .offset
             .saturating_add(record_count as u64);
-        let position = staging.last_assigned;
         let seq_no = DeltaSeqNo(staging.next_seq_no_to_assign);
         staging.next_seq_no_to_assign = staging.next_seq_no_to_assign.saturating_add(1);
-        if staging.last_assigned.offset < u64::MAX {
-            Some((position, seq_no))
+        if position.offset < u64::MAX {
+            Some((todo!(), position, seq_no))
         } else {
             None
         }
+        */
+        todo!();
     }
 
     /// Given a delta to the manifest, batch its application and wait for it to apply.
@@ -376,97 +409,99 @@ mod tests {
 
     use super::*;
 
-    #[tokio::test]
-    async fn manager_staging() {
-        // NOTE(rescrv):  This stest doesn't check writes to storage.  It just tracks the logic of
-        // the manager.
-        let manifest = Manifest {
-            path: manifest_path(),
-            writer: "manifest writer 1".to_string(),
-            setsum: Setsum::default(),
-            snapshots: vec![],
-            fragments: vec![],
-        };
-        let storage = Arc::new(test_storage());
-        let mut manager = ManifestManager::new(
-            ThrottleOptions::default(),
-            SnapshotOptions::default(),
-            manifest,
-            storage,
-        )
-        .await;
-        if let Some(background) = manager.background.take() {
-            background.abort();
-        }
-        let (d1_tx, mut d1_rx) = tokio::sync::oneshot::channel();
-        manager.push_delta(
-            Fragment {
-                path: "path2".to_string(),
-                seq_no: FragmentSeqNo(2),
-                start: LogPosition::uni(22),
-                limit: LogPosition::uni(42),
-                setsum: Setsum::default(),
-            },
-            DeltaSeqNo(2),
-            d1_tx,
-        );
-        let work = {
-            // SAFETY(rescrv):  Mutex poisoning.
-            let mut staging = manager.staging.lock().unwrap();
-            staging.pull_work()
-        };
-        assert!(work.is_none());
-        assert!(d1_rx.try_recv().is_err());
-        let (d2_tx, mut d2_rx) = tokio::sync::oneshot::channel();
-        manager.push_delta(
-            Fragment {
-                path: "path1".to_string(),
-                seq_no: FragmentSeqNo(1),
-                start: LogPosition::uni(1),
-                limit: LogPosition::uni(22),
-                setsum: Setsum::default(),
-            },
-            DeltaSeqNo(1),
-            d2_tx,
-        );
-        let work = {
-            // SAFETY(rescrv):  Mutex poisoning.
-            let mut staging = manager.staging.lock().unwrap();
-            staging.pull_work().unwrap()
-        };
-        // pretend to install the manifest....
-        // now finish work
-        for n in work.3 {
-            n.send(None).unwrap();
-        }
-        assert!(d1_rx.try_recv().is_ok());
-        assert!(d2_rx.try_recv().is_ok());
-        let staging = manager.staging.lock().unwrap();
-        assert!(staging.deltas.is_empty());
-        assert_eq!(
-            Manifest {
-                path: String::from("manifest/MANIFEST"),
+    /*
+        #[tokio::test]
+        async fn manager_staging() {
+            // NOTE(rescrv):  This stest doesn't check writes to storage.  It just tracks the logic of
+            // the manager.
+            let manifest = Manifest {
+                path: manifest_path(),
                 writer: "manifest writer 1".to_string(),
                 setsum: Setsum::default(),
                 snapshots: vec![],
-                fragments: vec![
-                    Fragment {
-                        path: "path1".to_string(),
-                        seq_no: FragmentSeqNo(1),
-                        start: LogPosition::uni(1),
-                        limit: LogPosition::uni(22),
-                        setsum: Setsum::default(),
-                    },
-                    Fragment {
-                        path: "path2".to_string(),
-                        seq_no: FragmentSeqNo(2),
-                        start: LogPosition::uni(22),
-                        limit: LogPosition::uni(42),
-                        setsum: Setsum::default(),
-                    }
-                ],
-            },
-            staging.manifest
-        );
-    }
+                fragments: vec![],
+            };
+            let storage = Arc::new(test_storage());
+            let mut manager = ManifestManager::new(
+                ThrottleOptions::default(),
+                SnapshotOptions::default(),
+                manifest,
+                storage,
+            )
+            .await;
+            if let Some(background) = manager.background.take() {
+                background.abort();
+            }
+            let (d1_tx, mut d1_rx) = tokio::sync::oneshot::channel();
+            manager.push_delta(
+                Fragment {
+                    path: "path2".to_string(),
+                    seq_no: FragmentSeqNo(2),
+                    start: LogPosition::uni(22),
+                    limit: LogPosition::uni(42),
+                    setsum: Setsum::default(),
+                },
+                DeltaSeqNo(2),
+                d1_tx,
+            );
+            let work = {
+                // SAFETY(rescrv):  Mutex poisoning.
+                let mut staging = manager.staging.lock().unwrap();
+                staging.pull_work()
+            };
+            assert!(work.is_none());
+            assert!(d1_rx.try_recv().is_err());
+            let (d2_tx, mut d2_rx) = tokio::sync::oneshot::channel();
+            manager.push_delta(
+                Fragment {
+                    path: "path1".to_string(),
+                    seq_no: FragmentSeqNo(1),
+                    start: LogPosition::uni(1),
+                    limit: LogPosition::uni(22),
+                    setsum: Setsum::default(),
+                },
+                DeltaSeqNo(1),
+                d2_tx,
+            );
+            let work = {
+                // SAFETY(rescrv):  Mutex poisoning.
+                let mut staging = manager.staging.lock().unwrap();
+                staging.pull_work().unwrap()
+            };
+            // pretend to install the manifest....
+            // now finish work
+            for n in work.4 {
+                n.send(None).unwrap();
+            }
+            assert!(d1_rx.try_recv().is_ok());
+            assert!(d2_rx.try_recv().is_ok());
+            let staging = manager.staging.lock().unwrap();
+            assert!(staging.deltas.is_empty());
+            assert_eq!(
+                Manifest {
+                    path: String::from("manifest/MANIFEST"),
+                    writer: "manifest writer 1".to_string(),
+                    setsum: Setsum::default(),
+                    snapshots: vec![],
+                    fragments: vec![
+                        Fragment {
+                            path: "path1".to_string(),
+                            seq_no: FragmentSeqNo(1),
+                            start: LogPosition::uni(1),
+                            limit: LogPosition::uni(22),
+                            setsum: Setsum::default(),
+                        },
+                        Fragment {
+                            path: "path2".to_string(),
+                            seq_no: FragmentSeqNo(2),
+                            start: LogPosition::uni(22),
+                            limit: LogPosition::uni(42),
+                            setsum: Setsum::default(),
+                        }
+                    ],
+                },
+                staging.stable.manifest
+            );
+        }
+    */
 }

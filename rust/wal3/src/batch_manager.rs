@@ -10,14 +10,12 @@ use crate::{
 
 #[derive(Debug)]
 struct FragmentState {
-    next_seq_no: FragmentSeqNo,
     next_write: Instant,
     writers_active: usize,
 }
 
 impl FragmentState {
     fn set_next_write(&mut self, options: &ThrottleOptions) {
-        self.next_seq_no += 1;
         self.next_write =
             Instant::now() + Duration::from_micros(1_000_000 / options.throughput as u64);
     }
@@ -42,23 +40,23 @@ impl ManagerState {
         options: &ThrottleOptions,
         manifest_manager: &ManifestManager,
         record_count: usize,
-    ) -> Option<(FragmentSeqNo, LogPosition, DeltaSeqNo)> {
+    ) -> Result<Option<(FragmentSeqNo, LogPosition, DeltaSeqNo)>, Error> {
         if self.fragment.next_write > Instant::now() {
-            return None;
+            return Ok(None);
         }
         if self.fragment.writers_active > options.outstanding {
-            return None;
+            return Ok(None);
         }
-        let (log_position, delta_seq_no) = match manifest_manager.assign_timestamp(record_count) {
-            Some(log_position) => log_position,
-            None => {
-                panic!("log full");
-            }
-        };
-        let next_seq_no = self.fragment.next_seq_no;
+        let (next_seq_no, log_position, delta_seq_no) =
+            match manifest_manager.assign_timestamp(record_count) {
+                Some(log_position) => log_position,
+                None => {
+                    return Err(Error::LogFull);
+                }
+            };
         self.fragment.writers_active += 1;
         self.fragment.set_next_write(options);
-        Some((next_seq_no, log_position, delta_seq_no))
+        Ok(Some((next_seq_no, log_position, delta_seq_no)))
     }
 
     fn finish_write(&mut self) {
@@ -78,11 +76,9 @@ pub struct BatchManager {
 }
 
 impl BatchManager {
-    pub fn new(options: ThrottleOptions, initial_manifest: &Manifest) -> Option<Self> {
-        let next_seq_no = initial_manifest.next_fragment_seq_no()?;
+    pub fn new(options: ThrottleOptions) -> Option<Self> {
         let next_write = Instant::now();
         let fragment = FragmentState {
-            next_seq_no,
             next_write,
             writers_active: 0,
         };
@@ -131,19 +127,22 @@ impl BatchManager {
     pub fn take_work(
         &self,
         manifest_manager: &ManifestManager,
-    ) -> Option<(
-        FragmentSeqNo,
-        LogPosition,
-        DeltaSeqNo,
-        Vec<(
-            Vec<u8>,
-            tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
+    ) -> Result<
+        Option<(
+            FragmentSeqNo,
+            LogPosition,
+            DeltaSeqNo,
+            Vec<(
+                Vec<u8>,
+                tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
+            )>,
         )>,
-    )> {
+        Error,
+    > {
         // SAFETY(rescrv): Mutex poisoning.
         let mut state = self.state.lock().unwrap();
         if state.enqueued.is_empty() {
-            return None;
+            return Ok(None);
         }
         let batch_size = self.batch_size();
         let mut batch_size =
@@ -166,14 +165,17 @@ impl BatchManager {
                 < Duration::from_micros(self.options.batch_interval_us as u64)
         {
             self.write_finished.notify_one();
-            return None;
+            return Ok(None);
         }
-        let (fragment_seq_no, log_position, delta_seq_no) =
-            state.select_for_write(&self.options, manifest_manager, batch_size)?;
+        let Some((fragment_seq_no, log_position, delta_seq_no)) =
+            state.select_for_write(&self.options, manifest_manager, batch_size)?
+        else {
+            return Ok(None);
+        };
         let mut work = std::mem::take(&mut state.enqueued);
         state.enqueued = work.split_off(batch_size);
         state.last_batch = Instant::now();
-        Some((fragment_seq_no, log_position, delta_seq_no, work))
+        Ok(Some((fragment_seq_no, log_position, delta_seq_no, work)))
     }
 
     pub fn update_average_batch_size(&self, records: usize) {

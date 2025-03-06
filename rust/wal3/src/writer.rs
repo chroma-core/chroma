@@ -48,20 +48,15 @@ impl LogWriter {
         storage: Arc<Storage>,
     ) -> Result<Arc<Self>, Error> {
         let options = Arc::new(options);
-        let manifest = Manifest::load(&storage)
-            .await?
-            .ok_or(Error::UninitializedLog)?;
         let done = AtomicBool::new(false);
         let (reap, mut rx) = tokio::sync::mpsc::channel(1_000);
-        let batch_manager =
-            BatchManager::new(options.throttle_fragment, &manifest).ok_or(Error::Internal)?;
+        let batch_manager = BatchManager::new(options.throttle_fragment).ok_or(Error::Internal)?;
         let manifest_manager = ManifestManager::new(
             options.throttle_manifest,
             options.snapshot_manifest,
-            manifest,
             Arc::clone(&storage),
         )
-        .await;
+        .await?;
         let reaper = Mutex::new(None);
         let flusher = Mutex::new(None);
         let this = Arc::new(Self {
@@ -83,14 +78,19 @@ impl LogWriter {
         let flusher = tokio::task::spawn(async move {
             while !that.done.load(std::sync::atomic::Ordering::Relaxed) {
                 that.batch_manager.wait_for_writable().await;
-                if let Some((fragment_seq_no, log_position, delta_seq_no, work)) =
-                    that.batch_manager.take_work(&that.manifest_manager)
-                {
-                    Arc::clone(&that)
-                        .append_batch(fragment_seq_no, log_position, delta_seq_no, work)
-                        .await;
-                } else {
-                    tokio::time::sleep(that.batch_manager.until_next_time()).await;
+                match that.batch_manager.take_work(&that.manifest_manager) {
+                    Ok(Some((fragment_seq_no, log_position, delta_seq_no, work))) => {
+                        Arc::clone(&that)
+                            .append_batch(fragment_seq_no, log_position, delta_seq_no, work)
+                            .await;
+                    }
+                    Ok(None) => {
+                        tokio::time::sleep(that.batch_manager.until_next_time()).await;
+                    }
+                    Err(err) => {
+                        tracing::error!("batch_manager.take_work: {:?}", err);
+                        tokio::time::sleep(that.batch_manager.until_next_time()).await;
+                    }
                 }
             }
         });
@@ -130,7 +130,7 @@ impl LogWriter {
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.batch_manager.push_work(message, tx);
         if let Some((fragment_seq_no, log_position, delta_seq_no, work)) =
-            self.batch_manager.take_work(&self.manifest_manager)
+            self.batch_manager.take_work(&self.manifest_manager)?
         {
             let this = Arc::clone(self);
             let jh = tokio::task::spawn(async move {
