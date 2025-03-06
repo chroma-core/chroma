@@ -28,6 +28,9 @@ spec:
     spec:
       containers:
         - name: rust-frontend-service
+          {{ if .Values.rustFrontendService.command }}
+          command: {{ .Values.rustFrontendService.command }}
+          {{ end }}
           image: "{{ .Values.rustFrontendService.image.repository }}:{{ .Values.rustFrontendService.image.tag }}"
           imagePullPolicy: IfNotPresent
           readinessProbe:
