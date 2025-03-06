@@ -28,11 +28,10 @@ FROM debian:stable-slim AS runner
 
 RUN apt-get update && apt-get install -y dumb-init libssl3 && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /chroma/rust/frontend/sample_configs/distributed.yaml /config/config.yaml
 COPY --from=builder /chroma/rust/frontend/sample_configs/docker_single_node.yaml /config.yaml
 COPY --from=builder /chroma/chroma /usr/local/bin/chroma
 
 EXPOSE 8000
 
 ENTRYPOINT [ "dumb-init", "--", "chroma" ]
-CMD [ "run", "--config", "/config/config.yaml" ]
+CMD [ "run", "--config", "/config.yaml" ]

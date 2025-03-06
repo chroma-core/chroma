@@ -35,6 +35,7 @@ use futures::stream;
 use futures::FutureExt;
 use futures::Stream;
 use futures::StreamExt;
+use rand::Rng;
 use std::clone::Clone;
 use std::ops::Range;
 use std::sync::Arc;
@@ -375,7 +376,12 @@ impl S3Storage {
         total_size_bytes < self.upload_part_size_bytes
     }
 
-    pub async fn put_bytes(&self, key: &str, bytes: Vec<u8>) -> Result<(), S3PutError> {
+    pub async fn put_bytes(
+        &self,
+        key: &str,
+        bytes: Vec<u8>,
+        options: PutOptions,
+    ) -> Result<(), S3PutError> {
         let bytes = Arc::new(Bytes::from(bytes));
 
         self.put_object(
@@ -385,7 +391,7 @@ impl S3Storage {
                 let bytes = bytes.clone();
                 async move { Ok(ByteStream::from(bytes.slice(range))) }.boxed()
             },
-            PutOptions::default(),
+            options,
         )
         .await
     }
@@ -749,6 +755,30 @@ impl Configurable<StorageConfig> for S3Storage {
     }
 }
 
+pub async fn s3_client_for_test_with_new_bucket() -> crate::Storage {
+    // Set up credentials assuming minio is running locally
+    let cred =
+        aws_sdk_s3::config::Credentials::new("minio", "minio123", None, None, "loaded-from-env");
+
+    // Set up s3 client
+    let config = aws_sdk_s3::config::Builder::new()
+        .endpoint_url("http://127.0.0.1:9000".to_string())
+        .credentials_provider(cred)
+        .behavior_version_latest()
+        .region(aws_sdk_s3::config::Region::new("us-east-1"))
+        .force_path_style(true)
+        .build();
+
+    let storage = S3Storage::new(
+        &format!("test-{}", rand::thread_rng().gen::<u64>()),
+        aws_sdk_s3::Client::from_conf(config),
+        1024 * 1024 * 8,
+        1024 * 1024 * 8,
+    );
+    storage.create_bucket().await.unwrap();
+    crate::Storage::S3(storage)
+}
+
 #[cfg(test)]
 mod tests {
     use std::future::ready;
@@ -795,7 +825,7 @@ mod tests {
 
         let test_data = "test data";
         storage
-            .put_bytes("test", test_data.as_bytes().to_vec())
+            .put_bytes("test", test_data.as_bytes().to_vec(), PutOptions::default())
             .await
             .unwrap();
 
@@ -877,6 +907,7 @@ mod tests {
             .put_bytes(
                 test_data_key.as_str(),
                 test_data_value_string.as_bytes().to_vec(),
+                crate::PutOptions::default(),
             )
             .await
             .unwrap();
