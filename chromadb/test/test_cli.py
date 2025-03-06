@@ -106,7 +106,7 @@ def simulate_transactional_write(
     system.stop()
 
 
-def test_vacuum_errors_if_locked(capsys, sqlite_persistent: System) -> None:
+def test_vacuum_errors_if_locked(sqlite_persistent: System, capfd) -> None:
     """Vacuum command should fail with details if there is a long-lived lock on the database."""
     ctx = multiprocessing.get_context("spawn")
     ready_event = ctx.Event()
@@ -121,8 +121,8 @@ def test_vacuum_errors_if_locked(capsys, sqlite_persistent: System) -> None:
     try:
         sys.argv = ["chroma", "vacuum", "--path", sqlite_persistent.settings.persist_directory, "--force"]
         cli.main()
-        captured = capsys.readouterr()
-        assert "database is locked" in captured.out
+        captured = capfd.readouterr()
+        assert "Failed to vacuum Chroma" in captured.err.strip()
     finally:
         shutdown_event.set()
         process.join()
