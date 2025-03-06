@@ -49,9 +49,6 @@ spec:
           env:
             - name: CONFIG_PATH
               value: "/config/config.yaml"
-            {{ if .Values.frontendService.otherEnvConfig }}
-              {{ .Values.frontendService.otherEnvConfig | nindent 12 }}
-            {{ end }}
             {{ if .Values.rustFrontendService.otherEnvConfig }}
               {{ .Values.rustFrontendService.otherEnvConfig | nindent 12 }}
             {{ end }}
