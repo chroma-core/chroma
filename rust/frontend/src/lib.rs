@@ -96,7 +96,7 @@ pub async fn frontend_service_entrypoint_with_config_system_registry(
         );
     }
 
-    let frontend = Frontend::try_from_config(&(fe_cfg, system), &registry)
+    let frontend = Frontend::try_from_config(&(fe_cfg, system.clone()), &registry)
         .await
         .expect("Error creating Frontend Config");
 
@@ -117,9 +117,16 @@ pub async fn frontend_service_entrypoint_with_config_system_registry(
         .map(rule_to_rule)
         .collect::<Result<Vec<_>, ScorecardRuleError>>()
         .expect("error creating scorecard");
-    FrontendServer::new(config.clone(), frontend, rules, auth, quota_enforcer)
-        .run()
-        .await;
+    FrontendServer::new(
+        config.clone(),
+        frontend,
+        rules,
+        auth,
+        quota_enforcer,
+        system,
+    )
+    .run()
+    .await;
 }
 
 pub async fn frontend_service_entrypoint_with_config(
