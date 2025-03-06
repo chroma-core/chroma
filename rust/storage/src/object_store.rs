@@ -8,7 +8,13 @@ use object_store::{GetOptions, GetRange, ObjectStore as ObjectStoreTrait, PutOpt
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::sync::Mutex;
 
-use super::{GetError, PutError, StorageConfigError};
+use super::{ETag, StorageConfigError, StorageError};
+
+impl From<object_store::Error> for StorageError {
+    fn from(_: object_store::Error) -> Self {
+        todo!();
+    }
+}
 
 #[derive(Clone)]
 pub struct ObjectStore {
@@ -75,7 +81,7 @@ impl ObjectStore {
         }
     }
 
-    pub async fn get(&self, key: &str) -> Result<Arc<Vec<u8>>, GetError> {
+    pub async fn get(&self, key: &str) -> Result<Arc<Vec<u8>>, StorageError> {
         // tracing::info!("ObjectStore::get called with key: {}", key);
         Ok(self
             .object_store
@@ -87,7 +93,14 @@ impl ObjectStore {
             .into())
     }
 
-    pub async fn get_parallel(&self, key: &str) -> Result<Arc<Vec<u8>>, GetError> {
+    pub async fn get_with_e_tag(
+        &self,
+        _: &str,
+    ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
+        Err(StorageError::NotImplemented)
+    }
+
+    pub async fn get_parallel(&self, key: &str) -> Result<Arc<Vec<u8>>, StorageError> {
         let meta = self.object_store.head(&Path::from(key)).await?;
         let file_size = meta.size;
         let mut pieces = vec![];
@@ -121,10 +134,15 @@ impl ObjectStore {
         Ok(Arc::new(output_buffer))
     }
 
-    pub async fn put_file(&self, key: &str, path: &str) -> Result<(), PutError> {
+    pub async fn put_file(&self, key: &str, path: &str) -> Result<(), StorageError> {
         let multipart = self.object_store.put_multipart(&Path::from(key)).await?;
         let multipart = Arc::new(Mutex::new(multipart));
-        let file_size = tokio::fs::metadata(path).await?.len();
+        let file_size = tokio::fs::metadata(path)
+            .await
+            .map_err(|err| StorageError::Generic {
+                source: Arc::new(err),
+            })?
+            .len();
         let path = path.to_string();
         async fn read_from_part_of_file(
             path: &str,
@@ -153,7 +171,9 @@ impl ObjectStore {
                     {
                         Ok(bytes) => bytes,
                         Err(e) => {
-                            return Err::<(), PutError>(e.into());
+                            return Err(StorageError::Generic {
+                                source: Arc::new(e),
+                            })
                         }
                     };
                 let mut multipart = multipart.lock().await;
@@ -172,7 +192,7 @@ impl ObjectStore {
         key: &str,
         bytes: Vec<u8>,
         options: crate::PutOptions,
-    ) -> Result<(), PutError> {
+    ) -> Result<(), StorageError> {
         let mut object_store_put_options = PutOptions::default();
         if options.if_not_exists {
             object_store_put_options.mode = object_store::PutMode::Create;
@@ -191,7 +211,7 @@ impl ObjectStore {
         Ok(())
     }
 
-    pub async fn delete(&self, key: &str) -> Result<(), PutError> {
+    pub async fn delete(&self, key: &str) -> Result<(), StorageError> {
         tracing::info!(key = %key, "Deleting object");
 
         match self.object_store.delete(&Path::from(key)).await {
@@ -206,7 +226,7 @@ impl ObjectStore {
         }
     }
 
-    pub async fn rename(&self, src_key: &str, dst_key: &str) -> Result<(), PutError> {
+    pub async fn rename(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
         tracing::info!(src = %src_key, dst = %dst_key, "Renaming object");
 
         // Copy the object
@@ -236,7 +256,7 @@ impl ObjectStore {
         }
     }
 
-    pub async fn list_prefix(&self, prefix: &str) -> Result<Vec<String>, GetError> {
+    pub async fn list_prefix(&self, prefix: &str) -> Result<Vec<String>, StorageError> {
         let mut files = Vec::new();
         let mut stream = self.object_store.list(Some(&Path::from(prefix)));
 
