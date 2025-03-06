@@ -63,6 +63,23 @@ pub struct FrontendConfig {
     pub executor: ExecutorConfig,
 }
 
+impl FrontendConfig {
+    pub fn sqlite_in_memory() -> Self {
+        Self {
+            allow_reset: false,
+            sqlitedb: Some(SqliteDBConfig {
+                url: None,
+                ..Default::default()
+            }),
+            segment_manager: default_segment_manager_config(),
+            sysdb: default_sysdb_config(),
+            collections_with_segments_provider: Default::default(),
+            log: default_log_config(),
+            executor: default_executor_config(),
+        }
+    }
+}
+
 fn default_otel_service_name() -> String {
     "chromadb".to_string()
 }

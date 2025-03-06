@@ -126,7 +126,17 @@ impl LocalExecutor {
             .await?;
         if let Some(dimensionality) = collection_and_segments.collection.dimension {
             let allowed_user_ids = if plan.filter.where_clause.is_none() {
-                plan.filter.query_ids.unwrap_or_default()
+                match plan.filter.query_ids {
+                    Some(ids) => {
+                        if ids.is_empty() {
+                            return Ok(vec![Default::default(); plan.knn.embeddings.len()]);
+                        }
+                        ids
+                    }
+                    None => {
+                        vec![]
+                    }
+                }
             } else {
                 let filter_plan = Get {
                     scan: plan.scan.clone(),
@@ -287,5 +297,98 @@ impl Configurable<LocalExecutorConfig> for LocalExecutor {
             .get::<ComponentHandle<LocalCompactionManager>>()
             .map_err(|err| err.boxed())?;
         Ok(Self::new(hnsw_manager, sqlite_db, compactor_handle.clone()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chroma_config::{registry::Registry, Configurable};
+    use chroma_system::System;
+    use chroma_types::{
+        AddCollectionRecordsRequest, CreateCollectionRequest, IncludeList, QueryRequest,
+    };
+
+    use crate::{frontend::Frontend, FrontendConfig};
+
+    #[tokio::test]
+    async fn test_query() {
+        let registry = Registry::new();
+        let system = System::new();
+
+        let config_and_system = (FrontendConfig::sqlite_in_memory(), system);
+        let mut frontend = Frontend::try_from_config(&config_and_system, &registry)
+            .await
+            .unwrap();
+
+        // Add data
+        let collection = frontend
+            .create_collection(
+                CreateCollectionRequest::try_new(
+                    "default_tenant".to_string(),
+                    "default_database".to_string(),
+                    "test".to_string(),
+                    None,
+                    None,
+                    false,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        frontend
+            .add(
+                AddCollectionRecordsRequest::try_new(
+                    "default_tenant".to_string(),
+                    "default_database".to_string(),
+                    collection.collection_id,
+                    vec!["id1".to_string(), "id2".to_string()],
+                    Some(vec![vec![-1.0, -1.0], vec![1.0, 1.0]]),
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // Knn should work
+        let result = frontend
+            .query(
+                QueryRequest::try_new(
+                    "default_tenant".to_string(),
+                    "default_database".to_string(),
+                    collection.collection_id,
+                    None,
+                    None,
+                    vec![vec![0.5, 0.5]],
+                    10,
+                    IncludeList::default_query(),
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.ids[0], vec!["id2".to_string(), "id1".to_string()]);
+
+        // An empty list of IDs should return no results
+        let result = frontend
+            .query(
+                QueryRequest::try_new(
+                    "default_tenant".to_string(),
+                    "default_database".to_string(),
+                    collection.collection_id,
+                    Some(vec![]),
+                    None,
+                    vec![vec![0.5, 0.5]],
+                    10,
+                    IncludeList::default_query(),
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.ids[0].len(), 0);
     }
 }
