@@ -208,11 +208,15 @@ impl DeleteUnusedFilesOperator {
 mod tests {
     use super::*;
     use chroma_storage::local::LocalStorage;
+    use chroma_storage::PutOptions;
     use std::path::Path;
     use tempfile::TempDir;
 
     async fn create_test_file(storage: &Storage, path: &str, content: &[u8]) {
-        storage.put_bytes(path, content.to_vec()).await.unwrap();
+        storage
+            .put_bytes(path, content.to_vec(), PutOptions::default())
+            .await
+            .unwrap();
     }
 
     #[tokio::test]

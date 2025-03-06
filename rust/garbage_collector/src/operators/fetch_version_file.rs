@@ -119,6 +119,7 @@ mod tests {
     use chroma_storage::config::{
         ObjectStoreBucketConfig, ObjectStoreConfig, ObjectStoreType, StorageConfig,
     };
+    use chroma_storage::PutOptions;
     use tracing_subscriber;
 
     async fn setup_test_storage() -> Storage {
@@ -156,7 +157,7 @@ mod tests {
 
         // Add more detailed error handling for the put operation
         match storage
-            .put_bytes(test_file_path, test_content.clone())
+            .put_bytes(test_file_path, test_content.clone(), PutOptions::default())
             .await
         {
             Ok(_) => tracing::info!("Successfully wrote test file"),
