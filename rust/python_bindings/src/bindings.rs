@@ -22,7 +22,7 @@ use chroma_types::{
     ListCollectionsRequest, ListDatabasesRequest, Metadata, QueryResponse, UpdateCollectionRequest,
     UpdateMetadata,
 };
-use cli::chroma_cli;
+use chroma_cli::chroma_cli;
 use pyo3::{
     exceptions::PyValueError, pyclass, pyfunction, pymethods, types::PyAnyMethods, PyObject, Python,
 };

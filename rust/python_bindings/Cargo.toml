@@ -29,5 +29,5 @@ chroma-system = { workspace = true }
 chroma-types = { workspace = true, features = ["pyo3"] }
 chroma-error = { workspace = true, features = ["validator"] }
 mdac = { workspace = true }
-cli = { workspace = true }
+chroma-cli = { workspace = true }
 

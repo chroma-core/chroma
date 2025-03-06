@@ -1,11 +1,11 @@
-use std::collections::HashMap;
-use std::{fs, io};
-use std::fs::File;
-use std::io::{BufRead, BufReader, BufWriter, Write};
-use std::path::PathBuf;
 use chroma_frontend::config::FrontendServerConfig;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::path::PathBuf;
+use std::{fs, io};
 
 pub const LOGO: &str = "
                 \x1b[38;5;069m(((((((((    \x1b[38;5;203m(((((\x1b[38;5;220m####
@@ -152,10 +152,15 @@ pub fn parse_credentials_file(credentials_file: &PathBuf) -> io::Result<HashMap<
 
         if trimmed.starts_with('[') && trimmed.ends_with(']') {
             if let Some(profile) = current_profile.take() {
-                if let (Some(api_key), Some(tenant_id)) = (current_api_key.take(), current_tenant_id.take()) {
+                if let (Some(api_key), Some(tenant_id)) =
+                    (current_api_key.take(), current_tenant_id.take())
+                {
                     profiles.insert(profile, Profile { api_key, tenant_id });
                 } else {
-                    eprintln!("Warning: Profile '{}' is missing an api_key or tenant_id", profile);
+                    eprintln!(
+                        "Warning: Profile '{}' is missing an api_key or tenant_id",
+                        profile
+                    );
                 }
             }
             let profile_name = &trimmed[1..trimmed.len() - 1];
@@ -177,10 +182,14 @@ pub fn parse_credentials_file(credentials_file: &PathBuf) -> io::Result<HashMap<
     }
 
     if let Some(profile) = current_profile.take() {
-        if let (Some(api_key), Some(tenant_id)) = (current_api_key.take(), current_tenant_id.take()) {
+        if let (Some(api_key), Some(tenant_id)) = (current_api_key.take(), current_tenant_id.take())
+        {
             profiles.insert(profile, Profile { api_key, tenant_id });
         } else {
-            eprintln!("Warning: Profile '{}' is missing an api_key or tenant_id", profile);
+            eprintln!(
+                "Warning: Profile '{}' is missing an api_key or tenant_id",
+                profile
+            );
         }
     }
 
@@ -196,8 +205,6 @@ pub fn write_cli_config(current_profile: String) {
 
 pub fn read_cli_config() -> CliConfig {
     let path = get_or_create_config_file();
-    let file = File::open(path)
-        .expect("\nCould not read config file\n");
-    serde_json::from_reader(file)
-        .expect("\nCould not parse config file\n")
+    let file = File::open(path).expect("\nCould not read config file\n");
+    serde_json::from_reader(file).expect("\nCould not parse config file\n")
 }

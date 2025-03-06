@@ -1345,6 +1345,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "chroma-cli"
+version = "1.0.0"
+dependencies = [
+ "chroma-config",
+ "chroma-frontend",
+ "chroma-log",
+ "chroma-segment",
+ "chroma-sqlite",
+ "chroma-sysdb",
+ "chroma-system",
+ "chroma-types",
+ "clap",
+ "colored",
+ "dialoguer",
+ "dirs 6.0.0",
+ "indicatif",
+ "regex",
+ "reqwest 0.12.12",
+ "semver",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "webbrowser",
+]
+
+[[package]]
 name = "chroma-config"
 version = "0.1.0"
 dependencies = [
@@ -1739,6 +1766,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chroma-cache",
+ "chroma-cli",
  "chroma-config",
  "chroma-error",
  "chroma-frontend",
@@ -1748,7 +1776,6 @@ dependencies = [
  "chroma-sysdb",
  "chroma-system",
  "chroma-types",
- "cli",
  "mdac",
  "numpy",
  "pyo3",
@@ -1840,33 +1867,6 @@ name = "clap_lex"
 version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f46ad14479a25103f283c0f10005961cf086d8dc42205bb44c46ac563475dca6"
-
-[[package]]
-name = "cli"
-version = "1.0.0"
-dependencies = [
- "chroma-config",
- "chroma-frontend",
- "chroma-log",
- "chroma-segment",
- "chroma-sqlite",
- "chroma-sysdb",
- "chroma-system",
- "chroma-types",
- "clap",
- "colored",
- "dialoguer",
- "dirs 6.0.0",
- "indicatif",
- "regex",
- "reqwest 0.12.12",
- "semver",
- "serde",
- "serde_json",
- "sqlx",
- "tokio",
- "webbrowser",
-]
 
 [[package]]
 name = "cmsketch"

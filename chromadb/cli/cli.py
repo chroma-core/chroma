@@ -26,7 +26,7 @@ def update():
             print("Your Chroma version is up-to-date")
             return
 
-        print(f"A new version of Chroma is available!\nRun 'pip install --upgrade chromadb' to upgrade to version {latest}")
+        print(f"A new version of Chroma is available!\nIf you're using pip, run 'pip install --upgrade chromadb' to upgrade to version {latest}")
 
     except Exception as e:
         print("Couldn't fetch the latest Chroma version")

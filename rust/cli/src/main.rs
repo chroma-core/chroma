@@ -1,6 +1,6 @@
 #![windows_subsystem = "console"]
 
-use cli::chroma_cli;
+use chroma_cli::chroma_cli;
 use std::env;
 
 fn main() {
