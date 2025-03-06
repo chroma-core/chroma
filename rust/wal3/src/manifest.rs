@@ -43,6 +43,7 @@ pub struct SnapshotPointer {
 }
 
 impl SnapshotPointer {
+    /// An estimate on the number of bytes required to serialize this object as JSON.
     pub const JSON_SIZE_ESTIMATE: usize = 142;
 }
 
@@ -199,7 +200,7 @@ impl Manifest {
                 }
                 1
             } else {
-                unreachable!();
+                unreachable!("I checked A || B above, then checked A and B separately; should not reach here.");
             };
             let path = snapshot_path(setsum);
             Some(Snapshot {
@@ -216,7 +217,7 @@ impl Manifest {
     }
 
     /// Given a snapshot, apply it to the manifest.  This modifies the manifest to refer to the
-    /// snapshot and removes from the snapshot all data that is now part of the snapshot.
+    /// snapshot and removes from the manifest all data that is now part of the snapshot.
     pub fn apply_snapshot(&mut self, snapshot: &Snapshot) -> Result<(), Error> {
         if snapshot.fragments.is_empty() {
             return Ok(());
@@ -238,8 +239,13 @@ impl Manifest {
                 )));
             }
         }
+        // Remove all snapshots now part of the current snapshot.
         self.snapshots
             .retain(|s| !snapshot.snapshots.iter().any(|t| t.setsum == s.setsum));
+        // Remove all fragments referenced by the snapshot.
+        // This assumes the fragments are in offset order and that the snapshot is a contiguous set
+        // of fragments.
+        // The setsum is intended to catch cases where this doesn't hold.
         self.fragments = self.fragments.split_off(snapshot.fragments.len());
         self.snapshots.push(SnapshotPointer {
             setsum: snapshot.setsum,
@@ -266,20 +272,15 @@ impl Manifest {
     /// Once upon a time there was more parallelism in wal3 and this was a more interesting.  Now
     /// it mostly returns true unless internal invariants are violated.
     pub fn can_apply_fragment(&self, fragment: &Fragment) -> bool {
-        let Fragment {
-            path: _,
-            seq_no,
-            start,
-            limit,
-            setsum: _,
-        } = fragment;
         let max_seq_no = self
             .fragments
             .iter()
             .map(|f| f.seq_no)
             .max()
             .unwrap_or(FragmentSeqNo(0));
-        max_seq_no < max_seq_no + 1 && max_seq_no + 1 == *seq_no && start.offset() < limit.offset()
+        max_seq_no < max_seq_no + 1
+            && max_seq_no + 1 == fragment.seq_no
+            && fragment.start.offset() < fragment.limit.offset()
     }
 
     /// Modify the manifest to apply the fragment to it.
