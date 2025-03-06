@@ -6,6 +6,7 @@ on:
       - "*"
     branches:
       - main
+      - eculver/maybe-fix-python-tests
 
 jobs:
   check-tag:
