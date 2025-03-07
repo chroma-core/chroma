@@ -185,6 +185,7 @@ pub struct Manifest {
         serialize_with = "super::serialize_setsum"
     )]
     pub setsum: Setsum,
+    pub acc_bytes: u64,
     pub writer: String,
     pub snapshots: Vec<SnapshotPointer>,
     pub fragments: Vec<Fragment>,
@@ -334,6 +335,7 @@ impl Manifest {
     /// Modify the manifest to apply the fragment to it.
     pub fn apply_fragment(&mut self, fragment: Fragment) {
         self.setsum += fragment.setsum;
+        self.acc_bytes = self.acc_bytes.saturating_add(fragment.num_bytes);
         self.fragments.push(fragment);
     }
 
@@ -425,6 +427,7 @@ impl Manifest {
             path: manifest_path(prefix),
             writer: "TODO".to_string(),
             setsum: Setsum::default(),
+            acc_bytes: 0,
             snapshots: vec![],
             fragments: vec![],
         };
@@ -525,6 +528,7 @@ mod tests {
             seq_no: FragmentSeqNo(1),
             start: LogPosition::uni(1),
             limit: LogPosition::uni(42),
+            num_bytes: 4100,
             setsum: Setsum::default(),
         };
         assert!(!fragment.possibly_contains_position(LogPosition::uni(0)));
@@ -541,6 +545,7 @@ mod tests {
             seq_no: FragmentSeqNo(1),
             start: LogPosition::uni(1),
             limit: LogPosition::uni(22),
+            num_bytes: 4100,
             setsum: Setsum::default(),
         };
         let fragment2 = Fragment {
@@ -548,12 +553,14 @@ mod tests {
             seq_no: FragmentSeqNo(2),
             start: LogPosition::uni(22),
             limit: LogPosition::uni(42),
+            num_bytes: 4100,
             setsum: Setsum::default(),
         };
         let manifest = Manifest {
             path: String::from("manifest/MANIFEST.ffffffffffffffff"),
             writer: "manifest writer 1".to_string(),
             setsum: Setsum::default(),
+            acc_bytes: 8200,
             snapshots: vec![],
             fragments: vec![fragment1, fragment2],
         };
@@ -572,6 +579,7 @@ mod tests {
             seq_no: FragmentSeqNo(1),
             start: LogPosition::uni(1),
             limit: LogPosition::uni(22),
+            num_bytes: 4100,
             setsum: Setsum::from_hexdigest(
                 "4eec78e0b5cd15df7b36fd42cdc3aecb1986ffa3655c338201db88f80d855465",
             )
@@ -582,6 +590,7 @@ mod tests {
             seq_no: FragmentSeqNo(2),
             start: LogPosition::uni(22),
             limit: LogPosition::uni(42),
+            num_bytes: 4100,
             setsum: Setsum::from_hexdigest(
                 "dd901afef0e5d336aaa52a2df7f785c909091fd0aa011980de443a61a889d3e1",
             )
@@ -594,6 +603,7 @@ mod tests {
                 "307d93deb6b3e91525dc277027bc34958d8f1e74965e4c027820c3596e0f2847",
             )
             .unwrap(),
+            acc_bytes: 8200,
             snapshots: vec![],
             fragments: vec![fragment1.clone(), fragment2.clone()],
         };
@@ -605,6 +615,7 @@ mod tests {
                 "6c5b5ee2c5e741a8d190d215d6cb2802a57ce0d3bb5a1a0223964e97acfa8083",
             )
             .unwrap(),
+            acc_bytes: 8200,
             snapshots: vec![],
             fragments: vec![fragment1, fragment2],
         };
@@ -618,6 +629,7 @@ mod tests {
             seq_no: FragmentSeqNo(1),
             start: LogPosition::uni(1),
             limit: LogPosition::uni(22),
+            num_bytes: 41,
             setsum: Setsum::from_hexdigest(
                 "4eec78e0b5cd15df7b36fd42cdc3aecb1986ffa3655c338201db88f80d855465",
             )
@@ -628,6 +640,7 @@ mod tests {
             seq_no: FragmentSeqNo(2),
             start: LogPosition::uni(22),
             limit: LogPosition::uni(42),
+            num_bytes: 42,
             setsum: Setsum::from_hexdigest(
                 "dd901afef0e5d336aaa52a2df7f785c909091fd0aa011980de443a61a889d3e1",
             )
@@ -637,6 +650,7 @@ mod tests {
             path: String::from("manifest/MANIFEST.ffffffffffffffff"),
             writer: "manifest writer 1".to_string(),
             setsum: Setsum::default(),
+            acc_bytes: 0,
             snapshots: vec![],
             fragments: vec![],
         };
@@ -653,6 +667,7 @@ mod tests {
                     "307d93deb6b3e91525dc277027bc34958d8f1e74965e4c027820c3596e0f2847",
                 )
                 .unwrap(),
+                acc_bytes: 83,
                 snapshots: vec![],
                 fragments: vec![
                     Fragment {
@@ -660,6 +675,7 @@ mod tests {
                         seq_no: FragmentSeqNo(1),
                         start: LogPosition::uni(1),
                         limit: LogPosition::uni(22),
+                        num_bytes: 41,
                         setsum: Setsum::from_hexdigest(
                             "4eec78e0b5cd15df7b36fd42cdc3aecb1986ffa3655c338201db88f80d855465"
                         )
@@ -670,6 +686,7 @@ mod tests {
                         seq_no: FragmentSeqNo(2),
                         start: LogPosition::uni(22),
                         limit: LogPosition::uni(42),
+                        num_bytes: 42,
                         setsum: Setsum::from_hexdigest(
                             "dd901afef0e5d336aaa52a2df7f785c909091fd0aa011980de443a61a889d3e1"
                         )

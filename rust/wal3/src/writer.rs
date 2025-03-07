@@ -342,6 +342,7 @@ impl OnceLogWriter {
             seq_no: fragment_seq_no,
             start: log_position,
             limit: log_position + messages_len,
+            num_bytes: buffer.len() as u64,
             setsum,
         };
         self.manifest_manager.add_fragment(fragment).await?;
