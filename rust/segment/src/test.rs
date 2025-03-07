@@ -472,8 +472,18 @@ impl CheckRecord for MetadataExpression {
         let stored = record.metadata.as_ref().and_then(|m| m.get(&self.key));
         match &self.comparison {
             MetadataComparison::Primitive(primitive_operator, metadata_value) => {
+                // Convert int to float to make comparisons easier
+                let stored = stored.map(|v| match v {
+                    MetadataValue::Int(i) => MetadataValue::Float(*i as f64),
+                    v => v.clone(),
+                });
+                let metadata_value = match metadata_value {
+                    MetadataValue::Int(i) => MetadataValue::Float(*i as f64),
+                    v => v.clone(),
+                };
+
                 let match_type = matches!(
-                    (stored, metadata_value),
+                    (&stored, &metadata_value),
                     (Some(MetadataValue::Bool(_)), MetadataValue::Bool(_))
                         | (Some(MetadataValue::Int(_)), MetadataValue::Int(_))
                         | (Some(MetadataValue::Float(_)), MetadataValue::Float(_))
