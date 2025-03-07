@@ -23,6 +23,9 @@ log:
     port: 50051
     connect_timeout_ms: 5000
     request_timeout_ms: 5000
+compaction_client:
+  Grpc:
+    url: "compactionservice.chroma:50051" # todo
 executor:
   distributed:
     connections_per_node: 5

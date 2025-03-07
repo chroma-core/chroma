@@ -120,6 +120,8 @@ impl Bindings {
             collections_with_segments_provider: collection_cache_config,
             log: log_config,
             executor: executor_config,
+            compaction_client:
+                chroma_frontend::compaction_client::compaction_client::CompactionClientConfig::Local,
         };
 
         let frontend = runtime.block_on(async {

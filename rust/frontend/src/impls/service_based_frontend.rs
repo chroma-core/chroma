@@ -1,6 +1,6 @@
 use crate::{
-    config::FrontendConfig, executor::Executor, types::errors::ValidationError,
-    CollectionsWithSegmentsProvider,
+    compaction_client::compaction_client::CompactionClient, config::FrontendConfig,
+    executor::Executor, types::errors::ValidationError, CollectionsWithSegmentsProvider,
 };
 use backon::Retryable;
 use chroma_config::{registry, Configurable};
@@ -25,9 +25,10 @@ use chroma_types::{
     GetCollectionsError, GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest,
     GetResponse, GetTenantError, GetTenantRequest, GetTenantResponse, HealthCheckResponse,
     HeartbeatError, HeartbeatResponse, Include, ListCollectionsRequest, ListCollectionsResponse,
-    ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse, Metadata, Operation,
-    OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse, Segment,
-    SegmentScope, SegmentType, SegmentUuid, SingleNodeHnswParameters, UpdateCollectionError,
+    ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse, ManualCompactionError,
+    ManualCompactionRequest, ManualCompactionResponse, Metadata, Operation, OperationRecord,
+    QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse, Segment, SegmentScope,
+    SegmentType, SegmentUuid, SingleNodeHnswParameters, UpdateCollectionError,
     UpdateCollectionRecordsError, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
     UpdateCollectionRequest, UpdateCollectionResponse, UpsertCollectionRecordsError,
     UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, Where,
@@ -54,6 +55,7 @@ pub struct ServiceBasedFrontend {
     executor: Executor,
     log_client: Log,
     sysdb_client: SysDb,
+    compaction_client: CompactionClient,
     collections_with_segments_provider: CollectionsWithSegmentsProvider,
     max_batch_size: u32,
     metrics: Arc<Metrics>,
@@ -63,6 +65,7 @@ impl ServiceBasedFrontend {
     pub fn new(
         allow_reset: bool,
         sysdb_client: SysDb,
+        compaction_client: CompactionClient,
         collections_with_segments_provider: CollectionsWithSegmentsProvider,
         log_client: Log,
         executor: Executor,
@@ -84,6 +87,7 @@ impl ServiceBasedFrontend {
             executor,
             log_client,
             sysdb_client,
+            compaction_client,
             collections_with_segments_provider,
             max_batch_size,
             metrics,
@@ -192,6 +196,13 @@ impl ServiceBasedFrontend {
         self.sysdb_client.reset().await?;
         self.log_client.reset().await?;
         Ok(ResetResponse {})
+    }
+
+    pub async fn manually_compact(
+        &mut self,
+        request: ManualCompactionRequest,
+    ) -> Result<ManualCompactionResponse, ManualCompactionError> {
+        self.compaction_client.manually_compact(request).await
     }
 
     pub async fn create_tenant(
@@ -1089,9 +1100,16 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
         let executor =
             Executor::try_from_config(&(config.executor.clone(), system.clone()), registry).await?;
 
+        let compaction_client = CompactionClient::try_from_config(
+            &(config.compaction_client.clone(), system.clone()),
+            registry,
+        )
+        .await?;
+
         Ok(ServiceBasedFrontend::new(
             config.allow_reset,
             sysdb,
+            compaction_client,
             collections_with_segments_provider,
             log,
             executor,
