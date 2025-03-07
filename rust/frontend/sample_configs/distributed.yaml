@@ -1,3 +1,5 @@
+# This file is an example of configuring the frontend for
+# distributed chroma. It is used in our Tiltfile as well.
 open_telemetry:
   service_name: "rust-frontend-service"
   endpoint: "http://otel-collector:4317"

@@ -278,7 +278,7 @@ pub struct QuotaExceededError {
 
 #[derive(Error, Debug)]
 pub enum QuotaEnforcerError {
-    #[error("Quota exceeded")]
+    #[error("Quota exceeded {0:?}")]
     QuotaExceeded(QuotaExceededError),
     #[error("Missing API key in the request header")]
     ApiKeyMissing,
