@@ -8,7 +8,7 @@ sysdb:
 rustFrontendService:
 # We have to specify the command, because the Dockerfile uses the CLI since its shared with
 # single node, so in values.dev we pass the CONFIG_PATH into the chroma run command
-  command: '["chroma", "run", "$(CONFIG_PATH)"]'
+  command: '["chroma", "run", "--config", "$(CONFIG_PATH)"]'
   otherEnvConfig: |
     - name: CHROMA_ALLOW_RESET
       value: "true"
