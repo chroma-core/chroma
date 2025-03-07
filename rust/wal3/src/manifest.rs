@@ -513,7 +513,7 @@ mod tests {
     fn paths() {
         assert_eq!("myprefix/manifest/MANIFEST", manifest_path("myprefix"));
         assert_eq!(
-            "myprefix/snapshots/SNAPSHOT.00000000000000000000000000000000",
+            "myprefix/snapshot/SNAPSHOT.0000000000000000000000000000000000000000000000000000000000000000",
             snapshot_path("myprefix", Setsum::default())
         );
     }
