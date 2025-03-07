@@ -18,13 +18,12 @@ use crate::{
 
 /////////////////////////////////////////////// paths //////////////////////////////////////////////
 
-#[allow(dead_code)]
-pub fn manifest_path() -> String {
-    "manifest/MANIFEST".to_string()
+fn manifest_path(prefix: &str) -> String {
+    format!("{prefix}/manifest/MANIFEST")
 }
 
-fn snapshot_path(setsum: Setsum) -> String {
-    format!("snapshot/SNAPSHOT.{}", setsum.hexdigest())
+fn snapshot_path(prefix: &str, setsum: Setsum) -> String {
+    format!("{prefix}/snapshot/SNAPSHOT.{}", setsum.hexdigest())
 }
 
 fn snapshot_setsum(path: &str) -> Result<Setsum, Error> {
@@ -196,7 +195,11 @@ impl Manifest {
     //
     // This just creates a snapshot.  Install it to object store and then call apply_snapshot when
     // it is durable to modify the manifest.
-    pub fn generate_snapshot(&self, snapshot_options: SnapshotOptions) -> Option<Snapshot> {
+    pub fn generate_snapshot(
+        &self,
+        snapshot_options: SnapshotOptions,
+        prefix: &str,
+    ) -> Option<Snapshot> {
         // TODO(rescrv):  A real, random string.
         let writer = "TODO".to_string();
         let can_snapshot_snapshots = self.snapshots.iter().filter(|s| s.depth < 2).count()
@@ -247,7 +250,7 @@ impl Manifest {
             } else {
                 unreachable!("I checked A || B above, then checked A and B separately; should not reach here.");
             };
-            let path = snapshot_path(setsum);
+            let path = snapshot_path(prefix, setsum);
             Some(Snapshot {
                 path,
                 depth,
@@ -413,9 +416,13 @@ impl Manifest {
     }
 
     /// Initialize the log with an empty manifest.
-    pub async fn initialize(_: &LogWriterOptions, storage: &Storage) -> Result<(), Error> {
+    pub async fn initialize(
+        _: &LogWriterOptions,
+        storage: &Storage,
+        prefix: &str,
+    ) -> Result<(), Error> {
         let initial = Manifest {
-            path: manifest_path(),
+            path: manifest_path(prefix),
             writer: "TODO".to_string(),
             setsum: Setsum::default(),
             snapshots: vec![],
@@ -425,22 +432,20 @@ impl Manifest {
             .map_err(|e| Error::CorruptManifest(format!("could not encode JSON manifest: {e:?}")))?
             .into_bytes();
         storage
-            .put_bytes(&manifest_path(), payload, PutOptions::if_not_exists())
+            .put_bytes(&initial.path, payload, PutOptions::if_not_exists())
             .await
             .map_err(Arc::new)?;
         Ok(())
     }
 
     /// Load the latest manifest from object storage.
-    pub async fn load(storage: &Storage) -> Result<Option<(Manifest, ETag)>, Error> {
-        let (manifest, e_tag) = storage
-            .get_with_e_tag(&manifest_path())
-            .await
-            .map_err(Arc::new)?;
+    pub async fn load(storage: &Storage, prefix: &str) -> Result<Option<(Manifest, ETag)>, Error> {
+        let path = manifest_path(prefix);
+        let (manifest, e_tag) = storage.get_with_e_tag(&path).await.map_err(Arc::new)?;
         let Some(e_tag) = e_tag else {
             return Err(Error::CorruptManifest(format!(
                 "no ETag for manifest at {}",
-                manifest_path()
+                path
             )));
         };
         serde_json::from_slice(&manifest)
@@ -506,7 +511,11 @@ mod tests {
 
     #[test]
     fn paths() {
-        assert_eq!("manifest/MANIFEST", manifest_path());
+        assert_eq!("myprefix/manifest/MANIFEST", manifest_path("myprefix"));
+        assert_eq!(
+            "myprefix/snapshots/SNAPSHOT.00000000000000000000000000000000",
+            snapshot_path("myprefix", Setsum::default())
+        );
     }
 
     #[test]
