@@ -109,6 +109,23 @@ impl LocalHnswSegmentReader {
                             chroma_index::IndexUuid(segment.id.0),
                         )
                         .map_err(|_| LocalHnswSegmentReaderError::HnswIndexLoadError)?;
+
+                        let current_seq_id = {
+                            let (query, values) = Query::select()
+                                .column(MaxSeqId::SeqId)
+                                .from(MaxSeqId::Table)
+                                .and_where(
+                                    Expr::col(MaxSeqId::SegmentId).eq(segment.id.to_string()),
+                                )
+                                .build_sqlx(SqliteQueryBuilder);
+                            let row = sqlx::query_with(&query, values)
+                                .fetch_optional(sql_db.get_conn())
+                                .await?;
+                            row.map(|row| row.try_get::<u64, _>(0))
+                                .transpose()?
+                                .unwrap_or_default()
+                        };
+
                         // TODO(Sanket): Set allow reset appropriately.
                         return Ok(Self {
                             index: LocalHnswIndex {
@@ -118,6 +135,7 @@ impl LocalHnswSegmentReader {
                                     index_init: true,
                                     allow_reset: false,
                                     num_elements_since_last_persist: 0,
+                                    last_seen_seq_id: current_seq_id,
                                     sync_threshold: hnsw_configuration.sync_threshold,
                                     persist_path: Some(index_folder_str.to_string()),
                                     sqlite: sql_db,
@@ -158,6 +176,7 @@ impl LocalHnswSegmentReader {
                             index_init: true,
                             allow_reset: false,
                             num_elements_since_last_persist: 0,
+                            last_seen_seq_id: 0,
                             sync_threshold: hnsw_configuration.sync_threshold,
                             persist_path: None,
                             sqlite: sql_db,
@@ -279,6 +298,7 @@ pub struct Inner {
     index_init: bool,
     allow_reset: bool,
     num_elements_since_last_persist: u64,
+    last_seen_seq_id: u64,
     sync_threshold: usize,
     persist_path: Option<String>,
     sqlite: SqliteDb,
@@ -425,6 +445,23 @@ impl LocalHnswSegmentWriter {
                             chroma_index::IndexUuid(segment.id.0),
                         )
                         .map_err(|_| LocalHnswSegmentWriterError::HnswIndexLoadError)?;
+
+                        let current_seq_id = {
+                            let (query, values) = Query::select()
+                                .column(MaxSeqId::SeqId)
+                                .from(MaxSeqId::Table)
+                                .and_where(
+                                    Expr::col(MaxSeqId::SegmentId).eq(segment.id.to_string()),
+                                )
+                                .build_sqlx(SqliteQueryBuilder);
+                            let row = sqlx::query_with(&query, values)
+                                .fetch_optional(sql_db.get_conn())
+                                .await?;
+                            row.map(|row| row.try_get::<u64, _>(0))
+                                .transpose()?
+                                .unwrap_or_default()
+                        };
+
                         // TODO(Sanket): Set allow reset appropriately.
                         return Ok(Self {
                             index: LocalHnswIndex {
@@ -434,6 +471,7 @@ impl LocalHnswSegmentWriter {
                                     index_init: true,
                                     allow_reset: false,
                                     num_elements_since_last_persist: 0,
+                                    last_seen_seq_id: current_seq_id,
                                     sync_threshold: hnsw_configuration.sync_threshold,
                                     persist_path: Some(index_folder_str.to_string()),
                                     sqlite: sql_db,
@@ -468,6 +506,7 @@ impl LocalHnswSegmentWriter {
                             index_init: true,
                             allow_reset: false,
                             num_elements_since_last_persist: 0,
+                            last_seen_seq_id: 0,
                             sync_threshold: hnsw_configuration.sync_threshold,
                             persist_path: Some(index_folder_str.to_string()),
                             sqlite: sql_db,
@@ -499,6 +538,7 @@ impl LocalHnswSegmentWriter {
                             index_init: true,
                             allow_reset: false,
                             num_elements_since_last_persist: 0,
+                            last_seen_seq_id: 0,
                             sync_threshold: hnsw_configuration.sync_threshold,
                             persist_path: None,
                             sqlite: sql_db,
@@ -525,6 +565,10 @@ impl LocalHnswSegmentWriter {
         let mut hnsw_batch: HashMap<u32, Vec<(u32, &OperationRecord)>> =
             HashMap::with_capacity(log_chunk.len());
         for (log, _) in log_chunk.iter() {
+            if log.log_offset <= guard.last_seen_seq_id as i64 {
+                continue;
+            }
+
             guard.num_elements_since_last_persist += 1;
             max_seq_id = max_seq_id.max(log.log_offset as u64);
             match log.record.operation {
@@ -687,6 +731,8 @@ impl LocalHnswSegmentWriter {
                 .await?;
             guard.num_elements_since_last_persist = 0;
         }
+
+        guard.last_seen_seq_id = max_seq_id;
 
         Ok(next_label)
     }
