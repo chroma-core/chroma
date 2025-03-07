@@ -131,7 +131,7 @@ wal3/Manifest/MANIFEST.json
 ```text
 ┌─ Writer ──────────────────────────────────────────────────┐
 │  ┌─────────────────────────────┐  ┌────────────────────┐  │
-│  │ fragment                    │  │ manifest           │  │
+│  │ fragment batch              │  │ manifest           │  │
 │  │ manager                     │  │ manager            │  │
 │  │                             │  │                    │  │
 │  │ - new                       │  │ - new              │  │

@@ -405,13 +405,6 @@ impl Drop for ManifestManager {
 
 #[cfg(test)]
 mod tests {
-    use crate::manifest::manifest_path;
-    use crate::{Fragment, FragmentSeqNo};
-
-    use chroma_storage::{test_storage, ETag};
-
-    use super::*;
-
     /*
         #[tokio::test]
         async fn manager_staging() {
