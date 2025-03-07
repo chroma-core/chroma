@@ -34,4 +34,4 @@ COPY --from=builder /chroma/chroma /usr/local/bin/chroma
 EXPOSE 8000
 
 ENTRYPOINT [ "dumb-init", "--", "chroma" ]
-CMD [ "run", "--config", "/config.yaml" ]
+CMD [ "run", "--", "--config", "/config.yaml" ]
