@@ -283,6 +283,7 @@ impl OnceLogWriter {
         let timestamps_us = UInt64Array::from(timestamps_us);
         let bodies = BinaryArray::from(bodies);
         // SAFETY(rescrv):  The try_from_iter call will always succeed.
+        // TODO(rescrv):  Arrow pre-allocator.
         let batch = RecordBatch::try_from_iter(vec![
             ("offset", Arc::new(offsets) as ArrayRef),
             ("timestamp_us", Arc::new(timestamps_us) as ArrayRef),
@@ -336,14 +337,14 @@ impl OnceLogWriter {
         }
 
         // Upload to a coalesced manifest.
-        let delta = Fragment {
+        let fragment = Fragment {
             path: path.to_string(),
             seq_no: fragment_seq_no,
             start: log_position,
             limit: log_position + messages_len,
             setsum,
         };
-        self.manifest_manager.apply_delta(delta).await?;
+        self.manifest_manager.add_fragment(fragment).await?;
         // Record the records/batches written.
         self.batch_manager.update_average_batch_size(messages_len);
         self.batch_manager.finish_write();
