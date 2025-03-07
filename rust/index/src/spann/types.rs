@@ -3122,11 +3122,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_data_integrity_multiple_parallel_runs_with_updates_deletes() {
-        // Inserts 10k randomly generated embeddings each of 1000 dimensions in batches of 1k.
+        // Inserts 5k randomly generated embeddings each of 1000 dimensions in batches of 1k.
         // Each batch of 1k records is inserted in parallel using 10 tokio tasks.
         // After each batch of 1k, it commits and flushes to disk.
+        // Inserts another 1k adds/updates/deletes randomly chosen, commits and flushes.
         // Then reads the data back using scan api
         // and verifies that all the data is present and correct.
+        // Additionally runs GC after and verifies that the data is still correct.
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let max_block_size_bytes = 8 * 1024 * 1024;
