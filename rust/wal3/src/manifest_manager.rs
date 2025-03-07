@@ -32,8 +32,8 @@ struct Staging {
     /// This is the manifest and e-tag most recently witnessed in storage.  It will be gotten at
     /// startup and will be maintained by the background thread.
     stable: ManifestAndETag,
-    /// Deltas that are waiting to be applied.  These are fragments that are in any order.
-    deltas: Vec<(Fragment, tokio::sync::oneshot::Sender<Option<Error>>)>,
+    /// Fragments that are waiting to be applied.  These are fragments that are in any order.
+    fragments: Vec<(Fragment, tokio::sync::oneshot::Sender<Option<Error>>)>,
     /// In-flight snapshots.  These are being uploaded.  This serves to dedupe the uploads.
     snapshots_in_flight: Vec<Snapshot>,
     /// Snapshots that have been uploaded and are free for a manifest to reference.
@@ -60,16 +60,16 @@ impl Staging {
         Option<Snapshot>,
         Vec<tokio::sync::oneshot::Sender<Option<Error>>>,
     )> {
-        if self.deltas.is_empty() {
+        if self.fragments.is_empty() {
             return None;
         }
         let mut notifiers = vec![];
         let mut new_manifest = self.stable.manifest.clone();
         let mut postpone = vec![];
-        let mut deltas = std::mem::take(&mut self.deltas);
+        let mut fragments = std::mem::take(&mut self.fragments);
         let mut next_seq_no_to_apply = self.next_seq_no_to_apply;
-        deltas.sort_by_key(|(fragment, _)| fragment.seq_no);
-        for (fragment, tx) in deltas.into_iter() {
+        fragments.sort_by_key(|(fragment, _)| fragment.seq_no);
+        for (fragment, tx) in fragments.into_iter() {
             if fragment.seq_no == next_seq_no_to_apply && new_manifest.can_apply_fragment(&fragment)
             {
                 next_seq_no_to_apply += 1;
@@ -79,7 +79,7 @@ impl Staging {
                 postpone.push((fragment, tx));
             }
         }
-        self.deltas = postpone;
+        self.fragments = postpone;
         if notifiers.is_empty() {
             return None;
         }
@@ -162,7 +162,7 @@ impl ManifestManager {
             snapshot,
             prefix,
             stable,
-            deltas: vec![],
+            fragments: vec![],
             snapshots_in_flight: vec![],
             snapshots_staged: vec![],
             next_log_position,
@@ -226,10 +226,10 @@ impl ManifestManager {
         }
     }
 
-    /// Given a delta to the manifest, batch its application and wait for it to apply.
-    pub async fn apply_delta(&self, delta: Fragment) -> Result<(), Error> {
+    /// Given a fragment, add it to the manifest, batch its application and wait for it to apply.
+    pub async fn add_fragment(&self, fragment: Fragment) -> Result<(), Error> {
         let (tx, rx) = tokio::sync::oneshot::channel();
-        self.push_delta(delta, tx)?;
+        self.push_fragment(fragment, tx)?;
         match rx.await {
             Ok(None) => Ok(()),
             Ok(Some(err)) => Err(err),
@@ -237,10 +237,10 @@ impl ManifestManager {
         }
     }
 
-    /// Add the delta to the queue/vector of deltas waiting to be applied.
-    fn push_delta(
+    /// Add the fragment to the queue/vector of fragments waiting to be applied.
+    fn push_fragment(
         &self,
-        delta: Fragment,
+        fragment: Fragment,
         notify: tokio::sync::oneshot::Sender<Option<Error>>,
     ) -> Result<(), Error> {
         let was_empty = {
@@ -248,8 +248,8 @@ impl ManifestManager {
             if let Some(err) = staging.poison.clone() {
                 return Err(err);
             }
-            let was_empty = staging.deltas.is_empty();
-            staging.deltas.push((delta, notify));
+            let was_empty = staging.fragments.is_empty();
+            staging.fragments.push((fragment, notify));
             was_empty
         };
         if was_empty {
@@ -443,7 +443,7 @@ mod tests {
                 background.abort();
             }
             let (d1_tx, mut d1_rx) = tokio::sync::oneshot::channel();
-            manager.push_delta(
+            manager.push_fragments(
                 Fragment {
                     path: "path2".to_string(),
                     seq_no: FragmentSeqNo(2),
@@ -462,7 +462,7 @@ mod tests {
             assert!(work.is_none());
             assert!(d1_rx.try_recv().is_err());
             let (d2_tx, mut d2_rx) = tokio::sync::oneshot::channel();
-            manager.push_delta(
+            manager.push_fragments(
                 Fragment {
                     path: "path1".to_string(),
                     seq_no: FragmentSeqNo(1),
@@ -486,7 +486,7 @@ mod tests {
             assert!(d1_rx.try_recv().is_ok());
             assert!(d2_rx.try_recv().is_ok());
             let staging = manager.staging.lock().unwrap();
-            assert!(staging.deltas.is_empty());
+            assert!(staging.fragments.is_empty());
             assert_eq!(
                 Manifest {
                     path: String::from("manifest/MANIFEST"),
