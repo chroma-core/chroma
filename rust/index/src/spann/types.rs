@@ -2898,6 +2898,118 @@ mod tests {
         }
     }
 
+    // NOTE(Sanket): It is non-trivial to use shuttle for this test since it requires
+    // a tokio runtime for creating the hnsw provider - the cache requires a mpsc channel,
+    // the construction of hnsw provider calls async tokio filesystem apis that also need
+    // a runtime which is not supported by shuttle.
+    #[tokio::test]
+    async fn test_data_integrity_parallel() {
+        // Inserts 10k randomly generated embeddings each of 1000 dimensions using 500 parallel tasks.
+        // Commits and flushes the data to disk. Then reads the data back using scan api
+        // and verifies that all the data is present and correct.
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let max_block_size_bytes = 8 * 1024 * 1024;
+
+        let blockfile_provider =
+            new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
+        let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
+        let m = 16;
+        let ef_construction = 200;
+        let ef_search = 200;
+        let collection_id = CollectionUuid::new();
+        let distance_function = chroma_distance::DistanceFunction::Euclidean;
+        let dimensionality = 1000;
+        let writer = SpannIndexWriter::from_id(
+            &hnsw_provider,
+            None,
+            None,
+            None,
+            None,
+            Some(m),
+            Some(ef_construction),
+            Some(ef_search),
+            &collection_id,
+            distance_function.clone(),
+            dimensionality,
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating spann index writer");
+        let mut rng = rand::thread_rng();
+        let mut doc_offset_ids = vec![0u32; 10000];
+        let mut doc_embeddings: Vec<Vec<f32>> = Vec::new();
+        for i in 1..=10000 {
+            // Generate 1000 randomly generated f32.
+            let embedding = (0..1000).map(|_| rng.gen::<f32>()).collect::<Vec<f32>>();
+            doc_offset_ids[i - 1] = i as u32;
+            doc_embeddings.push(embedding);
+        }
+        let doc_offset_ids_arc = Arc::new(doc_offset_ids);
+        let doc_embeddings_arc = Arc::new(doc_embeddings);
+
+        // 500 tokio tasks each adding 20 embeddings.
+        let mut tasks = Vec::new();
+        for i in 0..500 {
+            let writer_clone = writer.clone();
+            let doc_offset_ids_clone = doc_offset_ids_arc.clone();
+            let doc_embeddings_clone = doc_embeddings_arc.clone();
+            let join_handle = tokio::task::spawn(async move {
+                for j in 1..=20 {
+                    let id = i * 20 + j;
+                    writer_clone
+                        .add(doc_offset_ids_clone[id - 1], &doc_embeddings_clone[id - 1])
+                        .await
+                        .expect("Error adding to spann index writer");
+                }
+            });
+            tasks.push(join_handle);
+        }
+        futures::future::join_all(tasks)
+            .await
+            .into_iter()
+            .for_each(|result| {
+                result.expect("Error in tokio task");
+            });
+        let flusher = writer
+            .commit()
+            .await
+            .expect("Error committing spann index writer");
+        let paths = flusher
+            .flush()
+            .await
+            .expect("Error flushing spann index writer");
+        println!("Wrote 10k records of 1000 dimensions each");
+        // Construct a reader.
+        // Clear the cache.
+        let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
+        let blockfile_provider = new_blockfile_provider_for_tests(max_block_size_bytes, storage);
+        let reader = SpannIndexReader::from_id(
+            Some(&paths.hnsw_id),
+            &hnsw_provider,
+            &collection_id,
+            distance_function,
+            dimensionality,
+            Some(&paths.pl_id),
+            Some(&paths.versions_map_id),
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating spann index reader");
+        // Scan the reader and verify the data.
+        let mut results = reader
+            .scan()
+            .await
+            .expect("Error scanning spann index reader");
+        assert_eq!(results.len(), 10000);
+        results.sort_by(|a, b| a.doc_offset_id.cmp(&b.doc_offset_id));
+
+        for i in 0..10000 {
+            assert_eq!(results[i].doc_offset_id, doc_offset_ids_arc[i]);
+            assert_eq!(results[i].doc_embedding, doc_embeddings_arc[i].as_slice());
+        }
+    }
+
     #[tokio::test]
     async fn test_data_integrity_multiple_runs() {
         // Inserts 10k randomly generated embeddings each of 1000 dimensions in batches of 1k.
@@ -3303,12 +3415,12 @@ mod tests {
         .expect("Error creating spann index writer");
         let operations_arc = Arc::new(operations);
         let mut join_handles = Vec::new();
-        for t in 0..10 {
+        for t in 0..100 {
             let operations_clone = operations_arc.clone();
             let writer_clone = writer.clone();
             let join_handle = tokio::task::spawn(async move {
-                for k in 1..=100 {
-                    let (id, operation, embedding) = &operations_clone[t * 100 + k - 1];
+                for k in 1..=10 {
+                    let (id, operation, embedding) = &operations_clone[t * 10 + k - 1];
                     match operation {
                         0 => {
                             writer_clone
