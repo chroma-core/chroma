@@ -446,8 +446,9 @@ mod tests {
 
     use crate::*;
 
+    // This test kills the background thread and tests the pull_work function.
     #[tokio::test]
-    async fn test_k8s_integration_manager_staging() {
+    async fn test_k8s_integration_manager_staging_no_background() {
         // NOTE(rescrv):  This stest doesn't check writes to storage.  It just tracks the logic of
         // the manager.
         let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
@@ -561,5 +562,97 @@ mod tests {
             work.2
         );
         assert_eq!(None, work.4);
+    }
+
+    /// This does an end-to-end test against storage.  Equivalent to test_k8s_integration_manager_staging_no_background
+    #[tokio::test]
+    async fn test_k8s_integration_manager_staging_with_background() {
+        // NOTE(rescrv):  This stest doesn't check writes to storage.  It just tracks the logic of
+        // the manager.
+        let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
+        Manifest::initialize(
+            &LogWriterOptions::default(),
+            &storage,
+            "prefix",
+            "init in test",
+        )
+        .await
+        .unwrap();
+        let manager = ManifestManager::new(
+            ThrottleOptions::default(),
+            SnapshotOptions::default(),
+            storage,
+            "prefix".to_string(),
+            "manager in test".to_string(),
+        )
+        .await
+        .unwrap();
+        let (d1_tx, mut d1_rx) = tokio::sync::oneshot::channel();
+        manager
+            .push_delta(
+                Fragment {
+                    path: "path2".to_string(),
+                    seq_no: FragmentSeqNo(2),
+                    num_bytes: 20,
+                    start: LogPosition::uni(22),
+                    limit: LogPosition::uni(42),
+                    setsum: Setsum::default(),
+                },
+                d1_tx,
+            )
+            .unwrap();
+        let work = {
+            // SAFETY(rescrv):  Mutex poisoning.
+            let mut staging = manager.staging.lock().unwrap();
+            staging.pull_work()
+        };
+        assert!(work.is_none());
+        assert!(d1_rx.try_recv().is_err());
+        let (d2_tx, d2_rx) = tokio::sync::oneshot::channel();
+        manager
+            .push_delta(
+                Fragment {
+                    path: "path1".to_string(),
+                    seq_no: FragmentSeqNo(1),
+                    num_bytes: 30,
+                    start: LogPosition::uni(1),
+                    limit: LogPosition::uni(22),
+                    setsum: Setsum::default(),
+                },
+                d2_tx,
+            )
+            .unwrap();
+        d1_rx.await.unwrap();
+        d2_rx.await.unwrap();
+        let staging = manager.staging.lock().unwrap();
+        assert!(staging.deltas.is_empty());
+        assert_eq!(
+            Manifest {
+                path: String::from("prefix/manifest/MANIFEST"),
+                writer: "manager in test".to_string(),
+                setsum: Setsum::default(),
+                acc_bytes: 50,
+                snapshots: vec![],
+                fragments: vec![
+                    Fragment {
+                        path: "path1".to_string(),
+                        seq_no: FragmentSeqNo(1),
+                        num_bytes: 30,
+                        start: LogPosition::uni(1),
+                        limit: LogPosition::uni(22),
+                        setsum: Setsum::default(),
+                    },
+                    Fragment {
+                        path: "path2".to_string(),
+                        seq_no: FragmentSeqNo(2),
+                        num_bytes: 20,
+                        start: LogPosition::uni(22),
+                        limit: LogPosition::uni(42),
+                        setsum: Setsum::default(),
+                    }
+                ],
+            },
+            staging.stable.manifest,
+        );
     }
 }
