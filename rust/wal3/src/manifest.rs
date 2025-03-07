@@ -137,6 +137,29 @@ impl Snapshot {
         Ok(acc)
     }
 
+    pub async fn load(
+        _options: &ThrottleOptions,
+        storage: &Storage,
+        pointer: &SnapshotPointer,
+    ) -> Result<Option<Snapshot>, Error> {
+        match storage
+            .get_with_e_tag(&pointer.path_to_snapshot)
+            .await
+            .map_err(Arc::new)
+        {
+            Ok((ref snapshot, _)) => {
+                let snapshot: Snapshot = serde_json::from_slice(snapshot).map_err(|e| {
+                    Error::CorruptManifest(format!("could not decode JSON snapshot: {e:?}"))
+                })?;
+                Ok(Some(snapshot))
+            }
+            Err(err) => match &*err {
+                StorageError::NotFound { path: _, source: _ } => Ok(None),
+                err => Err(Error::StorageError(Arc::new(err.clone()))),
+            },
+        }
+    }
+
     pub async fn install(&self, options: &ThrottleOptions, storage: &Storage) -> Result<(), Error> {
         let exp_backoff = crate::backoff::ExponentialBackoff::new(
             options.throughput as f64,
@@ -557,7 +580,7 @@ mod tests {
             setsum: Setsum::default(),
         };
         let manifest = Manifest {
-            path: String::from("manifest/MANIFEST.ffffffffffffffff"),
+            path: String::from("manifest/MANIFEST"),
             writer: "manifest writer 1".to_string(),
             setsum: Setsum::default(),
             acc_bytes: 8200,
@@ -597,7 +620,7 @@ mod tests {
             .unwrap(),
         };
         let manifest = Manifest {
-            path: String::from("manifest/MANIFEST.ffffffffffffffff"),
+            path: String::from("manifest/MANIFEST"),
             writer: "manifest writer 1".to_string(),
             setsum: Setsum::from_hexdigest(
                 "307d93deb6b3e91525dc277027bc34958d8f1e74965e4c027820c3596e0f2847",
@@ -609,7 +632,7 @@ mod tests {
         };
         assert!(manifest.scrub().is_ok());
         let manifest = Manifest {
-            path: String::from("manifest/MANIFEST.ffffffffffffffff"),
+            path: String::from("manifest/MANIFEST"),
             writer: "manifest writer 1".to_string(),
             setsum: Setsum::from_hexdigest(
                 "6c5b5ee2c5e741a8d190d215d6cb2802a57ce0d3bb5a1a0223964e97acfa8083",
@@ -647,7 +670,7 @@ mod tests {
             .unwrap(),
         };
         let mut manifest = Manifest {
-            path: String::from("manifest/MANIFEST.ffffffffffffffff"),
+            path: String::from("manifest/MANIFEST"),
             writer: "manifest writer 1".to_string(),
             setsum: Setsum::default(),
             acc_bytes: 0,
@@ -661,7 +684,7 @@ mod tests {
         manifest.apply_fragment(fragment2);
         assert_eq!(
             Manifest {
-                path: String::from("manifest/MANIFEST.ffffffffffffffff"),
+                path: String::from("manifest/MANIFEST"),
                 writer: "manifest writer 1".to_string(),
                 setsum: Setsum::from_hexdigest(
                     "307d93deb6b3e91525dc277027bc34958d8f1e74965e4c027820c3596e0f2847",
