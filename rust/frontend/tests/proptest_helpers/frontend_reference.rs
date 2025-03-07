@@ -1,8 +1,13 @@
 use crate::CollectionRequest;
+use chroma_distance::DistanceFunction;
 use chroma_frontend::impls::in_memory_frontend::InMemoryFrontend;
-use chroma_types::{Collection, CreateCollectionRequest, GetRequest, IncludeList};
+use chroma_types::{
+    Collection, CreateCollectionRequest, GetRequest, Include, IncludeList, QueryRequest,
+    QueryResponse,
+};
 use proptest::prelude::*;
 use proptest_state_machine::ReferenceStateMachine;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use super::arbitrary::CollectionRequestArbitraryParams;
@@ -66,6 +71,114 @@ impl FrontendReferenceState {
         // todo: should shrink be enabled?
         // todo: try storing embedding strategy on self
         proptest::collection::vec((0.0..=1.0f32).no_shrink(), self.get_dimension())
+    }
+
+    pub fn ann_accuracy(&self, request: QueryRequest, response_to_validate: &QueryResponse) {
+        let min_recall = 0.5; // todo
+        let distance_function = DistanceFunction::Euclidean;
+        let accuracy_threshold = 10_f64.powi(self.get_dimension().ilog10() as i32) * 1e-6;
+        // todo: handle other distance functions (need to update collection creation)
+
+        let collection = self.collection.clone().unwrap();
+        let frontend = self.frontend.as_ref().unwrap();
+        let filtered_records = frontend
+            .get(
+                GetRequest::try_new(
+                    collection.tenant,
+                    collection.database,
+                    collection.collection_id,
+                    request.ids,
+                    request.r#where,
+                    None,
+                    0,
+                    IncludeList(vec![Include::Embedding]),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+
+        for query_i in 0..request.embeddings.len() {
+            let mut missing = 0;
+
+            let query_embedding = &request.embeddings[query_i];
+
+            let mut record_index_and_distance_from_query = vec![];
+            for (i, record_embedding) in filtered_records
+                .embeddings
+                .as_ref()
+                .unwrap()
+                .iter()
+                .enumerate()
+            {
+                let distance = distance_function.distance(&query_embedding, record_embedding);
+                record_index_and_distance_from_query.push((i, distance));
+            }
+
+            let mut sorted_record_index_and_distance_from_query =
+                record_index_and_distance_from_query.clone();
+            sorted_record_index_and_distance_from_query
+                .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+
+            let received_ids = response_to_validate.ids[query_i]
+                .iter()
+                .cloned()
+                .collect::<HashSet<_>>();
+            let expected_ids = sorted_record_index_and_distance_from_query
+                [..(request.n_results as usize).min(record_index_and_distance_from_query.len())]
+                .iter()
+                .map(|(i, _)| filtered_records.ids[*i].clone())
+                .collect::<HashSet<_>>();
+
+            missing += expected_ids.difference(&received_ids).count();
+
+            for (i, received_id) in response_to_validate.ids[query_i].iter().enumerate() {
+                let was_unexpected = !expected_ids.contains(received_id);
+                let reference_i = filtered_records
+                    .ids
+                    .iter()
+                    .position(|id| id == received_id)
+                    .unwrap();
+
+                let received_distance =
+                    response_to_validate.distances.as_ref().unwrap()[query_i][i].unwrap();
+                let expected_distance = distance_function.distance(
+                    query_embedding,
+                    &filtered_records.embeddings.as_ref().unwrap()[reference_i],
+                );
+
+                let correct_distance = (received_distance as f64 - expected_distance as f64).abs()
+                    < accuracy_threshold;
+                if was_unexpected {
+                    if correct_distance {
+                        missing -= 1;
+                    } else {
+                        // continue
+                    }
+                } else {
+                    assert!(
+                        correct_distance,
+                        "Expected distance to be within {:.6} of {:.6}, was {:.6} for ID {}.",
+                        accuracy_threshold, expected_distance, received_distance, received_id,
+                    );
+                }
+            }
+
+            let size = expected_ids.len();
+            if size > 0 {
+                let recall = (size - missing) as f32 / size as f32; // todo?
+                assert!(
+                    recall >= min_recall,
+                    "Expected recall to be >= {:.2}, was {:.2}. Missing {} out of {}, accuracy threshold {}.",
+                    min_recall,
+                    recall,
+                    missing,
+                    size,
+                    accuracy_threshold
+                );
+            }
+        }
+
+        // todo: results are sorted by distance
     }
 }
 

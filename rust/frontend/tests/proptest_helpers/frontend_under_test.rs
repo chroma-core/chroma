@@ -23,6 +23,7 @@ impl StateMachineTest for FrontendUnderTest {
     fn init_test(
         ref_state: &<Self::Reference as ReferenceStateMachine>::State,
     ) -> Self::SystemUnderTest {
+        println!("starting test -------------------------");
         let runtime = ref_state.runtime.clone();
         let frontend = runtime.block_on(async {
             let system = System::new();
@@ -259,6 +260,17 @@ impl StateMachineTest for FrontendUnderTest {
                             }
                         });
                     }
+
+                    let response = {
+                        let collection = state.collection.clone().unwrap();
+                        request.collection_id = collection.collection_id;
+                        request.tenant_id = collection.tenant;
+                        request.database_name = collection.database;
+
+                        state.frontend.query(request.clone()).await.unwrap()
+                    };
+
+                    ref_state.ann_accuracy(request, &response);
                 }
                 CollectionRequest::Compact => {}
             }
