@@ -10,7 +10,7 @@ use parquet::file::properties::WriterProperties;
 use setsum::Setsum;
 
 use crate::{
-    BatchManager, DeltaSeqNo, Error, ExponentialBackoff, Fragment, FragmentSeqNo, LogPosition,
+    BatchManager, Error, ExponentialBackoff, Fragment, FragmentSeqNo, LogPosition,
     LogWriterOptions, Manifest, ManifestManager,
 };
 
@@ -79,9 +79,9 @@ impl LogWriter {
             while !that.done.load(std::sync::atomic::Ordering::Relaxed) {
                 that.batch_manager.wait_for_writable().await;
                 match that.batch_manager.take_work(&that.manifest_manager) {
-                    Ok(Some((fragment_seq_no, log_position, delta_seq_no, work))) => {
+                    Ok(Some((fragment_seq_no, log_position, work))) => {
                         Arc::clone(&that)
-                            .append_batch(fragment_seq_no, log_position, delta_seq_no, work)
+                            .append_batch(fragment_seq_no, log_position, work)
                             .await;
                     }
                     Ok(None) => {
@@ -129,13 +129,12 @@ impl LogWriter {
     pub async fn append(self: &Arc<Self>, message: Vec<u8>) -> Result<LogPosition, Error> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.batch_manager.push_work(message, tx);
-        if let Some((fragment_seq_no, log_position, delta_seq_no, work)) =
+        if let Some((fragment_seq_no, log_position, work)) =
             self.batch_manager.take_work(&self.manifest_manager)?
         {
             let this = Arc::clone(self);
             let jh = tokio::task::spawn(async move {
-                this.append_batch(fragment_seq_no, log_position, delta_seq_no, work)
-                    .await
+                this.append_batch(fragment_seq_no, log_position, work).await
             });
             let _ = self.reap.send(jh).await;
         }
@@ -147,7 +146,6 @@ impl LogWriter {
         self: Arc<Self>,
         fragment_seq_no: FragmentSeqNo,
         log_position: LogPosition,
-        delta_seq_no: DeltaSeqNo,
         work: Vec<(
             Vec<u8>,
             tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
@@ -160,7 +158,7 @@ impl LogWriter {
             notifies.push(work.1);
         }
         match self
-            .append_batch_internal(fragment_seq_no, log_position, delta_seq_no, messages)
+            .append_batch_internal(fragment_seq_no, log_position, messages)
             .await
         {
             Ok(log_position) => {
@@ -185,7 +183,6 @@ impl LogWriter {
         &self,
         fragment_seq_no: FragmentSeqNo,
         log_position: LogPosition,
-        delta_seq_no: DeltaSeqNo,
         messages: Vec<Vec<u8>>,
     ) -> Result<LogPosition, Error> {
         assert!(!messages.is_empty());
@@ -264,9 +261,7 @@ impl LogWriter {
             limit: log_position + messages_len,
             setsum,
         };
-        self.manifest_manager
-            .apply_delta(delta, delta_seq_no)
-            .await?;
+        self.manifest_manager.apply_delta(delta).await?;
         // Record the records/batches written.
         self.batch_manager.update_average_batch_size(messages_len);
         self.batch_manager.finish_write();

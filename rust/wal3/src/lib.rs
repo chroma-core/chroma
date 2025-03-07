@@ -280,12 +280,12 @@ pub struct LogWriterOptions {
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd, Hash, serde::Deserialize, serde::Serialize,
 )]
-pub struct FragmentSeqNo(pub usize);
+pub struct FragmentSeqNo(pub u64);
 
 impl FragmentSeqNo {
     /// Returns the successor of this FragmentSeqNo, or None if this FragmentSeqNo is the maximum
     pub fn successor(&self) -> Option<Self> {
-        if self.0 == usize::MAX {
+        if self.0 == u64::MAX {
             None
         } else {
             Some(FragmentSeqNo(self.0 + 1))
@@ -293,7 +293,7 @@ impl FragmentSeqNo {
     }
 
     // Round down to the nearest multiple of 5k.
-    pub fn bucket(&self) -> usize {
+    pub fn bucket(&self) -> u64 {
         (self.0 / 5_000) * 5_000
     }
 }
@@ -304,7 +304,7 @@ impl std::fmt::Display for FragmentSeqNo {
     }
 }
 
-impl std::ops::Add<FragmentSeqNo> for usize {
+impl std::ops::Add<FragmentSeqNo> for u64 {
     type Output = FragmentSeqNo;
 
     fn add(self, rhs: FragmentSeqNo) -> Self::Output {
@@ -312,25 +312,27 @@ impl std::ops::Add<FragmentSeqNo> for usize {
     }
 }
 
-impl std::ops::Add<usize> for FragmentSeqNo {
+impl std::ops::Add<u64> for FragmentSeqNo {
     type Output = FragmentSeqNo;
 
-    fn add(self, rhs: usize) -> Self::Output {
+    fn add(self, rhs: u64) -> Self::Output {
         FragmentSeqNo(self.0.wrapping_add(rhs))
     }
 }
 
-impl std::ops::AddAssign<usize> for FragmentSeqNo {
-    fn add_assign(&mut self, rhs: usize) {
-        self.0 = self.0.wrapping_add(rhs);
+impl std::ops::Sub<FragmentSeqNo> for FragmentSeqNo {
+    type Output = u64;
+
+    fn sub(self, rhs: FragmentSeqNo) -> Self::Output {
+        self.0.wrapping_sub(rhs.0)
     }
 }
 
-//////////////////////////////////////////// DeltaSeqNo ////////////////////////////////////////////
-
-/// An DeltaSeqNo is the degree to which one fragment seq no differs from another.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct DeltaSeqNo(u64);
+impl std::ops::AddAssign<u64> for FragmentSeqNo {
+    fn add_assign(&mut self, rhs: u64) {
+        self.0 = self.0.wrapping_add(rhs);
+    }
+}
 
 ///////////////////////////////////////////// Fragment /////////////////////////////////////////////
 
