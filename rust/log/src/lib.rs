@@ -13,7 +13,9 @@ use chroma_error::ChromaError;
 use config::LogConfig;
 pub use local_compaction_manager::*;
 pub use log::*;
+use server::{LogServer, LogServerConfig};
 pub use types::*;
+mod server;
 
 use async_trait::async_trait;
 
@@ -36,5 +38,26 @@ impl Configurable<LogConfig> for Log {
 
         registry.register(res.clone());
         Ok(res)
+    }
+}
+
+// Entrypoint for the wal3 based log server
+#[allow(dead_code)]
+pub async fn log_entrypoint() {
+    let config = LogServerConfig::default();
+    let registry = chroma_config::registry::Registry::new();
+    let log_server = LogServer::try_from_config(&config, &registry)
+        .await
+        .expect("Failed to create log server");
+
+    let server_join_handle = tokio::spawn(async move {
+        let _ = crate::server::LogServer::run(log_server).await;
+    });
+
+    match server_join_handle.await {
+        Ok(_) => {}
+        Err(e) => {
+            tracing::error!("Error terminating server: {:?}", e);
+        }
     }
 }
