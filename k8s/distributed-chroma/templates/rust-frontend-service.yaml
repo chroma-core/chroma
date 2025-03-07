@@ -1,3 +1,16 @@
+{{if .Values.rustFrontendService.configuration}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rust-frontend-service-config
+  namespace: {{ .Values.namespace }}
+data:
+  config.yaml: |
+{{  .Values.rustFrontendService.configuration | indent 4 }}
+{{ end }}
+
+---
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -13,9 +26,12 @@ spec:
       labels:
         app: rust-frontend-service
     spec:
+      serviceAccountName: rust-frontend-service-serviceaccount
       containers:
         - name: rust-frontend-service
-          command: ["chroma", "run", "$(CONFIG_PATH)"]
+          {{ if .Values.rustFrontendService.command }}
+          command: {{ .Values.rustFrontendService.command }}
+          {{ end }}
           image: "{{ .Values.rustFrontendService.image.repository }}:{{ .Values.rustFrontendService.image.tag }}"
           imagePullPolicy: IfNotPresent
           readinessProbe:
@@ -35,13 +51,15 @@ spec:
           {{ end }}
           env:
             - name: CONFIG_PATH
-              value: "/sample_configs/distributed.yaml"
-            {{ if .Values.frontendService.otherEnvConfig }}
-              {{ .Values.frontendService.otherEnvConfig | nindent 12 }}
-            {{ end }}
+              value: "/config/config.yaml"
             {{ if .Values.rustFrontendService.otherEnvConfig }}
               {{ .Values.rustFrontendService.otherEnvConfig | nindent 12 }}
             {{ end }}
+          {{if .Values.rustFrontendService.configuration}}
+          volumeMounts:
+            - name: rust-frontend-service-config
+              mountPath: /config/
+          {{ end }}
 
       {{if .Values.rustFrontendService.tolerations}}
       tolerations:
@@ -50,6 +68,12 @@ spec:
       {{if .Values.rustFrontendService.nodeSelector}}
       nodeSelector:
         {{ toYaml .Values.rustFrontendService.nodeSelector | nindent 8 }}
+      {{ end }}
+      {{if .Values.rustFrontendService.configuration}}
+      volumes:
+        - name: rust-frontend-service-config
+          configMap:
+            name: rust-frontend-service-config
       {{ end }}
 
 ---
@@ -67,3 +91,14 @@ spec:
   selector:
     app: rust-frontend-service
   type: ClusterIP
+
+
+---
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: rust-frontend-service-serviceaccount
+  namespace: {{ .Values.namespace }}
+
+---

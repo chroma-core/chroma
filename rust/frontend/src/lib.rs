@@ -14,10 +14,10 @@ mod types;
 
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
-use chroma_system::{ReceiverForMessage, System};
+use chroma_system::System;
 use chroma_tracing::{
     init_global_filter_layer, init_otel_layer, init_panic_tracing_hook, init_stdout_layer,
-    init_tracing, meter_event::MeterEvent,
+    init_tracing,
 };
 use config::FrontendServerConfig;
 use frontend::Frontend;
@@ -28,7 +28,7 @@ use server::FrontendServer;
 
 pub use config::{FrontendConfig, ScorecardRule};
 
-const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
+pub const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
 
 #[derive(thiserror::Error, Debug)]
 pub enum ScorecardRuleError {
@@ -47,20 +47,20 @@ impl ChromaError for ScorecardRuleError {
 pub async fn frontend_service_entrypoint(
     auth: Arc<dyn auth::AuthenticateAndAuthorize>,
     quota_enforcer: Arc<dyn QuotaEnforcer>,
-    meter_receiver: impl ReceiverForMessage<MeterEvent> + 'static,
 ) {
     let config = match std::env::var(CONFIG_PATH_ENV_VAR) {
         Ok(config_path) => FrontendServerConfig::load_from_path(&config_path),
         Err(_) => FrontendServerConfig::load(),
     };
-    frontend_service_entrypoint_with_config(auth, quota_enforcer, meter_receiver, config).await;
+    frontend_service_entrypoint_with_config(auth, quota_enforcer, &config).await;
 }
 
-pub async fn frontend_service_entrypoint_with_config(
+pub async fn frontend_service_entrypoint_with_config_system_registry(
     auth: Arc<dyn auth::AuthenticateAndAuthorize>,
     quota_enforcer: Arc<dyn QuotaEnforcer>,
-    meter_receiver: impl ReceiverForMessage<MeterEvent> + 'static,
-    config: FrontendServerConfig,
+    system: System,
+    registry: Registry,
+    config: &FrontendServerConfig,
 ) {
     if let Some(config) = &config.open_telemetry {
         let tracing_layers = vec![
@@ -70,12 +70,9 @@ pub async fn frontend_service_entrypoint_with_config(
         ];
         init_tracing(tracing_layers);
         init_panic_tracing_hook();
-        MeterEvent::init_receiver(Box::new(meter_receiver));
     } else {
         eprintln!("OpenTelemetry is not enabled because it is missing from the config.");
     }
-    let system = System::new();
-    let registry = Registry::new();
 
     let mut fe_cfg = config.frontend.clone();
     if let (Some(path_str), Some(sql_cfg), Some(local_segman_cfg)) = (
@@ -99,7 +96,7 @@ pub async fn frontend_service_entrypoint_with_config(
         );
     }
 
-    let frontend = Frontend::try_from_config(&(fe_cfg, system), &registry)
+    let frontend = Frontend::try_from_config(&(fe_cfg, system.clone()), &registry)
         .await
         .expect("Error creating Frontend Config");
     fn rule_to_rule(rule: &ScorecardRule) -> Result<Rule, ScorecardRuleError> {
@@ -119,7 +116,31 @@ pub async fn frontend_service_entrypoint_with_config(
         .map(rule_to_rule)
         .collect::<Result<Vec<_>, ScorecardRuleError>>()
         .expect("error creating scorecard");
-    FrontendServer::new(config, frontend, rules, auth, quota_enforcer)
-        .run()
-        .await;
+    FrontendServer::new(
+        config.clone(),
+        frontend,
+        rules,
+        auth,
+        quota_enforcer,
+        system,
+    )
+    .run()
+    .await;
+}
+
+pub async fn frontend_service_entrypoint_with_config(
+    auth: Arc<dyn auth::AuthenticateAndAuthorize>,
+    quota_enforcer: Arc<dyn QuotaEnforcer>,
+    config: &FrontendServerConfig,
+) {
+    let system = System::new();
+    let registry = Registry::new();
+    frontend_service_entrypoint_with_config_system_registry(
+        auth,
+        quota_enforcer,
+        system,
+        registry,
+        config,
+    )
+    .await;
 }

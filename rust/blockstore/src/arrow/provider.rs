@@ -17,7 +17,7 @@ use async_trait::async_trait;
 use chroma_cache::{CacheError, PersistentCache};
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_storage::Storage;
+use chroma_storage::{PutOptions, Storage};
 use futures::{stream::FuturesUnordered, StreamExt};
 use std::sync::Arc;
 use thiserror::Error;
@@ -383,7 +383,10 @@ impl BlockManager {
         };
         let key = format!("block/{}", block.id);
         let block_bytes_len = bytes.len();
-        let res = self.storage.put_bytes(&key, bytes).await;
+        let res = self
+            .storage
+            .put_bytes(&key, bytes, PutOptions::default())
+            .await;
         match res {
             Ok(_) => {
                 tracing::info!(
@@ -517,7 +520,10 @@ impl RootManager {
             }
         };
         let key = format!("sparse_index/{}", root.id);
-        let res = self.storage.put_bytes(&key, bytes).await;
+        let res = self
+            .storage
+            .put_bytes(&key, bytes, PutOptions::default())
+            .await;
         match res {
             Ok(_) => {
                 tracing::info!("Root written to storage");

@@ -4,6 +4,8 @@ on:
   push:
     paths:
       - k8s/distributed-chroma/Chart.yaml
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
