@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use crate::{Error, FragmentSeqNo, LogPosition, Manifest, ManifestManager, ThrottleOptions};
+use crate::{Error, FragmentSeqNo, LogPosition, ManifestManager, ThrottleOptions};
 
 /////////////////////////////////////////// FragmentState //////////////////////////////////////////
 
