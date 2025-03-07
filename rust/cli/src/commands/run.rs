@@ -14,7 +14,11 @@ pub struct RunArgs {
 
 pub fn run(args: RunArgs) {
     println!("{}", LOGO);
-    println!("\n{}\n", "Running Chroma".bold());
+    println!("\n{}", "Running Chroma".bold());
+    
+    if (args.frontend_args.config_path.is_some()) {
+        println!("Config path: {}", args.frontend_args.config_path.clone().unwrap().bold());
+    }
 
     let config = match get_frontend_config(
         args.frontend_args.config_path,
@@ -32,7 +36,7 @@ pub fn run(args: RunArgs) {
         .persist_path
         .as_deref()
         .unwrap_or(DEFAULT_PERSISTENT_PATH);
-
+    
     println!("Saving data to: {}", persistent_path.bold());
     println!(
         "Connect to Chroma at: {}",
