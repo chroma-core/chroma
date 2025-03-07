@@ -23,6 +23,7 @@ pub struct EpochWriter {
 ///////////////////////////////////////////// LogWriter ////////////////////////////////////////////
 
 pub struct LogWriter {
+    writer: String,
     inner: Mutex<Option<EpochWriter>>,
 }
 
@@ -30,20 +31,28 @@ impl LogWriter {
     pub async fn initialize(
         options: &LogWriterOptions,
         storage: &Storage,
-        prefix: String,
+        prefix: &str,
+        writer: &str,
     ) -> Result<(), Error> {
-        Manifest::initialize(options, storage, &prefix).await
+        Manifest::initialize(options, storage, prefix, writer).await
     }
 
     /// Open the log, possibly writing a new manifest to recover it.
     pub async fn open(
         options: LogWriterOptions,
         storage: Arc<Storage>,
-        prefix: String,
+        prefix: &str,
+        writer: &str,
     ) -> Result<Self, Error> {
-        let writer = OnceLogWriter::open(options, storage, prefix).await?;
-        let inner = EpochWriter { epoch: 1, writer };
+        let once_log_writer =
+            OnceLogWriter::open(options, storage, prefix.to_string(), writer.to_string()).await?;
+        let inner = EpochWriter {
+            epoch: 1,
+            writer: once_log_writer,
+        };
+        let writer = writer.to_string();
         Ok(Self {
+            writer,
             inner: Mutex::new(Some(inner)),
         })
     }
@@ -70,6 +79,7 @@ impl LogWriter {
                     epoch_writer.writer.options.clone(),
                     epoch_writer.writer.storage.clone(),
                     epoch_writer.writer.prefix.clone(),
+                    self.writer.clone(),
                 )
                 .await?;
                 // SAFETY(rescrv):  Mutex poisoning.
@@ -128,6 +138,7 @@ impl OnceLogWriter {
         options: LogWriterOptions,
         storage: Arc<Storage>,
         prefix: String,
+        writer: String,
     ) -> Result<Arc<Self>, Error> {
         let done = AtomicBool::new(false);
         let (reap, mut rx) = tokio::sync::mpsc::channel(1_000);
@@ -137,6 +148,7 @@ impl OnceLogWriter {
             options.snapshot_manifest,
             Arc::clone(&storage),
             prefix.clone(),
+            writer,
         )
         .await?;
         manifest_manager.recover().await?;
