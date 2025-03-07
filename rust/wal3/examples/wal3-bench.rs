@@ -44,7 +44,8 @@ async fn main() {
     // NOTE(rescrv):  Outside benchmarking we don't want to initialize except when we create a new
     // log.  A durability event that loses the manifest will cause the log to become truncated.
     // Recovery is necessary, not just creating the manifest.
-    match LogWriter::initialize(&options.log, &storage, "wal3bench".to_string()).await {
+    match LogWriter::initialize(&options.log, &storage, "wal3bench", "benchmark initializer").await
+    {
         Ok(_) => {}
         Err(Error::AlreadyInitialized) => {}
         Err(e) => {
@@ -53,9 +54,14 @@ async fn main() {
         }
     };
     let log = Arc::new(
-        LogWriter::open(options.log.clone(), storage, "wal3bench".to_string())
-            .await
-            .unwrap(),
+        LogWriter::open(
+            options.log.clone(),
+            storage,
+            "wal3bench",
+            "benchmark writer",
+        )
+        .await
+        .unwrap(),
     );
 
     let (tx, mut rx) = tokio::sync::mpsc::channel(options.target_throughput + 1_000_000);

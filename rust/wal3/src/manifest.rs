@@ -215,17 +215,29 @@ pub struct Manifest {
 }
 
 impl Manifest {
-    // Possibly generate a new snapshot from self if the conditions are right.
-    //
-    // This just creates a snapshot.  Install it to object store and then call apply_snapshot when
-    // it is durable to modify the manifest.
+    /// Generate a new manifest that's empty and suitable for initialization.
+    pub fn new_empty(prefix: &str, writer: &str) -> Self {
+        Self {
+            path: manifest_path(prefix),
+            setsum: Setsum::default(),
+            acc_bytes: 0,
+            writer: writer.to_string(),
+            snapshots: vec![],
+            fragments: vec![],
+        }
+    }
+
+    /// Possibly generate a new snapshot from self if the conditions are right.
+    ///
+    /// This just creates a snapshot.  Install it to object store and then call apply_snapshot when
+    /// it is durable to modify the manifest.
     pub fn generate_snapshot(
         &self,
         snapshot_options: SnapshotOptions,
         prefix: &str,
+        writer: &str,
     ) -> Option<Snapshot> {
-        // TODO(rescrv):  A real, random string.
-        let writer = "TODO".to_string();
+        let writer = writer.to_string();
         let can_snapshot_snapshots = self.snapshots.iter().filter(|s| s.depth < 2).count()
             >= snapshot_options.snapshot_rollover_threshold;
         let can_snapshot_fragments =
@@ -445,10 +457,12 @@ impl Manifest {
         _: &LogWriterOptions,
         storage: &Storage,
         prefix: &str,
+        writer: &str,
     ) -> Result<(), Error> {
+        let writer = writer.to_string();
         let initial = Manifest {
             path: manifest_path(prefix),
-            writer: "TODO".to_string(),
+            writer,
             setsum: Setsum::default(),
             acc_bytes: 0,
             snapshots: vec![],
@@ -529,6 +543,7 @@ impl Manifest {
         }
     }
 }
+
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
 
 #[cfg(test)]

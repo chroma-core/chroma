@@ -29,6 +29,8 @@ struct Staging {
     snapshot: SnapshotOptions,
     /// The prefix to store the log under in object storage.
     prefix: String,
+    /// The unique ID of the process doing the writing.
+    writer: String,
     /// This is the manifest and e-tag most recently witnessed in storage.  It will be gotten at
     /// startup and will be maintained by the background thread.
     stable: ManifestAndETag,
@@ -72,6 +74,7 @@ impl Staging {
         // sequence_number, making sure to never leave gaps.
         let mut notifiers = vec![];
         let mut new_manifest = self.stable.manifest.clone();
+        new_manifest.writer = self.writer.clone();
         let mut postpone = vec![];
         let mut fragments = std::mem::take(&mut self.fragments);
         let mut next_seq_no_to_apply = self.next_seq_no_to_apply;
@@ -94,7 +97,8 @@ impl Staging {
         }
         self.last_batch = Instant::now();
         // If the manifest can create a snapshot based upon the options.
-        let mut snapshot = new_manifest.generate_snapshot(self.snapshot, &self.prefix);
+        let mut snapshot =
+            new_manifest.generate_snapshot(self.snapshot, &self.prefix, &self.writer);
         if let Some(s) = snapshot.as_ref() {
             // If the snapshot has been added to object storage it will be available for the next
             // manifest that gets installed.  Apply it to the new manifest.
@@ -154,6 +158,7 @@ impl ManifestManager {
         snapshot: SnapshotOptions,
         storage: Arc<Storage>,
         prefix: String,
+        writer: String,
     ) -> Result<Self, Error> {
         // NOTE(rescrv):  Once upon a time we allowed concurrency here.  Deny it for safety.
         throttle.outstanding = 1;
@@ -175,6 +180,7 @@ impl ManifestManager {
             throttle,
             snapshot,
             prefix,
+            writer,
             stable,
             fragments: vec![],
             snapshots_in_flight: vec![],
@@ -436,99 +442,124 @@ impl Drop for ManifestManager {
 
 #[cfg(test)]
 mod tests {
-    /*
-        #[tokio::test]
-        async fn manager_staging() {
-            // NOTE(rescrv):  This stest doesn't check writes to storage.  It just tracks the logic of
-            // the manager.
-            let manifest = Manifest {
-                path: manifest_path(),
-                writer: "manifest writer 1".to_string(),
-                setsum: Setsum::default(),
-                snapshots: vec![],
-                fragments: vec![],
-            };
-            let storage = Arc::new(test_storage());
-            let mut manager = ManifestManager::new(
-                ThrottleOptions::default(),
-                SnapshotOptions::default(),
-                manifest,
-                storage,
-            )
-            .await;
-            if let Some(background) = manager.background.take() {
-                background.abort();
-            }
-            let (d1_tx, mut d1_rx) = tokio::sync::oneshot::channel();
-            manager.push_fragments(
+    use chroma_storage::s3_client_for_test_with_new_bucket;
+
+    use crate::*;
+
+    #[tokio::test]
+    async fn test_k8s_manager_staging() {
+        // NOTE(rescrv):  This stest doesn't check writes to storage.  It just tracks the logic of
+        // the manager.
+        let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
+        Manifest::initialize(
+            &LogWriterOptions::default(),
+            &storage,
+            "prefix",
+            "init in test",
+        )
+        .await
+        .unwrap();
+        let mut manager = ManifestManager::new(
+            ThrottleOptions::default(),
+            SnapshotOptions::default(),
+            storage,
+            "prefix".to_string(),
+            "manager in test".to_string(),
+        )
+        .await
+        .unwrap();
+        // Kill the background process so we can test the batch logic.
+        if let Some(background) = manager.background.take() {
+            background.abort();
+        }
+        let (d1_tx, mut d1_rx) = tokio::sync::oneshot::channel();
+        manager
+            .push_fragment(
                 Fragment {
                     path: "path2".to_string(),
                     seq_no: FragmentSeqNo(2),
+                    num_bytes: 20,
                     start: LogPosition::uni(22),
                     limit: LogPosition::uni(42),
                     setsum: Setsum::default(),
                 },
-                DeltaSeqNo(2),
                 d1_tx,
-            );
-            let work = {
-                // SAFETY(rescrv):  Mutex poisoning.
-                let mut staging = manager.staging.lock().unwrap();
-                staging.pull_work()
-            };
-            assert!(work.is_none());
-            assert!(d1_rx.try_recv().is_err());
-            let (d2_tx, mut d2_rx) = tokio::sync::oneshot::channel();
-            manager.push_fragments(
+            )
+            .unwrap();
+        let work = {
+            // SAFETY(rescrv):  Mutex poisoning.
+            let mut staging = manager.staging.lock().unwrap();
+            staging.pull_work()
+        };
+        assert!(work.is_none());
+        assert!(d1_rx.try_recv().is_err());
+        let (d2_tx, mut d2_rx) = tokio::sync::oneshot::channel();
+        manager
+            .push_fragment(
                 Fragment {
                     path: "path1".to_string(),
                     seq_no: FragmentSeqNo(1),
+                    num_bytes: 30,
                     start: LogPosition::uni(1),
                     limit: LogPosition::uni(22),
                     setsum: Setsum::default(),
                 },
-                DeltaSeqNo(1),
                 d2_tx,
-            );
-            let work = {
-                // SAFETY(rescrv):  Mutex poisoning.
-                let mut staging = manager.staging.lock().unwrap();
-                staging.pull_work().unwrap()
-            };
-            // pretend to install the manifest....
-            // now finish work
-            for n in work.4 {
-                n.send(None).unwrap();
-            }
-            assert!(d1_rx.try_recv().is_ok());
-            assert!(d2_rx.try_recv().is_ok());
-            let staging = manager.staging.lock().unwrap();
-            assert!(staging.fragments.is_empty());
-            assert_eq!(
-                Manifest {
-                    path: String::from("manifest/MANIFEST"),
-                    writer: "manifest writer 1".to_string(),
-                    setsum: Setsum::default(),
-                    snapshots: vec![],
-                    fragments: vec![
-                        Fragment {
-                            path: "path1".to_string(),
-                            seq_no: FragmentSeqNo(1),
-                            start: LogPosition::uni(1),
-                            limit: LogPosition::uni(22),
-                            setsum: Setsum::default(),
-                        },
-                        Fragment {
-                            path: "path2".to_string(),
-                            seq_no: FragmentSeqNo(2),
-                            start: LogPosition::uni(22),
-                            limit: LogPosition::uni(42),
-                            setsum: Setsum::default(),
-                        }
-                    ],
-                },
-                staging.stable.manifest
-            );
+            )
+            .unwrap();
+        let work = {
+            // SAFETY(rescrv):  Mutex poisoning.
+            let mut staging = manager.staging.lock().unwrap();
+            staging.pull_work().unwrap()
+        };
+        // pretend to install the manifest....
+        // now finish work
+        for n in work.5 {
+            n.send(None).unwrap();
         }
-    */
+        assert!(d1_rx.try_recv().is_ok());
+        assert!(d2_rx.try_recv().is_ok());
+        let staging = manager.staging.lock().unwrap();
+        assert!(staging.fragments.is_empty());
+        assert_eq!(
+            Manifest {
+                path: String::from("prefix/manifest/MANIFEST"),
+                writer: "init in test".to_string(),
+                setsum: Setsum::default(),
+                acc_bytes: 0,
+                snapshots: vec![],
+                fragments: vec![],
+            },
+            work.0
+        );
+        assert_eq!(
+            Manifest {
+                path: String::from("prefix/manifest/MANIFEST"),
+                writer: "manager in test".to_string(),
+                setsum: Setsum::default(),
+                acc_bytes: 50,
+                snapshots: vec![],
+                fragments: vec![
+                    Fragment {
+                        path: "path1".to_string(),
+                        seq_no: FragmentSeqNo(1),
+                        num_bytes: 30,
+                        start: LogPosition::uni(1),
+                        limit: LogPosition::uni(22),
+                        setsum: Setsum::default(),
+                    },
+                    Fragment {
+                        path: "path2".to_string(),
+                        seq_no: FragmentSeqNo(2),
+                        num_bytes: 20,
+                        start: LogPosition::uni(22),
+                        limit: LogPosition::uni(42),
+                        setsum: Setsum::default(),
+                    }
+                ],
+            },
+            work.2
+        );
+        assert_eq!(None, work.4);
+    }
 }
