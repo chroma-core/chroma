@@ -52,7 +52,7 @@ async fn main() {
             std::process::exit(1);
         }
     };
-    let log = LogWriter::open(options.log.clone(), storage).await.unwrap();
+    let log = Arc::new(LogWriter::open(options.log.clone(), storage).await.unwrap());
 
     let (tx, mut rx) = tokio::sync::mpsc::channel(options.target_throughput + 1_000_000);
     tx.send(tokio::task::spawn(async move {})).await.unwrap();
@@ -95,6 +95,6 @@ async fn main() {
     drop(tx);
     reaper.await.unwrap();
     println!("done with benchmark");
-    log.close().await.unwrap();
+    Arc::into_inner(log).unwrap().close().await.unwrap();
     println!("log closed");
 }

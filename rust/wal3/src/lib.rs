@@ -40,6 +40,8 @@ pub enum Error {
     LogWriteTimeout,
     #[error("the log is full")]
     LogFull,
+    #[error("the log is closed")]
+    LogClosed,
     #[error("an internal, otherwise unclassifiable error")]
     Internal,
     #[error("corrupt manifest: {0}")]

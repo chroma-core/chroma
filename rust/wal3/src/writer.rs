@@ -14,13 +14,87 @@ use crate::{
     LogWriterOptions, Manifest, ManifestManager,
 };
 
+#[derive(Clone)]
+pub struct EpochWriter {
+    epoch: u64,
+    writer: Arc<OnceLogWriter>,
+}
+
 ///////////////////////////////////////////// LogWriter ////////////////////////////////////////////
 
 pub struct LogWriter {
+    inner: Mutex<Option<EpochWriter>>,
+}
+
+impl LogWriter {
+    pub async fn initialize(options: &LogWriterOptions, storage: &Storage) -> Result<(), Error> {
+        Manifest::initialize(options, storage).await
+    }
+
+    /// Open the log, possibly writing a new manifest to recover it.
+    pub async fn open(options: LogWriterOptions, storage: Arc<Storage>) -> Result<Self, Error> {
+        let writer = OnceLogWriter::open(options, storage).await?;
+        let inner = EpochWriter { epoch: 1, writer };
+        Ok(Self {
+            inner: Mutex::new(Some(inner)),
+        })
+    }
+
+    /// This will close the log.
+    pub async fn close(self) -> Result<(), Error> {
+        // SAFETY(rescrv):  Mutex poisoning.
+        let inner = { self.inner.lock().unwrap().take() };
+        if let Some(inner) = inner {
+            inner.writer.close().await
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Append a message to a log.
+    pub async fn append(&self, message: Vec<u8>) -> Result<LogPosition, Error> {
+        // SAFETY(rescrv):  Mutex poisoning.
+        let inner = { self.inner.lock().unwrap().clone() };
+        if let Some(epoch_writer) = inner {
+            let res = epoch_writer.writer.append(message).await;
+            if matches!(res, Err(Error::LogContention)) {
+                let writer = OnceLogWriter::open(
+                    epoch_writer.writer.options.clone(),
+                    epoch_writer.writer.storage.clone(),
+                )
+                .await?;
+                // SAFETY(rescrv):  Mutex poisoning.
+                let mut inner = self.inner.lock().unwrap();
+                if let Some(second) = inner.as_mut() {
+                    if second.epoch == epoch_writer.epoch {
+                        second.epoch += 1;
+                        second.writer = writer;
+                    }
+                } else {
+                    // This should never happen, so just be polite with an error.
+                    return Err(Error::LogClosed);
+                }
+            }
+            res
+        } else {
+            // This should never happen, so just be polite with an error.
+            Err(Error::LogClosed)
+        }
+    }
+}
+
+/////////////////////////////////////////// OnceLogWriter //////////////////////////////////////////
+
+/// OnceLogWriter writes to a log once until contention is discovered.  It must then be thrown away
+/// and recovered.  Because throw-away and recovery have the exact same network round-trip
+/// structure as the recovery procedure does, this allows us to re-use exactly one code path for
+/// both.  That code path can then be well-tested because any contention state gets exercised from
+/// the perspective of initialization.
+struct OnceLogWriter {
     /// LogWriterOptions are fixed at log creation time.
     /// LogWriter is intentionally cheap to construct and destroy.
     /// Reopen the log to change the options.
-    options: Arc<LogWriterOptions>,
+    options: LogWriterOptions,
     /// A chroma object store.
     storage: Arc<Storage>,
     /// True iff the log is done.
@@ -38,25 +112,18 @@ pub struct LogWriter {
     flusher: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
-impl LogWriter {
-    pub async fn initialize(options: &LogWriterOptions, storage: &Storage) -> Result<(), Error> {
-        Manifest::initialize(options, storage).await
-    }
-
-    pub async fn open(
-        options: LogWriterOptions,
-        storage: Arc<Storage>,
-    ) -> Result<Arc<Self>, Error> {
-        let options = Arc::new(options);
+impl OnceLogWriter {
+    async fn open(options: LogWriterOptions, storage: Arc<Storage>) -> Result<Arc<Self>, Error> {
         let done = AtomicBool::new(false);
         let (reap, mut rx) = tokio::sync::mpsc::channel(1_000);
         let batch_manager = BatchManager::new(options.throttle_fragment).ok_or(Error::Internal)?;
-        let manifest_manager = ManifestManager::new(
+        let mut manifest_manager = ManifestManager::new(
             options.throttle_manifest,
             options.snapshot_manifest,
             Arc::clone(&storage),
         )
         .await?;
+        manifest_manager.recover().await?;
         let reaper = Mutex::new(None);
         let flusher = Mutex::new(None);
         let this = Arc::new(Self {
@@ -100,9 +167,7 @@ impl LogWriter {
         Ok(this)
     }
 
-    /// This will close the log.  If any references to the log exist outside those created by this
-    /// library, this call will hang until they are dropped.
-    pub async fn close(mut self: Arc<Self>) -> Result<(), Error> {
+    async fn close(mut self: Arc<Self>) -> Result<(), Error> {
         // SAFETY(rescrv): Mutex poisoning.
         if let Some(flusher) = self.flusher.lock().unwrap().take() {
             flusher.abort();
@@ -125,8 +190,7 @@ impl LogWriter {
         Ok(())
     }
 
-    /// Append a message to a stream.
-    pub async fn append(self: &Arc<Self>, message: Vec<u8>) -> Result<LogPosition, Error> {
+    async fn append(self: &Arc<Self>, message: Vec<u8>) -> Result<LogPosition, Error> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.batch_manager.push_work(message, tx);
         if let Some((fragment_seq_no, log_position, work)) =

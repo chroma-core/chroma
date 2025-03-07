@@ -184,6 +184,16 @@ impl ManifestManager {
         })
     }
 
+    /// Recover from a fault in writing.  It is possible that fragments have been written that are
+    /// not referenced by the manifest.  Scout ahead until an empty slot is observed.  Then write
+    /// the manifest that includes the new fragments.
+    pub async fn recover(&mut self) -> Result<(), Error> {
+        // TODO(rescrv):  Implement recovery once LogReader is complete, as the features of
+        // LogReader for reading log fragments and scrubbing the log will be necessary components
+        // of recovery.  It's inherently a read operation.
+        Ok(())
+    }
+
     /// Assign a timestamp to a record.
     pub fn assign_timestamp(&self, record_count: usize) -> Option<(FragmentSeqNo, LogPosition)> {
         let epoch_micros = SystemTime::now()
