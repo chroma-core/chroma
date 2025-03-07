@@ -1712,7 +1712,7 @@ impl<'me> SpannIndexReader<'me> {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashSet, f32::consts::PI, path::PathBuf};
+    use std::{collections::HashSet, f32::consts::PI, path::PathBuf, sync::Arc};
 
     use chroma_blockstore::{
         arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
@@ -3031,6 +3031,8 @@ mod tests {
             doc_offset_ids.push(i as u32);
             doc_embeddings.push(embedding);
         }
+        let doc_offset_ids_arc = Arc::new(doc_offset_ids);
+        let doc_embeddings_arc = Arc::new(doc_embeddings);
         println!("Generated 10k random embeddings");
         for k in 0..10 {
             // Create tokio task for each batch.
@@ -3057,9 +3059,8 @@ mod tests {
             let mut join_handles = Vec::new();
             for batch in 0..10 {
                 let writer_clone = writer.clone();
-                // Don't care about cloning since it is test.
-                let doc_offset_ids_clone = doc_offset_ids.clone();
-                let doc_embeddings_clone = doc_embeddings.clone();
+                let doc_offset_ids_clone = doc_offset_ids_arc.clone();
+                let doc_embeddings_clone = doc_embeddings_arc.clone();
                 let join_handle = tokio::task::spawn(async move {
                     for i in 1..=100 {
                         let id = 1000 * k + 100 * batch + i;
@@ -3119,8 +3120,8 @@ mod tests {
         results.sort_by(|a, b| a.doc_offset_id.cmp(&b.doc_offset_id));
 
         for i in 0..10000 {
-            assert_eq!(results[i].doc_offset_id, doc_offset_ids[i]);
-            assert_eq!(results[i].doc_embedding, doc_embeddings[i].as_slice());
+            assert_eq!(results[i].doc_offset_id, doc_offset_ids_arc[i]);
+            assert_eq!(results[i].doc_embedding, doc_embeddings_arc[i].as_slice());
         }
     }
 
@@ -3160,6 +3161,8 @@ mod tests {
             doc_offset_ids.push(i as u32);
             doc_embeddings.push(Some(embedding));
         }
+        let doc_offset_ids_arc = Arc::new(doc_offset_ids.clone());
+        let doc_embeddings_arc = Arc::new(doc_embeddings.clone());
         println!("Generated 10k random embeddings");
         for k in 0..5 {
             // Create tokio task for each batch.
@@ -3186,9 +3189,8 @@ mod tests {
             let mut join_handles = Vec::new();
             for batch in 0..10 {
                 let writer_clone = writer.clone();
-                // Don't care about cloning since it is test.
-                let doc_offset_ids_clone = doc_offset_ids.clone();
-                let doc_embeddings_clone = doc_embeddings.clone();
+                let doc_offset_ids_clone = doc_offset_ids_arc.clone();
+                let doc_embeddings_clone = doc_embeddings_arc.clone();
                 let join_handle = tokio::task::spawn(async move {
                     for i in 1..=100 {
                         let id = 1000 * k + 100 * batch + i;
@@ -3299,9 +3301,10 @@ mod tests {
         )
         .await
         .expect("Error creating spann index writer");
+        let operations_arc = Arc::new(operations);
         let mut join_handles = Vec::new();
         for t in 0..10 {
-            let operations_clone = operations.clone();
+            let operations_clone = operations_arc.clone();
             let writer_clone = writer.clone();
             let join_handle = tokio::task::spawn(async move {
                 for k in 1..=100 {
