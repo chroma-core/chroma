@@ -27,6 +27,8 @@ struct Staging {
     throttle: ThrottleOptions,
     /// Options related to snapshots.
     snapshot: SnapshotOptions,
+    /// The prefix to store the log under in object storage.
+    prefix: String,
     /// This is the manifest and e-tag most recently witnessed in storage.  It will be gotten at
     /// startup and will be maintained by the background thread.
     stable: ManifestAndETag,
@@ -82,7 +84,7 @@ impl Staging {
             return None;
         }
         self.last_batch = Instant::now();
-        let mut snapshot = new_manifest.generate_snapshot(self.snapshot);
+        let mut snapshot = new_manifest.generate_snapshot(self.snapshot, &self.prefix);
         if let Some(s) = snapshot.as_ref() {
             if self.snapshots_staged.contains(&s.setsum) {
                 if let Err(err) = new_manifest.apply_snapshot(s) {
@@ -137,11 +139,12 @@ impl ManifestManager {
         mut throttle: ThrottleOptions,
         snapshot: SnapshotOptions,
         storage: Arc<Storage>,
+        prefix: String,
     ) -> Result<Self, Error> {
         // NOTE(rescrv):  Once upon a time we allowed concurrency here.  Deny it for safety.
         throttle.outstanding = 1;
         let poison = None;
-        let Some((manifest, e_tag)) = Manifest::load(&storage).await? else {
+        let Some((manifest, e_tag)) = Manifest::load(&storage, &prefix).await? else {
             return Err(Error::UninitializedLog);
         };
         let latest_fragment = manifest.fragments.iter().max_by_key(|f| f.limit.offset());
@@ -157,6 +160,7 @@ impl ManifestManager {
             poison,
             throttle,
             snapshot,
+            prefix,
             stable,
             deltas: vec![],
             snapshots_in_flight: vec![],

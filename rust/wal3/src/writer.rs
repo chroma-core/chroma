@@ -27,13 +27,21 @@ pub struct LogWriter {
 }
 
 impl LogWriter {
-    pub async fn initialize(options: &LogWriterOptions, storage: &Storage) -> Result<(), Error> {
-        Manifest::initialize(options, storage).await
+    pub async fn initialize(
+        options: &LogWriterOptions,
+        storage: &Storage,
+        prefix: String,
+    ) -> Result<(), Error> {
+        Manifest::initialize(options, storage, &prefix).await
     }
 
     /// Open the log, possibly writing a new manifest to recover it.
-    pub async fn open(options: LogWriterOptions, storage: Arc<Storage>) -> Result<Self, Error> {
-        let writer = OnceLogWriter::open(options, storage).await?;
+    pub async fn open(
+        options: LogWriterOptions,
+        storage: Arc<Storage>,
+        prefix: String,
+    ) -> Result<Self, Error> {
+        let writer = OnceLogWriter::open(options, storage, prefix).await?;
         let inner = EpochWriter { epoch: 1, writer };
         Ok(Self {
             inner: Mutex::new(Some(inner)),
@@ -61,6 +69,7 @@ impl LogWriter {
                 let writer = OnceLogWriter::open(
                     epoch_writer.writer.options.clone(),
                     epoch_writer.writer.storage.clone(),
+                    epoch_writer.writer.prefix.clone(),
                 )
                 .await?;
                 // SAFETY(rescrv):  Mutex poisoning.
@@ -97,6 +106,8 @@ struct OnceLogWriter {
     options: LogWriterOptions,
     /// A chroma object store.
     storage: Arc<Storage>,
+    /// The prefix to store the log under in object storage.
+    prefix: String,
     /// True iff the log is done.
     done: AtomicBool,
     /// ManifestManager coordinates updates to the manifest.
@@ -113,7 +124,11 @@ struct OnceLogWriter {
 }
 
 impl OnceLogWriter {
-    async fn open(options: LogWriterOptions, storage: Arc<Storage>) -> Result<Arc<Self>, Error> {
+    async fn open(
+        options: LogWriterOptions,
+        storage: Arc<Storage>,
+        prefix: String,
+    ) -> Result<Arc<Self>, Error> {
         let done = AtomicBool::new(false);
         let (reap, mut rx) = tokio::sync::mpsc::channel(1_000);
         let batch_manager = BatchManager::new(options.throttle_fragment).ok_or(Error::Internal)?;
@@ -121,6 +136,7 @@ impl OnceLogWriter {
             options.throttle_manifest,
             options.snapshot_manifest,
             Arc::clone(&storage),
+            prefix.clone(),
         )
         .await?;
         manifest_manager.recover().await?;
@@ -129,6 +145,7 @@ impl OnceLogWriter {
         let this = Arc::new(Self {
             options,
             storage,
+            prefix,
             done,
             manifest_manager,
             batch_manager,
@@ -285,7 +302,8 @@ impl OnceLogWriter {
 
         // Upload the log.
         let path = format!(
-            "log/Bucket={}/FragmentSeqNo={}.parquet",
+            "{}/log/Bucket={}/FragmentSeqNo={}.parquet",
+            self.prefix,
             fragment_seq_no.bucket(),
             fragment_seq_no.0,
         );
