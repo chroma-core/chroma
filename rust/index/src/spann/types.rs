@@ -477,14 +477,17 @@ impl SpannIndexWriter {
     ) -> Result<(), SpannIndexWriterError> {
         // Don't reassign if outdated by now.
         if self.is_outdated(doc_offset_id, doc_version).await? {
-            println!(
-                "(Sanket-temp) Outdated point {} for reassignment version {}",
-                doc_offset_id, doc_version
+            tracing::debug!(
+                "Outdated point {} for reassignment version {} current head id {}",
+                doc_offset_id,
+                doc_version,
+                prev_head_id
             );
             return Ok(());
         }
         // RNG query to find the nearest heads.
         let (nearest_head_ids, _, nearest_head_embeddings) = self.rng_query(doc_embedding).await?;
+        // Don't reassign if empty.
         if nearest_head_ids.is_empty() {
             return Ok(());
         }
@@ -502,9 +505,11 @@ impl SpannIndexWriter {
                 .get(&doc_offset_id)
                 .ok_or(SpannIndexWriterError::VersionNotFound)?;
             if doc_version < *current_version {
-                println!(
-                    "(Sanket-temp) Outdated point {} for reassignment version {}",
-                    doc_offset_id, doc_version
+                tracing::debug!(
+                    "Outdated point {} for reassignment version {} current head id {}",
+                    doc_offset_id,
+                    doc_version,
+                    prev_head_id
                 );
                 return Ok(());
             }
@@ -519,15 +524,20 @@ impl SpannIndexWriter {
             .zip(nearest_head_embeddings.into_iter())
         {
             if self.is_outdated(doc_offset_id, next_version).await? {
-                println!(
-                    "(Sanket-temp) Outdated point {} for reassignment version {}",
-                    doc_offset_id, next_version
+                tracing::debug!(
+                    "Outdated point {} for reassignment version {} current head id {}",
+                    doc_offset_id,
+                    doc_version,
+                    prev_head_id
                 );
                 return Ok(());
             }
-            println!(
-                "Reassigning {} to {} incremented version {}",
-                doc_offset_id, nearest_head_id, next_version
+            tracing::debug!(
+                "Reassigning {} to head {} incremented version {} current head id {}",
+                doc_offset_id,
+                nearest_head_id,
+                next_version,
+                prev_head_id
             );
             self.append(
                 nearest_head_id as u32,
@@ -671,7 +681,12 @@ impl SpannIndexWriter {
         {
             let write_guard = self.posting_list_writer.lock().await;
             if self.is_head_deleted(head_id as usize).await? {
-                println!("Head {} is deleted for adding point {}", head_id, id);
+                tracing::info!(
+                    "Head {} got concurrently deleted for adding point {} at version {}. Reassigning now",
+                    head_id,
+                    id,
+                    version
+                );
                 if self.is_outdated(id, version).await? {
                     return Ok(());
                 }
@@ -741,7 +756,10 @@ impl SpannIndexWriter {
 
                 return Ok(());
             }
-            tracing::info!("Splitting posting list for head {}", head_id);
+            tracing::debug!(
+                "Splitting posting list of head {} since it exceeds threshold in lieu of appending point {} at version {}",
+                head_id, id, version
+            );
             // Otherwise split the posting list.
             local_indices.truncate(up_to_date_index);
             // Shuffle local_indices.
@@ -764,7 +782,7 @@ impl SpannIndexWriter {
             // TODO(Sanket): Not sure how this can happen. The reference implementation
             // just includes one point from the entire list in this case.
             if clustering_output.num_clusters <= 1 {
-                println!("Clustering split the posting list into only 1 cluster");
+                tracing::warn!("Clustering split the posting list into only 1 cluster");
                 let mut single_doc_offset_ids = Vec::with_capacity(1);
                 let mut single_doc_versions = Vec::with_capacity(1);
                 let mut single_doc_embeddings = Vec::with_capacity(self.dimensionality);
@@ -823,7 +841,10 @@ impl SpannIndexWriter {
                             .distance(&clustering_output.cluster_centers[k], &head_embedding)
                             < 1e-6
                     {
-                        // println!("Same head after splitting in lieu of adding point {}", id);
+                        tracing::info!(
+                            "One of the heads remains the same id {} after splitting in lieu of adding point {} at version {}",
+                            head_id, id, version
+                        );
                         same_head = true;
                         let posting_list = SpannPostingList {
                             doc_offset_ids: &new_doc_offset_ids[k],
@@ -841,6 +862,10 @@ impl SpannIndexWriter {
                         let next_id = self
                             .next_head_id
                             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        tracing::info!(
+                            "Creating new head {}, old head {} in lieu of adding point {} at version {}",
+                            next_id, head_id, id, version
+                        );
                         let posting_list = SpannPostingList {
                             doc_offset_ids: &new_doc_offset_ids[k],
                             doc_versions: &new_doc_versions[k],
@@ -869,7 +894,12 @@ impl SpannIndexWriter {
                     }
                 }
                 if !same_head {
-                    println!("(Sanket-temp) Deleting head {} after splitting", head_id);
+                    tracing::info!(
+                        "Deleting head {} after splitting in lieu of adding point {} at version {}",
+                        head_id,
+                        id,
+                        version
+                    );
                     // Delete the old head
                     let hnsw_write_guard = self.hnsw_index.inner.write();
                     hnsw_write_guard
@@ -907,9 +937,20 @@ impl SpannIndexWriter {
         // It's fine to create new centers for each of them since the number of such points
         // will be very small and we can also run GC to merge them later if needed.
         if ids.is_empty() {
+            tracing::info!(
+                "No nearby heads found for adding {} at version {}. Creating a new head",
+                id,
+                version
+            );
             let next_id = self
                 .next_head_id
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            tracing::info!(
+                "Created new head {} in lieu of adding point {} at version {}",
+                next_id,
+                id,
+                version
+            );
             // First add to postings list then to hnsw. This order is important
             // to ensure that if and when the center is discoverable, it also exists
             // in the postings list. Otherwise, it will be a dangling center.
@@ -964,17 +1005,16 @@ impl SpannIndexWriter {
             let mut version_map_guard = self.versions_map.write();
             let curr_version = match version_map_guard.versions_map.get(&id) {
                 Some(version) => *version,
-                None => return Err(SpannIndexWriterError::VersionNotFound),
+                None => {
+                    tracing::error!("Point {} not found in version map", id);
+                    return Err(SpannIndexWriterError::VersionNotFound);
+                }
             };
             if curr_version == 0 {
-                println!("(Sanket-temp) Id {} already deleted", id);
+                tracing::error!("Trying to update a deleted point {}", id);
                 return Err(SpannIndexWriterError::VersionNotFound);
             }
             inc_version = curr_version + 1;
-            println!(
-                "(Sanket-temp) Incrementing version for {} to {}",
-                id, inc_version
-            );
             version_map_guard.versions_map.insert(id, inc_version);
         }
         // Normalize the embedding in case of cosine.
@@ -1101,6 +1141,8 @@ impl SpannIndexWriter {
         ))
     }
 
+    // Note(Sanket): This has not been tested for running concurrently with
+    // other add/update/delete operations.
     async fn garbage_collect_head(
         &self,
         head_id: usize,
@@ -1276,6 +1318,8 @@ impl SpannIndexWriter {
 
     // TODO(Sanket): Hook in the gc policy.
     // TODO(Sanket): Garbage collect HNSW also.
+    // Note(Sanket): This has not been tested for running concurrently with
+    // other add/update/delete operations.
     pub async fn garbage_collect(&self) -> Result<(), SpannIndexWriterError> {
         // Get all the heads.
         let non_deleted_heads;
@@ -1608,28 +1652,12 @@ impl<'me> SpannIndexReader<'me> {
         Ok(posting_lists)
     }
 
-    pub async fn print_version_map(&self) {
-        let version_map = self
-            .versions_map
-            .get_range(.., ..)
-            .await
-            .expect("Error reading versions map");
-        for (doc_offset_id, version) in version_map.iter() {
-            println!(
-                "(Sanket-temp) Version map: Doc offset id: {}, version: {}",
-                doc_offset_id, version
-            );
-        }
-    }
-
     // Only for testing purposes as of 5 March 2024.
     // Returns all the ids with embeddings.
     // Intentionally dumb and not paginated.
     pub async fn scan(&self) -> Result<Vec<SpannPosting>, SpannIndexReaderError> {
-        self.print_version_map().await;
         // Get all the heads.
-        let (non_deleted_heads, deleted_heads) = self.hnsw_index.inner.read().get_all_ids()?;
-        println!("(Sanket-temp) non_deleted heads: {:?}", non_deleted_heads);
+        let (non_deleted_heads, _) = self.hnsw_index.inner.read().get_all_ids()?;
         let mut postings_map: HashMap<u32, Vec<f32>> = HashMap::new();
         for head in non_deleted_heads {
             let res = self
@@ -1658,11 +1686,7 @@ impl<'me> SpannIndexReader<'me> {
                             .await
                             .map_err(|_| SpannIndexReaderError::PostingListReadError)?
                             .ok_or(SpannIndexReaderError::PostingListReadError)?;
-                        println!(
-                            "(Sanket-temp) Duplicate doc offset id with different embeddings {}, version {}",
-                            doc_offset_id, actual_version
-                        );
-                        tracing::error!("Duplicate doc offset id with different embeddings");
+                        tracing::error!("Duplicate doc offset id {} at latest version {} with different embeddings", doc_offset_id, actual_version);
                         return Err(SpannIndexReaderError::DataInconsistencyError);
                     }
                     continue;
@@ -1688,7 +1712,7 @@ impl<'me> SpannIndexReader<'me> {
 
 #[cfg(test)]
 mod tests {
-    use std::{f32::consts::PI, path::PathBuf};
+    use std::{collections::HashSet, f32::consts::PI, path::PathBuf};
 
     use chroma_blockstore::{
         arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
@@ -3196,13 +3220,20 @@ mod tests {
         // 10 tokio tasks, each randomly either inserting, or updating or deleting 100 records.
         // Generate data for this.
         let mut operations: Vec<(u32, u32, Vec<f32>)> = Vec::new();
-        for i in 1..=1000 {
+        let mut count_ops = 0;
+        let mut touched_ids = HashSet::new();
+        while count_ops < 1000 {
             // Generate a random integer between 0 and 2.
             let operation = rand::thread_rng().gen_range(0..3);
             match operation {
                 0 => {
                     // Insert
-                    let id = 5000 + i;
+                    let id = rand::thread_rng().gen_range(5001..=10000);
+                    if touched_ids.contains(&id) {
+                        continue;
+                    }
+                    touched_ids.insert(id);
+                    count_ops += 1;
                     let embedding = (0..1000)
                         .map(|_| rand::thread_rng().gen::<f32>())
                         .collect::<Vec<f32>>();
@@ -3214,34 +3245,29 @@ mod tests {
                     // Update
                     // Generate a random index between 0 and 5000.
                     let id = rand::thread_rng().gen_range(1..=5000);
+                    if touched_ids.contains(&id) {
+                        continue;
+                    }
+                    touched_ids.insert(id);
+                    count_ops += 1;
                     let embedding = (0..1000)
                         .map(|_| rand::thread_rng().gen::<f32>())
                         .collect::<Vec<f32>>();
                     operations.push((id, 1, embedding.clone()));
-                    // If already deleted, then ignore.
-                    if doc_embeddings[id as usize - 1].is_some() {
-                        doc_embeddings[id as usize - 1] = Some(embedding);
-                    }
+                    doc_embeddings[id as usize - 1] = Some(embedding);
                 }
                 2 => {
                     // Delete
                     let id = rand::thread_rng().gen_range(1..=5000);
+                    if touched_ids.contains(&id) {
+                        continue;
+                    }
+                    touched_ids.insert(id);
+                    count_ops += 1;
                     operations.push((id, 2, Vec::new()));
                     doc_embeddings[id as usize - 1] = None;
                 }
                 _ => panic!("Invalid operation"),
-            }
-        }
-        for op in operations.iter() {
-            if op.1 == 0 {
-                // Insert
-                println!("(Sanket-temp) Inserting id {}", op.0);
-            } else if op.1 == 1 {
-                // Update
-                println!("(Sanket-temp) Updating id {}", op.0);
-            } else if op.1 == 2 {
-                // Delete
-                println!("(Sanket-temp) Deleting id {}", op.0);
             }
         }
         let blockfile_provider =
@@ -3317,6 +3343,7 @@ mod tests {
         hnsw_path = Some(paths.hnsw_id);
         versions_map_path = Some(paths.versions_map_id);
         pl_path = Some(paths.pl_id);
+        max_bf_id_path = Some(paths.max_head_id_id);
 
         // Construct a reader.
         // Clear the cache.
@@ -3326,7 +3353,7 @@ mod tests {
             hnsw_path.as_ref(),
             &hnsw_provider,
             &collection_id,
-            distance_function,
+            distance_function.clone(),
             dimensionality,
             pl_path.as_ref(),
             versions_map_path.as_ref(),
@@ -3341,15 +3368,85 @@ mod tests {
             .expect("Error scanning spann index reader");
         results.sort_by(|a, b| a.doc_offset_id.cmp(&b.doc_offset_id));
 
+        let mut actual_pairs: Vec<(u32, Option<Vec<f32>>)> = doc_offset_ids
+            .iter()
+            .cloned()
+            .zip(doc_embeddings.drain(..))
+            .collect();
+
+        // Sort the pairs by id
+        actual_pairs.sort_by_key(|(id, _)| *id);
         let mut count = 0;
-        for (index, id) in doc_offset_ids.iter().enumerate() {
-            if doc_embeddings[index].is_none() {
+        for (id, embedding) in actual_pairs.iter() {
+            if embedding.is_none() {
                 continue;
             }
-            assert_eq!(results[index].doc_offset_id, *id);
+            assert_eq!(results[count].doc_offset_id, *id);
             assert_eq!(
-                results[index].doc_embedding,
-                doc_embeddings[index].as_ref().unwrap().as_slice(),
+                results[count].doc_embedding,
+                embedding.as_ref().unwrap().as_slice(),
+            );
+            count += 1;
+        }
+        assert_eq!(results.len(), count);
+        // After GC, it should return the same result.
+        let writer = SpannIndexWriter::from_id(
+            &hnsw_provider,
+            hnsw_path.as_ref(),
+            versions_map_path.as_ref(),
+            pl_path.as_ref(),
+            max_bf_id_path.as_ref(),
+            Some(m),
+            Some(ef_construction),
+            Some(ef_search),
+            &collection_id,
+            distance_function.clone(),
+            dimensionality,
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating spann index writer");
+        writer
+            .garbage_collect()
+            .await
+            .expect("Error garbage collecting");
+        let flusher = writer
+            .commit()
+            .await
+            .expect("Error committing spann index writer");
+        let paths = flusher
+            .flush()
+            .await
+            .expect("Error flushing spann index writer");
+        hnsw_path = Some(paths.hnsw_id);
+        versions_map_path = Some(paths.versions_map_id);
+        pl_path = Some(paths.pl_id);
+        let reader = SpannIndexReader::from_id(
+            hnsw_path.as_ref(),
+            &hnsw_provider,
+            &collection_id,
+            distance_function.clone(),
+            dimensionality,
+            pl_path.as_ref(),
+            versions_map_path.as_ref(),
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating spann index reader");
+        let mut results = reader
+            .scan()
+            .await
+            .expect("Error scanning spann index reader");
+        results.sort_by(|a, b| a.doc_offset_id.cmp(&b.doc_offset_id));
+        let mut count = 0;
+        for (id, embedding) in actual_pairs.iter() {
+            if embedding.is_none() {
+                continue;
+            }
+            assert_eq!(results[count].doc_offset_id, *id);
+            assert_eq!(
+                results[count].doc_embedding,
+                embedding.as_ref().unwrap().as_slice(),
             );
             count += 1;
         }
