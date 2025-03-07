@@ -447,7 +447,7 @@ mod tests {
     use crate::*;
 
     #[tokio::test]
-    async fn test_k8s_manager_staging() {
+    async fn test_k8s_integration_manager_staging() {
         // NOTE(rescrv):  This stest doesn't check writes to storage.  It just tracks the logic of
         // the manager.
         let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
