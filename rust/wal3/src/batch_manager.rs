@@ -2,9 +2,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use crate::{
-    DeltaSeqNo, Error, FragmentSeqNo, LogPosition, Manifest, ManifestManager, ThrottleOptions,
-};
+use crate::{Error, FragmentSeqNo, LogPosition, Manifest, ManifestManager, ThrottleOptions};
 
 /////////////////////////////////////////// FragmentState //////////////////////////////////////////
 
@@ -40,23 +38,22 @@ impl ManagerState {
         options: &ThrottleOptions,
         manifest_manager: &ManifestManager,
         record_count: usize,
-    ) -> Result<Option<(FragmentSeqNo, LogPosition, DeltaSeqNo)>, Error> {
+    ) -> Result<Option<(FragmentSeqNo, LogPosition)>, Error> {
         if self.fragment.next_write > Instant::now() {
             return Ok(None);
         }
         if self.fragment.writers_active > options.outstanding {
             return Ok(None);
         }
-        let (next_seq_no, log_position, delta_seq_no) =
-            match manifest_manager.assign_timestamp(record_count) {
-                Some(log_position) => log_position,
-                None => {
-                    return Err(Error::LogFull);
-                }
-            };
+        let (next_seq_no, log_position) = match manifest_manager.assign_timestamp(record_count) {
+            Some(log_position) => log_position,
+            None => {
+                return Err(Error::LogFull);
+            }
+        };
         self.fragment.writers_active += 1;
         self.fragment.set_next_write(options);
-        Ok(Some((next_seq_no, log_position, delta_seq_no)))
+        Ok(Some((next_seq_no, log_position)))
     }
 
     fn finish_write(&mut self) {
@@ -131,7 +128,6 @@ impl BatchManager {
         Option<(
             FragmentSeqNo,
             LogPosition,
-            DeltaSeqNo,
             Vec<(
                 Vec<u8>,
                 tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
@@ -167,7 +163,7 @@ impl BatchManager {
             self.write_finished.notify_one();
             return Ok(None);
         }
-        let Some((fragment_seq_no, log_position, delta_seq_no)) =
+        let Some((fragment_seq_no, log_position)) =
             state.select_for_write(&self.options, manifest_manager, batch_size)?
         else {
             return Ok(None);
@@ -175,7 +171,7 @@ impl BatchManager {
         let mut work = std::mem::take(&mut state.enqueued);
         state.enqueued = work.split_off(batch_size);
         state.last_batch = Instant::now();
-        Ok(Some((fragment_seq_no, log_position, delta_seq_no, work)))
+        Ok(Some((fragment_seq_no, log_position, work)))
     }
 
     pub fn update_average_batch_size(&self, records: usize) {

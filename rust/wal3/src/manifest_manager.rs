@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
@@ -6,9 +7,7 @@ use chroma_storage::{ETag, Storage};
 use setsum::Setsum;
 
 use crate::manifest::{Manifest, Snapshot};
-use crate::{
-    DeltaSeqNo, Error, Fragment, FragmentSeqNo, LogPosition, SnapshotOptions, ThrottleOptions,
-};
+use crate::{Error, Fragment, FragmentSeqNo, LogPosition, SnapshotOptions, ThrottleOptions};
 
 ////////////////////////////////////////// ManifestAndETag /////////////////////////////////////////
 
@@ -22,7 +21,9 @@ struct ManifestAndETag {
 
 #[derive(Debug)]
 struct Staging {
-    /// Options for rate limiting.
+    /// Poisioned by the background thread.
+    poison: Option<Error>,
+    /// Options for rate limiting and batching the manifest.
     throttle: ThrottleOptions,
     /// Options related to snapshots.
     snapshot: SnapshotOptions,
@@ -30,23 +31,17 @@ struct Staging {
     /// startup and will be maintained by the background thread.
     stable: ManifestAndETag,
     /// Deltas that are waiting to be applied.  These are fragments that are in any order.
-    deltas: Vec<(
-        Fragment,
-        DeltaSeqNo,
-        tokio::sync::oneshot::Sender<Option<Error>>,
-    )>,
+    deltas: Vec<(Fragment, tokio::sync::oneshot::Sender<Option<Error>>)>,
     /// In-flight snapshots.  These are being uploaded.  This serves to dedupe the uploads.
     snapshots_in_flight: Vec<Snapshot>,
-    /// Snapshots that have been uploaded and are free for a manifest to claim.
+    /// Snapshots that have been uploaded and are free for a manifest to reference.
     snapshots_staged: Vec<Setsum>,
     /// The next timestamp to assign.
     next_log_position: LogPosition,
-    /*
-    /// The sequence number of the next shard assigned.
-    next_seq_no_to_assign: u64,
-    /// The sequence number of the next delta to apply.
-    next_seq_no_to_apply: u64,
-    */
+    /// The next fragment sequence number to assign to a not-yet completed fragment upload  .
+    next_seq_no_to_assign: FragmentSeqNo,
+    /// The next fragment sequence number to look for when applying fragments.
+    next_seq_no_to_apply: FragmentSeqNo,
     /// The instant at which the last batch was generated.
     last_batch: Instant,
 }
@@ -59,10 +54,10 @@ impl Staging {
         Manifest,
         ETag,
         Manifest,
+        FragmentSeqNo,
         Option<Snapshot>,
         Vec<tokio::sync::oneshot::Sender<Option<Error>>>,
     )> {
-        /*
         if self.deltas.is_empty() {
             return None;
         }
@@ -71,16 +66,15 @@ impl Staging {
         let mut postpone = vec![];
         let mut deltas = std::mem::take(&mut self.deltas);
         let mut next_seq_no_to_apply = self.next_seq_no_to_apply;
-        deltas.sort_by_key(|(_, delta_seq_no, _)| *delta_seq_no);
-        for (delta, delta_seq_no, tx) in deltas.into_iter() {
-            if delta_seq_no == DeltaSeqNo(next_seq_no_to_apply)
-                && new_manifest.can_apply_fragment(&delta)
+        deltas.sort_by_key(|(fragment, _)| fragment.seq_no);
+        for (fragment, tx) in deltas.into_iter() {
+            if fragment.seq_no == next_seq_no_to_apply && new_manifest.can_apply_fragment(&fragment)
             {
                 next_seq_no_to_apply += 1;
-                new_manifest.apply_fragment(delta);
+                new_manifest.apply_fragment(fragment);
                 notifiers.push(tx);
             } else {
-                postpone.push((delta, delta_seq_no, tx));
+                postpone.push((fragment, tx));
             }
         }
         self.deltas = postpone;
@@ -116,15 +110,15 @@ impl Staging {
                 self.snapshots_in_flight.push(s.clone());
             }
         }
+        self.next_seq_no_to_apply = next_seq_no_to_apply;
         Some((
             self.stable.manifest.clone(),
             self.stable.e_tag.clone(),
             new_manifest,
+            next_seq_no_to_apply,
             snapshot,
             notifiers,
         ))
-        */
-        todo!();
     }
 }
 
@@ -140,10 +134,13 @@ pub struct ManifestManager {
 
 impl ManifestManager {
     pub async fn new(
-        throttle: ThrottleOptions,
+        mut throttle: ThrottleOptions,
         snapshot: SnapshotOptions,
         storage: Arc<Storage>,
     ) -> Result<Self, Error> {
+        // NOTE(rescrv):  Once upon a time we allowed concurrency here.  Deny it for safety.
+        throttle.outstanding = 1;
+        let poison = None;
         let Some((manifest, e_tag)) = Manifest::load(&storage).await? else {
             return Err(Error::UninitializedLog);
         };
@@ -151,8 +148,13 @@ impl ManifestManager {
         let next_log_position = latest_fragment
             .map(|f| f.limit)
             .unwrap_or(LogPosition::from_offset(1));
+        let next_seq_no_to_assign = latest_fragment
+            .map(|f| f.seq_no + 1)
+            .unwrap_or(FragmentSeqNo(1));
+        let next_seq_no_to_apply = next_seq_no_to_assign;
         let stable = ManifestAndETag { manifest, e_tag };
         let staging = Arc::new(Mutex::new(Staging {
+            poison,
             throttle,
             snapshot,
             stable,
@@ -160,6 +162,8 @@ impl ManifestManager {
             snapshots_in_flight: vec![],
             snapshots_staged: vec![],
             next_log_position,
+            next_seq_no_to_assign,
+            next_seq_no_to_apply,
             last_batch: Instant::now(),
         }));
         let notifier = Arc::new(tokio::sync::Notify::new());
@@ -181,11 +185,7 @@ impl ManifestManager {
     }
 
     /// Assign a timestamp to a record.
-    pub fn assign_timestamp(
-        &self,
-        record_count: usize,
-    ) -> Option<(FragmentSeqNo, LogPosition, DeltaSeqNo)> {
-        /*
+    pub fn assign_timestamp(&self, record_count: usize) -> Option<(FragmentSeqNo, LogPosition)> {
         let epoch_micros = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or(Duration::ZERO)
@@ -203,25 +203,19 @@ impl ManifestManager {
             .next_log_position
             .offset
             .saturating_add(record_count as u64);
-        let seq_no = DeltaSeqNo(staging.next_seq_no_to_assign);
-        staging.next_seq_no_to_assign = staging.next_seq_no_to_assign.saturating_add(1);
+        let seq_no = staging.next_seq_no_to_assign;
+        staging.next_seq_no_to_assign += 1u64;
         if position.offset < u64::MAX {
-            Some((todo!(), position, seq_no))
+            Some((seq_no, position))
         } else {
             None
         }
-        */
-        todo!();
     }
 
     /// Given a delta to the manifest, batch its application and wait for it to apply.
-    pub async fn apply_delta(
-        &self,
-        delta: Fragment,
-        delta_seq_no: DeltaSeqNo,
-    ) -> Result<(), Error> {
+    pub async fn apply_delta(&self, delta: Fragment) -> Result<(), Error> {
         let (tx, rx) = tokio::sync::oneshot::channel();
-        self.push_delta(delta, delta_seq_no, tx);
+        self.push_delta(delta, tx)?;
         match rx.await {
             Ok(None) => Ok(()),
             Ok(Some(err)) => Err(err),
@@ -233,18 +227,21 @@ impl ManifestManager {
     fn push_delta(
         &self,
         delta: Fragment,
-        delta_seq_no: DeltaSeqNo,
         notify: tokio::sync::oneshot::Sender<Option<Error>>,
-    ) {
+    ) -> Result<(), Error> {
         let was_empty = {
             let mut staging = self.staging.lock().unwrap();
+            if let Some(err) = staging.poison.clone() {
+                return Err(err);
+            }
             let was_empty = staging.deltas.is_empty();
-            staging.deltas.push((delta, delta_seq_no, notify));
+            staging.deltas.push((delta, notify));
             was_empty
         };
         if was_empty {
             self.notifier.notify_one();
         }
+        Ok(())
     }
 
     /// At a periodic interval consistent with throttle options, pump the notifier to wake up the
@@ -273,33 +270,33 @@ impl ManifestManager {
         storage: Arc<Storage>,
         notifier: Arc<tokio::sync::Notify>,
     ) {
-        /*
-        let mut in_flight = LinkedList::default();
+        let mut in_flight_snapshots = VecDeque::new();
         loop {
             notifier.notified().await;
             let (work, throttle) = {
                 // SAFETY(rescrv):  Mutex poisoning.
                 let mut staging = staging.lock().unwrap();
-                if in_flight.len() < staging.throttle.outstanding {
-                    (staging.pull_work(), staging.throttle)
-                } else {
-                    (None, staging.throttle)
-                }
+                (staging.pull_work(), staging.throttle)
             };
-            if let Some((old_manifest, new_manifest, snapshot, notifiers)) = work {
-                let old_e_tag = todo!();
+            if let Some((
+                old_manifest,
+                old_e_tag,
+                new_manifest,
+                next_seq_no_to_apply,
+                snapshot,
+                notifiers,
+            )) = work
+            {
                 let done = Arc::new(AtomicBool::new(false));
                 let install_one = Self::install_one(
                     throttle,
                     Arc::clone(&storage),
                     old_manifest,
-                    old_e_tag,
+                    &old_e_tag,
                     new_manifest.clone(),
                     Arc::clone(&notifier),
                     Arc::clone(&done),
                 );
-                let handle = tokio::task::spawn(install_one);
-                in_flight.push_back((done, handle, notifiers));
                 if let Some(snapshot) = snapshot {
                     let done = Arc::new(AtomicBool::new(false));
                     let install = Self::install_snapshot(
@@ -311,24 +308,30 @@ impl ManifestManager {
                         Arc::clone(&done),
                     );
                     let handle = tokio::task::spawn(install);
-                    in_flight.push_back((done, handle, vec![]));
+                    in_flight_snapshots.push_back((done, handle));
                 }
-            }
-            while in_flight
-                .front()
-                .map(|f| f.0.load(Ordering::Relaxed))
-                .unwrap_or_default()
-                || in_flight.len() >= throttle.outstanding
-            {
-                if let Some((_, handle, notifiers)) = in_flight.pop_front() {
-                    let err = handle.await.unwrap();
-                    for notifier in notifiers {
-                        let _ = notifier.send(err.clone().err());
+                match install_one.await {
+                    Ok(e_tag) => {
+                        let mut staging = staging.lock().unwrap();
+                        staging.next_seq_no_to_apply = next_seq_no_to_apply;
+                        staging.stable = ManifestAndETag {
+                            manifest: new_manifest,
+                            e_tag,
+                        };
+                        for notifier in notifiers.into_iter() {
+                            notifier.send(None).unwrap();
+                        }
+                    }
+                    Err(e) => {
+                        for notifier in notifiers.into_iter() {
+                            notifier.send(Some(e.clone())).unwrap();
+                        }
+                        let mut staging = staging.lock().unwrap();
+                        staging.poison = Some(e);
                     }
                 }
             }
         }
-        */
     }
 
     async fn install_one(
