@@ -1,7 +1,5 @@
 #![windows_subsystem = "console"]
 
-mod utils;
-
 use chroma_cli::chroma_cli;
 use std::env;
 

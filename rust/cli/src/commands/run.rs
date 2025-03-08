@@ -1,8 +1,8 @@
-use crate::utils::{get_frontend_config, LocalFrontendCommandArgs, DEFAULT_PERSISTENT_PATH, LOGO};
 use chroma_frontend::frontend_service_entrypoint_with_config;
 use clap::Parser;
 use colored::Colorize;
 use std::sync::Arc;
+use crate::utils::{get_frontend_config, LocalFrontendCommandArgs, DEFAULT_PERSISTENT_PATH, LOGO};
 
 #[derive(Parser, Debug)]
 pub struct RunArgs {
