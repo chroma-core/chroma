@@ -517,10 +517,10 @@ impl SqliteLog {
         sqlx::query(
             "INSERT OR REPLACE INTO embeddings_queue_config (id, config_json_str) VALUES (1, ?)",
         )
-            .bind(value)
-            .execute(&mut *tx)
-            .await
-            .map_err(WrappedSqlxError)?;
+        .bind(value)
+        .execute(&mut *tx)
+        .await
+        .map_err(WrappedSqlxError)?;
         tx.commit().await.map_err(WrappedSqlxError)?;
         Ok(config)
     }

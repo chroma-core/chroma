@@ -366,7 +366,7 @@ impl Bindings {
                 ids.len(),
                 self.get_max_batch_size()
             )))
-                .into());
+            .into());
         }
 
         let collection_id = chroma_types::CollectionUuid(
@@ -411,7 +411,7 @@ impl Bindings {
                 ids.len(),
                 self.get_max_batch_size()
             )))
-                .into());
+            .into());
         }
 
         let collection_id = chroma_types::CollectionUuid(
@@ -458,7 +458,7 @@ impl Bindings {
                 ids.len(),
                 self.get_max_batch_size()
             )))
-                .into());
+            .into());
         }
 
         let collection_id = chroma_types::CollectionUuid(
@@ -500,7 +500,7 @@ impl Bindings {
             r#where.as_deref(),
             where_document.as_deref(),
         )?
-            .parse()?;
+        .parse()?;
 
         let collection_id = chroma_types::CollectionUuid(
             uuid::Uuid::parse_str(&collection_id).map_err(WrappedUuidError)?,
@@ -563,7 +563,7 @@ impl Bindings {
             r#where.as_deref(),
             where_document.as_deref(),
         )?
-            .parse()?;
+        .parse()?;
 
         let collection_id = chroma_types::CollectionUuid(
             uuid::Uuid::parse_str(&collection_id).map_err(WrappedUuidError)?,
@@ -610,7 +610,7 @@ impl Bindings {
             r#where.as_deref(),
             where_document.as_deref(),
         )?
-            .parse()?;
+        .parse()?;
 
         let collection_id = chroma_types::CollectionUuid(
             uuid::Uuid::parse_str(&collection_id).map_err(WrappedUuidError)?,

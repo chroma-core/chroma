@@ -156,9 +156,9 @@ pub async fn vacuum_chroma(config: FrontendConfig) -> Result<(), Box<dyn Error>>
                 WHERE segments.collection = ?
             "#,
         )
-            .bind(collection.collection_id.to_string())
-            .fetch_all(sqlite.get_conn())
-            .await?;
+        .bind(collection.collection_id.to_string())
+        .fetch_all(sqlite.get_conn())
+        .await?;
 
         let min_seq_id: Option<i64> = seq_ids.iter().map(|row| row.get(0)).min().unwrap_or(None);
 
@@ -188,8 +188,8 @@ pub async fn vacuum_chroma(config: FrontendConfig) -> Result<(), Box<dyn Error>>
         "INSERT INTO maintenance_log (operation, timestamp)
          VALUES ('vacuum', CURRENT_TIMESTAMP)",
     )
-        .execute(sqlite.get_conn())
-        .await?;
+    .execute(sqlite.get_conn())
+    .await?;
 
     Ok(())
 }
