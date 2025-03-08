@@ -515,8 +515,8 @@ async fn get_tenant(
 }
 
 #[derive(Deserialize, Serialize, ToSchema, Debug)]
-struct CreateDatabasePayload {
-    name: String,
+pub struct CreateDatabasePayload {
+    pub name: String,
 }
 
 /// Creates a new database for a given tenant.

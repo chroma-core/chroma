@@ -1,14 +1,23 @@
 mod commands;
 mod utils;
+mod client;
 
 use crate::commands::run::{run, RunArgs};
 use crate::commands::update::update;
 use crate::commands::vacuum::{vacuum, VacuumArgs};
 use clap::{Parser, Subcommand};
+use crate::commands::db::{db_command, DbCommand};
+use crate::commands::login::{login, LoginArgs};
+use crate::commands::profile::{profile_command, ProfileCommand};
 
 #[derive(Subcommand, Debug)]
 enum Command {
+    #[command(subcommand)]
+    DB(DbCommand),
     Docs,
+    Login(LoginArgs),
+    #[command(subcommand)]
+    Profile(ProfileCommand),
     Run(RunArgs),
     Support,
     Update,
@@ -28,11 +37,20 @@ pub fn chroma_cli(args: Vec<String>) {
     let cli = Cli::parse_from(args);
 
     match cli.command {
+        Command::DB(db_subcommand) => {
+            db_command(db_subcommand);
+        }
         Command::Docs => {
             let url = "https://docs.trychroma.com";
             if webbrowser::open(url).is_err() {
                 eprintln!("Error: Failed to open the browser. Visit {}.", url);
             }
+        }
+        Command::Login(args) => {
+            login(args)
+        }
+        Command::Profile(profile_subcommand) => {
+            profile_command(profile_subcommand);
         }
         Command::Run(args) => {
             run(args);
