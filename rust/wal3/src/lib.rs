@@ -1,15 +1,24 @@
 #![doc = include_str!("../README.md")]
 
+use std::sync::Arc;
+use std::time::SystemTime;
+
 use serde::{Deserialize, Serialize};
 use setsum::Setsum;
 
 mod backoff;
+mod batch_manager;
 mod manifest;
+mod manifest_manager;
+mod writer;
 
 use manifest::SnapshotPointer;
 
 pub use backoff::ExponentialBackoff;
+pub use batch_manager::BatchManager;
 pub use manifest::{Manifest, Snapshot};
+pub use manifest_manager::ManifestManager;
+pub use writer::LogWriter;
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
@@ -28,7 +37,11 @@ pub enum Error {
     #[error("log contention fails a write")]
     LogContention,
     #[error("the log is full")]
+    LogWriteTimeout,
+    #[error("the log is full")]
     LogFull,
+    #[error("the log is closed")]
+    LogClosed,
     #[error("an internal, otherwise unclassifiable error")]
     Internal,
     #[error("corrupt manifest: {0}")]
@@ -37,6 +50,10 @@ pub enum Error {
     CorruptCursor(String),
     #[error("missing cursor: {0}")]
     NoSuchCursor(String),
+    #[error("parquet error: {0}")]
+    ParquetError(#[from] Arc<parquet::errors::ParquetError>),
+    #[error("storage error: {0}")]
+    StorageError(#[from] Arc<chroma_storage::StorageError>),
 }
 
 //////////////////////////////////////////// ScrubError ////////////////////////////////////////////
@@ -68,6 +85,18 @@ pub struct LogPosition {
 }
 
 impl LogPosition {
+    /// Create a new log position from offset and current time.
+    pub fn from_offset(offset: u64) -> Self {
+        let timestamp_us = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("wal3 won't work before 1970")
+            .as_micros() as u64;
+        LogPosition {
+            offset,
+            timestamp_us,
+        }
+    }
+
     /// Create a new offset and timestamp.
     pub fn new(offset: u64, timestamp_us: u64) -> Self {
         LogPosition {
@@ -106,6 +135,23 @@ impl LogPosition {
     }
 }
 
+impl std::ops::Add<usize> for LogPosition {
+    type Output = LogPosition;
+
+    fn add(self, rhs: usize) -> Self::Output {
+        LogPosition {
+            offset: self.offset.wrapping_add(rhs as u64),
+            timestamp_us: self.timestamp_us.wrapping_add(rhs as u64),
+        }
+    }
+}
+
+impl std::ops::AddAssign<usize> for LogPosition {
+    fn add_assign(&mut self, rhs: usize) {
+        *self = *self + rhs;
+    }
+}
+
 ////////////////////////////////////////// ThrottleOptions /////////////////////////////////////////
 
 /// ThrottleOptions control admission to S3 and batch size/interval.
@@ -117,7 +163,7 @@ pub struct ThrottleOptions {
     /// The maximum number of bytes to batch.  Defaults to 8MB.
     #[serde(default = "ThrottleOptions::default_batch_size_bytes")]
     pub batch_size_bytes: usize,
-    /// The maximum number of microseconds to batch.  Defaults to 20ms or 20_000us.
+    /// The maximum number of microseconds to batch.  Defaults to 100ms or 100_000us.
     #[serde(default = "ThrottleOptions::default_batch_interval_us")]
     pub batch_interval_us: usize,
     /// The maximum number of operations per second to allow.  Defaults to 2_000.
@@ -137,7 +183,7 @@ impl ThrottleOptions {
     }
 
     fn default_batch_interval_us() -> usize {
-        20_000
+        100_000
     }
 
     fn default_throughput() -> usize {
@@ -149,7 +195,7 @@ impl ThrottleOptions {
     }
 
     fn default_outstanding() -> usize {
-        100
+        1
     }
 }
 
@@ -165,7 +211,7 @@ impl Default for ThrottleOptions {
             throughput: Self::default_throughput(),
             // How much headroom we have for retries.
             headroom: Self::default_headroom(),
-            // Allow up to 100 requests to be outstanding.
+            // Allow up to 1 requests to be outstanding.
             outstanding: Self::default_outstanding(),
         }
     }
@@ -236,16 +282,21 @@ pub struct LogWriterOptions {
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd, Hash, serde::Deserialize, serde::Serialize,
 )]
-pub struct FragmentSeqNo(pub usize);
+pub struct FragmentSeqNo(pub u64);
 
 impl FragmentSeqNo {
     /// Returns the successor of this FragmentSeqNo, or None if this FragmentSeqNo is the maximum
     pub fn successor(&self) -> Option<Self> {
-        if self.0 == usize::MAX {
+        if self.0 == u64::MAX {
             None
         } else {
             Some(FragmentSeqNo(self.0 + 1))
         }
+    }
+
+    // Round down to the nearest multiple of 5k.
+    pub fn bucket(&self) -> u64 {
+        (self.0 / 5_000) * 5_000
     }
 }
 
@@ -255,7 +306,7 @@ impl std::fmt::Display for FragmentSeqNo {
     }
 }
 
-impl std::ops::Add<FragmentSeqNo> for usize {
+impl std::ops::Add<FragmentSeqNo> for u64 {
     type Output = FragmentSeqNo;
 
     fn add(self, rhs: FragmentSeqNo) -> Self::Output {
@@ -263,16 +314,24 @@ impl std::ops::Add<FragmentSeqNo> for usize {
     }
 }
 
-impl std::ops::Add<usize> for FragmentSeqNo {
+impl std::ops::Add<u64> for FragmentSeqNo {
     type Output = FragmentSeqNo;
 
-    fn add(self, rhs: usize) -> Self::Output {
+    fn add(self, rhs: u64) -> Self::Output {
         FragmentSeqNo(self.0.wrapping_add(rhs))
     }
 }
 
-impl std::ops::AddAssign<usize> for FragmentSeqNo {
-    fn add_assign(&mut self, rhs: usize) {
+impl std::ops::Sub<FragmentSeqNo> for FragmentSeqNo {
+    type Output = u64;
+
+    fn sub(self, rhs: FragmentSeqNo) -> Self::Output {
+        self.0.wrapping_sub(rhs.0)
+    }
+}
+
+impl std::ops::AddAssign<u64> for FragmentSeqNo {
+    fn add_assign(&mut self, rhs: u64) {
         self.0 = self.0.wrapping_add(rhs);
     }
 }
