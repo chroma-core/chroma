@@ -175,7 +175,7 @@ impl SysDb {
         match self {
             SysDb::Grpc(grpc) => grpc.get_collection_size(collection_id).await,
             SysDb::Sqlite(_) => unimplemented!(),
-            SysDb::Test(_) => unimplemented!(),
+            SysDb::Test(test) => test.get_collection_size(collection_id).await,
         }
     }
 
@@ -225,8 +225,29 @@ impl SysDb {
                     )
                     .await
             }
-            SysDb::Test(_) => {
-                todo!()
+            SysDb::Test(test_sysdb) => {
+                const CONFIGURATION_JSON_STR: &str = r#"{"hnsw_configuration": {"space": "l2", "ef_construction": 100, "ef_search": 100, "num_threads": 16, "M": 16, "resize_factor": 1.2, "batch_size": 100, "sync_threshold": 1000, "_type": "HNSWConfigurationInternal"}, "_type": "CollectionConfigurationInternal"}"#;
+                let configuration_json: serde_json::Value =
+                    serde_json::from_str(CONFIGURATION_JSON_STR)
+                        .map_err(CreateCollectionError::Configuration)?;
+                let collection = Collection {
+                    collection_id,
+                    name,
+                    configuration_json,
+                    metadata,
+                    dimension,
+                    tenant: tenant.clone(),
+                    database: database.clone(),
+                    log_position: 0,
+                    version: 0,
+                    total_records_post_compaction: 0,
+                };
+
+                test_sysdb.add_collection(collection.clone());
+                for seg in segments {
+                    test_sysdb.add_segment(seg);
+                }
+                Ok(collection)
             }
         }
     }
