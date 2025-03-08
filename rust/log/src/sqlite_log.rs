@@ -121,18 +121,18 @@ impl ChromaError for SqliteGetLegacyEmbeddingsQueueConfigError {
     }
 }
 
-fn legacy_embeddings_queue_config_default_kind() -> String {
+pub fn legacy_embeddings_queue_config_default_kind() -> String {
     "EmbeddingsQueueConfigurationInternal".to_owned()
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-struct LegacyEmbeddingsQueueConfig {
-    automatically_purge: bool,
+pub struct LegacyEmbeddingsQueueConfig {
+    pub automatically_purge: bool,
     #[serde(
         default = "legacy_embeddings_queue_config_default_kind",
         rename = "_type"
     )]
-    kind: String,
+    pub kind: String,
 }
 
 #[derive(Clone, Debug)]
@@ -506,6 +506,23 @@ impl SqliteLog {
         tx.commit().await.map_err(WrappedSqlxError)?;
 
         Ok(default_config)
+    }
+
+    pub async fn update_legacy_embeddings_queue_config(
+        &self,
+        config: LegacyEmbeddingsQueueConfig,
+    ) -> Result<LegacyEmbeddingsQueueConfig, SqliteGetLegacyEmbeddingsQueueConfigError> {
+        let mut tx = self.db.get_conn().begin().await.map_err(WrappedSqlxError)?;
+        let value = serde_json::to_string(&config)?;
+        sqlx::query(
+            "INSERT OR REPLACE INTO embeddings_queue_config (id, config_json_str) VALUES (1, ?)",
+        )
+            .bind(value)
+            .execute(&mut *tx)
+            .await
+            .map_err(WrappedSqlxError)?;
+        tx.commit().await.map_err(WrappedSqlxError)?;
+        Ok(config)
     }
 }
 
