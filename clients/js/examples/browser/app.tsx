@@ -1,6 +1,20 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { ChromaClient } from "../../src/ChromaClient";
-import { Collection } from "../../src/types";
+// Choose the appropriate import based on environment variable
+const packageType = (window as any).process?.env?.PACKAGE || 'bundled';
+let ChromaClientModule;
+
+if (packageType === 'client') {
+  console.log('Using chromadb-client package with peer dependencies');
+  ChromaClientModule = require('chromadb-client');
+} else {
+  console.log('Using bundled chromadb package');
+  ChromaClientModule = require('chromadb');
+}
+
+// Import directly from the chosen module
+const { ChromaClient } = ChromaClientModule;
+// For TypeScript, we need to use typeof for the Collection type
+type Collection = ReturnType<typeof ChromaClientModule.ChromaClient.prototype.getOrCreateCollection>;
 
 const SAMPLE_DOCUMENTS = [
   "apple",
@@ -19,6 +33,7 @@ const hashString = async (message: string) => {
   return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 };
 
+// Create the Chroma client from the selected package
 const chroma = new ChromaClient({ path: "http://localhost:8000" });
 
 const useCollection = () => {

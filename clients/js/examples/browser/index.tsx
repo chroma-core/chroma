@@ -1,7 +1,9 @@
 import React from "react";
-import { createRoot } from "react-dom/client";
+import ReactDOM from "react-dom/client";
 import { App } from "./app";
 
-const container = document.getElementById("app");
-const root = createRoot(container);
-root.render(<App />);
+// Display which package we're using
+const packageType = import.meta.env.VITE_PACKAGE || 'default (bundled)';
+console.log(`Using ChromaDB package: ${packageType}`);
+
+ReactDOM.createRoot(document.getElementById("root")!).render(<App />);
