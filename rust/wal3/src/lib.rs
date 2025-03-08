@@ -10,6 +10,7 @@ mod backoff;
 mod batch_manager;
 mod manifest;
 mod manifest_manager;
+mod reader;
 mod writer;
 
 use manifest::SnapshotPointer;
@@ -18,6 +19,7 @@ pub use backoff::ExponentialBackoff;
 pub use batch_manager::BatchManager;
 pub use manifest::{Manifest, Snapshot};
 pub use manifest_manager::ManifestManager;
+pub use reader::{Limits, LogReader};
 pub use writer::LogWriter;
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
@@ -273,6 +275,16 @@ pub struct LogWriterOptions {
     /// Default snapshot options for manifest.
     #[serde(default)]
     pub snapshot_manifest: SnapshotOptions,
+}
+
+///////////////////////////////////////// LogReaderOptions /////////////////////////////////////////
+
+/// LogReaderOptions control the behavior of the log writer.
+#[derive(Clone, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct LogReaderOptions {
+    /// Default throttling options for manifest.
+    #[serde(default)]
+    pub throttle: ThrottleOptions,
 }
 
 /////////////////////////////////////////// FragmentSeqNo //////////////////////////////////////////
