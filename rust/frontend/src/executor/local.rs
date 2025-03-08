@@ -308,7 +308,7 @@ mod tests {
         AddCollectionRecordsRequest, CreateCollectionRequest, IncludeList, QueryRequest,
     };
 
-    use crate::{frontend::Frontend, FrontendConfig};
+    use crate::{Frontend, FrontendConfig};
 
     #[tokio::test]
     async fn test_query() {
