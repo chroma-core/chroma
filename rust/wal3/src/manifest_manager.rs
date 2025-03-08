@@ -49,6 +49,10 @@ struct Staging {
 }
 
 impl Staging {
+    /// Pull work from the staging area.  This will return the stable manifest and its etag, the
+    /// new manifest and the sequence number at which to write it.  Optionally returns a snapshot
+    /// that the current log could use to trim itself.  Lastly, return a vector of notification
+    /// channels to alert every fragment waiting on this manifest that it's ready.
     #[allow(clippy::type_complexity)]
     fn pull_work(
         &mut self,
@@ -60,9 +64,12 @@ impl Staging {
         Option<Snapshot>,
         Vec<tokio::sync::oneshot::Sender<Option<Error>>>,
     )> {
+        // No fragment, no work.
         if self.fragments.is_empty() {
             return None;
         }
+        // Iterate the fragments that are queued up and apply them to the manifest in order of
+        // sequence_number, making sure to never leave gaps.
         let mut notifiers = vec![];
         let mut new_manifest = self.stable.manifest.clone();
         let mut postpone = vec![];
@@ -79,13 +86,18 @@ impl Staging {
                 postpone.push((fragment, tx));
             }
         }
+        // The fragments that didn't make the cut.
         self.fragments = postpone;
+        // No-one to notify, no work.
         if notifiers.is_empty() {
             return None;
         }
         self.last_batch = Instant::now();
+        // If the manifest can create a snapshot based upon the options.
         let mut snapshot = new_manifest.generate_snapshot(self.snapshot, &self.prefix);
         if let Some(s) = snapshot.as_ref() {
+            // If the snapshot has been added to object storage it will be available for the next
+            // manifest that gets installed.  Apply it to the new manifest.
             if self.snapshots_staged.contains(&s.setsum) {
                 if let Err(err) = new_manifest.apply_snapshot(s) {
                     // It failed to apply, so error everyone waiting.  The backoff/retry/reseat
@@ -126,6 +138,7 @@ impl Staging {
 
 ////////////////////////////////////////// ManifestManager /////////////////////////////////////////
 
+/// ManifestManager is responsible for managing the manifest and batching writes to it.
 #[derive(Debug)]
 pub struct ManifestManager {
     staging: Arc<Mutex<Staging>>,
@@ -135,6 +148,7 @@ pub struct ManifestManager {
 }
 
 impl ManifestManager {
+    /// Create a new manifest manager.
     pub async fn new(
         mut throttle: ThrottleOptions,
         snapshot: SnapshotOptions,
@@ -348,6 +362,7 @@ impl ManifestManager {
         }
     }
 
+    /// Install one manifest, returning its etag or erroring.
     async fn install_one(
         throttle: ThrottleOptions,
         storage: Arc<Storage>,
@@ -374,6 +389,8 @@ impl ManifestManager {
         }
     }
 
+    /// Install a snapshot.  Can succeed or error.
+    /// Clears the bookkeeping regardless so the manifest snapshot can retry.
     async fn install_snapshot(
         throttle: ThrottleOptions,
         staging: Arc<Mutex<Staging>>,

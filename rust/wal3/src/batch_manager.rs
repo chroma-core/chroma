@@ -4,45 +4,39 @@ use std::time::{Duration, Instant};
 
 use crate::{Error, FragmentSeqNo, LogPosition, ManifestManager, ThrottleOptions};
 
-/////////////////////////////////////////// FragmentState //////////////////////////////////////////
-
-#[derive(Debug)]
-struct FragmentState {
-    next_write: Instant,
-    writers_active: usize,
-}
-
-impl FragmentState {
-    fn set_next_write(&mut self, options: &ThrottleOptions) {
-        self.next_write =
-            Instant::now() + Duration::from_micros(1_000_000 / options.throughput as u64);
-    }
-}
-
 /////////////////////////////////////////// ManagerState ///////////////////////////////////////////
 
+/// ManagerState captures the state necessary to batch manifests.
 #[derive(Debug)]
 #[allow(clippy::type_complexity)]
 struct ManagerState {
-    fragment: FragmentState,
+    last_batch: Instant,
+    next_write: Instant,
+    writers_active: usize,
     enqueued: Vec<(
         Vec<u8>,
         tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
     )>,
-    last_batch: Instant,
 }
 
 impl ManagerState {
+    /// Set the next_write instant based upon the current time and throttle options.
+    fn set_next_write(&mut self, options: &ThrottleOptions) {
+        self.next_write =
+            Instant::now() + Duration::from_micros(1_000_000 / options.throughput as u64);
+    }
+
+    /// Select a fragment seq no and log position for writing, if possible.
     fn select_for_write(
         &mut self,
         options: &ThrottleOptions,
         manifest_manager: &ManifestManager,
         record_count: usize,
     ) -> Result<Option<(FragmentSeqNo, LogPosition)>, Error> {
-        if self.fragment.next_write > Instant::now() {
+        if self.next_write > Instant::now() {
             return Ok(None);
         }
-        if self.fragment.writers_active > options.outstanding {
+        if self.writers_active > options.outstanding {
             return Ok(None);
         }
         let (next_seq_no, log_position) = match manifest_manager.assign_timestamp(record_count) {
@@ -51,13 +45,13 @@ impl ManagerState {
                 return Err(Error::LogFull);
             }
         };
-        self.fragment.writers_active += 1;
-        self.fragment.set_next_write(options);
+        self.writers_active += 1;
+        self.set_next_write(options);
         Ok(Some((next_seq_no, log_position)))
     }
 
     fn finish_write(&mut self) {
-        self.fragment.writers_active -= 1;
+        self.writers_active -= 1;
     }
 }
 
@@ -73,16 +67,15 @@ pub struct BatchManager {
 }
 
 impl BatchManager {
-    pub fn new(options: ThrottleOptions) -> Option<Self> {
+    pub fn new(mut options: ThrottleOptions) -> Option<Self> {
+        // NOTE(rescrv):  Once upon a time we allowed concurrency here.  Deny it for safety.
+        options.outstanding = 1;
         let next_write = Instant::now();
-        let fragment = FragmentState {
-            next_write,
-            writers_active: 0,
-        };
         Some(Self {
             options,
             state: Mutex::new(ManagerState {
-                fragment,
+                next_write,
+                writers_active: 0,
                 enqueued: Vec::new(),
                 last_batch: Instant::now(),
             }),
@@ -138,34 +131,43 @@ impl BatchManager {
         // SAFETY(rescrv): Mutex poisoning.
         let mut state = self.state.lock().unwrap();
         if state.enqueued.is_empty() {
+            // No work, no notify.
             return Ok(None);
         }
+        // Clamp first by the number of items in this batch.
         let batch_size = self.batch_size();
         let mut batch_size =
-            // If our estimate is wildly under-estimating, just take everything available.
+            // If our estimate is wildly under-estimating or is an over-estimate, just take
+            // everything available.
             if state.enqueued.len() > batch_size * 2 || state.enqueued.len() < batch_size {
                 state.enqueued.len()
             } else {
                 batch_size
             };
-        let mut size = 0usize;
+        // Clamp second by the number of bytes in this batch.
+        let mut batch_size_bytes = 0usize;
         for idx in 0..batch_size {
-            if size > self.options.batch_size_bytes {
+            if batch_size_bytes > self.options.batch_size_bytes {
                 batch_size = idx;
                 break;
             }
-            size += state.enqueued[idx].0.len();
+            batch_size_bytes += state.enqueued[idx].0.len();
         }
-        if size < self.options.batch_size_bytes / 2
+        // If the batch size is less than half full and we haven't waited the batch interval since
+        // last write, wait for more data.
+        if batch_size_bytes < self.options.batch_size_bytes / 2
             && state.last_batch.elapsed()
                 < Duration::from_micros(self.options.batch_interval_us as u64)
         {
+            // This notify makes sure the background picks up the work and makes progress at end of
+            // the batching interval.
             self.write_finished.notify_one();
             return Ok(None);
         }
         let Some((fragment_seq_no, log_position)) =
             state.select_for_write(&self.options, manifest_manager, batch_size)?
         else {
+            // No fragment can be written at this time.
             return Ok(None);
         };
         let mut work = std::mem::take(&mut state.enqueued);
