@@ -345,6 +345,7 @@ pub struct Fragment {
     pub seq_no: FragmentSeqNo,
     pub start: LogPosition,
     pub limit: LogPosition,
+    pub num_bytes: u64,
     #[serde(
         deserialize_with = "deserialize_setsum",
         serialize_with = "serialize_setsum"
