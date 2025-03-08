@@ -589,7 +589,7 @@ mod tests {
         .unwrap();
         let (d1_tx, mut d1_rx) = tokio::sync::oneshot::channel();
         manager
-            .push_delta(
+            .push_fragment(
                 Fragment {
                     path: "path2".to_string(),
                     seq_no: FragmentSeqNo(2),
@@ -610,7 +610,7 @@ mod tests {
         assert!(d1_rx.try_recv().is_err());
         let (d2_tx, d2_rx) = tokio::sync::oneshot::channel();
         manager
-            .push_delta(
+            .push_fragment(
                 Fragment {
                     path: "path1".to_string(),
                     seq_no: FragmentSeqNo(1),
@@ -625,7 +625,7 @@ mod tests {
         d1_rx.await.unwrap();
         d2_rx.await.unwrap();
         let staging = manager.staging.lock().unwrap();
-        assert!(staging.deltas.is_empty());
+        assert!(staging.fragments.is_empty());
         assert_eq!(
             Manifest {
                 path: String::from("prefix/manifest/MANIFEST"),
