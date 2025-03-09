@@ -111,7 +111,7 @@ impl AuthenticateAndAuthorize for () {
     ) -> Pin<Box<dyn Future<Output = Result<GetUserIdentityResponse, AuthError>> + Send>> {
         Box::pin(ready(Ok::<GetUserIdentityResponse, AuthError>(
             GetUserIdentityResponse {
-                user_id: String::new(),
+                user_id: 0,
                 tenant: "default_tenant".to_string(),
                 databases: vec!["default_database".to_string()],
             },

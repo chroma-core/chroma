@@ -146,7 +146,7 @@ impl ChromaError for HeartbeatError {
 
 #[derive(Serialize, Deserialize, ToSchema)]
 pub struct GetUserIdentityResponse {
-    pub user_id: String,
+    pub user_id: u64,
     pub tenant: String,
     pub databases: Vec<String>,
 }

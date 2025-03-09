@@ -1,4 +1,5 @@
 use std::error::Error;
+use colored::Colorize;
 use reqwest::blocking::Client;
 use reqwest::header::{HeaderMap, HeaderValue};
 use serde::de::DeserializeOwned;
@@ -15,7 +16,7 @@ fn chroma_server_get_request<T: DeserializeOwned>(route: &str, api_key: &str) ->
 
     let mut headers = HeaderMap::new();
     headers.insert("X-Chroma-Token", HeaderValue::from_str(api_key)?);
-
+    
     let response = client
         .get(url)
         .headers(headers)
@@ -71,13 +72,13 @@ pub fn get_tenant_id(api_key: &str) -> Result<String, Box<dyn Error>> {
 
 pub fn create_database(profile: &Profile, name: String) -> Result<(), Box<dyn Error>> {
     let create_db_route = format!("/api/v2/tenants/{}/databases", profile.tenant_id);
-    let _response = chroma_server_post_request::<CreateDatabaseResponse, CreateDatabasePayload>(&create_db_route, &profile.api_key, &CreateDatabasePayload { name })?;
+    let _response = chroma_server_post_request::<_, CreateDatabasePayload>(&create_db_route, &profile.api_key, &CreateDatabasePayload { name })?;
     Ok(())
 }
 
 pub fn delete_database(profile: &Profile, name: String) -> Result<(), Box<dyn Error>> {
     let delete_db_route = format!("/api/v2/tenants/{}/databases/{}", profile.tenant_id, name);
-    chroma_server_delete_request::<DeleteDatabaseResponse>(&delete_db_route, &profile.api_key)?;
+    chroma_server_delete_request(&delete_db_route, &profile.api_key)?;
     Ok(())
 }
 

@@ -7,6 +7,7 @@ use crate::commands::update::update;
 use crate::commands::vacuum::{vacuum, VacuumArgs};
 use clap::{Parser, Subcommand};
 use crate::commands::db::{db_command, DbCommand};
+use crate::commands::install::{install, InstallArgs};
 use crate::commands::login::{login, LoginArgs};
 use crate::commands::profile::{profile_command, ProfileCommand};
 
@@ -15,6 +16,7 @@ enum Command {
     #[command(subcommand)]
     DB(DbCommand),
     Docs,
+    Install(InstallArgs),
     Login(LoginArgs),
     #[command(subcommand)]
     Profile(ProfileCommand),
@@ -45,6 +47,9 @@ pub fn chroma_cli(args: Vec<String>) {
             if webbrowser::open(url).is_err() {
                 eprintln!("Error: Failed to open the browser. Visit {}.", url);
             }
+        }
+        Command::Install(args) => {
+            install(args);
         }
         Command::Login(args) => {
             login(args)

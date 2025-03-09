@@ -40,12 +40,12 @@ fn delete_profile(args: DeleteArgs) {
     profiles.remove(&profile);
     write_credentials_file(&profiles, &credentials_file).expect("Could not write credentials file");
 
-    println!("\nProfile {} successfully removed\n", profile);
+    println!("{} {} {}", "\nProfile".green(), profile.green(), "successfully removed\n".green());
 }
 
 #[allow(dead_code)]
 fn list_profiles() {
-    println!("{}", "\nAvailable profiles:\n".blue().bold());
+    println!("{}", "\nAvailable profiles:".blue().bold());
     let credentials_file = get_or_create_credentials_file();
     let profiles =
         read_credentials_file(&credentials_file).expect("\nCould not parse credentials file");

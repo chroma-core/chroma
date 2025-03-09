@@ -1,15 +1,26 @@
+use std::fmt;
 use arboard::Clipboard;
 use clap::{Args, Subcommand, ValueEnum};
 use colored::Colorize;
 use dialoguer::{Input, Select};
 use dialoguer::theme::ColorfulTheme;
 use crate::client::{create_database, delete_database, list_databases, CHROMA_API_URL};
+use crate::commands::install::DbType;
 use crate::utils::{get_current_profile, Profile};
 
 #[derive(Debug, Clone, ValueEnum)]
 pub enum Language {
     Python,
     JavaScript,
+}
+
+impl fmt::Display for Language {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Language::Python => write!(f, "python"),
+            Language::JavaScript => write!(f, "javascript"),
+        }
+    }
 }
 
 #[derive(Args, Debug)]
@@ -71,13 +82,12 @@ pub fn prompt_db_name(prompt: &str) -> String {
 
 pub fn connect(args: ConnectArgs, current_profile: Profile) {
     let language = args.language.unwrap_or_else(|| {
-        println!("{}", "\nWhat language would you like to use?".blue().bold());
         let options = vec![
             format!("{} {}", ">".yellow(), "Python"),
             format!("{} {}", ">".yellow(), "JavaScript/Typescript"),
         ];
 
-        println!("{}", "\nChoose a profile name".blue().bold());
+        println!("{}", "\nWhat language would you like to use?".blue().bold());
         let selection = Select::with_theme(&ColorfulTheme::default())
             .items(&options)
             .default(0)
@@ -90,6 +100,7 @@ pub fn connect(args: ConnectArgs, current_profile: Profile) {
             Language::JavaScript
         }
     });
+    println!("{}", language.to_string().green());
     
     let connection_string = match language { 
         Language::Python => {
@@ -100,7 +111,7 @@ pub fn connect(args: ConnectArgs, current_profile: Profile) {
         }
     };
     
-    println!("\n{}", connection_string);
+    println!("{}", connection_string);
     let mut clipboard = Clipboard::new().expect("Failed to create clipboard");
     clipboard.set_text(connection_string).expect("Failed to copy text");
     println!("\n{}\n", "Copied to clipboard!".blue().bold());
