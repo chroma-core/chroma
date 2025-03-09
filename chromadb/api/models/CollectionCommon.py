@@ -44,20 +44,9 @@ from chromadb.api.types import (
     OneOrMany,
     UpdateRequest,
     UpsertRequest,
-    get_default_embeddable_record_set_fields,
     maybe_cast_one_to_many,
     normalize_base_record_set,
     normalize_insert_record_set,
-    validate_base_record_set,
-    validate_ids,
-    validate_include,
-    validate_insert_record_set,
-    validate_metadata,
-    validate_embedding_function,
-    validate_n_results,
-    validate_record_set_contains_any,
-    validate_record_set_for_embedding,
-    validate_filter_set,
 )
 
 # TODO: We should rename the types in chromadb.types to be Models where
@@ -66,6 +55,21 @@ from chromadb.api.types import (
 # stored / retrieved / transmitted.
 from chromadb.types import Collection as CollectionModel, Where, WhereDocument
 import logging
+
+from chromadb.utils.validators import (
+    get_default_embeddable_record_set_fields,
+    validate_base_record_set,
+    validate_embedding_function,
+    validate_embeddings,
+    validate_filter_set,
+    validate_ids,
+    validate_include,
+    validate_insert_record_set,
+    validate_metadata,
+    validate_n_results,
+    validate_record_set_for_embedding,
+    validate_record_set_contains_any,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -302,6 +306,9 @@ class CollectionCommon(Generic[ClientT]):
         else:
             request_embeddings = query_records["embeddings"]
 
+        # Embeddings must be validated after they're computed
+        validate_embeddings(embeddings=request_embeddings)
+
         request_where = filters["where"]
         request_where_document = filters["where_document"]
 
@@ -362,6 +369,10 @@ class CollectionCommon(Generic[ClientT]):
         else:
             update_embeddings = update_records["embeddings"]
 
+        # Embeddings must be validated after they're computed
+        if update_embeddings is not None:
+            validate_embeddings(embeddings=update_embeddings)
+
         return UpdateRequest(
             ids=update_records["ids"],
             embeddings=update_embeddings,
@@ -406,6 +417,9 @@ class CollectionCommon(Generic[ClientT]):
             upsert_embeddings = self._embed_record_set(record_set=upsert_records)
         else:
             upsert_embeddings = upsert_records["embeddings"]
+
+        # Embeddings must be validated after they're computed
+        validate_embeddings(embeddings=upsert_embeddings)
 
         return UpsertRequest(
             ids=upsert_records["ids"],

@@ -38,11 +38,6 @@ from chromadb.api.types import (
     IncludeEnum,
     GetResult,
     QueryResult,
-    validate_metadata,
-    validate_update_metadata,
-    validate_where,
-    validate_where_document,
-    validate_batch,
 )
 from chromadb.telemetry.product.events import (
     CollectionAddEvent,
@@ -69,6 +64,14 @@ from functools import wraps
 import time
 import logging
 import re
+
+from chromadb.utils.validators import (
+    validate_batch,
+    validate_metadata,
+    validate_update_metadata,
+    validate_where,
+    validate_where_document,
+)
 
 T = TypeVar("T", bound=Callable[..., Any])
 
