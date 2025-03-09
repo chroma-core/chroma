@@ -31,7 +31,6 @@ pub struct VersionsMapInner {
 
 #[derive(Clone)]
 // Note: Fields of this struct are public for testing.
-#[derive(Clone)]
 pub struct SpannIndexWriter {
     // HNSW index and its provider for centroid search.
     pub hnsw_index: HnswIndexRef,
@@ -1003,7 +1002,8 @@ impl SpannIndexWriter {
         }
         // Normalize the embedding in case of cosine.
         let mut normalized_embedding = embedding.to_vec();
-        if self.distance_function == DistanceFunction::Cosine {
+        let distance_function: DistanceFunction = self.params.space.clone().into();
+        if distance_function == DistanceFunction::Cosine {
             normalized_embedding = normalize(embedding);
         }
         // Add to the posting list.
@@ -1705,6 +1705,7 @@ mod tests {
         provider::BlockfileProvider,
     };
     use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
+    use chroma_distance::DistanceFunction;
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{CollectionUuid, DistributedSpannParameters, SpannPostingList};
     use rand::Rng;
@@ -2780,11 +2781,9 @@ mod tests {
         let blockfile_provider =
             new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
         let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
-        let m = 16;
-        let ef_construction = 200;
-        let ef_search = 200;
         let collection_id = CollectionUuid::new();
-        let distance_function = chroma_distance::DistanceFunction::Euclidean;
+        let params = DistributedSpannParameters::default();
+        let distance_function = params.space.clone().into();
         let dimensionality = 1000;
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
@@ -2792,13 +2791,10 @@ mod tests {
             None,
             None,
             None,
-            Some(m),
-            Some(ef_construction),
-            Some(ef_search),
             &collection_id,
-            distance_function.clone(),
             dimensionality,
             &blockfile_provider,
+            params,
         )
         .await
         .expect("Error creating spann index writer");
@@ -2870,11 +2866,9 @@ mod tests {
         let blockfile_provider =
             new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
         let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
-        let m = 16;
-        let ef_construction = 200;
-        let ef_search = 200;
         let collection_id = CollectionUuid::new();
-        let distance_function = chroma_distance::DistanceFunction::Euclidean;
+        let params = DistributedSpannParameters::default();
+        let distance_function = params.space.clone().into();
         let dimensionality = 1000;
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
@@ -2882,13 +2876,10 @@ mod tests {
             None,
             None,
             None,
-            Some(m),
-            Some(ef_construction),
-            Some(ef_search),
             &collection_id,
-            distance_function.clone(),
             dimensionality,
             &blockfile_provider,
+            params,
         )
         .await
         .expect("Error creating spann index writer");
@@ -2974,11 +2965,9 @@ mod tests {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let max_block_size_bytes = 8 * 1024 * 1024;
-        let m = 16;
-        let ef_construction = 200;
-        let ef_search = 200;
         let collection_id = CollectionUuid::new();
-        let distance_function = chroma_distance::DistanceFunction::Euclidean;
+        let params = DistributedSpannParameters::default();
+        let distance_function = params.space.clone().into();
         let dimensionality = 1000;
         let mut hnsw_path = None;
         let mut versions_map_path = None;
@@ -2996,13 +2985,10 @@ mod tests {
                 versions_map_path.as_ref(),
                 pl_path.as_ref(),
                 max_bf_id_path.as_ref(),
-                Some(m),
-                Some(ef_construction),
-                Some(ef_search),
                 &collection_id,
-                distance_function.clone(),
                 dimensionality,
                 &blockfile_provider,
+                params.clone(),
             )
             .await
             .expect("Error creating spann index writer");
@@ -3079,11 +3065,9 @@ mod tests {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let max_block_size_bytes = 8 * 1024 * 1024;
-        let m = 16;
-        let ef_construction = 200;
-        let ef_search = 200;
+        let params = DistributedSpannParameters::default();
+        let distance_function = params.space.clone().into();
         let collection_id = CollectionUuid::new();
-        let distance_function = chroma_distance::DistanceFunction::Euclidean;
         let dimensionality = 1000;
         let mut hnsw_path = None;
         let mut versions_map_path = None;
@@ -3113,13 +3097,10 @@ mod tests {
                 versions_map_path.as_ref(),
                 pl_path.as_ref(),
                 max_bf_id_path.as_ref(),
-                Some(m),
-                Some(ef_construction),
-                Some(ef_search),
                 &collection_id,
-                distance_function.clone(),
                 dimensionality,
                 &blockfile_provider,
+                params.clone(),
             )
             .await
             .expect("Error creating spann index writer");
@@ -3209,11 +3190,9 @@ mod tests {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let max_block_size_bytes = 8 * 1024 * 1024;
-        let m = 16;
-        let ef_construction = 200;
-        let ef_search = 200;
+        let params = DistributedSpannParameters::default();
+        let distance_function: DistanceFunction = params.space.clone().into();
         let collection_id = CollectionUuid::new();
-        let distance_function = chroma_distance::DistanceFunction::Euclidean;
         let dimensionality = 1000;
         let mut hnsw_path = None;
         let mut versions_map_path = None;
@@ -3243,13 +3222,10 @@ mod tests {
                 versions_map_path.as_ref(),
                 pl_path.as_ref(),
                 max_bf_id_path.as_ref(),
-                Some(m),
-                Some(ef_construction),
-                Some(ef_search),
                 &collection_id,
-                distance_function.clone(),
                 dimensionality,
                 &blockfile_provider,
+                params.clone(),
             )
             .await
             .expect("Error creating spann index writer");
@@ -3359,13 +3335,10 @@ mod tests {
             versions_map_path.as_ref(),
             pl_path.as_ref(),
             max_bf_id_path.as_ref(),
-            Some(m),
-            Some(ef_construction),
-            Some(ef_search),
             &collection_id,
-            distance_function.clone(),
             dimensionality,
             &blockfile_provider,
+            params.clone(),
         )
         .await
         .expect("Error creating spann index writer");
@@ -3477,13 +3450,10 @@ mod tests {
             versions_map_path.as_ref(),
             pl_path.as_ref(),
             max_bf_id_path.as_ref(),
-            Some(m),
-            Some(ef_construction),
-            Some(ef_search),
             &collection_id,
-            distance_function.clone(),
             dimensionality,
             &blockfile_provider,
+            params,
         )
         .await
         .expect("Error creating spann index writer");
