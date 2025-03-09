@@ -5,6 +5,7 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   plugins: [react()],
   server: {
+    host: "0.0.0.0",
     port: 3000,
   },
   // This manual remapping is only needed because we're loading a locally linked version of the JS client
