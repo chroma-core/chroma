@@ -1,7 +1,5 @@
 use async_trait::async_trait;
-use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_index::spann::utils::rng_query;
 use chroma_segment::distributed_spann::{SpannSegmentReader, SpannSegmentReaderContext};
 use chroma_system::Operator;
 use thiserror::Error;
@@ -12,10 +10,6 @@ pub(crate) struct SpannCentersSearchInput {
     pub(crate) reader_context: SpannSegmentReaderContext,
     // Assumes that query is already normalized in case of cosine.
     pub(crate) normalized_query: Vec<f32>,
-    pub(crate) k: usize,
-    pub(crate) rng_epsilon: f32,
-    pub(crate) rng_factor: f32,
-    pub(crate) distance_function: DistanceFunction,
 }
 
 #[allow(dead_code)]
@@ -68,17 +62,10 @@ impl Operator<SpannCentersSearchInput, SpannCentersSearchOutput> for SpannCenter
         .await
         .map_err(|_| SpannCentersSearchError::SpannSegmentReaderCreationError)?;
         // RNG Query.
-        let res = rng_query(
-            &input.normalized_query,
-            spann_reader.index_reader.hnsw_index.clone(),
-            input.k,
-            input.rng_epsilon,
-            input.rng_factor,
-            input.distance_function.clone(),
-            false,
-        )
-        .await
-        .map_err(|_| SpannCentersSearchError::RngQueryError)?;
+        let res = spann_reader
+            .rng_query(&input.normalized_query)
+            .await
+            .map_err(|_| SpannCentersSearchError::RngQueryError)?;
         Ok(SpannCentersSearchOutput { center_ids: res.0 })
     }
 }

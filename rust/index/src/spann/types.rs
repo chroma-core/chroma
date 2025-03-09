@@ -9,8 +9,8 @@ use chroma_blockstore::{
 };
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::CollectionUuid;
 use chroma_types::SpannPostingList;
+use chroma_types::{CollectionUuid, DistributedSpannParameters};
 use rand::seq::SliceRandom;
 use thiserror::Error;
 use uuid::Uuid;
@@ -29,7 +29,7 @@ pub struct VersionsMapInner {
     pub versions_map: HashMap<u32, u32>,
 }
 
-#[allow(dead_code)]
+#[derive(Clone)]
 // Note: Fields of this struct are public for testing.
 #[derive(Clone)]
 pub struct SpannIndexWriter {
@@ -45,8 +45,8 @@ pub struct SpannIndexWriter {
     // Version number of each point.
     // TODO(Sanket): Finer grained locking for this map in future if perf is not satisfactory.
     pub versions_map: Arc<parking_lot::RwLock<VersionsMapInner>>,
-    pub distance_function: DistanceFunction,
     pub dimensionality: usize,
+    pub params: DistributedSpannParameters,
 }
 
 // TODO(Sanket): Can compose errors whenever downstream returns Box<dyn ChromaError>.
@@ -138,20 +138,6 @@ impl ChromaError for SpannIndexWriterError {
 
 const MAX_HEAD_OFFSET_ID: &str = "max_head_offset_id";
 
-// TODO(Sanket): Make these configurable.
-#[allow(dead_code)]
-const NUM_CENTROIDS_TO_SEARCH: u32 = 64;
-#[allow(dead_code)]
-const RNG_FACTOR: f32 = 1.0;
-#[allow(dead_code)]
-const SPLIT_THRESHOLD: usize = 100;
-const NUM_SAMPLES_FOR_KMEANS: usize = 1000;
-const INITIAL_LAMBDA: f32 = 100.0;
-const REASSIGN_NBR_COUNT: usize = 8;
-const QUERY_EPSILON: f32 = 10.0;
-const MERGE_THRESHOLD: usize = 50;
-const NUM_CENTERS_TO_MERGE_TO: usize = 8;
-
 impl SpannIndexWriter {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -161,8 +147,8 @@ impl SpannIndexWriter {
         posting_list_writer: BlockfileWriter,
         next_head_id: u32,
         versions_map: VersionsMapInner,
-        distance_function: DistanceFunction,
         dimensionality: usize,
+        params: DistributedSpannParameters,
     ) -> Self {
         SpannIndexWriter {
             hnsw_index,
@@ -171,8 +157,8 @@ impl SpannIndexWriter {
             posting_list_writer: Arc::new(tokio::sync::Mutex::new(posting_list_writer)),
             next_head_id: Arc::new(AtomicU32::new(next_head_id)),
             versions_map: Arc::new(parking_lot::RwLock::new(versions_map)),
-            distance_function,
             dimensionality,
+            params,
         }
     }
 
@@ -275,14 +261,12 @@ impl SpannIndexWriter {
         versions_map_id: Option<&Uuid>,
         posting_list_id: Option<&Uuid>,
         max_head_id_bf_id: Option<&Uuid>,
-        m: Option<usize>,
-        ef_construction: Option<usize>,
-        ef_search: Option<usize>,
         collection_id: &CollectionUuid,
-        distance_function: DistanceFunction,
         dimensionality: usize,
         blockfile_provider: &BlockfileProvider,
+        params: DistributedSpannParameters,
     ) -> Result<Self, SpannIndexWriterError> {
+        let distance_function = DistanceFunction::from(params.space.clone());
         // Create the HNSW index.
         let hnsw_index = match hnsw_id {
             Some(hnsw_id) => {
@@ -301,9 +285,9 @@ impl SpannIndexWriter {
                     collection_id,
                     distance_function.clone(),
                     dimensionality,
-                    m.unwrap(), // Safe since caller should always provide this.
-                    ef_construction.unwrap(), // Safe since caller should always provide this.
-                    ef_search.unwrap(), // Safe since caller should always provide this.
+                    params.m,
+                    params.construction_ef,
+                    params.search_ef,
                 )
                 .await?
             }
@@ -348,8 +332,8 @@ impl SpannIndexWriter {
             posting_list_writer,
             max_head_id,
             versions_map,
-            distance_function,
             dimensionality,
+            params,
         ))
     }
 
@@ -360,7 +344,6 @@ impl SpannIndexWriter {
         *write_lock.versions_map.get(&id).unwrap()
     }
 
-    #[allow(dead_code)]
     async fn rng_query(
         &self,
         query: &[f32],
@@ -368,10 +351,10 @@ impl SpannIndexWriter {
         rng_query(
             query,
             self.hnsw_index.clone(),
-            NUM_CENTROIDS_TO_SEARCH as usize,
-            QUERY_EPSILON,
-            RNG_FACTOR,
-            self.distance_function.clone(),
+            self.params.write_nprobe as usize,
+            self.params.write_rng_epsilon,
+            self.params.write_rng_factor,
+            self.params.space.clone().into(),
             true,
         )
         .await
@@ -419,11 +402,12 @@ impl SpannIndexWriter {
                 {
                     continue;
                 }
-                let old_dist = self.distance_function.distance(
+                let distance_function: DistanceFunction = self.params.space.clone().into();
+                let old_dist = distance_function.distance(
                     old_head_embedding,
                     &doc_embeddings[index * self.dimensionality..(index + 1) * self.dimensionality],
                 );
-                let new_dist = self.distance_function.distance(
+                let new_dist = distance_function.distance(
                     new_head_embeddings[k].unwrap(),
                     &doc_embeddings[index * self.dimensionality..(index + 1) * self.dimensionality],
                 );
@@ -581,15 +565,16 @@ impl SpannIndexWriter {
             {
                 continue;
             }
-            let distance_from_curr_center = self.distance_function.distance(
+            let distance_function: DistanceFunction = self.params.space.clone().into();
+            let distance_from_curr_center = distance_function.distance(
                 &doc_embeddings[index * self.dimensionality..(index + 1) * self.dimensionality],
                 head_embedding,
             );
-            let distance_from_split_center1 = self.distance_function.distance(
+            let distance_from_split_center1 = distance_function.distance(
                 &doc_embeddings[index * self.dimensionality..(index + 1) * self.dimensionality],
                 new_head_embeddings[0].unwrap(),
             );
-            let distance_from_split_center2 = self.distance_function.distance(
+            let distance_from_split_center2 = distance_function.distance(
                 &doc_embeddings[index * self.dimensionality..(index + 1) * self.dimensionality],
                 new_head_embeddings[1].unwrap(),
             );
@@ -598,7 +583,7 @@ impl SpannIndexWriter {
             {
                 continue;
             }
-            let distance_from_old_head = self.distance_function.distance(
+            let distance_from_old_head = distance_function.distance(
                 &doc_embeddings[index * self.dimensionality..(index + 1) * self.dimensionality],
                 old_head_embedding,
             );
@@ -641,9 +626,9 @@ impl SpannIndexWriter {
             )
             .await?;
         // Reassign neighbors of this center if applicable.
-        if REASSIGN_NBR_COUNT > 0 {
+        if self.params.reassign_nbr_count > 0 {
             let (nearby_head_ids, _, nearby_head_embeddings) = self
-                .get_nearby_heads(old_head_embedding, REASSIGN_NBR_COUNT)
+                .get_nearby_heads(old_head_embedding, self.params.reassign_nbr_count as usize)
                 .await?;
             for (head_idx, head_id) in nearby_head_ids.iter().enumerate() {
                 // Skip the current split heads.
@@ -663,7 +648,6 @@ impl SpannIndexWriter {
         Ok(())
     }
 
-    #[allow(dead_code)]
     async fn append(
         &self,
         head_id: u32,
@@ -728,7 +712,7 @@ impl SpannIndexWriter {
                 }
             }
             // If size is within threshold, write the new posting back and return.
-            if up_to_date_index <= SPLIT_THRESHOLD {
+            if up_to_date_index <= self.params.split_threshold as usize {
                 for idx in 0..up_to_date_index {
                     if local_indices[idx] == idx {
                         continue;
@@ -773,9 +757,9 @@ impl SpannIndexWriter {
                 /* k */ 2,
                 /* first */ 0,
                 last,
-                NUM_SAMPLES_FOR_KMEANS,
-                self.distance_function.clone(),
-                INITIAL_LAMBDA,
+                self.params.num_samples_kmeans,
+                self.params.space.clone().into(),
+                self.params.initial_lambda,
             );
             clustering_output =
                 cluster(&mut kmeans_input).map_err(SpannIndexWriterError::KMeansClusteringError)?;
@@ -832,12 +816,12 @@ impl SpannIndexWriter {
                     );
                 }
                 let mut same_head = false;
+                let distance_function: DistanceFunction = self.params.space.clone().into();
                 for k in 0..2 {
                     // Update the existing head.
                     // TODO(Sanket): Need to understand what this achieves.
                     if !same_head
-                        && self
-                            .distance_function
+                        && distance_function
                             .distance(&clustering_output.cluster_centers[k], &head_embedding)
                             < 1e-6
                     {
@@ -922,7 +906,6 @@ impl SpannIndexWriter {
         .await
     }
 
-    #[allow(dead_code)]
     async fn add_to_postings_list(
         &self,
         id: u32,
@@ -990,7 +973,8 @@ impl SpannIndexWriter {
         let version = self.add_versions_map(id);
         // Normalize the embedding in case of cosine.
         let mut normalized_embedding = embedding.to_vec();
-        if self.distance_function == DistanceFunction::Cosine {
+        let distance_function: DistanceFunction = self.params.space.clone().into();
+        if distance_function == DistanceFunction::Cosine {
             normalized_embedding = normalize(embedding);
         }
         // Add to the posting list.
@@ -1173,7 +1157,7 @@ impl SpannIndexWriter {
                 .await?;
             source_cluster_len = doc_offset_ids.len();
             // Write the PL back and return if within the merge threshold.
-            if source_cluster_len > MERGE_THRESHOLD {
+            if source_cluster_len > self.params.merge_threshold as usize {
                 let posting_list = SpannPostingList {
                     doc_offset_ids: &doc_offset_ids,
                     doc_versions: &doc_versions,
@@ -1188,7 +1172,7 @@ impl SpannIndexWriter {
             }
             // Find candidates for merge.
             let (nearest_head_ids, _, nearest_head_embeddings) = self
-                .get_nearby_heads(head_embedding, NUM_CENTERS_TO_MERGE_TO)
+                .get_nearby_heads(head_embedding, self.params.num_centers_to_merge_to as usize)
                 .await?;
             for (nearest_head_id, nearest_head_embedding) in nearest_head_ids
                 .into_iter()
@@ -1214,7 +1198,7 @@ impl SpannIndexWriter {
                     .get_up_to_date_count(&nearest_head_doc_offset_ids, &nearest_head_doc_versions)
                     .await?;
                 // If the total count exceeds the max posting list size then skip.
-                if target_cluster_len + source_cluster_len >= SPLIT_THRESHOLD {
+                if target_cluster_len + source_cluster_len >= self.params.split_threshold as usize {
                     continue;
                 }
                 // Merge the two PLs.
@@ -1271,12 +1255,13 @@ impl SpannIndexWriter {
         if source_cluster_len > target_cluster_len {
             // target_cluster points were merged to source_cluster
             // so they are candidates for reassignment.
+            let distance_function: DistanceFunction = self.params.space.clone().into();
             for idx in source_cluster_len..(source_cluster_len + target_cluster_len) {
-                let origin_dist = self.distance_function.distance(
+                let origin_dist = distance_function.distance(
                     &doc_embeddings[idx * self.dimensionality..(idx + 1) * self.dimensionality],
                     &target_embedding,
                 );
-                let new_dist = self.distance_function.distance(
+                let new_dist = distance_function.distance(
                     &doc_embeddings[idx * self.dimensionality..(idx + 1) * self.dimensionality],
                     head_embedding,
                 );
@@ -1293,12 +1278,13 @@ impl SpannIndexWriter {
         } else {
             // source_cluster points were merged to target_cluster
             // so they are candidates for reassignment.
+            let distance_function: DistanceFunction = self.params.space.clone().into();
             for idx in 0..source_cluster_len {
-                let origin_dist = self.distance_function.distance(
+                let origin_dist = distance_function.distance(
                     &doc_embeddings[idx * self.dimensionality..(idx + 1) * self.dimensionality],
                     head_embedding,
                 );
-                let new_dist = self.distance_function.distance(
+                let new_dist = distance_function.distance(
                     &doc_embeddings[idx * self.dimensionality..(idx + 1) * self.dimensionality],
                     &target_embedding,
                 );
@@ -1720,7 +1706,7 @@ mod tests {
     };
     use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
     use chroma_storage::{local::LocalStorage, Storage};
-    use chroma_types::{CollectionUuid, SpannPostingList};
+    use chroma_types::{CollectionUuid, DistributedSpannParameters, SpannPostingList};
     use rand::Rng;
     use tempfile::TempDir;
 
@@ -1753,25 +1739,19 @@ mod tests {
             16,
             rx,
         );
-        let m = 16;
-        let ef_construction = 200;
-        let ef_search = 200;
         let collection_id = CollectionUuid::new();
-        let distance_function = chroma_distance::DistanceFunction::Euclidean;
         let dimensionality = 2;
+        let params = DistributedSpannParameters::default();
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
             None,
             None,
             None,
-            Some(m),
-            Some(ef_construction),
-            Some(ef_search),
             &collection_id,
-            distance_function,
             dimensionality,
             &blockfile_provider,
+            params,
         )
         .await
         .expect("Error creating spann index writer");
@@ -1949,25 +1929,19 @@ mod tests {
             16,
             rx,
         );
-        let m = 16;
-        let ef_construction = 200;
-        let ef_search = 200;
         let collection_id = CollectionUuid::new();
-        let distance_function = chroma_distance::DistanceFunction::Euclidean;
         let dimensionality = 2;
+        let params = DistributedSpannParameters::default();
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
             None,
             None,
             None,
-            Some(m),
-            Some(ef_construction),
-            Some(ef_search),
             &collection_id,
-            distance_function,
             dimensionality,
             &blockfile_provider,
+            params,
         )
         .await
         .expect("Error creating spann index writer");
@@ -2135,25 +2109,19 @@ mod tests {
             16,
             rx,
         );
-        let m = 16;
-        let ef_construction = 200;
-        let ef_search = 200;
         let collection_id = CollectionUuid::new();
-        let distance_function = chroma_distance::DistanceFunction::Euclidean;
         let dimensionality = 2;
+        let params = DistributedSpannParameters::default();
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
             None,
             None,
             None,
-            Some(m),
-            Some(ef_construction),
-            Some(ef_search),
             &collection_id,
-            distance_function,
             dimensionality,
             &blockfile_provider,
+            params,
         )
         .await
         .expect("Error creating spann index writer");
@@ -2325,25 +2293,19 @@ mod tests {
             16,
             rx,
         );
-        let m = 16;
-        let ef_construction = 200;
-        let ef_search = 200;
         let collection_id = CollectionUuid::new();
-        let distance_function = chroma_distance::DistanceFunction::Euclidean;
         let dimensionality = 2;
+        let params = DistributedSpannParameters::default();
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
             None,
             None,
             None,
-            Some(m),
-            Some(ef_construction),
-            Some(ef_search),
             &collection_id,
-            distance_function,
             dimensionality,
             &blockfile_provider,
+            params,
         )
         .await
         .expect("Error creating spann index writer");
@@ -2567,25 +2529,19 @@ mod tests {
             16,
             rx,
         );
-        let m = 16;
-        let ef_construction = 200;
-        let ef_search = 200;
         let collection_id = CollectionUuid::new();
-        let distance_function = chroma_distance::DistanceFunction::Euclidean;
         let dimensionality = 2;
+        let params = DistributedSpannParameters::default();
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
             None,
             None,
             None,
-            Some(m),
-            Some(ef_construction),
-            Some(ef_search),
             &collection_id,
-            distance_function,
             dimensionality,
             &blockfile_provider,
+            params,
         )
         .await
         .expect("Error creating spann index writer");

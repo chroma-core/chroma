@@ -16,7 +16,7 @@ use chroma_types::{
         KnnBatchResult, KnnPlan,
     },
     operator::Scan,
-    CollectionAndSegments,
+    CollectionAndSegments, SegmentType,
 };
 use futures::{stream, StreamExt, TryStreamExt};
 use tokio::signal::unix::{signal, SignalKind};
@@ -29,7 +29,7 @@ use crate::{
         operators::{fetch_log::FetchLogOperator, knn_projection::KnnProjectionOperator},
         orchestration::{
             get::GetOrchestrator, knn::KnnOrchestrator, knn_filter::KnnFilterOrchestrator,
-            CountOrchestrator,
+            spann_knn::SpannKnnOrchestrator, CountOrchestrator,
         },
     },
     utils::convert::{from_proto_knn, to_proto_knn_batch_result},
@@ -246,6 +246,7 @@ impl WorkerServer {
             )?));
         }
 
+        let vector_segment_type = collection_and_segments.vector_segment.r#type;
         let knn_filter_orchestrator = KnnFilterOrchestrator::new(
             self.blockfile_provider.clone(),
             dispatcher.clone(),
@@ -264,28 +265,55 @@ impl WorkerServer {
             }
         };
 
-        let knn_orchestrator_futures = from_proto_knn(knn)?
-            .into_iter()
-            .map(|knn| {
-                KnnOrchestrator::new(
-                    self.blockfile_provider.clone(),
-                    dispatcher.clone(),
-                    // TODO: Make this configurable
-                    1000,
-                    matching_records.clone(),
-                    knn,
-                    knn_projection.clone(),
-                )
-            })
-            .map(|knner| knner.run(system.clone()));
+        if vector_segment_type == SegmentType::Spann {
+            tracing::info!("Running KNN on SPANN segment");
+            let knn_orchestrator_futures = from_proto_knn(knn)?
+                .into_iter()
+                .map(|knn| {
+                    SpannKnnOrchestrator::new(
+                        self.blockfile_provider.clone(),
+                        self.hnsw_index_provider.clone(),
+                        dispatcher.clone(),
+                        1000,
+                        matching_records.clone(),
+                        knn.fetch as usize,
+                        knn.embedding,
+                        knn_projection.clone(),
+                    )
+                })
+                .map(|knner| knner.run(system.clone()));
+            match stream::iter(knn_orchestrator_futures)
+                .buffered(32)
+                .try_collect::<Vec<_>>()
+                .await
+            {
+                Ok(results) => Ok(Response::new(to_proto_knn_batch_result(results)?)),
+                Err(err) => Err(Status::new(err.code().into(), err.to_string())),
+            }
+        } else {
+            let knn_orchestrator_futures = from_proto_knn(knn)?
+                .into_iter()
+                .map(|knn| {
+                    KnnOrchestrator::new(
+                        self.blockfile_provider.clone(),
+                        dispatcher.clone(),
+                        // TODO: Make this configurable
+                        1000,
+                        matching_records.clone(),
+                        knn,
+                        knn_projection.clone(),
+                    )
+                })
+                .map(|knner| knner.run(system.clone()));
 
-        match stream::iter(knn_orchestrator_futures)
-            .buffered(32)
-            .try_collect::<Vec<_>>()
-            .await
-        {
-            Ok(results) => Ok(Response::new(to_proto_knn_batch_result(results)?)),
-            Err(err) => Err(Status::new(err.code().into(), err.to_string())),
+            match stream::iter(knn_orchestrator_futures)
+                .buffered(32)
+                .try_collect::<Vec<_>>()
+                .await
+            {
+                Ok(results) => Ok(Response::new(to_proto_knn_batch_result(results)?)),
+                Err(err) => Err(Status::new(err.code().into(), err.to_string())),
+            }
         }
     }
 
