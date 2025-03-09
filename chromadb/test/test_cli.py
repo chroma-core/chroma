@@ -1,38 +1,35 @@
 import multiprocessing
 import multiprocessing.context
+import sys
+import time
 from multiprocessing.synchronize import Event
 
-from typer.testing import CliRunner
-
+import chromadb
 from chromadb.api.client import Client
 from chromadb.api.models.Collection import Collection
-from chromadb.cli.cli import app
 from chromadb.cli.utils import set_log_file_path
 from chromadb.config import Settings, System
 from chromadb.db.base import get_sql
 from chromadb.db.impl.sqlite import SqliteDB
+from chromadb.cli import cli
 from pypika import Table
 import numpy as np
 
 from chromadb.test.property import invariants
 
-runner = CliRunner()
-
+def start_app() -> None:
+    sys.argv = ["chroma", "run"]
+    cli.main()
 
 def test_app() -> None:
-    result = runner.invoke(
-        app,
-        [
-            "run",
-            "--path",
-            "chroma_test_data",
-            "--port",
-            "8001",
-            "--test",
-        ],
-    )
-    assert "chroma_test_data" in result.stdout
-    assert "8001" in result.stdout
+    server_process = multiprocessing.Process(target=start_app)
+    server_process.start()
+    time.sleep(5)
+    client = chromadb.HttpClient()
+    heartbeat = client.heartbeat()
+    server_process.terminate()
+    server_process.join()
+    assert heartbeat > 0
 
 
 def test_utils_set_log_file_path() -> None:
@@ -70,12 +67,8 @@ def test_vacuum(sqlite_persistent: System) -> None:
         cur.execute(sql, params)
         assert cur.fetchall() == []
 
-    result = runner.invoke(
-        app,
-        ["utils", "vacuum", "--path", system.settings.persist_directory],
-        input="y\n",
-    )
-    assert result.exit_code == 0
+    sys.argv = ["chroma", "vacuum", "--path", system.settings.persist_directory, "--force"]
+    cli.main()
 
     # Maintenance log should have a vacuum entry
     with sqlite.tx() as cur:
@@ -113,7 +106,7 @@ def simulate_transactional_write(
     system.stop()
 
 
-def test_vacuum_errors_if_locked(sqlite_persistent: System) -> None:
+def test_vacuum_errors_if_locked(sqlite_persistent: System, capfd) -> None:
     """Vacuum command should fail with details if there is a long-lived lock on the database."""
     ctx = multiprocessing.get_context("spawn")
     ready_event = ctx.Event()
@@ -126,19 +119,10 @@ def test_vacuum_errors_if_locked(sqlite_persistent: System) -> None:
     ready_event.wait()
 
     try:
-        result = runner.invoke(
-            app,
-            [
-                "utils",
-                "vacuum",
-                "--path",
-                sqlite_persistent.settings.persist_directory,
-                "--force",
-            ],
-            env={"CHROMA_API_IMPL": "chromadb.api.segment.SegmentAPI"},
-        )
-        assert result.exit_code == 1
-        assert "database is locked" in result.stdout
+        sys.argv = ["chroma", "vacuum", "--path", sqlite_persistent.settings.persist_directory, "--force"]
+        cli.main()
+        captured = capfd.readouterr()
+        assert "Failed to vacuum Chroma" in captured.err.strip()
     finally:
         shutdown_event.set()
         process.join()
