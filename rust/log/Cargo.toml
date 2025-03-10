@@ -36,6 +36,9 @@ chroma-sysdb = { workspace = true }
 chroma-types = { workspace = true }
 chroma-sqlite = { workspace = true }
 
+[features]
+server = []
+
 [dev-dependencies]
 tempfile = { workspace = true }
 proptest = { workspace = true }

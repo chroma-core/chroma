@@ -13,9 +13,12 @@ use chroma_error::ChromaError;
 use config::LogConfig;
 pub use local_compaction_manager::*;
 pub use log::*;
-use server::{LogServer, LogServerConfig};
 pub use types::*;
+
+#[cfg(feature = "server")]
 mod server;
+#[cfg(feature = "server")]
+use server::{LogServer, LogServerConfig};
 
 use async_trait::async_trait;
 
@@ -42,7 +45,7 @@ impl Configurable<LogConfig> for Log {
 }
 
 // Entrypoint for the wal3 based log server
-#[allow(dead_code)]
+#[cfg(feature = "server")]
 pub async fn log_entrypoint() {
     let config = LogServerConfig::default();
     let registry = chroma_config::registry::Registry::new();
