@@ -1,16 +1,13 @@
 from abc import ABC, abstractmethod
-from typing import Any, Optional, Union, Sequence, Dict, Mapping, List, Generic
+from typing import Any, Optional, Union, Sequence, Dict, Mapping, Generic
 
 from typing_extensions import Self
 
 from overrides import override
-from typing_extensions import Literal, TypedDict, TypeVar
+from typing_extensions import TypedDict, TypeVar
 from uuid import UUID
 from enum import Enum
 from pydantic import BaseModel
-
-import numpy as np
-from numpy.typing import NDArray
 
 from chromadb.api.configuration import (
     ConfigurationInternal,
@@ -22,8 +19,19 @@ from chromadb.api.collection_configuration import (
     load_collection_config_from_json,
 )
 
-Metadata = Mapping[str, Union[str, int, float, bool]]
-UpdateMetadata = Mapping[str, Union[int, float, str, bool, None]]
+from chromadb.base_types import (
+    Metadata,
+    UpdateMetadata,
+    Vector,
+    PyVector,
+    LiteralValue,
+    LogicalOperator,
+    WhereOperator,
+    OperatorExpression,
+    Where,
+    WhereDocumentOperator,
+    WhereDocument,
+)
 
 # Namespaced Names are mechanically just strings, but we use this type to indicate that
 # the intent is for the value to be globally unique and semantically meaningful.
@@ -204,10 +212,6 @@ class Operation(Enum):
     DELETE = "DELETE"
 
 
-PyVector = Union[Sequence[float], Sequence[int]]
-Vector = NDArray[Union[np.int32, np.float32]]  # TODO: Specify that the vector is 1D
-
-
 class VectorEmbeddingRecord(TypedDict):
     id: str
     embedding: Vector
@@ -270,33 +274,6 @@ class VectorQueryResult(TypedDict):
     embedding: Optional[Vector]
 
 
-# Metadata Query Grammar
-LiteralValue = Union[str, int, float, bool]
-LogicalOperator = Union[Literal["$and"], Literal["$or"]]
-WhereOperator = Union[
-    Literal["$gt"],
-    Literal["$gte"],
-    Literal["$lt"],
-    Literal["$lte"],
-    Literal["$ne"],
-    Literal["$eq"],
-]
-InclusionExclusionOperator = Union[Literal["$in"], Literal["$nin"]]
-OperatorExpression = Union[
-    Dict[Union[WhereOperator, LogicalOperator], LiteralValue],
-    Dict[InclusionExclusionOperator, List[LiteralValue]],
-]
-
-Where = Dict[
-    Union[str, LogicalOperator], Union[LiteralValue, OperatorExpression, List["Where"]]
-]
-
-WhereDocumentOperator = Union[
-    Literal["$contains"], Literal["$not_contains"], LogicalOperator
-]
-WhereDocument = Dict[WhereDocumentOperator, Union[str, List["WhereDocument"]]]
-
-
 class Unspecified:
     """A sentinel value used to indicate that a value should not be updated"""
 
@@ -311,3 +288,17 @@ class Unspecified:
 
 T = TypeVar("T")
 OptionalArgument = Union[T, Unspecified]
+
+__all__ = [
+    "Metadata",
+    "UpdateMetadata",
+    "Vector",
+    "PyVector",
+    "LiteralValue",
+    "LogicalOperator",
+    "WhereOperator",
+    "OperatorExpression",
+    "Where",
+    "WhereDocumentOperator",
+    "WhereDocument",
+]

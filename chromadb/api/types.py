@@ -5,7 +5,7 @@ from typing_extensions import TypedDict, Protocol, runtime_checkable
 from enum import Enum
 from pydantic import Field
 import chromadb.errors as errors
-from chromadb.types import (
+from chromadb.base_types import (
     Metadata,
     UpdateMetadata,
     Vector,
