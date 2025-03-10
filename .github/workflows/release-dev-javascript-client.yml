@@ -36,6 +36,8 @@ jobs:
       - uses: pnpm/action-setup@v2
         with:
           version: 8
+          dest: 'clients/js'
+          package_json_file: 'clients/js/package.json'
       - uses: actions/setup-node@v3
         with:
           node-version: "16.x"
