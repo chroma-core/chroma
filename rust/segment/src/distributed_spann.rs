@@ -231,6 +231,7 @@ impl SpannSegmentWriter {
         record_segment_reader: &Option<RecordSegmentReader<'_>>,
         materialized_chunk: &MaterializeLogsResult,
     ) -> Result<(), ApplyMaterializedLogError> {
+        println!("(Sanket-temp) Applying materialized log chunk to spann segment writer");
         for record in materialized_chunk {
             match record.get_operation() {
                 MaterializedLogOperation::AddNew => {
@@ -262,6 +263,7 @@ impl SpannSegmentWriter {
                 ),
             }
         }
+        println!("(Sanket-temp) Finished applying materialized log chunk to spann segment writer");
         Ok(())
     }
 
@@ -653,7 +655,7 @@ mod test {
             2
         );
         {
-            let read_guard = spann_writer.index.versions_map.read();
+            let read_guard = spann_writer.index.versions_map.read().await;
             assert_eq!(read_guard.versions_map.len(), 2);
             assert_eq!(
                 *read_guard

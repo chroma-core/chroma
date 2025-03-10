@@ -43,7 +43,7 @@ pub struct SpannIndexWriter {
     pub next_head_id: Arc<AtomicU32>,
     // Version number of each point.
     // TODO(Sanket): Finer grained locking for this map in future if perf is not satisfactory.
-    pub versions_map: Arc<parking_lot::RwLock<VersionsMapInner>>,
+    pub versions_map: Arc<tokio::sync::RwLock<VersionsMapInner>>,
     pub dimensionality: usize,
     pub params: DistributedSpannParameters,
 }
@@ -155,7 +155,7 @@ impl SpannIndexWriter {
             blockfile_provider,
             posting_list_writer: Arc::new(tokio::sync::Mutex::new(posting_list_writer)),
             next_head_id: Arc::new(AtomicU32::new(next_head_id)),
-            versions_map: Arc::new(parking_lot::RwLock::new(versions_map)),
+            versions_map: Arc::new(tokio::sync::RwLock::new(versions_map)),
             dimensionality,
             params,
         }
@@ -336,9 +336,9 @@ impl SpannIndexWriter {
         ))
     }
 
-    fn add_versions_map(&self, id: u32) -> u32 {
+    async fn add_versions_map(&self, id: u32) -> u32 {
         // 0 means deleted. Version counting starts from 1.
-        let mut write_lock = self.versions_map.write();
+        let mut write_lock = self.versions_map.write().await;
         write_lock.versions_map.insert(id, 1);
         *write_lock.versions_map.get(&id).unwrap()
     }
@@ -365,7 +365,7 @@ impl SpannIndexWriter {
         doc_offset_id: u32,
         version: u32,
     ) -> Result<bool, SpannIndexWriterError> {
-        let version_map_guard = self.versions_map.read();
+        let version_map_guard = self.versions_map.read().await;
         let current_version = version_map_guard
             .versions_map
             .get(&doc_offset_id)
@@ -482,7 +482,7 @@ impl SpannIndexWriter {
         // Increment version and trigger append.
         let next_version;
         {
-            let mut version_map_guard = self.versions_map.write();
+            let mut version_map_guard = self.versions_map.write().await;
             let current_version = version_map_guard
                 .versions_map
                 .get(&doc_offset_id)
@@ -696,7 +696,7 @@ impl SpannIndexWriter {
             let mut local_indices = vec![0; doc_offset_ids.len()];
             let mut up_to_date_index = 0;
             {
-                let version_map_guard = self.versions_map.read();
+                let version_map_guard = self.versions_map.read().await;
                 for (index, doc_version) in doc_versions.iter().enumerate() {
                     let current_version = version_map_guard
                         .versions_map
@@ -969,7 +969,7 @@ impl SpannIndexWriter {
     }
 
     pub async fn add(&self, id: u32, embedding: &[f32]) -> Result<(), SpannIndexWriterError> {
-        let version = self.add_versions_map(id);
+        let version = self.add_versions_map(id).await;
         // Normalize the embedding in case of cosine.
         let mut normalized_embedding = embedding.to_vec();
         let distance_function: DistanceFunction = self.params.space.clone().into();
@@ -985,7 +985,7 @@ impl SpannIndexWriter {
         let inc_version;
         {
             // Increment version.
-            let mut version_map_guard = self.versions_map.write();
+            let mut version_map_guard = self.versions_map.write().await;
             let curr_version = match version_map_guard.versions_map.get(&id) {
                 Some(version) => *version,
                 None => {
@@ -1012,7 +1012,7 @@ impl SpannIndexWriter {
     }
 
     pub async fn delete(&self, id: u32) -> Result<(), SpannIndexWriterError> {
-        let mut version_map_guard = self.versions_map.write();
+        let mut version_map_guard = self.versions_map.write().await;
         version_map_guard.versions_map.insert(id, 0);
         Ok(())
     }
@@ -1023,7 +1023,7 @@ impl SpannIndexWriter {
         doc_versions: &[u32],
     ) -> Result<usize, SpannIndexWriterError> {
         let mut up_to_date_index = 0;
-        let version_map_guard = self.versions_map.read();
+        let version_map_guard = self.versions_map.read().await;
         for (index, doc_version) in doc_versions.iter().enumerate() {
             let current_version = version_map_guard
                 .versions_map
@@ -1058,7 +1058,7 @@ impl SpannIndexWriter {
         let mut cluster_len = 0;
         let mut local_indices = vec![0; doc_offset_ids.len()];
         {
-            let version_map_guard = self.versions_map.read();
+            let version_map_guard = self.versions_map.read().await;
             for (index, doc_version) in doc_versions.iter().enumerate() {
                 let current_version = version_map_guard
                     .versions_map
@@ -1335,18 +1335,14 @@ impl SpannIndexWriter {
 
     // TODO(Sanket): Change the error types.
     pub async fn commit(self) -> Result<SpannIndexFlusher, SpannIndexWriterError> {
+        // NOTE(Sanket): This is not the best way to drain the writer but the orchestrator keeps a
+        // reference to the writer so cannot do an Arc::try_unwrap() here.
         // Pl list.
-        let pl_flusher = match Arc::try_unwrap(self.posting_list_writer) {
-            Ok(writer) => writer
-                .into_inner()
-                .commit::<u32, &SpannPostingList<'_>>()
-                .await
-                .map_err(|_| SpannIndexWriterError::PostingListCommitError)?,
-            Err(_) => {
-                // This should never happen.
-                panic!("Failed to unwrap posting list writer");
-            }
-        };
+        let pl_writer_clone = self.posting_list_writer.lock().await.clone();
+        let pl_flusher = pl_writer_clone
+            .commit::<u32, &SpannPostingList<'_>>()
+            .await
+            .map_err(|_| SpannIndexWriterError::PostingListCommitError)?;
         // Versions map. Create a writer, write all the data and commit.
         let mut bf_options = BlockfileWriterOptions::new();
         bf_options = bf_options.unordered_mutations();
@@ -1355,25 +1351,19 @@ impl SpannIndexWriter {
             .write::<u32, u32>(bf_options)
             .await
             .map_err(|_| SpannIndexWriterError::VersionsMapWriterCreateError)?;
-        let versions_map_flusher = match Arc::try_unwrap(self.versions_map) {
-            Ok(writer) => {
-                let writer = writer.into_inner();
-                for (doc_offset_id, doc_version) in writer.versions_map.into_iter() {
-                    versions_map_bf_writer
-                        .set("", doc_offset_id, doc_version)
-                        .await
-                        .map_err(|_| SpannIndexWriterError::VersionsMapSetError)?;
-                }
+        {
+            let mut version_map_guard = self.versions_map.write().await;
+            for (doc_offset_id, doc_version) in version_map_guard.versions_map.drain() {
                 versions_map_bf_writer
-                    .commit::<u32, u32>()
+                    .set("", doc_offset_id, doc_version)
                     .await
-                    .map_err(|_| SpannIndexWriterError::VersionsMapCommitError)?
+                    .map_err(|_| SpannIndexWriterError::VersionsMapSetError)?;
             }
-            Err(_) => {
-                // This should never happen.
-                panic!("Failed to unwrap posting list writer");
-            }
-        };
+        }
+        let versions_map_flusher = versions_map_bf_writer
+            .commit::<u32, u32>()
+            .await
+            .map_err(|_| SpannIndexWriterError::VersionsMapCommitError)?;
         // Next head.
         let mut bf_options = BlockfileWriterOptions::new();
         bf_options = bf_options.unordered_mutations();
@@ -1382,23 +1372,15 @@ impl SpannIndexWriter {
             .write::<&str, u32>(bf_options)
             .await
             .map_err(|_| SpannIndexWriterError::MaxHeadIdWriterCreateError)?;
-        let max_head_id_flusher = match Arc::try_unwrap(self.next_head_id) {
-            Ok(value) => {
-                let value = value.into_inner();
-                max_head_id_bf
-                    .set("", MAX_HEAD_OFFSET_ID, value)
-                    .await
-                    .map_err(|_| SpannIndexWriterError::MaxHeadIdSetError)?;
-                max_head_id_bf
-                    .commit::<&str, u32>()
-                    .await
-                    .map_err(|_| SpannIndexWriterError::MaxHeadIdCommitError)?
-            }
-            Err(_) => {
-                // This should never happen.
-                panic!("Failed to unwrap next head id");
-            }
-        };
+        let max_head_oid = self.next_head_id.load(std::sync::atomic::Ordering::SeqCst);
+        max_head_id_bf
+            .set("", MAX_HEAD_OFFSET_ID, max_head_oid)
+            .await
+            .map_err(|_| SpannIndexWriterError::MaxHeadIdSetError)?;
+        let max_head_id_flusher = max_head_id_bf
+            .commit::<&str, u32>()
+            .await
+            .map_err(|_| SpannIndexWriterError::MaxHeadIdCommitError)?;
 
         let hnsw_id = self.hnsw_index.inner.read().id;
 
@@ -1995,7 +1977,7 @@ mod tests {
         }
         // Insert the points in the version map as well.
         {
-            let mut version_map_guard = writer.versions_map.write();
+            let mut version_map_guard = writer.versions_map.write().await;
             for point in 1..=100 {
                 version_map_guard.versions_map.insert(point as u32, 1);
                 version_map_guard.versions_map.insert(100 + point as u32, 1);
@@ -2014,7 +1996,7 @@ mod tests {
         }
         // Expect the version map to be properly updated.
         {
-            let version_map_guard = writer.versions_map.read();
+            let version_map_guard = writer.versions_map.read().await;
             for point in 1..=40 {
                 assert_eq!(version_map_guard.versions_map.get(&point), Some(&0));
                 assert_eq!(version_map_guard.versions_map.get(&(100 + point)), Some(&0));
@@ -2175,7 +2157,7 @@ mod tests {
         }
         // Insert the points in the version map as well.
         {
-            let mut version_map_guard = writer.versions_map.write();
+            let mut version_map_guard = writer.versions_map.write().await;
             for point in 1..=100 {
                 version_map_guard.versions_map.insert(point as u32, 1);
                 version_map_guard.versions_map.insert(100 + point as u32, 1);
@@ -2200,7 +2182,7 @@ mod tests {
             .expect("Error deleting from spann index writer");
         // Expect the version map to be properly updated.
         {
-            let version_map_guard = writer.versions_map.read();
+            let version_map_guard = writer.versions_map.read().await;
             for point in 1..=60 {
                 assert_eq!(version_map_guard.versions_map.get(&point), Some(&0));
                 assert_eq!(version_map_guard.versions_map.get(&(100 + point)), Some(&0));
@@ -2417,7 +2399,7 @@ mod tests {
         }
         // Insert these 150 points to version map.
         {
-            let mut version_map_guard = writer.versions_map.write();
+            let mut version_map_guard = writer.versions_map.write().await;
             for i in 1..=150 {
                 version_map_guard.versions_map.insert(i as u32, 1);
             }
@@ -2653,7 +2635,7 @@ mod tests {
         }
         // Initialize the versions map appropriately.
         {
-            let mut version_map_guard = writer.versions_map.write();
+            let mut version_map_guard = writer.versions_map.write().await;
             for i in 1..=160 {
                 version_map_guard.versions_map.insert(i as u32, 1);
             }
