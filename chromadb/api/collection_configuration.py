@@ -106,9 +106,30 @@ def collection_configuration_to_json_str(config: CollectionConfiguration) -> str
 
 
 def collection_configuration_to_json(config: CollectionConfiguration) -> Dict[str, Any]:
+    hnsw_config = config.get("hnsw")
+
+    # Handle embedding function serialization
+    ef = config.get("embedding_function")
+    if ef is not None:
+        try:
+            ef_config = {
+                "name": ef.name(),
+                "type": "known" if ef.name() in known_embedding_functions else "custom",
+                "config": ef.get_config(),
+            }
+        except Exception as e:
+            warnings.warn(
+                f"legacy embedding function config: {e}",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            ef_config = {"type": "legacy"}
+    else:
+        ef_config = None
+
     return {
-        "hnsw": config.get("hnsw"),
-        "embedding_function": config.get("embedding_function"),
+        "hnsw": hnsw_config,
+        "embedding_function": ef_config,
     }
 
 
@@ -253,27 +274,39 @@ def validate_hnsw_config(
     if "batch_size" in config and "sync_threshold" in config:
         if config["batch_size"] > config["sync_threshold"]:
             raise ValueError("batch_size must be less than or equal to sync_threshold")
-    if "ef_construction" in config and "max_neighbors" in config:
-        if config["ef_construction"] > config["max_neighbors"]:
-            raise ValueError(
-                "ef_construction must be less than or equal to max_neighbors"
-            )
-    if "ef_search" in config and "max_neighbors" in config:
-        if config["ef_search"] > config["max_neighbors"]:
-            raise ValueError("ef_search must be less than or equal to max_neighbors")
     if "num_threads" in config:
         if config["num_threads"] > cpu_count():
             raise ValueError(
                 "num_threads must be less than or equal to the number of available threads"
             )
+        if config["num_threads"] <= 0:
+            raise ValueError("num_threads must be greater than 0")
     if "resize_factor" in config:
-        if config["resize_factor"] <= 1:
-            raise ValueError("resize_factor must be greater than 1")
+        if config["resize_factor"] <= 0:
+            raise ValueError("resize_factor must be greater than 0")
     if "space" in config:
-        if config["space"] not in Space.__members__.values():
-            raise ValueError("space must be one of the following: cosine, l2, ip")
-        if ef is not None and config["space"] not in ef.supported_spaces():
-            raise ValueError("space must be supported by the embedding function")
+        # Check if the space value is one of the string values of the Space enum
+        valid_spaces = [space.value for space in Space]
+        space_value = config["space"]
+        space_str = space_value.value if isinstance(space_value, Space) else space_value
+
+        if space_str not in valid_spaces:
+            raise ValueError(
+                f"space must be one of the following: {', '.join(valid_spaces)}"
+            )
+        if ef is not None:
+            supported_spaces = [space.value for space in ef.supported_spaces()]
+            if space_str not in supported_spaces:
+                raise ValueError("space must be supported by the embedding function")
+    if "ef_construction" in config:
+        if config["ef_construction"] <= 0:
+            raise ValueError("ef_construction must be greater than 0")
+    if "max_neighbors" in config:
+        if config["max_neighbors"] <= 0:
+            raise ValueError("max_neighbors must be greater than 0")
+    if "ef_search" in config:
+        if config["ef_search"] <= 0:
+            raise ValueError("ef_search must be greater than 0")
 
 
 class UpdateHNSWConfiguration(TypedDict, total=False):
