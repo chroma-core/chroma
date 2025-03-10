@@ -553,7 +553,10 @@ impl SpannIndexWriter {
             (doc_offset_ids, doc_versions, doc_embeddings) = write_guard
                 .get_owned::<u32, &SpannPostingList<'_>>("", head_id as u32)
                 .await
-                .map_err(|_| SpannIndexWriterError::PostingListGetError)?
+                .map_err(|e| {
+                    tracing::error!("Error getting posting list for head {}: {}", head_id, e);
+                    SpannIndexWriterError::PostingListGetError
+                })?
                 .ok_or(SpannIndexWriterError::PostingListGetError)?;
         }
         for (index, doc_offset_id) in doc_offset_ids.iter().enumerate() {
@@ -680,7 +683,10 @@ impl SpannIndexWriter {
             let (mut doc_offset_ids, mut doc_versions, mut doc_embeddings) = write_guard
                 .get_owned::<u32, &SpannPostingList<'_>>("", head_id)
                 .await
-                .map_err(|_| SpannIndexWriterError::PostingListGetError)?
+                .map_err(|e| {
+                    tracing::error!("Error getting posting list for head {}: {}", head_id, e);
+                    SpannIndexWriterError::PostingListGetError
+                })?
                 .ok_or(SpannIndexWriterError::PostingListGetError)?;
             // Append the new point to the posting list.
             doc_offset_ids.reserve_exact(1);
@@ -732,6 +738,17 @@ impl SpannIndexWriter {
                     doc_versions: &doc_versions,
                     doc_embeddings: &doc_embeddings,
                 };
+                // The only case when this can happen is if the point that is being appended
+                // was concurrently reassigned and its version incremented. In this case,
+                // we can safely ignore the append since the reassign will take care of
+                // adding the point to the correct heads.
+                if doc_offset_ids.is_empty() {
+                    tracing::info!(
+                        "Point {} at version {} was concurrently updated. Empty posting list after appending",
+                        id, version
+                    );
+                    return Ok(());
+                }
                 write_guard
                     .set("", head_id, &posting_list)
                     .await
@@ -764,6 +781,8 @@ impl SpannIndexWriter {
                 cluster(&mut kmeans_input).map_err(SpannIndexWriterError::KMeansClusteringError)?;
             // TODO(Sanket): Not sure how this can happen. The reference implementation
             // just includes one point from the entire list in this case.
+            // My guess is that this can happen only when the total number of points
+            // that need to be split is 1.
             if clustering_output.num_clusters <= 1 {
                 tracing::warn!("Clustering split the posting list into only 1 cluster");
                 let mut single_doc_offset_ids = Vec::with_capacity(1);
@@ -796,6 +815,13 @@ impl SpannIndexWriter {
 
                 return Ok(());
             } else {
+                // None of the cluster_counts should be 0. Points to some error if it is.
+                if clustering_output.cluster_counts.iter().any(|&x| x == 0) {
+                    tracing::error!("Zero points in a cluster after clustering");
+                    return Err(SpannIndexWriterError::KMeansClusteringError(
+                        KMeansError::ZeroPointsInCluster,
+                    ));
+                }
                 new_posting_lists.push(Vec::with_capacity(
                     clustering_output.cluster_counts[0] * self.dimensionality,
                 ));
@@ -837,7 +863,14 @@ impl SpannIndexWriter {
                         write_guard
                             .set("", head_id, &posting_list)
                             .await
-                            .map_err(|_| SpannIndexWriterError::PostingListSetError)?;
+                            .map_err(|e| {
+                                tracing::error!(
+                                    "Error setting posting list for head {}: {}",
+                                    head_id,
+                                    e
+                                );
+                                SpannIndexWriterError::PostingListSetError
+                            })?;
                         new_head_ids[k] = head_id as i32;
                         new_head_embeddings[k] = Some(&head_embedding);
                     } else {
