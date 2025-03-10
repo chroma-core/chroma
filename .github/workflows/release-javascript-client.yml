@@ -53,13 +53,14 @@ jobs:
         version: 8
         dest: 'clients/js'
         package_json_file: 'clients/js/package.json'
-    - uses: actions/setup-node@v3
+    - uses: actions/setup-node@v4
       with:
         node-version: "16.x"
         registry-url: ${{ matrix.registry }}
         check-latest: false
         token: ${{ matrix.registry == 'https://registry.npmjs.org' && secrets.NPM_TOKEN || secrets.GITHUB_TOKEN }}
         cache: 'pnpm'
+        cache-dependency-path: 'clients/js/pnpm-lock.yaml'
     - name: Install dependencies
       run: pnpm install
       working-directory: ./clients/js/
