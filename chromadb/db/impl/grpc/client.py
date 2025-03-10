@@ -1,7 +1,10 @@
 from typing import List, Optional, Sequence, Tuple, Union, cast
 from uuid import UUID
 from overrides import overrides
-from chromadb.api.configuration import CollectionConfigurationInternal
+from chromadb.api.collection_configuration import (
+    CreateCollectionConfiguration,
+    create_collection_config_to_json_str,
+)
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System, logger
 from chromadb.db.system import SysDB
 from chromadb.errors import NotFoundError, UniqueConstraintError, InternalError
@@ -39,8 +42,6 @@ from chromadb.proto.coordinator_pb2_grpc import SysDBStub
 from chromadb.proto.utils import RetryOnRpcErrorClientInterceptor
 from chromadb.telemetry.opentelemetry.grpc import OtelInterceptor
 from chromadb.telemetry.opentelemetry import (
-    add_attributes_to_current_span,
-    OpenTelemetryClient,
     OpenTelemetryGranularity,
     trace_method,
 )
@@ -107,7 +108,7 @@ class GrpcSysDB(SysDB):
     ) -> None:
         try:
             request = CreateDatabaseRequest(id=id.hex, name=name, tenant=tenant)
-            response = self._sys_db_stub.CreateDatabase(
+            self._sys_db_stub.CreateDatabase(
                 request, timeout=self._request_timeout_seconds
             )
         except grpc.RpcError as e:
@@ -185,7 +186,7 @@ class GrpcSysDB(SysDB):
     def create_tenant(self, name: str) -> None:
         try:
             request = CreateTenantRequest(name=name)
-            response = self._sys_db_stub.CreateTenant(
+            self._sys_db_stub.CreateTenant(
                 request, timeout=self._request_timeout_seconds
             )
         except grpc.RpcError as e:
@@ -217,7 +218,7 @@ class GrpcSysDB(SysDB):
             request = CreateSegmentRequest(
                 segment=proto_segment,
             )
-            response = self._sys_db_stub.CreateSegment(
+            self._sys_db_stub.CreateSegment(
                 request, timeout=self._request_timeout_seconds
             )
         except grpc.RpcError as e:
@@ -233,7 +234,7 @@ class GrpcSysDB(SysDB):
                 id=id.hex,
                 collection=collection.hex,
             )
-            response = self._sys_db_stub.DeleteSegment(
+            self._sys_db_stub.DeleteSegment(
                 request, timeout=self._request_timeout_seconds
             )
         except grpc.RpcError as e:
@@ -311,7 +312,7 @@ class GrpcSysDB(SysDB):
         self,
         id: UUID,
         name: str,
-        configuration: CollectionConfigurationInternal,
+        configuration: CreateCollectionConfiguration,
         segments: Sequence[Segment],
         metadata: Optional[Metadata] = None,
         dimension: Optional[int] = None,
@@ -323,7 +324,9 @@ class GrpcSysDB(SysDB):
             request = CreateCollectionRequest(
                 id=id.hex,
                 name=name,
-                configuration_json_str=configuration.to_json_str(),
+                configuration_json_str=create_collection_config_to_json_str(
+                    configuration
+                ),
                 metadata=to_proto_update_metadata(metadata) if metadata else None,
                 dimension=dimension,
                 get_or_create=get_or_create,
@@ -357,7 +360,7 @@ class GrpcSysDB(SysDB):
                 tenant=tenant,
                 database=database,
             )
-            response = self._sys_db_stub.DeleteCollection(
+            self._sys_db_stub.DeleteCollection(
                 request, timeout=self._request_timeout_seconds
             )
         except grpc.RpcError as e:
@@ -432,14 +435,18 @@ class GrpcSysDB(SysDB):
         try:
             if database is None or database == "":
                 request = CountCollectionsRequest(tenant=tenant)
-                response: CountCollectionsResponse = self._sys_db_stub.CountCollections(request)
+                response: CountCollectionsResponse = self._sys_db_stub.CountCollections(
+                    request
+                )
                 return response.count
             else:
                 request = CountCollectionsRequest(
                     tenant=tenant,
                     database=database,
                 )
-                response: CountCollectionsResponse = self._sys_db_stub.CountCollections(request)
+                response: CountCollectionsResponse = self._sys_db_stub.CountCollections(
+                    request
+                )
                 return response.count
         except grpc.RpcError as e:
             logger.error(f"Failed to count collections due to error: {e}")
@@ -514,7 +521,7 @@ class GrpcSysDB(SysDB):
                 request.ClearField("metadata")
                 request.reset_metadata = True
 
-            response = self._sys_db_stub.UpdateCollection(
+            self._sys_db_stub.UpdateCollection(
                 request, timeout=self._request_timeout_seconds
             )
         except grpc.RpcError as e:

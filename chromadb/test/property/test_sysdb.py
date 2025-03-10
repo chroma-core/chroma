@@ -13,7 +13,7 @@ from typing import Dict
 from uuid import uuid4
 
 import chromadb.test.property.strategies as strategies
-from chromadb.api.configuration import CollectionConfigurationInternal
+from chromadb.api.collection_configuration import CollectionConfiguration
 from chromadb.config import System
 from chromadb.db.system import SysDB
 from chromadb.segment import SegmentType
@@ -90,11 +90,11 @@ class SysDBStateMachine(RuleBasedStateMachine):
         if coll.name in self.created_collections:
             with pytest.raises(Exception):
                 self.sysdb.create_collection(
-                    coll.id, coll.name, CollectionConfigurationInternal(), segments
+                    coll.id, coll.name, CollectionConfiguration(), segments
                 )
         else:
             self.sysdb.create_collection(
-                coll.id, coll.name, CollectionConfigurationInternal(), segments
+                coll.id, coll.name, CollectionConfiguration(), segments
             )
             self.created_collections[coll.name] = coll
         return multiple(coll)

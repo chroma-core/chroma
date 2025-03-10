@@ -9,8 +9,6 @@ from itertools import groupby
 
 from chromadb.api.configuration import (
     CollectionConfigurationInternal,
-    ConfigurationParameter,
-    HNSWConfigurationInternal,
     InvalidConfigurationError,
 )
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System
@@ -38,6 +36,14 @@ from chromadb.types import (
     Tenant,
     Unspecified,
     UpdateMetadata,
+)
+from chromadb.api.collection_configuration import (
+    CreateCollectionConfiguration,
+    create_collection_config_to_json_str,
+    load_collection_config_from_json_str,
+    create_collection_config_from_legacy_params,
+    CollectionConfiguration,
+    load_collection_config_from_create_collection_config,
 )
 
 logger = logging.getLogger(__name__)
@@ -272,7 +278,7 @@ class SqlSysDB(SqlDB, SysDB):
         self,
         id: UUID,
         name: str,
-        configuration: CollectionConfigurationInternal,
+        configuration: CreateCollectionConfiguration,
         segments: Sequence[Segment],
         metadata: Optional[Metadata] = None,
         dimension: Optional[int] = None,
@@ -306,7 +312,9 @@ class SqlSysDB(SqlDB, SysDB):
         collection = Collection(
             id=id,
             name=name,
-            configuration=configuration,
+            configuration=load_collection_config_from_create_collection_config(
+                configuration
+            ),
             metadata=metadata,
             dimension=dimension,
             tenant=tenant,
@@ -331,7 +339,7 @@ class SqlSysDB(SqlDB, SysDB):
                 .insert(
                     ParameterValue(self.uuid_to_db(collection["id"])),
                     ParameterValue(collection["name"]),
-                    ParameterValue(configuration.to_json_str()),
+                    ParameterValue(create_collection_config_to_json_str(configuration)),
                     ParameterValue(collection["dimension"]),
                     # Get the database id for the database with the given name and tenant
                     self.querybuilder()
@@ -517,9 +525,7 @@ class SqlSysDB(SqlDB, SysDB):
                 metadata = self._metadata_from_rows(rows)
                 dimension = int(rows[0][3]) if rows[0][3] else None
                 if rows[0][2] is not None:
-                    configuration = self._load_config_from_json_str_and_migrate(
-                        str(collection_id), rows[0][2]
-                    )
+                    configuration = load_collection_config_from_json_str(rows[0][2])
                 else:
                     # 07/2024: This is a legacy case where we don't have a collection
                     # configuration stored in the database. This non-destructively migrates
@@ -921,7 +927,7 @@ class SqlSysDB(SqlDB, SysDB):
 
     def _insert_config_from_legacy_params(
         self, collection_id: Any, metadata: Optional[Metadata]
-    ) -> CollectionConfigurationInternal:
+    ) -> CollectionConfiguration:
         """Insert the configuration from legacy metadata params into the collections table, and return the configuration object."""
 
         # This is a legacy case where we don't have configuration stored in the database
@@ -933,18 +939,13 @@ class SqlSysDB(SqlDB, SysDB):
         # Get any existing HNSW params from the metadata (works regardless whether metadata has persistent params)
         hnsw_metadata_params = PersistentHnswParams.extract(metadata or {})
 
-        hnsw_configuration = HNSWConfigurationInternal.from_legacy_params(
-            hnsw_metadata_params  # type: ignore[arg-type]
-        )
-        configuration = CollectionConfigurationInternal(
-            parameters=[
-                ConfigurationParameter(
-                    name="hnsw_configuration", value=hnsw_configuration
-                )
-            ]
+        create_collection_config = create_collection_config_from_legacy_params(
+            hnsw_metadata_params
         )
         # Write the configuration into the database
-        configuration_json_str = configuration.to_json_str()
+        configuration_json_str = create_collection_config_to_json_str(
+            create_collection_config
+        )
         q = (
             self.querybuilder()
             .update(collections_t)
@@ -957,12 +958,12 @@ class SqlSysDB(SqlDB, SysDB):
         sql, params = get_sql(q, self.parameter_format())
         with self.tx() as cur:
             cur.execute(sql, params)
-        return configuration
+        return load_collection_config_from_json_str(configuration_json_str)
 
     @override
     def get_collection_size(self, id: UUID) -> int:
         raise NotImplementedError
-    
+
     @override
     def count_collections(
         self,
@@ -975,7 +976,5 @@ class SqlSysDB(SqlDB, SysDB):
         # to be specified. In the sysdb implementation in go code, it does not
         # filter on database if it is set to "". This is a bad API and
         # should be fixed. For now, we will replicate the behavior.
-        request_database = database
-        if database == None or database == "":
-            request_database = ""
+        request_database: str = "" if database is None or database == "" else database
         return len(self.get_collections(tenant=tenant, database=request_database))
