@@ -74,7 +74,6 @@ chroma-sysdb = { path = "rust/sysdb" }
 chroma-tracing = { path = "rust/tracing" }
 chroma-types = { path = "rust/types" }
 chroma-sqlite = { path = "rust/sqlite" }
-chroma-cli = { path = "rust/cli" }
 mdac = { path = "rust/mdac" }
 wal3 = { path = "rust/wal3" }
 worker = { path = "rust/worker" }

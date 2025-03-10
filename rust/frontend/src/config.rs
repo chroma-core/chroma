@@ -131,7 +131,7 @@ const DEFAULT_SINGLE_NODE_CONFIG_FILENAME: &str = "sample_configs/single_node.ya
 
 #[derive(Embed)]
 #[folder = "./"]
-#[include = "**/*.yaml"]
+#[include = "*.yaml"]
 struct DefaultConfigurationsFolder;
 
 impl FrontendServerConfig {
