@@ -23,7 +23,10 @@ from fastapi.routing import APIRoute
 from fastapi import HTTPException, status
 from functools import wraps
 
-from chromadb.api.configuration import CollectionConfigurationInternal
+from chromadb.api.collection_configuration import (
+    CreateCollectionConfiguration,
+    load_collection_config_from_json,
+)
 from pydantic import BaseModel
 from chromadb import __version__ as chromadb_version
 from chromadb.api.types import (
@@ -472,7 +475,8 @@ class FastAPI(Server):
     ) -> None:
         return await to_thread.run_sync(
             # NOTE(rescrv, iron will auth):  No need to migrate because this is the utility call.
-            self.sync_auth_request, *(headers, action, tenant, database, collection)
+            self.sync_auth_request,
+            *(headers, action, tenant, database, collection),
         )
 
     @trace_method(
@@ -781,9 +785,9 @@ class FastAPI(Server):
         ) -> CollectionModel:
             create = validate_model(CreateCollection, orjson.loads(raw_body))
             configuration = (
-                CollectionConfigurationInternal()
+                CreateCollectionConfiguration()
                 if not create.configuration
-                else CollectionConfigurationInternal.from_json(create.configuration)
+                else load_collection_config_from_json(create.configuration)
             )
 
             # NOTE(rescrv, iron will auth):  Implemented.
@@ -1701,9 +1705,9 @@ class FastAPI(Server):
         ) -> CollectionModel:
             create = validate_model(CreateCollection, orjson.loads(raw_body))
             configuration = (
-                CollectionConfigurationInternal()
+                CreateCollectionConfiguration()
                 if not create.configuration
-                else CollectionConfigurationInternal.from_json(create.configuration)
+                else load_collection_config_from_json(create.configuration)
             )
 
             (
