@@ -10,6 +10,7 @@ pub mod garbage_collector_orchestrator;
 pub mod helper;
 mod opentelemetry_config;
 pub mod operators;
+pub mod types;
 
 const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
 
