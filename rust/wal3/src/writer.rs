@@ -102,6 +102,14 @@ impl LogWriter {
     }
 }
 
+impl std::fmt::Debug for LogWriter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LogWriter")
+            .field("writer", &self.writer)
+            .finish()
+    }
+}
+
 /////////////////////////////////////////// OnceLogWriter //////////////////////////////////////////
 
 /// OnceLogWriter writes to a log once until contention is discovered.  It must then be thrown away
@@ -279,82 +287,23 @@ impl OnceLogWriter {
         messages: Vec<Vec<u8>>,
     ) -> Result<LogPosition, Error> {
         assert!(!messages.is_empty());
-
-        // Construct the columns.
         let messages_len = messages.len();
-        let mut positions = Vec::with_capacity(messages_len);
-        let mut bodies = Vec::with_capacity(messages_len);
-        for (index, message) in messages.iter().enumerate() {
-            let position = log_position + index;
-            positions.push(position);
-            bodies.push(message.as_slice());
-        }
-        let offsets = positions.iter().map(|p| p.offset).collect::<Vec<_>>();
-        let timestamps_us = positions.iter().map(|p| p.timestamp_us).collect::<Vec<_>>();
-        let offsets = UInt64Array::from(offsets);
-        let timestamps_us = UInt64Array::from(timestamps_us);
-        let bodies = BinaryArray::from(bodies);
-        // SAFETY(rescrv):  The try_from_iter call will always succeed.
-        // TODO(rescrv):  Arrow pre-allocator.
-        let batch = RecordBatch::try_from_iter(vec![
-            ("offset", Arc::new(offsets) as ArrayRef),
-            ("timestamp_us", Arc::new(timestamps_us) as ArrayRef),
-            ("body", Arc::new(bodies) as ArrayRef),
-        ])
-        .unwrap();
-
-        // Write to parquet.
-        let props = WriterProperties::builder()
-            .set_compression(Compression::SNAPPY)
-            .build();
-        let mut buffer = vec![];
-        let mut writer = ArrowWriter::try_new(&mut buffer, batch.schema(), Some(props)).unwrap();
-        writer.write(&batch).map_err(Arc::new)?;
-        writer.close().map_err(Arc::new)?;
-        let setsum = Setsum::default();
-
-        // Upload the log.
-        let path = format!(
-            "{}/log/Bucket={}/FragmentSeqNo={}.parquet",
-            self.prefix,
-            fragment_seq_no.bucket(),
-            fragment_seq_no.0,
-        );
-        let exp_backoff: ExponentialBackoff = self.options.throttle_fragment.into();
-        let start = Instant::now();
-        loop {
-            match self
-                .storage
-                .put_bytes(&path, buffer.clone(), PutOptions::if_not_exists())
-                .await
-            {
-                Ok(_) => {
-                    println!("installed fragment");
-                    break;
-                }
-                Err(StorageError::Precondition { path: _, source: _ }) => {
-                    return Err(Error::LogContention);
-                }
-                Err(_) => {
-                    if start.elapsed() > Duration::from_secs(60) {
-                        return Err(Error::LogWriteTimeout);
-                    }
-                    let mut backoff = exp_backoff.next();
-                    if backoff > Duration::from_secs(3_600) {
-                        backoff = Duration::from_secs(3_600);
-                    }
-                    tokio::time::sleep(backoff).await;
-                }
-            }
-        }
-
+        let (path, setsum, num_bytes) = upload_parquet(
+            &self.options,
+            &self.storage,
+            &self.prefix,
+            fragment_seq_no,
+            log_position,
+            messages,
+        )
+        .await?;
         // Upload to a coalesced manifest.
         let fragment = Fragment {
             path: path.to_string(),
             seq_no: fragment_seq_no,
             start: log_position,
             limit: log_position + messages_len,
-            num_bytes: buffer.len() as u64,
+            num_bytes: num_bytes as u64,
             setsum,
         };
         self.manifest_manager.add_fragment(fragment).await?;
@@ -362,5 +311,87 @@ impl OnceLogWriter {
         self.batch_manager.update_average_batch_size(messages_len);
         self.batch_manager.finish_write();
         Ok(log_position)
+    }
+}
+
+pub fn construct_parquet(
+    log_position: LogPosition,
+    messages: Vec<Vec<u8>>,
+) -> Result<(Vec<u8>, Setsum), Error> {
+    // Construct the columns.
+    let messages_len = messages.len();
+    let mut positions = Vec::with_capacity(messages_len);
+    let mut bodies = Vec::with_capacity(messages_len);
+    for (index, message) in messages.iter().enumerate() {
+        let position = log_position + index;
+        positions.push(position);
+        bodies.push(message.as_slice());
+    }
+    let offsets = positions.iter().map(|p| p.offset).collect::<Vec<_>>();
+    let timestamps_us = positions.iter().map(|p| p.timestamp_us).collect::<Vec<_>>();
+    let offsets = UInt64Array::from(offsets);
+    let timestamps_us = UInt64Array::from(timestamps_us);
+    let bodies = BinaryArray::from(bodies);
+    // SAFETY(rescrv):  The try_from_iter call will always succeed.
+    // TODO(rescrv):  Arrow pre-allocator.
+    let batch = RecordBatch::try_from_iter(vec![
+        ("offset", Arc::new(offsets) as ArrayRef),
+        ("timestamp_us", Arc::new(timestamps_us) as ArrayRef),
+        ("body", Arc::new(bodies) as ArrayRef),
+    ])
+    .unwrap();
+
+    // Write to parquet.
+    let props = WriterProperties::builder()
+        .set_compression(Compression::SNAPPY)
+        .build();
+    let mut buffer = vec![];
+    let mut writer = ArrowWriter::try_new(&mut buffer, batch.schema(), Some(props)).unwrap();
+    writer.write(&batch).map_err(Arc::new)?;
+    writer.close().map_err(Arc::new)?;
+    let setsum = Setsum::default();
+    Ok((buffer, setsum))
+}
+
+pub async fn upload_parquet(
+    options: &LogWriterOptions,
+    storage: &Storage,
+    prefix: &str,
+    fragment_seq_no: FragmentSeqNo,
+    log_position: LogPosition,
+    messages: Vec<Vec<u8>>,
+) -> Result<(String, Setsum, usize), Error> {
+    let (buffer, setsum) = construct_parquet(log_position, messages)?;
+    // Upload the log.
+    let unprefixed_path = format!(
+        "log/Bucket={}/FragmentSeqNo={}.parquet",
+        fragment_seq_no.bucket(),
+        fragment_seq_no.0,
+    );
+    let path = format!("{prefix}/{unprefixed_path}");
+    let exp_backoff: ExponentialBackoff = options.throttle_fragment.into();
+    let start = Instant::now();
+    loop {
+        match storage
+            .put_bytes(&path, buffer.clone(), PutOptions::if_not_exists())
+            .await
+        {
+            Ok(_) => {
+                return Ok((unprefixed_path, setsum, buffer.len()));
+            }
+            Err(StorageError::Precondition { path: _, source: _ }) => {
+                return Err(Error::LogContention);
+            }
+            Err(err) => {
+                if start.elapsed() > Duration::from_secs(60) {
+                    return Err(Error::StorageError(Arc::new(err)));
+                }
+                let mut backoff = exp_backoff.next();
+                if backoff > Duration::from_secs(3_600) {
+                    backoff = Duration::from_secs(3_600);
+                }
+                tokio::time::sleep(backoff).await;
+            }
+        }
     }
 }
