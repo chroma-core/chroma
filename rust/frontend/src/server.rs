@@ -867,6 +867,9 @@ async fn create_collection(
     )?;
     let collection = server.frontend.create_collection(request).await?;
 
+    println!("[CREATE COLLECTION] Collection {collection:?}");
+    println!("[CREATE COLLECTION] Payload {collection:?}");
+
     Ok(Json(collection))
 }
 
