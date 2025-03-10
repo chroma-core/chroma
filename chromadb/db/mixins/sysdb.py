@@ -7,10 +7,6 @@ from overrides import override
 from pypika import Table, Column
 from itertools import groupby
 
-from chromadb.api.configuration import (
-    CollectionConfigurationInternal,
-    InvalidConfigurationError,
-)
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System
 from chromadb.db.base import Cursor, SqlDB, ParameterValue, get_sql
 from chromadb.db.system import SysDB
@@ -41,9 +37,12 @@ from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
     create_collection_config_to_json_str,
     load_collection_config_from_json_str,
+    load_collection_config_from_json,
     create_collection_config_from_legacy_params,
     CollectionConfiguration,
     load_collection_config_from_create_collection_config,
+    collection_configuration_to_json_str,
+    InvalidConfigurationError,
 )
 
 logger = logging.getLogger(__name__)
@@ -877,7 +876,7 @@ class SqlSysDB(SqlDB, SysDB):
 
     def _load_config_from_json_str_and_migrate(
         self, collection_id: str, json_str: str
-    ) -> CollectionConfigurationInternal:
+    ) -> CollectionConfiguration:
         try:
             config_json = json.loads(json_str)
         except json.JSONDecodeError:
@@ -886,7 +885,7 @@ class SqlSysDB(SqlDB, SysDB):
             )
 
         try:
-            return CollectionConfigurationInternal.from_json_str(json_str)
+            return load_collection_config_from_json_str(json_str)
         except InvalidConfigurationError as error:
             # 07/17/2024: the initial migration from the legacy metadata-based config to the new sysdb-based config had a bug where the batch_size and sync_threshold were swapped. Along with this migration, a validator was added to HNSWConfigurationInternal to ensure that batch_size <= sync_threshold.
             hnsw_configuration = config_json.get("hnsw_configuration")
@@ -903,9 +902,7 @@ class SqlSysDB(SqlDB, SysDB):
                     }
                     config_json.update({"hnsw_configuration": hnsw_configuration})
 
-                    configuration = CollectionConfigurationInternal.from_json(
-                        config_json
-                    )
+                    configuration = load_collection_config_from_json(config_json)
 
                     collections_t = Table("collections")
                     q = (
@@ -913,7 +910,9 @@ class SqlSysDB(SqlDB, SysDB):
                         .update(collections_t)
                         .set(
                             collections_t.config_json_str,
-                            ParameterValue(configuration.to_json_str()),
+                            ParameterValue(
+                                collection_configuration_to_json_str(configuration)
+                            ),
                         )
                         .where(collections_t.id == ParameterValue(collection_id))
                     )

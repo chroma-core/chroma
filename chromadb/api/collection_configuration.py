@@ -287,3 +287,9 @@ class UpdateHNSWConfiguration(TypedDict, total=False):
 class UpdateCollectionConfiguration(TypedDict, total=False):
     hnsw: Optional[UpdateHNSWConfiguration]
     embedding_function: Optional[EmbeddingFunction[Embeddable]]
+
+
+class InvalidConfigurationError(ValueError):
+    """Represents an error that occurs when a configuration is invalid."""
+
+    pass

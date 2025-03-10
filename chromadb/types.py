@@ -31,6 +31,7 @@ from chromadb.base_types import (
     Where,
     WhereDocumentOperator,
     WhereDocument,
+    InclusionExclusionOperator,
 )
 
 # Namespaced Names are mechanically just strings, but we use this type to indicate that
@@ -301,4 +302,5 @@ __all__ = [
     "Where",
     "WhereDocumentOperator",
     "WhereDocument",
+    "InclusionExclusionOperator",
 ]

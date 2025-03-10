@@ -7,7 +7,7 @@ from chromadb.api.models.Collection import CollectionName
 from chromadb.auth import UserIdentity
 from chromadb.auth.utils import maybe_set_tenant_and_database
 from chromadb.api import AsyncAdminAPI, AsyncClientAPI, AsyncServerAPI
-from chromadb.api.configuration import CollectionConfiguration
+from chromadb.api.collection_configuration import CreateCollectionConfiguration
 from chromadb.api.models.AsyncCollection import AsyncCollection
 from chromadb.api.shared_system_client import SharedSystemClient
 from chromadb.api.types import (
@@ -170,7 +170,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     async def create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfiguration] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
@@ -218,7 +218,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     async def get_or_create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfiguration] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
