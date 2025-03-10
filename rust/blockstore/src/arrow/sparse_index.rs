@@ -109,7 +109,7 @@ impl ChromaError for SetCountError {
 }
 
 impl SparseIndexWriter {
-    pub(super) fn new(initial_block_id: Uuid) -> Self {
+    pub(crate) fn new(initial_block_id: Uuid) -> Self {
         let mut forward = BTreeMap::new();
         let mut reverse = HashMap::new();
         let counts = BTreeMap::new();
@@ -128,7 +128,7 @@ impl SparseIndexWriter {
         }
     }
 
-    pub(super) fn add_block(
+    pub(crate) fn add_block(
         &self,
         start_key: CompositeKey,
         block_id: Uuid,
@@ -167,7 +167,7 @@ impl SparseIndexWriter {
     /// # Arguments
     /// * `block_id` - The block id to set the count for
     /// * `count` - The number of keys in the block
-    pub(super) fn set_count(&self, block_id: Uuid, count: u32) -> Result<(), SetCountError> {
+    pub(crate) fn set_count(&self, block_id: Uuid, count: u32) -> Result<(), SetCountError> {
         let mut data = self.data.lock();
         let start_key = data.reverse.get(&block_id);
         match start_key.cloned() {

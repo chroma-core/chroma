@@ -6,8 +6,7 @@ use chroma_storage::Storage;
 use chroma_system::{Operator, OperatorType};
 use chroma_types::chroma_proto::CollectionVersionHistory;
 use chroma_types::chroma_proto::{
-    CollectionSegmentInfo, CollectionVersionFile, CollectionVersionInfo,
-    FlushSegmentCompactionInfo, VersionListForCollection,
+    CollectionSegmentInfo, CollectionVersionFile, VersionListForCollection,
 };
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
@@ -242,8 +241,7 @@ impl Operator<ComputeUnusedFilesInput, ComputeUnusedFilesOutput> for ComputeUnus
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chroma_blockstore::{arrow::provider::ArrowBlockfileProvider, BlockfileWriterOptions};
-    use chroma_cache::UnboundedCacheConfig;
+    use chroma_blockstore::test_utils::sparse_index_test_utils;
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::chroma_proto::{
         self, CollectionSegmentInfo, CollectionVersionInfo, FilePaths, FlushSegmentCompactionInfo,
@@ -267,30 +265,17 @@ mod tests {
         }
     }
 
-    // Helper function to create a test blockfile and return its UUID
-    async fn create_test_blockfile(storage: &Storage, data: Vec<(&str, u32)>) -> Uuid {
-        let block_cache = Box::new(UnboundedCacheConfig {}.build());
-        let sparse_index_cache = Box::new(UnboundedCacheConfig {}.build());
-        let provider = ArrowBlockfileProvider::new(
-            storage.clone(),
-            1024 * 1024,
-            block_cache,
-            sparse_index_cache,
-        );
+    async fn create_sparse_index_file(
+        storage: &Storage,
+        block_ids: Vec<Uuid>,
+    ) -> Result<Uuid, Box<dyn ChromaError>> {
+        // Use the test utility function to create a sparse index
+        let root_id = sparse_index_test_utils::create_test_sparse_index(
+            storage, block_ids, None, // Use default "test" prefix
+        )
+        .await?;
 
-        let writer = provider
-            .write::<&str, u32>(BlockfileWriterOptions::new().ordered_mutations())
-            .await
-            .unwrap();
-
-        for (key, value) in data {
-            writer.set(key, value, 1).await.unwrap();
-        }
-
-        let writer_id = writer.id();
-        let flusher = writer.commit::<&str, u32>().await.unwrap();
-        flusher.flush::<&str, u32>().await.unwrap();
-        writer_id
+        Ok(root_id)
     }
 
     #[tokio::test]
@@ -298,10 +283,20 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let storage = Storage::Local(LocalStorage::new(temp_dir.path().to_str().unwrap()));
 
-        // Create test blockfiles with real UUIDs
-        let uuid1 = create_test_blockfile(&storage, vec![("key1", 1)]).await;
-        let uuid2 = create_test_blockfile(&storage, vec![("key2", 2)]).await;
-        let uuid3 = create_test_blockfile(&storage, vec![("key3", 3)]).await;
+        // Create sparse index files with block IDs
+        let block_ids1 = vec![Uuid::new_v4(), Uuid::new_v4()];
+        let block_ids2 = vec![Uuid::new_v4(), Uuid::new_v4()];
+        let block_ids3 = vec![Uuid::new_v4(), Uuid::new_v4()];
+
+        let uuid1 = create_sparse_index_file(&storage, block_ids1.clone())
+            .await
+            .unwrap();
+        let uuid2 = create_sparse_index_file(&storage, block_ids2.clone())
+            .await
+            .unwrap();
+        let uuid3 = create_sparse_index_file(&storage, block_ids3.clone())
+            .await
+            .unwrap();
 
         // Create version_to_segment_info map
         let mut version_to_segment_info = HashMap::new();
@@ -334,12 +329,18 @@ mod tests {
             .await
             .unwrap();
 
-        // Check that file1 is marked as unused
-        assert!(unused_files.contains(&format!("block/{}", uuid1)));
-        // Check that file2 is not marked as unused
-        assert!(!unused_files.contains(&format!("block/{}", uuid2)));
-        // Check that file3 is not marked as unused
-        assert!(!unused_files.contains(&format!("block/{}", uuid3)));
+        // Check that file1's blocks are marked as unused
+        for block_id in block_ids1 {
+            assert!(unused_files.contains(&format!("block/{}", block_id)));
+        }
+        // Check that file2's blocks are not marked as unused
+        for block_id in block_ids2 {
+            assert!(!unused_files.contains(&format!("block/{}", block_id)));
+        }
+        // Check that file3's blocks are not marked as unused
+        for block_id in block_ids3 {
+            assert!(!unused_files.contains(&format!("block/{}", block_id)));
+        }
         // Check that hnsw1 is marked as unused
         assert!(unused_hnsw_prefixes.contains(&"hnsw1".to_string()));
     }
@@ -349,10 +350,20 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let storage = Storage::Local(LocalStorage::new(temp_dir.path().to_str().unwrap()));
 
-        // Create actual blockfiles with real UUIDs
-        let uuid1 = create_test_blockfile(&storage, vec![("key1", 1)]).await;
-        let uuid2 = create_test_blockfile(&storage, vec![("key2", 2)]).await;
-        let uuid3 = create_test_blockfile(&storage, vec![("key3", 3)]).await;
+        // Create sparse index files with block IDs
+        let block_ids1 = vec![Uuid::new_v4(), Uuid::new_v4()];
+        let block_ids2 = vec![Uuid::new_v4(), Uuid::new_v4()];
+        let block_ids3 = vec![Uuid::new_v4(), Uuid::new_v4()];
+
+        let uuid1 = create_sparse_index_file(&storage, block_ids1.clone())
+            .await
+            .unwrap();
+        let uuid2 = create_sparse_index_file(&storage, block_ids2.clone())
+            .await
+            .unwrap();
+        let uuid3 = create_sparse_index_file(&storage, block_ids3.clone())
+            .await
+            .unwrap();
 
         let operator = ComputeUnusedFilesOperator::new("test_collection".to_string());
 
@@ -412,10 +423,17 @@ mod tests {
 
         let result = operator.run(&input).await.unwrap();
 
-        // Verify results
-        assert!(result.unused_files.contains(&format!("block/{}", uuid1)));
-        assert!(result.unused_files.contains(&format!("block/{}", uuid2)));
-        assert!(!result.unused_files.contains(&format!("block/{}", uuid3)));
+        // Verify results - check all block IDs from uuid1 and uuid2 are marked unused
+        for block_id in block_ids1 {
+            assert!(result.unused_files.contains(&format!("block/{}", block_id)));
+        }
+        for block_id in block_ids2 {
+            assert!(result.unused_files.contains(&format!("block/{}", block_id)));
+        }
+        // Check uuid3's blocks are not marked as unused
+        for block_id in block_ids3 {
+            assert!(!result.unused_files.contains(&format!("block/{}", block_id)));
+        }
         assert!(result.unused_hnsw_prefixes.contains(&"hnsw1".to_string()));
     }
 
