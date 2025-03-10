@@ -175,6 +175,7 @@ impl ManifestManager {
             .unwrap_or(FragmentSeqNo(1));
         let next_seq_no_to_apply = next_seq_no_to_assign;
         let stable = ManifestAndETag { manifest, e_tag };
+        let prefix_clone = prefix.clone();
         let staging = Arc::new(Mutex::new(Staging {
             poison,
             throttle,
@@ -198,6 +199,7 @@ impl ManifestManager {
         let background = Some(tokio::task::spawn(Self::background(
             Arc::clone(&staging),
             storage,
+            prefix_clone,
             Arc::clone(&notifier),
         )));
         Ok(Self {
@@ -302,6 +304,7 @@ impl ManifestManager {
     async fn background(
         staging: Arc<Mutex<Staging>>,
         storage: Arc<Storage>,
+        prefix: String,
         notifier: Arc<tokio::sync::Notify>,
     ) {
         let mut in_flight_snapshots = VecDeque::new();
@@ -325,6 +328,7 @@ impl ManifestManager {
                 let install_one = Self::install_one(
                     throttle,
                     Arc::clone(&storage),
+                    prefix.clone(),
                     old_manifest,
                     &old_e_tag,
                     new_manifest.clone(),
@@ -369,9 +373,11 @@ impl ManifestManager {
     }
 
     /// Install one manifest, returning its etag or erroring.
+    #[allow(clippy::too_many_arguments)]
     async fn install_one(
         throttle: ThrottleOptions,
         storage: Arc<Storage>,
+        prefix: String,
         old_manifest: Manifest,
         old_e_tag: &ETag,
         new_manifest: Manifest,
@@ -379,7 +385,7 @@ impl ManifestManager {
         done: Arc<AtomicBool>,
     ) -> Result<ETag, Error> {
         match old_manifest
-            .install(&throttle, &storage, Some(old_e_tag), &new_manifest)
+            .install(&throttle, &storage, &prefix, Some(old_e_tag), &new_manifest)
             .await
         {
             Ok(e_tag) => {
@@ -524,7 +530,6 @@ mod tests {
         assert!(staging.fragments.is_empty());
         assert_eq!(
             Manifest {
-                path: String::from("prefix/manifest/MANIFEST"),
                 writer: "init in test".to_string(),
                 setsum: Setsum::default(),
                 acc_bytes: 0,
@@ -535,7 +540,6 @@ mod tests {
         );
         assert_eq!(
             Manifest {
-                path: String::from("prefix/manifest/MANIFEST"),
                 writer: "manager in test".to_string(),
                 setsum: Setsum::default(),
                 acc_bytes: 50,
@@ -628,7 +632,6 @@ mod tests {
         assert!(staging.fragments.is_empty());
         assert_eq!(
             Manifest {
-                path: String::from("prefix/manifest/MANIFEST"),
                 writer: "manager in test".to_string(),
                 setsum: Setsum::default(),
                 acc_bytes: 50,
