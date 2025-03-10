@@ -138,43 +138,62 @@ impl Snapshot {
     }
 
     pub async fn load(
-        _options: &ThrottleOptions,
+        options: &ThrottleOptions,
         storage: &Storage,
         pointer: &SnapshotPointer,
     ) -> Result<Option<Snapshot>, Error> {
-        match storage
-            .get_with_e_tag(&pointer.path_to_snapshot)
-            .await
-            .map_err(Arc::new)
-        {
-            Ok((ref snapshot, _)) => {
-                let snapshot: Snapshot = serde_json::from_slice(snapshot).map_err(|e| {
-                    Error::CorruptManifest(format!("could not decode JSON snapshot: {e:?}"))
-                })?;
-                Ok(Some(snapshot))
+        let exp_backoff = crate::backoff::ExponentialBackoff::new(
+            options.throughput as f64,
+            options.headroom as f64,
+        );
+        let mut retries = 0;
+        loop {
+            match storage
+                .get_with_e_tag(&pointer.path_to_snapshot)
+                .await
+                .map_err(Arc::new)
+            {
+                Ok((ref snapshot, _)) => {
+                    let snapshot: Snapshot = serde_json::from_slice(snapshot).map_err(|e| {
+                        Error::CorruptManifest(format!("could not decode JSON snapshot: {e:?}"))
+                    })?;
+                    return Ok(Some(snapshot));
+                }
+                Err(err) => match &*err {
+                    StorageError::NotFound { path: _, source: _ } => return Ok(None),
+                    err => {
+                        let backoff = exp_backoff.next();
+                        tokio::time::sleep(backoff).await;
+                        if retries >= 3 {
+                            return Err(Error::StorageError(Arc::new(err.clone())));
+                        }
+                        retries += 1;
+                    }
+                },
             }
-            Err(err) => match &*err {
-                StorageError::NotFound { path: _, source: _ } => Ok(None),
-                err => Err(Error::StorageError(Arc::new(err.clone()))),
-            },
         }
     }
 
-    pub async fn install(&self, options: &ThrottleOptions, storage: &Storage) -> Result<(), Error> {
+    pub async fn install(
+        &self,
+        options: &ThrottleOptions,
+        storage: &Storage,
+        prefix: &str,
+    ) -> Result<(), Error> {
         let exp_backoff = crate::backoff::ExponentialBackoff::new(
             options.throughput as f64,
             options.headroom as f64,
         );
         loop {
+            let path = format!("{}/{}", prefix, self.path);
             let payload = serde_json::to_string(&self)
                 .map_err(|e| {
                     Error::CorruptManifest(format!("could not encode JSON manifest: {e:?}"))
                 })?
                 .into_bytes();
             let options = PutOptions::if_not_exists();
-            match storage.put_bytes(&self.path, payload, options).await {
+            match storage.put_bytes(&path, payload, options).await {
                 Ok(_) => {
-                    println!("installed snapshot");
                     return Ok(());
                 }
                 Err(StorageError::Precondition { path: _, source: _ }) => {
@@ -202,7 +221,6 @@ impl Snapshot {
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct Manifest {
-    pub path: String,
     #[serde(
         deserialize_with = "super::deserialize_setsum",
         serialize_with = "super::serialize_setsum"
@@ -216,9 +234,8 @@ pub struct Manifest {
 
 impl Manifest {
     /// Generate a new manifest that's empty and suitable for initialization.
-    pub fn new_empty(prefix: &str, writer: &str) -> Self {
+    pub fn new_empty(writer: &str) -> Self {
         Self {
-            path: manifest_path(prefix),
             setsum: Setsum::default(),
             acc_bytes: 0,
             writer: writer.to_string(),
@@ -286,6 +303,9 @@ impl Manifest {
             } else {
                 unreachable!("I checked A || B above, then checked A and B separately; should not reach here.");
             };
+            if snapshots.is_empty() && fragments.is_empty() {
+                return None;
+            }
             let path = snapshot_path(prefix, setsum);
             Some(Snapshot {
                 path,
@@ -426,7 +446,7 @@ impl Manifest {
         }
         if self.setsum != acc {
             return Err(ScrubError::CorruptManifest{
-                manifest: self.path.to_string(),
+                manifest: format!("{:?}", self),
                 what: format!(
                 "expected manifest setsum does not match observed contents: expected:{} != observed:{}",
                 self.setsum.hexdigest(),
@@ -461,7 +481,6 @@ impl Manifest {
     ) -> Result<(), Error> {
         let writer = writer.to_string();
         let initial = Manifest {
-            path: manifest_path(prefix),
             writer,
             setsum: Setsum::default(),
             acc_bytes: 0,
@@ -472,25 +491,51 @@ impl Manifest {
             .map_err(|e| Error::CorruptManifest(format!("could not encode JSON manifest: {e:?}")))?
             .into_bytes();
         storage
-            .put_bytes(&initial.path, payload, PutOptions::if_not_exists())
+            .put_bytes(&manifest_path(prefix), payload, PutOptions::if_not_exists())
             .await
             .map_err(Arc::new)?;
         Ok(())
     }
 
     /// Load the latest manifest from object storage.
-    pub async fn load(storage: &Storage, prefix: &str) -> Result<Option<(Manifest, ETag)>, Error> {
+    pub async fn load(
+        options: &ThrottleOptions,
+        storage: &Storage,
+        prefix: &str,
+    ) -> Result<Option<(Manifest, ETag)>, Error> {
+        let exp_backoff = crate::backoff::ExponentialBackoff::new(
+            options.throughput as f64,
+            options.headroom as f64,
+        );
+        let mut retries = 0;
         let path = manifest_path(prefix);
-        let (manifest, e_tag) = storage.get_with_e_tag(&path).await.map_err(Arc::new)?;
-        let Some(e_tag) = e_tag else {
-            return Err(Error::CorruptManifest(format!(
-                "no ETag for manifest at {}",
-                path
-            )));
-        };
-        serde_json::from_slice(&manifest)
-            .map_err(|e| Error::CorruptManifest(format!("could not decode JSON manifest: {e:?}")))
-            .map(|m| Some((m, e_tag)))
+        loop {
+            match storage.get_with_e_tag(&path).await.map_err(Arc::new) {
+                Ok((ref manifest, e_tag)) => {
+                    let Some(e_tag) = e_tag else {
+                        return Err(Error::CorruptManifest(format!(
+                            "no ETag for manifest at {}",
+                            path
+                        )));
+                    };
+                    let manifest: Manifest = serde_json::from_slice(manifest).map_err(|e| {
+                        Error::CorruptManifest(format!("could not decode JSON manifest: {e:?}"))
+                    })?;
+                    return Ok(Some((manifest, e_tag)));
+                }
+                Err(err) => match &*err {
+                    StorageError::NotFound { path: _, source: _ } => return Ok(None),
+                    err => {
+                        let backoff = exp_backoff.next();
+                        tokio::time::sleep(backoff).await;
+                        if retries >= 3 {
+                            return Err(Error::StorageError(Arc::new(err.clone())));
+                        }
+                        retries += 1;
+                    }
+                },
+            }
+        }
     }
 
     /// Install a manifest to object storage.
@@ -498,6 +543,7 @@ impl Manifest {
         &self,
         options: &ThrottleOptions,
         storage: &Storage,
+        prefix: &str,
         current: Option<&ETag>,
         new: &Manifest,
     ) -> Result<ETag, Error> {
@@ -516,9 +562,11 @@ impl Manifest {
             } else {
                 PutOptions::if_not_exists()
             };
-            match storage.put_bytes(&self.path, payload, options).await {
+            match storage
+                .put_bytes(&manifest_path(prefix), payload, options)
+                .await
+            {
                 Ok(Some(e_tag)) => {
-                    println!("installed manifest");
                     return Ok(e_tag);
                 }
                 Ok(None) => {
@@ -595,7 +643,6 @@ mod tests {
             setsum: Setsum::default(),
         };
         let manifest = Manifest {
-            path: String::from("manifest/MANIFEST"),
             writer: "manifest writer 1".to_string(),
             setsum: Setsum::default(),
             acc_bytes: 8200,
@@ -635,7 +682,6 @@ mod tests {
             .unwrap(),
         };
         let manifest = Manifest {
-            path: String::from("manifest/MANIFEST"),
             writer: "manifest writer 1".to_string(),
             setsum: Setsum::from_hexdigest(
                 "307d93deb6b3e91525dc277027bc34958d8f1e74965e4c027820c3596e0f2847",
@@ -647,7 +693,6 @@ mod tests {
         };
         assert!(manifest.scrub().is_ok());
         let manifest = Manifest {
-            path: String::from("manifest/MANIFEST"),
             writer: "manifest writer 1".to_string(),
             setsum: Setsum::from_hexdigest(
                 "6c5b5ee2c5e741a8d190d215d6cb2802a57ce0d3bb5a1a0223964e97acfa8083",
@@ -685,7 +730,6 @@ mod tests {
             .unwrap(),
         };
         let mut manifest = Manifest {
-            path: String::from("manifest/MANIFEST"),
             writer: "manifest writer 1".to_string(),
             setsum: Setsum::default(),
             acc_bytes: 0,
@@ -699,7 +743,6 @@ mod tests {
         manifest.apply_fragment(fragment2);
         assert_eq!(
             Manifest {
-                path: String::from("manifest/MANIFEST"),
                 writer: "manifest writer 1".to_string(),
                 setsum: Setsum::from_hexdigest(
                     "307d93deb6b3e91525dc277027bc34958d8f1e74965e4c027820c3596e0f2847",
