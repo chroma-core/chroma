@@ -13,7 +13,6 @@ import numpy as np
 from numpy.typing import NDArray
 
 from chromadb.api.configuration import (
-    CollectionConfigurationInternal,
     ConfigurationInternal,
 )
 from chromadb.serde import BaseModelJSONSerializable
@@ -133,13 +132,13 @@ class Collection(
                 return False
         return True
 
-    def get_configuration(self) -> CollectionConfigurationInternal:
+    def get_configuration(self) -> CollectionConfiguration:
         """Returns the configuration of the collection"""
-        return CollectionConfigurationInternal.from_json(self.configuration_json)
+        return load_collection_config_from_json(self.configuration_json)
 
-    def set_configuration(self, configuration: CollectionConfigurationInternal) -> None:
+    def set_configuration(self, configuration: CollectionConfiguration) -> None:
         """Sets the configuration of the collection"""
-        self.configuration_json = configuration.to_json()
+        self.configuration_json = create_collection_config_to_json(configuration)
 
     def get_model_fields(self) -> Dict[Any, Any]:
         """Used for backward compatibility with Pydantic 1.x"""
