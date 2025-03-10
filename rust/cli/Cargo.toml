@@ -1,32 +1,14 @@
 [package]
 name = "chroma-cli"
-version = "1.0.0"
+version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 clap = { version = "4.5.28", features = ["derive"] }
 webbrowser = "1.0.3"
 tokio = { workspace = true }
-sqlx = { workspace = true }
 
 chroma-frontend = { workspace = true }
-chroma-config = { workspace = true }
-chroma-system = { workspace = true }
-chroma-sqlite = { workspace = true }
-chroma-segment = { workspace = true }
-chroma-sysdb = { workspace = true }
-chroma-types = { workspace = true }
-chroma-log = { workspace = true }
-
-colored = "3.0.0"
-dialoguer = "0.11.0"
-indicatif.workspace = true
-serde_json.workspace = true
-reqwest = { version = "0.12.12" , default-features = false, features = ["rustls-tls"]}
-regex = "1.11.1"
-semver = "1.0.26"
-dirs = "6.0.0"
-serde = { version = "1.0.215", features = ["derive"] }
 
 [[bin]]
 name = "chroma"
