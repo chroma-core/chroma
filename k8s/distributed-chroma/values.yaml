@@ -79,6 +79,12 @@ logService:
   flags:
   replicaCount: 1
 
+
+rustLogService:
+  image:
+    repository: 'local'
+    tag: 'rust-log-service'
+
 queryService:
   image:
     repository: 'local'
