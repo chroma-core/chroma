@@ -206,6 +206,15 @@ pub struct GetTenantResponse {
     pub name: String,
 }
 
+#[cfg(feature = "pyo3")]
+#[pyo3::pymethods]
+impl GetTenantResponse {
+    #[getter]
+    pub fn name(&self) -> &String {
+        &self.name
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum GetTenantError {
     #[error(transparent)]

@@ -39,6 +39,9 @@ class QueryResponse:
     distances: Optional[List[List[float]]]
     include: Include
 
+class GetTenantResponse:
+    name: str
+
 # SqliteDBConfig types
 class MigrationMode(Enum):
     Apply = 0
@@ -78,7 +81,7 @@ class Bindings:
         tenant: str = DEFAULT_TENANT,
     ) -> Sequence[DatabaseFromBindings]: ...
     def create_tenant(self, name: str) -> None: ...
-    def get_tenant(self, name: str) -> Tenant: ...
+    def get_tenant(self, name: str) -> GetTenantResponse: ...
     def count_collections(
         self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
     ) -> int: ...
