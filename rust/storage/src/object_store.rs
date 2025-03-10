@@ -167,10 +167,26 @@ impl ObjectStore {
         Ok(())
     }
 
-    pub async fn put_bytes(&self, key: &str, bytes: Vec<u8>) -> Result<(), PutError> {
+    pub async fn put_bytes(
+        &self,
+        key: &str,
+        bytes: Vec<u8>,
+        options: crate::PutOptions,
+    ) -> Result<(), PutError> {
+        let mut object_store_put_options = PutOptions::default();
+        if options.if_not_exists {
+            object_store_put_options.mode = object_store::PutMode::Create;
+        }
+        if let Some(etag) = options.if_match.as_ref() {
+            object_store_put_options.mode =
+                object_store::PutMode::Update(object_store::UpdateVersion {
+                    e_tag: Some(etag.0.clone()),
+                    version: None,
+                });
+        }
         // tracing::warn!("put_bytes key: {}, path: {:?}", key, Path::from(key));
         self.object_store
-            .put_opts(&Path::from(key), bytes.into(), PutOptions::default())
+            .put_opts(&Path::from(key), bytes.into(), object_store_put_options)
             .await?;
         Ok(())
     }
@@ -261,7 +277,10 @@ mod tests {
         let object_store = get_object_store();
         let key = "test";
         let bytes = b"test data".to_vec();
-        object_store.put_bytes(key, bytes.clone()).await.unwrap();
+        object_store
+            .put_bytes(key, bytes.clone(), crate::PutOptions::default())
+            .await
+            .unwrap();
         let result = object_store.get(key).await.unwrap();
         assert_eq!(result, bytes.into());
     }
@@ -276,7 +295,10 @@ mod tests {
             .cycle()
             .take(1024 * 1024 * 50)
             .collect::<Vec<_>>();
-        object_store.put_bytes(key, bytes.clone()).await.unwrap();
+        object_store
+            .put_bytes(key, bytes.clone(), crate::PutOptions::default())
+            .await
+            .unwrap();
         let result = object_store.get(key).await.unwrap();
         assert_eq!(result, bytes.into());
     }

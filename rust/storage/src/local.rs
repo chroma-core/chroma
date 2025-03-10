@@ -4,7 +4,10 @@ use async_trait::async_trait;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
+use std::path::Path;
 use std::sync::Arc;
+
+use crate::PutOptions;
 
 #[derive(Clone)]
 pub struct LocalStorage {
@@ -27,7 +30,17 @@ impl LocalStorage {
         }
     }
 
-    pub async fn put_bytes(&self, key: &str, bytes: &[u8]) -> Result<(), String> {
+    pub async fn put_bytes(
+        &self,
+        key: &str,
+        bytes: &[u8],
+        options: PutOptions,
+    ) -> Result<(), String> {
+        assert_eq!(
+            options,
+            PutOptions::default(),
+            "local does not support put options"
+        );
         let path = format!("{}/{}", self.root, key);
         tracing::debug!("Writing to path: {}", path);
         // Create the path if it doesn't exist, we unwrap since this should only be used in tests
@@ -44,7 +57,7 @@ impl LocalStorage {
     pub async fn put_file(&self, key: &str, path: &str) -> Result<(), String> {
         let file = std::fs::read(path);
         match file {
-            Ok(bytes_u8) => self.put_bytes(key, &bytes_u8).await,
+            Ok(bytes_u8) => self.put_bytes(key, &bytes_u8, PutOptions::default()).await,
             Err(e) => Err::<(), String>(e.to_string()),
         }
     }
@@ -88,6 +101,22 @@ impl LocalStorage {
                 Err(e.to_string())
             }
         }
+    }
+
+    pub async fn list_prefix(&self, prefix: &str) -> Result<Vec<String>, String> {
+        let search_path = Path::new(&self.root).join(prefix);
+        let entries = std::fs::read_dir(search_path).map_err(|e| e.to_string())?;
+        entries
+            .into_iter()
+            .map(|e| {
+                e.map_err(|e| e.to_string()).and_then(|e| {
+                    e.file_name()
+                        .to_str()
+                        .map(|s| s.to_string())
+                        .ok_or("Unable to convert path to string".to_string())
+                })
+            })
+            .collect()
     }
 }
 

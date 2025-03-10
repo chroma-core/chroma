@@ -1276,16 +1276,16 @@ impl QueryRequest {
     }
 }
 
-#[derive(Clone, Deserialize, Serialize, ToSchema)]
+#[derive(Clone, Deserialize, Serialize, ToSchema, Debug)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct QueryResponse {
-    ids: Vec<Vec<String>>,
-    embeddings: Option<Vec<Vec<Option<Vec<f32>>>>>,
-    documents: Option<Vec<Vec<Option<String>>>>,
-    uris: Option<Vec<Vec<Option<String>>>>,
-    metadatas: Option<Vec<Vec<Option<Metadata>>>>,
-    distances: Option<Vec<Vec<Option<f32>>>>,
-    include: Vec<Include>,
+    pub ids: Vec<Vec<String>>,
+    pub embeddings: Option<Vec<Vec<Option<Vec<f32>>>>>,
+    pub documents: Option<Vec<Vec<Option<String>>>>,
+    pub uris: Option<Vec<Vec<Option<String>>>>,
+    pub metadatas: Option<Vec<Vec<Option<Metadata>>>>,
+    pub distances: Option<Vec<Vec<Option<f32>>>>,
+    pub include: Vec<Include>,
 }
 
 #[cfg(feature = "pyo3")]

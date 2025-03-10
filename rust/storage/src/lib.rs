@@ -17,6 +17,8 @@ use local::LocalStorage;
 use tempfile::TempDir;
 use thiserror::Error;
 
+pub use s3::s3_client_for_test_with_new_bucket;
+
 #[derive(Clone)]
 pub enum Storage {
     ObjectStore(object_store::ObjectStore),
@@ -29,6 +31,8 @@ pub enum Storage {
 pub enum GetError {
     #[error("No such key: {0}")]
     NoSuchKey(String),
+    #[error("Precondition not met")]
+    ConditionNotMet,
     #[error("ObjectStore error: {0}")]
     ObjectStoreError(Arc<::object_store::Error>),
     #[error("S3 error: {0}")]
@@ -44,6 +48,7 @@ impl ChromaError for GetError {
             GetError::ObjectStoreError(_) => ErrorCodes::Internal,
             GetError::S3Error(_) => ErrorCodes::Internal,
             GetError::LocalError(_) => ErrorCodes::Internal,
+            GetError::ConditionNotMet => ErrorCodes::FailedPrecondition,
         }
     }
 }
@@ -170,13 +175,47 @@ impl Storage {
         }
     }
 
+    pub async fn get_with_e_tag(
+        &self,
+        key: &str,
+    ) -> Result<(Arc<Vec<u8>>, Option<ETag>), GetError> {
+        match self {
+            Storage::ObjectStore(_) => Err(GetError::ConditionNotMet),
+            Storage::S3(s3) => {
+                let res = s3.get_with_e_tag(key).await;
+                match res {
+                    Ok(res) => Ok(res),
+                    Err(e) => match e {
+                        S3GetError::NoSuchKey(_) => Err(GetError::NoSuchKey(key.to_string())),
+                        _ => Err(GetError::S3Error(e)),
+                    },
+                }
+            }
+            Storage::Local(_) => Err(GetError::ConditionNotMet),
+            Storage::AdmissionControlledS3(admission_controlled_storage) => {
+                let res = admission_controlled_storage
+                    .get_with_e_tag(key.to_string())
+                    .await;
+                match res {
+                    Ok(res) => Ok(res),
+                    Err(e) => match e {
+                        AdmissionControlledS3StorageError::S3GetError(e) => match e {
+                            S3GetError::NoSuchKey(_) => Err(GetError::NoSuchKey(key.to_string())),
+                            _ => Err(GetError::S3Error(e)),
+                        },
+                    },
+                }
+            }
+        }
+    }
+
     pub async fn get_parallel(&self, key: &str) -> Result<Arc<Vec<u8>>, GetError> {
         match self {
             Storage::ObjectStore(object_store) => object_store.get_parallel(key).await,
             Storage::S3(s3) => {
                 let res = s3.get_parallel(key).await;
                 match res {
-                    Ok(res) => Ok(res),
+                    Ok(res) => Ok(res.0),
                     Err(e) => match e {
                         S3GetError::NoSuchKey(_) => Err(GetError::NoSuchKey(key.to_string())),
                         _ => Err(GetError::S3Error(e)),
@@ -221,17 +260,26 @@ impl Storage {
         }
     }
 
-    pub async fn put_bytes(&self, key: &str, bytes: Vec<u8>) -> Result<(), PutError> {
+    pub async fn put_bytes(
+        &self,
+        key: &str,
+        bytes: Vec<u8>,
+        options: PutOptions,
+    ) -> Result<(), PutError> {
         match self {
-            Storage::ObjectStore(object_store) => object_store.put_bytes(key, bytes).await,
-            Storage::S3(s3) => s3.put_bytes(key, bytes).await.map_err(PutError::S3Error),
+            Storage::ObjectStore(object_store) => object_store.put_bytes(key, bytes, options).await,
+            Storage::S3(s3) => s3
+                .put_bytes(key, bytes, options)
+                .await
+                .map_err(PutError::S3Error),
             Storage::Local(local) => local
-                .put_bytes(key, &bytes)
+                .put_bytes(key, &bytes, options)
                 .await
                 .map_err(PutError::LocalError),
-            Storage::AdmissionControlledS3(as3) => {
-                as3.put_bytes(key, bytes).await.map_err(PutError::S3Error)
-            }
+            Storage::AdmissionControlledS3(as3) => as3
+                .put_bytes(key, bytes, options)
+                .await
+                .map_err(PutError::S3Error),
         }
     }
 
@@ -272,9 +320,10 @@ impl Storage {
 
     pub async fn list_prefix(&self, prefix: &str) -> Result<Vec<String>, GetError> {
         match self {
-            Storage::Local(_) => {
-                unimplemented!("list_prefix not implemented for LocalStorage")
-            }
+            Storage::Local(local) => local
+                .list_prefix(prefix)
+                .await
+                .map_err(GetError::LocalError),
             Storage::S3(_) => {
                 unimplemented!("list_prefix not implemented for S3")
             }
@@ -320,4 +369,51 @@ pub fn test_storage() -> Storage {
             .to_str()
             .expect("Should be able to convert temporary directory path to string"),
     ))
+}
+
+#[derive(Debug, Default, Eq, PartialEq)]
+pub struct PutOptions {
+    if_not_exists: bool,
+    if_match: Option<ETag>,
+}
+
+#[derive(Error, Debug)]
+pub enum PutOptionsCreateError {
+    #[error("If not exists and if match cannot both be used")]
+    IfNotExistsAndIfMatchEnabled,
+}
+
+impl PutOptions {
+    pub fn if_not_exists() -> Self {
+        // SAFETY(rescrv):  This is always safe because of a unit test.
+        Self::new(true, None).unwrap()
+    }
+
+    pub fn new(
+        if_not_exists: bool,
+        if_match: Option<ETag>,
+    ) -> Result<PutOptions, PutOptionsCreateError> {
+        if !if_not_exists && if_match.is_some() {
+            return Err(PutOptionsCreateError::IfNotExistsAndIfMatchEnabled);
+        }
+        Ok(PutOptions {
+            if_not_exists,
+            if_match,
+        })
+    }
+}
+
+#[derive(Clone, Eq, PartialEq, Debug)]
+pub struct ETag(String);
+
+/////////////////////////////////////////////// tests //////////////////////////////////////////////
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn put_options_ctors() {
+        let _x = PutOptions::if_not_exists();
+    }
 }

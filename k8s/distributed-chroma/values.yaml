@@ -29,8 +29,6 @@ frontendService:
   logServiceHost: 'value: "logservice.chroma"'
   logServicePort: 'value: "50051"'
   otherEnvConfig: |
-    - name: CHROMA_ALLOW_RESET
-      value: "true"
     - name: CHROMA_OTEL_COLLECTION_ENDPOINT
       value: "http://jaeger:4317"
     - name: CHROMA_OTEL_GRANULARITY
@@ -80,6 +78,12 @@ logService:
     value: 'value: "sysdb.chroma:50051"'
   flags:
   replicaCount: 1
+
+
+rustLogService:
+  image:
+    repository: 'local'
+    tag: 'rust-log-service'
 
 queryService:
   image:

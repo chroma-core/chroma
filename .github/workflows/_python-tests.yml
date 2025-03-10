@@ -20,7 +20,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: [depot-ubuntu-22.04, windows-latest]
+        platform: [ubuntu-latest, windows-latest]
         test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
                    "chromadb/test/auth/test_simple_rbac_authz.py",
                    "chromadb/test/property/test_add.py",
@@ -44,6 +44,18 @@ jobs:
         uses: ./.github/actions/python
         with:
           python-version: ${{ matrix.python }}
+      - name: Setup Rust
+        uses: ./.github/actions/rust
+        with:
+            github-token: ${{ github.token }}
+      - name: Build Rust bindings
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          sccache: true
+      - name: Install built wheel
+        shell: bash
+        run: pip install --no-index --find-links target/wheels/ chromadb
       - name: Test
         run: python -m pytest ${{ matrix.parallelized && '-n auto' || '' }} ${{ matrix.test-globs }}
         shell: bash
@@ -57,7 +69,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: [depot-ubuntu-22.04, windows-latest]
+        platform: [ubuntu-latest, windows-latest]
         test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
                    "chromadb/test/auth/test_simple_rbac_authz.py",
                    "chromadb/test/property/test_add.py",
@@ -101,7 +113,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: [depot-ubuntu-22.04, windows-latest]
+        platform: [ubuntu-latest, windows-latest]
         test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore='chromadb/test/test_cli.py' --ignore-glob 'chromadb/test/distributed/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
                    "chromadb/test/property/test_add.py",
                    "chromadb/test/test_cli.py",
@@ -115,7 +127,7 @@ jobs:
                    "chromadb/test/property/test_sysdb.py",
                    "chromadb/test/stress"]
         include:
-          - platform: depot-ubuntu-22.04
+          - platform: ubuntu-latest
             env-file: compose-env.linux
           - platform: windows-latest
             env-file: compose-env.windows
@@ -125,6 +137,18 @@ jobs:
       uses: actions/checkout@v4
     - name: Set up Python (${{ matrix.python }})
       uses: ./.github/actions/python
+    - name: Setup Rust
+      uses: ./.github/actions/rust
+      with:
+        github-token: ${{ github.token }}
+    - name: Build Rust bindings
+      uses: PyO3/maturin-action@v1
+      with:
+        command: build
+        sccache: true
+    - name: Install built wheel
+      shell: bash
+      run: pip install --no-index --find-links target/wheels/ chromadb
     - name: Integration Test
       run: bin/python-integration-test ${{ matrix.test-globs }}
       shell: bash
@@ -137,7 +161,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: [depot-ubuntu-22.04, windows-latest]
+        platform: [ubuntu-latest, windows-latest]
         test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore='chromadb/test/test_cli.py' --ignore-glob 'chromadb/test/distributed/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
                    "chromadb/test/property/test_add.py",
                    "chromadb/test/property/test_collections.py",
@@ -149,7 +173,7 @@ jobs:
                    "chromadb/test/property/test_sysdb.py",
                    "chromadb/test/stress"]
         include:
-          - platform: depot-ubuntu-22.04
+          - platform: ubuntu-latest
             env-file: compose-env.linux
     runs-on: ${{ matrix.platform }}
     steps:
@@ -172,7 +196,7 @@ jobs:
     strategy:
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: [depot-ubuntu-22.04, windows-latest]
+        platform: [ubuntu-latest, windows-latest]
         test-globs: ["chromadb/test/property/test_add.py",
                    "chromadb/test/property/test_collections.py",
                    "chromadb/test/property/test_collections_with_database_tenant.py",
@@ -296,7 +320,7 @@ jobs:
     strategy:
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: [depot-ubuntu-22.04] # todo: should run on Windows, currently failing because Dockerfile doesn't build
+        platform: [ubuntu-latest] # todo: should run on Windows, currently failing because Dockerfile doesn't build
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4

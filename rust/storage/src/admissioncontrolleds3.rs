@@ -1,8 +1,8 @@
-use crate::StorageConfigError;
 use crate::{
     config::{RateLimitingConfig, StorageConfig},
     s3::{S3GetError, S3PutError, S3Storage},
 };
+use crate::{ETag, PutOptions, StorageConfigError};
 use async_trait::async_trait;
 use aws_sdk_s3::primitives::{ByteStream, Length};
 use bytes::Bytes;
@@ -39,7 +39,7 @@ pub struct AdmissionControlledS3Storage {
                         Box<
                             dyn Future<
                                     Output = Result<
-                                        Arc<Vec<u8>>,
+                                        (Arc<Vec<u8>>, Option<ETag>),
                                         AdmissionControlledS3StorageError,
                                     >,
                                 > + Send
@@ -88,8 +88,8 @@ impl AdmissionControlledS3Storage {
         storage: S3Storage,
         rate_limiter: Arc<RateLimitPolicy>,
         key: String,
-    ) -> Result<Arc<Vec<u8>>, AdmissionControlledS3StorageError> {
-        let (content_length, ranges) = match storage.get_key_ranges(&key).await {
+    ) -> Result<(Arc<Vec<u8>>, Option<ETag>), AdmissionControlledS3StorageError> {
+        let (content_length, ranges, e_tag) = match storage.get_key_ranges(&key).await {
             Ok(ranges) => ranges,
             Err(e) => {
                 tracing::error!("Error heading s3: {}", e);
@@ -99,7 +99,7 @@ impl AdmissionControlledS3Storage {
 
         // .buffer_unordered() below will hang if the range is empty (https://github.com/rust-lang/futures-rs/issues/2740), so we short-circuit here
         if content_length == 0 {
-            return Ok(Arc::new(Vec::new()));
+            return Ok((Arc::new(Vec::new()), e_tag));
         }
 
         let part_size = storage.download_part_size_bytes;
@@ -155,22 +155,22 @@ impl AdmissionControlledS3Storage {
             .buffer_unordered(num_parts)
             .collect::<Vec<_>>()
             .await;
-        Ok(Arc::new(output_buffer))
+        Ok((Arc::new(output_buffer), e_tag))
     }
 
     async fn read_from_storage(
         storage: S3Storage,
         rate_limiter: Arc<RateLimitPolicy>,
         key: String,
-    ) -> Result<Arc<Vec<u8>>, AdmissionControlledS3StorageError> {
+    ) -> Result<(Arc<Vec<u8>>, Option<ETag>), AdmissionControlledS3StorageError> {
         // Acquire permit.
         let _permit = rate_limiter.enter().await;
         let bytes_res = storage
-            .get(&key)
+            .get_with_e_tag(&key)
             .instrument(tracing::trace_span!(parent: Span::current(), "S3 get"))
             .await;
         match bytes_res {
-            Ok(bytes) => Ok(bytes),
+            Ok((bytes, e_tag)) => Ok((bytes, e_tag)),
             Err(e) => {
                 tracing::error!("Error reading from s3: {}", e);
                 Err(AdmissionControlledS3StorageError::S3GetError(e))
@@ -214,13 +214,20 @@ impl AdmissionControlledS3Storage {
             let mut requests = self.outstanding_read_requests.lock();
             requests.remove(&key);
         }
-        res
+        Ok(res?.0)
     }
 
     pub async fn get(
         &self,
         key: String,
     ) -> Result<Arc<Vec<u8>>, AdmissionControlledS3StorageError> {
+        self.get_with_e_tag(key).await.map(|(bytes, _e_tag)| bytes)
+    }
+
+    pub async fn get_with_e_tag(
+        &self,
+        key: String,
+    ) -> Result<(Arc<Vec<u8>>, Option<ETag>), AdmissionControlledS3StorageError> {
         // If there is a duplicate request and the original request finishes
         // before we look it up in the map below then we will end up with another
         // request to S3.
@@ -259,11 +266,12 @@ impl AdmissionControlledS3Storage {
         create_bytestream_fn: impl Fn(
             Range<usize>,
         ) -> BoxFuture<'static, Result<ByteStream, S3PutError>>,
+        options: PutOptions,
     ) -> Result<(), S3PutError> {
         // Acquire permit.
         let _permit = self.rate_limiter.enter().await;
         self.storage
-            .oneshot_upload(key, total_size_bytes, create_bytestream_fn)
+            .oneshot_upload(key, total_size_bytes, create_bytestream_fn, options)
             .await
         // Permit gets dropped due to RAII.
     }
@@ -275,6 +283,7 @@ impl AdmissionControlledS3Storage {
         create_bytestream_fn: impl Fn(
             Range<usize>,
         ) -> BoxFuture<'static, Result<ByteStream, S3PutError>>,
+        options: PutOptions,
     ) -> Result<(), S3PutError> {
         let (part_count, size_of_last_part, upload_id) = self
             .storage
@@ -300,7 +309,7 @@ impl AdmissionControlledS3Storage {
         }
 
         self.storage
-            .finish_multipart_upload(key, &upload_id, upload_parts)
+            .finish_multipart_upload(key, &upload_id, upload_parts, options)
             .await
     }
 
@@ -311,14 +320,15 @@ impl AdmissionControlledS3Storage {
         create_bytestream_fn: impl Fn(
             Range<usize>,
         ) -> BoxFuture<'static, Result<ByteStream, S3PutError>>,
+        options: PutOptions,
     ) -> Result<(), S3PutError> {
         if self.storage.is_oneshot_upload(total_size_bytes) {
             return self
-                .oneshot_upload(key, total_size_bytes, create_bytestream_fn)
+                .oneshot_upload(key, total_size_bytes, create_bytestream_fn, options)
                 .await;
         }
 
-        self.multipart_upload(key, total_size_bytes, create_bytestream_fn)
+        self.multipart_upload(key, total_size_bytes, create_bytestream_fn, options)
             .await
     }
 
@@ -330,30 +340,45 @@ impl AdmissionControlledS3Storage {
 
         let path = path.to_string();
 
-        self.put_object(key, file_size as usize, move |range| {
-            let path = path.clone();
+        self.put_object(
+            key,
+            file_size as usize,
+            move |range| {
+                let path = path.clone();
 
-            async move {
-                ByteStream::read_from()
-                    .path(path)
-                    .offset(range.start as u64)
-                    .length(Length::Exact(range.len() as u64))
-                    .build()
-                    .await
-                    .map_err(|err| S3PutError::S3PutError(err.to_string()))
-            }
-            .boxed()
-        })
+                async move {
+                    ByteStream::read_from()
+                        .path(path)
+                        .offset(range.start as u64)
+                        .length(Length::Exact(range.len() as u64))
+                        .build()
+                        .await
+                        .map_err(|err| S3PutError::S3PutError(err.to_string()))
+                }
+                .boxed()
+            },
+            PutOptions::default(),
+        )
         .await
     }
 
-    pub async fn put_bytes(&self, key: &str, bytes: Vec<u8>) -> Result<(), S3PutError> {
+    pub async fn put_bytes(
+        &self,
+        key: &str,
+        bytes: Vec<u8>,
+        options: PutOptions,
+    ) -> Result<(), S3PutError> {
         let bytes = Arc::new(Bytes::from(bytes));
 
-        self.put_object(key, bytes.len(), move |range| {
-            let bytes = bytes.clone();
-            async move { Ok(ByteStream::from(bytes.slice(range))) }.boxed()
-        })
+        self.put_object(
+            key,
+            bytes.len(),
+            move |range| {
+                let bytes = bytes.clone();
+                async move { Ok(ByteStream::from(bytes.slice(range))) }.boxed()
+            },
+            options,
+        )
         .await
     }
 }
@@ -493,6 +518,7 @@ mod tests {
             .put_bytes(
                 test_data_key.as_str(),
                 test_data_value_string.as_bytes().to_vec(),
+                crate::PutOptions::default(),
             )
             .await
             .unwrap();
@@ -529,7 +555,11 @@ mod tests {
 
         let test_data = "test data";
         admission_controlled_storage
-            .put_bytes("test", test_data.as_bytes().to_vec())
+            .put_bytes(
+                "test",
+                test_data.as_bytes().to_vec(),
+                crate::PutOptions::default(),
+            )
             .await
             .unwrap();
 

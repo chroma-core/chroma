@@ -10,7 +10,7 @@ use chroma_segment::local_segment_manager::LocalSegmentManager;
 use chroma_sqlite::db::SqliteDb;
 use chroma_sysdb::SysDb;
 use chroma_system::System;
-use chroma_tracing::meter_event::{IoKind, MeterEvent};
+use chroma_tracing::meter_event::MeterEvent;
 use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
     plan::{Count, Get, Knn},
@@ -596,13 +596,9 @@ impl Frontend {
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
-        MeterEvent::Collection {
-            tenant_id,
-            database_name,
-            io: IoKind::Write { log_bytes },
-        }
-        .submit()
-        .await;
+        MeterEvent::collection_write(tenant_id, database_name, collection_id.0, log_bytes)
+            .submit()
+            .await;
 
         Ok(AddCollectionRecordsResponse {})
     }
@@ -642,13 +638,9 @@ impl Frontend {
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
-        MeterEvent::Collection {
-            tenant_id,
-            database_name,
-            io: IoKind::Write { log_bytes },
-        }
-        .submit()
-        .await;
+        MeterEvent::collection_write(tenant_id, database_name, collection_id.0, log_bytes)
+            .submit()
+            .await;
 
         Ok(UpdateCollectionRecordsResponse {})
     }
@@ -690,13 +682,9 @@ impl Frontend {
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
-        MeterEvent::Collection {
-            tenant_id,
-            database_name,
-            io: IoKind::Write { log_bytes },
-        }
-        .submit()
-        .await;
+        MeterEvent::collection_write(tenant_id, database_name, collection_id.0, log_bytes)
+            .submit()
+            .await;
 
         Ok(UpsertCollectionRecordsResponse {})
     }
@@ -778,13 +766,9 @@ impl Frontend {
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
-        MeterEvent::Collection {
-            tenant_id,
-            database_name,
-            io: IoKind::Write { log_bytes },
-        }
-        .submit()
-        .await;
+        MeterEvent::collection_write(tenant_id, database_name, collection_id.0, log_bytes)
+            .submit()
+            .await;
 
         Ok(DeleteCollectionRecordsResponse {})
     }
@@ -845,23 +829,22 @@ impl Frontend {
             .get_collection_with_segments(collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
-        let meter_event = MeterEvent::Collection {
+        let meter_event = MeterEvent::collection_read(
             tenant_id,
             database_name,
-            io: IoKind::Read {
-                collection_record: collection_and_segments
-                    .collection
-                    .total_records_post_compaction as u32,
-                collection_dim: collection_and_segments
-                    .collection
-                    .dimension
-                    .as_ref()
-                    .map(|dim| *dim as u32)
-                    .unwrap_or_default(),
-                where_complexity: 0,
-                vector_complexity: 0,
-            },
-        };
+            collection_id.0,
+            collection_and_segments
+                .collection
+                .total_records_post_compaction,
+            collection_and_segments
+                .collection
+                .dimension
+                .as_ref()
+                .map(|dim| *dim as u32)
+                .unwrap_or_default() as u64,
+            1,
+            0,
+        );
         let res = self
             .executor
             .count(Count {
@@ -936,23 +919,22 @@ impl Frontend {
             .get_collection_with_segments(collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
-        let meter_event = MeterEvent::Collection {
+        let meter_event = MeterEvent::collection_read(
             tenant_id,
             database_name,
-            io: IoKind::Read {
-                collection_record: collection_and_segments
-                    .collection
-                    .total_records_post_compaction as u32,
-                collection_dim: collection_and_segments
-                    .collection
-                    .dimension
-                    .as_ref()
-                    .map(|dim| *dim as u32)
-                    .unwrap_or_default(),
-                where_complexity: r#where.as_ref().map(Where::complexity).unwrap_or_default(),
-                vector_complexity: 0,
-            },
-        };
+            collection_id.0,
+            collection_and_segments
+                .collection
+                .total_records_post_compaction,
+            collection_and_segments
+                .collection
+                .dimension
+                .as_ref()
+                .map(|dim| *dim as u32)
+                .unwrap_or_default() as u64,
+            r#where.as_ref().map(Where::complexity).unwrap_or_default() as u64 + 1,
+            0,
+        );
         let get_result = self
             .executor
             .get(Get {
@@ -1042,23 +1024,22 @@ impl Frontend {
             .get_collection_with_segments(collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
-        let meter_event = MeterEvent::Collection {
+        let meter_event = MeterEvent::collection_read(
             tenant_id,
             database_name,
-            io: IoKind::Read {
-                collection_record: collection_and_segments
-                    .collection
-                    .total_records_post_compaction as u32,
-                collection_dim: collection_and_segments
-                    .collection
-                    .dimension
-                    .as_ref()
-                    .map(|dim| *dim as u32)
-                    .unwrap_or_default(),
-                where_complexity: r#where.as_ref().map(Where::complexity).unwrap_or_default(),
-                vector_complexity: embeddings.len() as u32,
-            },
-        };
+            collection_id.0,
+            collection_and_segments
+                .collection
+                .total_records_post_compaction,
+            collection_and_segments
+                .collection
+                .dimension
+                .as_ref()
+                .map(|dim| *dim as u32)
+                .unwrap_or_default() as u64,
+            r#where.as_ref().map(Where::complexity).unwrap_or_default() as u64 + 1,
+            embeddings.len() as u64,
+        );
         let query_result = self
             .executor
             .knn(Knn {

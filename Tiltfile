@@ -23,6 +23,13 @@ docker_build(
 )
 
 docker_build(
+  'local:rust-log-service',
+  '.',
+  only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
+  dockerfile='./rust/log/Dockerfile',
+)
+
+docker_build(
   'local:sysdb',
   '.',
   only=['go/', 'idl/'],
@@ -70,25 +77,27 @@ docker_build(
   target='compaction_service'
 )
 
+
+# First install the CRD
 k8s_yaml(
-  helm(
-    'k8s/distributed-chroma',
-    namespace='chroma',
-    values=[
-      'k8s/distributed-chroma/values.yaml',
-      # Values for local development, and for CI/CD testing.
-      'k8s/distributed-chroma/values.dev.yaml'
-    ]
-  )
+  ['k8s/distributed-chroma/crds/memberlist_crd.yaml'],
 )
 
-k8s_yaml([
-  'k8s/test/postgres.yaml',
-])
+
+# We manually call helm template so we can call set-file
+k8s_yaml(
+  local(
+    'helm template --set-file rustFrontendService.configuration=rust/frontend/sample_configs/distributed.yaml --values k8s/distributed-chroma/values.yaml,k8s/distributed-chroma/values.dev.yaml k8s/distributed-chroma'
+  ),
+)
+watch_file('rust/frontend/sample_configs/distributed.yaml')
+watch_file('k8s/distributed-chroma/values.yaml')
+watch_file('k8s/distributed-chroma/values.dev.yaml')
+watch_file('k8s/distributed-chroma/*.yaml')
+
 
 # Extra stuff to make debugging and testing easier
 k8s_yaml([
-  'k8s/test/namespace.yaml',
   'k8s/test/otel-collector.yaml',
   'k8s/test/grafana-service.yaml',
   'k8s/test/grafana.yaml',
@@ -97,6 +106,7 @@ k8s_yaml([
   'k8s/test/minio.yaml',
   'k8s/test/prometheus.yaml',
   'k8s/test/test-memberlist-cr.yaml',
+  'k8s/test/postgres.yaml',
 ])
 
 # Lots of things assume the cluster is in a basic state. Get it into a basic
@@ -132,6 +142,7 @@ k8s_resource(
     'test-memberlist-reader-binding:ClusterRoleBinding',
     'lease-watcher:role',
     'logservice-serviceaccount-rolebinding:rolebinding',
+    'rust-frontend-service-config:ConfigMap',
   ],
   new_name='k8s_setup',
   labels=["infrastructure"],
@@ -143,13 +154,12 @@ k8s_resource('postgres', resource_deps=['k8s_setup'], labels=["infrastructure"],
 k8s_resource('sysdb-migration-sysdb-migration', resource_deps=['postgres'], labels=["infrastructure"])
 k8s_resource('logservice-migration-logservice-migration', resource_deps=['postgres'], labels=["infrastructure"])
 k8s_resource('logservice', resource_deps=['sysdb-migration-sysdb-migration'], labels=["chroma"], port_forwards='50052:50051')
+k8s_resource('rust-log-service', labels=["chroma"], port_forwards='50054:50051')
 k8s_resource('sysdb', resource_deps=['sysdb-migration-sysdb-migration'], labels=["chroma"], port_forwards='50051:50051')
 k8s_resource('frontend-service', resource_deps=['sysdb', 'logservice'],labels=["chroma"], port_forwards='8000:8000')
-k8s_resource('rust-frontend-service', resource_deps=['sysdb', 'logservice'], labels=["chroma"], port_forwards='3000:8000')
+k8s_resource('rust-frontend-service', resource_deps=['sysdb', 'logservice', 'rust-log-service'], labels=["chroma"], port_forwards='3000:8000')
 k8s_resource('query-service', resource_deps=['sysdb'], labels=["chroma"], port_forwards='50053:50051')
 k8s_resource('compaction-service', resource_deps=['sysdb'], labels=["chroma"])
-
-# I have no idea why these need their own lines but the others don't.
 k8s_resource('jaeger', resource_deps=['k8s_setup'], labels=["observability"])
 k8s_resource('grafana', resource_deps=['k8s_setup'], labels=["observability"])
 k8s_resource('prometheus', resource_deps=['k8s_setup'], labels=["observability"])

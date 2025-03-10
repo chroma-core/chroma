@@ -160,6 +160,8 @@ mod tests {
             CollectionUuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
         let tenant_1 = "tenant_1".to_string();
         let total_records_post_compaction: u64 = 5;
+        let size_bytes_post_compaction: u64 = 25000;
+        let last_compaction_time_secs: u64 = 1741037006;
         let collection_1 = Collection {
             collection_id: collection_uuid_1,
             name: "collection_1".to_string(),
@@ -171,6 +173,8 @@ mod tests {
             log_position: 0,
             version: collection_version,
             total_records_post_compaction,
+            size_bytes_post_compaction,
+            last_compaction_time_secs,
         };
 
         let collection_uuid_2 =
@@ -187,6 +191,8 @@ mod tests {
             log_position: 0,
             version: collection_version,
             total_records_post_compaction,
+            size_bytes_post_compaction,
+            last_compaction_time_secs,
         };
 
         match sysdb {

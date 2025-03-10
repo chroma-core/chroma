@@ -1,4 +1,7 @@
-import { IEmbeddingFunction } from "./IEmbeddingFunction";
+import type {
+  EmbeddingFunctionSpace,
+  IEmbeddingFunction,
+} from "./IEmbeddingFunction";
 
 interface CohereAIAPI {
   createEmbedding: (params: {
@@ -73,19 +76,39 @@ class CohereAISDK7 implements CohereAIAPI {
   }
 }
 
+interface StoredConfig {
+  model_name: string;
+  api_key_env_var: string;
+}
+
 export class CohereEmbeddingFunction implements IEmbeddingFunction {
+  name = "cohere";
+
   private cohereAiApi?: CohereAIAPI;
   private model: string;
   private apiKey: string;
+  private apiKeyEnvVar: string;
+
   constructor({
     cohere_api_key,
-    model,
+    model = "large",
+    cohere_api_key_env_var = "CHROMA_COHERE_API_KEY",
   }: {
-    cohere_api_key: string;
+    cohere_api_key?: string;
     model?: string;
+    cohere_api_key_env_var: string;
   }) {
-    this.model = model || "large";
-    this.apiKey = cohere_api_key;
+    this.model = model;
+
+    const apiKey = cohere_api_key ?? process.env[cohere_api_key_env_var];
+    if (!apiKey) {
+      throw new Error(
+        `Cohere API key is required. Please provide it in the constructor or set the environment variable ${cohere_api_key_env_var}.`,
+      );
+    }
+
+    this.apiKey = apiKey;
+    this.apiKeyEnvVar = cohere_api_key_env_var;
   }
 
   private async initCohereClient() {
@@ -118,5 +141,67 @@ export class CohereEmbeddingFunction implements IEmbeddingFunction {
       model: this.model,
       input: texts,
     });
+  }
+
+  buildFromConfig(config: StoredConfig): CohereEmbeddingFunction {
+    return new CohereEmbeddingFunction({
+      model: config.model_name,
+      cohere_api_key_env_var: config.api_key_env_var,
+    });
+  }
+
+  getConfig(): StoredConfig {
+    return {
+      model_name: this.model,
+      api_key_env_var: this.apiKeyEnvVar,
+    };
+  }
+
+  validateConfigUpdate(oldConfig: StoredConfig, newConfig: StoredConfig): void {
+    if (oldConfig.model_name !== newConfig.model_name) {
+      throw new Error(
+        "CohereEmbeddingFunction model_name cannot be changed after initialization.",
+      );
+    }
+  }
+
+  supportedSpaces(): EmbeddingFunctionSpace[] {
+    if (this.model === "embed-english-v3.0") {
+      return ["cosine", "l2", "inner_product"];
+    }
+
+    if (this.model === "embed-english-light-v3.0") {
+      return ["cosine", "inner_product", "l2"];
+    }
+
+    if (this.model === "embed-english-v2.0") {
+      return ["cosine"];
+    }
+
+    if (this.model === "embed-english-light-v2.0") {
+      return ["cosine"];
+    }
+
+    if (this.model === "embed-multilingual-v3.0") {
+      return ["cosine", "l2", "inner_product"];
+    }
+
+    if (this.model === "embed-multilingual-light-v3.0") {
+      return ["cosine", "l2", "inner_product"];
+    }
+
+    if (this.model === "embed-multilingual-v2.0") {
+      return ["inner_product"];
+    }
+
+    return ["cosine", "l2", "inner_product"];
+  }
+
+  defaultSpace(): EmbeddingFunctionSpace {
+    if (this.model == "embed-multilingual-v2.0") {
+      return "inner_product";
+    }
+
+    return "cosine";
   }
 }
