@@ -9,6 +9,7 @@ use crate::validators::{
 use crate::Collection;
 use crate::CollectionConversionError;
 use crate::CollectionUuid;
+use crate::DistributedSpannParametersFromSegmentError;
 use crate::HnswParametersFromSegmentError;
 use crate::Metadata;
 use crate::SegmentConversionError;
@@ -564,6 +565,8 @@ pub type CreateCollectionResponse = Collection;
 pub enum CreateCollectionError {
     #[error("Invalid HNSW parameters: {0}")]
     InvalidHnswParameters(#[from] HnswParametersFromSegmentError),
+    #[error("Invalid Spann parameters: {0}")]
+    InvalidSpannParameters(#[from] DistributedSpannParametersFromSegmentError),
     #[error("Collection [{0}] already exists")]
     AlreadyExists(String),
     #[error("Database [{0}] does not exist")]
@@ -580,6 +583,7 @@ impl ChromaError for CreateCollectionError {
     fn code(&self) -> ErrorCodes {
         match self {
             CreateCollectionError::InvalidHnswParameters(_) => ErrorCodes::InvalidArgument,
+            CreateCollectionError::InvalidSpannParameters(_) => ErrorCodes::InvalidArgument,
             CreateCollectionError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
             CreateCollectionError::DatabaseNotFound(_) => ErrorCodes::InvalidArgument,
             CreateCollectionError::Get(err) => err.code(),

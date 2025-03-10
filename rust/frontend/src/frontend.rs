@@ -21,7 +21,8 @@ use chroma_types::{
     CreateTenantError, CreateTenantRequest, CreateTenantResponse, DeleteCollectionError,
     DeleteCollectionRecordsError, DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse,
     DeleteCollectionRequest, DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse,
-    DistributedHnswParameters, GetCollectionError, GetCollectionRequest, GetCollectionResponse,
+    DistributedHnswParameters, DistributedIndexType, DistributedIndexTypeParam,
+    DistributedSpannParameters, GetCollectionError, GetCollectionRequest, GetCollectionResponse,
     GetCollectionsError, GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest,
     GetResponse, GetTenantError, GetTenantRequest, GetTenantResponse, HealthCheckResponse,
     HeartbeatError, HeartbeatResponse, Include, ListCollectionsRequest, ListCollectionsResponse,
@@ -422,18 +423,36 @@ impl Frontend {
         let collection_id = CollectionUuid::new();
         let segments = match self.executor {
             Executor::Distributed(_) => {
-                let hnsw_metadata =
-                    Metadata::try_from(DistributedHnswParameters::try_from(&metadata)?)?;
+                let index_type = DistributedIndexTypeParam::try_from(&metadata)?;
+                let vector_segment = match index_type.index_type {
+                    DistributedIndexType::Hnsw => {
+                        let validated_metadata =
+                            Metadata::try_from(DistributedHnswParameters::try_from(&metadata)?)?;
+                        Segment {
+                            id: SegmentUuid::new(),
+                            r#type: SegmentType::HnswDistributed,
+                            scope: SegmentScope::VECTOR,
+                            collection: collection_id,
+                            metadata: Some(validated_metadata),
+                            file_path: Default::default(),
+                        }
+                    }
+                    DistributedIndexType::Spann => {
+                        let validated_metadata =
+                            Metadata::try_from(DistributedSpannParameters::try_from(&metadata)?)?;
+                        Segment {
+                            id: SegmentUuid::new(),
+                            r#type: SegmentType::Spann,
+                            scope: SegmentScope::VECTOR,
+                            collection: collection_id,
+                            metadata: Some(validated_metadata),
+                            file_path: Default::default(),
+                        }
+                    }
+                };
 
                 vec![
-                    Segment {
-                        id: SegmentUuid::new(),
-                        r#type: SegmentType::HnswDistributed,
-                        scope: SegmentScope::VECTOR,
-                        collection: collection_id,
-                        metadata: Some(hnsw_metadata),
-                        file_path: Default::default(),
-                    },
+                    vector_segment,
                     Segment {
                         id: SegmentUuid::new(),
                         r#type: SegmentType::BlockfileMetadata,
