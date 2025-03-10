@@ -69,7 +69,7 @@ To run unit tests using your current environment, run `pytest`.
 
 ## Manual Build
 
-Install maturin using `pip install maturin` and run `maturin develop` to build.
+To manually build the rust codebase and bindings for type safety, run `maturin develop`.
 
 To manually build a distribution, run `python -m build`.
 

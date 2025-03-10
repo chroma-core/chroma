@@ -101,6 +101,17 @@ def load_collection_config_from_json(
                 )
 
 
+def collection_configuration_to_json_str(config: CollectionConfiguration) -> str:
+    return json.dumps(collection_configuration_to_json(config))
+
+
+def collection_configuration_to_json(config: CollectionConfiguration) -> Dict[str, Any]:
+    return {
+        "hnsw": config.get("hnsw"),
+        "embedding_function": config.get("embedding_function"),
+    }
+
+
 class CreateHNSWConfiguration(TypedDict, total=False):
     space: Space
     ef_construction: int
