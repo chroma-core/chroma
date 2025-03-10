@@ -10,7 +10,8 @@ on:
       tag:
         description: 'Tag to release'
         required: true
-
+env:
+  PNPM_CACHE_FOLDER: .cache/pnpm
 jobs:
   release:
     strategy:
@@ -53,6 +54,14 @@ jobs:
         version: 8
         dest: 'clients/js'
         package_json_file: 'clients/js/package.json'
+    - run: |
+          PNPM_STORE_PATH="$( pnpm store path --silent )"
+          if [ ! -d "$PNPM_STORE_PATH" ]; then
+            echo "PNPM store directory does not exist, creating it."
+            mkdir -p "$PNPM_STORE_PATH"
+          else
+            echo "PNPM store directory exists."
+          fi
     - uses: actions/setup-node@v4
       with:
         node-version: "16.x"
@@ -62,7 +71,7 @@ jobs:
         cache: 'pnpm'
         cache-dependency-path: 'clients/js/pnpm-lock.yaml'
     - name: Install dependencies
-      run: pnpm install
+      run: pnpm install --frozen-lockfile
       working-directory: ./clients/js/
     - name: Build packages
       run: pnpm build

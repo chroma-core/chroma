@@ -17,7 +17,7 @@ const nextConfig = {
 module.exports = nextConfig
 ```
 
-In addition, make sure you're using the latest of the `chromadb` package. Version v1.11.0 includes some important fixes for Next.js environments.
+In addition, make sure you're using the latest of the `chromadb` package. Version v2.0.0 includes some important fixes for Next.js environments.
 
 
 ## Cannot return the results in a contiguous 2D array. Probably ef or M is too small
