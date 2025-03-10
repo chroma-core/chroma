@@ -124,7 +124,9 @@ pub fn write_credentials_file(
     Ok(())
 }
 
-pub fn read_credentials_file(credentials_file: &PathBuf) -> Result<HashMap<String, Profile>, Box<dyn std::error::Error>> {
+pub fn read_credentials_file(
+    credentials_file: &PathBuf,
+) -> Result<HashMap<String, Profile>, Box<dyn std::error::Error>> {
     let toml_string = fs::read_to_string(credentials_file)?;
     let profiles: HashMap<String, Profile> = toml::from_str(&toml_string)?;
     Ok(profiles)
@@ -145,8 +147,12 @@ pub fn read_cli_config() -> CliConfig {
 
 pub fn get_profile(profile_name: String) -> Profile {
     let credentials_file = get_or_create_credentials_file();
-    let profiles = read_credentials_file(&credentials_file).expect("\nCould not read credentials file\n");
-    profiles.get(&profile_name).cloned().expect(format!("\nCould not find {} profile\n", &profile_name).as_str())
+    let profiles =
+        read_credentials_file(&credentials_file).expect("\nCould not read credentials file\n");
+    profiles
+        .get(&profile_name)
+        .cloned()
+        .expect(format!("\nCould not find {} profile\n", &profile_name).as_str())
 }
 
 pub fn get_current_profile() -> Profile {

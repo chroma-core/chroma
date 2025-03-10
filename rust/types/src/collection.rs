@@ -53,7 +53,7 @@ impl std::fmt::Display for CollectionUuid {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct Collection {
-    #[serde(rename(serialize = "id"))]
+    #[serde(rename = "id")]
     pub collection_id: CollectionUuid,
     pub name: String,
     #[serde(default, rename(deserialize = "configuration_json_str"))]

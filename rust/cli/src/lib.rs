@@ -1,15 +1,15 @@
+mod client;
 mod commands;
 mod utils;
-mod client;
 
-use crate::commands::run::{run, RunArgs};
-use crate::commands::update::update;
-use crate::commands::vacuum::{vacuum, VacuumArgs};
-use clap::{Parser, Subcommand};
 use crate::commands::db::{db_command, DbCommand};
 use crate::commands::install::{install, InstallArgs};
 use crate::commands::login::{login, LoginArgs};
 use crate::commands::profile::{profile_command, ProfileCommand};
+use crate::commands::run::{run, RunArgs};
+use crate::commands::update::update;
+use crate::commands::vacuum::{vacuum, VacuumArgs};
+use clap::{Parser, Subcommand};
 
 #[derive(Subcommand, Debug)]
 enum Command {
@@ -51,9 +51,7 @@ pub fn chroma_cli(args: Vec<String>) {
         Command::Install(args) => {
             install(args);
         }
-        Command::Login(args) => {
-            login(args)
-        }
+        Command::Login(args) => login(args),
         Command::Profile(profile_subcommand) => {
             profile_command(profile_subcommand);
         }

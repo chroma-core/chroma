@@ -793,7 +793,7 @@ impl AddCollectionRecordsRequest {
     }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, Deserialize, ToSchema, Debug)]
 pub struct AddCollectionRecordsResponse {}
 
 #[derive(Error, Debug)]
@@ -914,7 +914,7 @@ impl UpsertCollectionRecordsRequest {
     }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, Deserialize, ToSchema)]
 pub struct UpsertCollectionRecordsResponse {}
 
 #[derive(Error, Debug)]
@@ -1098,7 +1098,7 @@ pub type CountResponse = u32;
 ////////////////////////// Get //////////////////////////
 
 #[non_exhaustive]
-#[derive(Clone, Validate)]
+#[derive(Clone, Validate, Serialize, Debug)]
 pub struct GetRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -1140,12 +1140,13 @@ impl GetRequest {
 #[derive(Clone, Deserialize, Serialize, Debug, ToSchema)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct GetResponse {
-    ids: Vec<String>,
-    embeddings: Option<Vec<Vec<f32>>>,
-    documents: Option<Vec<Option<String>>>,
-    uris: Option<Vec<Option<String>>>,
+    pub ids: Vec<String>,
+    pub embeddings: Option<Vec<Vec<f32>>>,
+    pub documents: Option<Vec<Option<String>>>,
+    pub uris: Option<Vec<Option<String>>>,
     // TODO(hammadb): Add metadata & include to the response
-    metadatas: Option<Vec<Option<Metadata>>>,
+    pub metadatas: Option<Vec<Option<Metadata>>>,
+    #[serde(rename = "included")]
     include: Vec<Include>,
 }
 

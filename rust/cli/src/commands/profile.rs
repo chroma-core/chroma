@@ -1,4 +1,7 @@
-use crate::utils::{get_or_create_credentials_file, read_cli_config, read_credentials_file, write_cli_config, write_credentials_file};
+use crate::utils::{
+    get_or_create_credentials_file, read_cli_config, read_credentials_file, write_cli_config,
+    write_credentials_file,
+};
 use clap::{Args, Subcommand};
 use colored::Colorize;
 
@@ -40,7 +43,12 @@ fn delete_profile(args: DeleteArgs) {
     profiles.remove(&profile);
     write_credentials_file(&profiles, &credentials_file).expect("Could not write credentials file");
 
-    println!("{} {} {}", "\nProfile".green(), profile.green(), "successfully removed\n".green());
+    println!(
+        "{} {} {}",
+        "\nProfile".green(),
+        profile.green(),
+        "successfully removed\n".green()
+    );
 }
 
 #[allow(dead_code)]

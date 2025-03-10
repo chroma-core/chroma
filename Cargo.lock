@@ -1381,6 +1381,7 @@ dependencies = [
  "chroma-sysdb",
  "chroma-system",
  "chroma-types",
+ "chromadb",
  "clap",
  "colored",
  "dialoguer",

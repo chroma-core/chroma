@@ -1,11 +1,14 @@
-use crate::utils::{get_or_create_credentials_file, read_credentials_file, write_cli_config, write_credentials_file, Profile};
+use crate::client::get_tenant_id;
+use crate::utils::{
+    get_or_create_credentials_file, read_credentials_file, write_cli_config,
+    write_credentials_file, Profile,
+};
 use clap::Parser;
 use colored::Colorize;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{Input, Select};
 use std::io;
 use std::io::Write;
-use crate::client::get_tenant_id;
 
 #[derive(Parser, Debug)]
 pub struct LoginArgs {
@@ -34,10 +37,9 @@ pub fn login(args: LoginArgs) {
             .expect("Failed to read API key");
         input.trim().to_string()
     });
-    
-    let tenant_id = get_tenant_id(&api_key)
-        .expect("Invalid API key");
-    
+
+    let tenant_id = get_tenant_id(&api_key).expect("Invalid API key");
+
     let has_default = profiles.contains_key("default");
 
     let profile = args.profile.unwrap_or_else(|| {
@@ -100,5 +102,6 @@ pub fn login(args: LoginArgs) {
 
     println!();
 
-    write_credentials_file(&profiles, &credentials_file).expect("Failed to write Chrome credentials");
+    write_credentials_file(&profiles, &credentials_file)
+        .expect("Failed to write Chrome credentials");
 }
