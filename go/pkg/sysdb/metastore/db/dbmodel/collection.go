@@ -27,10 +27,12 @@ type Collection struct {
 }
 
 type CollectionToGc struct {
-	ID              string `gorm:"id;primaryKey"`
-	Name            string `gorm:"name;not null;index:idx_name,unique;"`
-	Version         int32  `gorm:"version;default:0"`
-	VersionFileName string `gorm:"version_file_name"`
+	ID              string    `gorm:"id;primaryKey"`
+	Name            string    `gorm:"name;not null;index:idx_name,unique;"`
+	Version         int32     `gorm:"version;default:0"`
+	VersionFileName string    `gorm:"version_file_name"`
+	OldestVersionTs time.Time `gorm:"oldest_version_ts;type:timestamp"`
+	NumVersions     uint32    `gorm:"num_versions;default:0"`
 }
 
 func (v Collection) TableName() string {
@@ -57,6 +59,6 @@ type ICollectionDb interface {
 	UpdateLogPositionAndVersionInfo(collectionID string, logPosition int64, currentCollectionVersion int32, currentVersionFileName string, newCollectionVersion int32, newVersionFileName string) (int64, error)
 	GetCollectionEntry(collectionID *string, databaseName *string) (*Collection, error)
 	GetCollectionSize(collectionID string) (uint64, error)
-	ListCollectionsToGc() ([]*CollectionToGc, error)
-	UpdateVersionFileName(collectionID, existingVersionFileName, newVersionFileName string) (int64, error)
+	ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64) ([]*CollectionToGc, error)
+	UpdateVersionRelatedFields(collectionID, existingVersionFileName, newVersionFileName string, oldestVersionTs *time.Time, numActiveVersions *int) (int64, error)
 }

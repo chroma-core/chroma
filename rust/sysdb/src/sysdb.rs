@@ -835,7 +835,10 @@ impl GrpcSysDb {
     ) -> Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError> {
         let res = self
             .client
-            .list_collections_to_gc(chroma_proto::ListCollectionsToGcRequest {})
+            .list_collections_to_gc(chroma_proto::ListCollectionsToGcRequest {
+                cutoff_time_secs: None,
+                limit: None,
+            })
             .await;
 
         match res {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
@@ -307,7 +308,7 @@ func TestCatalog_DeleteCollectionVersion(t *testing.T) {
 	// Test data
 	tenantID := "test_tenant"
 	collectionID := "00000000-0000-0000-0000-000000000001"
-	versions := []int64{1, 2}
+	versions_to_delete := []int64{3}
 	currentVersion := int32(3)
 	existingVersionFileName := "3_existing_version"
 
@@ -319,6 +320,7 @@ func TestCatalog_DeleteCollectionVersion(t *testing.T) {
 		},
 		VersionHistory: &coordinatorpb.CollectionVersionHistory{
 			Versions: []*coordinatorpb.CollectionVersionInfo{
+				{Version: 0, CreatedAtSecs: 0},
 				{Version: 1, CreatedAtSecs: 1000},
 				{Version: 2, CreatedAtSecs: 2000},
 				{Version: 3, CreatedAtSecs: 3000},
@@ -332,12 +334,20 @@ func TestCatalog_DeleteCollectionVersion(t *testing.T) {
 		ID:              collectionID,
 		Version:         currentVersion,
 		VersionFileName: existingVersionFileName,
+		OldestVersionTs: time.Unix(0, 0),
+		NumVersions:     4,
 	}
 
 	// Setup mock behaviors
 	mockMetaDomain.On("CollectionDb", mock.Anything).Return(mockCollectionDb)
 	mockCollectionDb.On("GetCollectionEntry", &collectionID, mock.Anything).Return(mockCollectionEntry, nil)
-	mockCollectionDb.On("UpdateVersionFileName", collectionID, existingVersionFileName, mock.AnythingOfType("string")).Return(int64(1), nil)
+	mockCollectionDb.On("UpdateVersionRelatedFields",
+		collectionID,
+		existingVersionFileName,
+		mock.AnythingOfType("string"),
+		mock.AnythingOfType("*time.Time"), // expect any time value
+		mock.AnythingOfType("*int"),       // numActiveVersions
+	).Return(int64(1), nil)
 
 	// Create test request
 	req := &coordinatorpb.DeleteCollectionVersionRequest{
@@ -345,7 +355,7 @@ func TestCatalog_DeleteCollectionVersion(t *testing.T) {
 			{
 				TenantId:     tenantID,
 				CollectionId: collectionID,
-				Versions:     versions,
+				Versions:     versions_to_delete,
 			},
 		},
 	}
@@ -368,8 +378,10 @@ func TestCatalog_DeleteCollectionVersion(t *testing.T) {
 		existingVersionFileName,
 	)
 	assert.NoError(t, err)
-	assert.Equal(t, 1, len(updatedFile.VersionHistory.Versions))
-	assert.Equal(t, int64(3), updatedFile.VersionHistory.Versions[0].Version)
+	assert.Equal(t, 3, len(updatedFile.VersionHistory.Versions))
+	assert.Equal(t, int64(0), updatedFile.VersionHistory.Versions[0].Version)
+	assert.Equal(t, int64(1), updatedFile.VersionHistory.Versions[1].Version)
+	assert.Equal(t, int64(2), updatedFile.VersionHistory.Versions[2].Version)
 
 	// Verify mock expectations
 	mockMetaDomain.AssertExpectations(t)
@@ -462,7 +474,13 @@ func TestCatalog_MarkVersionForDeletion(t *testing.T) {
 	// Setup mock behaviors
 	mockMetaDomain.On("CollectionDb", mock.Anything).Return(mockCollectionDb)
 	mockCollectionDb.On("GetCollectionEntry", &collectionID, mock.Anything).Return(mockCollectionEntry, nil)
-	mockCollectionDb.On("UpdateVersionFileName", collectionID, existingVersionFileName, mock.AnythingOfType("string")).Return(int64(1), nil)
+	mockCollectionDb.On("UpdateVersionRelatedFields",
+		collectionID,
+		existingVersionFileName,
+		mock.AnythingOfType("string"),
+		(*time.Time)(nil),           // oldestVersionTs
+		mock.AnythingOfType("*int"), // numActiveVersions
+	).Return(int64(1), nil)
 
 	// Create test request
 	req := &coordinatorpb.MarkVersionForDeletionRequest{
@@ -613,6 +631,114 @@ func TestCatalog_MarkVersionForDeletion_VersionNotFound(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, resp)
 	assert.False(t, resp.CollectionIdToSuccess[collectionID])
+
+	// Verify mock expectations
+	mockMetaDomain.AssertExpectations(t)
+	mockCollectionDb.AssertExpectations(t)
+}
+
+func TestCatalog_ListCollectionsToGc(t *testing.T) {
+	// Create mocks
+	mockTxImpl := &mocks.ITransaction{}
+	mockMetaDomain := &mocks.IMetaDomain{}
+	mockCollectionDb := &mocks.ICollectionDb{}
+	mockS3Store := newMockS3MetaStore()
+
+	// Create catalog
+	catalog := NewTableCatalog(mockTxImpl, mockMetaDomain, mockS3Store, true)
+
+	// Test data
+	cutoffTimeSecs := uint64(time.Now().Add(-24 * time.Hour).Unix()) // 24 hours ago
+	limit := uint64(10)
+
+	// Mock collections to return
+	collectionsToGc := []*dbmodel.CollectionToGc{
+		{
+			ID:              "00000000-0000-0000-0000-000000000001",
+			Name:            "collection1",
+			Version:         3,
+			VersionFileName: "3_existing_version",
+			OldestVersionTs: time.Now().Add(-48 * time.Hour), // 48 hours ago
+			NumVersions:     3,
+		},
+		{
+			ID:              "00000000-0000-0000-0000-000000000002",
+			Name:            "collection2",
+			Version:         2,
+			VersionFileName: "2_existing_version",
+			OldestVersionTs: time.Now().Add(-36 * time.Hour), // 36 hours ago
+			NumVersions:     2,
+		},
+	}
+
+	// Setup mock behaviors
+	mockMetaDomain.On("CollectionDb", mock.Anything).Return(mockCollectionDb)
+	mockCollectionDb.On("ListCollectionsToGc", &cutoffTimeSecs, &limit).Return(collectionsToGc, nil)
+
+	// Execute test
+	result, err := catalog.ListCollectionsToGc(context.Background(), &cutoffTimeSecs, &limit)
+
+	// Verify results
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, 2, len(result))
+
+	// Verify first collection
+	assert.Equal(t, "00000000-0000-0000-0000-000000000001", result[0].ID.String())
+	assert.Equal(t, "collection1", result[0].Name)
+	assert.Equal(t, int64(3), result[0].LatestVersion)
+	assert.Equal(t, "3_existing_version", result[0].VersionFilePath)
+
+	// Verify second collection
+	assert.Equal(t, "00000000-0000-0000-0000-000000000002", result[1].ID.String())
+	assert.Equal(t, "collection2", result[1].Name)
+	assert.Equal(t, int64(2), result[1].LatestVersion)
+	assert.Equal(t, "2_existing_version", result[1].VersionFilePath)
+
+	// Verify mock expectations
+	mockMetaDomain.AssertExpectations(t)
+	mockCollectionDb.AssertExpectations(t)
+}
+
+func TestCatalog_ListCollectionsToGc_NilParameters(t *testing.T) {
+	// Create mocks
+	mockTxImpl := &mocks.ITransaction{}
+	mockMetaDomain := &mocks.IMetaDomain{}
+	mockCollectionDb := &mocks.ICollectionDb{}
+	mockS3Store := newMockS3MetaStore()
+
+	// Create catalog
+	catalog := NewTableCatalog(mockTxImpl, mockMetaDomain, mockS3Store, true)
+
+	// Mock collections to return
+	collectionsToGc := []*dbmodel.CollectionToGc{
+		{
+			ID:              "00000000-0000-0000-0000-000000000001",
+			Name:            "collection1",
+			Version:         3,
+			VersionFileName: "3_existing_version",
+			OldestVersionTs: time.Now().Add(-48 * time.Hour),
+			NumVersions:     3,
+		},
+	}
+
+	// Setup mock behaviors
+	mockMetaDomain.On("CollectionDb", mock.Anything).Return(mockCollectionDb)
+	mockCollectionDb.On("ListCollectionsToGc", (*uint64)(nil), (*uint64)(nil)).Return(collectionsToGc, nil)
+
+	// Execute test with nil parameters
+	result, err := catalog.ListCollectionsToGc(context.Background(), nil, nil)
+
+	// Verify results
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, 1, len(result))
+
+	// Verify collection details
+	assert.Equal(t, "00000000-0000-0000-0000-000000000001", result[0].ID.String())
+	assert.Equal(t, "collection1", result[0].Name)
+	assert.Equal(t, int64(3), result[0].LatestVersion)
+	assert.Equal(t, "3_existing_version", result[0].VersionFilePath)
 
 	// Verify mock expectations
 	mockMetaDomain.AssertExpectations(t)
