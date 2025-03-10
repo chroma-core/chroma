@@ -1,7 +1,7 @@
 from typing import List, Optional, Sequence
 from uuid import UUID
 from chromadb import CollectionMetadata, Embeddings, IDs
-from chromadb.api.configuration import CollectionConfigurationInternal
+from chromadb.api.collection_configuration import CreateCollectionConfiguration
 from chromadb.api.types import (
     CollectionMetadata,
     Documents,
@@ -95,7 +95,7 @@ class Bindings:
     def create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfigurationInternal] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
