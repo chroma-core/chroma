@@ -4,4 +4,4 @@ set -e
 
 cd clients/js
 pnpm install
-pnpm test -- --verbose
+pnpm -r test --verbose
