@@ -9,8 +9,8 @@ use chroma_blockstore::{
 };
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::CollectionUuid;
 use chroma_types::SpannPostingList;
+use chroma_types::{CollectionUuid, DistributedSpannParameters};
 use rand::seq::SliceRandom;
 use thiserror::Error;
 use uuid::Uuid;
@@ -29,9 +29,8 @@ pub struct VersionsMapInner {
     pub versions_map: HashMap<u32, u32>,
 }
 
-#[allow(dead_code)]
-// Note: Fields of this struct are public for testing.
 #[derive(Clone)]
+// Note: Fields of this struct are public for testing.
 pub struct SpannIndexWriter {
     // HNSW index and its provider for centroid search.
     pub hnsw_index: HnswIndexRef,
@@ -44,9 +43,9 @@ pub struct SpannIndexWriter {
     pub next_head_id: Arc<AtomicU32>,
     // Version number of each point.
     // TODO(Sanket): Finer grained locking for this map in future if perf is not satisfactory.
-    pub versions_map: Arc<parking_lot::RwLock<VersionsMapInner>>,
-    pub distance_function: DistanceFunction,
+    pub versions_map: Arc<tokio::sync::RwLock<VersionsMapInner>>,
     pub dimensionality: usize,
+    pub params: DistributedSpannParameters,
 }
 
 // TODO(Sanket): Can compose errors whenever downstream returns Box<dyn ChromaError>.
@@ -138,20 +137,6 @@ impl ChromaError for SpannIndexWriterError {
 
 const MAX_HEAD_OFFSET_ID: &str = "max_head_offset_id";
 
-// TODO(Sanket): Make these configurable.
-#[allow(dead_code)]
-const NUM_CENTROIDS_TO_SEARCH: u32 = 64;
-#[allow(dead_code)]
-const RNG_FACTOR: f32 = 1.0;
-#[allow(dead_code)]
-const SPLIT_THRESHOLD: usize = 100;
-const NUM_SAMPLES_FOR_KMEANS: usize = 1000;
-const INITIAL_LAMBDA: f32 = 100.0;
-const REASSIGN_NBR_COUNT: usize = 8;
-const QUERY_EPSILON: f32 = 10.0;
-const MERGE_THRESHOLD: usize = 50;
-const NUM_CENTERS_TO_MERGE_TO: usize = 8;
-
 impl SpannIndexWriter {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -161,8 +146,8 @@ impl SpannIndexWriter {
         posting_list_writer: BlockfileWriter,
         next_head_id: u32,
         versions_map: VersionsMapInner,
-        distance_function: DistanceFunction,
         dimensionality: usize,
+        params: DistributedSpannParameters,
     ) -> Self {
         SpannIndexWriter {
             hnsw_index,
@@ -170,9 +155,9 @@ impl SpannIndexWriter {
             blockfile_provider,
             posting_list_writer: Arc::new(tokio::sync::Mutex::new(posting_list_writer)),
             next_head_id: Arc::new(AtomicU32::new(next_head_id)),
-            versions_map: Arc::new(parking_lot::RwLock::new(versions_map)),
-            distance_function,
+            versions_map: Arc::new(tokio::sync::RwLock::new(versions_map)),
             dimensionality,
+            params,
         }
     }
 
@@ -275,14 +260,12 @@ impl SpannIndexWriter {
         versions_map_id: Option<&Uuid>,
         posting_list_id: Option<&Uuid>,
         max_head_id_bf_id: Option<&Uuid>,
-        m: Option<usize>,
-        ef_construction: Option<usize>,
-        ef_search: Option<usize>,
         collection_id: &CollectionUuid,
-        distance_function: DistanceFunction,
         dimensionality: usize,
         blockfile_provider: &BlockfileProvider,
+        params: DistributedSpannParameters,
     ) -> Result<Self, SpannIndexWriterError> {
+        let distance_function = DistanceFunction::from(params.space.clone());
         // Create the HNSW index.
         let hnsw_index = match hnsw_id {
             Some(hnsw_id) => {
@@ -301,9 +284,9 @@ impl SpannIndexWriter {
                     collection_id,
                     distance_function.clone(),
                     dimensionality,
-                    m.unwrap(), // Safe since caller should always provide this.
-                    ef_construction.unwrap(), // Safe since caller should always provide this.
-                    ef_search.unwrap(), // Safe since caller should always provide this.
+                    params.m,
+                    params.construction_ef,
+                    params.search_ef,
                 )
                 .await?
             }
@@ -348,19 +331,18 @@ impl SpannIndexWriter {
             posting_list_writer,
             max_head_id,
             versions_map,
-            distance_function,
             dimensionality,
+            params,
         ))
     }
 
-    fn add_versions_map(&self, id: u32) -> u32 {
+    async fn add_versions_map(&self, id: u32) -> u32 {
         // 0 means deleted. Version counting starts from 1.
-        let mut write_lock = self.versions_map.write();
+        let mut write_lock = self.versions_map.write().await;
         write_lock.versions_map.insert(id, 1);
         *write_lock.versions_map.get(&id).unwrap()
     }
 
-    #[allow(dead_code)]
     async fn rng_query(
         &self,
         query: &[f32],
@@ -368,10 +350,10 @@ impl SpannIndexWriter {
         rng_query(
             query,
             self.hnsw_index.clone(),
-            NUM_CENTROIDS_TO_SEARCH as usize,
-            QUERY_EPSILON,
-            RNG_FACTOR,
-            self.distance_function.clone(),
+            self.params.write_nprobe as usize,
+            self.params.write_rng_epsilon,
+            self.params.write_rng_factor,
+            self.params.space.clone().into(),
             true,
         )
         .await
@@ -383,7 +365,7 @@ impl SpannIndexWriter {
         doc_offset_id: u32,
         version: u32,
     ) -> Result<bool, SpannIndexWriterError> {
-        let version_map_guard = self.versions_map.read();
+        let version_map_guard = self.versions_map.read().await;
         let current_version = version_map_guard
             .versions_map
             .get(&doc_offset_id)
@@ -419,11 +401,12 @@ impl SpannIndexWriter {
                 {
                     continue;
                 }
-                let old_dist = self.distance_function.distance(
+                let distance_function: DistanceFunction = self.params.space.clone().into();
+                let old_dist = distance_function.distance(
                     old_head_embedding,
                     &doc_embeddings[index * self.dimensionality..(index + 1) * self.dimensionality],
                 );
-                let new_dist = self.distance_function.distance(
+                let new_dist = distance_function.distance(
                     new_head_embeddings[k].unwrap(),
                     &doc_embeddings[index * self.dimensionality..(index + 1) * self.dimensionality],
                 );
@@ -499,7 +482,7 @@ impl SpannIndexWriter {
         // Increment version and trigger append.
         let next_version;
         {
-            let mut version_map_guard = self.versions_map.write();
+            let mut version_map_guard = self.versions_map.write().await;
             let current_version = version_map_guard
                 .versions_map
                 .get(&doc_offset_id)
@@ -581,15 +564,16 @@ impl SpannIndexWriter {
             {
                 continue;
             }
-            let distance_from_curr_center = self.distance_function.distance(
+            let distance_function: DistanceFunction = self.params.space.clone().into();
+            let distance_from_curr_center = distance_function.distance(
                 &doc_embeddings[index * self.dimensionality..(index + 1) * self.dimensionality],
                 head_embedding,
             );
-            let distance_from_split_center1 = self.distance_function.distance(
+            let distance_from_split_center1 = distance_function.distance(
                 &doc_embeddings[index * self.dimensionality..(index + 1) * self.dimensionality],
                 new_head_embeddings[0].unwrap(),
             );
-            let distance_from_split_center2 = self.distance_function.distance(
+            let distance_from_split_center2 = distance_function.distance(
                 &doc_embeddings[index * self.dimensionality..(index + 1) * self.dimensionality],
                 new_head_embeddings[1].unwrap(),
             );
@@ -598,7 +582,7 @@ impl SpannIndexWriter {
             {
                 continue;
             }
-            let distance_from_old_head = self.distance_function.distance(
+            let distance_from_old_head = distance_function.distance(
                 &doc_embeddings[index * self.dimensionality..(index + 1) * self.dimensionality],
                 old_head_embedding,
             );
@@ -641,9 +625,9 @@ impl SpannIndexWriter {
             )
             .await?;
         // Reassign neighbors of this center if applicable.
-        if REASSIGN_NBR_COUNT > 0 {
+        if self.params.reassign_nbr_count > 0 {
             let (nearby_head_ids, _, nearby_head_embeddings) = self
-                .get_nearby_heads(old_head_embedding, REASSIGN_NBR_COUNT)
+                .get_nearby_heads(old_head_embedding, self.params.reassign_nbr_count as usize)
                 .await?;
             for (head_idx, head_id) in nearby_head_ids.iter().enumerate() {
                 // Skip the current split heads.
@@ -663,7 +647,6 @@ impl SpannIndexWriter {
         Ok(())
     }
 
-    #[allow(dead_code)]
     async fn append(
         &self,
         head_id: u32,
@@ -713,7 +696,7 @@ impl SpannIndexWriter {
             let mut local_indices = vec![0; doc_offset_ids.len()];
             let mut up_to_date_index = 0;
             {
-                let version_map_guard = self.versions_map.read();
+                let version_map_guard = self.versions_map.read().await;
                 for (index, doc_version) in doc_versions.iter().enumerate() {
                     let current_version = version_map_guard
                         .versions_map
@@ -728,7 +711,7 @@ impl SpannIndexWriter {
                 }
             }
             // If size is within threshold, write the new posting back and return.
-            if up_to_date_index <= SPLIT_THRESHOLD {
+            if up_to_date_index <= self.params.split_threshold as usize {
                 for idx in 0..up_to_date_index {
                     if local_indices[idx] == idx {
                         continue;
@@ -773,9 +756,9 @@ impl SpannIndexWriter {
                 /* k */ 2,
                 /* first */ 0,
                 last,
-                NUM_SAMPLES_FOR_KMEANS,
-                self.distance_function.clone(),
-                INITIAL_LAMBDA,
+                self.params.num_samples_kmeans,
+                self.params.space.clone().into(),
+                self.params.initial_lambda,
             );
             clustering_output =
                 cluster(&mut kmeans_input).map_err(SpannIndexWriterError::KMeansClusteringError)?;
@@ -832,12 +815,12 @@ impl SpannIndexWriter {
                     );
                 }
                 let mut same_head = false;
+                let distance_function: DistanceFunction = self.params.space.clone().into();
                 for k in 0..2 {
                     // Update the existing head.
                     // TODO(Sanket): Need to understand what this achieves.
                     if !same_head
-                        && self
-                            .distance_function
+                        && distance_function
                             .distance(&clustering_output.cluster_centers[k], &head_embedding)
                             < 1e-6
                     {
@@ -922,7 +905,6 @@ impl SpannIndexWriter {
         .await
     }
 
-    #[allow(dead_code)]
     async fn add_to_postings_list(
         &self,
         id: u32,
@@ -987,10 +969,11 @@ impl SpannIndexWriter {
     }
 
     pub async fn add(&self, id: u32, embedding: &[f32]) -> Result<(), SpannIndexWriterError> {
-        let version = self.add_versions_map(id);
+        let version = self.add_versions_map(id).await;
         // Normalize the embedding in case of cosine.
         let mut normalized_embedding = embedding.to_vec();
-        if self.distance_function == DistanceFunction::Cosine {
+        let distance_function: DistanceFunction = self.params.space.clone().into();
+        if distance_function == DistanceFunction::Cosine {
             normalized_embedding = normalize(embedding);
         }
         // Add to the posting list.
@@ -1002,7 +985,7 @@ impl SpannIndexWriter {
         let inc_version;
         {
             // Increment version.
-            let mut version_map_guard = self.versions_map.write();
+            let mut version_map_guard = self.versions_map.write().await;
             let curr_version = match version_map_guard.versions_map.get(&id) {
                 Some(version) => *version,
                 None => {
@@ -1019,7 +1002,8 @@ impl SpannIndexWriter {
         }
         // Normalize the embedding in case of cosine.
         let mut normalized_embedding = embedding.to_vec();
-        if self.distance_function == DistanceFunction::Cosine {
+        let distance_function: DistanceFunction = self.params.space.clone().into();
+        if distance_function == DistanceFunction::Cosine {
             normalized_embedding = normalize(embedding);
         }
         // Add to the posting list.
@@ -1028,7 +1012,7 @@ impl SpannIndexWriter {
     }
 
     pub async fn delete(&self, id: u32) -> Result<(), SpannIndexWriterError> {
-        let mut version_map_guard = self.versions_map.write();
+        let mut version_map_guard = self.versions_map.write().await;
         version_map_guard.versions_map.insert(id, 0);
         Ok(())
     }
@@ -1039,7 +1023,7 @@ impl SpannIndexWriter {
         doc_versions: &[u32],
     ) -> Result<usize, SpannIndexWriterError> {
         let mut up_to_date_index = 0;
-        let version_map_guard = self.versions_map.read();
+        let version_map_guard = self.versions_map.read().await;
         for (index, doc_version) in doc_versions.iter().enumerate() {
             let current_version = version_map_guard
                 .versions_map
@@ -1074,7 +1058,7 @@ impl SpannIndexWriter {
         let mut cluster_len = 0;
         let mut local_indices = vec![0; doc_offset_ids.len()];
         {
-            let version_map_guard = self.versions_map.read();
+            let version_map_guard = self.versions_map.read().await;
             for (index, doc_version) in doc_versions.iter().enumerate() {
                 let current_version = version_map_guard
                     .versions_map
@@ -1173,7 +1157,7 @@ impl SpannIndexWriter {
                 .await?;
             source_cluster_len = doc_offset_ids.len();
             // Write the PL back and return if within the merge threshold.
-            if source_cluster_len > MERGE_THRESHOLD {
+            if source_cluster_len > self.params.merge_threshold as usize {
                 let posting_list = SpannPostingList {
                     doc_offset_ids: &doc_offset_ids,
                     doc_versions: &doc_versions,
@@ -1188,7 +1172,7 @@ impl SpannIndexWriter {
             }
             // Find candidates for merge.
             let (nearest_head_ids, _, nearest_head_embeddings) = self
-                .get_nearby_heads(head_embedding, NUM_CENTERS_TO_MERGE_TO)
+                .get_nearby_heads(head_embedding, self.params.num_centers_to_merge_to as usize)
                 .await?;
             for (nearest_head_id, nearest_head_embedding) in nearest_head_ids
                 .into_iter()
@@ -1214,7 +1198,7 @@ impl SpannIndexWriter {
                     .get_up_to_date_count(&nearest_head_doc_offset_ids, &nearest_head_doc_versions)
                     .await?;
                 // If the total count exceeds the max posting list size then skip.
-                if target_cluster_len + source_cluster_len >= SPLIT_THRESHOLD {
+                if target_cluster_len + source_cluster_len >= self.params.split_threshold as usize {
                     continue;
                 }
                 // Merge the two PLs.
@@ -1271,12 +1255,13 @@ impl SpannIndexWriter {
         if source_cluster_len > target_cluster_len {
             // target_cluster points were merged to source_cluster
             // so they are candidates for reassignment.
+            let distance_function: DistanceFunction = self.params.space.clone().into();
             for idx in source_cluster_len..(source_cluster_len + target_cluster_len) {
-                let origin_dist = self.distance_function.distance(
+                let origin_dist = distance_function.distance(
                     &doc_embeddings[idx * self.dimensionality..(idx + 1) * self.dimensionality],
                     &target_embedding,
                 );
-                let new_dist = self.distance_function.distance(
+                let new_dist = distance_function.distance(
                     &doc_embeddings[idx * self.dimensionality..(idx + 1) * self.dimensionality],
                     head_embedding,
                 );
@@ -1293,12 +1278,13 @@ impl SpannIndexWriter {
         } else {
             // source_cluster points were merged to target_cluster
             // so they are candidates for reassignment.
+            let distance_function: DistanceFunction = self.params.space.clone().into();
             for idx in 0..source_cluster_len {
-                let origin_dist = self.distance_function.distance(
+                let origin_dist = distance_function.distance(
                     &doc_embeddings[idx * self.dimensionality..(idx + 1) * self.dimensionality],
                     head_embedding,
                 );
-                let new_dist = self.distance_function.distance(
+                let new_dist = distance_function.distance(
                     &doc_embeddings[idx * self.dimensionality..(idx + 1) * self.dimensionality],
                     &target_embedding,
                 );
@@ -1349,18 +1335,14 @@ impl SpannIndexWriter {
 
     // TODO(Sanket): Change the error types.
     pub async fn commit(self) -> Result<SpannIndexFlusher, SpannIndexWriterError> {
+        // NOTE(Sanket): This is not the best way to drain the writer but the orchestrator keeps a
+        // reference to the writer so cannot do an Arc::try_unwrap() here.
         // Pl list.
-        let pl_flusher = match Arc::try_unwrap(self.posting_list_writer) {
-            Ok(writer) => writer
-                .into_inner()
-                .commit::<u32, &SpannPostingList<'_>>()
-                .await
-                .map_err(|_| SpannIndexWriterError::PostingListCommitError)?,
-            Err(_) => {
-                // This should never happen.
-                panic!("Failed to unwrap posting list writer");
-            }
-        };
+        let pl_writer_clone = self.posting_list_writer.lock().await.clone();
+        let pl_flusher = pl_writer_clone
+            .commit::<u32, &SpannPostingList<'_>>()
+            .await
+            .map_err(|_| SpannIndexWriterError::PostingListCommitError)?;
         // Versions map. Create a writer, write all the data and commit.
         let mut bf_options = BlockfileWriterOptions::new();
         bf_options = bf_options.unordered_mutations();
@@ -1369,25 +1351,19 @@ impl SpannIndexWriter {
             .write::<u32, u32>(bf_options)
             .await
             .map_err(|_| SpannIndexWriterError::VersionsMapWriterCreateError)?;
-        let versions_map_flusher = match Arc::try_unwrap(self.versions_map) {
-            Ok(writer) => {
-                let writer = writer.into_inner();
-                for (doc_offset_id, doc_version) in writer.versions_map.into_iter() {
-                    versions_map_bf_writer
-                        .set("", doc_offset_id, doc_version)
-                        .await
-                        .map_err(|_| SpannIndexWriterError::VersionsMapSetError)?;
-                }
+        {
+            let mut version_map_guard = self.versions_map.write().await;
+            for (doc_offset_id, doc_version) in version_map_guard.versions_map.drain() {
                 versions_map_bf_writer
-                    .commit::<u32, u32>()
+                    .set("", doc_offset_id, doc_version)
                     .await
-                    .map_err(|_| SpannIndexWriterError::VersionsMapCommitError)?
+                    .map_err(|_| SpannIndexWriterError::VersionsMapSetError)?;
             }
-            Err(_) => {
-                // This should never happen.
-                panic!("Failed to unwrap posting list writer");
-            }
-        };
+        }
+        let versions_map_flusher = versions_map_bf_writer
+            .commit::<u32, u32>()
+            .await
+            .map_err(|_| SpannIndexWriterError::VersionsMapCommitError)?;
         // Next head.
         let mut bf_options = BlockfileWriterOptions::new();
         bf_options = bf_options.unordered_mutations();
@@ -1396,23 +1372,15 @@ impl SpannIndexWriter {
             .write::<&str, u32>(bf_options)
             .await
             .map_err(|_| SpannIndexWriterError::MaxHeadIdWriterCreateError)?;
-        let max_head_id_flusher = match Arc::try_unwrap(self.next_head_id) {
-            Ok(value) => {
-                let value = value.into_inner();
-                max_head_id_bf
-                    .set("", MAX_HEAD_OFFSET_ID, value)
-                    .await
-                    .map_err(|_| SpannIndexWriterError::MaxHeadIdSetError)?;
-                max_head_id_bf
-                    .commit::<&str, u32>()
-                    .await
-                    .map_err(|_| SpannIndexWriterError::MaxHeadIdCommitError)?
-            }
-            Err(_) => {
-                // This should never happen.
-                panic!("Failed to unwrap next head id");
-            }
-        };
+        let max_head_oid = self.next_head_id.load(std::sync::atomic::Ordering::SeqCst);
+        max_head_id_bf
+            .set("", MAX_HEAD_OFFSET_ID, max_head_oid)
+            .await
+            .map_err(|_| SpannIndexWriterError::MaxHeadIdSetError)?;
+        let max_head_id_flusher = max_head_id_bf
+            .commit::<&str, u32>()
+            .await
+            .map_err(|_| SpannIndexWriterError::MaxHeadIdCommitError)?;
 
         let hnsw_id = self.hnsw_index.inner.read().id;
 
@@ -1719,8 +1687,9 @@ mod tests {
         provider::BlockfileProvider,
     };
     use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
+    use chroma_distance::DistanceFunction;
     use chroma_storage::{local::LocalStorage, Storage};
-    use chroma_types::{CollectionUuid, SpannPostingList};
+    use chroma_types::{CollectionUuid, DistributedSpannParameters, SpannPostingList};
     use rand::Rng;
     use tempfile::TempDir;
 
@@ -1753,25 +1722,19 @@ mod tests {
             16,
             rx,
         );
-        let m = 16;
-        let ef_construction = 200;
-        let ef_search = 200;
         let collection_id = CollectionUuid::new();
-        let distance_function = chroma_distance::DistanceFunction::Euclidean;
         let dimensionality = 2;
+        let params = DistributedSpannParameters::default();
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
             None,
             None,
             None,
-            Some(m),
-            Some(ef_construction),
-            Some(ef_search),
             &collection_id,
-            distance_function,
             dimensionality,
             &blockfile_provider,
+            params,
         )
         .await
         .expect("Error creating spann index writer");
@@ -1949,25 +1912,19 @@ mod tests {
             16,
             rx,
         );
-        let m = 16;
-        let ef_construction = 200;
-        let ef_search = 200;
         let collection_id = CollectionUuid::new();
-        let distance_function = chroma_distance::DistanceFunction::Euclidean;
         let dimensionality = 2;
+        let params = DistributedSpannParameters::default();
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
             None,
             None,
             None,
-            Some(m),
-            Some(ef_construction),
-            Some(ef_search),
             &collection_id,
-            distance_function,
             dimensionality,
             &blockfile_provider,
+            params,
         )
         .await
         .expect("Error creating spann index writer");
@@ -2020,7 +1977,7 @@ mod tests {
         }
         // Insert the points in the version map as well.
         {
-            let mut version_map_guard = writer.versions_map.write();
+            let mut version_map_guard = writer.versions_map.write().await;
             for point in 1..=100 {
                 version_map_guard.versions_map.insert(point as u32, 1);
                 version_map_guard.versions_map.insert(100 + point as u32, 1);
@@ -2039,7 +1996,7 @@ mod tests {
         }
         // Expect the version map to be properly updated.
         {
-            let version_map_guard = writer.versions_map.read();
+            let version_map_guard = writer.versions_map.read().await;
             for point in 1..=40 {
                 assert_eq!(version_map_guard.versions_map.get(&point), Some(&0));
                 assert_eq!(version_map_guard.versions_map.get(&(100 + point)), Some(&0));
@@ -2135,25 +2092,19 @@ mod tests {
             16,
             rx,
         );
-        let m = 16;
-        let ef_construction = 200;
-        let ef_search = 200;
         let collection_id = CollectionUuid::new();
-        let distance_function = chroma_distance::DistanceFunction::Euclidean;
         let dimensionality = 2;
+        let params = DistributedSpannParameters::default();
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
             None,
             None,
             None,
-            Some(m),
-            Some(ef_construction),
-            Some(ef_search),
             &collection_id,
-            distance_function,
             dimensionality,
             &blockfile_provider,
+            params,
         )
         .await
         .expect("Error creating spann index writer");
@@ -2206,7 +2157,7 @@ mod tests {
         }
         // Insert the points in the version map as well.
         {
-            let mut version_map_guard = writer.versions_map.write();
+            let mut version_map_guard = writer.versions_map.write().await;
             for point in 1..=100 {
                 version_map_guard.versions_map.insert(point as u32, 1);
                 version_map_guard.versions_map.insert(100 + point as u32, 1);
@@ -2231,7 +2182,7 @@ mod tests {
             .expect("Error deleting from spann index writer");
         // Expect the version map to be properly updated.
         {
-            let version_map_guard = writer.versions_map.read();
+            let version_map_guard = writer.versions_map.read().await;
             for point in 1..=60 {
                 assert_eq!(version_map_guard.versions_map.get(&point), Some(&0));
                 assert_eq!(version_map_guard.versions_map.get(&(100 + point)), Some(&0));
@@ -2325,25 +2276,19 @@ mod tests {
             16,
             rx,
         );
-        let m = 16;
-        let ef_construction = 200;
-        let ef_search = 200;
         let collection_id = CollectionUuid::new();
-        let distance_function = chroma_distance::DistanceFunction::Euclidean;
         let dimensionality = 2;
+        let params = DistributedSpannParameters::default();
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
             None,
             None,
             None,
-            Some(m),
-            Some(ef_construction),
-            Some(ef_search),
             &collection_id,
-            distance_function,
             dimensionality,
             &blockfile_provider,
+            params,
         )
         .await
         .expect("Error creating spann index writer");
@@ -2454,7 +2399,7 @@ mod tests {
         }
         // Insert these 150 points to version map.
         {
-            let mut version_map_guard = writer.versions_map.write();
+            let mut version_map_guard = writer.versions_map.write().await;
             for i in 1..=150 {
                 version_map_guard.versions_map.insert(i as u32, 1);
             }
@@ -2567,25 +2512,19 @@ mod tests {
             16,
             rx,
         );
-        let m = 16;
-        let ef_construction = 200;
-        let ef_search = 200;
         let collection_id = CollectionUuid::new();
-        let distance_function = chroma_distance::DistanceFunction::Euclidean;
         let dimensionality = 2;
+        let params = DistributedSpannParameters::default();
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
             None,
             None,
             None,
-            Some(m),
-            Some(ef_construction),
-            Some(ef_search),
             &collection_id,
-            distance_function,
             dimensionality,
             &blockfile_provider,
+            params,
         )
         .await
         .expect("Error creating spann index writer");
@@ -2696,7 +2635,7 @@ mod tests {
         }
         // Initialize the versions map appropriately.
         {
-            let mut version_map_guard = writer.versions_map.write();
+            let mut version_map_guard = writer.versions_map.write().await;
             for i in 1..=160 {
                 version_map_guard.versions_map.insert(i as u32, 1);
             }
@@ -2824,11 +2763,9 @@ mod tests {
         let blockfile_provider =
             new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
         let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
-        let m = 16;
-        let ef_construction = 200;
-        let ef_search = 200;
         let collection_id = CollectionUuid::new();
-        let distance_function = chroma_distance::DistanceFunction::Euclidean;
+        let params = DistributedSpannParameters::default();
+        let distance_function = params.space.clone().into();
         let dimensionality = 1000;
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
@@ -2836,13 +2773,10 @@ mod tests {
             None,
             None,
             None,
-            Some(m),
-            Some(ef_construction),
-            Some(ef_search),
             &collection_id,
-            distance_function.clone(),
             dimensionality,
             &blockfile_provider,
+            params,
         )
         .await
         .expect("Error creating spann index writer");
@@ -2914,11 +2848,9 @@ mod tests {
         let blockfile_provider =
             new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
         let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
-        let m = 16;
-        let ef_construction = 200;
-        let ef_search = 200;
         let collection_id = CollectionUuid::new();
-        let distance_function = chroma_distance::DistanceFunction::Euclidean;
+        let params = DistributedSpannParameters::default();
+        let distance_function = params.space.clone().into();
         let dimensionality = 1000;
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
@@ -2926,13 +2858,10 @@ mod tests {
             None,
             None,
             None,
-            Some(m),
-            Some(ef_construction),
-            Some(ef_search),
             &collection_id,
-            distance_function.clone(),
             dimensionality,
             &blockfile_provider,
+            params,
         )
         .await
         .expect("Error creating spann index writer");
@@ -3018,11 +2947,9 @@ mod tests {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let max_block_size_bytes = 8 * 1024 * 1024;
-        let m = 16;
-        let ef_construction = 200;
-        let ef_search = 200;
         let collection_id = CollectionUuid::new();
-        let distance_function = chroma_distance::DistanceFunction::Euclidean;
+        let params = DistributedSpannParameters::default();
+        let distance_function = params.space.clone().into();
         let dimensionality = 1000;
         let mut hnsw_path = None;
         let mut versions_map_path = None;
@@ -3040,13 +2967,10 @@ mod tests {
                 versions_map_path.as_ref(),
                 pl_path.as_ref(),
                 max_bf_id_path.as_ref(),
-                Some(m),
-                Some(ef_construction),
-                Some(ef_search),
                 &collection_id,
-                distance_function.clone(),
                 dimensionality,
                 &blockfile_provider,
+                params.clone(),
             )
             .await
             .expect("Error creating spann index writer");
@@ -3123,11 +3047,9 @@ mod tests {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let max_block_size_bytes = 8 * 1024 * 1024;
-        let m = 16;
-        let ef_construction = 200;
-        let ef_search = 200;
+        let params = DistributedSpannParameters::default();
+        let distance_function = params.space.clone().into();
         let collection_id = CollectionUuid::new();
-        let distance_function = chroma_distance::DistanceFunction::Euclidean;
         let dimensionality = 1000;
         let mut hnsw_path = None;
         let mut versions_map_path = None;
@@ -3157,13 +3079,10 @@ mod tests {
                 versions_map_path.as_ref(),
                 pl_path.as_ref(),
                 max_bf_id_path.as_ref(),
-                Some(m),
-                Some(ef_construction),
-                Some(ef_search),
                 &collection_id,
-                distance_function.clone(),
                 dimensionality,
                 &blockfile_provider,
+                params.clone(),
             )
             .await
             .expect("Error creating spann index writer");
@@ -3253,11 +3172,9 @@ mod tests {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let max_block_size_bytes = 8 * 1024 * 1024;
-        let m = 16;
-        let ef_construction = 200;
-        let ef_search = 200;
+        let params = DistributedSpannParameters::default();
+        let distance_function: DistanceFunction = params.space.clone().into();
         let collection_id = CollectionUuid::new();
-        let distance_function = chroma_distance::DistanceFunction::Euclidean;
         let dimensionality = 1000;
         let mut hnsw_path = None;
         let mut versions_map_path = None;
@@ -3287,13 +3204,10 @@ mod tests {
                 versions_map_path.as_ref(),
                 pl_path.as_ref(),
                 max_bf_id_path.as_ref(),
-                Some(m),
-                Some(ef_construction),
-                Some(ef_search),
                 &collection_id,
-                distance_function.clone(),
                 dimensionality,
                 &blockfile_provider,
+                params.clone(),
             )
             .await
             .expect("Error creating spann index writer");
@@ -3403,13 +3317,10 @@ mod tests {
             versions_map_path.as_ref(),
             pl_path.as_ref(),
             max_bf_id_path.as_ref(),
-            Some(m),
-            Some(ef_construction),
-            Some(ef_search),
             &collection_id,
-            distance_function.clone(),
             dimensionality,
             &blockfile_provider,
+            params.clone(),
         )
         .await
         .expect("Error creating spann index writer");
@@ -3521,13 +3432,10 @@ mod tests {
             versions_map_path.as_ref(),
             pl_path.as_ref(),
             max_bf_id_path.as_ref(),
-            Some(m),
-            Some(ef_construction),
-            Some(ef_search),
             &collection_id,
-            distance_function.clone(),
             dimensionality,
             &blockfile_provider,
+            params,
         )
         .await
         .expect("Error creating spann index writer");
