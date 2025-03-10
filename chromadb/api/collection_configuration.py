@@ -265,43 +265,6 @@ def validate_hnsw_config(
             raise ValueError("space must be supported by the embedding function")
 
 
-# def json_to_create_collection_config(config: Dict[str, Any]) -> CreateCollectionConfiguration:
-#     """Convert a JSON-serializable dict to a CreateCollectionConfiguration"""
-#     if config.get("hnsw") is None:
-#         raise ValueError("hnsw is required")
-#     if config.get("embedding_function") is None:
-#         raise ValueError("embedding_function is required")
-
-
-#     return CreateCollectionConfiguration(
-#         hnsw=json_to_create_hnsw_config(config["hnsw"]),
-#         embedding_function=json_to_embedding_function(config["embedding_function"]),
-#     )
-
-# def json_to_create_hnsw_config(hnsw_config: Dict[str, Any]) -> CreateHNSWConfiguration:
-#     """Convert a JSON-serializable dict to a CreateHNSWConfiguration"""
-#     return CreateHNSWConfiguration(
-#         **hnsw_config,
-#     )
-
-# def json_to_embedding_function(ef_config: Dict[str, Any]) -> Optional[EmbeddingFunction[Embeddable]]:
-#     """Convert a JSON-serializable dict to an EmbeddingFunction"""
-#     if ef_config["name"] == "legacy":
-#         warnings.warn(
-#             "legacy embedding function config",
-#             DeprecationWarning,
-#             stacklevel=2,
-#         )
-#         return None
-
-#     if ef_config["name"] not in known_embedding_functions:
-#         raise ValueError(f"unknown embedding function: {ef_config['name']}")
-
-#     ef = known_embedding_functions[ef_config["name"]]
-
-#     return cast(EmbeddingFunction[Embeddable], ef.build_from_config(ef_config["config"]))
-
-
 class UpdateHNSWConfiguration(TypedDict, total=False):
     ef_search: int
     num_threads: int
