@@ -28,7 +28,7 @@ pub(super) const CURRENT_VERSION: Version = Version::V1_1;
 // ================
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
-pub(super) enum Version {
+pub(crate) enum Version {
     V1 = 1,
     V1_1 = 2,
 }
@@ -78,7 +78,7 @@ pub struct RootWriter {
 }
 
 impl RootWriter {
-    pub(super) fn new(version: Version, id: Uuid, sparse_index: SparseIndexWriter) -> Self {
+    pub(crate) fn new(version: Version, id: Uuid, sparse_index: SparseIndexWriter) -> Self {
         Self {
             version,
             sparse_index,
