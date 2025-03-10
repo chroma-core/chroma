@@ -5,6 +5,7 @@ use bindings::{Bindings, PythonBindingsConfig};
 use pyo3::prelude::*;
 
 //////////////////////// Config Imports ////////////////////////
+use crate::bindings::run_cli;
 use chroma_sqlite::config::{MigrationHash, MigrationMode, SqliteDBConfig};
 
 #[pymodule]
@@ -20,6 +21,8 @@ fn chromadb_rust_bindings(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<SqliteDBConfig>()?;
     m.add_class::<MigrationMode>()?;
     m.add_class::<MigrationHash>()?;
+
+    m.add_function(wrap_pyfunction!(run_cli, m)?)?;
 
     // Log config classes
     // TODO
