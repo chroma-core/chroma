@@ -88,11 +88,8 @@ impl Collection {
         &self,
         py: pyo3::Python<'py>,
     ) -> pyo3::PyResult<pyo3::Bound<'py, pyo3::PyAny>> {
-        let res = pyo3::prelude::PyModule::import(py, "chromadb.api")?
-            .getattr("CollectionConfigurationInternal")?
-            .getattr("from_json_str")?
-            .call1((self.configuration_json.to_string(),))?;
-        Ok(res)
+        // TODO(@codetheweb): return expected configuration dict
+        Ok(pyo3::types::PyDict::new(py).into_any())
     }
 
     #[getter]
