@@ -1,4 +1,4 @@
-use crate::errors::{ChromaPyResult, WrappedPyErr, WrappedSerdeJsonError, WrappedUuidError};
+use crate::errors::{ChromaPyResult, WrappedPyErr, WrappedUuidError};
 use chroma_cache::FoyerCacheConfig;
 use chroma_cli::chroma_cli;
 use chroma_config::{registry::Registry, Configurable};
@@ -250,35 +250,19 @@ impl Bindings {
     fn create_collection(
         &self,
         name: String,
-        configuration: Option<PyObject>,
+        #[allow(unused_variables)] configuration: Option<PyObject>,
         metadata: Option<Metadata>,
         get_or_create: bool,
         tenant: String,
         database: String,
-        py: Python<'_>,
+        _py: Python<'_>,
     ) -> ChromaPyResult<Collection> {
-        let configuration_json = match configuration {
-            Some(configuration) => {
-                let configuration_json_str = configuration
-                    .call_method0(py, "to_json_str")
-                    .map_err(WrappedPyErr)?
-                    .extract::<String>(py)
-                    .map_err(WrappedPyErr)?;
-
-                Some(
-                    serde_json::from_str::<serde_json::Value>(&configuration_json_str)
-                        .map_err(WrappedSerdeJsonError)?,
-                )
-            }
-            None => None,
-        };
-
         let request = CreateCollectionRequest::try_new(
             tenant,
             database,
             name,
             metadata,
-            configuration_json,
+            None,
             get_or_create,
         )?;
 

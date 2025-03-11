@@ -1,10 +1,10 @@
-use thiserror::Error;
-use tonic::Status;
-
+use super::operator::ScanToProtoError;
 use crate::{
     CollectionConversionError, MetadataValueConversionError, SegmentConversionError,
     VectorConversionError, WhereConversionError,
 };
+use thiserror::Error;
+use tonic::Status;
 
 #[derive(Debug, Error)]
 pub enum QueryConversionError {
@@ -20,6 +20,8 @@ pub enum QueryConversionError {
     Vector(#[from] VectorConversionError),
     #[error("Error parsing where clause: {0}")]
     Where(#[from] WhereConversionError),
+    #[error("Error parsing scan: {0}")]
+    Scan(#[from] ScanToProtoError),
 }
 
 impl QueryConversionError {

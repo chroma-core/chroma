@@ -13,9 +13,9 @@ use chroma_types::{
     CreateTenantResponse, Database, DeleteCollectionError, DeleteDatabaseError,
     DeleteDatabaseResponse, GetCollectionSizeError, GetCollectionWithSegmentsError,
     GetCollectionsError, GetDatabaseError, GetDatabaseResponse, GetSegmentsError, GetTenantError,
-    GetTenantResponse, ListDatabasesError, ListDatabasesResponse, Metadata, ResetError,
-    ResetResponse, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
-    UpdateCollectionError,
+    GetTenantResponse, InternalCollectionConfiguration, ListDatabasesError, ListDatabasesResponse,
+    Metadata, ResetError, ResetResponse, SegmentFlushInfo, SegmentFlushInfoConversionError,
+    SegmentUuid, UpdateCollectionError,
 };
 use chroma_types::{
     Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
@@ -187,13 +187,21 @@ impl SysDb {
         collection_id: CollectionUuid,
         name: String,
         segments: Vec<Segment>,
+        configuration: Option<InternalCollectionConfiguration>,
         metadata: Option<Metadata>,
         dimension: Option<i32>,
         get_or_create: bool,
     ) -> Result<Collection, CreateCollectionError> {
-        const CONFIGURATION_JSON_STR: &str = r#"{"hnsw_configuration": {"space": "l2", "ef_construction": 100, "ef_search": 100, "num_threads": 16, "M": 16, "resize_factor": 1.2, "batch_size": 100, "sync_threshold": 1000, "_type": "HNSWConfigurationInternal"}, "_type": "CollectionConfigurationInternal"}"#;
-        let configuration_json: serde_json::Value = serde_json::from_str(CONFIGURATION_JSON_STR)
-            .map_err(CreateCollectionError::Configuration)?;
+        let configuration = match configuration {
+            Some(config) => config,
+            None => metadata
+                .clone()
+                .map(|m| {
+                    InternalCollectionConfiguration::from_legacy_metadata(m).map_err(|e| e.boxed())
+                })
+                .transpose()?
+                .unwrap_or(InternalCollectionConfiguration::default_hnsw()),
+        };
 
         match self {
             SysDb::Grpc(grpc) => {
@@ -203,7 +211,7 @@ impl SysDb {
                     collection_id,
                     name,
                     segments,
-                    configuration_json,
+                    configuration,
                     metadata,
                     dimension,
                     get_or_create,
@@ -218,7 +226,7 @@ impl SysDb {
                         collection_id,
                         name,
                         segments,
-                        configuration_json,
+                        configuration,
                         metadata,
                         dimension,
                         get_or_create,
@@ -226,14 +234,11 @@ impl SysDb {
                     .await
             }
             SysDb::Test(test_sysdb) => {
-                const CONFIGURATION_JSON_STR: &str = r#"{"hnsw_configuration": {"space": "l2", "ef_construction": 100, "ef_search": 100, "num_threads": 16, "M": 16, "resize_factor": 1.2, "batch_size": 100, "sync_threshold": 1000, "_type": "HNSWConfigurationInternal"}, "_type": "CollectionConfigurationInternal"}"#;
-                let configuration_json: serde_json::Value =
-                    serde_json::from_str(CONFIGURATION_JSON_STR)
-                        .map_err(CreateCollectionError::Configuration)?;
                 let collection = Collection {
                     collection_id,
                     name,
-                    configuration_json,
+                    config: configuration,
+                    legacy_configuration_json: (),
                     metadata,
                     dimension,
                     tenant: tenant.clone(),
@@ -754,7 +759,7 @@ impl GrpcSysDb {
         collection_id: CollectionUuid,
         name: String,
         segments: Vec<Segment>,
-        configuration_json: serde_json::Value,
+        configuration: InternalCollectionConfiguration,
         metadata: Option<Metadata>,
         dimension: Option<i32>,
         get_or_create: bool,
@@ -770,7 +775,7 @@ impl GrpcSysDb {
                     .into_iter()
                     .map(chroma_proto::Segment::from)
                     .collect(),
-                configuration_json_str: serde_json::to_string(&configuration_json)
+                configuration_json_str: serde_json::to_string(&configuration)
                     .map_err(CreateCollectionError::Configuration)?,
                 metadata: metadata.map(|metadata| metadata.into()),
                 dimension,

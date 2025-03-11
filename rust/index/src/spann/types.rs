@@ -11,7 +11,7 @@ use chroma_config::{registry::Registry, Configurable};
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::SpannPostingList;
-use chroma_types::{CollectionUuid, SpannConfiguration};
+use chroma_types::{CollectionUuid, InternalSpannConfiguration};
 use rand::seq::SliceRandom;
 use thiserror::Error;
 use uuid::Uuid;
@@ -171,7 +171,7 @@ pub struct SpannIndexWriter {
     // TODO(Sanket): Finer grained locking for this map in future if perf is not satisfactory.
     pub versions_map: Arc<tokio::sync::RwLock<VersionsMapInner>>,
     pub dimensionality: usize,
-    pub params: SpannConfiguration,
+    pub params: InternalSpannConfiguration,
     pub gc_context: GarbageCollectionContext,
     pub collection_id: CollectionUuid,
 }
@@ -275,7 +275,7 @@ impl SpannIndexWriter {
         next_head_id: u32,
         versions_map: VersionsMapInner,
         dimensionality: usize,
-        params: SpannConfiguration,
+        params: InternalSpannConfiguration,
         gc_context: GarbageCollectionContext,
         collection_id: CollectionUuid,
     ) -> Self {
@@ -396,7 +396,7 @@ impl SpannIndexWriter {
         collection_id: &CollectionUuid,
         dimensionality: usize,
         blockfile_provider: &BlockfileProvider,
-        params: SpannConfiguration,
+        params: InternalSpannConfiguration,
         gc_context: GarbageCollectionContext,
     ) -> Result<Self, SpannIndexWriterError> {
         let distance_function = DistanceFunction::from(params.space.clone());
@@ -1978,7 +1978,7 @@ mod tests {
     use chroma_config::{registry::Registry, Configurable};
     use chroma_distance::DistanceFunction;
     use chroma_storage::{local::LocalStorage, Storage};
-    use chroma_types::{CollectionUuid, SpannConfiguration, SpannPostingList};
+    use chroma_types::{CollectionUuid, InternalSpannConfiguration, SpannPostingList};
     use rand::Rng;
     use tempfile::TempDir;
 
@@ -2019,7 +2019,7 @@ mod tests {
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
-        let params = SpannConfiguration::default();
+        let params = InternalSpannConfiguration::default();
         let gc_context = GarbageCollectionContext::try_from_config(
             &(
                 PlGarbageCollectionConfig::default(),
@@ -2219,7 +2219,7 @@ mod tests {
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
-        let params = SpannConfiguration::default();
+        let params = InternalSpannConfiguration::default();
         let pl_gc_policy = PlGarbageCollectionConfig {
             enabled: true,
             policy: PlGarbageCollectionPolicyConfig::RandomSample(RandomSamplePolicyConfig {
@@ -2461,7 +2461,7 @@ mod tests {
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
-        let params = SpannConfiguration::default();
+        let params = InternalSpannConfiguration::default();
         let pl_gc_policy = PlGarbageCollectionConfig {
             enabled: true,
             policy: PlGarbageCollectionPolicyConfig::RandomSample(RandomSamplePolicyConfig {
@@ -2678,7 +2678,7 @@ mod tests {
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
-        let params = SpannConfiguration::default();
+        let params = InternalSpannConfiguration::default();
         let gc_context = GarbageCollectionContext::try_from_config(
             &(
                 PlGarbageCollectionConfig::default(),
@@ -2924,7 +2924,7 @@ mod tests {
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
-        let params = SpannConfiguration::default();
+        let params = InternalSpannConfiguration::default();
         let pl_gc_policy = PlGarbageCollectionConfig {
             enabled: true,
             policy: PlGarbageCollectionPolicyConfig::RandomSample(RandomSamplePolicyConfig {
@@ -3213,7 +3213,7 @@ mod tests {
             new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
         let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
         let collection_id = CollectionUuid::new();
-        let params = SpannConfiguration::default();
+        let params = InternalSpannConfiguration::default();
         let distance_function = params.space.clone().into();
         let dimensionality = 1000;
         let gc_context = GarbageCollectionContext::try_from_config(
@@ -3308,7 +3308,7 @@ mod tests {
             new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
         let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
         let collection_id = CollectionUuid::new();
-        let params = SpannConfiguration::default();
+        let params = InternalSpannConfiguration::default();
         let distance_function = params.space.clone().into();
         let dimensionality = 1000;
         let gc_context = GarbageCollectionContext::try_from_config(
@@ -3417,7 +3417,7 @@ mod tests {
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let max_block_size_bytes = 8 * 1024 * 1024;
         let collection_id = CollectionUuid::new();
-        let params = SpannConfiguration::default();
+        let params = InternalSpannConfiguration::default();
         let gc_context = GarbageCollectionContext::try_from_config(
             &(
                 PlGarbageCollectionConfig::default(),
@@ -3526,7 +3526,7 @@ mod tests {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let max_block_size_bytes = 8 * 1024 * 1024;
-        let params = SpannConfiguration::default();
+        let params = InternalSpannConfiguration::default();
         let gc_context = GarbageCollectionContext::try_from_config(
             &(
                 PlGarbageCollectionConfig::default(),
@@ -3661,7 +3661,7 @@ mod tests {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let max_block_size_bytes = 8 * 1024 * 1024;
-        let params = SpannConfiguration::default();
+        let params = InternalSpannConfiguration::default();
         // Create a garbage collection context.
         let pl_gc_config = PlGarbageCollectionConfig {
             enabled: true,
