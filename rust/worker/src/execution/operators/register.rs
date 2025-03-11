@@ -146,7 +146,9 @@ mod tests {
     use super::*;
     use chroma_log::in_memory_log::InMemoryLog;
     use chroma_sysdb::TestSysDb;
-    use chroma_types::{Collection, Segment, SegmentScope, SegmentType, SegmentUuid};
+    use chroma_types::{
+        Collection, CollectionConfiguration, Segment, SegmentScope, SegmentType, SegmentUuid,
+    };
     use std::collections::HashMap;
     use std::str::FromStr;
 
@@ -165,6 +167,7 @@ mod tests {
             .dimension(1)
             .tenant(tenant_1.clone())
             .database("database_1".to_string())
+            .config(CollectionConfiguration::default_hnsw())
             .total_records_post_compaction(total_records_post_compaction)
             .size_bytes_post_compaction(size_bytes_post_compaction)
             .last_compaction_time_secs(last_compaction_time_secs)
@@ -177,6 +180,7 @@ mod tests {
             .dimension(1)
             .tenant(tenant_2.clone())
             .database("database_2".to_string())
+            .config(CollectionConfiguration::default_hnsw())
             .total_records_post_compaction(total_records_post_compaction)
             .size_bytes_post_compaction(size_bytes_post_compaction)
             .last_compaction_time_secs(last_compaction_time_secs)
