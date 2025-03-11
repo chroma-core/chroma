@@ -10,9 +10,7 @@ use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
     PanicError, TaskError, TaskMessage, TaskResult,
 };
-use chroma_types::{
-    CollectionAndSegments, DistributedHnswParameters, Segment, SegmentType, SpannConfiguration,
-};
+use chroma_types::{CollectionAndSegments, HnswParametersFromSegmentError, Segment, SegmentType};
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 
@@ -39,6 +37,8 @@ pub enum KnnError {
     Filter(#[from] FilterError),
     #[error("Error creating hnsw segment reader: {0}")]
     HnswReader(#[from] DistributedHNSWSegmentFromSegmentError),
+    #[error("Error parsing collection config: {0}")]
+    Config(#[from] HnswParametersFromSegmentError),
     #[error("Error running Knn Log Operator: {0}")]
     KnnLog(#[from] KnnLogError),
     #[error("Error running Knn Hnsw Operator: {0}")]
@@ -74,6 +74,7 @@ impl ChromaError for KnnError {
             KnnError::FetchLog(e) => e.code(),
             KnnError::Filter(e) => e.code(),
             KnnError::HnswReader(e) => e.code(),
+            KnnError::Config(e) => e.code(),
             KnnError::KnnLog(e) => e.code(),
             KnnError::KnnHnsw(e) => e.code(),
             KnnError::KnnMerge(_) => ErrorCodes::Internal,
@@ -283,15 +284,23 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
         let (hnsw_reader, distance_function) = if self.collection_and_segments.vector_segment.r#type
             == SegmentType::HnswDistributed
         {
-            let hnsw_configuration = match self.ok_or_terminate(
-                DistributedHnswParameters::try_from(&self.collection_and_segments.vector_segment)
-                    .map_err(|_| KnnError::InvalidDistanceFunction),
-                ctx,
-            ) {
+            let hnsw_configuration = match self
+                .ok_or_terminate(
+                    self.collection_and_segments
+                        .collection
+                        .config
+                        .get_hnsw_config_with_legacy_fallback(
+                            &self.collection_and_segments.vector_segment,
+                        ),
+                    ctx,
+                )
+                .flatten()
+            {
                 Some(hnsw_configuration) => hnsw_configuration,
                 None => return,
             };
             match DistributedHNSWSegmentReader::from_segment(
+                &self.collection_and_segments.collection,
                 &self.collection_and_segments.vector_segment,
                 collection_dimension as usize,
                 self.hnsw_provider.clone(),
@@ -312,8 +321,11 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
             }
         } else {
             let params = match self.ok_or_terminate(
-                SpannConfiguration::try_from(&self.collection_and_segments.vector_segment)
-                    .map_err(|_| KnnError::InvalidDistanceFunction),
+                self.collection_and_segments
+                    .collection
+                    .config
+                    .get_spann_config()
+                    .ok_or(KnnError::InvalidDistanceFunction),
                 ctx,
             ) {
                 Some(params) => params,
