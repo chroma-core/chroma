@@ -896,7 +896,7 @@ impl SpannIndexWriter {
                         new_head_embeddings[k] = Some(&clustering_output.cluster_centers[k]);
                         // Insert to hnsw now.
                         let mut hnsw_write_guard = self.hnsw_index.inner.write();
-                        let hnsw_len = hnsw_write_guard.len();
+                        let hnsw_len = hnsw_write_guard.len_with_deleted();
                         let hnsw_capacity = hnsw_write_guard.capacity();
                         if hnsw_len + 1 > hnsw_capacity {
                             tracing::info!("Resizing hnsw index");
@@ -906,7 +906,14 @@ impl SpannIndexWriter {
                         }
                         hnsw_write_guard
                             .add(next_id as usize, &clustering_output.cluster_centers[k])
-                            .map_err(|_| SpannIndexWriterError::HnswIndexAddError)?;
+                            .map_err(|e| {
+                                tracing::error!(
+                                    "Error adding new head {} to hnsw index: {}",
+                                    next_id,
+                                    e
+                                );
+                                SpannIndexWriterError::HnswIndexAddError
+                            })?;
                     }
                 }
                 if !same_head {
@@ -918,9 +925,10 @@ impl SpannIndexWriter {
                     );
                     // Delete the old head
                     let hnsw_write_guard = self.hnsw_index.inner.write();
-                    hnsw_write_guard
-                        .delete(head_id as usize)
-                        .map_err(|_| SpannIndexWriterError::HnswIndexAddError)?;
+                    hnsw_write_guard.delete(head_id as usize).map_err(|e| {
+                        tracing::error!("Error deleting head {} from hnsw index: {}", head_id, e);
+                        SpannIndexWriterError::HnswIndexAddError
+                    })?;
                 }
             }
         }
@@ -985,10 +993,19 @@ impl SpannIndexWriter {
             // This shouldn't exceed the capacity since this will happen only for the first few points
             // so no need to check and increase the capacity.
             {
-                let write_guard = self.hnsw_index.inner.write();
-                write_guard
-                    .add(next_id as usize, embeddings)
-                    .map_err(|_| SpannIndexWriterError::HnswIndexAddError)?;
+                let mut write_guard = self.hnsw_index.inner.write();
+                let hnsw_len = write_guard.len_with_deleted();
+                let hnsw_capacity = write_guard.capacity();
+                if hnsw_len + 1 > hnsw_capacity {
+                    tracing::info!("Resizing hnsw index");
+                    write_guard
+                        .resize(hnsw_capacity * 2)
+                        .map_err(|_| SpannIndexWriterError::HnswIndexResizeError)?;
+                }
+                write_guard.add(next_id as usize, embeddings).map_err(|e| {
+                    tracing::error!("Error adding new head {} to hnsw index: {}", next_id, e);
+                    SpannIndexWriterError::HnswIndexAddError
+                })?;
             }
             return Ok(());
         }
