@@ -20,7 +20,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: [depot-ubuntu-24.04, depot-windows-2022]
+        platform: [depot-ubuntu-24.04, depot-windows-2022-4]
         test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
                    "chromadb/test/auth/test_simple_rbac_authz.py",
                    "chromadb/test/property/test_add.py",
@@ -57,7 +57,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: [depot-ubuntu-24.04, depot-windows-2022]
+        platform: [depot-ubuntu-24.04, depot-windows-2022-4]
         test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
                    "chromadb/test/auth/test_simple_rbac_authz.py",
                    "chromadb/test/property/test_add.py",
@@ -137,7 +137,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: [depot-ubuntu-24.04, depot-windows-2022]
+        platform: [depot-ubuntu-24.04, depot-windows-2022-4]
         test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore='chromadb/test/test_cli.py' --ignore-glob 'chromadb/test/distributed/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
                    "chromadb/test/property/test_add.py",
                    "chromadb/test/property/test_collections.py",
@@ -172,7 +172,7 @@ jobs:
     strategy:
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: [depot-ubuntu-24.04, depot-windows-2022]
+        platform: [depot-ubuntu-24.04, depot-windows-2022-4]
         test-globs: ["chromadb/test/property/test_add.py",
                    "chromadb/test/property/test_collections.py",
                    "chromadb/test/property/test_collections_with_database_tenant.py",
@@ -315,7 +315,7 @@ jobs:
     strategy:
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: ['depot-ubuntu-22.04-16', 'depot-windows-2022-8']
+        platform: ['depot-ubuntu-22.04-16', 'depot-windows-2022-4-8']
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
