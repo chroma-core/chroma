@@ -613,21 +613,14 @@ impl CompactOrchestrator {
 
                 let collection_res = sysdb
                     .get_collections(Some(self.collection_id), None, None, None, None, 0)
-                    .await;
+                    .await
+                    .map_err(GetSegmentWritersError::GetCollectionError)?;
 
-                let collection_res = match collection_res {
-                    Ok(collections) => {
-                        if collections.is_empty() {
-                            return Err(GetSegmentWritersError::CollectionNotFound);
-                        }
-                        collections
-                    }
-                    Err(e) => {
-                        return Err(GetSegmentWritersError::GetCollectionError(e));
-                    }
-                };
+                let collection = collection_res
+                    .first()
+                    .ok_or_else(|| GetSegmentWritersError::CollectionNotFound)?;
 
-                let dim = match collection_res[0].dimension {
+                let dim = match collection.dimension {
                     Some(dim) => dim,
                     None => {
                         tracing::error!(
@@ -640,6 +633,7 @@ impl CompactOrchestrator {
                 if vector_segment.r#type == SegmentType::HnswDistributed {
                     // Create a hnsw segment writer
                     let hnsw_segment_writer = match DistributedHNSWSegmentWriter::from_segment(
+                        collection,
                         &vector_segment,
                         dim as usize,
                         self.hnsw_index_provider.clone(),
@@ -660,7 +654,7 @@ impl CompactOrchestrator {
                 } else if vector_segment.r#type == SegmentType::Spann {
                     let spann_writer = match self
                         .spann_provider
-                        .write(&vector_segment, dim as usize)
+                        .write(collection, &vector_segment, dim as usize)
                         .await
                     {
                         Ok(writer) => writer,

@@ -5,6 +5,7 @@ use chroma_system::{
     wrap, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator, TaskMessage,
     TaskResult,
 };
+use chroma_types::Collection;
 use tokio::sync::oneshot::Sender;
 
 use crate::execution::operators::{
@@ -37,6 +38,7 @@ pub struct SpannKnnOrchestrator {
     spann_provider: SpannProvider,
     dispatcher: ComponentHandle<Dispatcher>,
     queue: usize,
+    collection: Collection,
 
     // Output from KnnFilterOrchestrator
     knn_filter_output: KnnFilterOutput,
@@ -76,6 +78,7 @@ impl SpannKnnOrchestrator {
         spann_provider: SpannProvider,
         dispatcher: ComponentHandle<Dispatcher>,
         queue: usize,
+        collection: Collection,
         knn_filter_output: KnnFilterOutput,
         k: usize,
         query_embedding: Vec<f32>,
@@ -91,6 +94,7 @@ impl SpannKnnOrchestrator {
             spann_provider,
             dispatcher,
             queue,
+            collection,
             knn_filter_output,
             k,
             normalized_query_emb: normalized_query_emb.clone(),
@@ -151,6 +155,7 @@ impl Orchestrator for SpannKnnOrchestrator {
         tasks.push(knn_log_task);
 
         let reader_context = SpannSegmentReaderContext {
+            collection: self.collection.clone(),
             segment: self.knn_filter_output.vector_segment.clone(),
             spann_provider: self.spann_provider.clone(),
             dimension: self.knn_filter_output.dimension,
@@ -223,6 +228,7 @@ impl Handler<TaskResult<SpannCentersSearchOutput, SpannCentersSearchError>>
         for head_id in output.center_ids {
             // Invoke Head search operator.
             let reader_context = SpannSegmentReaderContext {
+                collection: self.collection.clone(),
                 segment: self.knn_filter_output.vector_segment.clone(),
                 spann_provider: self.spann_provider.clone(),
                 dimension: self.knn_filter_output.dimension,

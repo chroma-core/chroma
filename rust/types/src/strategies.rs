@@ -4,7 +4,6 @@ use crate::{
     ScalarEncoding, Segment, SegmentType, SegmentUuid, UpdateMetadata, UpdateMetadataValue, Where,
 };
 use proptest::{collection, prelude::*};
-use serde_json::Value;
 
 /**
  * Strategy for metadata.
@@ -211,16 +210,10 @@ impl Arbitrary for TestCollectionData {
                     collection: Collection {
                         collection_id,
                         name: PROP_COLL.to_string(),
-                        configuration_json: Value::Null,
-                        metadata: None,
                         dimension: Some(3),
                         tenant: PROP_TENANT.to_string(),
                         database: PROP_DB.to_string(),
-                        log_position: 0,
-                        version: 0,
-                        total_records_post_compaction: 0,
-                        size_bytes_post_compaction: 0,
-                        last_compaction_time_secs: 0,
+                        ..Default::default()
                     },
                     metadata_segment: Segment {
                         id: SegmentUuid::new(),

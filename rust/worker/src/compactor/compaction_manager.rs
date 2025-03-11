@@ -499,7 +499,6 @@ mod tests {
         );
 
         let mut sysdb = SysDb::Test(TestSysDb::new());
-
         match sysdb {
             SysDb::Test(ref mut sysdb) => {
                 sysdb.add_collection(collection_1);
