@@ -103,19 +103,11 @@ impl Scheduler {
             // TODO: add a cache to avoid fetching the same collection multiple times
             let result = self
                 .sysdb
-                .get_collections(collection_id, None, None, None, None, 0)
+                .get_collection(collection_id, None, None, None)
                 .await;
 
             match result {
                 Ok(collection) => {
-                    if collection.is_empty() {
-                        tracing::error!(
-                            "Collection not found: {:?}",
-                            collection_info.collection_id
-                        );
-                        continue;
-                    }
-
                     // TODO: make querying the last compaction time in batch
                     let log_position_in_collecion = collection[0].log_position;
                     let tenant_ids = vec![collection[0].tenant.clone()];
@@ -157,9 +149,20 @@ impl Scheduler {
                         collection_version: collection[0].version,
                     });
                 }
-                Err(e) => {
-                    tracing::error!("Error: {:?}", e);
-                }
+                Err(e) => match e {
+                    GetCollectionError::SoftDeleted(_) => {
+                        tracing::info!(
+                            "Collection was soft deleted: {:?}",
+                            collection_info.collection_id
+                        );
+                    }
+                    _ => {
+                        tracing::error!(
+                            "Error in GetCollection inside verify_and_enrich_collections: {:?}",
+                            e
+                        );
+                    }
+                },
             }
         }
         collection_records
