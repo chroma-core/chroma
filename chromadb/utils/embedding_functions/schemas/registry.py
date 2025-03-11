@@ -8,9 +8,7 @@ It can be used to get information about available schemas and their versions.
 from typing import Dict, List, Set
 import os
 import json
-
-# Path to the schemas directory
-SCHEMAS_DIR = os.path.dirname(__file__)
+from .schema_utils import SCHEMAS_DIR
 
 
 def get_available_schemas() -> List[str]:
