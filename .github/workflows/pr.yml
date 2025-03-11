@@ -15,6 +15,7 @@ jobs:
       outside-docs: ${{ steps.changes.outputs.outside-docs }}
       only-docs: ${{ steps.changes.outputs.docs }}
       helm-changes: ${{ steps.helm-changes.outputs.helm-changes }}
+      only-js-client: ${{ steps.js-client-changes.outputs.only-js-client }}
     steps:
       - name: Get changed paths
         id: changes
@@ -33,6 +34,17 @@ jobs:
           filters: |
             helm-changes:
               - 'k8s/distributed-chroma/**'
+      - name: Check for JS client only changes
+        id: js-client-changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            only-js-client:
+              - 'clients/js/**'
+              - '!clients/python/**'
+              - '!chromadb/**'
+              - '!rust/**'
+              - '!go/**'
 
   deploy-docs-preview:
     name: Deploy preview of docs
@@ -115,7 +127,7 @@ jobs:
   python-tests:
     name: Python tests
     needs: paths-filter
-    if: needs.paths-filter.outputs.outside-docs == 'true'
+    if: needs.paths-filter.outputs.outside-docs == 'true' && needs.paths-filter.outputs.only-js-client != 'true'
     uses: ./.github/workflows/_python-tests.yml
     with:
       property_testing_preset: 'fast'
@@ -123,13 +135,13 @@ jobs:
   python-vulnerability-scan:
     name: Python vulnerability scan
     needs: paths-filter
-    if: needs.paths-filter.outputs.outside-docs == 'true'
+    if: needs.paths-filter.outputs.outside-docs == 'true' && needs.paths-filter.outputs.only-js-client != 'true'
     uses: ./.github/workflows/_python-vulnerability-scan.yml
 
   javascript-client-tests:
     name: JavaScript client tests
     needs: paths-filter
-    if: needs.paths-filter.outputs.outside-docs == 'true'
+    if: needs.paths-filter.outputs.outside-docs == 'true' || needs.paths-filter.outputs.only-js-client == 'true'
     uses: ./.github/workflows/_javascript-client-tests.yml
 
   rust-tests:
