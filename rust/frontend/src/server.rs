@@ -1,7 +1,6 @@
 use axum::{
-    extract::{DefaultBodyLimit, Path, Query, State},
-    http::header::HeaderMap,
-    http::StatusCode,
+    extract::{DefaultBodyLimit, Path, Query, Request, State},
+    http::{header::HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router, ServiceExt,
@@ -131,6 +130,21 @@ impl Metrics {
     }
 }
 
+/// If the request does not have a `Content-Type` header, set it to `application/json`.
+async fn default_json_content_type(mut req: Request, next: axum::middleware::Next) -> Response {
+    if req
+        .headers()
+        .get(axum::http::header::CONTENT_TYPE)
+        .is_none()
+    {
+        req.headers_mut().insert(
+            axum::http::header::CONTENT_TYPE,
+            axum::http::HeaderValue::from_static("application/json"),
+        );
+    }
+    next.run(req).await
+}
+
 #[derive(Clone)]
 pub(crate) struct FrontendServer {
     config: FrontendServerConfig,
@@ -258,7 +272,9 @@ impl FrontendServer {
             )
             .merge(docs_router)
             .with_state(self)
-            .layer(DefaultBodyLimit::max(max_payload_size_bytes));
+            .layer(DefaultBodyLimit::max(max_payload_size_bytes))
+            .layer(axum::middleware::from_fn(default_json_content_type));
+
         let mut app = add_tracing_middleware(app);
 
         if let Some(cors_allow_origins) = cors_allow_origins {
@@ -1719,5 +1735,42 @@ mod tests {
 
         let allow_headers = res.headers().get("Access-Control-Allow-Headers");
         assert_eq!(allow_headers.unwrap(), "*");
+    }
+
+    #[tokio::test]
+    async fn test_defaults_to_json_content_type() {
+        let registry = Registry::new();
+        let system = System::new();
+
+        let port = random_port::PortPicker::new().pick().unwrap();
+
+        let mut config = FrontendServerConfig::single_node_default();
+        config.port = port;
+        config.cors_allow_origins = Some(vec!["http://localhost:3000".to_string()]);
+
+        let frontend = Frontend::try_from_config(&(config.clone().frontend, system), &registry)
+            .await
+            .unwrap();
+        let app = FrontendServer::new(
+            config,
+            frontend,
+            vec![],
+            Arc::new(()),
+            Arc::new(()),
+            System::new(),
+        );
+        tokio::task::spawn(async move {
+            app.run().await;
+        });
+
+        // We don't send a content-type header
+        let client = reqwest::Client::new();
+        let res = client
+            .post(format!("http://localhost:{}/api/v2/tenants", port))
+            .body(serde_json::to_string(&serde_json::json!({ "name": "test" })).unwrap())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
     }
 }
