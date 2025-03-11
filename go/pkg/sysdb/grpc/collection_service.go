@@ -122,6 +122,33 @@ func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.Create
 	return res, nil
 }
 
+func (s *Server) GetCollection(ctx context.Context, req *coordinatorpb.GetCollectionRequest) (*coordinatorpb.GetCollectionResponse, error) {
+	collectionID := req.Id
+	tenantID := req.Tenant
+	databaseName := req.Database
+
+	res := &coordinatorpb.GetCollectionResponse{}
+
+	parsedCollectionID, err := types.ToUniqueID(&collectionID)
+	if err != nil {
+		log.Error("GetCollection failed. collection id format error", zap.Error(err), zap.Stringp("collection_id", &collectionID), zap.Stringp("collection_name", collectionName))
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	collection, err := s.coordinator.GetCollection(ctx, parsedCollectionID, req.Name, *tenantID, *databaseName)
+	if err != nil {
+		if err == common.ErrCollectionSoftDeleted {
+			return res, grpcutils.BuildFailedPreconditionGrpcError(err.Error())
+		}
+
+		log.Error("GetCollection failed. ", zap.Error(err), zap.Stringp("collection_id", &collectionID), zap.Stringp("collection_name", collectionName))
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	res.Collection = convertCollectionToProto(collection)
+	return res, nil
+}
+
 func (s *Server) GetCollections(ctx context.Context, req *coordinatorpb.GetCollectionsRequest) (*coordinatorpb.GetCollectionsResponse, error) {
 	collectionID := req.Id
 	collectionName := req.Name
