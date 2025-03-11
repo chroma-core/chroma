@@ -503,8 +503,8 @@ async fn create_tenant(
     ),
     responses(
         (status = 200, description = "Tenant found", body = GetTenantResponse),
-        (status = 404, description = "Tenant not found", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Tenant not found", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
     )
 )]
@@ -822,6 +822,7 @@ pub struct CreateCollectionPayload {
     pub name: String,
     pub configuration: Option<serde_json::Value>,
     pub metadata: Option<Metadata>,
+    #[serde(default)]
     pub get_or_create: bool,
 }
 
@@ -897,8 +898,8 @@ async fn create_collection(
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}",
     responses(
         (status = 200, description = "Collection found", body = Collection),
-        (status = 404, description = "Collection not found", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Collection not found", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
     params(
@@ -1081,7 +1082,7 @@ async fn collection_add(
     Path((tenant, database, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
     Json(payload): Json<AddCollectionRecordsPayload>,
-) -> Result<Json<AddCollectionRecordsResponse>, ServerError> {
+) -> Result<(StatusCode, Json<AddCollectionRecordsResponse>), ServerError> {
     server.metrics.collection_add.add(1, &[]);
     server
         .authenticate_and_authorize(
@@ -1135,7 +1136,7 @@ async fn collection_add(
 
     let res = server.frontend.add(request).await?;
 
-    Ok(Json(res))
+    Ok((StatusCode::CREATED, Json(res)))
 }
 
 #[derive(Deserialize, Debug, Clone, ToSchema, Serialize)]
