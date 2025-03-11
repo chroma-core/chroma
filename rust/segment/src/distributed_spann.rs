@@ -231,7 +231,10 @@ impl SpannSegmentWriter {
         record_segment_reader: &Option<RecordSegmentReader<'_>>,
         materialized_chunk: &MaterializeLogsResult,
     ) -> Result<(), ApplyMaterializedLogError> {
-        println!("(Sanket-temp) Applying materialized log chunk to spann segment writer");
+        tracing::info!(
+            "Applying {} materialized logs to spann segment writer",
+            materialized_chunk.len()
+        );
         for record in materialized_chunk {
             match record.get_operation() {
                 MaterializedLogOperation::AddNew => {
@@ -263,11 +266,15 @@ impl SpannSegmentWriter {
                 ),
             }
         }
-        println!("(Sanket-temp) Finished applying materialized log chunk to spann segment writer");
+        tracing::info!(
+            "Applied {} materialized logs to spann segment writer",
+            materialized_chunk.len()
+        );
         Ok(())
     }
 
     pub async fn commit(self) -> Result<SpannSegmentFlusher, Box<dyn ChromaError>> {
+        tracing::info!("Committing spann segment writer {}", self.id);
         let index_flusher = self
             .index
             .commit()
@@ -296,6 +303,7 @@ impl Debug for SpannSegmentFlusher {
 
 impl SpannSegmentFlusher {
     pub async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
+        tracing::info!("Flushing spann segment flusher {}", self.id);
         let index_flusher_res = self
             .index_flusher
             .flush()
@@ -317,6 +325,10 @@ impl SpannSegmentFlusher {
                 index_id_map.insert(
                     MAX_HEAD_ID_BF_PATH.to_string(),
                     vec![index_ids.max_head_id_id.to_string()],
+                );
+                tracing::info!(
+                    "Flushed file paths for spann segment flusher {:?}",
+                    index_id_map
                 );
                 Ok(index_id_map)
             }

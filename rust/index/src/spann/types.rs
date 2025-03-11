@@ -1375,7 +1375,11 @@ impl SpannIndexWriter {
         let pl_flusher = pl_writer_clone
             .commit::<u32, &SpannPostingList<'_>>()
             .await
-            .map_err(|_| SpannIndexWriterError::PostingListCommitError)?;
+            .map_err(|e| {
+                tracing::error!("Error committing posting list: {}", e);
+                SpannIndexWriterError::PostingListCommitError
+            })?;
+        tracing::info!("Committed posting list");
         // Versions map. Create a writer, write all the data and commit.
         let mut bf_options = BlockfileWriterOptions::new();
         bf_options = bf_options.unordered_mutations();
@@ -1397,6 +1401,7 @@ impl SpannIndexWriter {
             .commit::<u32, u32>()
             .await
             .map_err(|_| SpannIndexWriterError::VersionsMapCommitError)?;
+        tracing::info!("Committed versions map");
         // Next head.
         let mut bf_options = BlockfileWriterOptions::new();
         bf_options = bf_options.unordered_mutations();
@@ -1414,6 +1419,7 @@ impl SpannIndexWriter {
             .commit::<&str, u32>()
             .await
             .map_err(|_| SpannIndexWriterError::MaxHeadIdCommitError)?;
+        tracing::info!("Committed max head id");
 
         let hnsw_id = self.hnsw_index.inner.read().id;
 
@@ -1421,6 +1427,7 @@ impl SpannIndexWriter {
         self.hnsw_provider
             .commit(self.hnsw_index)
             .map_err(|_| SpannIndexWriterError::HnswIndexCommitError)?;
+        tracing::info!("Committed hnsw index");
 
         Ok(SpannIndexFlusher {
             pl_flusher,
