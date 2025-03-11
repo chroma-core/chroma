@@ -806,6 +806,7 @@ pub struct CreateCollectionPayload {
     pub name: String,
     pub configuration: Option<serde_json::Value>,
     pub metadata: Option<Metadata>,
+    #[serde(default)]
     pub get_or_create: bool,
 }
 
