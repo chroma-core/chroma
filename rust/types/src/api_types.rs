@@ -9,6 +9,7 @@ use crate::validators::{
 use crate::Collection;
 use crate::CollectionConversionError;
 use crate::CollectionUuid;
+use crate::DistributedSpannParametersFromSegmentError;
 use crate::HnswParametersFromSegmentError;
 use crate::Metadata;
 use crate::SegmentConversionError;
@@ -204,6 +205,15 @@ impl GetTenantRequest {
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct GetTenantResponse {
     pub name: String,
+}
+
+#[cfg(feature = "pyo3")]
+#[pyo3::pymethods]
+impl GetTenantResponse {
+    #[getter]
+    pub fn name(&self) -> &String {
+        &self.name
+    }
 }
 
 #[derive(Debug, Error)]
@@ -564,6 +574,8 @@ pub type CreateCollectionResponse = Collection;
 pub enum CreateCollectionError {
     #[error("Invalid HNSW parameters: {0}")]
     InvalidHnswParameters(#[from] HnswParametersFromSegmentError),
+    #[error("Invalid Spann parameters: {0}")]
+    InvalidSpannParameters(#[from] DistributedSpannParametersFromSegmentError),
     #[error("Collection [{0}] already exists")]
     AlreadyExists(String),
     #[error("Database [{0}] does not exist")]
@@ -580,6 +592,7 @@ impl ChromaError for CreateCollectionError {
     fn code(&self) -> ErrorCodes {
         match self {
             CreateCollectionError::InvalidHnswParameters(_) => ErrorCodes::InvalidArgument,
+            CreateCollectionError::InvalidSpannParameters(_) => ErrorCodes::InvalidArgument,
             CreateCollectionError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
             CreateCollectionError::DatabaseNotFound(_) => ErrorCodes::InvalidArgument,
             CreateCollectionError::Get(err) => err.code(),
@@ -1276,16 +1289,16 @@ impl QueryRequest {
     }
 }
 
-#[derive(Clone, Deserialize, Serialize, ToSchema)]
+#[derive(Clone, Deserialize, Serialize, ToSchema, Debug)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct QueryResponse {
-    ids: Vec<Vec<String>>,
-    embeddings: Option<Vec<Vec<Option<Vec<f32>>>>>,
-    documents: Option<Vec<Vec<Option<String>>>>,
-    uris: Option<Vec<Vec<Option<String>>>>,
-    metadatas: Option<Vec<Vec<Option<Metadata>>>>,
-    distances: Option<Vec<Vec<Option<f32>>>>,
-    include: Vec<Include>,
+    pub ids: Vec<Vec<String>>,
+    pub embeddings: Option<Vec<Vec<Option<Vec<f32>>>>>,
+    pub documents: Option<Vec<Vec<Option<String>>>>,
+    pub uris: Option<Vec<Vec<Option<String>>>>,
+    pub metadatas: Option<Vec<Vec<Option<Metadata>>>>,
+    pub distances: Option<Vec<Vec<Option<f32>>>>,
+    pub include: Vec<Include>,
 }
 
 #[cfg(feature = "pyo3")]

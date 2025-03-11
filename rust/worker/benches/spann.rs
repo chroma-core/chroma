@@ -15,7 +15,7 @@ use chroma_index::{
 };
 use chroma_storage::{local::LocalStorage, Storage};
 use chroma_system::Operator;
-use chroma_types::CollectionUuid;
+use chroma_types::{CollectionUuid, DistributedSpannParameters};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use futures::StreamExt;
 use rand::seq::SliceRandom;
@@ -74,25 +74,19 @@ fn add_to_index_and_get_reader<'a>(
             16,
             rx,
         );
-        let m = 32;
-        let ef_construction = 100;
-        let ef_search = 100;
         let collection_id = CollectionUuid::new();
-        let distance_function = chroma_distance::DistanceFunction::Euclidean;
         let dimensionality = 128;
+        let params = DistributedSpannParameters::default();
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
             None,
             None,
             None,
-            Some(m),
-            Some(ef_construction),
-            Some(ef_search),
             &collection_id,
-            distance_function.clone(),
             dimensionality,
             &blockfile_provider,
+            params.clone(),
         )
         .await
         .expect("Error creating spann index writer");
@@ -129,7 +123,7 @@ fn add_to_index_and_get_reader<'a>(
                 Some(&paths.hnsw_id),
                 &hnsw_provider,
                 &collection_id,
-                distance_function,
+                params.space.into(),
                 dimensionality,
                 Some(&paths.pl_id),
                 Some(&paths.versions_map_id),

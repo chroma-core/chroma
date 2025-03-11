@@ -63,6 +63,23 @@ pub struct FrontendConfig {
     pub executor: ExecutorConfig,
 }
 
+impl FrontendConfig {
+    pub fn sqlite_in_memory() -> Self {
+        Self {
+            allow_reset: false,
+            sqlitedb: Some(SqliteDBConfig {
+                url: None,
+                ..Default::default()
+            }),
+            segment_manager: default_segment_manager_config(),
+            sysdb: default_sysdb_config(),
+            collections_with_segments_provider: Default::default(),
+            log: default_log_config(),
+            executor: default_executor_config(),
+        }
+    }
+}
+
 fn default_otel_service_name() -> String {
     "chromadb".to_string()
 }
@@ -86,6 +103,10 @@ fn default_max_payload_size_bytes() -> usize {
     40 * 1024 * 1024 // 40 MB
 }
 
+fn default_enable_span_indexing() -> bool {
+    false
+}
+
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct FrontendServerConfig {
     #[serde(flatten)]
@@ -107,6 +128,8 @@ pub struct FrontendServerConfig {
     pub persist_path: Option<String>,
     #[serde(default)]
     pub cors_allow_origins: Option<Vec<String>>,
+    #[serde(default = "default_enable_span_indexing")]
+    pub enable_span_indexing: bool,
 }
 
 const DEFAULT_CONFIG_PATH: &str = "sample_configs/distributed.yaml";

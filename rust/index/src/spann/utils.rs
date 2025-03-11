@@ -120,6 +120,8 @@ pub enum KMeansError {
     MaxClusterNotFound,
     #[error("Could not assign a point to a center")]
     PointAssignmentFailed,
+    #[error("Returned 0 points in a cluster")]
+    ZeroPointsInCluster,
 }
 
 impl ChromaError for KMeansError {
@@ -127,6 +129,7 @@ impl ChromaError for KMeansError {
         match self {
             Self::MaxClusterNotFound => ErrorCodes::Internal,
             Self::PointAssignmentFailed => ErrorCodes::Internal,
+            Self::ZeroPointsInCluster => ErrorCodes::Internal,
         }
     }
 }
