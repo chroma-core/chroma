@@ -6,19 +6,19 @@ use axum::{
     Json, Router, ServiceExt,
 };
 use chroma_system::System;
+use chroma_types::RawWhereFields;
 use chroma_types::{
-    AddCollectionRecordsResponse, ChecklistResponse, Collection, CollectionMetadataUpdate,
-    CollectionUuid, CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
-    CreateCollectionRequest, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest,
-    CreateTenantResponse, DeleteCollectionRecordsResponse, DeleteDatabaseRequest,
-    DeleteDatabaseResponse, DistributedIndexType, GetCollectionRequest, GetDatabaseRequest,
-    GetDatabaseResponse, GetRequest, GetResponse, GetTenantRequest, GetTenantResponse,
-    GetUserIdentityResponse, HeartbeatResponse, IncludeList, ListCollectionsRequest,
-    ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest,
-    QueryResponse, UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateMetadata,
-    UpsertCollectionRecordsResponse,
+    AddCollectionRecordsResponse, ChecklistResponse, Collection, CollectionConfiguration,
+    CollectionMetadataUpdate, CollectionUuid, CountCollectionsRequest, CountCollectionsResponse,
+    CountRequest, CountResponse, CreateCollectionRequest, CreateDatabaseRequest,
+    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
+    DeleteCollectionRecordsResponse, DeleteDatabaseRequest, DeleteDatabaseResponse,
+    GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
+    GetTenantRequest, GetTenantResponse, GetUserIdentityResponse, HeartbeatResponse, IncludeList,
+    ListCollectionsRequest, ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse,
+    Metadata, QueryRequest, QueryResponse, UpdateCollectionRecordsResponse,
+    UpdateCollectionResponse, UpdateMetadata, UpsertCollectionRecordsResponse,
 };
-use chroma_types::{DistributedIndexTypeParam, RawWhereFields};
 use mdac::{Rule, Scorecard, ScorecardTicket};
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Meter};
@@ -820,7 +820,7 @@ async fn count_collections(
 #[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
 pub struct CreateCollectionPayload {
     pub name: String,
-    pub configuration: Option<serde_json::Value>,
+    pub configuration: Option<CollectionConfiguration>,
     pub metadata: Option<Metadata>,
     #[serde(default)]
     pub get_or_create: bool,
@@ -874,11 +874,13 @@ async fn create_collection(
         "op:create_collection",
         format!("tenant:{}", tenant).as_str(),
     ]);
-    let index_type = DistributedIndexTypeParam::try_from(&payload.metadata)?;
-    // spann index not allowed.
-    if index_type.index_type == DistributedIndexType::Spann && !server.config.enable_span_indexing {
-        return Err(ValidationError::SpannNotImplemented)?;
+
+    if let Some(config) = payload.configuration.as_ref() {
+        if config.spann.is_some() {
+            return Err(ValidationError::SpannNotImplemented)?;
+        }
     }
+
     let request = CreateCollectionRequest::try_new(
         tenant,
         database,

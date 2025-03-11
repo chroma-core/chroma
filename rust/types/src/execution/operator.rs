@@ -2,6 +2,7 @@ use std::{
     cmp::{Ordering, Reverse},
     collections::BinaryHeap,
 };
+use thiserror::Error;
 
 use crate::{chroma_proto, CollectionAndSegments, CollectionUuid, Metadata, ScalarEncoding, Where};
 
@@ -45,14 +46,22 @@ impl TryFrom<chroma_proto::ScanOperator> for Scan {
     }
 }
 
-impl From<Scan> for chroma_proto::ScanOperator {
-    fn from(value: Scan) -> Self {
-        Self {
-            collection: Some(value.collection_and_segments.collection.into()),
+#[derive(Debug, Error)]
+pub enum ScanToProtoError {
+    #[error("Could not convert collection to proto")]
+    CollectionToProto(#[from] crate::CollectionToProtoError),
+}
+
+impl TryFrom<Scan> for chroma_proto::ScanOperator {
+    type Error = ScanToProtoError;
+
+    fn try_from(value: Scan) -> Result<Self, Self::Error> {
+        Ok(Self {
+            collection: Some(value.collection_and_segments.collection.try_into()?),
             knn: Some(value.collection_and_segments.vector_segment.into()),
             metadata: Some(value.collection_and_segments.metadata_segment.into()),
             record: Some(value.collection_and_segments.record_segment.into()),
-        }
+        })
     }
 }
 

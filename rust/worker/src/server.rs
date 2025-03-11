@@ -269,7 +269,7 @@ impl WorkerServer {
             self.hnsw_index_provider.clone(),
             // TODO: Make this configurable
             1000,
-            collection_and_segments,
+            collection_and_segments.clone(),
             fetch_log,
             filter.try_into()?,
         );
@@ -293,6 +293,7 @@ impl WorkerServer {
                         self.hnsw_index_provider.clone(),
                         dispatcher.clone(),
                         1000,
+                        collection_and_segments.collection.clone(),
                         matching_records.clone(),
                         knn.fetch as usize,
                         knn.embedding,

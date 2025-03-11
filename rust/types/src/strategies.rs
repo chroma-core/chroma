@@ -1,10 +1,10 @@
 use crate::{
-    Collection, CollectionAndSegments, CollectionUuid, DocumentExpression, DocumentOperator,
-    LogRecord, MetadataExpression, MetadataValue, Operation, OperationRecord, PrimitiveOperator,
-    ScalarEncoding, Segment, SegmentType, SegmentUuid, UpdateMetadata, UpdateMetadataValue, Where,
+    Collection, CollectionAndSegments, InternalCollectionConfiguration, CollectionUuid, DocumentExpression,
+    DocumentOperator, LogRecord, MetadataExpression, MetadataValue, Operation, OperationRecord,
+    PrimitiveOperator, ScalarEncoding, Segment, SegmentType, SegmentUuid, UpdateMetadata,
+    UpdateMetadataValue, Where,
 };
 use proptest::{collection, prelude::*};
-use serde_json::Value;
 
 /**
  * Strategy for metadata.
@@ -208,20 +208,14 @@ impl Arbitrary for TestCollectionData {
             .prop_map(move |logs| {
                 let collection_id = CollectionUuid::new();
                 let collection_and_segments = CollectionAndSegments {
-                    collection: Collection {
-                        collection_id,
-                        name: PROP_COLL.to_string(),
-                        configuration_json: Value::Null,
-                        metadata: None,
-                        dimension: Some(3),
-                        tenant: PROP_TENANT.to_string(),
-                        database: PROP_DB.to_string(),
-                        log_position: 0,
-                        version: 0,
-                        total_records_post_compaction: 0,
-                        size_bytes_post_compaction: 0,
-                        last_compaction_time_secs: 0,
-                    },
+                    collection: Collection::builder()
+                        .collection_id(collection_id)
+                        .name(PROP_COLL.to_string())
+                        .dimension(3)
+                        .tenant(PROP_TENANT.to_string())
+                        .database(PROP_DB.to_string())
+                        .config(InternalCollectionConfiguration::default_hnsw())
+                        .build(),
                     metadata_segment: Segment {
                         id: SegmentUuid::new(),
                         r#type: SegmentType::Sqlite,

@@ -289,7 +289,9 @@ mod tests {
     use chroma_log::in_memory_log::{InMemoryLog, InternalLogRecord};
     use chroma_memberlist::memberlist_provider::Member;
     use chroma_sysdb::TestSysDb;
-    use chroma_types::{Collection, CollectionUuid, LogRecord, Operation, OperationRecord};
+    use chroma_types::{
+        Collection, InternalCollectionConfiguration, LogRecord, Operation, OperationRecord,
+    };
 
     #[tokio::test]
     async fn test_scheduler() {
@@ -308,6 +310,7 @@ mod tests {
             .dimension(1)
             .tenant(tenant_1.clone())
             .database("database_1".to_string())
+            .config(InternalCollectionConfiguration::default_hnsw())
             .build();
         let collection_uuid_1 = collection_1.collection_id;
 
@@ -340,6 +343,7 @@ mod tests {
             .dimension(1)
             .tenant(tenant_2.clone())
             .database("database_2".to_string())
+            .config(InternalCollectionConfiguration::default_hnsw())
             .build();
         let collection_uuid_2 = collection_2.collection_id;
 
@@ -502,6 +506,7 @@ mod tests {
             .dimension(1)
             .tenant(tenant_1.clone())
             .database("database_1".to_string())
+            .config(InternalCollectionConfiguration::default_hnsw())
             .build();
 
         let collection_uuid_1 = collection_1.collection_id;
