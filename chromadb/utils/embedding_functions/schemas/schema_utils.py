@@ -39,7 +39,7 @@ def load_schema(schema_name: str) -> Dict[str, Any]:
         return schema
 
 
-def validate_config(config: Dict[str, Any], schema_name: str) -> None:
+def validate_config_schema(config: Dict[str, Any], schema_name: str) -> None:
     """
     Validate a configuration against a schema.
 

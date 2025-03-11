@@ -4,6 +4,7 @@ export { CloudClient } from "./CloudClient";
 export { Collection } from "./Collection";
 export { IEmbeddingFunction } from "./embeddings/IEmbeddingFunction";
 export * from "./embeddings/all";
+export * from "./schemas";
 
 export {
   IncludeEnum,

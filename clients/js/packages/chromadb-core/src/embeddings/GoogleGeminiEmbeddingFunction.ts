@@ -2,10 +2,11 @@ import {
   EmbeddingFunctionSpace,
   IEmbeddingFunction,
 } from "./IEmbeddingFunction";
-
+import { validateConfigSchema } from "../schemas/schemaUtils";
 interface StoredConfig {
   api_key_env_var: string;
   model_name: string;
+  task_type: string;
 }
 
 let googleGenAiApi: any;
@@ -97,9 +98,11 @@ export class GoogleGenerativeAiEmbeddingFunction implements IEmbeddingFunction {
   }
 
   buildFromConfig(config: StoredConfig): GoogleGenerativeAiEmbeddingFunction {
+    this.validateConfig(config);
     return new GoogleGenerativeAiEmbeddingFunction({
       model: config.model_name,
       apiKeyEnvVar: config.api_key_env_var,
+      taskType: config.task_type,
     });
   }
 
@@ -107,6 +110,7 @@ export class GoogleGenerativeAiEmbeddingFunction implements IEmbeddingFunction {
     return {
       api_key_env_var: this.api_key_env_var,
       model_name: this.model,
+      task_type: this.taskType,
     };
   }
 
@@ -121,5 +125,9 @@ export class GoogleGenerativeAiEmbeddingFunction implements IEmbeddingFunction {
     if (oldConfig.taskType !== newConfig.taskType) {
       throw new Error("The task type cannot be changed after initialization.");
     }
+  }
+
+  validateConfig(config: Record<string, any>): void {
+    validateConfigSchema(config, "google_generative_ai");
   }
 }

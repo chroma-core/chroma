@@ -1,4 +1,4 @@
-from chromadb.utils.embedding_functions.schemas import validate_config
+from chromadb.utils.embedding_functions.schemas import validate_config_schema
 from chromadb.api.types import (
     Documents,
     Embeddings,
@@ -125,6 +125,8 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Embeddable]):
         if api_key_env_var is None or api_url is None:
             assert False, "This code should not be reached"
 
+        RoboflowEmbeddingFunction.validate_config(config)
+
         return RoboflowEmbeddingFunction(
             api_key_env_var=api_key_env_var, api_url=api_url
         )
@@ -138,7 +140,8 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Embeddable]):
         # API URL can be changed, so no validation needed
         pass
 
-    def validate_config(self, config: Dict[str, Any]) -> None:
+    @staticmethod
+    def validate_config(config: Dict[str, Any]) -> None:
         """
         Validate the configuration using the JSON schema.
 
@@ -148,4 +151,4 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Embeddable]):
         Raises:
             ValidationError: If the configuration does not match the schema
         """
-        validate_config(config, "roboflow")
+        validate_config_schema(config, "roboflow")

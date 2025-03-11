@@ -11,6 +11,7 @@ export interface IEmbeddingFunction {
     oldConfig: Record<string, any>,
     newConfig: Record<string, any>,
   ): void;
+  validateConfig?(config: Record<string, any>): void;
 }
 
 export type EmbeddingFunctionConstructor = (new (

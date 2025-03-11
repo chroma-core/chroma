@@ -1,5 +1,5 @@
 import { IEmbeddingFunction } from "./IEmbeddingFunction";
-
+import { validateConfigSchema } from "../schemas/schemaUtils";
 let OpenAIApi: any;
 let openAiVersion = null;
 let openAiMajorVersion = null;
@@ -181,6 +181,7 @@ export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
   }
 
   buildFromConfig(config: StoredConfig): OpenAIEmbeddingFunction {
+    this.validateConfig(config);
     return new OpenAIEmbeddingFunction({
       openai_api_key: config.api_key_env_var,
       openai_model: config.model_name,
@@ -202,5 +203,9 @@ export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
     if (oldConfig.model_name !== newConfig.model_name) {
       throw new Error("Cannot change model name.");
     }
+  }
+
+  validateConfig(config: StoredConfig): void {
+    validateConfigSchema(config, "openai");
   }
 }

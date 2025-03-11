@@ -2,7 +2,7 @@ from chromadb.api.types import Embeddings, Documents, EmbeddingFunction, Space
 from typing import List, Dict, Any, Optional
 import os
 import numpy as np
-from chromadb.utils.embedding_functions.schemas import validate_config
+from chromadb.utils.embedding_functions.schemas import validate_config_schema
 
 
 class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
@@ -148,6 +148,8 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
         if api_key_env_var is None or model_name is None:
             assert False, "This code should not be reached"
 
+        OpenAIEmbeddingFunction.validate_config(config)
+
         # Create and return the embedding function
         return OpenAIEmbeddingFunction(
             api_key_env_var=api_key_env_var,
@@ -182,7 +184,8 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
                 "The model name cannot be changed after the embedding function has been initialized."
             )
 
-    def validate_config(self, config: Dict[str, Any]) -> None:
+    @staticmethod
+    def validate_config(config: Dict[str, Any]) -> None:
         """
         Validate the configuration using the JSON schema.
 
@@ -192,4 +195,4 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
         Raises:
             ValidationError: If the configuration does not match the schema
         """
-        validate_config(config, "openai")
+        validate_config_schema(config, "openai")

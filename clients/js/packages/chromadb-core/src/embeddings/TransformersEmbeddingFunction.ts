@@ -1,5 +1,5 @@
 import { IEmbeddingFunction } from "./IEmbeddingFunction";
-
+import { validateConfigSchema } from "../schemas/schemaUtils";
 // Dynamically import module
 let TransformersApi: Promise<any>;
 
@@ -108,6 +108,7 @@ export class TransformersEmbeddingFunction implements IEmbeddingFunction {
   }
 
   buildFromConfig(config: StoredConfig): TransformersEmbeddingFunction {
+    this.validateConfig(config);
     return new TransformersEmbeddingFunction({
       model: config.model,
       revision: config.revision,
@@ -135,5 +136,9 @@ export class TransformersEmbeddingFunction implements IEmbeddingFunction {
         "Cannot change the quantization of the embedding function.",
       );
     }
+  }
+
+  validateConfig(config: StoredConfig): void {
+    validateConfigSchema(config, "transformers");
   }
 }

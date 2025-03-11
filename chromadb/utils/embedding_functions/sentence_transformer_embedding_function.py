@@ -1,7 +1,7 @@
 from chromadb.api.types import EmbeddingFunction, Space, Embeddings, Documents
 from typing import List, Dict, Any
 import numpy as np
-from chromadb.utils.embedding_functions.schemas import validate_config
+from chromadb.utils.embedding_functions.schemas import validate_config_schema
 
 
 class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
@@ -84,6 +84,8 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
         if model_name is None or device is None or normalize_embeddings is None:
             assert False, "This code should not be reached"
 
+        SentenceTransformerEmbeddingFunction.validate_config(config)
+
         return SentenceTransformerEmbeddingFunction(
             model_name=model_name,
             device=device,
@@ -107,7 +109,8 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
                 "The model name cannot be changed after the embedding function has been initialized."
             )
 
-    def validate_config(self, config: Dict[str, Any]) -> None:
+    @staticmethod
+    def validate_config(config: Dict[str, Any]) -> None:
         """
         Validate the configuration using the JSON schema.
 
@@ -117,4 +120,4 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
         Raises:
             ValidationError: If the configuration does not match the schema
         """
-        validate_config(config, "sentence_transformer")
+        validate_config_schema(config, "sentence_transformer")

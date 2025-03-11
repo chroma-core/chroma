@@ -1,3 +1,4 @@
+import { validateConfigSchema } from "../schemas/schemaUtils";
 import { isBrowser } from "../utils";
 import { IEmbeddingFunction } from "./IEmbeddingFunction";
 
@@ -83,6 +84,7 @@ export class DefaultEmbeddingFunction implements IEmbeddingFunction {
   }
 
   buildFromConfig(config: StoredConfig): DefaultEmbeddingFunction {
+    this.validateConfig(config);
     return new DefaultEmbeddingFunction({
       model: config.model_name,
       revision: config.revision,
@@ -96,6 +98,10 @@ export class DefaultEmbeddingFunction implements IEmbeddingFunction {
         "DefaultEmbeddingFunction model_name cannot be changed after initialization.",
       );
     }
+  }
+
+  validateConfig(config: StoredConfig): void {
+    validateConfigSchema(config, "default");
   }
 
   private async loadClient() {

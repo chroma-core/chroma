@@ -13,7 +13,7 @@ import httpx
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_random
 
 from chromadb.api.types import Documents, Embeddings, EmbeddingFunction, Space
-from chromadb.utils.embedding_functions.schemas import validate_config
+from chromadb.utils.embedding_functions.schemas import validate_config_schema
 
 logger = logging.getLogger(__name__)
 
@@ -325,6 +325,8 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
         preferred_providers = config.get("preferred_providers")
 
+        ONNXMiniLM_L6_V2.validate_config(config)
+
         return ONNXMiniLM_L6_V2(preferred_providers=preferred_providers)
 
     def get_config(self) -> Dict[str, Any]:
@@ -336,7 +338,8 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
         # Preferred providers can be changed, so no validation needed
         pass
 
-    def validate_config(self, config: Dict[str, Any]) -> None:
+    @staticmethod
+    def validate_config(config: Dict[str, Any]) -> None:
         """
         Validate the configuration using the JSON schema.
 
@@ -346,4 +349,4 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
         Raises:
             ValidationError: If the configuration does not match the schema
         """
-        validate_config(config, "onnx_mini_lm_l6_v2")
+        validate_config_schema(config, "onnx_mini_lm_l6_v2")

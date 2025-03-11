@@ -5,7 +5,7 @@ from chromadb.api.types import (
     Embeddable,
     EmbeddingFunction,
 )
-from chromadb.utils.embedding_functions.schemas import validate_config
+from chromadb.utils.embedding_functions.schemas import validate_config_schema
 from typing import List, Dict, Any, Union, cast, Sequence
 import numpy as np
 
@@ -157,7 +157,8 @@ class ChromaLangchainEmbeddingFunction(EmbeddingFunction[Embeddable]):
             "Please recreate the langchain embedding function and pass it to create_langchain_embedding."
         )
 
-    def validate_config(self, config: Dict[str, Any]) -> None:
+    @staticmethod
+    def validate_config(config: Dict[str, Any]) -> None:
         """
         Validate the configuration using the JSON schema.
 
@@ -167,4 +168,4 @@ class ChromaLangchainEmbeddingFunction(EmbeddingFunction[Embeddable]):
         Raises:
             ValidationError: If the configuration does not match the schema
         """
-        validate_config(config, "chroma_langchain")
+        validate_config_schema(config, "chroma_langchain")

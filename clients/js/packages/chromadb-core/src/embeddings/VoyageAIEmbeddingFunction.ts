@@ -1,5 +1,5 @@
 import { IEmbeddingFunction } from "./IEmbeddingFunction";
-
+import { validateConfigSchema } from "../schemas/schemaUtils";
 class VoyageAIAPI {
   private client: any;
   private apiKey: string;
@@ -94,6 +94,7 @@ export class VoyageAIEmbeddingFunction implements IEmbeddingFunction {
   }
 
   buildFromConfig(config: StoredConfig): VoyageAIEmbeddingFunction {
+    this.validateConfig(config);
     return new VoyageAIEmbeddingFunction({
       api_key_env_var: config.api_key_env_var,
       model: config.model_name,
@@ -111,5 +112,9 @@ export class VoyageAIEmbeddingFunction implements IEmbeddingFunction {
     if (oldConfig.model_name !== newConfig.model_name) {
       throw new Error("Cannot change the model of the embedding function.");
     }
+  }
+
+  validateConfig(config: StoredConfig): void {
+    validateConfigSchema(config, "voyageai");
   }
 }

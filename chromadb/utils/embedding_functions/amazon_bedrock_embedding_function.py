@@ -1,4 +1,4 @@
-from chromadb.utils.embedding_functions.schemas import validate_config
+from chromadb.utils.embedding_functions.schemas import validate_config_schema
 from chromadb.api.types import Embeddings, Documents, EmbeddingFunction
 from typing import Dict, Any, cast
 import json
@@ -105,6 +105,8 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
         else:
             session = boto3.Session(**session_args)
 
+        AmazonBedrockEmbeddingFunction.validate_config(config)
+
         return AmazonBedrockEmbeddingFunction(
             session=session, model_name=model_name, **kwargs
         )
@@ -124,7 +126,8 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
                 "The model name cannot be changed after the embedding function has been initialized."
             )
 
-    def validate_config(self, config: Dict[str, Any]) -> None:
+    @staticmethod
+    def validate_config(config: Dict[str, Any]) -> None:
         """
         Validate the configuration using the JSON schema.
 
@@ -134,4 +137,4 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
         Raises:
             ValidationError: If the configuration does not match the schema
         """
-        validate_config(config, "amazon_bedrock")
+        validate_config_schema(config, "amazon_bedrock")

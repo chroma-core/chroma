@@ -7,7 +7,7 @@ import numpy as np
 from unittest.mock import MagicMock
 from pytest import MonkeyPatch
 from chromadb.utils.embedding_functions.schemas import (
-    validate_config,
+    validate_config_schema,
     load_schema,
     get_available_schemas,
 )
@@ -399,7 +399,7 @@ def test_schema_required_fields() -> None:
 
                 # Validation should fail
                 with pytest.raises(ValidationError):
-                    validate_config(test_config, schema_name)
+                    validate_config_schema(test_config, schema_name)
 
 
 def test_schema_additional_properties() -> None:
@@ -438,4 +438,4 @@ def test_schema_additional_properties() -> None:
         # Validation should fail if additionalProperties is false
         if schema.get("additionalProperties", True) is False:
             with pytest.raises(ValidationError):
-                validate_config(test_config, schema_name)
+                validate_config_schema(test_config, schema_name)
