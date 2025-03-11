@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - main
-env:
-  PNPM_CACHE_FOLDER: .cache/pnpm
 jobs:
   test:
     name: JavaScript client tests
@@ -34,20 +32,15 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: pnpm/action-setup@v2
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
         with:
           version: 8
-          dest: 'clients/js'
-          package_json_file: 'clients/js/package.json'
-      - run: |
-          PNPM_STORE_PATH="$( pnpm store path --silent )"
-          if [ ! -d "$PNPM_STORE_PATH" ]; then
-            echo "PNPM store directory does not exist, creating it."
-            mkdir -p "$PNPM_STORE_PATH"
-          else
-            echo "PNPM store directory exists."
-          fi
-      - uses: actions/setup-node@v4
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: "16.x"
           registry-url: ${{ matrix.registry }}
@@ -55,12 +48,15 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           cache: 'pnpm'
           cache-dependency-path: 'clients/js/pnpm-lock.yaml'
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
         working-directory: ./clients/js/
+
       - name: Build packages
         run: pnpm build
         working-directory: ./clients/js/
+
       - name: Generate Dev Version
         id: dev-version
         run: |
@@ -87,6 +83,7 @@ jobs:
             echo "Updated ${PKG_DIR} to version ${NEW_VERSION}"
           done
         working-directory: ./clients/js/
+
       - name: Update package.json with organization scope
         run: |
           ORG_NAME="@chroma-core"
@@ -100,6 +97,7 @@ jobs:
           PACKAGE_NAME=$(jq -r '.name' $CLIENT_PKG)
           jq --arg org "$ORG_NAME" --arg name "$PACKAGE_NAME" '.name = "\($org)/\($name)"' $CLIENT_PKG > tmp.$$.json && mv tmp.$$.json $CLIENT_PKG
         working-directory: ./clients/js/
+
       - name: Publish dev packages
         run: pnpm publish -r --access public --no-git-checks --tag dev
         working-directory: ./clients/js/
