@@ -90,6 +90,7 @@ impl TestDistributedSegment {
             .expect("Should be able to flush record.");
 
         let vector_writer = DistributedHNSWSegmentWriter::from_segment(
+            &self.collection,
             &self.vector_segment,
             self.collection
                 .dimension

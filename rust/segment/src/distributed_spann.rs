@@ -12,9 +12,9 @@ use chroma_index::spann::utils::rng_query;
 use chroma_index::spann::utils::RngQueryError;
 use chroma_index::IndexUuid;
 use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::SpannIndexWriter};
-use chroma_types::SpannConfiguration;
-use chroma_types::DistributedSpannParametersFromSegmentError;
+use chroma_types::Collection;
 use chroma_types::SegmentUuid;
+use chroma_types::SpannConfiguration;
 use chroma_types::{MaterializedLogOperation, Segment, SegmentScope, SegmentType};
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -46,8 +46,8 @@ impl Debug for SpannSegmentWriter {
 pub enum SpannSegmentWriterError {
     #[error("Invalid argument")]
     InvalidArgument,
-    #[error("Could not parse spann configuration: {0}")]
-    InvalidConfiguration(#[from] DistributedSpannParametersFromSegmentError),
+    #[error("Collection is missing a spann configuration")]
+    MissingSpannConfiguration,
     #[error("Error parsing index uuid from string")]
     IndexIdParsingError,
     #[error("Invalid file path for HNSW index")]
@@ -84,13 +84,14 @@ impl ChromaError for SpannSegmentWriterError {
             Self::SpannSegmentWriterCommitError => ErrorCodes::Internal,
             Self::SpannSegmentWriterFlushError => ErrorCodes::Internal,
             Self::SpannSegmentWriterAddRecordError(e) => e.code(),
-            Self::InvalidConfiguration(e) => e.code(),
+            Self::MissingSpannConfiguration => ErrorCodes::Internal,
         }
     }
 }
 
 impl SpannSegmentWriter {
     pub async fn from_segment(
+        collection: &Collection,
         segment: &Segment,
         blockfile_provider: &BlockfileProvider,
         hnsw_provider: &HnswIndexProvider,
@@ -99,7 +100,10 @@ impl SpannSegmentWriter {
         if segment.r#type != SegmentType::Spann || segment.scope != SegmentScope::VECTOR {
             return Err(SpannSegmentWriterError::InvalidArgument);
         }
-        let params = SpannConfiguration::try_from(segment)?;
+        let params = collection
+            .config
+            .get_spann_config()
+            .ok_or_else(|| SpannSegmentWriterError::MissingSpannConfiguration)?;
 
         let hnsw_id = match segment.file_path.get(HNSW_PATH) {
             Some(hnsw_path) => match hnsw_path.first() {
@@ -340,8 +344,8 @@ impl SpannSegmentFlusher {
 pub enum SpannSegmentReaderError {
     #[error("Invalid argument")]
     InvalidArgument,
-    #[error("Could not parse configuration: {0}")]
-    InvalidConfiguration(#[from] DistributedSpannParametersFromSegmentError),
+    #[error("Collection is missing a spann configuration")]
+    MissingSpannConfiguration,
     #[error("Error parsing index uuid from string")]
     IndexIdParsingError,
     #[error("Invalid file path for HNSW index")]
@@ -371,7 +375,7 @@ impl ChromaError for SpannSegmentReaderError {
             Self::SpannSegmentReaderCreateError => ErrorCodes::Internal,
             Self::UninitializedSegment => ErrorCodes::Internal,
             Self::KeyReadError => ErrorCodes::Internal,
-            Self::InvalidConfiguration(e) => e.code(),
+            Self::MissingSpannConfiguration => ErrorCodes::Internal,
             Self::RngError(e) => e.code(),
         }
     }
@@ -379,6 +383,7 @@ impl ChromaError for SpannSegmentReaderError {
 
 #[derive(Debug)]
 pub struct SpannSegmentReaderContext {
+    pub collection: Collection,
     pub segment: Segment,
     pub blockfile_provider: BlockfileProvider,
     pub hnsw_provider: HnswIndexProvider,
@@ -395,6 +400,7 @@ pub struct SpannSegmentReader<'me> {
 
 impl<'me> SpannSegmentReader<'me> {
     pub async fn from_segment(
+        collection: &Collection,
         segment: &Segment,
         blockfile_provider: &BlockfileProvider,
         hnsw_provider: &HnswIndexProvider,
@@ -403,7 +409,11 @@ impl<'me> SpannSegmentReader<'me> {
         if segment.r#type != SegmentType::Spann || segment.scope != SegmentScope::VECTOR {
             return Err(SpannSegmentReaderError::InvalidArgument);
         }
-        let params = SpannConfiguration::try_from(segment)?;
+        let params = collection
+            .config
+            .get_spann_config()
+            .ok_or(SpannSegmentReaderError::MissingSpannConfiguration)?;
+
         let hnsw_id = match segment.file_path.get(HNSW_PATH) {
             Some(hnsw_path) => match hnsw_path.first() {
                 Some(index_id) => {
@@ -526,8 +536,8 @@ mod test {
     use chroma_index::{hnsw_provider::HnswIndexProvider, Index};
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{
-        Chunk, CollectionUuid, SpannConfiguration, LogRecord, Operation, OperationRecord,
-        SegmentUuid, SpannPostingList,
+        Chunk, CollectionUuid, LogRecord, Operation, OperationRecord, SegmentUuid,
+        SpannConfiguration, SpannPostingList,
     };
 
     use crate::{
@@ -566,14 +576,31 @@ mod test {
             collection: collection_id,
             r#type: chroma_types::SegmentType::Spann,
             scope: chroma_types::SegmentScope::VECTOR,
-            metadata: Some(
-                params
-                    .try_into()
-                    .expect("Error converting params to metadata"),
-            ),
+            metadata: None,
             file_path: HashMap::new(),
         };
+
+        let collection = chroma_types::Collection {
+            collection_id,
+            name: "test".to_string(),
+            config: chroma_types::CollectionConfiguration {
+                vector_index: chroma_types::VectorIndexConfiguration::Spann(params),
+                embedding_function: None,
+            },
+            legacy_configuration_json: (),
+            metadata: None,
+            dimension: None,
+            tenant: "test".to_string(),
+            database: "test".to_string(),
+            log_position: 0,
+            version: 0,
+            total_records_post_compaction: 0,
+            size_bytes_post_compaction: 0,
+            last_compaction_time_secs: 0,
+        };
+
         let spann_writer = SpannSegmentWriter::from_segment(
+            &collection,
             &spann_segment,
             &blockfile_provider,
             &hnsw_provider,
@@ -646,6 +673,7 @@ mod test {
             rx,
         );
         let spann_writer = SpannSegmentWriter::from_segment(
+            &collection,
             &spann_segment,
             &blockfile_provider,
             &hnsw_provider,
@@ -654,10 +682,7 @@ mod test {
         .await
         .expect("Error creating spann segment writer");
         assert_eq!(spann_writer.index.dimensionality, 3);
-        assert_eq!(
-            spann_writer.index.params,
-            SpannConfiguration::default()
-        );
+        assert_eq!(spann_writer.index.params, SpannConfiguration::default());
         // Next head id should be 2 since one centroid is already taken up.
         assert_eq!(
             spann_writer
@@ -752,14 +777,20 @@ mod test {
             collection: collection_id,
             r#type: chroma_types::SegmentType::Spann,
             scope: chroma_types::SegmentScope::VECTOR,
-            metadata: Some(
-                params
-                    .try_into()
-                    .expect("Error converting params to metadata"),
-            ),
+            metadata: None,
             file_path: HashMap::new(),
         };
+
+        let collection = chroma_types::Collection::builder()
+            .collection_id(collection_id)
+            .config(chroma_types::CollectionConfiguration {
+                vector_index: chroma_types::VectorIndexConfiguration::Spann(params),
+                embedding_function: None,
+            })
+            .build();
+
         let spann_writer = SpannSegmentWriter::from_segment(
+            &collection,
             &spann_segment,
             &blockfile_provider,
             &hnsw_provider,
@@ -832,6 +863,7 @@ mod test {
             rx,
         );
         let spann_reader = SpannSegmentReader::from_segment(
+            &collection,
             &spann_segment,
             &blockfile_provider,
             &hnsw_provider,
