@@ -22,6 +22,8 @@ pub enum ValidationError {
     GetCollection(#[from] GetCollectionError),
     #[error("Error updating collection: {0}")]
     UpdateCollection(#[from] UpdateCollectionError),
+    #[error("SPANN is still in development. Not allowed to created spann indexes")]
+    SpannNotImplemented,
 }
 
 impl ChromaError for ValidationError {
@@ -32,6 +34,7 @@ impl ChromaError for ValidationError {
             ValidationError::DimensionMismatch(_, _) => ErrorCodes::InvalidArgument,
             ValidationError::GetCollection(err) => err.code(),
             ValidationError::UpdateCollection(err) => err.code(),
+            ValidationError::SpannNotImplemented => ErrorCodes::Unimplemented,
         }
     }
 }

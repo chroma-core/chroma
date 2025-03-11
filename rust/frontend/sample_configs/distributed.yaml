@@ -43,3 +43,4 @@ scorecard:
       - "op:*"
       - "collection_id:*"
     score: 100
+enable_span_indexing: true
