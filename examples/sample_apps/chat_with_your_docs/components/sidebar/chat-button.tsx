@@ -1,12 +1,22 @@
-import React from "react";
+"use client";
 
-const ChatButton: React.FC<{ title: string }> = ({ title }) => {
+import React from "react";
+import { Chat } from "@/lib/models";
+import { useParams } from "next/navigation";
+import Link from "next/link";
+
+const ChatButton: React.FC<{ chat: Chat }> = ({ chat }) => {
+  const { chatId } = useParams();
   return (
-    <div className="p-2 rounded-md border border-black">
-      <div className="overflow-hidden text-ellipsis whitespace-nowrap">
-        {title}
+    <Link href={`/${chat.id}`}>
+      <div
+        className={`p-2 pl-3 rounded-md border border-black ${chatId === chat.id && "ring-1 ring-black"}`}
+      >
+        <div className="overflow-hidden text-ellipsis whitespace-nowrap">
+          {chat.title || "New Chat"}
+        </div>
       </div>
-    </div>
+    </Link>
   );
 };
 

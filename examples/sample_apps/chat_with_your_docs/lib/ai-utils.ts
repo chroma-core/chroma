@@ -1,7 +1,7 @@
 "use server";
 
 import { generateText } from "ai";
-import { Message } from "@/lib/models";
+import { Chunk, Message } from "@/lib/models";
 import { createAnthropic } from "@ai-sdk/anthropic";
 
 export const generate = async (prompt: string) => {
@@ -18,6 +18,7 @@ export const generate = async (prompt: string) => {
 export const getAssistantResponse = async (
   userMessage: Message,
   conversation: Message[],
+  chunks: Chunk[],
 ) => {
   const messages = [
     ...conversation
@@ -27,11 +28,16 @@ export const getAssistantResponse = async (
 
   let prompt = `User: ${userMessage.content}`;
 
+  prompt += `\n\nContext:\n ${chunks.map((c) => c.content).join("\n")}`;
+
   if (messages.length > 0) {
     prompt +=
-      "\nHere is the conversation history. You can use it if it is relevant to the user prompt.\n";
+      "\n\nHere is the conversation history. You can use it if it is relevant to the user prompt.\n";
     prompt += messages.map((m) => m.content).join("\n");
   }
+
+  prompt +=
+    "If the context does not seem relevant to the question, return only 'Sorry, I cannot answer.' Do not mention the fact that you were provided context.";
 
   return await generate(prompt);
 };

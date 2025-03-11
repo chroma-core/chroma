@@ -11,10 +11,6 @@ const nextConfig: NextConfig = {
       },
     },
   },
-  webpack: (config, { isServer }) => {
-    config.externals = [...(config.externals || []), "@xenova/transformers"];
-    return config;
-  },
 };
 
 export default nextConfig;

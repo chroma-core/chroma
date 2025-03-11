@@ -10,7 +10,7 @@ export const generateUUID = async () => {
   };
 };
 
-export const getChromaClient = () => {
+export const getChromaClient = async () => {
   return new ChromaClient({
     path: `${process.env.CHROMA_HOST}:${process.env.CHROMA_PORT}`,
     auth: {

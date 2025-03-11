@@ -27,7 +27,9 @@ const ChatMessages: React.FC = () => {
           <ChatMessage key={m.id} message={m} />
         ))}
         {loading && (
-          <div>
+          <div
+            className={`flex w-full ${messages.length === 0 && "justify-center"}`}
+          >
             <Loader className="ml-2 animate-spin w-5 h-5 text-black" />
           </div>
         )}

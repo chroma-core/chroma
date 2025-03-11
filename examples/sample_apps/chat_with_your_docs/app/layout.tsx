@@ -4,6 +4,7 @@ import "./globals.css";
 import React from "react";
 import Header from "@/components/header/header";
 import Sidebar from "@/components/sidebar/sidebar";
+import { AppProvider } from "@/context/app-context";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -34,10 +35,12 @@ export default function RootLayout({
           <div className="absolute inset-0 bg-[url('/background.jpg')] bg-cover bg-center opacity-10" />
           <div className="relative z-10 flex flex-col h-full">
             <Header />
-            <div className="flex items-center w-full h-full">
-              <Sidebar />
-              {children}
-            </div>
+            <AppProvider>
+              <div className="flex items-center w-full h-full">
+                <Sidebar />
+                {children}
+              </div>
+            </AppProvider>
           </div>
         </div>
       </body>

@@ -2,9 +2,10 @@
 
 import React, { useState } from "react";
 
-const ShadowButton: React.FC<{ children: React.ReactNode }> = ({
-  children,
-}) => {
+const ShadowButton: React.FC<{
+  children: React.ReactNode;
+  onClick?: () => void;
+}> = ({ children, onClick }) => {
   const [isPressed, setIsPressed] = useState(false);
 
   return (
@@ -19,6 +20,7 @@ const ShadowButton: React.FC<{ children: React.ReactNode }> = ({
         onMouseDown={() => setIsPressed(true)}
         onMouseUp={() => setIsPressed(false)}
         onMouseLeave={() => setIsPressed(false)}
+        onClick={onClick}
       >
         <div className="flex items-center w-full">{children}</div>
       </button>

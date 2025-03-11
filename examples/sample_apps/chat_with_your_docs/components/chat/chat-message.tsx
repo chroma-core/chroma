@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import "highlight.js/styles/atom-one-dark.css";
 import { Message } from "@/lib/models";
+import Citation from "@/components/chat/citation";
 
 const ChatMessage: React.FC<{ message: Message }> = ({ message }) => {
   const userStyle = "border border-black rounded-sm self-end";
@@ -18,6 +19,11 @@ const ChatMessage: React.FC<{ message: Message }> = ({ message }) => {
       >
         {message.content}
       </ReactMarkdown>
+      {message.role === "assistant" && (
+        <div className="flex items-center gap-4">
+          {message.chunks?.map((c) => <Citation key={c.id} chunk={c} />)}
+        </div>
+      )}
     </div>
   );
 };

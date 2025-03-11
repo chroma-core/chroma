@@ -5,14 +5,18 @@ import { Input } from "@/components/ui/input";
 import ShadowButton from "@/components/ui/shadow-button";
 import { ArrowRight } from "lucide-react";
 import { useChat } from "@/context/chat-context";
+import { useParams } from "next/navigation";
 
 const InputBox: React.FC = () => {
+  const { loading } = useChat();
   const [inputValue, setInputValue] = useState("");
   const [isHovered, setIsHovered] = useState(false);
   const { addUserMessage } = useChat();
+  const { chatId } = useParams();
 
   const handleSubmit = (content: string) => {
-    addUserMessage(content);
+    if (loading) return;
+    addUserMessage(content, chatId as string);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
