@@ -806,7 +806,6 @@ pub struct CreateCollectionPayload {
     pub name: String,
     pub configuration: Option<serde_json::Value>,
     pub metadata: Option<Metadata>,
-    #[serde(default)]
     pub get_or_create: bool,
 }
 
@@ -1043,9 +1042,13 @@ async fn delete_collection(
 #[derive(Serialize, Deserialize, ToSchema, Debug, Clone)]
 pub struct AddCollectionRecordsPayload {
     ids: Vec<String>,
+    #[serde(default)]
     embeddings: Option<Vec<Vec<f32>>>,
+    #[serde(default)]
     documents: Option<Vec<Option<String>>>,
+    #[serde(default)]
     uris: Option<Vec<Option<String>>>,
+    #[serde(default)]
     metadatas: Option<Vec<Option<Metadata>>>,
 }
 
