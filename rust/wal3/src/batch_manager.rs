@@ -14,7 +14,7 @@ struct ManagerState {
     next_write: Instant,
     writers_active: usize,
     enqueued: Vec<(
-        Vec<u8>,
+        Vec<Vec<u8>>,
         tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
     )>,
 }
@@ -89,12 +89,12 @@ impl BatchManager {
 
     pub fn push_work(
         &self,
-        message: Vec<u8>,
+        messages: Vec<Vec<u8>>,
         tx: tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
     ) {
         // SAFETY(rescrv): Mutex poisoning.
         let mut state = self.state.lock().unwrap();
-        state.enqueued.push((message, tx));
+        state.enqueued.push((messages, tx));
     }
 
     pub async fn wait_for_writable(&self) {
@@ -122,7 +122,7 @@ impl BatchManager {
             FragmentSeqNo,
             LogPosition,
             Vec<(
-                Vec<u8>,
+                Vec<Vec<u8>>,
                 tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
             )>,
         )>,
@@ -130,32 +130,49 @@ impl BatchManager {
     > {
         // SAFETY(rescrv): Mutex poisoning.
         let mut state = self.state.lock().unwrap();
+        // If there is no work, there is no notify.
         if state.enqueued.is_empty() {
             // No work, no notify.
             return Ok(None);
         }
-        // Clamp first by the number of items in this batch.
+
         let batch_size = self.batch_size();
-        let mut batch_size =
+        let enqueued_records = state.enqueued.iter().map(|(r, _)| r.len()).sum::<usize>();
+        let batch_size =
             // If our estimate is wildly under-estimating or is an over-estimate, just take
             // everything available.
-            if state.enqueued.len() > batch_size * 2 || state.enqueued.len() < batch_size {
-                state.enqueued.len()
+            if enqueued_records > batch_size * 2 || enqueued_records < batch_size {
+                enqueued_records
             } else {
                 batch_size
             };
-        // Clamp second by the number of bytes in this batch.
-        let mut batch_size_bytes = 0usize;
-        for idx in 0..batch_size {
-            if batch_size_bytes > self.options.batch_size_bytes {
-                batch_size = idx;
+        let mut split_off = 0usize;
+        let mut acc_count = 0usize;
+        let mut acc_bytes = 0usize;
+        let mut did_split = false;
+        for (batch, _) in state.enqueued.iter() {
+            let cur_count = batch.len();
+            let cur_bytes = batch.iter().map(|r| r.len()).sum::<usize>();
+            if acc_count + cur_count >= batch_size {
+                did_split = true;
                 break;
             }
-            batch_size_bytes += state.enqueued[idx].0.len();
+            if acc_bytes + cur_bytes >= self.options.batch_size_bytes {
+                did_split = true;
+                break;
+            }
+            acc_count += cur_count;
+            acc_bytes += cur_bytes;
+            split_off += 1;
         }
-        // If the batch size is less than half full and we haven't waited the batch interval since
-        // last write, wait for more data.
-        if batch_size_bytes < self.options.batch_size_bytes / 2
+        let Some((fragment_seq_no, log_position)) =
+            state.select_for_write(&self.options, manifest_manager, acc_count)?
+        else {
+            // No fragment can be written at this time.
+            return Ok(None);
+        };
+        // If we haven't waited the batch interval since last write, and we didn't break early, wait for more data.
+        if !did_split
             && state.last_batch.elapsed()
                 < Duration::from_micros(self.options.batch_interval_us as u64)
         {
@@ -164,14 +181,8 @@ impl BatchManager {
             self.write_finished.notify_one();
             return Ok(None);
         }
-        let Some((fragment_seq_no, log_position)) =
-            state.select_for_write(&self.options, manifest_manager, batch_size)?
-        else {
-            // No fragment can be written at this time.
-            return Ok(None);
-        };
         let mut work = std::mem::take(&mut state.enqueued);
-        state.enqueued = work.split_off(batch_size);
+        state.enqueued = work.split_off(split_off);
         state.last_batch = Instant::now();
         Ok(Some((fragment_seq_no, log_position, work)))
     }
@@ -192,5 +203,61 @@ impl BatchManager {
     pub fn finish_write(&self) {
         self.state.lock().unwrap().finish_write();
         self.write_finished.notify_one();
+    }
+}
+
+/////////////////////////////////////////////// tests //////////////////////////////////////////////
+
+#[cfg(test)]
+mod tests {
+    use chroma_storage::s3_client_for_test_with_new_bucket;
+
+    use super::*;
+    use crate::manifest_manager::ManifestManager;
+    use crate::{LogWriterOptions, Manifest, SnapshotOptions, ThrottleOptions};
+
+    #[tokio::test]
+    async fn test_batches() {
+        let batch_manager = BatchManager::new(ThrottleOptions {
+            throughput: 100,
+            headroom: 1,
+            outstanding: 1,
+            batch_size_bytes: 4,
+            batch_interval_us: 1_000_000,
+        })
+        .unwrap();
+        let storage = s3_client_for_test_with_new_bucket().await;
+        Manifest::initialize(
+            &LogWriterOptions::default(),
+            &storage,
+            "test-batches-prefix",
+            "initializer",
+        )
+        .await
+        .unwrap();
+        let manifest_manager = ManifestManager::new(
+            ThrottleOptions::default(),
+            SnapshotOptions::default(),
+            storage.into(),
+            "test-batches-prefix".to_string(),
+            "writer".to_string(),
+        )
+        .await
+        .unwrap();
+        let (tx, _rx1) = tokio::sync::oneshot::channel();
+        batch_manager.push_work(vec![vec![1]], tx);
+        let (tx, _rx2) = tokio::sync::oneshot::channel();
+        batch_manager.push_work(vec![vec![2, 3]], tx);
+        let (tx, _rx3) = tokio::sync::oneshot::channel();
+        batch_manager.push_work(vec![vec![4, 5, 6]], tx);
+        let (seq_no, log_position, work) =
+            batch_manager.take_work(&manifest_manager).unwrap().unwrap();
+        assert_eq!(seq_no, FragmentSeqNo(1));
+        assert_eq!(log_position.offset(), 1);
+        assert_eq!(2, work.len());
+        // Check batch 1
+        assert_eq!(vec![vec![1]], work[0].0);
+        // Check batch 2
+        assert_eq!(vec![vec![2, 3]], work[1].0);
     }
 }
