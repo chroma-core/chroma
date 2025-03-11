@@ -993,16 +993,26 @@ impl Handler<TaskResult<RegisterOutput, RegisterError>> for CompactOrchestrator 
         message: TaskResult<RegisterOutput, RegisterError>,
         ctx: &ComponentContext<CompactOrchestrator>,
     ) {
-        self.terminate_with_result(
-            message
-                .into_inner()
-                .map_err(|e| e.into())
-                .map(|_| CompactionResponse {
-                    id: self.id,
-                    compaction_job: self.compaction_job.clone(),
-                    message: "Compaction Complete".to_string(),
-                }),
-            ctx,
-        );
+        let ok_compaction_response = CompactionResponse {
+            id: self.id,
+            compaction_job: self.compaction_job.clone(),
+            message: "Compaction Complete".to_string(),
+        };
+
+        match message.into_inner() {
+            Ok(output) => {
+                self.terminate_with_result(Ok(ok_compaction_response), ctx);
+            }
+            Err(e) => match e {
+                RegisterError::CollectionSoftDeletedError => {
+                    tracing::info!("Collection was soft deleted: {:?}", e);
+                    self.terminate_with_result(Ok(ok_compaction_response), ctx);
+                }
+                _ => {
+                    tracing::error!("Error registering compaction: {:?}", e);
+                    self.terminate_with_result(Err(e.into()), ctx);
+                }
+            },
+        }
     }
 }

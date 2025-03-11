@@ -11,11 +11,11 @@ use chroma_types::{
     chroma_proto, CollectionAndSegments, CollectionMetadataUpdate, CountCollectionsError,
     CreateCollectionError, CreateDatabaseError, CreateDatabaseResponse, CreateTenantError,
     CreateTenantResponse, Database, DeleteCollectionError, DeleteDatabaseError,
-    DeleteDatabaseResponse, GetCollectionSizeError, GetCollectionWithSegmentsError,
-    GetCollectionsError, GetDatabaseError, GetDatabaseResponse, GetSegmentsError, GetTenantError,
-    GetTenantResponse, ListDatabasesError, ListDatabasesResponse, Metadata, ResetError,
-    ResetResponse, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
-    UpdateCollectionError,
+    DeleteDatabaseResponse, GetCollectionError, GetCollectionSizeError,
+    GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError, GetDatabaseResponse,
+    GetSegmentsError, GetTenantError, GetTenantResponse, ListDatabasesError, ListDatabasesResponse,
+    Metadata, ResetError, ResetResponse, SegmentFlushInfo, SegmentFlushInfoConversionError,
+    SegmentUuid, UpdateCollectionError,
 };
 use chroma_types::{
     Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
@@ -118,6 +118,23 @@ impl SysDb {
             SysDb::Grpc(grpc) => grpc.delete_database(database_name, tenant).await,
             SysDb::Sqlite(sqlite) => sqlite.delete_database(database_name, tenant).await,
             SysDb::Test(_) => todo!(),
+        }
+    }
+
+    pub async fn get_collection(
+        &mut self,
+        collection_id: CollectionUuid,
+        name: Option<String>,
+        tenant: Option<String>,
+        database: Option<String>,
+    ) -> Result<Collection, GetCollectionError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.get_collection(collection_id, name, tenant, database)
+                    .await
+            }
+            SysDb::Sqlite(sqlite) => unimplemented!(),
+            SysDb::Test(test) => unimplemented!(),
         }
     }
 
@@ -675,6 +692,35 @@ impl GrpcSysDb {
         }
     }
 
+    async fn get_collection(
+        &mut self,
+        collection_id: CollectionUuid,
+        name: Option<String>,
+        tenant: Option<String>,
+        database: Option<String>,
+    ) -> Result<Collection, GetCollectionError> {
+        let req = chroma_proto::GetCollectionRequest {
+            id: collection_id.0.to_string(),
+            name: name.unwrap_or("".to_string()),
+            tenant: tenant.unwrap_or("".to_string()),
+            database: database.unwrap_or("".to_string()),
+        };
+        let res = self.client.get_collection(req).await;
+        match res {
+            Ok(res) => {
+                let res = match res.into_inner().collection {
+                    Some(res) => res,
+                    None => return Err(GetCollectionError::NotFound(name)),
+                };
+                Ok(res.try_into().unwrap())
+            }
+            Err(e) if e.code() == tonic::Code::FailedPrecondition => Err(
+                GetCollectionError::SoftDeleted(name.unwrap_or("".to_string())),
+            ),
+            Err(e) => Err(GetCollectionError::Internal(e.into())),
+        }
+    }
+
     async fn get_collections(
         &mut self,
         collection_id: Option<CollectionUuid>,
@@ -1093,6 +1139,8 @@ pub enum FlushCompactionError {
     CollectionNotFound,
     #[error("Segment not found in sysdb")]
     SegmentNotFound,
+    #[error("Collection was soft deleted")]
+    CollectionSoftDeleted,
 }
 
 impl ChromaError for FlushCompactionError {
@@ -1103,6 +1151,7 @@ impl ChromaError for FlushCompactionError {
             FlushCompactionError::FlushCompactionResponseConversionError(_) => ErrorCodes::Internal,
             FlushCompactionError::CollectionNotFound => ErrorCodes::Internal,
             FlushCompactionError::SegmentNotFound => ErrorCodes::Internal,
+            FlushCompactionError::CollectionSoftDeleted => ErrorCodes::FailedPrecondition,
         }
     }
 }
