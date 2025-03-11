@@ -12,6 +12,9 @@
     "allowSyntheticDefaultImports": true,
     "moduleResolution": "Node",
     "forceConsistentCasingInFileNames": true,
-    "stripInternal": true
+    "stripInternal": true,
+    "paths": {
+      "@internal/chromadb-core": ["../chromadb-core/src"]
+    }
   }
 }

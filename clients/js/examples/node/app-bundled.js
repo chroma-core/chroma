@@ -2,13 +2,10 @@ var fs = require("fs");
 var path = require("path");
 
 var express = require("express");
-// Default to using the bundled version
+// Import the bundled version of chromadb
 var chroma = require("chromadb");
 
-console.log("Using standard app.js with the bundled chromadb package");
-console.log("To try the different variants, run:");
-console.log("  - pnpm dev:bundled - Uses the bundled chromadb package");
-console.log("  - pnpm dev:client - Uses the chromadb-client package with peer dependencies");
+console.log("Using bundled chromadb package");
 
 var app = express();
 app.get("/", async (req, res) => {
@@ -22,7 +19,7 @@ app.get("/", async (req, res) => {
   // });
 
   const collection = await cc.createCollection({
-    name: "test-from-js",
+    name: "test-from-js-bundled",
     embeddingFunction: new chroma.DefaultEmbeddingFunction(),
   });
 
@@ -40,7 +37,7 @@ app.get("/", async (req, res) => {
   // });
 
   const queryCollection = await collection.get({
-    name: "test-from-js",
+    name: "test-from-js-bundled",
     embeddingFunction: new chroma.DefaultEmbeddingFunction(),
   });
 
@@ -53,10 +50,10 @@ app.get("/", async (req, res) => {
   const collections = await cc.listCollections();
   console.log("collections", collections);
 
-  console.log("SUCCESS!");
+  console.log("SUCCESS with bundled package!");
 
   res.send(query);
 });
 app.listen(3000, function () {
-  console.log("Example app listening on port 3000!");
+  console.log("Example app using bundled chromadb package listening on port 3000!");
 });

@@ -118,27 +118,12 @@ export class DefaultEmbeddingFunction implements IEmbeddingFunction {
 
   /** @ignore */
   static async import(): Promise<{
-    // @ts-expect-error
+    // @ts-ignore
     pipeline: typeof import("chromadb-default-embed");
   }> {
     try {
-      let importResult;
-      if (isBrowser()) {
-        importResult = await import(
-          // @ts-expect-error
-          "https://unpkg.com/chromadb-default-embed@2.14.0"
-        );
-      } else {
-        // @ts-expect-error
-        importResult = await import("chromadb-default-embed");
-      }
-      const { pipeline, env } = importResult;
-
-      // By default, transformers.js attempts to first load models from the site origin when running in a browser (and then falls back to loading from HuggingFace).
-      // SPA servers like Vite tend to break this because by default they serve the same document regardless of the path, so transformers.js sees a 200 response and treats the HTML response as model JSON.
-      // todo: expose this as a config parameter in the future?
-      env.allowLocalModels = false;
-
+      // @ts-ignore
+      const { pipeline } = await import("chromadb-default-embed");
       return { pipeline };
     } catch (e) {
       throw new Error(

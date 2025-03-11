@@ -6,23 +6,19 @@ If you don't see your problem listed here, please also search the [Github Issues
 
 ## Chroma JS-Client failures on NextJS projects
 
-The Chroma JS-Client may fail on NextJS due to a dynamic import of `@xenova/transformers`. We are working on resolving this issue. In the meantime you can work around it by installing `@xenova/transformers`:
+When using Chroma with Next.js, be sure to do any embedding in the server - client-side embedding is not supported.
 
-```terminal
-npm install @xenova/transformers
+Next.js v15.2.1 includes a fix for embedding functions used by Chroma. If you're using an earlier version of Next.js, you may need to add this configuration to your `next.config.{js|ts}` file:
+
+```typescript
+const nextConfig = {
+  serverExternalPackages: ['chromadb', 'chromadb-default-embed'],
+};
+module.exports = nextConfig
 ```
 
-And add this `webpack` configuration to your `next.config` file:
+In addition, make sure you're using the latest of the `chromadb` package. Version v2.0.0 includes some important fixes for Next.js environments.
 
-```javascript
-webpack: (config, { isServer }) => {
-    config.externals = [
-      ...(config.externals || []),
-      "@xenova/transformers",
-    ];
-    return config;
-}
-```
 
 ## Cannot return the results in a contiguous 2D array. Probably ef or M is too small
 

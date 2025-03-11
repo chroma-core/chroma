@@ -18,7 +18,7 @@ export default async function testSetup() {
   } catch (error) {
     console.log(
       "Ollama package not installed or failed to start ollama. Skipping tests: " +
-        error,
+      error,
     );
   }
 }
