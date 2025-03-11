@@ -92,7 +92,14 @@ pub enum RegisterError {
 impl ChromaError for RegisterError {
     fn code(&self) -> ErrorCodes {
         match self {
-            RegisterError::FlushCompactionError(e) => e.code(),
+            RegisterError::FlushCompactionError(e) => {
+                if let FlushCompactionError::FailedToFlushCompaction(status) = e {
+                    if status.code() == tonic::Code::FailedPrecondition {
+                        return ErrorCodes::FailedPrecondition;
+                    }
+                }
+                e.code()
+            }
             RegisterError::UpdateLogOffsetError(e) => e.code(),
         }
     }
