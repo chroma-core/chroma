@@ -2,7 +2,7 @@
 
 Chroma is the open-source embedding database. Chroma makes it easy to build LLM apps by making knowledge, facts, and skills pluggable for LLMs.
 
-**This package includes all embedding libraries as bundled dependencies**, providing a simple installation experience without worrying about dependency management.
+**This package includes all embedding libraries as bundled dependencies**, providing a simple installation experience without worrying about dependency management. For a thin client, install `chromadb-client`
 
 ## Features
 
