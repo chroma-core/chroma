@@ -403,7 +403,7 @@ pub struct DistributedIndexTypeParam {
     pub index_type: DistributedIndexType,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub enum DistributedIndexType {
     #[serde(rename = "hnsw")]
