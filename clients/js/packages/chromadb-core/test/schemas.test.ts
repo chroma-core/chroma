@@ -1,7 +1,7 @@
 import { describe, expect, test } from "@jest/globals";
-import { loadSchema, validateConfig, getSchemaVersion } from "../src/schemas";
+import { loadSchema, getSchemaVersion } from "../src/schemas";
 import { OpenAIEmbeddingFunction } from "../src/embeddings/OpenAIEmbeddingFunction";
-import { validateEmbeddingFunction } from "../src/schemas/embeddingValidation";
+import { validateConfigSchema } from "../src/schemas/schemaUtils";
 
 describe("Schema Validation", () => {
   test("should load a schema", () => {
@@ -17,7 +17,7 @@ describe("Schema Validation", () => {
       organization_id: "",
       dimensions: 1536,
     };
-    expect(() => validateConfig(config, "openai")).not.toThrow();
+    expect(() => validateConfigSchema(config, "openai")).not.toThrow();
   });
 
   test("should throw on an invalid config", () => {
@@ -27,7 +27,7 @@ describe("Schema Validation", () => {
       organization_id: "",
       dimensions: 1536,
     };
-    expect(() => validateConfig(config, "openai")).toThrow();
+    expect(() => validateConfigSchema(config, "openai")).toThrow();
   });
 
   test("should get schema version", () => {
@@ -40,6 +40,8 @@ describe("Schema Validation", () => {
     process.env.OPENAI_API_KEY = "test-key";
 
     const embeddingFunction = new OpenAIEmbeddingFunction({});
-    expect(() => validateEmbeddingFunction(embeddingFunction)).not.toThrow();
+    expect(() =>
+      embeddingFunction.validateConfig(embeddingFunction.getConfig()),
+    ).not.toThrow();
   });
 });
