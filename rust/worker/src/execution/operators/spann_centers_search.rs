@@ -46,6 +46,7 @@ impl Operator<SpannCentersSearchInput, SpannCentersSearchOutput> for SpannCenter
         input: &SpannCentersSearchInput,
     ) -> Result<SpannCentersSearchOutput, SpannCentersSearchError> {
         let spann_reader = SpannSegmentReader::from_segment(
+            &input.reader_context.collection,
             &input.reader_context.segment,
             &input.reader_context.blockfile_provider,
             &input.reader_context.hnsw_provider,

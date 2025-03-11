@@ -95,7 +95,11 @@ async fn trigger_vector_segments_max_seq_id_migration(
         };
 
         segment_manager
-            .get_hnsw_writer(&collection.vector_segment, dim as usize)
+            .get_hnsw_writer(
+                &collection.collection,
+                &collection.vector_segment,
+                dim as usize,
+            )
             .await?;
     }
 
