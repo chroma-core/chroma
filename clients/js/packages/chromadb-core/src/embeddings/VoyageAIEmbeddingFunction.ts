@@ -46,6 +46,7 @@ export class VoyageAIEmbeddingFunction implements IEmbeddingFunction {
   private voyageAiApi?: VoyageAIAPI;
   private model: string;
   private apiKey: string;
+  private apiKeyEnvVar: string;
   constructor({
     api_key,
     model,
@@ -63,6 +64,7 @@ export class VoyageAIEmbeddingFunction implements IEmbeddingFunction {
     }
     this.apiKey = apiKey;
     this.model = model;
+    this.apiKeyEnvVar = api_key_env_var;
   }
 
   private async initClient() {
@@ -103,7 +105,7 @@ export class VoyageAIEmbeddingFunction implements IEmbeddingFunction {
 
   getConfig(): StoredConfig {
     return {
-      api_key_env_var: this.apiKey,
+      api_key_env_var: this.apiKeyEnvVar,
       model_name: this.model,
     };
   }

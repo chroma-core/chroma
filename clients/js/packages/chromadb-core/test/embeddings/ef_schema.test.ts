@@ -59,9 +59,17 @@ const EMBEDDING_FUNCTION_CONFIGS: Record<string, any> = {
       api_key_env_var: "COHERE_API_KEY",
       model_name: "large",
     },
-    expectedConfig: {
-      api_key_env_var: "COHERE_API_KEY",
-      model_name: "large",
+  },
+  default: {
+    args: {
+      model: "Xenova/all-MiniLM-L6-v2",
+      revision: "main",
+      quantized: false,
+    },
+    config: {
+      model: "Xenova/all-MiniLM-L6-v2",
+      revision: "main",
+      quantized: false,
     },
   },
   jina: {
@@ -119,10 +127,6 @@ const EMBEDDING_FUNCTION_CONFIGS: Record<string, any> = {
       api_key_env_var: "GOOGLE_API_KEY",
       model_name: "embedding-001",
     },
-    expectedConfig: {
-      api_key_env_var: "GOOGLE_API_KEY",
-      model_name: "embedding-001",
-    },
   },
   huggingface_server: {
     args: {
@@ -134,15 +138,6 @@ const EMBEDDING_FUNCTION_CONFIGS: Record<string, any> = {
   },
 };
 
-// Skip these embedding functions in tests as they require complex setup
-const SKIP_EMBEDDING_FUNCTIONS = [
-  "default",
-  "jina",
-  "voyageai",
-  "ollama",
-  "transformers",
-];
-
 // Map of embedding function names to their classes
 const EMBEDDING_FUNCTION_CLASSES: Record<string, any> = {
   openai: OpenAIEmbeddingFunction,
@@ -153,7 +148,7 @@ const EMBEDDING_FUNCTION_CLASSES: Record<string, any> = {
   voyageai: VoyageAIEmbeddingFunction,
   google_generative_ai: GoogleGenerativeAiEmbeddingFunction,
   huggingface_server: HuggingFaceEmbeddingServerFunction,
-  default: DefaultEmbeddingFunction,
+  default: TransformersEmbeddingFunction,
 };
 
 // Setup mocks for dependencies
@@ -237,11 +232,6 @@ describe("Embedding Function Schemas", () => {
 
   // Test each embedding function's config roundtrip
   Object.entries(EMBEDDING_FUNCTION_CONFIGS).forEach(([efName, testConfig]) => {
-    if (SKIP_EMBEDDING_FUNCTIONS.includes(efName)) {
-      test.skip(`${efName} embedding function config roundtrip`, () => {});
-      return;
-    }
-
     test(`${efName} embedding function config roundtrip`, () => {
       const EFClass = EMBEDDING_FUNCTION_CLASSES[efName];
       if (!EFClass) {
@@ -278,11 +268,6 @@ describe("Embedding Function Schemas", () => {
 
   // Test each embedding function with invalid config
   Object.entries(EMBEDDING_FUNCTION_CONFIGS).forEach(([efName, testConfig]) => {
-    if (SKIP_EMBEDDING_FUNCTIONS.includes(efName)) {
-      test.skip(`${efName} embedding function rejects invalid config`, () => {});
-      return;
-    }
-
     test(`${efName} embedding function rejects invalid config`, () => {
       const EFClass = EMBEDDING_FUNCTION_CLASSES[efName];
       if (!EFClass) {
@@ -392,11 +377,6 @@ describe("Embedding Function Schemas", () => {
 
   // Test config validation update
   Object.entries(EMBEDDING_FUNCTION_CONFIGS).forEach(([efName, testConfig]) => {
-    if (SKIP_EMBEDDING_FUNCTIONS.includes(efName)) {
-      test.skip(`${efName} embedding function validates config updates`, () => {});
-      return;
-    }
-
     test(`${efName} embedding function validates config updates`, () => {
       const EFClass = EMBEDDING_FUNCTION_CLASSES[efName];
       if (!EFClass) {

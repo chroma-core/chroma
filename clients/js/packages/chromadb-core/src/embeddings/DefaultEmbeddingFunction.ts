@@ -101,7 +101,7 @@ export class DefaultEmbeddingFunction implements IEmbeddingFunction {
   }
 
   validateConfig(config: StoredConfig): void {
-    validateConfigSchema(config, "default");
+    validateConfigSchema(config, "transformers");
   }
 
   private async loadClient() {
