@@ -1,19 +1,27 @@
-import React from "react";
-import { cn } from "@/lib/utils";
+"use client";
 
-const ShadowButton: React.FC<{
-  children: React.ReactNode;
-  className?: string;
-}> = ({ children, className }) => {
+import React, { useState } from "react";
+
+const ShadowButton: React.FC<{ children: React.ReactNode }> = ({
+  children,
+}) => {
+  const [isPressed, setIsPressed] = useState(false);
+
   return (
-    <div
-      className={cn(
-        "relative flex items-center justify-center p-1.5 px-2.5 bg-white border border-black cursor-pointer",
-        className,
-      )}
-    >
-      <div className="absolute w-full h-full bg-black top-1 -right-1 -z-10" />
-      {children}
+    <div className="relative">
+      <div className="absolute w-full h-full bg-black top-0.5 left-0.5"></div>
+      <button
+        className={`relative flex items-center justify-center w-full bg-white border-2 border-black p-2 transition-all duration-150 ${
+          isPressed
+            ? "transform translate-x-0.5 translate-y-0.5 hover:bg-gray-100"
+            : "hover:bg-gray-50 hover:-translate-y-0.5 hover:-translate-x-0.5"
+        }`}
+        onMouseDown={() => setIsPressed(true)}
+        onMouseUp={() => setIsPressed(false)}
+        onMouseLeave={() => setIsPressed(false)}
+      >
+        <div className="flex items-center w-full">{children}</div>
+      </button>
     </div>
   );
 };

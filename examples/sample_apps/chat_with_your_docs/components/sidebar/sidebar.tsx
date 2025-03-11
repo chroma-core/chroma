@@ -7,7 +7,7 @@ const Sidebar: React.FC = () => {
     <div className="h-full w-80 p-2">
       <div className="w-full h-full border border-double border-gray-600 p-1">
         <div className="flex flex-col gap-5 w-full h-full border border-double border-gray-600 py-3">
-          <div className="flex-shrink-0 px-5">
+          <div className="flex-shrink-0 px-5 w-full">
             <NewChatButton />
           </div>
           <div className="flex-grow h-0 overflow-auto px-5">
