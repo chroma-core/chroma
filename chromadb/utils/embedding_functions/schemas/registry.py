@@ -10,7 +10,13 @@ import os
 import json
 
 # Path to the schemas directory
-SCHEMAS_DIR = os.path.dirname(__file__)
+SCHEMAS_DIR = os.path.join(
+    os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+    ),
+    "schemas",
+    "embedding_functions",
+)
 
 
 def get_available_schemas() -> List[str]:

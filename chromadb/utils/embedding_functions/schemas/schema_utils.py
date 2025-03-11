@@ -5,7 +5,13 @@ import jsonschema
 from jsonschema import ValidationError
 
 # Path to the schemas directory
-SCHEMAS_DIR = os.path.dirname(__file__)
+SCHEMAS_DIR = os.path.join(
+    os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+    ),
+    "schemas",
+    "embedding_functions",
+)
 
 cached_schemas: Dict[str, Dict[str, Any]] = {}
 
