@@ -15,7 +15,13 @@ jobs:
       outside-docs: ${{ steps.changes.outputs.outside-docs }}
       only-docs: ${{ steps.changes.outputs.docs }}
       helm-changes: ${{ steps.helm-changes.outputs.helm-changes }}
-      only-js-client: ${{ steps.js-client-changes.outputs.only-js-client }}
+      python-changes: ${{ steps.component-changes.outputs.python-changes }}
+      rust-changes: ${{ steps.component-changes.outputs.rust-changes }}
+      go-changes: ${{ steps.component-changes.outputs.go-changes }}
+      js-changes: ${{ steps.component-changes.outputs.js-changes }}
+      run-all-tests: ${{ steps.test-decision.outputs.run-all-tests }}
+      run-go-tests: ${{ steps.test-decision.outputs.run-go-tests }}
+      run-js-tests: ${{ steps.test-decision.outputs.run-js-tests }}
     steps:
       - name: Get changed paths
         id: changes
@@ -34,17 +40,47 @@ jobs:
           filters: |
             helm-changes:
               - 'k8s/distributed-chroma/**'
-      - name: Check for JS client only changes
-        id: js-client-changes
+      - name: Check for component changes
+        id: component-changes
         uses: dorny/paths-filter@v3
         with:
           filters: |
-            only-js-client:
+            python-changes:
+              - 'chromadb/**'
+              - 'clients/python/**'
+              - 'pyproject.toml'
+              - 'requirements*.txt'
+            rust-changes:
+              - 'rust/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+            go-changes:
+              - 'go/**'
+            js-changes:
               - 'clients/js/**'
-              - '!clients/python/**'
-              - '!chromadb/**'
-              - '!rust/**'
-              - '!go/**'
+      - name: Determine which tests to run
+        id: test-decision
+        run: |
+          # Run all tests if Python or Rust code has changed
+          if [[ "${{ steps.component-changes.outputs.python-changes }}" == "true" || "${{ steps.component-changes.outputs.rust-changes }}" == "true" ]]; then
+            echo "run-all-tests=true" >> $GITHUB_OUTPUT
+          else
+            echo "run-all-tests=false" >> $GITHUB_OUTPUT
+
+            # Run Go tests only if Go code has changed
+            if [[ "${{ steps.component-changes.outputs.go-changes }}" == "true" ]]; then
+              echo "run-go-tests=true" >> $GITHUB_OUTPUT
+            else
+              echo "run-go-tests=false" >> $GITHUB_OUTPUT
+            fi
+
+            # Run JS tests only if JS code has changed
+            if [[ "${{ steps.component-changes.outputs.js-changes }}" == "true" ]]; then
+              echo "run-js-tests=true" >> $GITHUB_OUTPUT
+            else
+              echo "run-js-tests=false" >> $GITHUB_OUTPUT
+            fi
+          fi
 
   deploy-docs-preview:
     name: Deploy preview of docs
@@ -127,7 +163,7 @@ jobs:
   python-tests:
     name: Python tests
     needs: paths-filter
-    if: needs.paths-filter.outputs.outside-docs == 'true' && needs.paths-filter.outputs.only-js-client != 'true'
+    if: needs.paths-filter.outputs.outside-docs == 'true' && needs.paths-filter.outputs.run-all-tests == 'true'
     uses: ./.github/workflows/_python-tests.yml
     with:
       property_testing_preset: 'fast'
@@ -135,25 +171,25 @@ jobs:
   python-vulnerability-scan:
     name: Python vulnerability scan
     needs: paths-filter
-    if: needs.paths-filter.outputs.outside-docs == 'true' && needs.paths-filter.outputs.only-js-client != 'true'
+    if: needs.paths-filter.outputs.outside-docs == 'true' && needs.paths-filter.outputs.run-all-tests == 'true'
     uses: ./.github/workflows/_python-vulnerability-scan.yml
 
   javascript-client-tests:
     name: JavaScript client tests
     needs: paths-filter
-    if: needs.paths-filter.outputs.outside-docs == 'true'
+    if: needs.paths-filter.outputs.outside-docs == 'true' && (needs.paths-filter.outputs.run-all-tests == 'true' || needs.paths-filter.outputs.run-js-tests == 'true')
     uses: ./.github/workflows/_javascript-client-tests.yml
 
   rust-tests:
     name: Rust tests
     needs: paths-filter
-    if: needs.paths-filter.outputs.outside-docs == 'true' && needs.paths-filter.outputs.only-js-client != 'true'
+    if: needs.paths-filter.outputs.outside-docs == 'true' && needs.paths-filter.outputs.run-all-tests == 'true'
     uses: ./.github/workflows/_rust-tests.yml
 
   go-tests:
     name: Go tests
     needs: paths-filter
-    if: needs.paths-filter.outputs.outside-docs == 'true' && needs.paths-filter.outputs.only-js-client != 'true'
+    if: needs.paths-filter.outputs.outside-docs == 'true' && (needs.paths-filter.outputs.run-all-tests == 'true' || needs.paths-filter.outputs.run-go-tests == 'true')
     uses: ./.github/workflows/_go-tests.yml
 
   check-title:
