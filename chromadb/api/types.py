@@ -522,6 +522,7 @@ class EmbeddingFunction(Protocol[D]):
         Future implementations should override this method.
         """
         import warnings
+        import inspect
 
         warnings.warn(
             "The EmbeddingFunction class does not implement name(). "
@@ -529,9 +530,7 @@ class EmbeddingFunction(Protocol[D]):
             DeprecationWarning,
             stacklevel=2,
         )
-        raise NotImplementedError(
-            "name() is not implemented for this embedding function."
-        )
+        return NotImplemented
 
     def default_space(self) -> Space:
         """
@@ -562,9 +561,7 @@ class EmbeddingFunction(Protocol[D]):
             DeprecationWarning,
             stacklevel=2,
         )
-        raise NotImplementedError(
-            "build_from_config() is not implemented for this embedding function."
-        )
+        return NotImplemented
 
     def get_config(self) -> Dict[str, Any]:
         """
@@ -582,9 +579,7 @@ class EmbeddingFunction(Protocol[D]):
             DeprecationWarning,
             stacklevel=2,
         )
-        raise NotImplementedError(
-            "get_config() is not implemented for this embedding function."
-        )
+        return NotImplemented
 
     def validate_config_update(
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]

@@ -25,7 +25,7 @@ from functools import wraps
 
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
-    load_collection_config_from_json,
+    load_collection_configuration_from_json,
 )
 from pydantic import BaseModel
 from chromadb import __version__ as chromadb_version
@@ -787,7 +787,7 @@ class FastAPI(Server):
             configuration = (
                 CreateCollectionConfiguration()
                 if not create.configuration
-                else load_collection_config_from_json(create.configuration)
+                else load_collection_configuration_from_json(create.configuration)
             )
 
             # NOTE(rescrv, iron will auth):  Implemented.
@@ -1707,7 +1707,7 @@ class FastAPI(Server):
             configuration = (
                 CreateCollectionConfiguration()
                 if not create.configuration
-                else load_collection_config_from_json(create.configuration)
+                else load_collection_configuration_from_json(create.configuration)
             )
 
             (

@@ -35,12 +35,12 @@ from chromadb.types import (
 )
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
-    create_collection_config_to_json_str,
-    load_collection_config_from_json_str,
-    load_collection_config_from_json,
-    create_collection_config_from_legacy_params,
+    create_collection_configuration_to_json_str,
+    load_collection_configuration_from_json_str,
+    load_collection_configuration_from_json,
+    create_collection_configuration_from_legacy_metadata,
     CollectionConfiguration,
-    load_collection_config_from_create_collection_config,
+    load_collection_configuration_from_create_collection_configuration,
     collection_configuration_to_json_str,
     InvalidConfigurationError,
 )
@@ -311,7 +311,7 @@ class SqlSysDB(SqlDB, SysDB):
         collection = Collection(
             id=id,
             name=name,
-            configuration=load_collection_config_from_create_collection_config(
+            configuration=load_collection_configuration_from_create_collection_configuration(
                 configuration
             ),
             metadata=metadata,
@@ -338,7 +338,7 @@ class SqlSysDB(SqlDB, SysDB):
                 .insert(
                     ParameterValue(self.uuid_to_db(collection["id"])),
                     ParameterValue(collection["name"]),
-                    ParameterValue(create_collection_config_to_json_str(configuration)),
+                    ParameterValue(create_collection_configuration_to_json_str(configuration)),
                     ParameterValue(collection["dimension"]),
                     # Get the database id for the database with the given name and tenant
                     self.querybuilder()
@@ -524,7 +524,7 @@ class SqlSysDB(SqlDB, SysDB):
                 metadata = self._metadata_from_rows(rows)
                 dimension = int(rows[0][3]) if rows[0][3] else None
                 if rows[0][2] is not None:
-                    configuration = load_collection_config_from_json_str(rows[0][2])
+                    configuration = load_collection_configuration_from_json_str(rows[0][2])
                 else:
                     # 07/2024: This is a legacy case where we don't have a collection
                     # configuration stored in the database. This non-destructively migrates
@@ -885,7 +885,7 @@ class SqlSysDB(SqlDB, SysDB):
             )
 
         try:
-            return load_collection_config_from_json_str(json_str)
+            return load_collection_configuration_from_json_str(json_str)
         except InvalidConfigurationError as error:
             # 07/17/2024: the initial migration from the legacy metadata-based config to the new sysdb-based config had a bug where the batch_size and sync_threshold were swapped. Along with this migration, a validator was added to HNSWConfigurationInternal to ensure that batch_size <= sync_threshold.
             hnsw_configuration = config_json.get("hnsw_configuration")
@@ -902,7 +902,7 @@ class SqlSysDB(SqlDB, SysDB):
                     }
                     config_json.update({"hnsw_configuration": hnsw_configuration})
 
-                    configuration = load_collection_config_from_json(config_json)
+                    configuration = load_collection_configuration_from_json(config_json)
 
                     collections_t = Table("collections")
                     q = (
@@ -938,11 +938,11 @@ class SqlSysDB(SqlDB, SysDB):
         # Get any existing HNSW params from the metadata (works regardless whether metadata has persistent params)
         hnsw_metadata_params = PersistentHnswParams.extract(metadata or {})
 
-        create_collection_config = create_collection_config_from_legacy_params(
+        create_collection_config = create_collection_configuration_from_legacy_metadata(
             hnsw_metadata_params
         )
         # Write the configuration into the database
-        configuration_json_str = create_collection_config_to_json_str(
+        configuration_json_str = create_collection_configuration_to_json_str(
             create_collection_config
         )
         q = (
@@ -957,7 +957,7 @@ class SqlSysDB(SqlDB, SysDB):
         sql, params = get_sql(q, self.parameter_format())
         with self.tx() as cur:
             cur.execute(sql, params)
-        return load_collection_config_from_json_str(configuration_json_str)
+        return load_collection_configuration_from_json_str(configuration_json_str)
 
     @override
     def get_collection_size(self, id: UUID) -> int:

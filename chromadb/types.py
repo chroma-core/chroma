@@ -15,8 +15,8 @@ from chromadb.api.configuration import (
 from chromadb.serde import BaseModelJSONSerializable
 from chromadb.api.collection_configuration import (
     CollectionConfiguration,
-    create_collection_config_to_json,
-    load_collection_config_from_json,
+    collection_configuration_to_json,
+    load_collection_configuration_from_json,
 )
 
 from chromadb.base_types import (
@@ -101,7 +101,7 @@ class Collection(
             id=id,
             name=name,
             metadata=metadata,
-            configuration_json=create_collection_config_to_json(configuration),
+            configuration_json=collection_configuration_to_json(configuration),
             dimension=dimension,
             tenant=tenant,
             database=database,
@@ -143,11 +143,11 @@ class Collection(
 
     def get_configuration(self) -> CollectionConfiguration:
         """Returns the configuration of the collection"""
-        return load_collection_config_from_json(self.configuration_json)
+        return load_collection_configuration_from_json(self.configuration_json)
 
     def set_configuration(self, configuration: CollectionConfiguration) -> None:
         """Sets the configuration of the collection"""
-        self.configuration_json = create_collection_config_to_json(configuration)
+        self.configuration_json = collection_configuration_to_json(configuration)
 
     def get_model_fields(self) -> Dict[Any, Any]:
         """Used for backward compatibility with Pydantic 1.x"""
@@ -164,7 +164,7 @@ class Collection(
         params_map = json_map.copy()
 
         # Get the CollectionConfiguration from the JSON map, and remove it from the map
-        configuration = load_collection_config_from_json(
+        configuration = load_collection_configuration_from_json(
             params_map.pop("configuration_json", None)
         )
 

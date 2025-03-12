@@ -2,7 +2,7 @@ from concurrent import futures
 from typing import Any, Dict, List, cast
 from uuid import UUID
 from overrides import overrides
-from chromadb.api.collection_configuration import load_collection_config_from_json_str
+from chromadb.api.collection_configuration import load_collection_configuration_from_json_str
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Component, System
 from chromadb.proto.convert import (
     from_proto_metadata,
@@ -284,7 +284,7 @@ class GrpcMockSysDB(SysDBServicer, Component):
                 f"Collection {collection_name} already exists",
             )
 
-        configuration = load_collection_config_from_json_str(
+        configuration = load_collection_configuration_from_json_str(
             request.configuration_json_str
         )
 
