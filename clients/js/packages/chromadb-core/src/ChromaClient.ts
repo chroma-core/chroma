@@ -318,14 +318,17 @@ export class ChromaClient {
     const response = (await this.api.listCollectionsV2(
       this.tenant,
       this.database,
-      limit ?? null,
-      offset ?? null,
+      limit !== undefined ? limit : undefined,
+      offset !== undefined ? offset : undefined,
       this.api.options,
     )) as {
       collections: { name: string; tenant: string; database: string }[];
     };
 
-    return response.collections.map((collection) => collection.name);
+    // Debug logging
+    console.log("listCollections API response:", JSON.stringify(response));
+
+    return (response.collections || []).map((collection) => collection.name);
   }
 
   /**
@@ -357,10 +360,13 @@ export class ChromaClient {
     const results = (await this.api.listCollectionsV2(
       this.tenant,
       this.database,
-      limit ?? null,
-      offset ?? null,
+      limit !== undefined ? limit : undefined,
+      offset !== undefined ? offset : undefined,
       this.api.options,
     )) as any;
+
+    // Debug logging
+    console.log("listCollectionsAndMetadata API response:", JSON.stringify(results));
 
     return results.collections ?? [];
   }
