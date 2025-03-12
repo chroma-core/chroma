@@ -159,7 +159,7 @@ fn download_repo_directory(
             ContentType::Dir => {
                 create_dir_all(&item_local_path)?;
                 let base_url = url.split('?').next().unwrap();
-                let sub_url = format!("{}/{}?ref=itai/demo-app", base_url, item.name);
+                let sub_url = format!("{}/{}?ref=itai/demo-cli", base_url, item.name);
                 download_repo_directory(client, &sub_url, &item_local_path, progress)?;
             }
         }
@@ -438,6 +438,4 @@ pub fn install(args: InstallArgs) {
     );
     set_environment_variables(format!("{}/{}", path, args.name), &env_variables).expect("Failed to set environment variables");
     println!("{}\n", instructions.yellow());
-
-    println!();
 }

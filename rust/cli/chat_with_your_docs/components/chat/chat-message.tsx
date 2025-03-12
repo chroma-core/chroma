@@ -17,7 +17,7 @@ const ChatMessage: React.FC<{ message: Message; active?: boolean }> = ({
       className={`flex flex-col gap-4 max-w-[80%] ${message.role === "user" && "self-end"}`}
     >
       {message.role === "assistant" && !active && (
-        <div className="flex items-center text-lg font-medium">{`Retrieving (${message.retrievalTime?.toFixed(2)} ms)`}</div>
+        <div className="flex items-center text-lg font-medium">{`Retrieving (${message.retrievalTime} seconds)`}</div>
       )}
       {message.role === "assistant" && !active && (
         <div className="flex gap-4 ">

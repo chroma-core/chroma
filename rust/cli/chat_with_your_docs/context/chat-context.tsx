@@ -1,14 +1,8 @@
-import React, {
-  createContext,
-  useContext,
-  useState,
-  ReactNode,
-  useEffect,
-} from "react";
+import React, { createContext, useContext, useState, ReactNode } from "react";
 import { Chunk, Message } from "@/lib/models";
 import { getAssistantResponse } from "@/lib/ai-utils";
 import { generateUUID } from "@/lib/utils";
-import { addTelemetry, heartbeat, retrieveChunks } from "@/lib/retrieval";
+import { addTelemetry, retrieveChunks } from "@/lib/retrieval";
 import { v4 as uuidv4 } from "uuid";
 
 type ChatContextType = {
@@ -33,29 +27,12 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
   const [activeResponse, setActiveResponse] = useState<string>("");
   const [retrievalTime, setRetrievalTime] = useState<number | null>(null);
   const [chatId, setChatId] = useState<string>("");
-  const [travelTime, setTravelTime] = useState<number>(0);
-
-  useEffect(() => {
-    if (travelTime) {
-      return;
-    }
-    heartbeat()
-      .then(() => {
-        heartbeat()
-          .then((time) => setTravelTime(time))
-          .finally();
-      })
-      .finally();
-  }, []);
 
   const addUserMessage = async (content: string) => {
-    const currentChatId = chatId || uuidv4();
+    let currentChatId = chatId || uuidv4();
     if (!chatId) {
       setChatId(currentChatId);
     }
-
-    console.log(travelTime.toFixed(2));
-
     let userMessage: Message;
     try {
       const { id, timestamp } = generateUUID();
@@ -73,9 +50,7 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
     setLoading(true);
 
     const { time, chunks } = await retrieveChunks(userMessage);
-    console.log(time.toFixed(2));
-    const finalTime = time - travelTime > 0 ? time - travelTime : time;
-    setRetrievalTime(finalTime);
+    setRetrievalTime(time / 1000);
     setChunks(chunks);
 
     try {
@@ -96,7 +71,7 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
         role: "assistant",
         content: streamedResponse,
         chunks,
-        retrievalTime: finalTime,
+        retrievalTime: time / 1000,
       };
 
       addTelemetry(assistantMessage, currentChatId).finally();

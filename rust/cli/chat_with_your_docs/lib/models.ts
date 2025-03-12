@@ -1,7 +1,7 @@
 export interface Chunk {
   id: string;
   content: string;
-  type: "code" | "docs";
+  type: "code" | "documentation";
   summary: string;
 }
 

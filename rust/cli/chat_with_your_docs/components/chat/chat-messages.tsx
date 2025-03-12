@@ -72,7 +72,7 @@ const ChatMessages: React.FC = () => {
           </div>
         )}
         {retrievalTime !== null && (
-          <div className="flex items-center text-lg font-medium">{`Retrieving (${retrievalTime.toFixed(2)} ms)`}</div>
+          <div className="flex items-center text-lg font-medium">{`Retrieving (${retrievalTime} seconds)`}</div>
         )}
         <div className="flex gap-4">
           {chunks.map((chunk: Chunk) => (

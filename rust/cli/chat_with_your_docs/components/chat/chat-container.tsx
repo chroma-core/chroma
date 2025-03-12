@@ -1,5 +1,4 @@
 import React from "react";
-import { XIcon } from "lucide-react";
 
 const ChatContainer: React.FC<{ children: React.ReactNode }> = ({
   children,
@@ -17,9 +16,7 @@ const ChatContainer: React.FC<{ children: React.ReactNode }> = ({
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 px-2 py-1 bg-white dark:bg-gray-950 font-mono select-none">
             CHROMA CHAT
           </div>
-          <div className="absolute top-1 right-4 flex items-center justify-center w-7 h-7 bg-white border border-black">
-            <XIcon className="w-5 h-5" />
-          </div>
+          <div className="absolute top-1 right-4 w-7 h-7 bg-white border border-black" />
         </div>
       </div>
       <div className="flex-grow ">{children}</div>

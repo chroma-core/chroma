@@ -20,7 +20,7 @@ const Citation: React.FC<{ chunk: Chunk }> = ({ chunk }) => {
         <HoverCardTrigger asChild>
           <div className="flex items-center justify-center p-2 border border-black rounded-sm cursor-pointer">
             {chunk.type === "code" && <Code className="w-4 h-4" />}
-            {chunk.type === "docs" && <File className="w-4 h-4" />}
+            {chunk.type === "documentation" && <File className="w-4 h-4" />}
           </div>
         </HoverCardTrigger>
       </Link>

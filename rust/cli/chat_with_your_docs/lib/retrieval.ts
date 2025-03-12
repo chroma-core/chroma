@@ -14,19 +14,6 @@ export const embed = async (texts: string[]): Promise<number[][]> => {
   return response.data.map((item) => item.embedding);
 };
 
-export const heartbeat = async () => {
-  const url = "https://api.trychroma.com:8000/api/v2/heartbeat";
-  try {
-    const start = performance.now();
-    await axios.get(url);
-    console.log((performance.now() - start).toFixed(2));
-    return performance.now() - start;
-  } catch (error) {
-    console.error("Error getting Chroma collection:", error);
-    throw error;
-  }
-};
-
 export const getChromaCollection = async (
   collectionName: string,
 ): Promise<{ id: string }> => {
@@ -50,7 +37,7 @@ export const collectionAdd = async (
   ids: string[],
   documents?: string[],
   metadatas?: {
-    "chat-id": string;
+    chat_id: string;
     role: "user" | "assistant";
     timestamp: string;
     chunks: string | undefined;
@@ -88,16 +75,17 @@ const collectionQuery = async (
   chunks: {
     ids: string[][];
     documents: string[][];
-    metadatas: { type: string; summary: string }[][];
+    metadatas: { type: string }[][];
   };
-  time: number;
+  embedTime: number;
 }> => {
   const url = `https://api.trychroma.com:8000/api/v2/tenants/${process.env.CHROMA_TENANT_ID}/databases/${process.env.CHROMA_DATABASE}/collections/${collectionId}/query`;
+  const start = Date.now();
   const payload = {
     query_embeddings: await embed([query]),
     n_results: 5,
   };
-  const start = performance.now();
+  const elapsed = Date.now() - start;
 
   const headers = {
     "Content-Type": "application/json",
@@ -106,16 +94,41 @@ const collectionQuery = async (
 
   try {
     const response = await axios.post(url, payload, { headers });
-    return { chunks: response.data, time: performance.now() - start };
+    return { chunks: response.data, embedTime: elapsed };
   } catch (error) {
     console.error("Error querying Chroma collection:", error);
     throw error;
   }
 };
 
+export const collectionGet = async (
+  collectionId: string,
+  ids?: string[],
+  where?: any,
+) => {
+  const url = `https://api.trychroma.com:8000/api/v2/tenants/${process.env.CHROMA_TENANT_ID}/databases/${process.env.CHROMA_DATABASE}/collections/${collectionId}/get`;
+
+  const payload = {
+    where: where,
+  };
+
+  const headers = {
+    "Content-Type": "application/json",
+    "X-Chroma-Token": process.env.CHROMA_API_KEY,
+  };
+
+  try {
+    const response = await axios.post(url, payload, { headers });
+    return response.data;
+  } catch (error) {
+    console.error("Error getting from a Chroma collection:", error);
+    throw error;
+  }
+};
+
 export const addTelemetry = async (message: Message, chatId: string) => {
   const metadata = {
-    "chat-id": chatId,
+    chat_id: chatId,
     role: message.role,
     timestamp: message.timestamp,
     chunks: message.chunks?.map((c) => c.id).toString(),
@@ -134,12 +147,35 @@ export const addTelemetry = async (message: Message, chatId: string) => {
 };
 
 export const retrieveChunks = async (message: Message) => {
+  const start = Date.now();
   const dataCollection = (await getChromaCollection("data")) as { id: string };
+  const summariesCollection = (await getChromaCollection("summaries")) as {
+    id: string;
+  };
 
-  const { chunks, time } = await collectionQuery(
+  const { chunks, embedTime } = await collectionQuery(
     dataCollection.id,
     message.content,
   );
+
+  const time = Date.now() - (start + embedTime);
+
+  const where = {
+    $or: chunks.ids[0].map((chunkId) => {
+      return { "document-id": chunkId };
+    }),
+  };
+
+  const summaries = await collectionGet(
+    summariesCollection.id,
+    undefined,
+    where,
+  );
+
+  const summaryByChunkId: Record<string, string> = {};
+  summaries.documents.forEach((doc: string, i: number) => {
+    summaryByChunkId[summaries.metadatas[i]["document-id"] as string] = doc;
+  });
 
   return {
     time,
@@ -148,7 +184,7 @@ export const retrieveChunks = async (message: Message) => {
         id: chunkId,
         content: chunks.documents[0][i],
         type: chunks.metadatas[0][i]?.type,
-        summary: chunks.metadatas[0][i]?.summary,
+        summary: summaryByChunkId[chunkId],
       } as Chunk;
     }),
   };
