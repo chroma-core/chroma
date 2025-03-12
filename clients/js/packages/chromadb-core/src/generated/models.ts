@@ -13,9 +13,9 @@
  */
 
 export namespace Api {
-	export interface AddRequest {
+	export interface AddV1V1Request {
 		embeddings?: (unknown[]) | null;
-		metadatas?: ((Api.AddRequest.Metadatum | null)[]) | null;
+		metadatas?: ((Api.AddV1V1Request.Metadatum | null)[]) | null;
 		documents?: ((string | null)[]) | null;
 		uris?: ((string | null)[]) | null;
 		ids: string[];
@@ -23,17 +23,17 @@ export namespace Api {
 	
 	/**
 	 * @export
-	 * @namespace AddRequest
+	 * @namespace AddV1V1Request
 	 */
-	export namespace AddRequest {
+	export namespace AddV1V1Request {
 		export interface Metadatum {
 		}
 	
 	}
 
-	export interface AddV1Request {
+	export interface AddV2Request {
 		embeddings?: (unknown[]) | null;
-		metadatas?: ((Api.AddV1Request.Metadatum | null)[]) | null;
+		metadatas?: ((Api.AddV2Request.Metadatum | null)[]) | null;
 		documents?: ((string | null)[]) | null;
 		uris?: ((string | null)[]) | null;
 		ids: string[];
@@ -41,76 +41,26 @@ export namespace Api {
 	
 	/**
 	 * @export
-	 * @namespace AddV1Request
+	 * @namespace AddV2Request
 	 */
-	export namespace AddV1Request {
+	export namespace AddV2Request {
 		export interface Metadatum {
 		}
 	
 	}
 
-	export interface ADeleteRequest {
-		ids?: (string[]) | null;
-		where?: Api.ADeleteRequest.Where | null;
-		'where_document'?: Api.ADeleteRequest.WhereDocument | null;
-	}
-	
-	/**
-	 * @export
-	 * @namespace ADeleteRequest
-	 */
-	export namespace ADeleteRequest {
-		export interface Where {
-		}
-	
-		export interface WhereDocument {
-		}
-	
-	}
-
-	export interface AGetRequest {
-		ids?: (string[]) | null;
-		where?: Api.AGetRequest.Where | null;
-		'where_document'?: Api.AGetRequest.WhereDocument | null;
-		sort?: string | null;
-		/**
-		 * @type {number | null}
-		 * @memberof AGetRequest
-		 */
-		limit?: number | null;
-		/**
-		 * @type {number | null}
-		 * @memberof AGetRequest
-		 */
-		offset?: number | null;
-		include?: Api.IncludeEnum[];
-	}
-	
-	/**
-	 * @export
-	 * @namespace AGetRequest
-	 */
-	export namespace AGetRequest {
-		export interface Where {
-		}
-	
-		export interface WhereDocument {
-		}
-	
-	}
-
-	export interface CreateCollectionRequest {
+	export interface CreateCollectionV1V1Request {
 		name: string;
-		configuration?: Api.CreateCollectionRequest.Configuration | null;
-		metadata?: Api.CreateCollectionRequest.Metadata | null;
+		configuration?: Api.CreateCollectionV1V1Request.Configuration | null;
+		metadata?: Api.CreateCollectionV1V1Request.Metadata | null;
 		'get_or_create'?: boolean;
 	}
 	
 	/**
 	 * @export
-	 * @namespace CreateCollectionRequest
+	 * @namespace CreateCollectionV1V1Request
 	 */
-	export namespace CreateCollectionRequest {
+	export namespace CreateCollectionV1V1Request {
 		export interface Configuration {
 		}
 	
@@ -119,18 +69,18 @@ export namespace Api {
 	
 	}
 
-	export interface CreateCollectionV1Request {
+	export interface CreateCollectionV2Request {
 		name: string;
-		configuration?: Api.CreateCollectionV1Request.Configuration | null;
-		metadata?: Api.CreateCollectionV1Request.Metadata | null;
+		configuration?: Api.CreateCollectionV2Request.Configuration | null;
+		metadata?: Api.CreateCollectionV2Request.Metadata | null;
 		'get_or_create'?: boolean;
 	}
 	
 	/**
 	 * @export
-	 * @namespace CreateCollectionV1Request
+	 * @namespace CreateCollectionV2Request
 	 */
-	export namespace CreateCollectionV1Request {
+	export namespace CreateCollectionV2Request {
 		export interface Configuration {
 		}
 	
@@ -139,33 +89,33 @@ export namespace Api {
 	
 	}
 
-	export interface CreateDatabaseRequest {
+	export interface CreateDatabaseV1V1Request {
 		name: string;
 	}
 
-	export interface CreateDatabaseV1Request {
+	export interface CreateDatabaseV2Request {
 		name: string;
 	}
 
-	export interface CreateTenantRequest {
+	export interface CreateTenantV1V1Request {
 		name: string;
 	}
 
-	export interface CreateTenantV1Request {
+	export interface CreateTenantV2Request {
 		name: string;
 	}
 
-	export interface DeleteV1Request {
+	export interface DeleteV1V1Request {
 		ids?: (string[]) | null;
-		where?: Api.DeleteV1Request.Where | null;
-		'where_document'?: Api.DeleteV1Request.WhereDocument | null;
+		where?: Api.DeleteV1V1Request.Where | null;
+		'where_document'?: Api.DeleteV1V1Request.WhereDocument | null;
 	}
 	
 	/**
 	 * @export
-	 * @namespace DeleteV1Request
+	 * @namespace DeleteV1V1Request
 	 */
-	export namespace DeleteV1Request {
+	export namespace DeleteV1V1Request {
 		export interface Where {
 		}
 	
@@ -174,13 +124,32 @@ export namespace Api {
 	
 	}
 
-	export interface GetNearestNeighborsRequest {
-		where?: Api.GetNearestNeighborsRequest.Where | null;
-		'where_document'?: Api.GetNearestNeighborsRequest.WhereDocument | null;
+	export interface DeleteV2Request {
+		ids?: (string[]) | null;
+		where?: Api.DeleteV2Request.Where | null;
+		'where_document'?: Api.DeleteV2Request.WhereDocument | null;
+	}
+	
+	/**
+	 * @export
+	 * @namespace DeleteV2Request
+	 */
+	export namespace DeleteV2Request {
+		export interface Where {
+		}
+	
+		export interface WhereDocument {
+		}
+	
+	}
+
+	export interface GetNearestNeighborsV1V1Request {
+		where?: Api.GetNearestNeighborsV1V1Request.Where | null;
+		'where_document'?: Api.GetNearestNeighborsV1V1Request.WhereDocument | null;
 		'query_embeddings': unknown[];
 		/**
 		 * @type {number}
-		 * @memberof GetNearestNeighborsRequest
+		 * @memberof GetNearestNeighborsV1V1Request
 		 */
 		'n_results'?: number;
 		include?: Api.IncludeEnum[];
@@ -188,9 +157,9 @@ export namespace Api {
 	
 	/**
 	 * @export
-	 * @namespace GetNearestNeighborsRequest
+	 * @namespace GetNearestNeighborsV1V1Request
 	 */
-	export namespace GetNearestNeighborsRequest {
+	export namespace GetNearestNeighborsV1V1Request {
 		export interface Where {
 		}
 	
@@ -199,13 +168,13 @@ export namespace Api {
 	
 	}
 
-	export interface GetNearestNeighborsV1Request {
-		where?: Api.GetNearestNeighborsV1Request.Where | null;
-		'where_document'?: Api.GetNearestNeighborsV1Request.WhereDocument | null;
+	export interface GetNearestNeighborsV2Request {
+		where?: Api.GetNearestNeighborsV2Request.Where | null;
+		'where_document'?: Api.GetNearestNeighborsV2Request.WhereDocument | null;
 		'query_embeddings': unknown[];
 		/**
 		 * @type {number}
-		 * @memberof GetNearestNeighborsV1Request
+		 * @memberof GetNearestNeighborsV2Request
 		 */
 		'n_results'?: number;
 		include?: Api.IncludeEnum[];
@@ -213,9 +182,9 @@ export namespace Api {
 	
 	/**
 	 * @export
-	 * @namespace GetNearestNeighborsV1Request
+	 * @namespace GetNearestNeighborsV2Request
 	 */
-	export namespace GetNearestNeighborsV1Request {
+	export namespace GetNearestNeighborsV2Request {
 		export interface Where {
 		}
 	
@@ -224,19 +193,19 @@ export namespace Api {
 	
 	}
 
-	export interface GetV1Request {
+	export interface GetV1V1Request {
 		ids?: (string[]) | null;
-		where?: Api.GetV1Request.Where | null;
-		'where_document'?: Api.GetV1Request.WhereDocument | null;
+		where?: Api.GetV1V1Request.Where | null;
+		'where_document'?: Api.GetV1V1Request.WhereDocument | null;
 		sort?: string | null;
 		/**
 		 * @type {number | null}
-		 * @memberof GetV1Request
+		 * @memberof GetV1V1Request
 		 */
 		limit?: number | null;
 		/**
 		 * @type {number | null}
-		 * @memberof GetV1Request
+		 * @memberof GetV1V1Request
 		 */
 		offset?: number | null;
 		include?: Api.IncludeEnum[];
@@ -244,9 +213,40 @@ export namespace Api {
 	
 	/**
 	 * @export
-	 * @namespace GetV1Request
+	 * @namespace GetV1V1Request
 	 */
-	export namespace GetV1Request {
+	export namespace GetV1V1Request {
+		export interface Where {
+		}
+	
+		export interface WhereDocument {
+		}
+	
+	}
+
+	export interface GetV2Request {
+		ids?: (string[]) | null;
+		where?: Api.GetV2Request.Where | null;
+		'where_document'?: Api.GetV2Request.WhereDocument | null;
+		sort?: string | null;
+		/**
+		 * @type {number | null}
+		 * @memberof GetV2Request
+		 */
+		limit?: number | null;
+		/**
+		 * @type {number | null}
+		 * @memberof GetV2Request
+		 */
+		offset?: number | null;
+		include?: Api.IncludeEnum[];
+	}
+	
+	/**
+	 * @export
+	 * @namespace GetV2Request
+	 */
+	export namespace GetV2Request {
 		export interface Where {
 		}
 	
@@ -268,45 +268,45 @@ export namespace Api {
 		Data = 'data'
 	}
 
-	export interface PreFlightChecks200Response {
-	}
-
 	export interface PreFlightChecksV1200Response {
 	}
 
-	export interface UpdateCollectionRequest {
+	export interface PreFlightChecksV2200Response {
+	}
+
+	export interface UpdateCollectionV1V1Request {
 		'new_name'?: string | null;
-		'new_metadata'?: Api.UpdateCollectionRequest.NewMetadata | null;
+		'new_metadata'?: Api.UpdateCollectionV1V1Request.NewMetadata | null;
 	}
 	
 	/**
 	 * @export
-	 * @namespace UpdateCollectionRequest
+	 * @namespace UpdateCollectionV1V1Request
 	 */
-	export namespace UpdateCollectionRequest {
+	export namespace UpdateCollectionV1V1Request {
 		export interface NewMetadata {
 		}
 	
 	}
 
-	export interface UpdateCollectionV1Request {
+	export interface UpdateCollectionV2Request {
 		'new_name'?: string | null;
-		'new_metadata'?: Api.UpdateCollectionV1Request.NewMetadata | null;
+		'new_metadata'?: Api.UpdateCollectionV2Request.NewMetadata | null;
 	}
 	
 	/**
 	 * @export
-	 * @namespace UpdateCollectionV1Request
+	 * @namespace UpdateCollectionV2Request
 	 */
-	export namespace UpdateCollectionV1Request {
+	export namespace UpdateCollectionV2Request {
 		export interface NewMetadata {
 		}
 	
 	}
 
-	export interface UpdateRequest {
+	export interface UpdateV1V1Request {
 		embeddings?: (unknown[]) | null;
-		metadatas?: ((Api.UpdateRequest.Metadatum | null)[]) | null;
+		metadatas?: ((Api.UpdateV1V1Request.Metadatum | null)[]) | null;
 		documents?: ((string | null)[]) | null;
 		uris?: ((string | null)[]) | null;
 		ids: string[];
@@ -314,17 +314,17 @@ export namespace Api {
 	
 	/**
 	 * @export
-	 * @namespace UpdateRequest
+	 * @namespace UpdateV1V1Request
 	 */
-	export namespace UpdateRequest {
+	export namespace UpdateV1V1Request {
 		export interface Metadatum {
 		}
 	
 	}
 
-	export interface UpdateV1Request {
+	export interface UpdateV2Request {
 		embeddings?: (unknown[]) | null;
-		metadatas?: ((Api.UpdateV1Request.Metadatum | null)[]) | null;
+		metadatas?: ((Api.UpdateV2Request.Metadatum | null)[]) | null;
 		documents?: ((string | null)[]) | null;
 		uris?: ((string | null)[]) | null;
 		ids: string[];
@@ -332,17 +332,17 @@ export namespace Api {
 	
 	/**
 	 * @export
-	 * @namespace UpdateV1Request
+	 * @namespace UpdateV2Request
 	 */
-	export namespace UpdateV1Request {
+	export namespace UpdateV2Request {
 		export interface Metadatum {
 		}
 	
 	}
 
-	export interface UpsertRequest {
+	export interface UpsertV1V1Request {
 		embeddings?: (unknown[]) | null;
-		metadatas?: ((Api.UpsertRequest.Metadatum | null)[]) | null;
+		metadatas?: ((Api.UpsertV1V1Request.Metadatum | null)[]) | null;
 		documents?: ((string | null)[]) | null;
 		uris?: ((string | null)[]) | null;
 		ids: string[];
@@ -350,17 +350,17 @@ export namespace Api {
 	
 	/**
 	 * @export
-	 * @namespace UpsertRequest
+	 * @namespace UpsertV1V1Request
 	 */
-	export namespace UpsertRequest {
+	export namespace UpsertV1V1Request {
 		export interface Metadatum {
 		}
 	
 	}
 
-	export interface UpsertV1Request {
+	export interface UpsertV2Request {
 		embeddings?: (unknown[]) | null;
-		metadatas?: ((Api.UpsertV1Request.Metadatum | null)[]) | null;
+		metadatas?: ((Api.UpsertV2Request.Metadatum | null)[]) | null;
 		documents?: ((string | null)[]) | null;
 		uris?: ((string | null)[]) | null;
 		ids: string[];
@@ -368,9 +368,9 @@ export namespace Api {
 	
 	/**
 	 * @export
-	 * @namespace UpsertV1Request
+	 * @namespace UpsertV2Request
 	 */
-	export namespace UpsertV1Request {
+	export namespace UpsertV2Request {
 		export interface Metadatum {
 		}
 	
