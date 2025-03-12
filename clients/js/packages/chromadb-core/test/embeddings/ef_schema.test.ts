@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeAll, jest } from "@jest/globals";
+import { describe, expect, test, beforeAll, afterAll, jest } from "@jest/globals";
 import {
   loadSchema,
   validateConfigSchema,
@@ -16,14 +16,6 @@ import {
   HuggingFaceEmbeddingServerFunction,
   DefaultEmbeddingFunction,
 } from "../../src/embeddings/all";
-
-// Set environment variables for testing
-process.env.OPENAI_API_KEY = "dummy_openai_key";
-process.env.COHERE_API_KEY = "dummy_cohere_key";
-process.env.JINAAI_API_KEY = "dummy_jina_key";
-process.env.GOOGLE_API_KEY = "dummy_google_key";
-process.env.HUGGINGFACE_API_KEY = "dummy_huggingface_key";
-process.env.VOYAGE_API_KEY = "dummy_voyageai_key";
 
 // Mock for embedding functions to avoid actual API calls
 const mockEmbeddings = [[0.1, 0.2, 0.3]];
@@ -200,6 +192,22 @@ beforeAll(() => {
         .mockImplementation(async () => mockEmbeddings);
     }
   });
+
+  // Set environment variables for testing
+  process.env.OPENAI_API_KEY = "dummy_openai_key";
+  process.env.COHERE_API_KEY = "dummy_cohere_key";
+  process.env.JINAAI_API_KEY = "dummy_jina_key";
+  process.env.GOOGLE_API_KEY = "dummy_google_key";
+  process.env.VOYAGE_API_KEY = "dummy_voyageai_key";
+});
+
+// Clean up environment variables after all tests
+afterAll(() => {
+  process.env.OPENAI_API_KEY = undefined;
+  process.env.COHERE_API_KEY = undefined;
+  process.env.JINAAI_API_KEY = undefined;
+  process.env.GOOGLE_API_KEY = undefined;
+  process.env.VOYAGE_API_KEY = undefined;
 });
 
 describe("Embedding Function Schemas", () => {

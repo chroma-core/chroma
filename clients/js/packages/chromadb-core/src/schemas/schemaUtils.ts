@@ -23,29 +23,47 @@ import voyageaiSchema from "../../../../../../schemas/embedding_functions/voyage
 
 import Ajv from "ajv";
 
+// Define a common interface for all schemas
+interface Schema {
+  $schema: string;
+  title?: string;
+  description?: string;
+  version?: string;
+  type: string;
+  properties: Record<string, any>;
+  required?: string[];
+  additionalProperties?: boolean;
+  [key: string]: any; // Allow for other properties
+}
+
+const ajv = new Ajv({
+  strict: false, // Allow unknown keywords
+  allErrors: true,
+});
+
 // Map of schema names to schema objects
-const schemaMap: Record<string, any> = {
-  amazon_bedrock: amazonBedrockSchema,
-  base_schema: baseSchema,
-  chroma_langchain: chromaLangchainSchema,
-  cohere: cohereSchema,
-  default: defaultSchema,
-  google_generative_ai: googleGenerativeAiSchema,
-  google_palm: googlePalmSchema,
-  google_vertex: googleVertexSchema,
-  huggingface: huggingfaceSchema,
-  huggingface_server: huggingfaceServerSchema,
-  instructor: instructorSchema,
-  jina: jinaSchema,
-  ollama: ollamaSchema,
-  onnx_mini_lm_l6_v2: onnxMiniLmL6V2Schema,
-  open_clip: openClipSchema,
-  openai: openaiSchema,
-  roboflow: roboflowSchema,
-  sentence_transformer: sentenceTransformerSchema,
-  text2vec: text2vecSchema,
-  transformers: transformersSchema,
-  voyageai: voyageaiSchema,
+const schemaMap: Record<string, Schema> = {
+  amazon_bedrock: amazonBedrockSchema as Schema,
+  base_schema: baseSchema as Schema,
+  chroma_langchain: chromaLangchainSchema as Schema,
+  cohere: cohereSchema as Schema,
+  default: defaultSchema as Schema,
+  google_generative_ai: googleGenerativeAiSchema as Schema,
+  google_palm: googlePalmSchema as Schema,
+  google_vertex: googleVertexSchema as Schema,
+  huggingface: huggingfaceSchema as Schema,
+  huggingface_server: huggingfaceServerSchema as Schema,
+  instructor: instructorSchema as Schema,
+  jina: jinaSchema as Schema,
+  ollama: ollamaSchema as Schema,
+  onnx_mini_lm_l6_v2: onnxMiniLmL6V2Schema as Schema,
+  open_clip: openClipSchema as Schema,
+  openai: openaiSchema as Schema,
+  roboflow: roboflowSchema as Schema,
+  sentence_transformer: sentenceTransformerSchema as Schema,
+  text2vec: text2vecSchema as Schema,
+  transformers: transformersSchema as Schema,
+  voyageai: voyageaiSchema as Schema,
 };
 
 /**
@@ -55,7 +73,7 @@ const schemaMap: Record<string, any> = {
  * @returns The loaded schema as an object
  * @throws Error if the schema is not available
  */
-export function loadSchema(schemaName: string): Record<string, any> {
+export function loadSchema(schemaName: keyof typeof schemaMap): Schema {
   if (!schemaMap[schemaName]) {
     throw new Error(`Schema '${schemaName}' not found`);
   }
@@ -72,17 +90,13 @@ export function loadSchema(schemaName: string): Record<string, any> {
  */
 export function validateConfigSchema(
   config: Record<string, any>,
-  schemaName: string,
+  schemaName: keyof typeof schemaMap,
 ): void {
   const schema = loadSchema(schemaName);
 
   // Create a copy of the schema without the version field
   const { version, ...schemaWithoutVersion } = schema;
 
-  const ajv = new Ajv({
-    strict: false, // Allow unknown keywords
-    allErrors: true,
-  });
   const validate = ajv.compile(schemaWithoutVersion);
   const valid = validate(config);
 
@@ -104,7 +118,7 @@ export function validateConfigSchema(
  * @returns The schema version as a string
  * @throws Error if the schema file does not exist or is not valid JSON
  */
-export function getSchemaVersion(schemaName: string): string {
+export function getSchemaVersion(schemaName: keyof typeof schemaMap): string {
   const schema = loadSchema(schemaName);
   return schema.version || "1.0.0";
 }
@@ -114,8 +128,8 @@ export function getSchemaVersion(schemaName: string): string {
  *
  * @returns A list of schema names (without .json extension)
  */
-export function getAvailableSchemas(): string[] {
-  return Object.keys(schemaMap).filter((name) => name !== "base_schema");
+export function getAvailableSchemas(): (keyof typeof schemaMap)[] {
+  return Object.keys(schemaMap).filter((name) => name !== "base_schema") as (keyof typeof schemaMap)[];
 }
 
 /**
