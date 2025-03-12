@@ -705,8 +705,8 @@ impl GrpcSysDb {
         let req = chroma_proto::GetCollectionRequest {
             id: collection_id.0.to_string(),
             name: name.clone(),
-            tenant: tenant,
-            database: database,
+            tenant,
+            database,
         };
         let res = self.client.get_collection(req).await;
         match res {
