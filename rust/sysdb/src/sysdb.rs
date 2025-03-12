@@ -133,8 +133,11 @@ impl SysDb {
                 grpc.get_collection(collection_id, name, tenant, database)
                     .await
             }
-            SysDb::Sqlite(sqlite) => unimplemented!(),
-            SysDb::Test(test) => unimplemented!(),
+            SysDb::Sqlite(_sqlite) => unimplemented!(),
+            SysDb::Test(test) => {
+                test.get_collection(collection_id, name, tenant, database)
+                    .await
+            }
         }
     }
 
@@ -701,16 +704,18 @@ impl GrpcSysDb {
     ) -> Result<Collection, GetCollectionError> {
         let req = chroma_proto::GetCollectionRequest {
             id: collection_id.0.to_string(),
-            name: name.unwrap_or("".to_string()),
-            tenant: tenant.unwrap_or("".to_string()),
-            database: database.unwrap_or("".to_string()),
+            name: name.clone(),
+            tenant: tenant,
+            database: database,
         };
         let res = self.client.get_collection(req).await;
         match res {
             Ok(res) => {
                 let res = match res.into_inner().collection {
                     Some(res) => res,
-                    None => return Err(GetCollectionError::NotFound(name)),
+                    None => {
+                        return Err(GetCollectionError::NotFound(name.unwrap_or("".to_string())))
+                    }
                 };
                 Ok(res.try_into().unwrap())
             }
