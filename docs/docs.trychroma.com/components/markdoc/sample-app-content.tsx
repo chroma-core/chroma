@@ -67,10 +67,6 @@ const SampleAppContent: React.FC = () => {
         <p>
           Install the Chroma CLI via our Python or NPM package, or using cURL
         </p>
-        <TabbedCodeBlock>
-          <Tab label="python">code</Tab>
-          <Tab label="javascript">code</Tab>
-        </TabbedCodeBlock>
       </div>
     </div>
   );

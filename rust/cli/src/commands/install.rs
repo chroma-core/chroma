@@ -107,7 +107,7 @@ impl LlmProvider {
 
 #[derive(Parser, Debug)]
 pub struct InstallArgs {
-    #[arg(long)]
+    #[arg(index = 1)]
     name: String,
     #[arg(long)]
     path: Option<String>,
@@ -296,7 +296,7 @@ fn copy_db_cloud(source_db: String, target_db: String) {
     //     }
     // }
     // spinner.finish();
-    let total_steps = 50;
+    let total_steps = 100;
     let bar_width = 50;
 
     for i in 0..=total_steps {
@@ -304,7 +304,7 @@ fn copy_db_cloud(source_db: String, target_db: String) {
         let empty = bar_width - filled;
         print!("\r[{}{}] {}%", "=".repeat(filled as usize), " ".repeat(empty as usize), i);
         io::stdout().flush().unwrap();
-        thread::sleep(Duration::from_millis(50));
+        thread::sleep(Duration::from_millis(10));
     }
 
     println!("\n{}", "DB copy complete!".bold());
