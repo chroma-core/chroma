@@ -1,3 +1,8 @@
+---
+id: lovable
+name: Lovable.dev
+---
+
 # Lovable.dev
 
 [Lovable.dev](https://www.lovable.dev) is a versatile platform designed to help developers quickly build and deploy AI-powered applications. Whether you're working on search engines, recommendation systems, or any other type of AI-driven project, Lovable.dev makes it easy to integrate advanced AI models and manage your data efficiently.
