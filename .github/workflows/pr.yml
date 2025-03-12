@@ -28,7 +28,7 @@ jobs:
         uses: dorny/paths-filter@v3
         with:
           filters: |
-            # Only documentation changes
+            # documentation changes
             docs:
               - 'docs/**'
             # Outside docs
