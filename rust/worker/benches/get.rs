@@ -111,6 +111,7 @@ async fn bench_routine(input: (System, GetOrchestrator, Vec<String>)) {
         .expect("Orchestrator should not fail");
     assert_eq!(
         output
+            .0
             .records
             .into_iter()
             .map(|record| record.id)

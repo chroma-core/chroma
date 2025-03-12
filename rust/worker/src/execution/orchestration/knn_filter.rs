@@ -114,6 +114,7 @@ pub struct KnnFilterOutput {
     pub record_segment: Segment,
     pub vector_segment: Segment,
     pub dimension: usize,
+    pub fetch_log_bytes: u64,
 }
 
 type KnnFilterResult = Result<KnnFilterOutput, KnnError>;
@@ -322,17 +323,22 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
             (None, params.space.into())
         };
 
+        let logs = self
+            .fetched_logs
+            .take()
+            .expect("FetchLogOperator should have finished already");
+
+        let fetch_log_bytes = logs.iter().map(|(l, _)| l.size_byte()).sum();
+
         let output = KnnFilterOutput {
-            logs: self
-                .fetched_logs
-                .take()
-                .expect("FetchLogOperator should have finished already"),
+            logs,
             distance_function,
             filter_output: output,
             hnsw_reader,
             record_segment: self.collection_and_segments.record_segment.clone(),
             vector_segment: self.collection_and_segments.vector_segment.clone(),
             dimension: collection_dimension as usize,
+            fetch_log_bytes,
         };
         self.terminate_with_result(Ok(output), ctx);
     }
