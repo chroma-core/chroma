@@ -1543,6 +1543,7 @@ dependencies = [
  "chroma-error",
  "chroma-segment",
  "chroma-sqlite",
+ "chroma-storage",
  "chroma-sysdb",
  "chroma-system",
  "chroma-tracing",
@@ -1550,6 +1551,7 @@ dependencies = [
  "futures",
  "opentelemetry",
  "proptest",
+ "prost 0.13.3",
  "rand",
  "serde",
  "serde_json",
@@ -1562,6 +1564,7 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "uuid",
+ "wal3",
 ]
 
 [[package]]
