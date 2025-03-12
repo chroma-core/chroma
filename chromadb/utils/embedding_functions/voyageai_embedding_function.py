@@ -75,8 +75,6 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
         if api_key_env_var is None or model_name is None:
             assert False, "This code should not be reached"
 
-        VoyageAIEmbeddingFunction.validate_config(config)
-
         return VoyageAIEmbeddingFunction(
             api_key_env_var=api_key_env_var, model_name=model_name
         )

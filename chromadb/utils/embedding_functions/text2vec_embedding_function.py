@@ -63,8 +63,6 @@ class Text2VecEmbeddingFunction(EmbeddingFunction[Documents]):
         if model_name is None:
             assert False, "This code should not be reached"
 
-        Text2VecEmbeddingFunction.validate_config(config)
-
         return Text2VecEmbeddingFunction(model_name=model_name)
 
     def get_config(self) -> Dict[str, Any]:

@@ -34,7 +34,6 @@ export class HuggingFaceEmbeddingServerFunction implements IEmbeddingFunction {
   }
 
   buildFromConfig(config: StoredConfig): HuggingFaceEmbeddingServerFunction {
-    this.validateConfig(config);
     return new HuggingFaceEmbeddingServerFunction(config);
   }
 

@@ -105,8 +105,6 @@ class AmazonBedrockEmbeddingFunction(EmbeddingFunction[Documents]):
         else:
             session = boto3.Session(**session_args)
 
-        AmazonBedrockEmbeddingFunction.validate_config(config)
-
         return AmazonBedrockEmbeddingFunction(
             session=session, model_name=model_name, **kwargs
         )

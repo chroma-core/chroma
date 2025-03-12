@@ -98,7 +98,6 @@ export class GoogleGenerativeAiEmbeddingFunction implements IEmbeddingFunction {
   }
 
   buildFromConfig(config: StoredConfig): GoogleGenerativeAiEmbeddingFunction {
-    this.validateConfig(config);
     return new GoogleGenerativeAiEmbeddingFunction({
       model: config.model_name,
       apiKeyEnvVar: config.api_key_env_var,

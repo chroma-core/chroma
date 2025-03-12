@@ -148,8 +148,6 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
         if api_key_env_var is None or model_name is None:
             assert False, "This code should not be reached"
 
-        OpenAIEmbeddingFunction.validate_config(config)
-
         # Create and return the embedding function
         return OpenAIEmbeddingFunction(
             api_key_env_var=api_key_env_var,

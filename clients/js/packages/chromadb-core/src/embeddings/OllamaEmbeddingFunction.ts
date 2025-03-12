@@ -71,7 +71,6 @@ export class OllamaEmbeddingFunction implements IEmbeddingFunction {
   }
 
   buildFromConfig(config: StoredConfig): OllamaEmbeddingFunction {
-    this.validateConfig(config);
     return new OllamaEmbeddingFunction({
       url: config.url,
       model: config.model_name,

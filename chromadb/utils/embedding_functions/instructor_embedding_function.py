@@ -85,8 +85,6 @@ class InstructorEmbeddingFunction(EmbeddingFunction[Documents]):
         if model_name is None or device is None:
             assert False, "This code should not be reached"
 
-        InstructorEmbeddingFunction.validate_config(config)
-
         return InstructorEmbeddingFunction(
             model_name=model_name, device=device, instruction=instruction
         )

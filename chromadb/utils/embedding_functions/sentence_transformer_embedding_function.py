@@ -84,8 +84,6 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
         if model_name is None or device is None or normalize_embeddings is None:
             assert False, "This code should not be reached"
 
-        SentenceTransformerEmbeddingFunction.validate_config(config)
-
         return SentenceTransformerEmbeddingFunction(
             model_name=model_name,
             device=device,

@@ -181,7 +181,6 @@ export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
   }
 
   buildFromConfig(config: StoredConfig): OpenAIEmbeddingFunction {
-    this.validateConfig(config);
     return new OpenAIEmbeddingFunction({
       openai_api_key: config.api_key_env_var,
       openai_model: config.model_name,

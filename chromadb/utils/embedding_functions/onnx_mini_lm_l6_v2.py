@@ -325,8 +325,6 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
         preferred_providers = config.get("preferred_providers")
 
-        ONNXMiniLM_L6_V2.validate_config(config)
-
         return ONNXMiniLM_L6_V2(preferred_providers=preferred_providers)
 
     def get_config(self) -> Dict[str, Any]:

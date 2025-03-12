@@ -96,7 +96,6 @@ export class VoyageAIEmbeddingFunction implements IEmbeddingFunction {
   }
 
   buildFromConfig(config: StoredConfig): VoyageAIEmbeddingFunction {
-    this.validateConfig(config);
     return new VoyageAIEmbeddingFunction({
       api_key_env_var: config.api_key_env_var,
       model: config.model_name,

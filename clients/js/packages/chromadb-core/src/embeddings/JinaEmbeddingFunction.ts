@@ -70,7 +70,6 @@ export class JinaEmbeddingFunction implements IEmbeddingFunction {
   }
 
   buildFromConfig(config: StoredConfig): JinaEmbeddingFunction {
-    this.validateConfig(config);
     return new JinaEmbeddingFunction({
       model_name: config.model_name,
       api_key_env_var: config.api_key_env_var,

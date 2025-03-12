@@ -90,8 +90,6 @@ class OllamaEmbeddingFunction(EmbeddingFunction[Documents]):
         if url is None or model_name is None or timeout is None:
             assert False, "This code should not be reached"
 
-        OllamaEmbeddingFunction.validate_config(config)
-
         return OllamaEmbeddingFunction(url=url, model_name=model_name, timeout=timeout)
 
     def get_config(self) -> Dict[str, Any]:

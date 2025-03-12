@@ -144,7 +144,6 @@ export class CohereEmbeddingFunction implements IEmbeddingFunction {
   }
 
   buildFromConfig(config: StoredConfig): CohereEmbeddingFunction {
-    this.validateConfig(config);
     return new CohereEmbeddingFunction({
       model: config.model_name,
       cohere_api_key_env_var: config.api_key_env_var,

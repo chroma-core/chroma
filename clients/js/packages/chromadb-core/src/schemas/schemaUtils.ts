@@ -1,47 +1,66 @@
-import * as path from "path";
-import * as fs from "fs";
+// Import schemas directly
+import amazonBedrockSchema from "../../../../../../schemas/embedding_functions/amazon_bedrock.json";
+import baseSchema from "../../../../../../schemas/embedding_functions/base_schema.json";
+import chromaLangchainSchema from "../../../../../../schemas/embedding_functions/chroma_langchain.json";
+import cohereSchema from "../../../../../../schemas/embedding_functions/cohere.json";
+import defaultSchema from "../../../../../../schemas/embedding_functions/default.json";
+import googleGenerativeAiSchema from "../../../../../../schemas/embedding_functions/google_generative_ai.json";
+import googlePalmSchema from "../../../../../../schemas/embedding_functions/google_palm.json";
+import googleVertexSchema from "../../../../../../schemas/embedding_functions/google_vertex.json";
+import huggingfaceSchema from "../../../../../../schemas/embedding_functions/huggingface.json";
+import huggingfaceServerSchema from "../../../../../../schemas/embedding_functions/huggingface_server.json";
+import instructorSchema from "../../../../../../schemas/embedding_functions/instructor.json";
+import jinaSchema from "../../../../../../schemas/embedding_functions/jina.json";
+import ollamaSchema from "../../../../../../schemas/embedding_functions/ollama.json";
+import onnxMiniLmL6V2Schema from "../../../../../../schemas/embedding_functions/onnx_mini_lm_l6_v2.json";
+import openClipSchema from "../../../../../../schemas/embedding_functions/open_clip.json";
+import openaiSchema from "../../../../../../schemas/embedding_functions/openai.json";
+import roboflowSchema from "../../../../../../schemas/embedding_functions/roboflow.json";
+import sentenceTransformerSchema from "../../../../../../schemas/embedding_functions/sentence_transformer.json";
+import text2vecSchema from "../../../../../../schemas/embedding_functions/text2vec.json";
+import transformersSchema from "../../../../../../schemas/embedding_functions/transformers.json";
+import voyageaiSchema from "../../../../../../schemas/embedding_functions/voyageai.json";
+
 import Ajv from "ajv";
 
-// Path to the schemas directory (relative to the project root)
-const SCHEMAS_DIR = path.join(
-  process.cwd(),
-  "..",
-  "..",
-  "..",
-  "..",
-  "schemas",
-  "embedding_functions",
-);
-
-// Cache for loaded schemas
-const cachedSchemas: Record<string, any> = {};
+// Map of schema names to schema objects
+const schemaMap: Record<string, any> = {
+  amazon_bedrock: amazonBedrockSchema,
+  base_schema: baseSchema,
+  chroma_langchain: chromaLangchainSchema,
+  cohere: cohereSchema,
+  default: defaultSchema,
+  google_generative_ai: googleGenerativeAiSchema,
+  google_palm: googlePalmSchema,
+  google_vertex: googleVertexSchema,
+  huggingface: huggingfaceSchema,
+  huggingface_server: huggingfaceServerSchema,
+  instructor: instructorSchema,
+  jina: jinaSchema,
+  ollama: ollamaSchema,
+  onnx_mini_lm_l6_v2: onnxMiniLmL6V2Schema,
+  open_clip: openClipSchema,
+  openai: openaiSchema,
+  roboflow: roboflowSchema,
+  sentence_transformer: sentenceTransformerSchema,
+  text2vec: text2vecSchema,
+  transformers: transformersSchema,
+  voyageai: voyageaiSchema,
+};
 
 /**
- * Load a JSON schema from the schemas directory.
+ * Load a JSON schema.
  *
  * @param schemaName Name of the schema file (without .json extension)
  * @returns The loaded schema as an object
- * @throws Error if the schema file does not exist or is not valid JSON
+ * @throws Error if the schema is not available
  */
 export function loadSchema(schemaName: string): Record<string, any> {
-  if (cachedSchemas[schemaName]) {
-    return cachedSchemas[schemaName];
+  if (!schemaMap[schemaName]) {
+    throw new Error(`Schema '${schemaName}' not found`);
   }
 
-  try {
-    const schemaPath = path.join(SCHEMAS_DIR, `${schemaName}.json`);
-    const schemaContent = fs.readFileSync(schemaPath, "utf8");
-    const schema = JSON.parse(schemaContent);
-    cachedSchemas[schemaName] = schema;
-    return schema;
-  } catch (error) {
-    if (error instanceof Error) {
-      throw new Error(
-        `Failed to load schema '${schemaName}': ${error.message}`,
-      );
-    }
-    throw error;
-  }
+  return schemaMap[schemaName];
 }
 
 /**
@@ -96,18 +115,7 @@ export function getSchemaVersion(schemaName: string): string {
  * @returns A list of schema names (without .json extension)
  */
 export function getAvailableSchemas(): string[] {
-  try {
-    return fs
-      .readdirSync(SCHEMAS_DIR)
-      .filter(
-        (filename) =>
-          filename.endsWith(".json") && filename !== "base_schema.json",
-      )
-      .map((filename) => filename.slice(0, -5)); // Remove .json extension
-  } catch (error) {
-    console.error("Failed to read schemas directory:", error);
-    return [];
-  }
+  return Object.keys(schemaMap).filter((name) => name !== "base_schema");
 }
 
 /**
@@ -126,7 +134,7 @@ export function getSchemaInfo(): Record<
 
   for (const schemaName of getAvailableSchemas()) {
     try {
-      const schema = loadSchema(schemaName);
+      const schema = schemaMap[schemaName];
       schemaInfo[schemaName] = {
         version: schema.version || "1.0.0",
         title: schema.title || "",

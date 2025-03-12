@@ -150,8 +150,6 @@ class OpenCLIPEmbeddingFunction(EmbeddingFunction[Embeddable]):
         if model_name is None or checkpoint is None or device is None:
             assert False, "This code should not be reached"
 
-        OpenCLIPEmbeddingFunction.validate_config(config)
-
         return OpenCLIPEmbeddingFunction(
             model_name=model_name, checkpoint=checkpoint, device=device
         )

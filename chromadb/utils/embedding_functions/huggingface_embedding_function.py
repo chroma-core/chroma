@@ -86,8 +86,6 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
         if api_key_env_var is None or model_name is None:
             assert False, "This code should not be reached"
 
-        HuggingFaceEmbeddingFunction.validate_config(config)
-
         return HuggingFaceEmbeddingFunction(
             api_key_env_var=api_key_env_var, model_name=model_name
         )
@@ -178,8 +176,6 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
         url = config.get("url")
         if url is None:
             raise ValueError("URL must be provided for HuggingFaceEmbeddingServer")
-
-        HuggingFaceEmbeddingServer.validate_config(config)
 
         return HuggingFaceEmbeddingServer(url=url)
 

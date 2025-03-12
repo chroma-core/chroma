@@ -84,7 +84,6 @@ export class DefaultEmbeddingFunction implements IEmbeddingFunction {
   }
 
   buildFromConfig(config: StoredConfig): DefaultEmbeddingFunction {
-    this.validateConfig(config);
     return new DefaultEmbeddingFunction({
       model: config.model_name,
       revision: config.revision,

@@ -101,8 +101,6 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
         if api_key_env_var is None or model_name is None:
             assert False, "This code should not be reached"
 
-        JinaEmbeddingFunction.validate_config(config)
-
         return JinaEmbeddingFunction(
             api_key_env_var=api_key_env_var, model_name=model_name
         )

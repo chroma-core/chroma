@@ -125,8 +125,6 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Embeddable]):
         if api_key_env_var is None or api_url is None:
             assert False, "This code should not be reached"
 
-        RoboflowEmbeddingFunction.validate_config(config)
-
         return RoboflowEmbeddingFunction(
             api_key_env_var=api_key_env_var, api_url=api_url
         )

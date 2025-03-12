@@ -83,8 +83,6 @@ class GooglePalmEmbeddingFunction(EmbeddingFunction[Documents]):
         if api_key_env_var is None or model_name is None:
             assert False, "This code should not be reached"
 
-        GooglePalmEmbeddingFunction.validate_config(config)
-
         return GooglePalmEmbeddingFunction(
             api_key_env_var=api_key_env_var, model_name=model_name
         )
@@ -202,8 +200,6 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
 
         if api_key_env_var is None or model_name is None or task_type is None:
             assert False, "This code should not be reached"
-
-        GoogleGenerativeAiEmbeddingFunction.validate_config(config)
 
         return GoogleGenerativeAiEmbeddingFunction(
             api_key_env_var=api_key_env_var, model_name=model_name, task_type=task_type
@@ -334,8 +330,6 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
             or region is None
         ):
             assert False, "This code should not be reached"
-
-        GoogleVertexEmbeddingFunction.validate_config(config)
 
         return GoogleVertexEmbeddingFunction(
             api_key_env_var=api_key_env_var,

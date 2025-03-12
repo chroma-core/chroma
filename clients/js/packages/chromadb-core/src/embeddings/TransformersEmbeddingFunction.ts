@@ -108,7 +108,6 @@ export class TransformersEmbeddingFunction implements IEmbeddingFunction {
   }
 
   buildFromConfig(config: StoredConfig): TransformersEmbeddingFunction {
-    this.validateConfig(config);
     return new TransformersEmbeddingFunction({
       model: config.model,
       revision: config.revision,
