@@ -49,6 +49,12 @@ jobs:
             # Outside Go
             outside-go:
               - '!go/**'
+            # Workflow files
+            workflow:
+              - '.github/workflows/**'
+            # Outside workflow
+            outside-workflow:
+              - '!.github/workflows/**'
 
       - name: Determine tests to run
         id: determine-tests
@@ -78,6 +84,14 @@ jobs:
           if [[ "${{ steps.filter.outputs.go }}" == "true" && "${{ steps.filter.outputs.outside-go }}" == "false" ]]; then
             echo "Go-only changes detected"
             TESTS_TO_RUN='["go"]'
+            echo "tests-to-run=${TESTS_TO_RUN}" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Check for workflow-only changes
+          if [[ "${{ steps.filter.outputs.workflow }}" == "true" && "${{ steps.filter.outputs.outside-workflow }}" == "false" ]]; then
+            echo "Workflow-only changes detected"
+            TESTS_TO_RUN='[]'
             echo "tests-to-run=${TESTS_TO_RUN}" >> $GITHUB_OUTPUT
             exit 0
           fi
