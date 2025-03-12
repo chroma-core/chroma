@@ -483,7 +483,7 @@ impl HnswIndexProvider {
                 collection_uuid,
                 Instant::now().elapsed().as_nanos()
             );
-            match self.remove_temporary_files(&index_id).await {
+            match Self::purge_one_id(&self.temporary_storage_path, index_id).await {
                 Ok(_) => {}
                 Err(e) => {
                     tracing::error!("Failed to remove temporary files for {index_id}: {e}");
@@ -495,18 +495,33 @@ impl HnswIndexProvider {
     pub async fn purge_one_id(path: &Path, id: IndexUuid) -> tokio::io::Result<()> {
         let index_storage_path = path.join(id.to_string());
         tracing::info!(
-            "[Cache eviction] Purging index id: {}, path: {}, ts: {}",
+            "Purging HNSW index ID: {}, path: {}, ts: {}",
             id,
             index_storage_path.to_str().unwrap(),
             Instant::now().elapsed().as_nanos()
         );
-        tokio::fs::remove_dir_all(index_storage_path).await?;
-        Ok(())
-    }
-
-    async fn remove_temporary_files(&self, id: &IndexUuid) -> tokio::io::Result<()> {
-        let index_storage_path = self.temporary_storage_path.join(id.to_string());
-        tokio::fs::remove_dir_all(index_storage_path).await
+        match tokio::fs::remove_dir_all(&index_storage_path).await {
+            Ok(_) => Ok(()),
+            Err(e) => match e.kind() {
+                std::io::ErrorKind::NotFound => {
+                    tracing::warn!(
+                        "HNSW index ID: {} not found at path: {}",
+                        id,
+                        index_storage_path.to_str().unwrap()
+                    );
+                    Ok(())
+                }
+                _ => {
+                    tracing::error!(
+                        "Failed to remove HNSW index ID: {} at path: {}. Error: {}",
+                        id,
+                        index_storage_path.to_str().unwrap(),
+                        e
+                    );
+                    Err(e)
+                }
+            },
+        }
     }
 
     async fn create_dir_all(&self, path: &PathBuf) -> Result<(), Box<HnswIndexProviderFileError>> {
