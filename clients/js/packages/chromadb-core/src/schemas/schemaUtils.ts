@@ -42,7 +42,7 @@ const ajv = new Ajv({
 });
 
 // Map of schema names to schema objects
-const schemaMap: Record<string, Schema> = {
+const schemaMap = {
   amazon_bedrock: amazonBedrockSchema as Schema,
   base_schema: baseSchema as Schema,
   chroma_langchain: chromaLangchainSchema as Schema,
