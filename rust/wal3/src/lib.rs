@@ -1,10 +1,15 @@
 #![doc = include_str!("../README.md")]
 
 use serde::{Deserialize, Serialize};
+use setsum::Setsum;
 
 mod backoff;
+mod manifest;
+
+use manifest::SnapshotPointer;
 
 pub use backoff::ExponentialBackoff;
+pub use manifest::{Manifest, Snapshot};
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
@@ -34,6 +39,20 @@ pub enum Error {
     NoSuchCursor(String),
 }
 
+//////////////////////////////////////////// ScrubError ////////////////////////////////////////////
+
+#[derive(Clone, Debug, thiserror::Error)]
+pub enum ScrubError {
+    #[error("CorruptManifest: {what}")]
+    CorruptManifest { manifest: String, what: String },
+    #[error("CorruptFragment: {seq_no} {what}")]
+    CorruptFragment {
+        manifest: String,
+        seq_no: FragmentSeqNo,
+        what: String,
+    },
+}
+
 //////////////////////////////////////////// LogPosition ///////////////////////////////////////////
 
 /// A log position is a pair of an offset and a timestamp.  Every record has a unique log position.
@@ -49,6 +68,7 @@ pub struct LogPosition {
 }
 
 impl LogPosition {
+    /// Create a new offset and timestamp.
     pub fn new(offset: u64, timestamp_us: u64) -> Self {
         LogPosition {
             offset,
@@ -56,18 +76,31 @@ impl LogPosition {
         }
     }
 
+    #[cfg(test)]
+    pub fn uni(offset: u64) -> Self {
+        let timestamp_us = offset;
+        LogPosition {
+            offset,
+            timestamp_us,
+        }
+    }
+
+    /// The offset of the LogPosition.
     pub fn offset(&self) -> u64 {
         self.offset
     }
 
+    /// The timestamp of the LogPosition.
     pub fn timestamp_us(&self) -> u64 {
         self.timestamp_us
     }
 
+    /// True iff this contains offset.
     pub fn contains_offset(start: LogPosition, end: LogPosition, offset: u64) -> bool {
         start.offset <= offset && offset < end.offset
     }
 
+    /// True iff this contains timestamp.
     pub fn contains_timestamp(start: LogPosition, end: LogPosition, timestamp: u64) -> bool {
         start.offset <= timestamp && timestamp < end.offset
     }
@@ -150,19 +183,50 @@ impl From<ThrottleOptions> for ExponentialBackoff {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct SnapshotOptions {
     /// The maximum number of outbound snapshot pointers to embed in a snapshot or manifest.
+    #[serde(default = "SnapshotOptions::default_snapshot_rollover_threshold")]
     pub snapshot_rollover_threshold: usize,
     /// The maximum number of fragment pointers to embed in a snapshot or manifest.
+    #[serde(default = "SnapshotOptions::default_fragment_rollover_threshold")]
     pub fragment_rollover_threshold: usize,
+}
+
+impl SnapshotOptions {
+    /// Corresponds to [SnapshotOptions::snapshot_rollover_threshold], or the number of snapshot
+    /// pointers to embed in a snapshot or manifest.
+    fn default_snapshot_rollover_threshold() -> usize {
+        (1 << 18) / SnapshotPointer::JSON_SIZE_ESTIMATE
+    }
+
+    /// Corresponds to [SnapshotOptions::fragment_rollover_threshold], or the number of fragment
+    /// pointers to embed in a snapshot or manifest.
+    fn default_fragment_rollover_threshold() -> usize {
+        (1 << 19) / Fragment::JSON_SIZE_ESTIMATE
+    }
 }
 
 impl Default for SnapshotOptions {
     fn default() -> Self {
         SnapshotOptions {
-            // TODO(rescrv):  Commented out values are better.
-            snapshot_rollover_threshold: 2048, // (1 << 18) / SnapPointer::JSON_SIZE_ESTIMATE,
-            fragment_rollover_threshold: 1536, // (1 << 19) / ShardFragment::JSON_SIZE_ESTIMATE,
+            snapshot_rollover_threshold: Self::default_snapshot_rollover_threshold(),
+            fragment_rollover_threshold: Self::default_fragment_rollover_threshold(),
         }
     }
+}
+
+///////////////////////////////////////// LogWriterOptions /////////////////////////////////////////
+
+/// LogWriterOptions control the behavior of the log writer.
+#[derive(Clone, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct LogWriterOptions {
+    /// Default throttling options for fragments.
+    #[serde(default)]
+    pub throttle_fragment: ThrottleOptions,
+    /// Default throttling options for manifest.
+    #[serde(default)]
+    pub throttle_manifest: ThrottleOptions,
+    /// Default snapshot options for manifest.
+    #[serde(default)]
+    pub snapshot_manifest: SnapshotOptions,
 }
 
 /////////////////////////////////////////// FragmentSeqNo //////////////////////////////////////////
@@ -185,6 +249,34 @@ impl FragmentSeqNo {
     }
 }
 
+impl std::fmt::Display for FragmentSeqNo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::ops::Add<FragmentSeqNo> for usize {
+    type Output = FragmentSeqNo;
+
+    fn add(self, rhs: FragmentSeqNo) -> Self::Output {
+        FragmentSeqNo(self.wrapping_add(rhs.0))
+    }
+}
+
+impl std::ops::Add<usize> for FragmentSeqNo {
+    type Output = FragmentSeqNo;
+
+    fn add(self, rhs: usize) -> Self::Output {
+        FragmentSeqNo(self.0.wrapping_add(rhs))
+    }
+}
+
+impl std::ops::AddAssign<usize> for FragmentSeqNo {
+    fn add_assign(&mut self, rhs: usize) {
+        self.0 = self.0.wrapping_add(rhs);
+    }
+}
+
 ///////////////////////////////////////////// Fragment /////////////////////////////////////////////
 
 /// A Fragment is an immutable piece of the log containing adjacent writes.
@@ -198,25 +290,30 @@ pub struct Fragment {
         deserialize_with = "deserialize_setsum",
         serialize_with = "serialize_setsum"
     )]
-    pub setsum: setsum::Setsum,
+    pub setsum: Setsum,
 }
 
 impl Fragment {
+    /// An estimate on the number of bytes required to serialize this object as JSON.
     pub const JSON_SIZE_ESTIMATE: usize = 256;
+
+    pub fn possibly_contains_position(&self, position: LogPosition) -> bool {
+        LogPosition::contains_offset(self.start, self.limit, position.offset)
+    }
 }
 
 /////////////////////////////////////////////// util ///////////////////////////////////////////////
 
-fn deserialize_setsum<'de, D>(deserializer: D) -> Result<setsum::Setsum, D::Error>
+fn deserialize_setsum<'de, D>(deserializer: D) -> Result<Setsum, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
     let s = String::deserialize(deserializer)?;
-    setsum::Setsum::from_hexdigest(&s)
+    Setsum::from_hexdigest(&s)
         .ok_or_else(|| serde::de::Error::custom(format!("invalid setsum: {}", s)))
 }
 
-fn serialize_setsum<S>(setsum: &setsum::Setsum, serializer: S) -> Result<S::Ok, S::Error>
+fn serialize_setsum<S>(setsum: &Setsum, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
 {
