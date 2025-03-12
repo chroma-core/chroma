@@ -1,9 +1,10 @@
 from typing import TypedDict, Dict, Any, Optional, cast
 import json
-from chromadb.api.types import EmbeddingFunction, Embeddable, Space, Metadata
+from chromadb.api.types import EmbeddingFunction, Embeddable, Space, Metadata, CollectionMetadata
 from chromadb.utils.embedding_functions import (
     DefaultEmbeddingFunction,
     known_embedding_functions,
+    register_embedding_function
 )
 from multiprocessing import cpu_count
 import warnings
@@ -20,7 +21,7 @@ class HNSWConfiguration(TypedDict, total=False):
     resize_factor: float
 
 
-def json_to_hnsw_config(json_map: Dict[str, Any]) -> HNSWConfiguration:
+def json_to_hnsw_configuration(json_map: Dict[str, Any]) -> HNSWConfiguration:
     config: HNSWConfiguration = {}
     if "space" in json_map:
         config["space"] = json_map["space"]
@@ -46,12 +47,12 @@ class CollectionConfiguration(TypedDict, total=False):
     embedding_function: Optional[EmbeddingFunction[Embeddable]]
 
 
-def load_collection_config_from_json_str(json_str: str) -> CollectionConfiguration:
+def load_collection_configuration_from_json_str(json_str: str) -> CollectionConfiguration:
     json_map = json.loads(json_str)
-    return load_collection_config_from_json(json_map)
+    return load_collection_configuration_from_json(json_map)
 
 
-def load_collection_config_from_json(
+def load_collection_configuration_from_json(
     json_map: Dict[str, Any]
 ) -> CollectionConfiguration:
     if "hnsw" not in json_map:
@@ -77,7 +78,7 @@ def load_collection_config_from_json(
                 )
     else:
         if "embedding_function" not in json_map:
-            return CollectionConfiguration(hnsw=json_to_hnsw_config(json_map["hnsw"]))
+            return CollectionConfiguration(hnsw=json_to_hnsw_configuration(json_map["hnsw"]))
         else:
             if json_map["embedding_function"]["type"] == "legacy":
                 warnings.warn(
@@ -86,7 +87,7 @@ def load_collection_config_from_json(
                     stacklevel=2,
                 )
                 return CollectionConfiguration(
-                    hnsw=json_to_hnsw_config(json_map["hnsw"])
+                    hnsw=json_to_hnsw_configuration(json_map["hnsw"])
                 )
             else:
                 ef = cast(
@@ -94,7 +95,7 @@ def load_collection_config_from_json(
                     known_embedding_functions[json_map["embedding_function"]["name"]],
                 )
                 return CollectionConfiguration(
-                    hnsw=json_to_hnsw_config(json_map["hnsw"]),
+                    hnsw=json_to_hnsw_configuration(json_map["hnsw"]),
                     embedding_function=ef.build_from_config(
                         json_map["embedding_function"]["config"]
                     ),
@@ -112,11 +113,15 @@ def collection_configuration_to_json(config: CollectionConfiguration) -> Dict[st
     ef = config.get("embedding_function")
     if ef is not None:
         try:
-            ef_config = {
-                "name": ef.name(),
-                "type": "known" if ef.name() in known_embedding_functions else "custom",
-                "config": ef.get_config(),
-            }
+            if ef.name() is NotImplemented:
+                ef_config = {"type": "legacy"}
+            else:
+                ef_config = {
+                    "name": ef.name(),
+                    "type": "known" if ef.name() in known_embedding_functions else "custom",
+                    "config": ef.get_config(),
+                }
+                register_embedding_function(type(ef))
         except Exception as e:
             warnings.warn(
                 f"legacy embedding function config: {e}",
@@ -149,15 +154,39 @@ class CreateCollectionConfiguration(TypedDict, total=False):
     embedding_function: Optional[EmbeddingFunction[Embeddable]]
 
 
-def load_collection_config_from_create_collection_config(
+def load_collection_configuration_from_create_collection_configuration(
     config: CreateCollectionConfiguration,
 ) -> CollectionConfiguration:
     return CollectionConfiguration(
         hnsw=config.get("hnsw"), embedding_function=config.get("embedding_function")
     )
 
+def create_collection_configuration_from_legacy_collection_metadata(
+    metadata: CollectionMetadata,
+) -> CreateCollectionConfiguration:
+    """Create a CreateCollectionConfiguration from legacy collection metadata"""
+    old_to_new = {
+        "hnsw:space": "space",
+        "hnsw:ef_construction": "ef_construction",
+        "hnsw:max_neighbors": "max_neighbors",
+        "hnsw:ef_search": "ef_search",
+        "hnsw:num_threads": "num_threads",
+        "hnsw:batch_size": "batch_size",
+        "hnsw:sync_threshold": "sync_threshold",
+        "hnsw:resize_factor": "resize_factor",
+    }
+    json_map = {}
+    for name, value in metadata.items():
+        if name not in old_to_new:
+            raise ValueError(f"unknown legacy parameter: {name}")
+        json_map[old_to_new[name]] = value
+    hnsw_config = json_to_hnsw_configuration(json_map)
+    hnsw_config = populate_create_hnsw_defaults(hnsw_config)
+    validate_hnsw_config(hnsw_config)
 
-def create_collection_config_from_legacy_params(
+    return CreateCollectionConfiguration(hnsw=hnsw_config)
+
+def create_collection_configuration_from_legacy_metadata(
     metadata: Metadata,
 ) -> CreateCollectionConfiguration:
     """Create a CreateCollectionConfiguration from legacy parameters"""
@@ -177,24 +206,37 @@ def create_collection_config_from_legacy_params(
             raise ValueError(f"unknown legacy parameter: {name}")
         json_map[old_to_new[name]] = value
 
-    hnsw_config = json_to_hnsw_config(json_map)
+    hnsw_config = json_to_hnsw_configuration(json_map)
     hnsw_config = populate_create_hnsw_defaults(hnsw_config)
     validate_hnsw_config(hnsw_config)
 
     return CreateCollectionConfiguration(hnsw=hnsw_config)
 
+def legacy_create_collection_configuration_path(
+    embedding_function: Optional[EmbeddingFunction[Embeddable]] = None,
+    metadata: Optional[CollectionMetadata] = None,
+) -> CreateCollectionConfiguration:
+    configuration = CreateCollectionConfiguration()
+    if embedding_function is None:
+        configuration["embedding_function"] = DefaultEmbeddingFunction()  # type: ignore
+    else:
+        configuration["embedding_function"] = embedding_function
+    if metadata is not None:
+        configuration = create_collection_configuration_from_legacy_collection_metadata(metadata)
+    return configuration
 
-def create_collection_config_to_json_str(config: CreateCollectionConfiguration) -> str:
+
+def create_collection_configuration_to_json_str(config: CreateCollectionConfiguration) -> str:
     """Convert a CreateCollection configuration to a JSON-serializable string"""
-    return json.dumps(create_collection_config_to_json(config))
+    return json.dumps(create_collection_configuration_to_json(config))
 
 
-def create_collection_config_to_json(
+def create_collection_configuration_to_json(
     config: CreateCollectionConfiguration,
 ) -> Dict[str, Any]:
     """Convert a CreateCollection configuration to a JSON-serializable dict"""
     if config.get("hnsw") is None:
-        config["hnsw"] = default_create_hnsw_config()
+        config["hnsw"] = default_create_hnsw_configuration()
     if config.get("embedding_function") is None:
         config["embedding_function"] = cast(
             EmbeddingFunction[Embeddable], DefaultEmbeddingFunction()
@@ -206,11 +248,15 @@ def create_collection_config_to_json(
 
     try:
         ef = cast(EmbeddingFunction[Embeddable], config.get("embedding_function"))
-        ef_config = {
-            "name": ef.name(),
-            "type": "known" if ef.name() in known_embedding_functions else "custom",
-            "config": ef.get_config(),
-        }
+        if ef.name() is NotImplemented:
+            ef_config = {"type": "legacy"}
+        else:
+            ef_config = {
+                "name": ef.name(),
+                "type": "known" if ef.name() in known_embedding_functions else "custom",
+                "config": ef.get_config(),
+            }
+            register_embedding_function(type(ef))
     except Exception as e:
         warnings.warn(
             f"legacy embedding function config: {e}",
@@ -230,7 +276,7 @@ def create_collection_config_to_json(
     }
 
 
-def default_create_hnsw_config() -> CreateHNSWConfiguration:
+def default_create_hnsw_configuration() -> CreateHNSWConfiguration:
     """Create a default CreateHNSW configuration"""
     return CreateHNSWConfiguration(
         space=cast(Space, "cosine"),

@@ -3,7 +3,7 @@ from uuid import UUID
 from overrides import overrides
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
-    create_collection_config_to_json_str,
+    create_collection_configuration_to_json_str,
 )
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System, logger
 from chromadb.db.system import SysDB
@@ -324,7 +324,7 @@ class GrpcSysDB(SysDB):
             request = CreateCollectionRequest(
                 id=id.hex,
                 name=name,
-                configuration_json_str=create_collection_config_to_json_str(
+                configuration_json_str=create_collection_configuration_to_json_str(
                     configuration
                 ),
                 metadata=to_proto_update_metadata(metadata) if metadata else None,

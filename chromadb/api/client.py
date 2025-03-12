@@ -4,7 +4,7 @@ from uuid import UUID
 from overrides import override
 import httpx
 from chromadb.api import AdminAPI, ClientAPI, ServerAPI
-from chromadb.api.collection_configuration import CreateCollectionConfiguration
+from chromadb.api.collection_configuration import CreateCollectionConfiguration, legacy_create_collection_configuration_path
 from chromadb.api.shared_system_client import SharedSystemClient
 from chromadb.api.types import (
     CollectionMetadata,
@@ -144,6 +144,11 @@ class Client(SharedSystemClient, ClientAPI):
         data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
     ) -> Collection:
+        if configuration is None:
+            configuration = legacy_create_collection_configuration_path(
+                embedding_function=embedding_function,
+                metadata=metadata,
+            )
         model = self._server.create_collection(
             name=name,
             metadata=metadata,
@@ -191,6 +196,11 @@ class Client(SharedSystemClient, ClientAPI):
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> Collection:
+        if configuration is None:
+            configuration = legacy_create_collection_configuration_path(
+                embedding_function=embedding_function,
+                metadata=metadata,
+            )
         model = self._server.get_or_create_collection(
             name=name,
             metadata=metadata,

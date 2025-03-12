@@ -11,7 +11,7 @@ from chromadb.api.async_api import AsyncServerAPI
 from chromadb.api.base_http_client import BaseHTTPClient
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
-    create_collection_config_to_json_str,
+    create_collection_configuration_to_json_str,
 )
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System, Settings
 from chromadb.telemetry.opentelemetry import (
@@ -289,7 +289,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             json={
                 "name": name,
                 "metadata": metadata,
-                "configuration": create_collection_config_to_json_str(configuration)
+                "configuration": create_collection_configuration_to_json_str(configuration)
                 if configuration
                 else None,
                 "get_or_create": get_or_create,
