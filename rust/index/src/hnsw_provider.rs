@@ -290,7 +290,7 @@ impl HnswIndexProvider {
                         }
                         Err(e) => {
                             tracing::error!("Failed to load hnsw index file from storage: {}", e);
-                            return Err(Box::new(HnswIndexProviderFileError::StorageGetError(e)));
+                            return Err(Box::new(HnswIndexProviderFileError::StorageError(e)));
                         }
                     };
                     tracing::info!(
@@ -600,7 +600,7 @@ pub enum HnswIndexProviderFlushError {
     #[error("HNSW Save Error")]
     HnswSaveError(#[from] Box<dyn ChromaError>),
     #[error("Storage Put Error")]
-    StoragePutError(#[from] chroma_storage::PutError),
+    StoragePutError(#[from] chroma_storage::StorageError),
 }
 
 impl ChromaError for HnswIndexProviderFlushError {
@@ -615,12 +615,10 @@ impl ChromaError for HnswIndexProviderFlushError {
 
 #[derive(Error, Debug)]
 pub enum HnswIndexProviderFileError {
-    #[error("IO Error")]
+    #[error("IO Error: {0}")]
     IOError(#[from] std::io::Error),
-    #[error("Storage Get Error")]
-    StorageGetError(#[from] chroma_storage::GetError),
-    #[error("Storage Put Error")]
-    StoragePutError(#[from] chroma_storage::PutError),
+    #[error("Storage Error: {0}")]
+    StorageError(#[from] chroma_storage::StorageError),
     #[error("Must provide full path to file")]
     InvalidFilePath,
 }

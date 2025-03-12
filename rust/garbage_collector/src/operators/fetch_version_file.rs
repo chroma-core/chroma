@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_storage::{GetError, Storage};
+use chroma_storage::{Storage, StorageError};
 use chroma_system::{Operator, OperatorType};
 use thiserror::Error;
 
@@ -53,7 +53,7 @@ impl FetchVersionFileOutput {
 #[derive(Error, Debug)]
 pub enum FetchVersionFileError {
     #[error("Error fetching version file: {0}")]
-    StorageError(#[from] GetError),
+    StorageError(#[from] StorageError),
     #[error("Error parsing version file")]
     ParseError,
     #[error("Invalid storage configuration: {0}")]
