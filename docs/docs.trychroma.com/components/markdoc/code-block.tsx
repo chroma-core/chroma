@@ -30,18 +30,21 @@ const CodeBlock: React.FC<{
   language: string;
   showHeader: boolean;
   className?: string;
-}> = async ({ content, language, showHeader = true, className }) => {
+  hideTicks?: boolean;
+}> = async ({ content, language, showHeader = true, className, hideTicks }) => {
   if (typeof content !== "string") {
     throw new Error("CodeBlock children must be a string.");
   }
 
-  const highlightedCode = await unified()
-    .use(parse)
-    .use(remarkRehype)
-    .use(rehypeHighlight, { subset: [language] })
-    .use(rehypeRemovePre)
-    .use(rehypeStringify)
-    .process(`\`\`\`${language}\n${content}\`\`\``);
+  const highlightedCode = hideTicks
+    ? content
+    : await unified()
+        .use(parse)
+        .use(remarkRehype)
+        .use(rehypeHighlight, { subset: [language] })
+        .use(rehypeRemovePre)
+        .use(rehypeStringify)
+        .process(`\`\`\`${language}\n${content}\`\`\``);
 
   return (
     <div className="flex flex-col mb-2">
