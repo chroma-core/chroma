@@ -292,6 +292,7 @@ impl TestReferenceSegment {
         })
     }
 
+    #[allow(clippy::unnecessary_map_or)]
     pub fn get(&self, plan: Get) -> Result<GetResult, TestReferenceSegmentError> {
         let coll = self
             .record
