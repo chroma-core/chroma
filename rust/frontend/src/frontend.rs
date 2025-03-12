@@ -752,7 +752,7 @@ impl Frontend {
                 })
                 .await?;
 
-            for record in get_result.records {
+            for record in get_result.result.records {
                 records.push(OperationRecord {
                     id: record.id,
                     operation: Operation::Delete,
@@ -873,7 +873,7 @@ impl Frontend {
             })
             .await?;
         meter_event.submit().await;
-        Ok(res)
+        Ok(res.count)
     }
 
     pub async fn count(&mut self, request: CountRequest) -> Result<CountResponse, QueryError> {

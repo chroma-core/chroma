@@ -152,8 +152,9 @@ impl WorkerServer {
         );
 
         match count_orchestrator.run(self.clone_system()?).await {
-            Ok(count) => Ok(Response::new(CountResult {
-                count: count as u32,
+            Ok((count, pulled_log_bytes)) => Ok(Response::new(CountResult {
+                count,
+                pulled_log_bytes,
             })),
             Err(err) => Err(Status::new(err.code().into(), err.to_string())),
         }
@@ -193,7 +194,14 @@ impl WorkerServer {
         );
 
         match get_orchestrator.run(self.clone_system()?).await {
-            Ok(result) => Ok(Response::new(result.try_into()?)),
+            Ok((result, pulled_log_bytes)) => Ok(Response::new(GetResult {
+                records: result
+                    .records
+                    .into_iter()
+                    .map(TryInto::try_into)
+                    .collect::<Result<_, _>>()?,
+                pulled_log_bytes,
+            })),
             Err(err) => Err(Status::new(err.code().into(), err.to_string())),
         }
     }
@@ -230,7 +238,7 @@ impl WorkerServer {
             .map_err(|e| Status::invalid_argument(format!("Invalid Projection Operator: {}", e)))?;
 
         if knn.embeddings.is_empty() {
-            return Ok(Response::new(to_proto_knn_batch_result(Vec::new())?));
+            return Ok(Response::new(to_proto_knn_batch_result(0, Vec::new())?));
         }
 
         // If dimension is not set and segment is uninitialized, we assume
@@ -239,6 +247,7 @@ impl WorkerServer {
             && collection_and_segments.vector_segment.file_path.is_empty()
         {
             return Ok(Response::new(to_proto_knn_batch_result(
+                0,
                 once(Default::default())
                     .cycle()
                     .take(knn.embeddings.len())
@@ -265,6 +274,8 @@ impl WorkerServer {
             }
         };
 
+        let pulled_log_bytes = matching_records.fetch_log_bytes;
+
         if vector_segment_type == SegmentType::Spann {
             tracing::info!("Running KNN on SPANN segment");
             let knn_orchestrator_futures = from_proto_knn(knn)?
@@ -287,7 +298,10 @@ impl WorkerServer {
                 .try_collect::<Vec<_>>()
                 .await
             {
-                Ok(results) => Ok(Response::new(to_proto_knn_batch_result(results)?)),
+                Ok(results) => Ok(Response::new(to_proto_knn_batch_result(
+                    pulled_log_bytes,
+                    results,
+                )?)),
                 Err(err) => Err(Status::new(err.code().into(), err.to_string())),
             }
         } else {
@@ -311,7 +325,10 @@ impl WorkerServer {
                 .try_collect::<Vec<_>>()
                 .await
             {
-                Ok(results) => Ok(Response::new(to_proto_knn_batch_result(results)?)),
+                Ok(results) => Ok(Response::new(to_proto_knn_batch_result(
+                    pulled_log_bytes,
+                    results,
+                )?)),
                 Err(err) => Err(Status::new(err.code().into(), err.to_string())),
             }
         }

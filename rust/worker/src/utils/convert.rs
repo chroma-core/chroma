@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use chroma_types::{
-    chroma_proto::{self, GetResult, KnnBatchResult, KnnResult},
+    chroma_proto::{self, KnnBatchResult, KnnResult},
     CollectionUuid, ConversionError, ScalarEncoding, Where,
 };
 
@@ -12,7 +12,7 @@ use crate::{
         knn::KnnOperator,
         knn_projection::{KnnProjectionOperator, KnnProjectionOutput, KnnProjectionRecord},
         limit::LimitOperator,
-        projection::{ProjectionOperator, ProjectionOutput, ProjectionRecord},
+        projection::{ProjectionOperator, ProjectionRecord},
     },
 };
 
@@ -97,20 +97,6 @@ impl TryFrom<ProjectionRecord> for chroma_proto::ProjectionRecord {
     }
 }
 
-impl TryFrom<ProjectionOutput> for GetResult {
-    type Error = ConversionError;
-
-    fn try_from(value: ProjectionOutput) -> Result<Self, ConversionError> {
-        Ok(Self {
-            records: value
-                .records
-                .into_iter()
-                .map(TryInto::try_into)
-                .collect::<Result<_, _>>()?,
-        })
-    }
-}
-
 impl TryFrom<KnnProjectionRecord> for chroma_proto::KnnProjectionRecord {
     type Error = ConversionError;
 
@@ -150,9 +136,11 @@ pub fn from_proto_knn(knn: chroma_proto::KnnOperator) -> Result<Vec<KnnOperator>
 }
 
 pub fn to_proto_knn_batch_result(
+    pulled_log_bytes: u64,
     results: Vec<KnnProjectionOutput>,
 ) -> Result<KnnBatchResult, ConversionError> {
     Ok(KnnBatchResult {
+        pulled_log_bytes,
         results: results
             .into_iter()
             .map(TryInto::try_into)
