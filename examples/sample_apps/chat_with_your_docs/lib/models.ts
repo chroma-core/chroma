@@ -2,6 +2,7 @@ export interface Chunk {
   id: string;
   content: string;
   type: "code" | "documentation";
+  summary: string;
 }
 
 export interface Message {
@@ -10,10 +11,18 @@ export interface Message {
   role: "user" | "assistant";
   content: string;
   chunks?: Chunk[];
+  retrievalTime?: number;
 }
 
 export interface Chat {
   id: string;
   title: string;
   created: string;
+}
+
+export interface Records {
+  ids: string[];
+  documents?: string[];
+  embeddings?: string[];
+  metadatas?: Record<string, string | number | boolean>[];
 }

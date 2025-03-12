@@ -1,15 +1,20 @@
 import React, { createContext, useContext, useState, ReactNode } from "react";
-import { Message } from "@/lib/models";
-import { generateUUID } from "@/lib/server-utils";
+import { Chunk, Message } from "@/lib/models";
 import { getAssistantResponse } from "@/lib/ai-utils";
-import { addTelemetry, retrieveChunks } from "@/lib/retrieval"; // Import the server function
+import { generateUUID } from "@/lib/utils";
+import { addTelemetry, retrieveChunks } from "@/lib/retrieval";
+import { v4 as uuidv4 } from "uuid";
 
 type ChatContextType = {
   messages: Message[];
-  addUserMessage: (content: string, chatId: string) => void;
+  chunks: Chunk[];
+  activeResponse: string;
+  addUserMessage: (content: string) => void;
   clearMessages: () => void;
   error: string | null;
   loading: boolean;
+  retrievalTime: number | null;
+  chatId: string;
 };
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
@@ -18,11 +23,19 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
+  const [chunks, setChunks] = useState<Chunk[]>([]);
+  const [activeResponse, setActiveResponse] = useState<string>("");
+  const [retrievalTime, setRetrievalTime] = useState<number | null>(null);
+  const [chatId, setChatId] = useState<string>("");
 
-  const addUserMessage = async (content: string, chatId: string) => {
+  const addUserMessage = async (content: string) => {
+    let currentChatId = chatId || uuidv4();
+    if (!chatId) {
+      setChatId(currentChatId);
+    }
     let userMessage: Message;
     try {
-      const { id, timestamp } = await generateUUID();
+      const { id, timestamp } = generateUUID();
       userMessage = { id, timestamp, role: "user", content };
       setMessages((prev) => [...prev, userMessage]);
     } catch (err) {
@@ -32,35 +45,39 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
       return;
     }
 
-    addTelemetry(userMessage, chatId).finally();
+    addTelemetry(userMessage, currentChatId).finally();
 
     setLoading(true);
 
-    const chunks = await retrieveChunks(userMessage);
-
-    console.log(chunks);
+    const { time, chunks } = await retrieveChunks(userMessage);
+    setRetrievalTime(time / 1000);
+    setChunks(chunks);
 
     try {
-      const assistantResponse = await getAssistantResponse(
-        userMessage,
-        messages,
-        chunks,
-      );
+      const assistantResponse = await getAssistantResponse(userMessage, chunks);
 
-      const { id, timestamp } = await generateUUID();
+      let streamedResponse = "";
 
-      console.log(chunks.length);
+      for await (const part of assistantResponse) {
+        streamedResponse += part;
+        setActiveResponse((prev) => prev + part);
+      }
+
+      const { id, timestamp } = generateUUID();
 
       const assistantMessage: Message = {
         id,
         timestamp,
         role: "assistant",
-        content: assistantResponse,
+        content: streamedResponse,
         chunks,
+        retrievalTime: time / 1000,
       };
 
-      addTelemetry(assistantMessage, chatId).finally();
-
+      addTelemetry(assistantMessage, currentChatId).finally();
+      setActiveResponse("");
+      setRetrievalTime(null);
+      setChunks([]);
       setMessages((prev) => [...prev, assistantMessage]);
     } catch (err) {
       console.error("Failed to generate assistant response:", err);
@@ -76,7 +93,17 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
 
   return (
     <ChatContext.Provider
-      value={{ messages, addUserMessage, clearMessages, error, loading }}
+      value={{
+        messages,
+        addUserMessage,
+        clearMessages,
+        error,
+        loading,
+        chunks,
+        activeResponse,
+        retrievalTime,
+        chatId,
+      }}
     >
       {children}
     </ChatContext.Provider>

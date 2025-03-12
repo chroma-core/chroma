@@ -35,12 +35,9 @@ export default function RootLayout({
           <div className="absolute inset-0 bg-[url('/background.jpg')] bg-cover bg-center opacity-10" />
           <div className="relative z-10 flex flex-col h-full">
             <Header />
-            <AppProvider>
-              <div className="flex items-center w-full h-full">
-                <Sidebar />
-                {children}
-              </div>
-            </AppProvider>
+            <div className="flex items-center justify-center w-full h-full">
+              {children}
+            </div>
           </div>
         </div>
       </body>

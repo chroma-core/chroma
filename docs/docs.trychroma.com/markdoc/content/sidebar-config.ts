@@ -190,8 +190,14 @@ const sidebarConfig: AppSection[] = [
     id: "guides-and-examples",
     name: "Guides & Examples",
     icon: GraduationCap,
-    disable: true,
-    tag: "Coming Soon",
+    default: "/sample-apps/chat-with-your-docs",
+    subsections: [
+      {
+        id: "sample-apps",
+        name: "Sample Apps",
+        pages: [{ id: "chat-with-your-docs", name: "Chat with your Docs" }],
+      },
+    ],
   },
 ];
 

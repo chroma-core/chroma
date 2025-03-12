@@ -17,6 +17,9 @@ import CenteredContent from "@/components/markdoc/centered-content";
 import Latex from "@/components/markdoc/latex";
 import Banner from "@/components/markdoc/banner";
 import Heading from "@/components/markdoc/markdoc-heading";
+import CliBlock from "@/components/markdoc/cli-block";
+import StyledImage from "@/components/markdoc/styled-image";
+import SampleAppContent from "@/components/markdoc/sample-app-content";
 
 interface MarkDocConfig extends Config {
   components?: Record<string, React.FC<any>>;
@@ -64,6 +67,32 @@ const markdocConfig: MarkDocConfig = {
     },
   },
   tags: {
+    SampleAppContent: {
+      render: "SampleAppContent",
+      selfClosing: true,
+    },
+    StyledImage: {
+      render: "StyledImage",
+      selfClosing: true,
+      attributes: {
+        src: {
+          type: String,
+          required: true,
+        },
+        alt: {
+          type: String,
+          required: true,
+        },
+        className: {
+          type: String,
+          required: true,
+        },
+      },
+    },
+    CliBlock: {
+      render: "CliBlock",
+      selfClosing: false,
+    },
     TabbedCodeBlock: {
       render: "TabbedCodeBlock",
       selfClosing: true,
@@ -95,6 +124,12 @@ const markdocConfig: MarkDocConfig = {
     CenteredContent: {
       render: "CenteredContent",
       selfClosing: false,
+      attributes: {
+        className: {
+          type: String,
+          required: false,
+        },
+      },
     },
     Banner: {
       render: "Banner",
@@ -128,6 +163,9 @@ const markdocConfig: MarkDocConfig = {
     Banner,
     Latex,
     Heading,
+    CliBlock,
+    StyledImage,
+    SampleAppContent,
   },
 };
 

@@ -4,7 +4,7 @@ const ChatContainer: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
   return (
-    <div className="flex flex-col w-full h-full border border-black">
+    <div className="flex flex-col h-full border border-black w-[90%]">
       <div className="relative py-2 px-[3px] h-fit border-b-[1px] border-black dark:border-gray-300 dark:bg-gray-950">
         <div className="flex flex-col gap-0.5">
           {[...Array(7)].map((_, index) => (
