@@ -167,7 +167,7 @@ fn download_repo_directory(
 
 fn download_sample_app(name: &String, path: &String) -> Result<(), Box<dyn Error>> {
     let url = format!(
-        "https://api.github.com/repos/chroma-core/chroma/contents/examples/sample_apps/{}?ref=itai/demo-app",
+        "https://api.github.com/repos/chroma-core/chroma/contents/examples/sample_apps/{}?ref=itai/demo-cli",
         name
     );
     let app_path = format!("{}/{}", path, name);
@@ -346,20 +346,7 @@ pub fn install(args: InstallArgs) {
 
     let mut env_variables: HashMap<String, String> = HashMap::new();
 
-    let mut path = args.path.unwrap_or_else(|| {
-        println!(
-            "{}",
-            "\nWhere do you want to save this project?".blue().bold()
-        );
-        Input::with_theme(&ColorfulTheme::default())
-            .default("current working directory".to_string())
-            .interact_text()
-            .unwrap()
-    });
-
-    if path == "current working directory" {
-        path = String::from(".");
-    }
+    let mut path = String::from(".");
 
     let package_manager = args.package_manager.unwrap_or_else(|| {
         println!(

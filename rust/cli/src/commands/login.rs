@@ -38,6 +38,18 @@ pub fn login(args: LoginArgs) {
         input.trim().to_string()
     });
 
+    let team = args.team.unwrap_or_else(|| {
+        println!("{}", "\nWhat is your team name?".blue().bold());
+        print!("{} ", ">".yellow());
+        io::stdout().flush().expect("Failed to flush stdout");
+
+        let mut input = String::new();
+        io::stdin()
+            .read_line(&mut input)
+            .expect("Failed to read team name");
+        input.trim().to_string()
+    });
+
     let tenant_id = get_tenant_id(&api_key).expect("Invalid API key");
 
     let has_default = profiles.contains_key("default");
@@ -81,6 +93,7 @@ pub fn login(args: LoginArgs) {
         Profile {
             api_key: api_key.clone(),
             tenant_id: tenant_id.clone(),
+            team: team.clone()
         },
     );
 
@@ -96,6 +109,7 @@ pub fn login(args: LoginArgs) {
             Profile {
                 api_key: api_key.clone(),
                 tenant_id: tenant_id.clone(),
+                team: team.clone()
             },
         );
     }

@@ -36,6 +36,7 @@ pub struct LocalFrontendCommandArgs {
 pub struct Profile {
     pub api_key: String,
     pub tenant_id: String,
+    pub team: String,
 }
 
 #[derive(Serialize, Deserialize)]
