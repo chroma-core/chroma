@@ -116,7 +116,8 @@ impl ClientManager {
                 let channel = ServiceBuilder::new()
                     .layer(chroma_tracing::GrpcTraceLayer)
                     .service(channel);
-                let client = QueryExecutorClient::new(channel);
+                let client =
+                    QueryExecutorClient::new(channel).max_decoding_message_size(32 * 1024 * 1024); // 32 MB
 
                 let mut node_name_to_client_guard = self.node_name_to_client.write();
                 node_name_to_client_guard.insert(node.to_string(), client);
