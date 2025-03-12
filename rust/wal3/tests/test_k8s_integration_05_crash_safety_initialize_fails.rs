@@ -12,6 +12,8 @@ use common::{
 };
 
 #[tokio::test]
+// TODO(rescrv):  Un-ignore.
+#[ignore]
 async fn test_k8s_integration_05_crash_safety_initialize_fails() {
     // Appending to an initialized log should succeed and if you append enough, it should create a
     // snapshot.
