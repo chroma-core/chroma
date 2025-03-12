@@ -14,6 +14,19 @@ use crate::{
     LogWriterOptions, Manifest, ManifestManager,
 };
 
+fn fragment_path(prefix: &str, fragment_seq_no: FragmentSeqNo) -> String {
+    format!(
+        "{}/log/Bucket={}/FragmentSeqNo={}.parquet",
+        prefix,
+        fragment_seq_no.bucket(),
+        fragment_seq_no.0,
+    )
+}
+
+/// The epoch writer is a counting writer.  Every epoch exists.  An epoch goes
+/// unused->used->discarded.  The epoch of a writer is used to determine if and when log contention
+/// indicates that a new writer should be created.  The epoch is incremented when a new writer is
+/// created and checked before creating a new writer.
 #[derive(Clone)]
 pub struct EpochWriter {
     epoch: u64,
@@ -130,7 +143,9 @@ impl OnceLogWriter {
         prefix: String,
     ) -> Result<Arc<Self>, Error> {
         let done = AtomicBool::new(false);
-        let (reap, mut rx) = tokio::sync::mpsc::channel(1_000);
+        // NOTE(rescrv):  The channel size is relatively meaningless if it can hold the number of
+        // outstanding operations on the log.  10x it for headroom.
+        let (reap, mut rx) = tokio::sync::mpsc::channel(10 * options.throttle_fragment.outstanding);
         let batch_manager = BatchManager::new(options.throttle_fragment).ok_or(Error::Internal)?;
         let mut manifest_manager = ManifestManager::new(
             options.throttle_manifest,
@@ -238,6 +253,10 @@ impl OnceLogWriter {
             messages.push(work.0);
             notifies.push(work.1);
         }
+        if messages.is_empty() {
+            tracing::error!("somehow got empty messages");
+            return;
+        }
         match self
             .append_batch_internal(fragment_seq_no, log_position, messages)
             .await
@@ -266,7 +285,10 @@ impl OnceLogWriter {
         log_position: LogPosition,
         messages: Vec<Vec<u8>>,
     ) -> Result<LogPosition, Error> {
-        assert!(!messages.is_empty());
+        assert!(
+            !messages.is_empty(),
+            "empty batch; this should be checked by caller"
+        );
 
         // Construct the columns.
         let messages_len = messages.len();
@@ -282,7 +304,8 @@ impl OnceLogWriter {
         let offsets = UInt64Array::from(offsets);
         let timestamps_us = UInt64Array::from(timestamps_us);
         let bodies = BinaryArray::from(bodies);
-        // SAFETY(rescrv):  The try_from_iter call will always succeed.
+        // SAFETY(rescrv):  The try_from_iter call will always succeed because the three arrays
+        // have same length and the types check.
         // TODO(rescrv):  Arrow pre-allocator.
         let batch = RecordBatch::try_from_iter(vec![
             ("offset", Arc::new(offsets) as ArrayRef),
@@ -291,33 +314,27 @@ impl OnceLogWriter {
         ])
         .unwrap();
 
-        // Write to parquet.
-        let props = WriterProperties::builder()
-            .set_compression(Compression::SNAPPY)
-            .build();
-        let mut buffer = vec![];
-        let mut writer = ArrowWriter::try_new(&mut buffer, batch.schema(), Some(props)).unwrap();
-        writer.write(&batch).map_err(Arc::new)?;
-        writer.close().map_err(Arc::new)?;
-        let setsum = Setsum::default();
-
-        // Upload the log.
-        let path = format!(
-            "{}/log/Bucket={}/FragmentSeqNo={}.parquet",
-            self.prefix,
-            fragment_seq_no.bucket(),
-            fragment_seq_no.0,
-        );
+        let path = fragment_path(&self.prefix, fragment_seq_no);
         let exp_backoff: ExponentialBackoff = self.options.throttle_fragment.into();
         let start = Instant::now();
         loop {
+            // Write to parquet.
+            let props = WriterProperties::builder()
+                .set_compression(Compression::SNAPPY)
+                .build();
+            let mut buffer = vec![];
+            let mut writer =
+                ArrowWriter::try_new(&mut buffer, batch.schema(), Some(props)).unwrap();
+            writer.write(&batch).map_err(Arc::new)?;
+            writer.close().map_err(Arc::new)?;
+
+            // Upload the log.
             match self
                 .storage
                 .put_bytes(&path, buffer.clone(), PutOptions::if_not_exists())
                 .await
             {
                 Ok(_) => {
-                    println!("installed fragment");
                     break;
                 }
                 Err(StorageError::Precondition { path: _, source: _ }) => {
@@ -342,7 +359,8 @@ impl OnceLogWriter {
             seq_no: fragment_seq_no,
             start: log_position,
             limit: log_position + messages_len,
-            setsum,
+            // TODO(rescrv):  This is a placeholder.
+            setsum: Setsum::default(),
         };
         self.manifest_manager.add_fragment(fragment).await?;
         // Record the records/batches written.

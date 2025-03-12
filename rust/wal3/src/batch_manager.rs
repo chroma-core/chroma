@@ -181,6 +181,8 @@ impl BatchManager {
         self.batches_written.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Calculate the batch size based upon the average number of records written per batch.  Add
+    /// 10% to the batch size to make it always grow and open up up to the limits of throttling.
     fn batch_size(&self) -> usize {
         let average = self.records_written.load(Ordering::Relaxed)
             / self.batches_written.load(Ordering::Relaxed);
