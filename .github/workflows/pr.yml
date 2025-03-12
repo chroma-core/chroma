@@ -158,6 +158,20 @@ jobs:
           message: |
             :white_check_mark: The Helm chart's version was changed. Your changes to the chart will be published upon merge to `main`.
 
+  delete-helm-comment:
+    name: Delete Helm chart comment if not changed
+    needs: change-detection
+    if: needs.change-detection.outputs.helm-changes == 'false'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Delete comment (Helm chart was not changed)
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: helm-chart-version-info
+          delete: true
+
   python-tests:
     name: Python tests
     needs: change-detection
@@ -262,10 +276,12 @@ jobs:
     - go-tests
     - check-title
     - lint
+    - check-helm-version-bump
+    - delete-helm-comment
     runs-on: ubuntu-latest
     steps:
     - name: Decide whether the needed jobs succeeded or failed
       uses: re-actors/alls-green@release/v1
       with:
         jobs: ${{ toJSON(needs) }}
-        allowed-skips: python-tests,python-vulnerability-scan,javascript-client-tests,rust-tests,go-tests
+        allowed-skips: python-tests,python-vulnerability-scan,javascript-client-tests,rust-tests,go-tests,check-helm-version-bump,delete-helm-comment
