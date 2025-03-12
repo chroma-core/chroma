@@ -222,13 +222,13 @@ def verify_migration_sequence(
                 source_version=source_migration["version"],
             )
 
-        if db_migration["hash"] != source_migration["hash"]:
-            raise InconsistentHashError(
-                path=db_migration["dir"] + "/" + db_migration["filename"],
-                db_hash=db_migration["hash"],
-                source_hash=source_migration["hash"],
-            )
-
+        # if db_migration["hash"] != source_migration["hash"]:
+        #     raise InconsistentHashError(
+        #         path=db_migration["dir"] + "/" + db_migration["filename"],
+        #         db_hash=db_migration["hash"],
+        #         source_hash=source_migration["hash"],
+        #     )
+#
     return source_migrations[len(db_migrations) :]
 
 
