@@ -1,9 +1,11 @@
 use crate::types::CleanupMode;
+use crate::types::{DELETE_LIST_FILE_PREFIX, RENAMED_FILE_PREFIX};
 use async_trait::async_trait;
+use chroma_blockstore::BLOCKFILE_S3_PREFIX;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_index::HNSW_INDEX_S3_PREFIX;
 use chroma_storage::Storage;
 use chroma_system::{Operator, OperatorType};
-use chroma_types::ChromaS3FilePrefixes;
 use futures::stream::StreamExt;
 use std::collections::HashSet;
 use thiserror::Error;
@@ -79,17 +81,14 @@ impl DeleteUnusedFilesOperator {
     fn get_rename_path(&self, path: &str, epoch: i64) -> String {
         format!(
             "{}{}/{epoch}/{path}",
-            ChromaS3FilePrefixes::RenamedFilePrefix,
-            self.collection_id
+            RENAMED_FILE_PREFIX, self.collection_id
         )
     }
 
     fn get_deletion_list_path(&self, timestamp: i64) -> String {
         format!(
             "{}{}/{}.txt",
-            ChromaS3FilePrefixes::DeleteListFilePrefix,
-            self.collection_id,
-            timestamp
+            DELETE_LIST_FILE_PREFIX, self.collection_id, timestamp
         )
     }
 
@@ -216,14 +215,7 @@ impl Operator<DeleteUnusedFilesInput, DeleteUnusedFilesOutput> for DeleteUnusedF
                     "link_lists.bin",
                 ]
                 .iter()
-                .map(|file| {
-                    format!(
-                        "{}{}/{}",
-                        ChromaS3FilePrefixes::HnswIndexFilePrefix,
-                        prefix,
-                        file
-                    )
-                })
+                .map(|file| format!("{}{}/{}", HNSW_INDEX_S3_PREFIX, prefix, file))
                 .collect::<Vec<String>>()
             })
             .collect();
@@ -330,26 +322,10 @@ mod tests {
 
         // Create HNSW test files
         let hnsw_files = vec![
-            format!(
-                "{}{}/header.bin",
-                ChromaS3FilePrefixes::HnswIndexFilePrefix,
-                "prefix1"
-            ),
-            format!(
-                "{}{}/data_level0.bin",
-                ChromaS3FilePrefixes::HnswIndexFilePrefix,
-                "prefix1"
-            ),
-            format!(
-                "{}{}/length.bin",
-                ChromaS3FilePrefixes::HnswIndexFilePrefix,
-                "prefix1"
-            ),
-            format!(
-                "{}{}/link_lists.bin",
-                ChromaS3FilePrefixes::HnswIndexFilePrefix,
-                "prefix1"
-            ),
+            format!("{}{}/header.bin", HNSW_INDEX_S3_PREFIX, "prefix1"),
+            format!("{}{}/data_level0.bin", HNSW_INDEX_S3_PREFIX, "prefix1"),
+            format!("{}{}/length.bin", HNSW_INDEX_S3_PREFIX, "prefix1"),
+            format!("{}{}/link_lists.bin", HNSW_INDEX_S3_PREFIX, "prefix1"),
         ];
         for file in &hnsw_files {
             create_test_file(storage, file, b"test content").await;
@@ -386,7 +362,7 @@ mod tests {
         // Verify deletion list file was created
         let deletion_list_path = tmp_dir.path().join(format!(
             "{}test_collection/123.txt",
-            ChromaS3FilePrefixes::DeleteListFilePrefix
+            DELETE_LIST_FILE_PREFIX
         ));
         assert!(deletion_list_path.exists());
 
@@ -432,7 +408,7 @@ mod tests {
         // Verify deletion list was created
         let deletion_list_path = tmp_dir.path().join(format!(
             "{}test_collection/123.txt",
-            ChromaS3FilePrefixes::DeleteListFilePrefix
+            DELETE_LIST_FILE_PREFIX
         ));
         assert!(deletion_list_path.exists());
 
@@ -441,9 +417,7 @@ mod tests {
             let original_path = tmp_dir.path().join(file);
             let new_path = tmp_dir.path().join(format!(
                 "{}{}/123/{}",
-                ChromaS3FilePrefixes::RenamedFilePrefix,
-                "test_collection",
-                file
+                RENAMED_FILE_PREFIX, "test_collection", file
             ));
             assert!(!original_path.exists());
             assert!(new_path.exists());
@@ -455,9 +429,7 @@ mod tests {
             let original_path = tmp_dir.path().join(file);
             let new_path = tmp_dir.path().join(format!(
                 "{}{}/123/{}",
-                ChromaS3FilePrefixes::RenamedFilePrefix,
-                "test_collection",
-                file
+                RENAMED_FILE_PREFIX, "test_collection", file
             ));
             assert!(!original_path.exists());
             assert!(new_path.exists());
@@ -500,7 +472,7 @@ mod tests {
         // Verify deletion list was created
         let deletion_list_path = tmp_dir.path().join(format!(
             "{}test_collection/123.txt",
-            ChromaS3FilePrefixes::DeleteListFilePrefix
+            DELETE_LIST_FILE_PREFIX
         ));
         assert!(deletion_list_path.exists());
 
@@ -553,7 +525,7 @@ mod tests {
         // Verify deletion list contains the error
         let deletion_list_path = tmp_dir.path().join(format!(
             "{}test_collection/123.txt",
-            ChromaS3FilePrefixes::DeleteListFilePrefix
+            DELETE_LIST_FILE_PREFIX
         ));
         let content = std::fs::read_to_string(deletion_list_path).unwrap();
         assert!(content.contains("Failed files:"));
@@ -577,7 +549,7 @@ mod tests {
         // Verify deletion list contains the error
         let deletion_list_path = tmp_dir.path().join(format!(
             "{}test_collection/124.txt",
-            ChromaS3FilePrefixes::DeleteListFilePrefix
+            DELETE_LIST_FILE_PREFIX
         ));
         let content = std::fs::read_to_string(deletion_list_path).unwrap();
         assert!(content.contains("Failed files:"));
@@ -601,7 +573,7 @@ mod tests {
         // Verify deletion list was created even for nonexistent files
         let deletion_list_path = tmp_dir.path().join(format!(
             "{}test_collection/125.txt",
-            ChromaS3FilePrefixes::DeleteListFilePrefix
+            DELETE_LIST_FILE_PREFIX
         ));
         assert!(deletion_list_path.exists());
     }

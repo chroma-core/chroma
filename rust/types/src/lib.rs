@@ -2,7 +2,6 @@
 mod types;
 mod api_types;
 mod collection;
-mod common;
 mod data_chunk;
 mod data_record;
 mod execution;
@@ -25,7 +24,6 @@ mod where_parsing;
 // Re-export the types module, so that we can use it as a single import in other modules.
 pub use api_types::*;
 pub use collection::*;
-pub use common::*;
 pub use data_chunk::*;
 pub use data_record::*;
 pub use execution::*;

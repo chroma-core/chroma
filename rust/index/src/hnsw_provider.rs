@@ -169,6 +169,7 @@ impl HnswIndexProvider {
         }
     }
 
+    // TODO(rohitcp): Use IndexFilePrefixes::HnswIndexFilePrefix.
     fn format_key(&self, id: &IndexUuid, file: &str) -> String {
         format!("hnsw/{}/{}", id, file)
     }
