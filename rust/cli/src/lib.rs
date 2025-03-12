@@ -18,6 +18,7 @@ enum Command {
     Docs,
     Install(InstallArgs),
     Login(LoginArgs),
+    Migrate,
     #[command(subcommand)]
     Profile(ProfileCommand),
     Run(RunArgs),
@@ -52,6 +53,7 @@ pub fn chroma_cli(args: Vec<String>) {
             install(args);
         }
         Command::Login(args) => login(args),
+        Command::Migrate => {}
         Command::Profile(profile_subcommand) => {
             profile_command(profile_subcommand);
         }

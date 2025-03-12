@@ -149,7 +149,7 @@ export const addTelemetry = async (message: Message, chatId: string) => {
 export const retrieveChunks = async (message: Message) => {
   const start = Date.now();
   const dataCollection = (await getChromaCollection("data")) as { id: string };
-  const summariesCollection = (await getChromaCollection("data-summaries")) as {
+  const summariesCollection = (await getChromaCollection("summaries")) as {
     id: string;
   };
 
@@ -162,7 +162,7 @@ export const retrieveChunks = async (message: Message) => {
 
   const where = {
     $or: chunks.ids[0].map((chunkId) => {
-      return { "chunk-id": chunkId };
+      return { "document-id": chunkId };
     }),
   };
 
@@ -174,7 +174,7 @@ export const retrieveChunks = async (message: Message) => {
 
   const summaryByChunkId: Record<string, string> = {};
   summaries.documents.forEach((doc: string, i: number) => {
-    summaryByChunkId[summaries.metadatas[i]["chunk-id"] as string] = doc;
+    summaryByChunkId[summaries.metadatas[i]["document-id"] as string] = doc;
   });
 
   return {

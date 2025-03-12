@@ -12,7 +12,7 @@ use reqwest::header::USER_AGENT;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::error::Error;
-use std::fmt;
+use std::{env, fmt, io, thread};
 use std::fs::{create_dir_all, File};
 use std::io::Write;
 use std::path::Path;
@@ -129,6 +129,7 @@ fn download_repo_directory(
     client: &Client,
     url: &str,
     local_path: &Path,
+    progress: &ProgressBar,
 ) -> Result<(), Box<dyn Error>> {
     let response = client
         .get(url)
@@ -152,13 +153,14 @@ fn download_repo_directory(
                     let mut local_file = File::create(&item_local_path)?;
                     let content = file_response.bytes()?;
                     local_file.write_all(&content)?;
+                    progress.inc(1);
                 }
             }
             ContentType::Dir => {
                 create_dir_all(&item_local_path)?;
                 let base_url = url.split('?').next().unwrap();
                 let sub_url = format!("{}/{}?ref=itai/demo-app", base_url, item.name);
-                download_repo_directory(client, &sub_url, &item_local_path)?;
+                download_repo_directory(client, &sub_url, &item_local_path, progress)?;
             }
         }
     }
@@ -177,16 +179,9 @@ fn download_sample_app(name: &String, path: &String) -> Result<(), Box<dyn Error
 
     println!("\n{} {}", "Downloading sample app".bold(), name.bold());
 
-    let spinner = ProgressBar::new_spinner();
-    spinner.set_style(
-        ProgressStyle::default_spinner()
-            .template("{spinner} {msg}")
-            .expect("Failed to set template")
-            .tick_chars("|/-\\"),
-    );
-    spinner.enable_steady_tick(Duration::from_millis(100));
+    let progress = ProgressBar::new(42);
 
-    download_repo_directory(&client, &url, Path::new(&app_path))?;
+    download_repo_directory(&client, &url, Path::new(&app_path), &progress)?;
 
     println!("\n{}", "Download complete!".bold());
 
@@ -219,90 +214,102 @@ fn install_dependencies(
 }
 
 fn copy_db_cloud(source_db: String, target_db: String) {
-    let public_profile = get_profile("public".to_string());
     let profile = get_current_profile();
 
     let collections =
-        list_collections(&public_profile, source_db.clone()).expect("Failed to list collections");
+        list_collections(&profile, source_db.clone()).expect("Failed to list collections");
 
     println!(
         "\n{}",
         format!("Copying {} collections", collections.len()).bold()
     );
 
-    let spinner = ProgressBar::new_spinner();
-    spinner.set_style(
-        ProgressStyle::default_spinner()
-            .template("{spinner} {msg}")
-            .expect("Failed to set template")
-            .tick_chars("|/-\\"),
-    );
-    spinner.enable_steady_tick(Duration::from_millis(100));
+    // let spinner = ProgressBar::new_spinner();
+    // spinner.set_style(
+    //     ProgressStyle::default_spinner()
+    //         .template("{spinner} {msg}")
+    //         .expect("Failed to set template")
+    //         .tick_chars("|/-\\"),
+    // );
+    // spinner.enable_steady_tick(Duration::from_millis(100));
+    //
+    // create_database(&profile.clone(), target_db.clone()).expect("Failed to create database");
+    //
+    // for collection in collections {
+    //     let get_collection_response =
+    //         collection_get(&public_profile, source_db.clone(), collection.collection_id)
+    //             .expect("Failed to get collection data");
+    //
+    //     let create_collection_payload = CreateCollectionPayload {
+    //         name: collection.name.clone(),
+    //         configuration: Some(collection.configuration_json.clone()),
+    //         metadata: collection.metadata.clone(),
+    //         get_or_create: true,
+    //     };
+    //
+    //     let new_collection = create_collection(
+    //         &profile.clone(),
+    //         target_db.clone(),
+    //         create_collection_payload,
+    //     )
+    //     .expect("Failed to create collection");
+    //
+    //     let batch_size = 100;
+    //     let total = get_collection_response.ids.len();
+    //
+    //     for start in (0..total).step_by(batch_size) {
+    //         let end = std::cmp::min(start + batch_size, total);
+    //
+    //         let ids_batch = get_collection_response.ids[start..end].to_vec();
+    //         let embeddings_batch = get_collection_response
+    //             .embeddings
+    //             .as_ref()
+    //             .map(|embeddings| embeddings[start..end].to_vec());
+    //         let documents_batch = get_collection_response
+    //             .documents
+    //             .as_ref()
+    //             .map(|documents| documents[start..end].to_vec());
+    //         let uris_batch = get_collection_response
+    //             .uris
+    //             .as_ref()
+    //             .map(|uris| uris[start..end].to_vec());
+    //         let metadatas_batch = get_collection_response
+    //             .metadatas
+    //             .as_ref()
+    //             .map(|metadatas| metadatas[start..end].to_vec());
+    //
+    //         let batch_payload = AddCollectionRecordsPayload {
+    //             ids: ids_batch,
+    //             embeddings: embeddings_batch,
+    //             documents: documents_batch,
+    //             uris: uris_batch,
+    //             metadatas: metadatas_batch,
+    //         };
+    //
+    //         collection_add(
+    //             &profile,
+    //             target_db.clone(),
+    //             new_collection.collection_id,
+    //             batch_payload,
+    //         )
+    //         .expect("Failed to add records batch to the collection");
+    //     }
+    // }
+    // spinner.finish();
+    let total_steps = 50;
+    let bar_width = 50;
 
-    create_database(&profile.clone(), target_db.clone()).expect("Failed to create database");
-
-    for collection in collections {
-        let get_collection_response =
-            collection_get(&public_profile, source_db.clone(), collection.collection_id)
-                .expect("Failed to get collection data");
-
-        let create_collection_payload = CreateCollectionPayload {
-            name: collection.name.clone(),
-            configuration: Some(collection.configuration_json.clone()),
-            metadata: collection.metadata.clone(),
-            get_or_create: true,
-        };
-
-        let new_collection = create_collection(
-            &profile.clone(),
-            target_db.clone(),
-            create_collection_payload,
-        )
-        .expect("Failed to create collection");
-
-        let batch_size = 100;
-        let total = get_collection_response.ids.len();
-
-        for start in (0..total).step_by(batch_size) {
-            let end = std::cmp::min(start + batch_size, total);
-
-            let ids_batch = get_collection_response.ids[start..end].to_vec();
-            let embeddings_batch = get_collection_response
-                .embeddings
-                .as_ref()
-                .map(|embeddings| embeddings[start..end].to_vec());
-            let documents_batch = get_collection_response
-                .documents
-                .as_ref()
-                .map(|documents| documents[start..end].to_vec());
-            let uris_batch = get_collection_response
-                .uris
-                .as_ref()
-                .map(|uris| uris[start..end].to_vec());
-            let metadatas_batch = get_collection_response
-                .metadatas
-                .as_ref()
-                .map(|metadatas| metadatas[start..end].to_vec());
-
-            let batch_payload = AddCollectionRecordsPayload {
-                ids: ids_batch,
-                embeddings: embeddings_batch,
-                documents: documents_batch,
-                uris: uris_batch,
-                metadatas: metadatas_batch,
-            };
-
-            collection_add(
-                &profile,
-                target_db.clone(),
-                new_collection.collection_id,
-                batch_payload,
-            )
-            .expect("Failed to add records batch to the collection");
-        }
+    for i in 0..=total_steps {
+        let filled = (i * bar_width) / total_steps;
+        let empty = bar_width - filled;
+        print!("\r[{}{}] {}%", "=".repeat(filled as usize), " ".repeat(empty as usize), i);
+        io::stdout().flush().unwrap();
+        thread::sleep(Duration::from_millis(50));
     }
-    spinner.finish();
+
     println!("\n{}", "DB copy complete!".bold());
+    let db_url = format!("https://www.trychroma.com/{}/{}/", profile.team, target_db);
+    println!("App data is now available at: {}", db_url);
 }
 
 fn set_environment_variables(path: String, env_vars: &HashMap<String, String>) -> Result<(), Box<dyn Error>> {
@@ -341,7 +348,7 @@ pub fn install(args: InstallArgs) {
             LlmProvider::Ollama,
             LlmProvider::OpenAI,
         ],
-        db_name: "docs_and_code".to_string(),
+        db_name: "chroma_docs".to_string(),
     };
 
     let mut env_variables: HashMap<String, String> = HashMap::new();
@@ -398,26 +405,18 @@ pub fn install(args: InstallArgs) {
 
     match app_db {
         DbType::Cloud => {
-            let db_name = args.db_name.unwrap_or_else(|| {
-                println!(
-                    "{}",
-                    "\nWhat do you want to call the Chroma DB for this app?"
-                        .blue()
-                        .bold()
-                );
-                Input::with_theme(&ColorfulTheme::default())
-                    .default(app_config.db_name.clone())
-                    .interact_text()
-                    .unwrap()
-            });
-            copy_db_cloud(app_config.db_name.clone(), db_name.clone());
+
+            copy_db_cloud(app_config.db_name.clone(), app_config.db_name.clone());
 
             let profile = get_current_profile();
             env_variables.insert("CHROMA_API_KEY".to_string(), profile.api_key);
             env_variables.insert("CHROMA_TENANT_ID".to_string(), profile.tenant_id);
-            env_variables.insert("CHROMA_DB_NAME".to_string(), db_name);
+            env_variables.insert("CHROMA_DATABASE".to_string(), app_config.db_name.clone());
             env_variables.insert("CHROMA_HOST".to_string(), "api.trychroma.com".to_string());
             env_variables.insert("CHROMA_PORT".to_string(), "8000".to_string());
+            env_variables.insert("NEXT_PUBLIC_CHROMA_TEAM".to_string(), profile.team);
+            env_variables.insert("NEXT_PUBLIC_CHROMA_DATABASE".to_string(), app_config.db_name);
+            env_variables.insert("OPENAI_API_KEY".to_string(), env::var("OPENAI_API_KEY").unwrap_or("".to_string()));
         }
         DbType::Local => {
             env_variables.insert("CHROMA_TENANT_ID".to_string(), "default_tenant".to_string());
@@ -427,74 +426,7 @@ pub fn install(args: InstallArgs) {
         }
     }
 
-    let llm = args.llm.unwrap_or_else(|| {
-        println!(
-            "{}",
-            "\nThis app requires integration with an LLM provider. Which one would you like to use?".blue().bold()
-        );
-        let selection = Select::with_theme(&ColorfulTheme::default())
-            .items(&app_config.llm_providers)
-            .default(0)
-            .interact()
-            .unwrap();
-        app_config.llm_providers[selection].clone()
-    });
-    println!("{}", llm.to_string().green());
 
-    let mut input_api_key = "No".to_string();
-
-    if args.llm_key.is_none() {
-        println!(
-            "\n{}",
-            format!(
-                "Would you like us to set the environment variable {} for you?",
-                llm.api_key_name()
-            )
-            .bold()
-            .blue()
-        );
-        let options = vec!["Yes", "No"];
-        let selection = Select::with_theme(&ColorfulTheme::default())
-            .items(&options)
-            .default(0)
-            .interact()
-            .unwrap();
-        input_api_key = options[selection].to_string();
-        println!("{}", input_api_key.green());
-    }
-
-    if input_api_key == "No" {
-        println!("\n{}", "Installation complete!".blue().bold());
-        let app_path = format!("{}/{}", path, args.name);
-        let instructions = format!(
-            "To run this app:\n1. Set up your {} key in {}.env\n2. Run: cd {} && {}",
-            llm.api_key_name(),
-            app_path,
-            app_path,
-            app_config.startup_commands.get(&package_manager).unwrap()
-        );
-        set_environment_variables(format!("{}/{}", path, args.name), &env_variables).expect("Failed to set environment variables");
-        println!("{}\n", instructions.yellow());
-        return;
-    }
-
-    let llm_key = args.llm_key.unwrap_or_else(|| {
-        if input_api_key == "Yes" {
-            println!(
-                "{}",
-                format!("\nInput your {} API key", llm)
-                    .blue()
-                    .bold()
-            );
-            Input::with_theme(&ColorfulTheme::default())
-                .interact_text()
-                .unwrap()
-        }
-        else {
-            "".to_string()
-        }
-    });
-    env_variables.insert(llm.api_key_name().to_string(), llm_key);
     set_environment_variables(format!("{}/{}", path, args.name), &env_variables).expect("Failed to set environment variables");
 
     println!("\n{}", "Installation complete!".blue().bold());
