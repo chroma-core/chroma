@@ -88,7 +88,7 @@ pub enum RegisterError {
     #[error("Update log offset error: {0}")]
     UpdateLogOffsetError(#[from] Box<dyn ChromaError>),
     #[error("Collection was soft deleted")]
-    CollectionSoftDeletedError,
+    CollectionSoftDeleted,
 }
 
 impl ChromaError for RegisterError {
@@ -96,7 +96,7 @@ impl ChromaError for RegisterError {
         match self {
             RegisterError::FlushCompactionError(e) => e.code(),
             RegisterError::UpdateLogOffsetError(e) => e.code(),
-            RegisterError::CollectionSoftDeletedError => ErrorCodes::FailedPrecondition,
+            RegisterError::CollectionSoftDeleted => ErrorCodes::FailedPrecondition,
         }
     }
 }
@@ -130,7 +130,7 @@ impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
             Ok(response) => response,
             Err(error) => match error {
                 FlushCompactionError::CollectionSoftDeleted => {
-                    return Err(RegisterError::CollectionSoftDeletedError);
+                    return Err(RegisterError::CollectionSoftDeleted);
                 }
                 _ => return Err(RegisterError::FlushCompactionError(error)),
             },
