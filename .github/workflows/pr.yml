@@ -12,16 +12,10 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       # Component changes
-      docs-only: ${{ steps.filter.outputs.docs-only }}
+      docs-only: ${{ steps.determine-tests.outputs.docs-only }}
       helm-changes: ${{ steps.filter.outputs.helm-changes }}
-      core-changes: ${{ steps.filter.outputs.core-changes }}
-      js-only: ${{ steps.filter.outputs.js-only }}
-      go-only: ${{ steps.filter.outputs.go-only }}
-      # Test decisions
-      run-python-tests: ${{ steps.filter.outputs.docs-only != 'true' && (steps.filter.outputs.core-changes == 'true' || contains(fromJson('["python-changes"]'), github.event.action)) }}
-      run-rust-tests: ${{ steps.filter.outputs.docs-only != 'true' && (steps.filter.outputs.core-changes == 'true' || contains(fromJson('["rust-changes"]'), github.event.action)) }}
-      run-js-tests: ${{ steps.filter.outputs.docs-only != 'true' && (steps.filter.outputs.core-changes == 'true' || steps.filter.outputs.js-only == 'true') }}
-      run-go-tests: ${{ steps.filter.outputs.docs-only != 'true' && (steps.filter.outputs.core-changes == 'true' || steps.filter.outputs.go-only == 'true') }}
+      # Test flags as a JSON array
+      tests-to-run: ${{ steps.determine-tests.outputs.tests-to-run }}
       # Helm version check
       helm-version-changed: ${{ steps.helm-version.outputs.version_changed }}
     steps:
@@ -34,35 +28,64 @@ jobs:
         uses: dorny/paths-filter@v3
         with:
           filters: |
-            docs-only:
+            # Only documentation changes
+            docs:
               - 'docs/**'
-              - '!**/*.py'
-              - '!**/*.rs'
-              - '!**/*.go'
-              - '!**/*.js'
-              - '!**/*.ts'
+            # Outside docs
+            outside-docs:
+              - '!docs/**'
+            # Helm chart changes
             helm-changes:
               - 'k8s/distributed-chroma/**'
-            core-changes:
-              - 'chromadb/**'
-              - 'clients/python/**'
-              - 'pyproject.toml'
-              - 'requirements*.txt'
-              - 'rust/**'
-              - 'Cargo.toml'
-              - 'Cargo.lock'
-            js-only:
+            # JavaScript client changes
+            js:
               - 'clients/js/**'
-              - '!clients/python/**'
-              - '!chromadb/**'
-              - '!rust/**'
-              - '!go/**'
-            go-only:
-              - 'go/**'
-              - '!clients/python/**'
+            # Outside JS
+            outside-js:
               - '!clients/js/**'
-              - '!chromadb/**'
-              - '!rust/**'
+            # Go client changes
+            go:
+              - 'go/**'
+            # Outside Go
+            outside-go:
+              - '!go/**'
+
+      - name: Determine tests to run
+        id: determine-tests
+        run: |
+          # Initialize an empty array
+          TESTS_TO_RUN="[]"
+
+          # If changes are docs-only (changes in docs but not outside docs)
+          if [[ "${{ steps.filter.outputs.docs }}" == "true" && "${{ steps.filter.outputs.outside-docs }}" == "false" ]]; then
+            echo "Only documentation changes detected, skipping all tests"
+            echo "docs-only=true" >> $GITHUB_OUTPUT
+            echo "tests-to-run=${TESTS_TO_RUN}" >> $GITHUB_OUTPUT
+            exit 0
+          else
+            echo "docs-only=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Check for JS-only changes (changes in JS but not outside JS)
+          if [[ "${{ steps.filter.outputs.js }}" == "true" && "${{ steps.filter.outputs.outside-js }}" == "false" ]]; then
+            echo "JavaScript-only changes detected"
+            TESTS_TO_RUN='["js"]'
+            echo "tests-to-run=${TESTS_TO_RUN}" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Check for Go-only changes (changes in Go but not outside Go)
+          if [[ "${{ steps.filter.outputs.go }}" == "true" && "${{ steps.filter.outputs.outside-go }}" == "false" ]]; then
+            echo "Go-only changes detected"
+            TESTS_TO_RUN='["go"]'
+            echo "tests-to-run=${TESTS_TO_RUN}" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # If we get here, we need to run all tests (core changes)
+          echo "Core changes detected, running all tests"
+          TESTS_TO_RUN='["python", "rust", "js", "go"]'
+          echo "tests-to-run=${TESTS_TO_RUN}" >> $GITHUB_OUTPUT
 
       - name: Check Helm version change
         id: helm-version
@@ -138,7 +161,7 @@ jobs:
   python-tests:
     name: Python tests
     needs: change-detection
-    if: needs.change-detection.outputs.run-python-tests == 'true'
+    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
     uses: ./.github/workflows/_python-tests.yml
     with:
       property_testing_preset: 'fast'
@@ -146,25 +169,25 @@ jobs:
   python-vulnerability-scan:
     name: Python vulnerability scan
     needs: change-detection
-    if: needs.change-detection.outputs.run-python-tests == 'true'
+    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
     uses: ./.github/workflows/_python-vulnerability-scan.yml
 
   javascript-client-tests:
     name: JavaScript client tests
     needs: change-detection
-    if: needs.change-detection.outputs.run-js-tests == 'true'
+    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'js')
     uses: ./.github/workflows/_javascript-client-tests.yml
 
   rust-tests:
     name: Rust tests
     needs: change-detection
-    if: needs.change-detection.outputs.run-rust-tests == 'true'
+    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'rust')
     uses: ./.github/workflows/_rust-tests.yml
 
   go-tests:
     name: Go tests
     needs: change-detection
-    if: needs.change-detection.outputs.run-go-tests == 'true'
+    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'go')
     uses: ./.github/workflows/_go-tests.yml
 
   check-title:
