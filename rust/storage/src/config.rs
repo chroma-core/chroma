@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize, Debug, Serialize)]
+#[derive(Deserialize, Debug, Serialize, Clone)]
 /// The configuration for the chosen storage.
 /// # Options
 /// - S3: The configuration for the s3 storage.

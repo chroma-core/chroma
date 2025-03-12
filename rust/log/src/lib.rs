@@ -18,6 +18,8 @@ pub use types::*;
 #[cfg(feature = "server")]
 mod server;
 #[cfg(feature = "server")]
+mod state_hash_table;
+#[cfg(feature = "server")]
 use server::{LogServer, LogServerConfig};
 
 use async_trait::async_trait;

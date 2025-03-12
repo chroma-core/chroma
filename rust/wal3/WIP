@@ -1,0 +1,46 @@
+    /*
+            loop {
+                notifier.notified().await;
+                let (work, throttle) = {
+                    // SAFETY(rescrv):  Mutex poisoning.
+                    let mut staging = staging.lock().unwrap();
+                    (staging.pull_work(), staging.throttle)
+                };
+                    // TODO(rescrv): snapshots.
+                    /*
+                    if let Some(snapshot) = snapshot {
+                        let done = Arc::new(AtomicBool::new(false));
+                        let install = Self::install_snapshot(
+                            throttle,
+                            Arc::clone(&staging),
+                            Arc::clone(&storage),
+                            snapshot,
+                            Arc::clone(&notifier),
+                            Arc::clone(&done),
+                        );
+                        let handle = tokio::task::spawn(install);
+                        in_flight_snapshots.push_back((done, handle));
+                    }
+                    */
+                    match install_one.await {
+                        Ok(e_tag) => {
+                            let mut staging = staging.lock().unwrap();
+                            staging.next_seq_no_to_apply = next_seq_no_to_apply;
+                            staging.stable = ManifestAndETag {
+                                manifest: new_manifest,
+                                e_tag,
+                            };
+                            for notifier in notifiers.into_iter() {
+                                notifier.send(None).unwrap();
+                            }
+                        }
+                        Err(e) => {
+                            for notifier in notifiers.into_iter() {
+                                notifier.send(Some(e.clone())).unwrap();
+                            }
+                            let mut staging = staging.lock().unwrap();
+                        }
+                    }
+                }
+            }
+    */
