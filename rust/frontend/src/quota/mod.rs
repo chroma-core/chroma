@@ -289,8 +289,8 @@ pub enum QuotaEnforcerError {
     Unauthorized,
     #[error("Initialization failed")]
     InitializationFailed,
-    #[error("Billing limit exceeded - please contact support to increase your threshold")]
-    BillingLimitExceeded,
+    #[error("{0:?}")]
+    GenericQuotaError(String),
 }
 
 impl ChromaError for QuotaEnforcerError {
@@ -300,7 +300,7 @@ impl ChromaError for QuotaEnforcerError {
             QuotaEnforcerError::ApiKeyMissing => chroma_error::ErrorCodes::InvalidArgument,
             QuotaEnforcerError::Unauthorized => chroma_error::ErrorCodes::PermissionDenied,
             QuotaEnforcerError::InitializationFailed => chroma_error::ErrorCodes::Internal,
-            QuotaEnforcerError::BillingLimitExceeded => chroma_error::ErrorCodes::ResourceExhausted,
+            QuotaEnforcerError::GenericQuotaError(_) => chroma_error::ErrorCodes::ResourceExhausted,
         }
     }
 }
