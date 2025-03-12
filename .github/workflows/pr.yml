@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       # Component changes
-      docs-only: ${{ steps.filter.outputs.docs-only }}
+      docs-only: ${{ steps.determine-tests.outputs.docs-only }}
       helm-changes: ${{ steps.filter.outputs.helm-changes }}
       # Test flags as a JSON array
       tests-to-run: ${{ steps.determine-tests.outputs.tests-to-run }}
@@ -29,34 +29,26 @@ jobs:
         with:
           filters: |
             # Only documentation changes
-            docs-only:
+            docs:
               - 'docs/**'
-              - '**.md'
-              - '!clients/js/**/*.js'
-              - '!clients/js/**/*.ts'
-              - '!go/**/*.go'
-              - '!chromadb/**/*.py'
-              - '!clients/python/**/*.py'
-              - '!rust/**/*.rs'
+            # Outside docs
+            outside-docs:
+              - '!docs/**'
             # Helm chart changes
             helm-changes:
               - 'k8s/distributed-chroma/**'
-            # Only JavaScript client changes
-            js-only:
+            # JavaScript client changes
+            js:
               - 'clients/js/**'
-              - '!**.md'
-              - '!clients/python/**'
-              - '!chromadb/**'
-              - '!rust/**'
-              - '!go/**'
-            # Only Go client changes
-            go-only:
-              - 'go/**'
-              - '!**.md'
-              - '!clients/python/**'
+            # Outside JS
+            outside-js:
               - '!clients/js/**'
-              - '!chromadb/**'
-              - '!rust/**'
+            # Go client changes
+            go:
+              - 'go/**'
+            # Outside Go
+            outside-go:
+              - '!go/**'
 
       - name: Determine tests to run
         id: determine-tests
@@ -64,23 +56,26 @@ jobs:
           # Initialize an empty array
           TESTS_TO_RUN="[]"
 
-          # If changes are docs-only, we don't need to run any tests
-          if [[ "${{ steps.filter.outputs.docs-only }}" == "true" ]]; then
+          # If changes are docs-only (changes in docs but not outside docs)
+          if [[ "${{ steps.filter.outputs.docs }}" == "true" && "${{ steps.filter.outputs.outside-docs }}" == "false" ]]; then
             echo "Only documentation changes detected, skipping all tests"
+            echo "docs-only=true" >> $GITHUB_OUTPUT
             echo "tests-to-run=${TESTS_TO_RUN}" >> $GITHUB_OUTPUT
             exit 0
+          else
+            echo "docs-only=false" >> $GITHUB_OUTPUT
           fi
 
-          # Check for JS-only changes
-          if [[ "${{ steps.filter.outputs.js-only }}" == "true" ]]; then
+          # Check for JS-only changes (changes in JS but not outside JS)
+          if [[ "${{ steps.filter.outputs.js }}" == "true" && "${{ steps.filter.outputs.outside-js }}" == "false" ]]; then
             echo "JavaScript-only changes detected"
             TESTS_TO_RUN='["js"]'
             echo "tests-to-run=${TESTS_TO_RUN}" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          # Check for Go-only changes
-          if [[ "${{ steps.filter.outputs.go-only }}" == "true" ]]; then
+          # Check for Go-only changes (changes in Go but not outside Go)
+          if [[ "${{ steps.filter.outputs.go }}" == "true" && "${{ steps.filter.outputs.outside-go }}" == "false" ]]; then
             echo "Go-only changes detected"
             TESTS_TO_RUN='["go"]'
             echo "tests-to-run=${TESTS_TO_RUN}" >> $GITHUB_OUTPUT
