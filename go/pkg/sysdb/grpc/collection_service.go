@@ -131,7 +131,7 @@ func (s *Server) GetCollection(ctx context.Context, req *coordinatorpb.GetCollec
 
 	parsedCollectionID, err := types.ToUniqueID(&collectionID)
 	if err != nil {
-		log.Error("GetCollection failed. collection id format error", zap.Error(err), zap.Stringp("collection_id", &collectionID), zap.Stringp("collection_name", collectionName))
+		log.Error("GetCollection failed. collection id format error", zap.Error(err), zap.Stringp("collection_id", &collectionID), zap.Stringp("collection_name", req.Name))
 		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 
@@ -141,7 +141,7 @@ func (s *Server) GetCollection(ctx context.Context, req *coordinatorpb.GetCollec
 			return res, grpcutils.BuildFailedPreconditionGrpcError(err.Error())
 		}
 
-		log.Error("GetCollection failed. ", zap.Error(err), zap.Stringp("collection_id", &collectionID), zap.Stringp("collection_name", collectionName))
+		log.Error("GetCollection failed. ", zap.Error(err), zap.Stringp("collection_id", &collectionID), zap.Stringp("collection_name", req.Name))
 		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 

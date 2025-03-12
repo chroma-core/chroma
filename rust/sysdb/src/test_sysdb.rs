@@ -110,6 +110,27 @@ impl TestSysDb {
 }
 
 impl TestSysDb {
+    pub(crate) async fn get_collection(
+        &mut self,
+        collection_id: CollectionUuid,
+        name: Option<String>,
+        tenant: Option<String>,
+        database: Option<String>,
+    ) -> Result<Collection, chroma_types::GetCollectionError> {
+        let collections = self
+            .get_collections(Some(collection_id), name.clone(), tenant, database)
+            .await
+            .map_err(|_| {
+                chroma_types::GetCollectionError::NotFound(name.clone().unwrap_or("".to_string()))
+            })?;
+        if collections.is_empty() {
+            return Err(chroma_types::GetCollectionError::NotFound(
+                name.unwrap_or("".to_string()),
+            ));
+        }
+        Ok(collections[0].clone())
+    }
+
     pub(crate) async fn get_collections(
         &mut self,
         collection_id: Option<CollectionUuid>,

@@ -1000,11 +1000,11 @@ impl Handler<TaskResult<RegisterOutput, RegisterError>> for CompactOrchestrator 
         };
 
         match message.into_inner() {
-            Ok(output) => {
+            Ok(_output) => {
                 self.terminate_with_result(Ok(ok_compaction_response), ctx);
             }
             Err(e) => match e {
-                RegisterError::CollectionSoftDeletedError => {
+                TaskError::TaskFailed(RegisterError::CollectionSoftDeletedError) => {
                     tracing::info!("Collection was soft deleted: {:?}", e);
                     self.terminate_with_result(Ok(ok_compaction_response), ctx);
                 }

@@ -99,18 +99,17 @@ impl Scheduler {
                 );
                 continue;
             }
-            let collection_id = Some(collection_info.collection_id);
             // TODO: add a cache to avoid fetching the same collection multiple times
             let result = self
                 .sysdb
-                .get_collection(collection_id, None, None, None)
+                .get_collection(collection_info.collection_id, None, None, None)
                 .await;
 
             match result {
                 Ok(collection) => {
                     // TODO: make querying the last compaction time in batch
-                    let log_position_in_collecion = collection[0].log_position;
-                    let tenant_ids = vec![collection[0].tenant.clone()];
+                    let log_position_in_collecion = collection.log_position;
+                    let tenant_ids = vec![collection.tenant.clone()];
                     let tenant = self.sysdb.get_last_compaction_time(tenant_ids).await;
 
                     let last_compaction_time = match tenant {
@@ -141,16 +140,16 @@ impl Scheduler {
                     }
 
                     collection_records.push(CollectionRecord {
-                        collection_id: collection[0].collection_id,
-                        tenant_id: collection[0].tenant.clone(),
+                        collection_id: collection.collection_id,
+                        tenant_id: collection.tenant.clone(),
                         last_compaction_time,
                         first_record_time: collection_info.first_log_ts,
                         offset,
-                        collection_version: collection[0].version,
+                        collection_version: collection.version,
                     });
                 }
                 Err(e) => match e {
-                    GetCollectionError::SoftDeleted(_) => {
+                    chroma_types::GetCollectionError::SoftDeleted(_) => {
                         tracing::info!(
                             "Collection was soft deleted: {:?}",
                             collection_info.collection_id
