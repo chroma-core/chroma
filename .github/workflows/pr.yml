@@ -6,111 +6,38 @@ on:
       - '**'
 
 jobs:
-  # This job detects what changed and determines which tests to run
-  change-detection:
-    name: Detect changes and determine tests
+  # GitHub only provides a way to do path filtering at the workflow level rather than the job level.
+  # This allows us to selectively run jobs based on changed paths.
+  paths-filter:
+    name: Get changed paths
     runs-on: ubuntu-latest
     outputs:
-      # Component changes
-      docs-only: ${{ steps.determine-tests.outputs.docs-only }}
-      helm-changes: ${{ steps.filter.outputs.helm-changes }}
-      # Test flags as a JSON array
-      tests-to-run: ${{ steps.determine-tests.outputs.tests-to-run }}
-      # Helm version check
-      helm-version-changed: ${{ steps.helm-version.outputs.version_changed }}
+      outside-docs: ${{ steps.changes.outputs.outside-docs }}
+      only-docs: ${{ steps.changes.outputs.docs }}
+      helm-changes: ${{ steps.helm-changes.outputs.helm-changes }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Get changed paths
+        id: changes
+        uses: dorny/paths-filter@v3
         with:
-          fetch-depth: 2
-
-      - name: Filter changes
-        id: filter
+          predicate-quantifier: 'every'
+          filters: |
+            outside-docs:
+              - '!docs/**'
+            docs:
+              - 'docs/**'
+      - name: Check for Helm changes
+        id: helm-changes
         uses: dorny/paths-filter@v3
         with:
           filters: |
-            # Only documentation changes
-            docs:
-              - 'docs/**'
-            # Outside docs
-            outside-docs:
-              - '!docs/**'
-            # Helm chart changes
             helm-changes:
               - 'k8s/distributed-chroma/**'
-            # JavaScript client changes
-            js:
-              - 'clients/js/**'
-            # Outside JS
-            outside-js:
-              - '!clients/js/**'
-            # Go client changes
-            go:
-              - 'go/**'
-            # Outside Go
-            outside-go:
-              - '!go/**'
-
-      - name: Determine tests to run
-        id: determine-tests
-        run: |
-          # Initialize an empty array
-          TESTS_TO_RUN="[]"
-
-          # If changes are docs-only (changes in docs but not outside docs)
-          if [[ "${{ steps.filter.outputs.docs }}" == "true" && "${{ steps.filter.outputs.outside-docs }}" == "false" ]]; then
-            echo "Only documentation changes detected, skipping all tests"
-            echo "docs-only=true" >> $GITHUB_OUTPUT
-            echo "tests-to-run=${TESTS_TO_RUN}" >> $GITHUB_OUTPUT
-            exit 0
-          else
-            echo "docs-only=false" >> $GITHUB_OUTPUT
-          fi
-
-          # Check for JS-only changes (changes in JS but not outside JS)
-          if [[ "${{ steps.filter.outputs.js }}" == "true" && "${{ steps.filter.outputs.outside-js }}" == "false" ]]; then
-            echo "JavaScript-only changes detected"
-            TESTS_TO_RUN='["js"]'
-            echo "tests-to-run=${TESTS_TO_RUN}" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          # Check for Go-only changes (changes in Go but not outside Go)
-          if [[ "${{ steps.filter.outputs.go }}" == "true" && "${{ steps.filter.outputs.outside-go }}" == "false" ]]; then
-            echo "Go-only changes detected"
-            TESTS_TO_RUN='["go"]'
-            echo "tests-to-run=${TESTS_TO_RUN}" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          # If we get here, we need to run all tests (core changes)
-          echo "Core changes detected, running all tests"
-          TESTS_TO_RUN='["python", "rust", "js", "go"]'
-          echo "tests-to-run=${TESTS_TO_RUN}" >> $GITHUB_OUTPUT
-
-      - name: Check Helm version change
-        id: helm-version
-        if: steps.filter.outputs.helm-changes == 'true'
-        shell: bash
-        run: |
-          current=$(git show HEAD:$file | yq ".version")
-          previous=$(git show HEAD^:$file | yq ".version")
-
-          echo "version=$current" >> $GITHUB_OUTPUT
-
-          if [ "$current" != "$previous" ]; then
-            echo "Version field in $file was changed from $previous to $current"
-            echo "version_changed=true" >> $GITHUB_OUTPUT
-          else
-            echo "Version field in $file was not changed"
-            echo "version_changed=false" >> $GITHUB_OUTPUT
-          fi
-        env:
-          file: k8s/distributed-chroma/Chart.yaml
 
   deploy-docs-preview:
     name: Deploy preview of docs
-    needs: change-detection
-    if: needs.change-detection.outputs.docs-only == 'true'
+    needs: paths-filter
+    if: needs.paths-filter.outputs.only-docs == 'true'
     runs-on: depot-ubuntu-22.04-small
     environment:
       name: Preview
@@ -135,59 +62,82 @@ jobs:
 
   check-helm-version-bump:
     name: Warn if Helm chart was updated without version bump
-    needs: change-detection
-    if: needs.change-detection.outputs.helm-changes == 'true'
+    needs: paths-filter
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Detect if version field in Chart.yaml was changed
+        id: detect-version-change
+        shell: bash
+        run: |
+          current=$(git show HEAD:$file | yq ".version")
+          previous=$(git show HEAD^:$file | yq ".version")
+          echo "version=$current" >> $GITHUB_OUTPUT
+          if [ "$current" != "$previous" ]; then
+            echo "Version field in $file was changed from $previous to $current"
+            echo "version_changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "Version field in $file was not changed"
+            echo "version_changed=false" >> $GITHUB_OUTPUT
+          fi
+        env:
+          file: k8s/distributed-chroma/Chart.yaml
+
       - name: Comment warning
-        if: needs.change-detection.outputs.helm-version-changed == 'false'
+        if: ${{ steps.detect-version-change.outputs.version_changed == 'false' && needs.paths-filter.outputs.helm-changes == 'true' }}
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: helm-chart-version-info
           message: |
             :warning: The Helm chart was updated without a version bump. Your changes will only be published if the version field in `k8s/distributed-chroma/Chart.yaml` is updated.
-
       - name: Comment success
-        if: needs.change-detection.outputs.helm-version-changed == 'true'
+        if: ${{ steps.detect-version-change.outputs.version_changed == 'true' && needs.paths-filter.outputs.helm-changes == 'true' }}
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: helm-chart-version-info
           message: |
             :white_check_mark: The Helm chart's version was changed. Your changes to the chart will be published upon merge to `main`.
+      - name: Delete comment (Helm chart was not changed)
+        if:  needs.paths-filter.outputs.helm-changes == 'false'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: helm-chart-version-info
+          delete: true
 
   python-tests:
     name: Python tests
-    needs: change-detection
-    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
+    needs: paths-filter
+    if: needs.paths-filter.outputs.outside-docs == 'true'
     uses: ./.github/workflows/_python-tests.yml
     with:
       property_testing_preset: 'fast'
 
   python-vulnerability-scan:
     name: Python vulnerability scan
-    needs: change-detection
-    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
+    needs: paths-filter
+    if: needs.paths-filter.outputs.outside-docs == 'true'
     uses: ./.github/workflows/_python-vulnerability-scan.yml
 
   javascript-client-tests:
     name: JavaScript client tests
-    needs: change-detection
-    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'js')
+    needs: paths-filter
+    if: needs.paths-filter.outputs.outside-docs == 'true'
     uses: ./.github/workflows/_javascript-client-tests.yml
 
   rust-tests:
     name: Rust tests
-    needs: change-detection
-    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'rust')
+    needs: paths-filter
+    if: needs.paths-filter.outputs.outside-docs == 'true'
     uses: ./.github/workflows/_rust-tests.yml
 
   go-tests:
     name: Go tests
-    needs: change-detection
-    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'go')
+    needs: paths-filter
+    if: needs.paths-filter.outputs.outside-docs == 'true'
     uses: ./.github/workflows/_go-tests.yml
 
   check-title:
