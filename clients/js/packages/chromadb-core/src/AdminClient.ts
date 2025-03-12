@@ -286,8 +286,8 @@ export class AdminClient {
   }): Promise<Database[]> {
     const response = await this.api.listDatabasesV2(
       tenantName,
-      limit ?? null,
-      offset ?? null,
+      limit !== undefined ? limit : undefined,
+      offset !== undefined ? offset : undefined,
       this.api.options,
     );
 
