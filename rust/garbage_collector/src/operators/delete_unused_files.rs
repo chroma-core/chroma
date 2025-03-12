@@ -219,7 +219,7 @@ impl Operator<DeleteUnusedFilesInput, DeleteUnusedFilesOutput> for DeleteUnusedF
                 .map(|file| {
                     format!(
                         "{}{}/{}",
-                        ChromaS3FilePrefixes::HnswIndexFilePrefix.to_string(),
+                        ChromaS3FilePrefixes::HnswIndexFilePrefix,
                         prefix,
                         file
                     )
@@ -332,22 +332,22 @@ mod tests {
         let hnsw_files = vec![
             format!(
                 "{}{}/header.bin",
-                ChromaS3FilePrefixes::HnswIndexFilePrefix.to_string(),
+                ChromaS3FilePrefixes::HnswIndexFilePrefix,
                 "prefix1"
             ),
             format!(
                 "{}{}/data_level0.bin",
-                ChromaS3FilePrefixes::HnswIndexFilePrefix.to_string(),
+                ChromaS3FilePrefixes::HnswIndexFilePrefix,
                 "prefix1"
             ),
             format!(
                 "{}{}/length.bin",
-                ChromaS3FilePrefixes::HnswIndexFilePrefix.to_string(),
+                ChromaS3FilePrefixes::HnswIndexFilePrefix,
                 "prefix1"
             ),
             format!(
                 "{}{}/link_lists.bin",
-                ChromaS3FilePrefixes::HnswIndexFilePrefix.to_string(),
+                ChromaS3FilePrefixes::HnswIndexFilePrefix,
                 "prefix1"
             ),
         ];
@@ -386,7 +386,7 @@ mod tests {
         // Verify deletion list file was created
         let deletion_list_path = tmp_dir.path().join(format!(
             "{}test_collection/123.txt",
-            ChromaS3FilePrefixes::DeleteListFilePrefix.to_string()
+            ChromaS3FilePrefixes::DeleteListFilePrefix
         ));
         assert!(deletion_list_path.exists());
 
@@ -432,7 +432,7 @@ mod tests {
         // Verify deletion list was created
         let deletion_list_path = tmp_dir.path().join(format!(
             "{}test_collection/123.txt",
-            ChromaS3FilePrefixes::DeleteListFilePrefix.to_string()
+            ChromaS3FilePrefixes::DeleteListFilePrefix
         ));
         assert!(deletion_list_path.exists());
 
@@ -500,7 +500,7 @@ mod tests {
         // Verify deletion list was created
         let deletion_list_path = tmp_dir.path().join(format!(
             "{}test_collection/123.txt",
-            ChromaS3FilePrefixes::DeleteListFilePrefix.to_string()
+            ChromaS3FilePrefixes::DeleteListFilePrefix
         ));
         assert!(deletion_list_path.exists());
 
@@ -553,7 +553,7 @@ mod tests {
         // Verify deletion list contains the error
         let deletion_list_path = tmp_dir.path().join(format!(
             "{}test_collection/123.txt",
-            ChromaS3FilePrefixes::DeleteListFilePrefix.to_string()
+            ChromaS3FilePrefixes::DeleteListFilePrefix
         ));
         let content = std::fs::read_to_string(deletion_list_path).unwrap();
         assert!(content.contains("Failed files:"));
@@ -577,7 +577,7 @@ mod tests {
         // Verify deletion list contains the error
         let deletion_list_path = tmp_dir.path().join(format!(
             "{}test_collection/124.txt",
-            ChromaS3FilePrefixes::DeleteListFilePrefix.to_string()
+            ChromaS3FilePrefixes::DeleteListFilePrefix
         ));
         let content = std::fs::read_to_string(deletion_list_path).unwrap();
         assert!(content.contains("Failed files:"));
@@ -601,7 +601,7 @@ mod tests {
         // Verify deletion list was created even for nonexistent files
         let deletion_list_path = tmp_dir.path().join(format!(
             "{}test_collection/125.txt",
-            ChromaS3FilePrefixes::DeleteListFilePrefix.to_string()
+            ChromaS3FilePrefixes::DeleteListFilePrefix
         ));
         assert!(deletion_list_path.exists());
     }
