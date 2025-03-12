@@ -1,5 +1,4 @@
 import React from "react";
-import { InfoCircledIcon } from "@radix-ui/react-icons";
 
 const Banner: React.FC<{ type: string; children: React.ReactNode }> = ({
   type,
