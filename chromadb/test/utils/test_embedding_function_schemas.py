@@ -43,6 +43,22 @@ class MockInstructorEmbeddingFunction:
         return np.array([[0.1, 0.2, 0.3] for _ in range(len(texts))])
 
 
+# Mock SentenceTransformer class
+class MockSentenceTransformer:
+    def __init__(self, model_name: str, device: str = "cpu", **kwargs: Any) -> None:
+        self.model_name = model_name
+        self.device = device
+        self.kwargs = kwargs
+
+    def encode(
+        self,
+        texts: List[str],
+        convert_to_numpy: bool = True,
+        normalize_embeddings: bool = False,
+    ) -> np.ndarray[Any, np.dtype[np.float32]]:
+        return np.array([[0.1, 0.2, 0.3] for _ in range(len(texts))])
+
+
 # Mock for embedding functions to avoid actual API calls
 class MockEmbeddings:
     @staticmethod
@@ -91,6 +107,9 @@ EMBEDDING_FUNCTION_CONFIGS: Dict[str, Dict[str, Any]] = {
         "config": {
             "model_name": "all-MiniLM-L6-v2",
         },
+        "mocks": [
+            ("sentence_transformers.SentenceTransformer", MockSentenceTransformer),
+        ],
     },
     "cohere": {
         "args": {
