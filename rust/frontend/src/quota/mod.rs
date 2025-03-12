@@ -213,6 +213,7 @@ pub enum UsageType {
     NumQueryEmbeddings,    // Number of query embeddings
     CollectionSizeRecords, // Number of records in the collection
     NumCollections,        // Total number of collections for a tenant
+    NumDatabases,          // Total number of databases for a tenant
 }
 
 impl TryFrom<&str> for UsageType {
@@ -238,6 +239,7 @@ impl TryFrom<&str> for UsageType {
             "num_query_embeddings" => Ok(UsageType::NumQueryEmbeddings),
             "collection_size_records" => Ok(UsageType::CollectionSizeRecords),
             "num_collections" => Ok(UsageType::NumCollections),
+            "num_databases" => Ok(UsageType::NumDatabases),
             _ => Err(format!("Invalid UsageType: {}", value)),
         }
     }
@@ -264,6 +266,7 @@ lazy_static::lazy_static! {
         m.insert(UsageType::NumQueryEmbeddings, 100);
         m.insert(UsageType::CollectionSizeRecords, 1_000_000);
         m.insert(UsageType::NumCollections, 1_000_000);
+        m.insert(UsageType::NumDatabases, 10);
         m
     };
 }
@@ -286,6 +289,8 @@ pub enum QuotaEnforcerError {
     Unauthorized,
     #[error("Initialization failed")]
     InitializationFailed,
+    #[error("Billing limit exceeded - please contact support to increase your threshold")]
+    BillingLimitExceeded,
 }
 
 impl ChromaError for QuotaEnforcerError {
@@ -295,6 +300,7 @@ impl ChromaError for QuotaEnforcerError {
             QuotaEnforcerError::ApiKeyMissing => chroma_error::ErrorCodes::InvalidArgument,
             QuotaEnforcerError::Unauthorized => chroma_error::ErrorCodes::PermissionDenied,
             QuotaEnforcerError::InitializationFailed => chroma_error::ErrorCodes::Internal,
+            QuotaEnforcerError::BillingLimitExceeded => chroma_error::ErrorCodes::ResourceExhausted,
         }
     }
 }
