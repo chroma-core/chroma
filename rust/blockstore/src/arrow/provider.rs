@@ -219,7 +219,7 @@ pub enum GetError {
     #[error(transparent)]
     BlockLoadError(#[from] BlockLoadError),
     #[error(transparent)]
-    StorageGetError(#[from] chroma_storage::GetError),
+    StorageGetError(#[from] chroma_storage::StorageError),
 }
 
 impl ChromaError for GetError {
@@ -435,7 +435,7 @@ pub enum RootManagerError {
     #[error(transparent)]
     UUIDParseError(#[from] uuid::Error),
     #[error(transparent)]
-    StorageGetError(#[from] chroma_storage::GetError),
+    StorageGetError(#[from] chroma_storage::StorageError),
     #[error(transparent)]
     FromBytesError(#[from] FromBytesError),
 }
