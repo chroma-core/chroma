@@ -1,7 +1,6 @@
 use crate::types::CleanupMode;
 use crate::types::{DELETE_LIST_FILE_PREFIX, RENAMED_FILE_PREFIX};
 use async_trait::async_trait;
-use chroma_blockstore::BLOCKFILE_S3_PREFIX;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::HNSW_INDEX_S3_PREFIX;
 use chroma_storage::Storage;
