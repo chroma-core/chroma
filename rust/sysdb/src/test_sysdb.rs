@@ -1,6 +1,7 @@
 use chroma_types::{
-    Collection, CollectionUuid, FlushCompactionResponse, GetCollectionSizeError, GetSegmentsError,
-    Segment, SegmentFlushInfo, SegmentScope, SegmentType, Tenant,
+    Collection, CollectionUuid, Database, FlushCompactionResponse, GetCollectionSizeError,
+    GetSegmentsError, ListDatabasesError, ListDatabasesResponse, Segment, SegmentFlushInfo,
+    SegmentScope, SegmentType, Tenant,
 };
 use chroma_types::{GetCollectionsError, SegmentUuid};
 use parking_lot::Mutex;
@@ -149,6 +150,39 @@ impl TestSysDb {
             segments.push(segment.clone());
         }
         Ok(segments)
+    }
+
+    pub(crate) async fn list_databases(
+        &self,
+        tenant: String,
+        limit: Option<u32>,
+        _offset: u32,
+    ) -> Result<ListDatabasesResponse, ListDatabasesError> {
+        let inner = self.inner.lock();
+        let mut databases = Vec::new();
+        let mut seen_db_names = std::collections::HashSet::new();
+
+        for collection in inner.collections.values() {
+            if collection.tenant == tenant && !seen_db_names.contains(&collection.database) {
+                seen_db_names.insert(collection.database.clone());
+
+                let db = Database {
+                    id: uuid::Uuid::new_v4(),
+                    name: collection.database.clone(),
+                    tenant: tenant.clone(),
+                };
+
+                databases.push(db);
+            }
+        }
+
+        if let Some(limit_value) = limit {
+            if limit_value > 0 && databases.len() > limit_value as usize {
+                databases.truncate(limit_value as usize);
+            }
+        }
+
+        Ok(databases)
     }
 
     pub(crate) async fn get_last_compaction_time(
