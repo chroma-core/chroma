@@ -353,6 +353,7 @@ class SegmentAPI(ServerAPI):
         id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
+        new_configuration: Optional[UpdateCollectionConfiguration] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
@@ -371,16 +372,25 @@ class SegmentAPI(ServerAPI):
             tenant=tenant,
             name=new_name,
             metadata=new_metadata,
+            # TODO: @jai add configuration enforcement
         )
 
         # TODO eventually we'll want to use OptionalArgument and Unspecified in the
         # signature of `_modify` but not changing the API right now.
-        if new_name and new_metadata:
+        if new_name and new_metadata and new_configuration:
+            self._sysdb.update_collection(id, name=new_name, metadata=new_metadata, configuration=new_configuration)
+        elif new_name and new_metadata:
             self._sysdb.update_collection(id, name=new_name, metadata=new_metadata)
+        elif new_name and new_configuration:
+            self._sysdb.update_collection(id, name=new_name, configuration=new_configuration)
+        elif new_metadata and new_configuration:
+            self._sysdb.update_collection(id, metadata=new_metadata, configuration=new_configuration)
         elif new_name:
             self._sysdb.update_collection(id, name=new_name)
         elif new_metadata:
             self._sysdb.update_collection(id, metadata=new_metadata)
+        elif new_configuration:
+            self._sysdb.update_collection(id, configuration=new_configuration)
 
     @trace_method("SegmentAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
     @override

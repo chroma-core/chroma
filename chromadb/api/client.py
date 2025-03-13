@@ -4,7 +4,7 @@ from uuid import UUID
 from overrides import override
 import httpx
 from chromadb.api import AdminAPI, ClientAPI, ServerAPI
-from chromadb.api.collection_configuration import CreateCollectionConfiguration, legacy_create_collection_configuration_path
+from chromadb.api.collection_configuration import CreateCollectionConfiguration, UpdateCollectionConfiguration, legacy_create_collection_configuration_path
 from chromadb.api.shared_system_client import SharedSystemClient
 from chromadb.api.types import (
     CollectionMetadata,
@@ -221,6 +221,7 @@ class Client(SharedSystemClient, ClientAPI):
         id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
+        new_configuration: Optional[UpdateCollectionConfiguration] = None,
     ) -> None:
         return self._server._modify(
             id=id,
@@ -228,6 +229,7 @@ class Client(SharedSystemClient, ClientAPI):
             database=self.database,
             new_name=new_name,
             new_metadata=new_metadata,
+            new_configuration=new_configuration,
         )
 
     @override

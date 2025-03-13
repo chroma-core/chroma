@@ -20,7 +20,7 @@ from chromadb.api.types import (
     OneOrMany,
     WhereDocument,
 )
-
+from chromadb.api.collection_configuration import UpdateCollectionConfiguration
 import logging
 
 logger = logging.getLogger(__name__)
@@ -233,7 +233,7 @@ class Collection(CollectionCommon["ServerAPI"]):
         )
 
     def modify(
-        self, name: Optional[str] = None, metadata: Optional[CollectionMetadata] = None
+        self, name: Optional[str] = None, metadata: Optional[CollectionMetadata] = None, configuration: Optional[UpdateCollectionConfiguration] = None
     ) -> None:
         """Modify the collection name or metadata
 
@@ -254,6 +254,7 @@ class Collection(CollectionCommon["ServerAPI"]):
             id=self.id,
             new_name=name,
             new_metadata=metadata,
+            new_configuration=configuration,
             tenant=self.tenant,
             database=self.database,
         )
