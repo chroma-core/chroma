@@ -2,6 +2,8 @@ use crate::utils::LOGO;
 use chroma_frontend::config::FrontendServerConfig;
 use chroma_frontend::frontend_service_entrypoint_with_config;
 use clap::Parser;
+use colored::Colorize;
+use std::net::TcpListener;
 use std::sync::Arc;
 
 #[derive(Parser, Debug)]
@@ -36,16 +38,16 @@ pub struct RunArgs {
     port: Option<u16>,
 }
 
-pub fn run(args: RunArgs) {
-    println!("{}", LOGO);
+fn validate_host(address: &String, port: u16) -> bool {
+    let socket = format!("{}:{}", address, port);
+    TcpListener::bind(&socket).is_ok()
+}
 
-    let mut config = match &args.config_path {
-        Some(config_path) => FrontendServerConfig::load_from_path(config_path),
-        None => FrontendServerConfig::single_node_default(),
-    };
+fn override_default_config_with_args(args: RunArgs) -> Result<FrontendServerConfig, String> {
+    let mut config = FrontendServerConfig::single_node_default();
 
     if let Some(path) = args.path {
-        config.persist_path = Some(path);
+        config.persist_path = path;
     }
 
     if let Some(port) = args.port {
@@ -55,6 +57,53 @@ pub fn run(args: RunArgs) {
     if let Some(host) = args.host {
         config.listen_address = host;
     }
+
+    if !validate_host(&config.listen_address, config.port) {
+        return Err(format!(
+            "Address {}:{} is not available",
+            config.listen_address, config.port
+        ));
+    }
+
+    Ok(config)
+}
+
+fn display_run_message(config: &FrontendServerConfig) {
+    println!("{}", LOGO);
+    println!("Saving data to: {}", config.persist_path.bold());
+    println!(
+        "Connect to Chroma at: {}",
+        format!("http://localhost:{}", config.port)
+            .underline()
+            .blue()
+    );
+    println!(
+        "Getting started guide: {}",
+        "https://docs.trychroma.com/docs/overview/getting-started\n"
+            .underline()
+            .blue()
+    );
+}
+
+pub fn run(args: RunArgs) {
+    let config = match &args.config_path {
+        Some(config_path) => {
+            if !std::path::Path::new(config_path).exists() {
+                eprintln!("Config file {} does not exists", config_path);
+                return;
+            }
+            FrontendServerConfig::load_from_path(config_path)
+        }
+        None => match override_default_config_with_args(args) {
+            Ok(config) => config,
+            Err(e) => {
+                eprintln!("{}", e);
+                return;
+            }
+        },
+    };
+
+    display_run_message(&config);
 
     let runtime = tokio::runtime::Runtime::new().expect("Failed to start Chroma");
     runtime.block_on(async {

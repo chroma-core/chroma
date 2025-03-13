@@ -75,12 +75,10 @@ pub async fn frontend_service_entrypoint_with_config_system_registry(
     }
 
     let mut fe_cfg = config.frontend.clone();
-    if let (Some(path_str), Some(sql_cfg), Some(local_segman_cfg)) = (
-        &config.persist_path,
-        fe_cfg.sqlitedb.as_mut(),
-        fe_cfg.segment_manager.as_mut(),
-    ) {
-        let persist_root = Path::new(path_str);
+    if let (Some(sql_cfg), Some(local_segman_cfg)) =
+        (fe_cfg.sqlitedb.as_mut(), fe_cfg.segment_manager.as_mut())
+    {
+        let persist_root = Path::new(&config.persist_path);
         let sqlite_url = persist_root.join("chroma.sqlite3");
         local_segman_cfg.persist_path.get_or_insert(
             persist_root
