@@ -326,6 +326,7 @@ class GrpcSysDB(SysDB):
             request = CreateCollectionRequest(
                 id=id.hex,
                 name=name,
+                # TODO @jai convert metadata to config json str logic here too
                 configuration_json_str=create_collection_configuration_to_json_str(
                     configuration
                 ),
@@ -522,6 +523,7 @@ class GrpcSysDB(SysDB):
                     name=write_name,
                     dimension=write_dimension,
                     metadata=to_proto_update_metadata(write_metadata),
+                    # TODO @jai convert metadata to config json str logic here too
                     configuration_json_str=update_collection_configuration_to_json_str(write_configuration) if write_configuration else None,
                 )
             if metadata is None:

@@ -1,6 +1,6 @@
 from tenacity import retry, stop_after_attempt, retry_if_exception, wait_fixed
 from chromadb.api import ServerAPI
-from chromadb.api.collection_configuration import CreateCollectionConfiguration
+from chromadb.api.collection_configuration import CreateCollectionConfiguration, UpdateCollectionConfiguration
 from chromadb.auth import UserIdentity
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.db.system import SysDB
