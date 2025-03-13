@@ -156,7 +156,7 @@ impl TestSysDb {
         &self,
         tenant: String,
         limit: Option<u32>,
-        offset: u32,
+        _offset: u32,
     ) -> Result<ListDatabasesResponse, ListDatabasesError> {
         let inner = self.inner.lock();
         let mut databases = Vec::new();
