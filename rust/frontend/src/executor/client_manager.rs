@@ -39,6 +39,7 @@ pub(super) struct ClientManager {
     connect_timeout_ms: u64,
     request_timeout_ms: u64,
     old_memberlist: Memberlist,
+    max_query_service_response_size_bytes: usize,
 }
 
 impl ClientManager {
@@ -47,14 +48,16 @@ impl ClientManager {
         connections_per_node: usize,
         connect_timeout_ms: u64,
         request_timeout_ms: u64,
+        max_response_size_bytes: usize,
     ) -> Self {
-        ClientManager {
+        Self {
             node_name_to_client,
             node_name_to_change_sender: HashMap::new(),
             connections_per_node,
             connect_timeout_ms,
             request_timeout_ms,
             old_memberlist: Memberlist::new(),
+            max_query_service_response_size_bytes: max_response_size_bytes,
         }
     }
 
@@ -116,8 +119,8 @@ impl ClientManager {
                 let channel = ServiceBuilder::new()
                     .layer(chroma_tracing::GrpcTraceLayer)
                     .service(channel);
-                let client =
-                    QueryExecutorClient::new(channel).max_decoding_message_size(32 * 1024 * 1024); // 32 MB
+                let client = QueryExecutorClient::new(channel)
+                    .max_decoding_message_size(self.max_query_service_response_size_bytes);
 
                 let mut node_name_to_client_guard = self.node_name_to_client.write();
                 node_name_to_client_guard.insert(node.to_string(), client);
@@ -250,7 +253,8 @@ mod test {
 
     fn test_client_manager() -> (ClientManager, NodeNameToClient) {
         let node_name_to_client = Arc::new(RwLock::new(HashMap::new()));
-        let client_manager = ClientManager::new(node_name_to_client.clone(), 1, 1000, 1000);
+        let client_manager =
+            ClientManager::new(node_name_to_client.clone(), 1, 1000, 1000, 1024 * 1024);
         (client_manager, node_name_to_client)
     }
 
