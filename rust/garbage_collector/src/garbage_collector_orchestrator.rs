@@ -39,6 +39,7 @@
 
 use std::fmt::{Debug, Formatter};
 
+use crate::types::CleanupMode;
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::Storage;
@@ -448,7 +449,12 @@ impl Handler<TaskResult<ComputeUnusedBetweenVersionsOutput, ComputeUnusedBetween
         };
 
         let delete_task = wrap(
-            Box::new(DeleteUnusedFilesOperator::new(self.storage.clone(), true)), // Using soft delete mode
+            // TODO(rohit): The CleanupMode needs to be changed based on the config.
+            Box::new(DeleteUnusedFilesOperator::new(
+                self.storage.clone(),
+                CleanupMode::Rename,
+                self.collection_id.to_string(),
+            )),
             DeleteUnusedFilesInput {
                 unused_s3_files: output.unused_s3_files.clone(),
                 epoch_id: output.epoch_id,
