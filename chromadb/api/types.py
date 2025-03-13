@@ -24,7 +24,13 @@ from abc import abstractmethod
 
 
 # Re-export types from chromadb.types
-__all__ = ["Metadata", "Where", "WhereDocument", "UpdateCollectionMetadata"]
+__all__ = [
+    "Metadata",
+    "Where",
+    "WhereDocument",
+    "UpdateCollectionMetadata",
+    "UpdateMetadata",
+]
 META_KEY_CHROMA_DOCUMENT = "chroma:document"
 T = TypeVar("T")
 OneOrMany = Union[T, List[T]]
@@ -522,7 +528,6 @@ class EmbeddingFunction(Protocol[D]):
         Future implementations should override this method.
         """
         import warnings
-        import inspect
 
         warnings.warn(
             "The EmbeddingFunction class does not implement name(). "
