@@ -15,9 +15,9 @@ use chroma_index::spann::utils::rng_query;
 use chroma_index::spann::utils::RngQueryError;
 use chroma_index::IndexUuid;
 use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::SpannIndexWriter};
-use chroma_types::DistributedSpannParameters;
 use chroma_types::DistributedSpannParametersFromSegmentError;
 use chroma_types::SegmentUuid;
+use chroma_types::SpannConfiguration;
 use chroma_types::{MaterializedLogOperation, Segment, SegmentScope, SegmentType};
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -106,7 +106,7 @@ impl SpannSegmentWriter {
         if segment.r#type != SegmentType::Spann || segment.scope != SegmentScope::VECTOR {
             return Err(SpannSegmentWriterError::InvalidArgument);
         }
-        let params = DistributedSpannParameters::try_from(segment)?;
+        let params = SpannConfiguration::try_from(segment)?;
 
         let hnsw_id = match segment.file_path.get(HNSW_PATH) {
             Some(hnsw_path) => match hnsw_path.first() {
@@ -409,7 +409,7 @@ pub struct SpannSegmentReader<'me> {
     pub index_reader: SpannIndexReader<'me>,
     #[allow(dead_code)]
     id: SegmentUuid,
-    pub params: DistributedSpannParameters,
+    pub params: SpannConfiguration,
 }
 
 impl<'me> SpannSegmentReader<'me> {
@@ -422,7 +422,7 @@ impl<'me> SpannSegmentReader<'me> {
         if segment.r#type != SegmentType::Spann || segment.scope != SegmentScope::VECTOR {
             return Err(SpannSegmentReaderError::InvalidArgument);
         }
-        let params = DistributedSpannParameters::try_from(segment)?;
+        let params = SpannConfiguration::try_from(segment)?;
         let hnsw_id = match segment.file_path.get(HNSW_PATH) {
             Some(hnsw_path) => match hnsw_path.first() {
                 Some(index_id) => {
@@ -554,8 +554,8 @@ mod test {
     };
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{
-        Chunk, CollectionUuid, DistributedSpannParameters, LogRecord, Operation, OperationRecord,
-        SegmentUuid, SpannPostingList,
+        Chunk, CollectionUuid, LogRecord, Operation, OperationRecord, SegmentUuid,
+        SpannConfiguration, SpannPostingList,
     };
 
     use crate::{
@@ -588,7 +588,7 @@ mod test {
         );
         let collection_id = CollectionUuid::new();
         let segment_id = SegmentUuid::new();
-        let params = DistributedSpannParameters::default();
+        let params = SpannConfiguration::default();
         let mut spann_segment = chroma_types::Segment {
             id: segment_id,
             collection: collection_id,
@@ -702,10 +702,7 @@ mod test {
         .await
         .expect("Error creating spann segment writer");
         assert_eq!(spann_writer.index.dimensionality, 3);
-        assert_eq!(
-            spann_writer.index.params,
-            DistributedSpannParameters::default()
-        );
+        assert_eq!(spann_writer.index.params, SpannConfiguration::default());
         // Next head id should be 2 since one centroid is already taken up.
         assert_eq!(
             spann_writer
@@ -794,7 +791,7 @@ mod test {
         );
         let collection_id = CollectionUuid::new();
         let segment_id = SegmentUuid::new();
-        let params = DistributedSpannParameters::default();
+        let params = SpannConfiguration::default();
         let mut spann_segment = chroma_types::Segment {
             id: segment_id,
             collection: collection_id,
@@ -953,7 +950,7 @@ mod test {
         );
         let collection_id = CollectionUuid::new();
         let segment_id = SegmentUuid::new();
-        let params = DistributedSpannParameters::default();
+        let params = SpannConfiguration::default();
         let mut spann_segment = chroma_types::Segment {
             id: segment_id,
             collection: collection_id,
@@ -1083,10 +1080,7 @@ mod test {
         .await
         .expect("Error creating spann segment writer");
         assert_eq!(spann_writer.index.dimensionality, 3);
-        assert_eq!(
-            spann_writer.index.params,
-            DistributedSpannParameters::default()
-        );
+        assert_eq!(spann_writer.index.params, SpannConfiguration::default());
         // Next head id should be 2 since one centroid is already taken up.
         assert_eq!(
             spann_writer
