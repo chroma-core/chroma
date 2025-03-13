@@ -8,7 +8,6 @@ use std::sync::Arc;
 pub struct RunArgs {
     #[clap(
         index = 1,
-        long = "config-path",
         conflicts_with_all = &["path", "host", "port"],
         help = "The path to the Chroma config file"
     )]
@@ -16,7 +15,7 @@ pub struct RunArgs {
 
     #[clap(
         long,
-        conflicts_with = "config-path",
+        conflicts_with = "config_path",
         help = "The persistence path to your Chroma DB"
     )]
     path: Option<String>,
@@ -24,14 +23,14 @@ pub struct RunArgs {
     #[clap(
         long,
         default_value = "localhost",
-        conflicts_with = "config-path",
+        conflicts_with = "config_path",
         help = "The host to listen to. Default: localhost"
     )]
     host: Option<String>,
 
     #[clap(
         long,
-        conflicts_with = "config-path",
+        conflicts_with = "config_path",
         help = "The port to run the server on"
     )]
     port: Option<u16>,
