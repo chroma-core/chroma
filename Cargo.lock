@@ -2888,6 +2888,7 @@ dependencies = [
  "chroma-cache",
  "chroma-config",
  "chroma-error",
+ "chroma-index",
  "chroma-storage",
  "chroma-sysdb",
  "chroma-system",

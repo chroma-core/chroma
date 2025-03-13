@@ -38,7 +38,7 @@ pub enum Error {
     GarbageCollected,
     #[error("log contention fails a write")]
     LogContention,
-    #[error("the log is full")]
+    #[error("the log took too long to write")]
     LogWriteTimeout,
     #[error("the log is full")]
     LogFull,
@@ -56,6 +56,27 @@ pub enum Error {
     ParquetError(#[from] Arc<parquet::errors::ParquetError>),
     #[error("storage error: {0}")]
     StorageError(#[from] Arc<chroma_storage::StorageError>),
+}
+
+impl chroma_error::ChromaError for Error {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        match self {
+            Self::Success => chroma_error::ErrorCodes::Success,
+            Self::UninitializedLog => chroma_error::ErrorCodes::FailedPrecondition,
+            Self::AlreadyInitialized => chroma_error::ErrorCodes::AlreadyExists,
+            Self::GarbageCollected => chroma_error::ErrorCodes::NotFound,
+            Self::LogContention => chroma_error::ErrorCodes::Aborted,
+            Self::LogFull => chroma_error::ErrorCodes::Aborted,
+            Self::LogWriteTimeout => chroma_error::ErrorCodes::DeadlineExceeded,
+            Self::LogClosed => chroma_error::ErrorCodes::FailedPrecondition,
+            Self::Internal => chroma_error::ErrorCodes::Internal,
+            Self::CorruptManifest(_) => chroma_error::ErrorCodes::DataLoss,
+            Self::CorruptCursor(_) => chroma_error::ErrorCodes::DataLoss,
+            Self::NoSuchCursor(_) => chroma_error::ErrorCodes::Unknown,
+            Self::ParquetError(_) => chroma_error::ErrorCodes::Unknown,
+            Self::StorageError(storage) => storage.code(),
+        }
+    }
 }
 
 //////////////////////////////////////////// ScrubError ////////////////////////////////////////////
