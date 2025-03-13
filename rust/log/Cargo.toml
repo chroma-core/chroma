@@ -8,7 +8,11 @@ name = "log_service"
 path = "src/bin/log.rs"
 
 [dependencies]
+arrow = { workspace = true }
 async-trait = { workspace = true }
+bytes = { workspace = true }
+parquet = { workspace = true, optional = true }
+prost = { workspace = true }
 # Used by tracing
 opentelemetry = { workspace = true }
 rand = { workspace = true }
@@ -36,12 +40,11 @@ chroma-system = { workspace = true }
 chroma-sysdb = { workspace = true }
 chroma-types = { workspace = true }
 chroma-sqlite = { workspace = true }
-prost = { workspace = true }
 wal3 = { workspace = true }
 
 [features]
 default = ["server"]
-server = []
+server = ["parquet"]
 
 [dev-dependencies]
 tempfile = { workspace = true }

@@ -2,22 +2,25 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
+use bytes::Bytes;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_storage::config::StorageConfig;
 use chroma_storage::Storage;
 use chroma_types::chroma_proto::{
     log_service_server::LogService, GetAllCollectionInfoToCompactRequest,
-    GetAllCollectionInfoToCompactResponse, PullLogsRequest, PullLogsResponse, PushLogsRequest,
-    PushLogsResponse, UpdateCollectionLogOffsetRequest, UpdateCollectionLogOffsetResponse,
+    GetAllCollectionInfoToCompactResponse, LogRecord, OperationRecord, PullLogsRequest,
+    PullLogsResponse, PushLogsRequest, PushLogsResponse, UpdateCollectionLogOffsetRequest,
+    UpdateCollectionLogOffsetResponse,
 };
 use chroma_types::CollectionUuid;
+use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use prost::Message;
 use serde::{Deserialize, Serialize};
 use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
 use uuid::Uuid;
-use wal3::{LogReader, LogReaderOptions, LogWriter, LogWriterOptions};
+use wal3::{Limits, LogPosition, LogReader, LogReaderOptions, LogWriter, LogWriterOptions};
 
 use crate::state_hash_table::StateHashTable;
 
@@ -254,7 +257,40 @@ impl LogService for LogServer {
             Arc::clone(&self.storage),
             prefix,
         );
-        todo!("Implement wal3 backed pull_logs here")
+        let limits = Limits {
+            max_files: Some(100),
+            max_bytes: Some(1_048_576),
+        };
+        let fragments = log_reader
+            .scan(
+                LogPosition::from_offset(pull_logs.start_from_offset as u64),
+                limits,
+            )
+            .await
+            .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
+        let futures = fragments
+            .iter()
+            .map(|fragment| async { log_reader.fetch(fragment).await })
+            .collect::<Vec<_>>();
+        let parquets = futures::future::try_join_all(futures)
+            .await
+            .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
+        let mut records = Vec::with_capacity(pull_logs.batch_size as usize);
+        for parquet in parquets {
+            let this = parquet_to_records(parquet)?;
+            for record in this {
+                if records.len() >= pull_logs.batch_size as usize {
+                    break;
+                }
+                let op_record = OperationRecord::decode_length_delimited(record.1.as_slice())
+                    .map_err(|err| Status::unavailable(err.to_string()))?;
+                records.push(LogRecord {
+                    log_offset: record.0.offset() as i64,
+                    record: Some(op_record),
+                });
+            }
+        }
+        Ok(Response::new(PullLogsResponse { records }))
     }
 
     async fn get_all_collection_info_to_compact(
@@ -270,6 +306,71 @@ impl LogService for LogServer {
     ) -> Result<Response<UpdateCollectionLogOffsetResponse>, Status> {
         todo!("Implement wal3 backed update_collection_log_offset here")
     }
+}
+
+fn parquet_to_records(parquet: Arc<Vec<u8>>) -> Result<Vec<(LogPosition, Vec<u8>)>, Status> {
+    let parquet = match Arc::try_unwrap(parquet) {
+        Ok(parquet) => parquet,
+        Err(ptr) => ptr.to_vec(),
+    };
+    let builder =
+        ParquetRecordBatchReaderBuilder::try_new(Bytes::from_owner(parquet)).map_err(|err| {
+            Status::new(
+                tonic::Code::Unavailable,
+                format!("could not create parquet reader: {err:?}"),
+            )
+        })?;
+    let reader = builder.build().map_err(|err| {
+        Status::new(
+            tonic::Code::Unavailable,
+            format!("could not convert from parquet: {err:?}"),
+        )
+    })?;
+    let mut records = vec![];
+    for batch in reader {
+        let batch = batch.map_err(|err| {
+            Status::new(
+                tonic::Code::Unavailable,
+                format!("could not read record batch: {err:?}"),
+            )
+        })?;
+        let offset = batch.column_by_name("offset").ok_or_else(|| {
+            Status::new(
+                tonic::Code::Unavailable,
+                "could not find column 'offset' in record batch",
+            )
+        })?;
+        let body = batch.column_by_name("body").ok_or_else(|| {
+            Status::new(
+                tonic::Code::Unavailable,
+                "could not find column 'body' in record batch",
+            )
+        })?;
+        let offset = offset
+            .as_any()
+            .downcast_ref::<arrow::array::UInt64Array>()
+            .ok_or_else(|| {
+                Status::new(
+                    tonic::Code::Unavailable,
+                    "could not cast column 'body' to UInt64Array",
+                )
+            })?;
+        let body = body
+            .as_any()
+            .downcast_ref::<arrow::array::BinaryArray>()
+            .ok_or_else(|| {
+                Status::new(
+                    tonic::Code::Unavailable,
+                    "could not cast column 'body' to BinaryArray",
+                )
+            })?;
+        for i in 0..batch.num_rows() {
+            let offset = offset.value(i);
+            let body = body.value(i);
+            records.push((LogPosition::from_offset(offset), body.to_vec()));
+        }
+    }
+    Ok(records)
 }
 
 impl LogServer {

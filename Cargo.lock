@@ -1620,8 +1620,10 @@ dependencies = [
 name = "chroma-log"
 version = "0.1.0"
 dependencies = [
+ "arrow",
  "async-trait",
  "bytemuck",
+ "bytes",
  "chroma-config",
  "chroma-error",
  "chroma-segment",
@@ -1633,6 +1635,7 @@ dependencies = [
  "chroma-types",
  "futures",
  "opentelemetry",
+ "parquet",
  "proptest",
  "prost 0.13.3",
  "rand 0.8.5",
