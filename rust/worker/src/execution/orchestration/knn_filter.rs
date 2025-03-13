@@ -11,7 +11,7 @@ use chroma_system::{
     PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::{
-    CollectionAndSegments, DistributedHnswParameters, DistributedSpannParameters, Segment,
+    CollectionAndSegments, DistributedHnswParameters, SpannConfiguration, Segment,
     SegmentType,
 };
 use thiserror::Error;
@@ -313,7 +313,7 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
             }
         } else {
             let params = match self.ok_or_terminate(
-                DistributedSpannParameters::try_from(&self.collection_and_segments.vector_segment)
+                SpannConfiguration::try_from(&self.collection_and_segments.vector_segment)
                     .map_err(|_| KnnError::InvalidDistanceFunction),
                 ctx,
             ) {
