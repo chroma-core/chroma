@@ -215,9 +215,8 @@ def create_collection_configuration_from_legacy_collection_metadata(
     }
     json_map = {}
     for name, value in metadata.items():
-        if name not in old_to_new:
-            raise ValueError(f"unknown legacy parameter: {name}")
-        json_map[old_to_new[name]] = value
+        if name in old_to_new:
+            json_map[old_to_new[name]] = value
     hnsw_config = json_to_create_hnsw_configuration(json_map)
     hnsw_config = populate_create_hnsw_defaults(hnsw_config)
     validate_create_hnsw_config(hnsw_config)
@@ -241,9 +240,8 @@ def create_collection_configuration_from_legacy_metadata(
     }
     json_map = {}
     for name, value in metadata.items():
-        if name not in old_to_new:
-            raise ValueError(f"unknown legacy parameter: {name}")
-        json_map[old_to_new[name]] = value
+        if name in old_to_new:
+            json_map[old_to_new[name]] = value
 
     hnsw_config = json_to_create_hnsw_configuration(json_map)
     hnsw_config = populate_create_hnsw_defaults(hnsw_config)
@@ -524,9 +522,8 @@ def update_collection_configuration_from_legacy_collection_metadata(
     }
     json_map = {}
     for name, value in metadata.items():
-        if name not in old_to_new:
-            raise ValueError(f"unknown legacy parameter: {name}")
-        json_map[old_to_new[name]] = value
+        if name in old_to_new:
+            json_map[old_to_new[name]] = value
     hnsw_config = json_to_update_hnsw_configuration(json_map)
     validate_update_hnsw_config(hnsw_config)
     return UpdateCollectionConfiguration(hnsw=hnsw_config)
@@ -545,9 +542,8 @@ def update_collection_configuration_from_legacy_update_metadata(
     }
     json_map = {}
     for name, value in metadata.items():
-        if name not in old_to_new:
-            raise ValueError(f"unknown legacy parameter: {name}")
-        json_map[old_to_new[name]] = value
+        if name in old_to_new:
+            json_map[old_to_new[name]] = value
     hnsw_config = json_to_update_hnsw_configuration(json_map)
     validate_update_hnsw_config(hnsw_config)
     return UpdateCollectionConfiguration(hnsw=hnsw_config)
