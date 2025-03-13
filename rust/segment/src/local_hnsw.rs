@@ -66,6 +66,25 @@ impl ChromaError for LocalHnswSegmentReaderError {
     }
 }
 
+async fn get_current_seq_id(
+    segment: &Segment,
+    sql_db: &SqliteDb,
+) -> Result<u64, sqlx::error::Error> {
+    let (query, values) = Query::select()
+        .column(MaxSeqId::SeqId)
+        .from(MaxSeqId::Table)
+        .and_where(Expr::col(MaxSeqId::SegmentId).eq(segment.id.to_string()))
+        .build_sqlx(SqliteQueryBuilder);
+    let row = sqlx::query_with(&query, values)
+        .fetch_optional(sql_db.get_conn())
+        .await?;
+    let seq_id = row
+        .map(|row| row.try_get::<u64, _>(0))
+        .transpose()?
+        .unwrap_or_default();
+    Ok(seq_id)
+}
+
 impl LocalHnswSegmentReader {
     pub fn from_index(hnsw_index: LocalHnswIndex) -> Self {
         Self { index: hnsw_index }
@@ -110,21 +129,7 @@ impl LocalHnswSegmentReader {
                         )
                         .map_err(|_| LocalHnswSegmentReaderError::HnswIndexLoadError)?;
 
-                        let current_seq_id = {
-                            let (query, values) = Query::select()
-                                .column(MaxSeqId::SeqId)
-                                .from(MaxSeqId::Table)
-                                .and_where(
-                                    Expr::col(MaxSeqId::SegmentId).eq(segment.id.to_string()),
-                                )
-                                .build_sqlx(SqliteQueryBuilder);
-                            let row = sqlx::query_with(&query, values)
-                                .fetch_optional(sql_db.get_conn())
-                                .await?;
-                            row.map(|row| row.try_get::<u64, _>(0))
-                                .transpose()?
-                                .unwrap_or_default()
-                        };
+                        let current_seq_id = get_current_seq_id(segment, &sql_db).await?;
 
                         // TODO(Sanket): Set allow reset appropriately.
                         return Ok(Self {
@@ -446,21 +451,7 @@ impl LocalHnswSegmentWriter {
                         )
                         .map_err(|_| LocalHnswSegmentWriterError::HnswIndexLoadError)?;
 
-                        let current_seq_id = {
-                            let (query, values) = Query::select()
-                                .column(MaxSeqId::SeqId)
-                                .from(MaxSeqId::Table)
-                                .and_where(
-                                    Expr::col(MaxSeqId::SegmentId).eq(segment.id.to_string()),
-                                )
-                                .build_sqlx(SqliteQueryBuilder);
-                            let row = sqlx::query_with(&query, values)
-                                .fetch_optional(sql_db.get_conn())
-                                .await?;
-                            row.map(|row| row.try_get::<u64, _>(0))
-                                .transpose()?
-                                .unwrap_or_default()
-                        };
+                        let current_seq_id = get_current_seq_id(segment, &sql_db).await?;
 
                         // TODO(Sanket): Set allow reset appropriately.
                         return Ok(Self {
