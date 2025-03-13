@@ -35,10 +35,11 @@ impl LogReader {
         })
     }
 
-    /// Scan up to, but not including the provided limit across three dimensions:
-    /// 1. The offset of the log position.
-    /// 2. The number of files to return.
-    /// 3. The total number of bytes to return.
+    /// Scan up to:
+    /// 1. Up to, but not including, the offset of the log position.  This makes it a half-open
+    ///    interval.
+    /// 2. Up to, and including, the number of files to return.
+    /// 3. Up to, and including, the total number of bytes to return.
     pub async fn scan(&self, from: LogPosition, limits: Limits) -> Result<Vec<Fragment>, Error> {
         let Some((manifest, _)) = Manifest::load(&self.storage, &self.prefix).await? else {
             return Err(Error::UninitializedLog);
