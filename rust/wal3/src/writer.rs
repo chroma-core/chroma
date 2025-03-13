@@ -317,6 +317,7 @@ impl OnceLogWriter {
         let path = fragment_path(&self.prefix, fragment_seq_no);
         let exp_backoff: ExponentialBackoff = self.options.throttle_fragment.into();
         let start = Instant::now();
+        let mut num_bytes;
         loop {
             // Write to parquet.
             let props = WriterProperties::builder()
@@ -327,11 +328,12 @@ impl OnceLogWriter {
                 ArrowWriter::try_new(&mut buffer, batch.schema(), Some(props)).unwrap();
             writer.write(&batch).map_err(Arc::new)?;
             writer.close().map_err(Arc::new)?;
+            num_bytes = buffer.len() as u64;
 
             // Upload the log.
             match self
                 .storage
-                .put_bytes(&path, buffer.clone(), PutOptions::if_not_exists())
+                .put_bytes(&path, buffer, PutOptions::if_not_exists())
                 .await
             {
                 Ok(_) => {
@@ -359,6 +361,7 @@ impl OnceLogWriter {
             seq_no: fragment_seq_no,
             start: log_position,
             limit: log_position + messages_len,
+            num_bytes,
             // TODO(rescrv):  This is a placeholder.
             setsum: Setsum::default(),
         };
