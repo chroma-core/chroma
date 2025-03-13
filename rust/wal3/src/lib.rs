@@ -13,14 +13,12 @@ mod manifest_manager;
 mod reader;
 mod writer;
 
-use manifest::SnapshotPointer;
-
 pub use backoff::ExponentialBackoff;
 pub use batch_manager::BatchManager;
-pub use manifest::{Manifest, Snapshot};
+pub use manifest::{Manifest, Snapshot, SnapshotPointer};
 pub use manifest_manager::ManifestManager;
 pub use reader::{Limits, LogReader};
-pub use writer::LogWriter;
+pub use writer::{upload_parquet, LogWriter};
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
@@ -38,8 +36,6 @@ pub enum Error {
     GarbageCollected,
     #[error("log contention fails a write")]
     LogContention,
-    #[error("the log is full")]
-    LogWriteTimeout,
     #[error("the log is full")]
     LogFull,
     #[error("the log is closed")]
@@ -264,7 +260,7 @@ impl Default for SnapshotOptions {
 ///////////////////////////////////////// LogWriterOptions /////////////////////////////////////////
 
 /// LogWriterOptions control the behavior of the log writer.
-#[derive(Clone, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct LogWriterOptions {
     /// Default throttling options for fragments.
     #[serde(default)]

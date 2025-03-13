@@ -202,7 +202,6 @@ impl Snapshot {
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct Manifest {
-    pub path: String,
     #[serde(
         deserialize_with = "super::deserialize_setsum",
         serialize_with = "super::serialize_setsum"
@@ -216,9 +215,8 @@ pub struct Manifest {
 
 impl Manifest {
     /// Generate a new manifest that's empty and suitable for initialization.
-    pub fn new_empty(prefix: &str, writer: &str) -> Self {
+    pub fn new_empty(writer: &str) -> Self {
         Self {
-            path: manifest_path(prefix),
             setsum: Setsum::default(),
             acc_bytes: 0,
             writer: writer.to_string(),
@@ -242,6 +240,13 @@ impl Manifest {
             >= snapshot_options.snapshot_rollover_threshold;
         let can_snapshot_fragments =
             self.fragments.len() >= snapshot_options.fragment_rollover_threshold;
+        println!("can_snapshot_snapshots: {}", can_snapshot_snapshots);
+        println!("can_snapshot_fragments: {}", can_snapshot_fragments);
+        println!("self.fragments.len(): {}", self.fragments.len());
+        println!(
+            "snapshot_options.fragment_rollover_threshold: {}",
+            snapshot_options.fragment_rollover_threshold
+        );
         if can_snapshot_snapshots || can_snapshot_fragments {
             // NOTE(rescrv):  We _either_ compact a snapshot of snapshots or a snapshot of log
             // fragments.  We don't do both as interior snapshot nodes only refer to objects of the
@@ -426,7 +431,7 @@ impl Manifest {
         }
         if self.setsum != acc {
             return Err(ScrubError::CorruptManifest{
-                manifest: self.path.to_string(),
+                manifest: format!("{:?}", self),
                 what: format!(
                 "expected manifest setsum does not match observed contents: expected:{} != observed:{}",
                 self.setsum.hexdigest(),
@@ -461,7 +466,6 @@ impl Manifest {
     ) -> Result<(), Error> {
         let writer = writer.to_string();
         let initial = Manifest {
-            path: manifest_path(prefix),
             writer,
             setsum: Setsum::default(),
             acc_bytes: 0,
@@ -472,7 +476,7 @@ impl Manifest {
             .map_err(|e| Error::CorruptManifest(format!("could not encode JSON manifest: {e:?}")))?
             .into_bytes();
         storage
-            .put_bytes(&initial.path, payload, PutOptions::if_not_exists())
+            .put_bytes(&manifest_path(prefix), payload, PutOptions::if_not_exists())
             .await
             .map_err(Arc::new)?;
         Ok(())
@@ -498,6 +502,7 @@ impl Manifest {
         &self,
         options: &ThrottleOptions,
         storage: &Storage,
+        prefix: &str,
         current: Option<&ETag>,
         new: &Manifest,
     ) -> Result<ETag, Error> {
@@ -516,7 +521,10 @@ impl Manifest {
             } else {
                 PutOptions::if_not_exists()
             };
-            match storage.put_bytes(&self.path, payload, options).await {
+            match storage
+                .put_bytes(&manifest_path(prefix), payload, options)
+                .await
+            {
                 Ok(Some(e_tag)) => {
                     println!("installed manifest");
                     return Ok(e_tag);
@@ -595,7 +603,6 @@ mod tests {
             setsum: Setsum::default(),
         };
         let manifest = Manifest {
-            path: String::from("manifest/MANIFEST"),
             writer: "manifest writer 1".to_string(),
             setsum: Setsum::default(),
             acc_bytes: 8200,
@@ -635,7 +642,6 @@ mod tests {
             .unwrap(),
         };
         let manifest = Manifest {
-            path: String::from("manifest/MANIFEST"),
             writer: "manifest writer 1".to_string(),
             setsum: Setsum::from_hexdigest(
                 "307d93deb6b3e91525dc277027bc34958d8f1e74965e4c027820c3596e0f2847",
@@ -647,7 +653,6 @@ mod tests {
         };
         assert!(manifest.scrub().is_ok());
         let manifest = Manifest {
-            path: String::from("manifest/MANIFEST"),
             writer: "manifest writer 1".to_string(),
             setsum: Setsum::from_hexdigest(
                 "6c5b5ee2c5e741a8d190d215d6cb2802a57ce0d3bb5a1a0223964e97acfa8083",
@@ -685,7 +690,6 @@ mod tests {
             .unwrap(),
         };
         let mut manifest = Manifest {
-            path: String::from("manifest/MANIFEST"),
             writer: "manifest writer 1".to_string(),
             setsum: Setsum::default(),
             acc_bytes: 0,
@@ -699,7 +703,6 @@ mod tests {
         manifest.apply_fragment(fragment2);
         assert_eq!(
             Manifest {
-                path: String::from("manifest/MANIFEST"),
                 writer: "manifest writer 1".to_string(),
                 setsum: Setsum::from_hexdigest(
                     "307d93deb6b3e91525dc277027bc34958d8f1e74965e4c027820c3596e0f2847",
