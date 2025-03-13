@@ -26,3 +26,28 @@ impl HnswProviderConfig {
         180
     }
 }
+
+fn default_garbage_collection() -> bool {
+    false
+}
+
+fn default_garbage_collection_policy() -> GarbageCollectionPolicy {
+    GarbageCollectionPolicy::Random10
+}
+
+#[derive(Deserialize, Debug, Clone, Serialize, Default)]
+pub enum GarbageCollectionPolicy {
+    #[serde(rename = "full")]
+    Full,
+    #[serde(rename = "random10")]
+    #[default]
+    Random10,
+}
+
+#[derive(Deserialize, Debug, Clone, Serialize, Default)]
+pub struct SpannProviderConfig {
+    #[serde(default = "default_garbage_collection")]
+    pub garbage_collection: bool,
+    #[serde(default = "default_garbage_collection_policy")]
+    pub garbage_collection_policy: GarbageCollectionPolicy,
+}
