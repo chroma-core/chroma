@@ -137,6 +137,29 @@ impl Snapshot {
         Ok(acc)
     }
 
+    pub async fn load(
+        _options: &ThrottleOptions,
+        storage: &Storage,
+        pointer: &SnapshotPointer,
+    ) -> Result<Option<Snapshot>, Error> {
+        match storage
+            .get_with_e_tag(&pointer.path_to_snapshot)
+            .await
+            .map_err(Arc::new)
+        {
+            Ok((ref snapshot, _)) => {
+                let snapshot: Snapshot = serde_json::from_slice(snapshot).map_err(|e| {
+                    Error::CorruptManifest(format!("could not decode JSON snapshot: {e:?}"))
+                })?;
+                Ok(Some(snapshot))
+            }
+            Err(err) => match &*err {
+                StorageError::NotFound { path: _, source: _ } => Ok(None),
+                err => Err(Error::StorageError(Arc::new(err.clone()))),
+            },
+        }
+    }
+
     pub async fn install(&self, options: &ThrottleOptions, storage: &Storage) -> Result<(), Error> {
         let exp_backoff = crate::backoff::ExponentialBackoff::new(
             options.throughput as f64,
@@ -185,23 +208,36 @@ pub struct Manifest {
         serialize_with = "super::serialize_setsum"
     )]
     pub setsum: Setsum,
+    pub acc_bytes: u64,
     pub writer: String,
     pub snapshots: Vec<SnapshotPointer>,
     pub fragments: Vec<Fragment>,
 }
 
 impl Manifest {
-    // Possibly generate a new snapshot from self if the conditions are right.
-    //
-    // This just creates a snapshot.  Install it to object store and then call apply_snapshot when
-    // it is durable to modify the manifest.
+    /// Generate a new manifest that's empty and suitable for initialization.
+    pub fn new_empty(prefix: &str, writer: &str) -> Self {
+        Self {
+            path: manifest_path(prefix),
+            setsum: Setsum::default(),
+            acc_bytes: 0,
+            writer: writer.to_string(),
+            snapshots: vec![],
+            fragments: vec![],
+        }
+    }
+
+    /// Possibly generate a new snapshot from self if the conditions are right.
+    ///
+    /// This just creates a snapshot.  Install it to object store and then call apply_snapshot when
+    /// it is durable to modify the manifest.
     pub fn generate_snapshot(
         &self,
         snapshot_options: SnapshotOptions,
         prefix: &str,
+        writer: &str,
     ) -> Option<Snapshot> {
-        // TODO(rescrv):  A real, random string.
-        let writer = "TODO".to_string();
+        let writer = writer.to_string();
         let can_snapshot_snapshots = self.snapshots.iter().filter(|s| s.depth < 2).count()
             >= snapshot_options.snapshot_rollover_threshold;
         let can_snapshot_fragments =
@@ -334,6 +370,7 @@ impl Manifest {
     /// Modify the manifest to apply the fragment to it.
     pub fn apply_fragment(&mut self, fragment: Fragment) {
         self.setsum += fragment.setsum;
+        self.acc_bytes = self.acc_bytes.saturating_add(fragment.num_bytes);
         self.fragments.push(fragment);
     }
 
@@ -420,11 +457,14 @@ impl Manifest {
         _: &LogWriterOptions,
         storage: &Storage,
         prefix: &str,
+        writer: &str,
     ) -> Result<(), Error> {
+        let writer = writer.to_string();
         let initial = Manifest {
             path: manifest_path(prefix),
-            writer: "TODO".to_string(),
+            writer,
             setsum: Setsum::default(),
+            acc_bytes: 0,
             snapshots: vec![],
             fragments: vec![],
         };
@@ -503,6 +543,7 @@ impl Manifest {
         }
     }
 }
+
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
 
 #[cfg(test)]
@@ -525,6 +566,7 @@ mod tests {
             seq_no: FragmentSeqNo(1),
             start: LogPosition::uni(1),
             limit: LogPosition::uni(42),
+            num_bytes: 4100,
             setsum: Setsum::default(),
         };
         assert!(!fragment.possibly_contains_position(LogPosition::uni(0)));
@@ -541,6 +583,7 @@ mod tests {
             seq_no: FragmentSeqNo(1),
             start: LogPosition::uni(1),
             limit: LogPosition::uni(22),
+            num_bytes: 4100,
             setsum: Setsum::default(),
         };
         let fragment2 = Fragment {
@@ -548,12 +591,14 @@ mod tests {
             seq_no: FragmentSeqNo(2),
             start: LogPosition::uni(22),
             limit: LogPosition::uni(42),
+            num_bytes: 4100,
             setsum: Setsum::default(),
         };
         let manifest = Manifest {
-            path: String::from("manifest/MANIFEST.ffffffffffffffff"),
+            path: String::from("manifest/MANIFEST"),
             writer: "manifest writer 1".to_string(),
             setsum: Setsum::default(),
+            acc_bytes: 8200,
             snapshots: vec![],
             fragments: vec![fragment1, fragment2],
         };
@@ -572,6 +617,7 @@ mod tests {
             seq_no: FragmentSeqNo(1),
             start: LogPosition::uni(1),
             limit: LogPosition::uni(22),
+            num_bytes: 4100,
             setsum: Setsum::from_hexdigest(
                 "4eec78e0b5cd15df7b36fd42cdc3aecb1986ffa3655c338201db88f80d855465",
             )
@@ -582,29 +628,32 @@ mod tests {
             seq_no: FragmentSeqNo(2),
             start: LogPosition::uni(22),
             limit: LogPosition::uni(42),
+            num_bytes: 4100,
             setsum: Setsum::from_hexdigest(
                 "dd901afef0e5d336aaa52a2df7f785c909091fd0aa011980de443a61a889d3e1",
             )
             .unwrap(),
         };
         let manifest = Manifest {
-            path: String::from("manifest/MANIFEST.ffffffffffffffff"),
+            path: String::from("manifest/MANIFEST"),
             writer: "manifest writer 1".to_string(),
             setsum: Setsum::from_hexdigest(
                 "307d93deb6b3e91525dc277027bc34958d8f1e74965e4c027820c3596e0f2847",
             )
             .unwrap(),
+            acc_bytes: 8200,
             snapshots: vec![],
             fragments: vec![fragment1.clone(), fragment2.clone()],
         };
         assert!(manifest.scrub().is_ok());
         let manifest = Manifest {
-            path: String::from("manifest/MANIFEST.ffffffffffffffff"),
+            path: String::from("manifest/MANIFEST"),
             writer: "manifest writer 1".to_string(),
             setsum: Setsum::from_hexdigest(
                 "6c5b5ee2c5e741a8d190d215d6cb2802a57ce0d3bb5a1a0223964e97acfa8083",
             )
             .unwrap(),
+            acc_bytes: 8200,
             snapshots: vec![],
             fragments: vec![fragment1, fragment2],
         };
@@ -618,6 +667,7 @@ mod tests {
             seq_no: FragmentSeqNo(1),
             start: LogPosition::uni(1),
             limit: LogPosition::uni(22),
+            num_bytes: 41,
             setsum: Setsum::from_hexdigest(
                 "4eec78e0b5cd15df7b36fd42cdc3aecb1986ffa3655c338201db88f80d855465",
             )
@@ -628,15 +678,17 @@ mod tests {
             seq_no: FragmentSeqNo(2),
             start: LogPosition::uni(22),
             limit: LogPosition::uni(42),
+            num_bytes: 42,
             setsum: Setsum::from_hexdigest(
                 "dd901afef0e5d336aaa52a2df7f785c909091fd0aa011980de443a61a889d3e1",
             )
             .unwrap(),
         };
         let mut manifest = Manifest {
-            path: String::from("manifest/MANIFEST.ffffffffffffffff"),
+            path: String::from("manifest/MANIFEST"),
             writer: "manifest writer 1".to_string(),
             setsum: Setsum::default(),
+            acc_bytes: 0,
             snapshots: vec![],
             fragments: vec![],
         };
@@ -647,12 +699,13 @@ mod tests {
         manifest.apply_fragment(fragment2);
         assert_eq!(
             Manifest {
-                path: String::from("manifest/MANIFEST.ffffffffffffffff"),
+                path: String::from("manifest/MANIFEST"),
                 writer: "manifest writer 1".to_string(),
                 setsum: Setsum::from_hexdigest(
                     "307d93deb6b3e91525dc277027bc34958d8f1e74965e4c027820c3596e0f2847",
                 )
                 .unwrap(),
+                acc_bytes: 83,
                 snapshots: vec![],
                 fragments: vec![
                     Fragment {
@@ -660,6 +713,7 @@ mod tests {
                         seq_no: FragmentSeqNo(1),
                         start: LogPosition::uni(1),
                         limit: LogPosition::uni(22),
+                        num_bytes: 41,
                         setsum: Setsum::from_hexdigest(
                             "4eec78e0b5cd15df7b36fd42cdc3aecb1986ffa3655c338201db88f80d855465"
                         )
@@ -670,6 +724,7 @@ mod tests {
                         seq_no: FragmentSeqNo(2),
                         start: LogPosition::uni(22),
                         limit: LogPosition::uni(42),
+                        num_bytes: 42,
                         setsum: Setsum::from_hexdigest(
                             "dd901afef0e5d336aaa52a2df7f785c909091fd0aa011980de443a61a889d3e1"
                         )

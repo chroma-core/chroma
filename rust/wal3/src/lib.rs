@@ -10,6 +10,7 @@ mod backoff;
 mod batch_manager;
 mod manifest;
 mod manifest_manager;
+mod reader;
 mod writer;
 
 use manifest::SnapshotPointer;
@@ -18,6 +19,7 @@ pub use backoff::ExponentialBackoff;
 pub use batch_manager::BatchManager;
 pub use manifest::{Manifest, Snapshot};
 pub use manifest_manager::ManifestManager;
+pub use reader::{Limits, LogReader};
 pub use writer::LogWriter;
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
@@ -275,6 +277,16 @@ pub struct LogWriterOptions {
     pub snapshot_manifest: SnapshotOptions,
 }
 
+///////////////////////////////////////// LogReaderOptions /////////////////////////////////////////
+
+/// LogReaderOptions control the behavior of the log writer.
+#[derive(Clone, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct LogReaderOptions {
+    /// Default throttling options for manifest.
+    #[serde(default)]
+    pub throttle: ThrottleOptions,
+}
+
 /////////////////////////////////////////// FragmentSeqNo //////////////////////////////////////////
 
 /// A FragmentSeqNo is an identifier that corresponds to the the number of fragments that have been
@@ -345,6 +357,7 @@ pub struct Fragment {
     pub seq_no: FragmentSeqNo,
     pub start: LogPosition,
     pub limit: LogPosition,
+    pub num_bytes: u64,
     #[serde(
         deserialize_with = "deserialize_setsum",
         serialize_with = "serialize_setsum"

@@ -522,7 +522,6 @@ def update_collection_configuration_from_legacy_collection_metadata(
         "hnsw:sync_threshold": "sync_threshold",
         "hnsw:resize_factor": "resize_factor",
     }
-
     json_map = {}
     for name, value in metadata.items():
         if name not in old_to_new:
