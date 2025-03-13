@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
 use uuid::Uuid;
-use wal3::{LogWriter, LogWriterOptions};
+use wal3::{LogReader, LogReaderOptions, LogWriter, LogWriterOptions};
 
 use crate::state_hash_table::StateHashTable;
 
@@ -218,7 +218,7 @@ impl LogService for LogServer {
         let prefix = storage_prefix_for_log(collection_id);
         let key = LogKey { collection_id };
         let handle = self.open_logs.get_or_create_state(key);
-        let log = get_log_from_handle(&handle, &self.config.log, &self.storage, &prefix)
+        let log = get_log_from_handle(&handle, &self.config.writer, &self.storage, &prefix)
             .await
             // TODO(rescrv): better error handling.
             .map_err(|err| Status::unknown(err.to_string()))?;
@@ -242,8 +242,18 @@ impl LogService for LogServer {
 
     async fn pull_logs(
         &self,
-        _request: Request<PullLogsRequest>,
+        request: Request<PullLogsRequest>,
     ) -> Result<Response<PullLogsResponse>, Status> {
+        let pull_logs = request.into_inner();
+        let collection_id = Uuid::parse_str(&pull_logs.collection_id)
+            .map(CollectionUuid)
+            .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+        let prefix = storage_prefix_for_log(collection_id);
+        let log_reader = LogReader::new(
+            self.config.reader.clone(),
+            Arc::clone(&self.storage),
+            prefix,
+        );
         todo!("Implement wal3 backed pull_logs here")
     }
 
@@ -317,9 +327,14 @@ pub struct OpenTelemetryConfig {
 pub struct LogServerConfig {
     #[serde(default = "default_port")]
     pub port: u16,
+    #[serde(default)]
     pub opentelemetry: Option<OpenTelemetryConfig>,
+    #[serde(default)]
     pub storage: StorageConfig,
-    pub log: LogWriterOptions,
+    #[serde(default)]
+    pub writer: LogWriterOptions,
+    #[serde(default)]
+    pub reader: LogReaderOptions,
 }
 
 impl Default for LogServerConfig {
@@ -328,7 +343,8 @@ impl Default for LogServerConfig {
             port: default_port(),
             opentelemetry: None,
             storage: StorageConfig::default(),
-            log: LogWriterOptions::default(),
+            writer: LogWriterOptions::default(),
+            reader: LogReaderOptions::default(),
         }
     }
 }
