@@ -11,8 +11,8 @@ use crate::{Error, Fragment, LogPosition, LogReaderOptions, Manifest, Snapshot};
 /// Limits allows encoding things like offset, timestamp, and byte size limits for the read.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct Limits {
-    pub max_files: u64,
-    pub max_bytes: u64,
+    pub max_files: Option<u64>,
+    pub max_bytes: Option<u64>,
 }
 
 /// LogReader is a reader for the log.
@@ -35,6 +35,10 @@ impl LogReader {
         })
     }
 
+    /// Scan up to, but not including the provided limit across three dimensions:
+    /// 1. The offset of the log position.
+    /// 2. The number of files to return.
+    /// 3. The total number of bytes to return.
     pub async fn scan(&self, from: LogPosition, limits: Limits) -> Result<Vec<Fragment>, Error> {
         let Some((manifest, _)) = Manifest::load(&self.storage, &self.prefix).await? else {
             return Err(Error::UninitializedLog);
@@ -79,13 +83,13 @@ impl LogReader {
             }
         }
         fragments.sort_by_key(|f| f.start.offset());
-        fragments.truncate(limits.max_files as usize);
+        fragments.truncate(limits.max_files.unwrap_or(u64::MAX) as usize);
         while fragments.len() > 1
             && fragments
                 .iter()
                 .map(|f| f.num_bytes)
                 .fold(0, u64::saturating_add)
-                > limits.max_bytes
+                > limits.max_bytes.unwrap_or(u64::MAX)
         {
             fragments.pop();
         }
