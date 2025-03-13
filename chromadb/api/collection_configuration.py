@@ -597,17 +597,17 @@ def update_collection_configuration_to_json(
 
 def load_update_collection_configuration_from_json_str(
     json_str: str,
-) -> UpdateCollectionConfiguration | None:
+) -> UpdateCollectionConfiguration:
     json_map = json.loads(json_str)
     return load_update_collection_configuration_from_json(json_map)
 
 
 def load_update_collection_configuration_from_json(
     json_map: Dict[str, Any]
-) -> UpdateCollectionConfiguration | None:
+) -> UpdateCollectionConfiguration:
     if "hnsw" not in json_map:
         if "embedding_function" not in json_map:
-            return None
+            return UpdateCollectionConfiguration()
         else:
             if json_map["embedding_function"]["type"] == "legacy":
                 warnings.warn(
@@ -615,7 +615,7 @@ def load_update_collection_configuration_from_json(
                     DeprecationWarning,
                     stacklevel=2,
                 )
-                return None
+                return UpdateCollectionConfiguration()
             else:
                 ef = cast(
                     EmbeddingFunction[Embeddable],
