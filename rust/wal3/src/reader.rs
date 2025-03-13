@@ -29,6 +29,14 @@ pub struct LogReader {
 }
 
 impl LogReader {
+    pub fn new(options: LogReaderOptions, storage: Arc<Storage>, prefix: String) -> Self {
+        Self {
+            options,
+            storage,
+            prefix,
+        }
+    }
+
     pub async fn open(
         options: LogReaderOptions,
         storage: Arc<Storage>,
