@@ -1,10 +1,24 @@
 #![doc = include_str!("../README.md")]
 
+use std::sync::Arc;
+use std::time::SystemTime;
+
 use serde::{Deserialize, Serialize};
+use setsum::Setsum;
 
 mod backoff;
+mod batch_manager;
+mod manifest;
+mod manifest_manager;
+mod writer;
+
+use manifest::SnapshotPointer;
 
 pub use backoff::ExponentialBackoff;
+pub use batch_manager::BatchManager;
+pub use manifest::{Manifest, Snapshot};
+pub use manifest_manager::ManifestManager;
+pub use writer::LogWriter;
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
@@ -23,7 +37,11 @@ pub enum Error {
     #[error("log contention fails a write")]
     LogContention,
     #[error("the log is full")]
+    LogWriteTimeout,
+    #[error("the log is full")]
     LogFull,
+    #[error("the log is closed")]
+    LogClosed,
     #[error("an internal, otherwise unclassifiable error")]
     Internal,
     #[error("corrupt manifest: {0}")]
@@ -32,6 +50,24 @@ pub enum Error {
     CorruptCursor(String),
     #[error("missing cursor: {0}")]
     NoSuchCursor(String),
+    #[error("parquet error: {0}")]
+    ParquetError(#[from] Arc<parquet::errors::ParquetError>),
+    #[error("storage error: {0}")]
+    StorageError(#[from] Arc<chroma_storage::StorageError>),
+}
+
+//////////////////////////////////////////// ScrubError ////////////////////////////////////////////
+
+#[derive(Clone, Debug, thiserror::Error)]
+pub enum ScrubError {
+    #[error("CorruptManifest: {what}")]
+    CorruptManifest { manifest: String, what: String },
+    #[error("CorruptFragment: {seq_no} {what}")]
+    CorruptFragment {
+        manifest: String,
+        seq_no: FragmentSeqNo,
+        what: String,
+    },
 }
 
 //////////////////////////////////////////// LogPosition ///////////////////////////////////////////
@@ -49,6 +85,19 @@ pub struct LogPosition {
 }
 
 impl LogPosition {
+    /// Create a new log position from offset and current time.
+    pub fn from_offset(offset: u64) -> Self {
+        let timestamp_us = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("wal3 won't work before 1970")
+            .as_micros() as u64;
+        LogPosition {
+            offset,
+            timestamp_us,
+        }
+    }
+
+    /// Create a new offset and timestamp.
     pub fn new(offset: u64, timestamp_us: u64) -> Self {
         LogPosition {
             offset,
@@ -56,20 +105,50 @@ impl LogPosition {
         }
     }
 
+    #[cfg(test)]
+    pub fn uni(offset: u64) -> Self {
+        let timestamp_us = offset;
+        LogPosition {
+            offset,
+            timestamp_us,
+        }
+    }
+
+    /// The offset of the LogPosition.
     pub fn offset(&self) -> u64 {
         self.offset
     }
 
+    /// The timestamp of the LogPosition.
     pub fn timestamp_us(&self) -> u64 {
         self.timestamp_us
     }
 
+    /// True iff this contains offset.
     pub fn contains_offset(start: LogPosition, end: LogPosition, offset: u64) -> bool {
         start.offset <= offset && offset < end.offset
     }
 
+    /// True iff this contains timestamp.
     pub fn contains_timestamp(start: LogPosition, end: LogPosition, timestamp: u64) -> bool {
         start.offset <= timestamp && timestamp < end.offset
+    }
+}
+
+impl std::ops::Add<usize> for LogPosition {
+    type Output = LogPosition;
+
+    fn add(self, rhs: usize) -> Self::Output {
+        LogPosition {
+            offset: self.offset.wrapping_add(rhs as u64),
+            timestamp_us: self.timestamp_us.wrapping_add(rhs as u64),
+        }
+    }
+}
+
+impl std::ops::AddAssign<usize> for LogPosition {
+    fn add_assign(&mut self, rhs: usize) {
+        *self = *self + rhs;
     }
 }
 
@@ -84,7 +163,7 @@ pub struct ThrottleOptions {
     /// The maximum number of bytes to batch.  Defaults to 8MB.
     #[serde(default = "ThrottleOptions::default_batch_size_bytes")]
     pub batch_size_bytes: usize,
-    /// The maximum number of microseconds to batch.  Defaults to 20ms or 20_000us.
+    /// The maximum number of microseconds to batch.  Defaults to 100ms or 100_000us.
     #[serde(default = "ThrottleOptions::default_batch_interval_us")]
     pub batch_interval_us: usize,
     /// The maximum number of operations per second to allow.  Defaults to 2_000.
@@ -104,7 +183,7 @@ impl ThrottleOptions {
     }
 
     fn default_batch_interval_us() -> usize {
-        20_000
+        100_000
     }
 
     fn default_throughput() -> usize {
@@ -116,7 +195,7 @@ impl ThrottleOptions {
     }
 
     fn default_outstanding() -> usize {
-        100
+        1
     }
 }
 
@@ -132,7 +211,7 @@ impl Default for ThrottleOptions {
             throughput: Self::default_throughput(),
             // How much headroom we have for retries.
             headroom: Self::default_headroom(),
-            // Allow up to 100 requests to be outstanding.
+            // Allow up to 1 requests to be outstanding.
             outstanding: Self::default_outstanding(),
         }
     }
@@ -150,19 +229,50 @@ impl From<ThrottleOptions> for ExponentialBackoff {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct SnapshotOptions {
     /// The maximum number of outbound snapshot pointers to embed in a snapshot or manifest.
+    #[serde(default = "SnapshotOptions::default_snapshot_rollover_threshold")]
     pub snapshot_rollover_threshold: usize,
     /// The maximum number of fragment pointers to embed in a snapshot or manifest.
+    #[serde(default = "SnapshotOptions::default_fragment_rollover_threshold")]
     pub fragment_rollover_threshold: usize,
+}
+
+impl SnapshotOptions {
+    /// Corresponds to [SnapshotOptions::snapshot_rollover_threshold], or the number of snapshot
+    /// pointers to embed in a snapshot or manifest.
+    fn default_snapshot_rollover_threshold() -> usize {
+        (1 << 18) / SnapshotPointer::JSON_SIZE_ESTIMATE
+    }
+
+    /// Corresponds to [SnapshotOptions::fragment_rollover_threshold], or the number of fragment
+    /// pointers to embed in a snapshot or manifest.
+    fn default_fragment_rollover_threshold() -> usize {
+        (1 << 19) / Fragment::JSON_SIZE_ESTIMATE
+    }
 }
 
 impl Default for SnapshotOptions {
     fn default() -> Self {
         SnapshotOptions {
-            // TODO(rescrv):  Commented out values are better.
-            snapshot_rollover_threshold: 2048, // (1 << 18) / SnapPointer::JSON_SIZE_ESTIMATE,
-            fragment_rollover_threshold: 1536, // (1 << 19) / ShardFragment::JSON_SIZE_ESTIMATE,
+            snapshot_rollover_threshold: Self::default_snapshot_rollover_threshold(),
+            fragment_rollover_threshold: Self::default_fragment_rollover_threshold(),
         }
     }
+}
+
+///////////////////////////////////////// LogWriterOptions /////////////////////////////////////////
+
+/// LogWriterOptions control the behavior of the log writer.
+#[derive(Clone, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct LogWriterOptions {
+    /// Default throttling options for fragments.
+    #[serde(default)]
+    pub throttle_fragment: ThrottleOptions,
+    /// Default throttling options for manifest.
+    #[serde(default)]
+    pub throttle_manifest: ThrottleOptions,
+    /// Default snapshot options for manifest.
+    #[serde(default)]
+    pub snapshot_manifest: SnapshotOptions,
 }
 
 /////////////////////////////////////////// FragmentSeqNo //////////////////////////////////////////
@@ -172,16 +282,57 @@ impl Default for SnapshotOptions {
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd, Hash, serde::Deserialize, serde::Serialize,
 )]
-pub struct FragmentSeqNo(pub usize);
+pub struct FragmentSeqNo(pub u64);
 
 impl FragmentSeqNo {
     /// Returns the successor of this FragmentSeqNo, or None if this FragmentSeqNo is the maximum
     pub fn successor(&self) -> Option<Self> {
-        if self.0 == usize::MAX {
+        if self.0 == u64::MAX {
             None
         } else {
             Some(FragmentSeqNo(self.0 + 1))
         }
+    }
+
+    // Round down to the nearest multiple of 5k.
+    pub fn bucket(&self) -> u64 {
+        (self.0 / 5_000) * 5_000
+    }
+}
+
+impl std::fmt::Display for FragmentSeqNo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::ops::Add<FragmentSeqNo> for u64 {
+    type Output = FragmentSeqNo;
+
+    fn add(self, rhs: FragmentSeqNo) -> Self::Output {
+        FragmentSeqNo(self.wrapping_add(rhs.0))
+    }
+}
+
+impl std::ops::Add<u64> for FragmentSeqNo {
+    type Output = FragmentSeqNo;
+
+    fn add(self, rhs: u64) -> Self::Output {
+        FragmentSeqNo(self.0.wrapping_add(rhs))
+    }
+}
+
+impl std::ops::Sub<FragmentSeqNo> for FragmentSeqNo {
+    type Output = u64;
+
+    fn sub(self, rhs: FragmentSeqNo) -> Self::Output {
+        self.0.wrapping_sub(rhs.0)
+    }
+}
+
+impl std::ops::AddAssign<u64> for FragmentSeqNo {
+    fn add_assign(&mut self, rhs: u64) {
+        self.0 = self.0.wrapping_add(rhs);
     }
 }
 
@@ -198,25 +349,30 @@ pub struct Fragment {
         deserialize_with = "deserialize_setsum",
         serialize_with = "serialize_setsum"
     )]
-    pub setsum: setsum::Setsum,
+    pub setsum: Setsum,
 }
 
 impl Fragment {
+    /// An estimate on the number of bytes required to serialize this object as JSON.
     pub const JSON_SIZE_ESTIMATE: usize = 256;
+
+    pub fn possibly_contains_position(&self, position: LogPosition) -> bool {
+        LogPosition::contains_offset(self.start, self.limit, position.offset)
+    }
 }
 
 /////////////////////////////////////////////// util ///////////////////////////////////////////////
 
-fn deserialize_setsum<'de, D>(deserializer: D) -> Result<setsum::Setsum, D::Error>
+fn deserialize_setsum<'de, D>(deserializer: D) -> Result<Setsum, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
     let s = String::deserialize(deserializer)?;
-    setsum::Setsum::from_hexdigest(&s)
+    Setsum::from_hexdigest(&s)
         .ok_or_else(|| serde::de::Error::custom(format!("invalid setsum: {}", s)))
 }
 
-fn serialize_setsum<S>(setsum: &setsum::Setsum, serializer: S) -> Result<S::Ok, S::Error>
+fn serialize_setsum<S>(setsum: &Setsum, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
 {

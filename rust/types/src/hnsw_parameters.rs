@@ -22,7 +22,7 @@ impl ChromaError for HnswParametersFromSegmentError {
     }
 }
 
-#[derive(Default, Debug, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq)]
 pub enum HnswSpace {
     #[default]
     #[serde(rename = "l2")]
@@ -204,5 +204,220 @@ impl TryFrom<SingleNodeHnswParameters> for Metadata {
         let json_str = serde_json::to_string(&params)?;
         let parsed = serde_json::from_str::<Metadata>(&json_str)?;
         Ok(parsed)
+    }
+}
+
+fn default_search_nprobe() -> u32 {
+    128
+}
+
+fn default_search_rng_factor() -> f32 {
+    1.0
+}
+
+fn default_search_rng_epsilon() -> f32 {
+    10.0
+}
+
+fn default_write_nprobe() -> u32 {
+    128
+}
+
+fn default_write_rng_factor() -> f32 {
+    1.0
+}
+
+fn default_write_rng_epsilon() -> f32 {
+    10.0
+}
+
+fn default_split_threshold() -> u32 {
+    100
+}
+
+fn default_num_samples_kmeans() -> usize {
+    1000
+}
+
+fn default_initial_lambda() -> f32 {
+    100.0
+}
+
+fn default_reassign_nbr_count() -> u32 {
+    8
+}
+
+fn default_merge_threshold() -> u32 {
+    50
+}
+
+fn default_num_centers_to_merge_to() -> u32 {
+    8
+}
+
+fn default_construction_ef_spann() -> usize {
+    200
+}
+
+fn default_search_ef_spann() -> usize {
+    200
+}
+
+fn default_m_spann() -> usize {
+    16
+}
+
+#[derive(Debug, Error)]
+pub enum DistributedSpannParametersFromSegmentError {
+    #[error("Invalid metadata: {0}")]
+    InvalidMetadata(#[from] serde_json::Error),
+    #[error("Invalid parameters: {0}")]
+    InvalidParameters(#[from] validator::ValidationErrors),
+}
+
+impl ChromaError for DistributedSpannParametersFromSegmentError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            DistributedSpannParametersFromSegmentError::InvalidMetadata(_) => {
+                ErrorCodes::InvalidArgument
+            }
+            DistributedSpannParametersFromSegmentError::InvalidParameters(_) => {
+                ErrorCodes::InvalidArgument
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Validate, PartialEq)]
+pub struct DistributedSpannParameters {
+    #[serde(rename = "spann:search_nprobe", default = "default_search_nprobe")]
+    #[validate(range(min = 8))]
+    pub search_nprobe: u32,
+    #[serde(
+        rename = "spann:search_rng_factor",
+        default = "default_search_rng_factor"
+    )]
+    pub search_rng_factor: f32,
+    #[serde(
+        rename = "spann:search_rng_epsilon",
+        default = "default_search_rng_epsilon"
+    )]
+    pub search_rng_epsilon: f32,
+    #[serde(
+        rename = "spann:search_split_threshold",
+        default = "default_write_nprobe"
+    )]
+    #[validate(range(min = 8))]
+    pub write_nprobe: u32,
+    #[serde(
+        rename = "spann:write_rng_factor",
+        default = "default_write_rng_factor"
+    )]
+    pub write_rng_factor: f32,
+    #[serde(
+        rename = "spann:write_rng_epsilon",
+        default = "default_write_rng_epsilon"
+    )]
+    pub write_rng_epsilon: f32,
+    #[serde(
+        rename = "spann:write_split_threshold",
+        default = "default_split_threshold"
+    )]
+    #[validate(range(min = 50))]
+    pub split_threshold: u32,
+    #[serde(
+        rename = "spann:num_samples_kmeans",
+        default = "default_num_samples_kmeans"
+    )]
+    #[validate(range(min = 500))]
+    pub num_samples_kmeans: usize,
+    #[serde(rename = "spann:initial_lambda", default = "default_initial_lambda")]
+    pub initial_lambda: f32,
+    #[serde(
+        rename = "spann:reassign_nbr_count",
+        default = "default_reassign_nbr_count"
+    )]
+    pub reassign_nbr_count: u32,
+    #[serde(rename = "spann:merge_threshold", default = "default_merge_threshold")]
+    pub merge_threshold: u32,
+    #[serde(
+        rename = "spann:num_centers_to_merge_to",
+        default = "default_num_centers_to_merge_to"
+    )]
+    pub num_centers_to_merge_to: u32,
+    #[serde(rename = "spann:space", default)]
+    pub space: HnswSpace,
+    #[serde(
+        rename = "spann:construction_ef",
+        default = "default_construction_ef_spann"
+    )]
+    pub construction_ef: usize,
+    #[serde(rename = "spann:search_ef", default = "default_search_ef_spann")]
+    pub search_ef: usize,
+    #[serde(rename = "spann:M", default = "default_m_spann")]
+    pub m: usize,
+}
+
+impl Default for DistributedSpannParameters {
+    fn default() -> Self {
+        serde_json::from_str("{}").unwrap()
+    }
+}
+
+impl TryFrom<&Option<Metadata>> for DistributedSpannParameters {
+    type Error = DistributedSpannParametersFromSegmentError;
+
+    fn try_from(value: &Option<Metadata>) -> Result<Self, Self::Error> {
+        let metadata_str = serde_json::to_string(value.as_ref().unwrap_or(&Metadata::default()))?;
+        let r = serde_json::from_str::<DistributedSpannParameters>(&metadata_str)?;
+        r.validate()?;
+        Ok(r)
+    }
+}
+
+impl TryFrom<&Segment> for DistributedSpannParameters {
+    type Error = DistributedSpannParametersFromSegmentError;
+
+    fn try_from(value: &Segment) -> Result<Self, Self::Error> {
+        DistributedSpannParameters::try_from(&value.metadata)
+    }
+}
+
+impl TryFrom<DistributedSpannParameters> for Metadata {
+    type Error = DistributedSpannParametersFromSegmentError;
+
+    fn try_from(value: DistributedSpannParameters) -> Result<Self, Self::Error> {
+        let metadata_str = serde_json::to_string(&value)?;
+        let r = serde_json::from_str::<Metadata>(&metadata_str)?;
+        Ok(r)
+    }
+}
+
+fn default_index_type() -> DistributedIndexType {
+    DistributedIndexType::Hnsw
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DistributedIndexTypeParam {
+    #[serde(alias = "index_type", default = "default_index_type")]
+    pub index_type: DistributedIndexType,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub enum DistributedIndexType {
+    #[serde(rename = "hnsw")]
+    Hnsw,
+    #[serde(rename = "spann")]
+    Spann,
+}
+
+impl TryFrom<&Option<Metadata>> for DistributedIndexTypeParam {
+    type Error = DistributedSpannParametersFromSegmentError;
+
+    fn try_from(value: &Option<Metadata>) -> Result<Self, Self::Error> {
+        let metadata_str = serde_json::to_string(value.as_ref().unwrap_or(&Metadata::default()))?;
+        let r = serde_json::from_str::<DistributedIndexTypeParam>(&metadata_str)?;
+        Ok(r)
     }
 }

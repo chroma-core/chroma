@@ -1,5 +1,5 @@
 from chromadb.api.types import EmbeddingFunction, Space, Embeddings, Documents
-from chromadb.utils.embedding_functions.schemas import validate_config
+from chromadb.utils.embedding_functions.schemas import validate_config_schema
 from typing import List, Dict, Any, Optional
 import os
 import numpy as np
@@ -90,7 +90,8 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
                 "The model name cannot be changed after the embedding function has been initialized."
             )
 
-    def validate_config(self, config: Dict[str, Any]) -> None:
+    @staticmethod
+    def validate_config(config: Dict[str, Any]) -> None:
         """
         Validate the configuration using the JSON schema.
 
@@ -100,4 +101,4 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
         Raises:
             ValidationError: If the configuration does not match the schema
         """
-        validate_config(config, "voyageai")
+        validate_config_schema(config, "voyageai")

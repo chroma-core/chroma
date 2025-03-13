@@ -19,7 +19,7 @@ parking_lot = { workspace = true }
 rand = { workspace = true}
 serde = { workspace = true }
 tempfile = { workspace = true }
-thiserror = { workspace = true }
+thiserror.workspace = true
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }

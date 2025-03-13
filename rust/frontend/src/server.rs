@@ -1,25 +1,24 @@
 use axum::{
-    extract::{DefaultBodyLimit, Path, Query, State},
-    http::header::HeaderMap,
-    http::StatusCode,
+    extract::{DefaultBodyLimit, Path, Query, Request, State},
+    http::{header::HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router, ServiceExt,
 };
 use chroma_system::System;
-use chroma_types::RawWhereFields;
 use chroma_types::{
     AddCollectionRecordsResponse, ChecklistResponse, Collection, CollectionMetadataUpdate,
     CollectionUuid, CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
     CreateCollectionRequest, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest,
     CreateTenantResponse, DeleteCollectionRecordsResponse, DeleteDatabaseRequest,
-    DeleteDatabaseResponse, GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse,
-    GetRequest, GetResponse, GetTenantRequest, GetTenantResponse, GetUserIdentityResponse,
-    HeartbeatResponse, IncludeList, ListCollectionsRequest, ListCollectionsResponse,
-    ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
-    UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateMetadata,
+    DeleteDatabaseResponse, DistributedIndexType, GetCollectionRequest, GetDatabaseRequest,
+    GetDatabaseResponse, GetRequest, GetResponse, GetTenantRequest, GetTenantResponse,
+    GetUserIdentityResponse, HeartbeatResponse, IncludeList, ListCollectionsRequest,
+    ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest,
+    QueryResponse, UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateMetadata,
     UpsertCollectionRecordsResponse,
 };
+use chroma_types::{DistributedIndexTypeParam, RawWhereFields};
 use mdac::{Rule, Scorecard, ScorecardTicket};
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Meter};
@@ -129,6 +128,21 @@ impl Metrics {
             collection_query: meter.u64_counter("collection_query").build(),
         }
     }
+}
+
+/// If the request does not have a `Content-Type` header, set it to `application/json`.
+async fn default_json_content_type(mut req: Request, next: axum::middleware::Next) -> Response {
+    if req
+        .headers()
+        .get(axum::http::header::CONTENT_TYPE)
+        .is_none()
+    {
+        req.headers_mut().insert(
+            axum::http::header::CONTENT_TYPE,
+            axum::http::HeaderValue::from_static("application/json"),
+        );
+    }
+    next.run(req).await
 }
 
 #[derive(Clone)]
@@ -258,7 +272,9 @@ impl FrontendServer {
             )
             .merge(docs_router)
             .with_state(self)
-            .layer(DefaultBodyLimit::max(max_payload_size_bytes));
+            .layer(DefaultBodyLimit::max(max_payload_size_bytes))
+            .layer(axum::middleware::from_fn(default_json_content_type));
+
         let mut app = add_tracing_middleware(app);
 
         if let Some(cors_allow_origins) = cors_allow_origins {
@@ -487,8 +503,8 @@ async fn create_tenant(
     ),
     responses(
         (status = 200, description = "Tenant found", body = GetTenantResponse),
-        (status = 404, description = "Tenant not found", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Tenant not found", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
     )
 )]
@@ -806,6 +822,7 @@ pub struct CreateCollectionPayload {
     pub name: String,
     pub configuration: Option<serde_json::Value>,
     pub metadata: Option<Metadata>,
+    #[serde(default)]
     pub get_or_create: bool,
 }
 
@@ -857,6 +874,11 @@ async fn create_collection(
         "op:create_collection",
         format!("tenant:{}", tenant).as_str(),
     ]);
+    let index_type = DistributedIndexTypeParam::try_from(&payload.metadata)?;
+    // spann index not allowed.
+    if index_type.index_type == DistributedIndexType::Spann && !server.config.enable_span_indexing {
+        return Err(ValidationError::SpannNotImplemented)?;
+    }
     let request = CreateCollectionRequest::try_new(
         tenant,
         database,
@@ -876,8 +898,8 @@ async fn create_collection(
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}",
     responses(
         (status = 200, description = "Collection found", body = Collection),
-        (status = 404, description = "Collection not found", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Collection not found", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
     params(
@@ -1060,7 +1082,7 @@ async fn collection_add(
     Path((tenant, database, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
     Json(payload): Json<AddCollectionRecordsPayload>,
-) -> Result<Json<AddCollectionRecordsResponse>, ServerError> {
+) -> Result<(StatusCode, Json<AddCollectionRecordsResponse>), ServerError> {
     server.metrics.collection_add.add(1, &[]);
     server
         .authenticate_and_authorize(
@@ -1114,7 +1136,7 @@ async fn collection_add(
 
     let res = server.frontend.add(request).await?;
 
-    Ok(Json(res))
+    Ok((StatusCode::CREATED, Json(res)))
 }
 
 #[derive(Deserialize, Debug, Clone, ToSchema, Serialize)]
@@ -1719,5 +1741,42 @@ mod tests {
 
         let allow_headers = res.headers().get("Access-Control-Allow-Headers");
         assert_eq!(allow_headers.unwrap(), "*");
+    }
+
+    #[tokio::test]
+    async fn test_defaults_to_json_content_type() {
+        let registry = Registry::new();
+        let system = System::new();
+
+        let port = random_port::PortPicker::new().pick().unwrap();
+
+        let mut config = FrontendServerConfig::single_node_default();
+        config.port = port;
+        config.cors_allow_origins = Some(vec!["http://localhost:3000".to_string()]);
+
+        let frontend = Frontend::try_from_config(&(config.clone().frontend, system), &registry)
+            .await
+            .unwrap();
+        let app = FrontendServer::new(
+            config,
+            frontend,
+            vec![],
+            Arc::new(()),
+            Arc::new(()),
+            System::new(),
+        );
+        tokio::task::spawn(async move {
+            app.run().await;
+        });
+
+        // We don't send a content-type header
+        let client = reqwest::Client::new();
+        let res = client
+            .post(format!("http://localhost:{}/api/v2/tenants", port))
+            .body(serde_json::to_string(&serde_json::json!({ "name": "test" })).unwrap())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
     }
 }

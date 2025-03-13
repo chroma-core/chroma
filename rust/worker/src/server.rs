@@ -16,7 +16,7 @@ use chroma_types::{
         KnnBatchResult, KnnPlan,
     },
     operator::Scan,
-    CollectionAndSegments,
+    CollectionAndSegments, SegmentType,
 };
 use futures::{stream, StreamExt, TryStreamExt};
 use tokio::signal::unix::{signal, SignalKind};
@@ -29,7 +29,7 @@ use crate::{
         operators::{fetch_log::FetchLogOperator, knn_projection::KnnProjectionOperator},
         orchestration::{
             get::GetOrchestrator, knn::KnnOrchestrator, knn_filter::KnnFilterOrchestrator,
-            CountOrchestrator,
+            spann_knn::SpannKnnOrchestrator, CountOrchestrator,
         },
     },
     utils::convert::{from_proto_knn, to_proto_knn_batch_result},
@@ -152,8 +152,9 @@ impl WorkerServer {
         );
 
         match count_orchestrator.run(self.clone_system()?).await {
-            Ok(count) => Ok(Response::new(CountResult {
-                count: count as u32,
+            Ok((count, pulled_log_bytes)) => Ok(Response::new(CountResult {
+                count,
+                pulled_log_bytes,
             })),
             Err(err) => Err(Status::new(err.code().into(), err.to_string())),
         }
@@ -193,7 +194,14 @@ impl WorkerServer {
         );
 
         match get_orchestrator.run(self.clone_system()?).await {
-            Ok(result) => Ok(Response::new(result.try_into()?)),
+            Ok((result, pulled_log_bytes)) => Ok(Response::new(GetResult {
+                records: result
+                    .records
+                    .into_iter()
+                    .map(TryInto::try_into)
+                    .collect::<Result<_, _>>()?,
+                pulled_log_bytes,
+            })),
             Err(err) => Err(Status::new(err.code().into(), err.to_string())),
         }
     }
@@ -230,7 +238,7 @@ impl WorkerServer {
             .map_err(|e| Status::invalid_argument(format!("Invalid Projection Operator: {}", e)))?;
 
         if knn.embeddings.is_empty() {
-            return Ok(Response::new(to_proto_knn_batch_result(Vec::new())?));
+            return Ok(Response::new(to_proto_knn_batch_result(0, Vec::new())?));
         }
 
         // If dimension is not set and segment is uninitialized, we assume
@@ -239,6 +247,7 @@ impl WorkerServer {
             && collection_and_segments.vector_segment.file_path.is_empty()
         {
             return Ok(Response::new(to_proto_knn_batch_result(
+                0,
                 once(Default::default())
                     .cycle()
                     .take(knn.embeddings.len())
@@ -246,6 +255,7 @@ impl WorkerServer {
             )?));
         }
 
+        let vector_segment_type = collection_and_segments.vector_segment.r#type;
         let knn_filter_orchestrator = KnnFilterOrchestrator::new(
             self.blockfile_provider.clone(),
             dispatcher.clone(),
@@ -264,28 +274,63 @@ impl WorkerServer {
             }
         };
 
-        let knn_orchestrator_futures = from_proto_knn(knn)?
-            .into_iter()
-            .map(|knn| {
-                KnnOrchestrator::new(
-                    self.blockfile_provider.clone(),
-                    dispatcher.clone(),
-                    // TODO: Make this configurable
-                    1000,
-                    matching_records.clone(),
-                    knn,
-                    knn_projection.clone(),
-                )
-            })
-            .map(|knner| knner.run(system.clone()));
+        let pulled_log_bytes = matching_records.fetch_log_bytes;
 
-        match stream::iter(knn_orchestrator_futures)
-            .buffered(32)
-            .try_collect::<Vec<_>>()
-            .await
-        {
-            Ok(results) => Ok(Response::new(to_proto_knn_batch_result(results)?)),
-            Err(err) => Err(Status::new(err.code().into(), err.to_string())),
+        if vector_segment_type == SegmentType::Spann {
+            tracing::info!("Running KNN on SPANN segment");
+            let knn_orchestrator_futures = from_proto_knn(knn)?
+                .into_iter()
+                .map(|knn| {
+                    SpannKnnOrchestrator::new(
+                        self.blockfile_provider.clone(),
+                        self.hnsw_index_provider.clone(),
+                        dispatcher.clone(),
+                        1000,
+                        matching_records.clone(),
+                        knn.fetch as usize,
+                        knn.embedding,
+                        knn_projection.clone(),
+                    )
+                })
+                .map(|knner| knner.run(system.clone()));
+            match stream::iter(knn_orchestrator_futures)
+                .buffered(32)
+                .try_collect::<Vec<_>>()
+                .await
+            {
+                Ok(results) => Ok(Response::new(to_proto_knn_batch_result(
+                    pulled_log_bytes,
+                    results,
+                )?)),
+                Err(err) => Err(Status::new(err.code().into(), err.to_string())),
+            }
+        } else {
+            let knn_orchestrator_futures = from_proto_knn(knn)?
+                .into_iter()
+                .map(|knn| {
+                    KnnOrchestrator::new(
+                        self.blockfile_provider.clone(),
+                        dispatcher.clone(),
+                        // TODO: Make this configurable
+                        1000,
+                        matching_records.clone(),
+                        knn,
+                        knn_projection.clone(),
+                    )
+                })
+                .map(|knner| knner.run(system.clone()));
+
+            match stream::iter(knn_orchestrator_futures)
+                .buffered(32)
+                .try_collect::<Vec<_>>()
+                .await
+            {
+                Ok(results) => Ok(Response::new(to_proto_knn_batch_result(
+                    pulled_log_bytes,
+                    results,
+                )?)),
+                Err(err) => Err(Status::new(err.code().into(), err.to_string())),
+            }
         }
     }
 

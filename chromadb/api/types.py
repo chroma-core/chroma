@@ -589,7 +589,8 @@ class EmbeddingFunction(Protocol[D]):
         """
         return
 
-    def validate_config(self, config: Dict[str, Any]) -> None:
+    @staticmethod
+    def validate_config(config: Dict[str, Any]) -> None:
         """
         Validate the config.
         """

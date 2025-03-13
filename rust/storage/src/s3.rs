@@ -13,7 +13,7 @@ use super::stream::ByteStreamItem;
 use super::stream::S3ByteStream;
 use super::PutOptions;
 use super::StorageConfigError;
-use crate::{ETag, GetError};
+use crate::{ETag, StorageError};
 use async_trait::async_trait;
 use aws_config::retry::RetryConfig;
 use aws_config::timeout::TimeoutConfigBuilder;
@@ -29,7 +29,6 @@ use bytes::Bytes;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
-use chroma_error::ErrorCodes;
 use futures::future::BoxFuture;
 use futures::stream;
 use futures::FutureExt;
@@ -40,7 +39,6 @@ use std::clone::Clone;
 use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
-use thiserror::Error;
 use tokio::io::AsyncReadExt;
 use tracing::Instrument;
 use tracing::Span;
@@ -51,42 +49,6 @@ pub struct S3Storage {
     pub(super) client: aws_sdk_s3::Client,
     pub(super) upload_part_size_bytes: usize,
     pub(super) download_part_size_bytes: usize,
-}
-
-#[derive(Error, Debug)]
-pub enum S3PutError {
-    #[error("S3 PUT error: {0}")]
-    S3PutError(String),
-    #[error("S3 Dispatch failure error")]
-    S3DispatchFailure,
-    #[error("Condition did not match")]
-    ConditionNotMet,
-}
-
-impl ChromaError for S3PutError {
-    fn code(&self) -> ErrorCodes {
-        match self {
-            S3PutError::S3PutError(_) => ErrorCodes::Internal,
-            S3PutError::S3DispatchFailure => ErrorCodes::Internal,
-            S3PutError::ConditionNotMet => ErrorCodes::FailedPrecondition,
-        }
-    }
-}
-
-#[derive(Error, Debug, Clone)]
-pub enum S3GetError {
-    #[error("S3 GET error: {0}")]
-    S3GetError(String),
-    #[error("No such key: {0}")]
-    NoSuchKey(String),
-    #[error("ByteStream error: {0}")]
-    ByteStreamError(String),
-}
-
-impl ChromaError for S3GetError {
-    fn code(&self) -> ErrorCodes {
-        ErrorCodes::Internal
-    }
 }
 
 impl S3Storage {
@@ -150,7 +112,7 @@ impl S3Storage {
             Box<dyn Stream<Item = ByteStreamItem> + Unpin + Send>,
             Option<ETag>,
         ),
-        S3GetError,
+        StorageError,
     > {
         let res = self
             .client
@@ -172,22 +134,31 @@ impl S3Storage {
                 match e {
                     SdkError::ServiceError(err) => {
                         let inner = err.into_err();
-                        match inner {
+                        match &inner {
                             aws_sdk_s3::operation::get_object::GetObjectError::NoSuchKey(msg) => {
                                  tracing::error!("no such key: {}", msg);
-                                Err(S3GetError::NoSuchKey(msg.to_string()))
+                                Err(StorageError::NotFound {
+                                    path: key.to_string(),
+                                    source: Arc::new(inner),
+                                })
                             }
                             aws_sdk_s3::operation::get_object::GetObjectError::InvalidObjectState(msg) => {
                                  tracing::error!("invalid object state: {}", msg);
-                                Err(S3GetError::S3GetError(msg.to_string()))
+                                Err(StorageError::Generic {
+                                    source: Arc::new(inner),
+                                })
                             }
                             _ => {
                                  tracing::error!("error: {}", inner.to_string());
-                                Err(S3GetError::S3GetError(inner.to_string()))
+                                Err(StorageError::Generic {
+                                    source: Arc::new(inner),
+                                })
                             }
                         }
                     }
-                    _ => Err(S3GetError::S3GetError(e.to_string())),
+                    _ => Err(StorageError::Generic {
+                        source: Arc::new(e),
+                    }),
                 }
             }
         }
@@ -196,7 +167,7 @@ impl S3Storage {
     pub(super) async fn get_key_ranges(
         &self,
         key: &str,
-    ) -> Result<(i64, Vec<(i64, i64)>, Option<ETag>), S3GetError> {
+    ) -> Result<(i64, Vec<(i64, i64)>, Option<ETag>), StorageError> {
         let part_size = self.download_part_size_bytes as i64;
         let head_res = self
             .client
@@ -209,11 +180,15 @@ impl S3Storage {
             Ok(res) => match res.content_length {
                 Some(len) => (len, res.e_tag),
                 None => {
-                    return Err(S3GetError::S3GetError("No content length".to_string()));
+                    return Err(StorageError::Message {
+                        message: "No content length".to_string(),
+                    })
                 }
             },
             Err(e) => {
-                return Err(S3GetError::S3GetError(e.to_string()));
+                return Err(StorageError::Generic {
+                    source: Arc::new(e),
+                })
             }
         };
         // Round up.
@@ -235,12 +210,12 @@ impl S3Storage {
         &self,
         key: String,
         range_str: String,
-    ) -> Result<GetObjectOutput, S3GetError> {
+    ) -> Result<GetObjectOutput, StorageError> {
         let res = self
             .client
             .get_object()
             .bucket(self.bucket.clone())
-            .key(key)
+            .key(&key)
             .range(range_str)
             .send()
             .await;
@@ -251,19 +226,28 @@ impl S3Storage {
                 match e {
                     SdkError::ServiceError(err) => {
                         let inner = err.into_err();
-                        match inner {
-                            aws_sdk_s3::operation::get_object::GetObjectError::NoSuchKey(msg) => {
-                                Err(S3GetError::NoSuchKey(msg.to_string()))
+                        match &inner {
+                            aws_sdk_s3::operation::get_object::GetObjectError::NoSuchKey(_) => {
+                                Err(StorageError::NotFound {
+                                    path: key.to_string(),
+                                    source: Arc::new(inner),
+                                })
                             }
-                            aws_sdk_s3::operation::get_object::GetObjectError::InvalidObjectState(msg) => {
-                                Err(S3GetError::S3GetError(msg.to_string()))
+                            aws_sdk_s3::operation::get_object::GetObjectError::InvalidObjectState(_) => {
+                                Err(StorageError::Generic {
+                                    source: Arc::new(inner),
+                                })
                             }
                             _ => {
-                                Err(S3GetError::S3GetError(inner.to_string()))
+                                Err(StorageError::Generic {
+                                    source: Arc::new(inner),
+                                })
                             }
                         }
                     }
-                    _ => Err(S3GetError::S3GetError(e.to_string())),
+                    _ => Err(StorageError::Generic {
+                        source: Arc::new(e),
+                    }),
                 }
             }
         }
@@ -272,7 +256,7 @@ impl S3Storage {
     pub(super) async fn get_parallel(
         &self,
         key: &str,
-    ) -> Result<(Arc<Vec<u8>>, Option<ETag>), S3GetError> {
+    ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
         let (content_length, ranges, e_tag) = self.get_key_ranges(key).await?;
 
         // .buffer_unordered() below will hang if the range is empty (https://github.com/rust-lang/futures-rs/issues/2740), so we short-circuit here
@@ -299,7 +283,9 @@ impl S3Storage {
                                 Ok(_) => Ok(()),
                                 Err(e) => {
                                     tracing::error!("Error reading range: {:?}", e);
-                                    Err(S3GetError::ByteStreamError(e.to_string()))
+                                    Err(StorageError::Generic {
+                                        source: Arc::new(e),
+                                    })
                                 }
                             }
                         }
@@ -316,14 +302,14 @@ impl S3Storage {
         Ok((Arc::new(output_buffer), e_tag))
     }
 
-    pub async fn get(&self, key: &str) -> Result<Arc<Vec<u8>>, S3GetError> {
+    pub async fn get(&self, key: &str) -> Result<Arc<Vec<u8>>, StorageError> {
         self.get_with_e_tag(key).await.map(|(buf, _)| buf)
     }
 
     pub async fn get_with_e_tag(
         &self,
         key: &str,
-    ) -> Result<(Arc<Vec<u8>>, Option<ETag>), S3GetError> {
+    ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
         let (mut stream, e_tag) = self
             .get_stream_and_e_tag(key)
             .instrument(tracing::trace_span!(parent: Span::current(), "S3 get stream"))
@@ -337,25 +323,9 @@ impl S3Storage {
                         Ok(chunk) => {
                             buf.extend(chunk);
                         }
-                        Err(err) => {
-                            tracing::error!("Error reading from S3: {}", err);
-                            match err {
-                                GetError::ObjectStoreError(e) => {
-                                    return Err(S3GetError::S3GetError(e.to_string()));
-                                }
-                                GetError::S3Error(e) => {
-                                    return Err(e);
-                                }
-                                GetError::NoSuchKey(e) => {
-                                    return Err(S3GetError::NoSuchKey(e));
-                                }
-                                GetError::LocalError(_) => unreachable!(),
-                                GetError::ConditionNotMet => {
-                                    return Err(S3GetError::S3GetError(
-                                        "Condition not met".to_string(),
-                                    ));
-                                }
-                            }
+                        Err(e) => {
+                            tracing::error!("Error reading from S3: {}", e);
+                            return Err(e);
                         }
                     }
                 }
@@ -381,7 +351,7 @@ impl S3Storage {
         key: &str,
         bytes: Vec<u8>,
         options: PutOptions,
-    ) -> Result<(), S3PutError> {
+    ) -> Result<Option<ETag>, StorageError> {
         let bytes = Arc::new(Bytes::from(bytes));
 
         self.put_object(
@@ -396,10 +366,12 @@ impl S3Storage {
         .await
     }
 
-    pub async fn put_file(&self, key: &str, path: &str) -> Result<(), S3PutError> {
+    pub async fn put_file(&self, key: &str, path: &str) -> Result<Option<ETag>, StorageError> {
         let file_size = tokio::fs::metadata(path)
             .await
-            .map_err(|err| S3PutError::S3PutError(err.to_string()))?
+            .map_err(|err| StorageError::Generic {
+                source: Arc::new(err),
+            })?
             .len();
 
         let path = path.to_string();
@@ -417,7 +389,9 @@ impl S3Storage {
                         .length(Length::Exact(range.len() as u64))
                         .build()
                         .await
-                        .map_err(|err| S3PutError::S3PutError(err.to_string()))
+                        .map_err(|err| StorageError::Generic {
+                            source: Arc::new(err),
+                        })
                 }
                 .boxed()
             },
@@ -432,15 +406,14 @@ impl S3Storage {
         total_size_bytes: usize,
         create_bytestream_fn: impl Fn(
             Range<usize>,
-        ) -> BoxFuture<'static, Result<ByteStream, S3PutError>>,
+        ) -> BoxFuture<'static, Result<ByteStream, StorageError>>,
         options: PutOptions,
-    ) -> Result<(), S3PutError> {
+    ) -> Result<Option<ETag>, StorageError> {
         if self.is_oneshot_upload(total_size_bytes) {
             return self
                 .oneshot_upload(key, total_size_bytes, create_bytestream_fn, options)
                 .await;
         }
-
         self.multipart_upload(key, total_size_bytes, create_bytestream_fn, options)
             .await
     }
@@ -451,9 +424,9 @@ impl S3Storage {
         total_size_bytes: usize,
         create_bytestream_fn: impl Fn(
             Range<usize>,
-        ) -> BoxFuture<'static, Result<ByteStream, S3PutError>>,
+        ) -> BoxFuture<'static, Result<ByteStream, StorageError>>,
         options: PutOptions,
-    ) -> Result<(), S3PutError> {
+    ) -> Result<Option<ETag>, StorageError> {
         let req = self
             .client
             .put_object()
@@ -470,23 +443,27 @@ impl S3Storage {
             None => req,
         };
 
-        req.send().await.map_err(|err| {
+        let resp = req.send().await.map_err(|err| {
             let err = err.into_service_error();
             if err.meta().code() == Some("PreconditionFailed") {
-                S3PutError::ConditionNotMet
+                StorageError::Precondition {
+                    path: key.to_string(),
+                    source: Arc::new(err),
+                }
             } else {
-                S3PutError::S3PutError(format!("{:?}", err))
+                StorageError::Generic {
+                    source: Arc::new(err),
+                }
             }
         })?;
-
-        Ok(())
+        Ok(resp.e_tag.map(ETag))
     }
 
     pub(super) async fn prepare_multipart_upload(
         &self,
         key: &str,
         total_size_bytes: usize,
-    ) -> Result<(usize, usize, String), S3PutError> {
+    ) -> Result<(usize, usize, String), StorageError> {
         let mut part_count = (total_size_bytes / self.upload_part_size_bytes) + 1;
         let mut size_of_last_part = total_size_bytes % self.upload_part_size_bytes;
         if size_of_last_part == 0 {
@@ -501,14 +478,16 @@ impl S3Storage {
             .key(key)
             .send()
             .await
-            .map_err(|err| S3PutError::S3PutError(err.to_string()))?
+            .map_err(|err| StorageError::Generic {
+                source: Arc::new(err.into_service_error()),
+            })?
             .upload_id
         {
             Some(upload_id) => upload_id,
             None => {
-                return Err(S3PutError::S3PutError(
-                    "Multipart upload creation response missing upload ID".to_string(),
-                ));
+                return Err(StorageError::Message {
+                    message: "Multipart upload creation response missing upload ID".to_string(),
+                });
             }
         };
 
@@ -524,8 +503,8 @@ impl S3Storage {
         size_of_last_part: usize,
         create_bytestream_fn: &impl Fn(
             Range<usize>,
-        ) -> BoxFuture<'static, Result<ByteStream, S3PutError>>,
-    ) -> Result<CompletedPart, S3PutError> {
+        ) -> BoxFuture<'static, Result<ByteStream, StorageError>>,
+    ) -> Result<CompletedPart, StorageError> {
         let this_part = if part_count - 1 == part_index {
             size_of_last_part
         } else {
@@ -547,7 +526,9 @@ impl S3Storage {
             .part_number(part_number)
             .send()
             .await
-            .map_err(|err| S3PutError::S3PutError(err.to_string()))?;
+            .map_err(|err| StorageError::Generic {
+                source: Arc::new(err.into_service_error()),
+            })?;
 
         Ok(CompletedPart::builder()
             .e_tag(upload_part_res.e_tag.unwrap_or_default())
@@ -561,7 +542,7 @@ impl S3Storage {
         upload_id: &str,
         upload_parts: Vec<CompletedPart>,
         options: PutOptions,
-    ) -> Result<(), S3PutError> {
+    ) -> Result<Option<ETag>, StorageError> {
         let complete_req = self
             .client
             .complete_multipart_upload()
@@ -584,12 +565,13 @@ impl S3Storage {
             None => complete_req,
         };
 
-        complete_req
+        let resp = complete_req
             .send()
             .await
-            .map_err(|err| S3PutError::S3PutError(err.to_string()))?;
-
-        Ok(())
+            .map_err(|err| StorageError::Generic {
+                source: Arc::new(err.into_service_error()),
+            })?;
+        Ok(resp.e_tag.map(ETag))
     }
 
     async fn multipart_upload(
@@ -598,9 +580,9 @@ impl S3Storage {
         total_size_bytes: usize,
         create_bytestream_fn: impl Fn(
             Range<usize>,
-        ) -> BoxFuture<'static, Result<ByteStream, S3PutError>>,
+        ) -> BoxFuture<'static, Result<ByteStream, StorageError>>,
         options: PutOptions,
-    ) -> Result<(), S3PutError> {
+    ) -> Result<Option<ETag>, StorageError> {
         let (part_count, size_of_last_part, upload_id) =
             self.prepare_multipart_upload(key, total_size_bytes).await?;
 
@@ -624,7 +606,7 @@ impl S3Storage {
             .await
     }
 
-    pub async fn delete(&self, key: &str) -> Result<(), S3PutError> {
+    pub async fn delete(&self, key: &str) -> Result<(), StorageError> {
         tracing::info!(key = %key, "Deleting object from S3");
 
         match self
@@ -641,12 +623,14 @@ impl S3Storage {
             }
             Err(e) => {
                 tracing::error!(error = %e, key = %key, "Failed to delete object from S3");
-                Err(S3PutError::S3PutError(e.to_string()))
+                Err(StorageError::Generic {
+                    source: Arc::new(e.into_service_error()),
+                })
             }
         }
     }
 
-    pub async fn rename(&self, src_key: &str, dst_key: &str) -> Result<(), S3PutError> {
+    pub async fn rename(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
         tracing::info!(src = %src_key, dst = %dst_key, "Renaming object in S3");
 
         // S3 doesn't have a native rename operation, so we need to copy and delete
@@ -675,7 +659,9 @@ impl S3Storage {
             }
             Err(e) => {
                 tracing::error!(error = %e, src = %src_key, dst = %dst_key, "Failed to copy object");
-                Err(S3PutError::S3PutError(e.to_string()))
+                Err(StorageError::Generic {
+                    source: Arc::new(e.into_service_error()),
+                })
             }
         }
     }
@@ -995,7 +981,13 @@ mod tests {
             .await
             .unwrap_err();
         eprintln!("{:?}", err);
-        assert!(matches!(err, S3PutError::ConditionNotMet));
+        assert!(matches!(
+            &err,
+            StorageError::Precondition { path: _, source: _ }
+        ));
+        if let StorageError::Precondition { path, source: _ } = err {
+            assert_eq!("test", path)
+        }
     }
 
     #[tokio::test]
@@ -1058,7 +1050,14 @@ mod tests {
             )
             .await
             .unwrap_err();
-        assert!(matches!(err, S3PutError::ConditionNotMet));
+        eprintln!("{:?}", err);
+        assert!(matches!(
+            &err,
+            StorageError::Precondition { path: _, source: _ }
+        ));
+        if let StorageError::Precondition { path, source: _ } = err {
+            assert_eq!("test", path)
+        }
     }
 
     #[tokio::test]

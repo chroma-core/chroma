@@ -103,6 +103,10 @@ fn default_max_payload_size_bytes() -> usize {
     40 * 1024 * 1024 // 40 MB
 }
 
+fn default_enable_span_indexing() -> bool {
+    false
+}
+
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct FrontendServerConfig {
     #[serde(flatten)]
@@ -124,6 +128,8 @@ pub struct FrontendServerConfig {
     pub persist_path: Option<String>,
     #[serde(default)]
     pub cors_allow_origins: Option<Vec<String>>,
+    #[serde(default = "default_enable_span_indexing")]
+    pub enable_span_indexing: bool,
 }
 
 const DEFAULT_CONFIG_PATH: &str = "sample_configs/distributed.yaml";
@@ -131,7 +137,7 @@ const DEFAULT_SINGLE_NODE_CONFIG_FILENAME: &str = "sample_configs/single_node.ya
 
 #[derive(Embed)]
 #[folder = "./"]
-#[include = "**/*.yaml"]
+#[include = "*.yaml"]
 struct DefaultConfigurationsFolder;
 
 impl FrontendServerConfig {

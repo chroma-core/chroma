@@ -33,11 +33,6 @@ use crate::execution::operators::{
 
 use super::knn_filter::{KnnError, KnnFilterOutput, KnnOutput, KnnResult};
 
-// TODO(Sanket): Make these configurable.
-const RNG_FACTOR: f32 = 1.0;
-const QUERY_EPSILON: f32 = 10.0;
-const NUM_PROBE: usize = 64;
-
 #[derive(Debug)]
 pub struct SpannKnnOrchestrator {
     // Orchestrator parameters
@@ -172,10 +167,6 @@ impl Orchestrator for SpannKnnOrchestrator {
             SpannCentersSearchInput {
                 reader_context,
                 normalized_query: self.normalized_query_emb.clone(),
-                k: NUM_PROBE,
-                rng_epsilon: QUERY_EPSILON,
-                rng_factor: RNG_FACTOR,
-                distance_function: self.knn_filter_output.distance_function.clone(),
             },
             ctx.receiver(),
         );

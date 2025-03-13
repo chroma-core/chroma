@@ -7,7 +7,7 @@ use chroma_error::ChromaError;
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::PutOptions;
+use crate::{ETag, PutOptions, StorageError};
 
 #[derive(Clone)]
 pub struct LocalStorage {
@@ -22,12 +22,21 @@ impl LocalStorage {
         }
     }
 
-    pub async fn get(&self, key: &str) -> Result<Arc<Vec<u8>>, String> {
+    pub async fn get(&self, key: &str) -> Result<Arc<Vec<u8>>, StorageError> {
         let file_path = format!("{}/{}", self.root, key);
         match std::fs::read(file_path) {
             Ok(bytes_u8) => Ok(Arc::new(bytes_u8)),
-            Err(e) => Err::<Arc<Vec<u8>>, String>(e.to_string()),
+            Err(e) => Err(StorageError::Generic {
+                source: Arc::new(e),
+            }),
         }
+    }
+
+    pub async fn get_with_e_tag(
+        &self,
+        _: &str,
+    ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
+        Err(StorageError::NotImplemented)
     }
 
     pub async fn put_bytes(
@@ -35,7 +44,7 @@ impl LocalStorage {
         key: &str,
         bytes: &[u8],
         options: PutOptions,
-    ) -> Result<(), String> {
+    ) -> Result<Option<ETag>, StorageError> {
         assert_eq!(
             options,
             PutOptions::default(),
@@ -49,20 +58,24 @@ impl LocalStorage {
         std::fs::create_dir_all(parent).unwrap();
         let res = std::fs::write(&path, bytes);
         match res {
-            Ok(_) => Ok(()),
-            Err(e) => Err::<(), String>(e.to_string()),
+            Ok(_) => Ok(None),
+            Err(e) => Err(StorageError::Generic {
+                source: Arc::new(e),
+            }),
         }
     }
 
-    pub async fn put_file(&self, key: &str, path: &str) -> Result<(), String> {
+    pub async fn put_file(&self, key: &str, path: &str) -> Result<Option<ETag>, StorageError> {
         let file = std::fs::read(path);
         match file {
             Ok(bytes_u8) => self.put_bytes(key, &bytes_u8, PutOptions::default()).await,
-            Err(e) => Err::<(), String>(e.to_string()),
+            Err(e) => Err(StorageError::Generic {
+                source: Arc::new(e),
+            }),
         }
     }
 
-    pub async fn delete(&self, key: &str) -> Result<(), String> {
+    pub async fn delete(&self, key: &str) -> Result<(), StorageError> {
         let path = format!("{}/{}", self.root, key);
         tracing::info!(path = %path, "Deleting file");
 
@@ -73,12 +86,14 @@ impl LocalStorage {
             }
             Err(e) => {
                 tracing::error!(error = %e, path = %path, "Failed to delete file");
-                Err(e.to_string())
+                Err(StorageError::Generic {
+                    source: Arc::new(e),
+                })
             }
         }
     }
 
-    pub async fn rename(&self, src_key: &str, dst_key: &str) -> Result<(), String> {
+    pub async fn rename(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
         let src_path = format!("{}/{}", self.root, src_key);
         let dst_path = format!("{}/{}", self.root, dst_key);
         tracing::info!(src = %src_path, dst = %dst_path, "Renaming file");
@@ -87,7 +102,9 @@ impl LocalStorage {
         if let Some(parent) = std::path::Path::new(&dst_path).parent() {
             if let Err(e) = std::fs::create_dir_all(parent) {
                 tracing::error!(error = %e, path = %parent.display(), "Failed to create parent directory");
-                return Err(e.to_string());
+                return Err(StorageError::Generic {
+                    source: Arc::new(e),
+                });
             }
         }
 
@@ -98,22 +115,31 @@ impl LocalStorage {
             }
             Err(e) => {
                 tracing::error!(error = %e, src = %src_path, dst = %dst_path, "Failed to rename file");
-                Err(e.to_string())
+                Err(StorageError::Generic {
+                    source: Arc::new(e),
+                })
             }
         }
     }
 
-    pub async fn list_prefix(&self, prefix: &str) -> Result<Vec<String>, String> {
+    pub async fn list_prefix(&self, prefix: &str) -> Result<Vec<String>, StorageError> {
         let search_path = Path::new(&self.root).join(prefix);
-        let entries = std::fs::read_dir(search_path).map_err(|e| e.to_string())?;
+        let entries = std::fs::read_dir(search_path).map_err(|e| StorageError::Generic {
+            source: Arc::new(e),
+        })?;
         entries
             .into_iter()
             .map(|e| {
-                e.map_err(|e| e.to_string()).and_then(|e| {
+                e.map_err(|e| StorageError::Generic {
+                    source: Arc::new(e),
+                })
+                .and_then(|e| {
                     e.file_name()
                         .to_str()
                         .map(|s| s.to_string())
-                        .ok_or("Unable to convert path to string".to_string())
+                        .ok_or(StorageError::Message {
+                            message: "Unable to convert path to string".to_string(),
+                        })
                 })
             })
             .collect()

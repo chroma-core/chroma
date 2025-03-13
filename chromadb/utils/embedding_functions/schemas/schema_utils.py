@@ -5,7 +5,13 @@ import jsonschema
 from jsonschema import ValidationError
 
 # Path to the schemas directory
-SCHEMAS_DIR = os.path.dirname(__file__)
+SCHEMAS_DIR = os.path.join(
+    os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+    ),
+    "schemas",
+    "embedding_functions",
+)
 
 cached_schemas: Dict[str, Dict[str, Any]] = {}
 
@@ -33,7 +39,7 @@ def load_schema(schema_name: str) -> Dict[str, Any]:
         return schema
 
 
-def validate_config(config: Dict[str, Any], schema_name: str) -> None:
+def validate_config_schema(config: Dict[str, Any], schema_name: str) -> None:
     """
     Validate a configuration against a schema.
 

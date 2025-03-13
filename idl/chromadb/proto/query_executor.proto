@@ -46,6 +46,7 @@ message CountPlan {
 
 message CountResult {
     uint32 count = 1;
+    uint64 pulled_log_bytes = 2;
 }
 
 message GetPlan {
@@ -64,6 +65,7 @@ message ProjectionRecord {
 
 message GetResult {
     repeated ProjectionRecord records = 1;
+    uint64 pulled_log_bytes = 2;
 }
 
 message KNNPlan {
@@ -84,6 +86,7 @@ message KNNResult {
 
 message KNNBatchResult {
     repeated KNNResult results = 1;
+    uint64 pulled_log_bytes = 2;
 }
 
 service QueryExecutor {

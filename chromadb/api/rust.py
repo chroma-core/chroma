@@ -150,7 +150,8 @@ class RustBindingsAPI(ServerAPI):
 
     @override
     def get_tenant(self, name: str) -> Tenant:
-        return self.bindings.get_tenant(name)
+        tenant = self.bindings.get_tenant(name)
+        return Tenant(name=tenant.name)
 
     # ////////////////////////////// Base API //////////////////////////////
 

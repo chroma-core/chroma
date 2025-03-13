@@ -27,7 +27,7 @@ module = ["chromadb.proto.*"]
 ignore_errors = true
 
 [project.scripts]
-chroma = "chromadb.cli.cli:main"
+chroma = "chromadb.cli.cli:app"
 
 [project.urls]
 "Homepage" = "https://github.com/chroma-core/chroma"
@@ -53,4 +53,4 @@ strip = true
 features = ["pyo3/extension-module"]
 manifest-path = "rust/python_bindings/Cargo.toml"
 python-packages = ["chromadb"]
-include = ["chromadb/proto/**/*.py"]
+include = ["chromadb/proto/**/*.py", "schemas/**/*"]

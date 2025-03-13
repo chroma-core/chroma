@@ -9,6 +9,7 @@ use crate::validators::{
 use crate::Collection;
 use crate::CollectionConversionError;
 use crate::CollectionUuid;
+use crate::DistributedSpannParametersFromSegmentError;
 use crate::HnswParametersFromSegmentError;
 use crate::Metadata;
 use crate::SegmentConversionError;
@@ -204,6 +205,15 @@ impl GetTenantRequest {
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct GetTenantResponse {
     pub name: String,
+}
+
+#[cfg(feature = "pyo3")]
+#[pyo3::pymethods]
+impl GetTenantResponse {
+    #[getter]
+    pub fn name(&self) -> &String {
+        &self.name
+    }
 }
 
 #[derive(Debug, Error)]
@@ -564,6 +574,8 @@ pub type CreateCollectionResponse = Collection;
 pub enum CreateCollectionError {
     #[error("Invalid HNSW parameters: {0}")]
     InvalidHnswParameters(#[from] HnswParametersFromSegmentError),
+    #[error("Invalid Spann parameters: {0}")]
+    InvalidSpannParameters(#[from] DistributedSpannParametersFromSegmentError),
     #[error("Collection [{0}] already exists")]
     AlreadyExists(String),
     #[error("Database [{0}] does not exist")]
@@ -580,6 +592,7 @@ impl ChromaError for CreateCollectionError {
     fn code(&self) -> ErrorCodes {
         match self {
             CreateCollectionError::InvalidHnswParameters(_) => ErrorCodes::InvalidArgument,
+            CreateCollectionError::InvalidSpannParameters(_) => ErrorCodes::InvalidArgument,
             CreateCollectionError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
             CreateCollectionError::DatabaseNotFound(_) => ErrorCodes::InvalidArgument,
             CreateCollectionError::Get(err) => err.code(),
@@ -1179,7 +1192,7 @@ impl GetResponse {
 }
 
 impl From<(GetResult, IncludeList)> for GetResponse {
-    fn from((result_vec, IncludeList(include_vec)): (GetResult, IncludeList)) -> Self {
+    fn from((result, IncludeList(include_vec)): (GetResult, IncludeList)) -> Self {
         let mut res = Self {
             ids: Vec::new(),
             embeddings: include_vec
@@ -1199,7 +1212,7 @@ impl From<(GetResult, IncludeList)> for GetResponse {
             document,
             embedding,
             mut metadata,
-        } in result_vec.records
+        } in result.result.records
         {
             res.ids.push(id);
             if let (Some(emb), Some(embeddings)) = (embedding, res.embeddings.as_mut()) {
@@ -1323,7 +1336,7 @@ impl QueryResponse {
 }
 
 impl From<(KnnBatchResult, IncludeList)> for QueryResponse {
-    fn from((result_vec, IncludeList(include_vec)): (KnnBatchResult, IncludeList)) -> Self {
+    fn from((result, IncludeList(include_vec)): (KnnBatchResult, IncludeList)) -> Self {
         let mut res = Self {
             ids: Vec::new(),
             embeddings: include_vec
@@ -1341,7 +1354,7 @@ impl From<(KnnBatchResult, IncludeList)> for QueryResponse {
                 .then_some(Vec::new()),
             include: include_vec,
         };
-        for query_result in result_vec {
+        for query_result in result.results {
             let mut ids = Vec::new();
             let mut embeddings = Vec::new();
             let mut documents = Vec::new();
