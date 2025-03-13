@@ -163,19 +163,16 @@ impl TestSysDb {
         let mut seen_db_names = std::collections::HashSet::new();
 
         for collection in inner.collections.values() {
-            if collection.tenant == tenant {
-                if !seen_db_names.contains(&collection.database) {
-                    seen_db_names.insert(collection.database.clone());
+            if collection.tenant == tenant && !seen_db_names.contains(&collection.database) {
+                seen_db_names.insert(collection.database.clone());
 
-                    // Create a new Database object
-                    let db = Database {
-                        id: uuid::Uuid::new_v4(),
-                        name: collection.database.clone(),
-                        tenant: tenant.clone(),
-                    };
+                let db = Database {
+                    id: uuid::Uuid::new_v4(),
+                    name: collection.database.clone(),
+                    tenant: tenant.clone(),
+                };
 
-                    databases.push(db);
-                }
+                databases.push(db);
             }
         }
 
