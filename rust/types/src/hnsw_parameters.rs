@@ -289,7 +289,7 @@ impl ChromaError for DistributedSpannParametersFromSegmentError {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Validate, PartialEq)]
-pub struct DistributedSpannParameters {
+pub struct SpannConfiguration {
     #[serde(rename = "spann:search_nprobe", default = "default_search_nprobe")]
     #[validate(range(min = 32))]
     pub search_nprobe: u32,
@@ -358,35 +358,35 @@ pub struct DistributedSpannParameters {
     pub m: usize,
 }
 
-impl Default for DistributedSpannParameters {
+impl Default for SpannConfiguration {
     fn default() -> Self {
         serde_json::from_str("{}").unwrap()
     }
 }
 
-impl TryFrom<&Option<Metadata>> for DistributedSpannParameters {
+impl TryFrom<&Option<Metadata>> for SpannConfiguration {
     type Error = DistributedSpannParametersFromSegmentError;
 
     fn try_from(value: &Option<Metadata>) -> Result<Self, Self::Error> {
         let metadata_str = serde_json::to_string(value.as_ref().unwrap_or(&Metadata::default()))?;
-        let r = serde_json::from_str::<DistributedSpannParameters>(&metadata_str)?;
+        let r = serde_json::from_str::<SpannConfiguration>(&metadata_str)?;
         r.validate()?;
         Ok(r)
     }
 }
 
-impl TryFrom<&Segment> for DistributedSpannParameters {
+impl TryFrom<&Segment> for SpannConfiguration {
     type Error = DistributedSpannParametersFromSegmentError;
 
     fn try_from(value: &Segment) -> Result<Self, Self::Error> {
-        DistributedSpannParameters::try_from(&value.metadata)
+        SpannConfiguration::try_from(&value.metadata)
     }
 }
 
-impl TryFrom<DistributedSpannParameters> for Metadata {
+impl TryFrom<SpannConfiguration> for Metadata {
     type Error = DistributedSpannParametersFromSegmentError;
 
-    fn try_from(value: DistributedSpannParameters) -> Result<Self, Self::Error> {
+    fn try_from(value: SpannConfiguration) -> Result<Self, Self::Error> {
         let metadata_str = serde_json::to_string(&value)?;
         let r = serde_json::from_str::<Metadata>(&metadata_str)?;
         Ok(r)

@@ -21,19 +21,18 @@ use chroma_types::{
     CreateTenantError, CreateTenantRequest, CreateTenantResponse, DeleteCollectionError,
     DeleteCollectionRecordsError, DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse,
     DeleteCollectionRequest, DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse,
-    DistributedHnswParameters, DistributedIndexType, DistributedIndexTypeParam,
-    DistributedSpannParameters, GetCollectionError, GetCollectionRequest, GetCollectionResponse,
-    GetCollectionsError, GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest,
-    GetResponse, GetTenantError, GetTenantRequest, GetTenantResponse, HealthCheckResponse,
-    HeartbeatError, HeartbeatResponse, Include, ListCollectionsRequest, ListCollectionsResponse,
-    ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse, Metadata, Operation,
-    OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
-    ScalarEncoding, Segment, SegmentScope, SegmentType, SegmentUuid, SingleNodeHnswParameters,
-    UpdateCollectionError, UpdateCollectionRecordsError, UpdateCollectionRecordsRequest,
-    UpdateCollectionRecordsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
-    UpdateMetadata, UpdateMetadataValue, UpsertCollectionRecordsError,
-    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, Where, CHROMA_DOCUMENT_KEY,
-    CHROMA_URI_KEY,
+    DistributedHnswParameters, DistributedIndexType, DistributedIndexTypeParam, GetCollectionError,
+    GetCollectionRequest, GetCollectionResponse, GetCollectionsError, GetDatabaseError,
+    GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantError,
+    GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError, HeartbeatResponse,
+    Include, ListCollectionsRequest, ListCollectionsResponse, ListDatabasesError,
+    ListDatabasesRequest, ListDatabasesResponse, Metadata, Operation, OperationRecord, QueryError,
+    QueryRequest, QueryResponse, ResetError, ResetResponse, ScalarEncoding, Segment, SegmentScope,
+    SegmentType, SegmentUuid, SingleNodeHnswParameters, SpannConfiguration, UpdateCollectionError,
+    UpdateCollectionRecordsError, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
+    UpdateCollectionRequest, UpdateCollectionResponse, UpdateMetadata, UpdateMetadataValue,
+    UpsertCollectionRecordsError, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse,
+    Where, CHROMA_DOCUMENT_KEY, CHROMA_URI_KEY,
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
@@ -439,7 +438,7 @@ impl Frontend {
                     }
                     DistributedIndexType::Spann => {
                         let validated_metadata =
-                            Metadata::try_from(DistributedSpannParameters::try_from(&metadata)?)?;
+                            Metadata::try_from(SpannConfiguration::try_from(&metadata)?)?;
                         Segment {
                             id: SegmentUuid::new(),
                             r#type: SegmentType::Spann,
