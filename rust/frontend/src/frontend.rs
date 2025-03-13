@@ -860,7 +860,7 @@ impl Frontend {
         MeterEvent::collection_read(tenant_id, database_name, collection_id.0, 0, 0)
             .submit()
             .await;
-        Ok(res)
+        Ok(res.count)
     }
 
     pub async fn count(&mut self, request: CountRequest) -> Result<CountResponse, QueryError> {
