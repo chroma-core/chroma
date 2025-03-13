@@ -548,7 +548,7 @@ def update_collection_configuration_to_json(config: UpdateCollectionConfiguratio
         "embedding_function": ef_config,
     }
     
-def load_update_collection_configuration_from_json_str(json_str: str) -> UpdateCollectionConfiguration:
+def load_update_collection_configuration_from_json_str(json_str: str) -> UpdateCollectionConfiguration | None:
     json_map = json.loads(json_str)
     return load_update_collection_configuration_from_json(json_map)
 
@@ -563,20 +563,20 @@ def load_update_collection_configuration_from_json(json_map: Dict[str, Any]) -> 
                     DeprecationWarning,
                     stacklevel=2,
                 )
-                return CollectionConfiguration()
+                return None
             else:
                 ef = cast(
                     EmbeddingFunction[Embeddable],
                     known_embedding_functions[json_map["embedding_function"]["name"]],
                 )
-                return CollectionConfiguration(
+                return UpdateCollectionConfiguration(
                     embedding_function=ef.build_from_config(
                         json_map["embedding_function"]["config"]
                     )
                 )
     else:
         if "embedding_function" not in json_map:
-            return CollectionConfiguration(hnsw=json_to_hnsw_configuration(json_map["hnsw"]))
+            return UpdateCollectionConfiguration(hnsw=json_to_update_hnsw_configuration(json_map["hnsw"]))
         else:
             if json_map["embedding_function"]["type"] == "legacy":
                 warnings.warn(
@@ -584,16 +584,16 @@ def load_update_collection_configuration_from_json(json_map: Dict[str, Any]) -> 
                     DeprecationWarning,
                     stacklevel=2,
                 )
-                return CollectionConfiguration(
-                    hnsw=json_to_hnsw_configuration(json_map["hnsw"])
+                return UpdateCollectionConfiguration(
+                    hnsw=json_to_update_hnsw_configuration(json_map["hnsw"])
                 )
             else:
                 ef = cast(
                     EmbeddingFunction[Embeddable],
                     known_embedding_functions[json_map["embedding_function"]["name"]],
                 )
-                return CollectionConfiguration(
-                    hnsw=json_to_hnsw_configuration(json_map["hnsw"]),
+                return UpdateCollectionConfiguration(
+                    hnsw=json_to_update_hnsw_configuration(json_map["hnsw"]),
                     embedding_function=ef.build_from_config(
                         json_map["embedding_function"]["config"]
                     ),
@@ -633,7 +633,7 @@ def overwrite_embedding_function(existing_embedding_function: EmbeddingFunction[
     if existing_embedding_function.name() != update_embedding_function.name():
         raise ValueError("cannot update embedding function with different name")
     
-    update_embedding_function.validate_config(update_embedding_function.get_config())
+    update_embedding_function.validate_config_update(existing_embedding_function.get_config(), update_embedding_function.get_config())
     return update_embedding_function
 
 def overwrite_collection_configuration(existing_config: CollectionConfiguration, update_config: UpdateCollectionConfiguration) -> CollectionConfiguration:

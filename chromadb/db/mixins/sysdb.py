@@ -310,6 +310,11 @@ class SqlSysDB(SqlDB, SysDB):
                 )
             else:
                 raise UniqueConstraintError(f"Collection {name} already exists")
+            
+        if metadata:
+            configuration = create_collection_configuration_from_legacy_metadata(
+                metadata
+            )
 
         collection = Collection(
             id=id,
@@ -910,56 +915,6 @@ class SqlSysDB(SqlDB, SysDB):
         sql, params = get_sql(q, self.parameter_format())
         if sql:
             cur.execute(sql, params)
-
-    def _load_config_from_json_str_and_migrate(
-        self, collection_id: str, json_str: str
-    ) -> CollectionConfiguration:
-        try:
-            config_json = json.loads(json_str)
-        except json.JSONDecodeError:
-            raise ValueError(
-                f"Unable to decode configuration from JSON string: {json_str}"
-            )
-
-        try:
-            return load_collection_configuration_from_json_str(json_str)
-        except InvalidConfigurationError as error:
-            # 07/17/2024: the initial migration from the legacy metadata-based config to the new sysdb-based config had a bug where the batch_size and sync_threshold were swapped. Along with this migration, a validator was added to HNSWConfigurationInternal to ensure that batch_size <= sync_threshold.
-            hnsw_configuration = config_json.get("hnsw_configuration")
-            if hnsw_configuration:
-                batch_size = hnsw_configuration.get("batch_size")
-                sync_threshold = hnsw_configuration.get("sync_threshold")
-
-                if batch_size and sync_threshold and batch_size > sync_threshold:
-                    # Allow new defaults to be set
-                    hnsw_configuration = {
-                        k: v
-                        for k, v in hnsw_configuration.items()
-                        if k not in ["batch_size", "sync_threshold"]
-                    }
-                    config_json.update({"hnsw_configuration": hnsw_configuration})
-
-                    configuration = load_collection_configuration_from_json(config_json)
-
-                    collections_t = Table("collections")
-                    q = (
-                        self.querybuilder()
-                        .update(collections_t)
-                        .set(
-                            collections_t.config_json_str,
-                            ParameterValue(
-                                collection_configuration_to_json_str(configuration)
-                            ),
-                        )
-                        .where(collections_t.id == ParameterValue(collection_id))
-                    )
-                    sql, params = get_sql(q, self.parameter_format())
-                    with self.tx() as cur:
-                        cur.execute(sql, params)
-
-                    return configuration
-
-            raise error
 
     def _insert_config_from_legacy_params(
         self, collection_id: Any, metadata: Optional[Metadata]

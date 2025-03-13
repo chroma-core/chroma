@@ -194,6 +194,8 @@ message UpdateCollectionRequest {
     UpdateMetadata metadata = 5;
     bool reset_metadata = 6;
   }
+  string configuration_json_str = 7;
+
 }
 
 message UpdateCollectionResponse {
