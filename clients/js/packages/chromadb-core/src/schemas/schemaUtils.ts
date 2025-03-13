@@ -94,10 +94,10 @@ export function validateConfigSchema(
 ): void {
   const schema = loadSchema(schemaName);
 
-  // Create a copy of the schema without the version field
-  const { version, ...schemaWithoutVersion } = schema;
+  // // Create a copy of the schema without the version field
+  // const { version, ...schemaWithoutVersion } = schema;
 
-  const validate = ajv.compile(schemaWithoutVersion);
+  const validate = ajv.compile(schema);
   const valid = validate(config);
 
   if (!valid) {
