@@ -1,3 +1,14 @@
+//! Manifests, and their immutable cousin, snapshots, are the metadata that describe a log.
+//!
+//! A manifest transitively names every file in object storage that is part of the log.
+//!
+//! Snapshots are content-addressable and immutable, while manifests get overwritten.  For that
+//! reason, manifests embed the ETag for conditional writes while snapshots do not.
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use chroma_storage::{ETag, PutOptions, Storage, StorageError};
 use setsum::Setsum;
 
 use crate::{
@@ -7,13 +18,12 @@ use crate::{
 
 /////////////////////////////////////////////// paths //////////////////////////////////////////////
 
-#[allow(dead_code)]
-fn manifest_path() -> String {
-    "manifest/MANIFEST".to_string()
+fn manifest_path(prefix: &str) -> String {
+    format!("{prefix}/manifest/MANIFEST")
 }
 
-fn snapshot_path(setsum: Setsum) -> String {
-    format!("snapshot/SNAPSHOT.{}", setsum.hexdigest())
+fn snapshot_path(prefix: &str, setsum: Setsum) -> String {
+    format!("{prefix}/snapshot/SNAPSHOT.{}", setsum.hexdigest())
 }
 
 fn snapshot_setsum(path: &str) -> Result<Setsum, Error> {
@@ -127,10 +137,44 @@ impl Snapshot {
         Ok(acc)
     }
 
-    pub async fn install(&self, _: &ThrottleOptions) -> Result<(), Error> {
-        todo!("robert will implement");
+    pub async fn install(&self, options: &ThrottleOptions, storage: &Storage) -> Result<(), Error> {
+        let exp_backoff = crate::backoff::ExponentialBackoff::new(
+            options.throughput as f64,
+            options.headroom as f64,
+        );
+        loop {
+            let payload = serde_json::to_string(&self)
+                .map_err(|e| {
+                    Error::CorruptManifest(format!("could not encode JSON manifest: {e:?}"))
+                })?
+                .into_bytes();
+            let options = PutOptions::if_not_exists();
+            match storage.put_bytes(&self.path, payload, options).await {
+                Ok(_) => {
+                    println!("installed snapshot");
+                    return Ok(());
+                }
+                Err(StorageError::Precondition { path: _, source: _ }) => {
+                    // NOTE(rescrv):  This is something of a lie.  We know that someone put the
+                    // file before us, and we know the setsum of the file is embedded in the path.
+                    // Because the setsum is only calculable if you have the file and we assume
+                    // non-malicious code, anyone who puts the same setsum as us has, in all
+                    // likelihood, put something referencing the same content as us.
+                    return Ok(());
+                }
+                Err(e) => {
+                    tracing::error!("error uploading manifest: {e:?}");
+                    let mut backoff = exp_backoff.next();
+                    if backoff > Duration::from_secs(3_600) {
+                        backoff = Duration::from_secs(3_600);
+                    }
+                    tokio::time::sleep(backoff).await;
+                }
+            }
+        }
     }
 }
+
 ///////////////////////////////////////////// Manifest /////////////////////////////////////////////
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
@@ -151,7 +195,11 @@ impl Manifest {
     //
     // This just creates a snapshot.  Install it to object store and then call apply_snapshot when
     // it is durable to modify the manifest.
-    pub fn generate_snapshot(&self, snapshot_options: SnapshotOptions) -> Option<Snapshot> {
+    pub fn generate_snapshot(
+        &self,
+        snapshot_options: SnapshotOptions,
+        prefix: &str,
+    ) -> Option<Snapshot> {
         // TODO(rescrv):  A real, random string.
         let writer = "TODO".to_string();
         let can_snapshot_snapshots = self.snapshots.iter().filter(|s| s.depth < 2).count()
@@ -202,7 +250,7 @@ impl Manifest {
             } else {
                 unreachable!("I checked A || B above, then checked A and B separately; should not reach here.");
             };
-            let path = snapshot_path(setsum);
+            let path = snapshot_path(prefix, setsum);
             Some(Snapshot {
                 path,
                 depth,
@@ -368,18 +416,91 @@ impl Manifest {
     }
 
     /// Initialize the log with an empty manifest.
-    pub async fn initialize(_: &LogWriterOptions) -> Result<(), Error> {
-        todo!("robert will implement once storage supports If-Match");
+    pub async fn initialize(
+        _: &LogWriterOptions,
+        storage: &Storage,
+        prefix: &str,
+    ) -> Result<(), Error> {
+        let initial = Manifest {
+            path: manifest_path(prefix),
+            writer: "TODO".to_string(),
+            setsum: Setsum::default(),
+            snapshots: vec![],
+            fragments: vec![],
+        };
+        let payload = serde_json::to_string(&initial)
+            .map_err(|e| Error::CorruptManifest(format!("could not encode JSON manifest: {e:?}")))?
+            .into_bytes();
+        storage
+            .put_bytes(&initial.path, payload, PutOptions::if_not_exists())
+            .await
+            .map_err(Arc::new)?;
+        Ok(())
     }
 
     /// Load the latest manifest from object storage.
-    pub async fn load() -> Result<Option<Manifest>, Error> {
-        todo!("robert will implement");
+    pub async fn load(storage: &Storage, prefix: &str) -> Result<Option<(Manifest, ETag)>, Error> {
+        let path = manifest_path(prefix);
+        let (manifest, e_tag) = storage.get_with_e_tag(&path).await.map_err(Arc::new)?;
+        let Some(e_tag) = e_tag else {
+            return Err(Error::CorruptManifest(format!(
+                "no ETag for manifest at {}",
+                path
+            )));
+        };
+        serde_json::from_slice(&manifest)
+            .map_err(|e| Error::CorruptManifest(format!("could not decode JSON manifest: {e:?}")))
+            .map(|m| Some((m, e_tag)))
     }
 
     /// Install a manifest to object storage.
-    pub async fn install(&self, _: &ThrottleOptions, _: &Manifest) -> Result<(), Error> {
-        todo!("robert will implement");
+    pub async fn install(
+        &self,
+        options: &ThrottleOptions,
+        storage: &Storage,
+        current: Option<&ETag>,
+        new: &Manifest,
+    ) -> Result<ETag, Error> {
+        let exp_backoff = crate::backoff::ExponentialBackoff::new(
+            options.throughput as f64,
+            options.headroom as f64,
+        );
+        loop {
+            let payload = serde_json::to_string(&new)
+                .map_err(|e| {
+                    Error::CorruptManifest(format!("could not encode JSON manifest: {e:?}"))
+                })?
+                .into_bytes();
+            let options = if let Some(e_tag) = current {
+                PutOptions::if_matches(e_tag)
+            } else {
+                PutOptions::if_not_exists()
+            };
+            match storage.put_bytes(&self.path, payload, options).await {
+                Ok(Some(e_tag)) => {
+                    println!("installed manifest");
+                    return Ok(e_tag);
+                }
+                Ok(None) => {
+                    // NOTE(rescrv):  This is something of a lie.  We know that we put the log, but
+                    // without an e_tag we cannot do anything.  The log contention backoff protocol
+                    // cares for this case, rather than having to error-handle it separately
+                    // because it "crashes" the log and reinitializes.
+                    return Err(Error::LogContention);
+                }
+                Err(StorageError::Precondition { path: _, source: _ }) => {
+                    return Err(Error::LogContention);
+                }
+                Err(e) => {
+                    tracing::error!("error uploading manifest: {e:?}");
+                    let mut backoff = exp_backoff.next();
+                    if backoff > Duration::from_secs(3_600) {
+                        backoff = Duration::from_secs(3_600);
+                    }
+                    tokio::time::sleep(backoff).await;
+                }
+            }
+        }
     }
 }
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
@@ -390,7 +511,11 @@ mod tests {
 
     #[test]
     fn paths() {
-        assert_eq!("manifest/MANIFEST", manifest_path());
+        assert_eq!("myprefix/manifest/MANIFEST", manifest_path("myprefix"));
+        assert_eq!(
+            "myprefix/snapshot/SNAPSHOT.0000000000000000000000000000000000000000000000000000000000000000",
+            snapshot_path("myprefix", Setsum::default())
+        );
     }
 
     #[test]
