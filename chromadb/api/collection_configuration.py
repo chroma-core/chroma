@@ -64,8 +64,8 @@ def load_collection_configuration_from_json_str(
 def load_collection_configuration_from_json(
     json_map: Dict[str, Any]
 ) -> CollectionConfiguration:
-    if "hnsw" not in json_map:
-        if "embedding_function" not in json_map:
+    if json_map.get("hnsw") is None:
+        if json_map.get("embedding_function") is None:
             return CollectionConfiguration()
         else:
             if json_map["embedding_function"]["type"] == "legacy":
@@ -86,12 +86,12 @@ def load_collection_configuration_from_json(
                     )
                 )
     else:
-        if "embedding_function" not in json_map:
+        if json_map.get("embedding_function") is None:
             return CollectionConfiguration(
                 hnsw=json_to_hnsw_configuration(json_map["hnsw"])
             )
         else:
-            if json_map["embedding_function"]["type"] == "legacy":
+            if json_map["embedding_function"].get("type") == "legacy":
                 warnings.warn(
                     "legacy embedding function config",
                     DeprecationWarning,
@@ -276,8 +276,8 @@ def load_create_collection_configuration_from_json_str(
 def load_create_collection_configuration_from_json(
     json_map: Dict[str, Any]
 ) -> CreateCollectionConfiguration:
-    if "hnsw" not in json_map:
-        if "embedding_function" not in json_map:
+    if json_map.get("hnsw") is None:
+        if json_map.get("embedding_function") is None:
             return CreateCollectionConfiguration()
         else:
             if json_map["embedding_function"]["type"] == "legacy":
@@ -298,7 +298,7 @@ def load_create_collection_configuration_from_json(
                     )
                 )
     else:
-        if "embedding_function" not in json_map:
+        if json_map.get("embedding_function") is None:
             return CreateCollectionConfiguration(
                 hnsw=json_to_create_hnsw_configuration(json_map["hnsw"])
             )
@@ -439,6 +439,7 @@ def validate_create_hnsw_config(
         space_str = space_value.value if isinstance(space_value, Space) else space_value
 
         if space_str not in valid_spaces:
+            print(space_str)
             raise ValueError(
                 f"space must be one of the following: {', '.join(valid_spaces)}"
             )
@@ -601,8 +602,8 @@ def load_update_collection_configuration_from_json_str(
 def load_update_collection_configuration_from_json(
     json_map: Dict[str, Any]
 ) -> UpdateCollectionConfiguration:
-    if "hnsw" not in json_map:
-        if "embedding_function" not in json_map:
+    if json_map.get("hnsw") is None:
+        if json_map.get("embedding_function") is None:
             return UpdateCollectionConfiguration()
         else:
             if json_map["embedding_function"]["type"] == "legacy":
@@ -623,7 +624,7 @@ def load_update_collection_configuration_from_json(
                     )
                 )
     else:
-        if "embedding_function" not in json_map:
+        if json_map.get("embedding_function") is None:
             return UpdateCollectionConfiguration(
                 hnsw=json_to_update_hnsw_configuration(json_map["hnsw"])
             )

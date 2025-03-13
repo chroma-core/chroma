@@ -62,7 +62,7 @@ Embeddings = List[Embedding]
 class Space(Enum):
     COSINE = "cosine"
     L2 = "l2"
-    INNER_PRODUCT = "inner_product"
+    IP = "ip"
 
 
 def normalize_embeddings(
@@ -547,7 +547,7 @@ class EmbeddingFunction(Protocol[D]):
         """
         Return the supported spaces for the embedding function.
         """
-        return [Space.COSINE, Space.L2, Space.INNER_PRODUCT]
+        return [Space.COSINE, Space.L2, Space.IP]
 
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[D]":

@@ -10,8 +10,8 @@ from overrides import override
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
     UpdateCollectionConfiguration,
-    create_collection_configuration_to_json_str,
-    update_collection_configuration_to_json_str,
+    create_collection_configuration_to_json,
+    update_collection_configuration_to_json,
 )
 from chromadb.api.base_http_client import BaseHTTPClient
 from chromadb.types import Database, Tenant, Collection as CollectionModel
@@ -247,7 +247,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             json={
                 "name": name,
                 "metadata": metadata,
-                "configuration": create_collection_configuration_to_json_str(configuration)
+                "configuration": create_collection_configuration_to_json(configuration)
                 if configuration
                 else None,
                 "get_or_create": get_or_create,
@@ -310,7 +310,15 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         self._make_request(
             "put",
             f"/tenants/{tenant}/databases/{database}/collections/{id}",
-            json={"new_metadata": new_metadata, "new_name": new_name, "new_configuration": update_collection_configuration_to_json_str(new_configuration) if new_configuration else None},
+            json={
+                "new_metadata": new_metadata,
+                "new_name": new_name,
+                "new_configuration": update_collection_configuration_to_json(
+                    new_configuration
+                )
+                if new_configuration
+                else None,
+            },
         )
 
     @trace_method("FastAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
