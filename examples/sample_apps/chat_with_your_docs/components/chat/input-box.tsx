@@ -39,7 +39,7 @@ const InputBox: React.FC = () => {
           className="block"
         >
           <div className="absolute -top-7 right-0 text-xs py-0.5 px-3 rounded-full border bg-white border-black cursor-pointer">
-            Open Conversation
+            Debug Conversation
           </div>
         </Link>
       )}
