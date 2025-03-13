@@ -93,7 +93,7 @@ impl SysDb {
         match self {
             SysDb::Grpc(grpc) => grpc.list_databases(tenant_id, limit, offset).await,
             SysDb::Sqlite(sqlite) => sqlite.list_databases(tenant_id, limit, offset).await,
-            SysDb::Test(_) => todo!(),
+            SysDb::Test(test) => test.list_databases(tenant_id, limit, offset).await,
         }
     }
 

@@ -33,6 +33,7 @@
     "watch": "NODE_OPTIONS=--enable-source-maps tsup --watch"
   },
   "dependencies": {
+    "ajv": "^8.12.0",
     "cliui": "^8.0.1",
     "isomorphic-fetch": "^3.0.0"
   },

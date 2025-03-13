@@ -13,7 +13,7 @@ use chroma_memberlist::{
 use chroma_system::System;
 use chroma_types::{
     chroma_proto::query_executor_client::QueryExecutorClient,
-    operator::{from_proto_knn_batch_result, CountResult, GetResult, KnnBatchResult},
+    operator::{CountResult, GetResult, KnnBatchResult},
     plan::{Count, Get, Knn},
     CollectionUuid, ExecutorError,
 };
@@ -92,9 +92,8 @@ impl DistributedExecutor {
         })
         .retry(self.backoff)
         .when(is_retryable_error)
-        .await?
-        .into_inner();
-        Ok(res.count)
+        .await?;
+        Ok(res.into_inner().into())
     }
 
     pub async fn get(&mut self, plan: Get) -> Result<GetResult, ExecutorError> {
@@ -109,6 +108,7 @@ impl DistributedExecutor {
         .await?;
         Ok(res.into_inner().try_into()?)
     }
+
     pub async fn knn(&mut self, plan: Knn) -> Result<KnnBatchResult, ExecutorError> {
         let clients = self.clients(plan.scan.collection_and_segments.collection.collection_id)?;
         let res = (|| async {
@@ -119,7 +119,7 @@ impl DistributedExecutor {
         .retry(self.backoff)
         .when(is_retryable_error)
         .await?;
-        Ok(from_proto_knn_batch_result(res.into_inner())?)
+        Ok(res.into_inner().try_into()?)
     }
 
     pub async fn is_ready(&self) -> bool {

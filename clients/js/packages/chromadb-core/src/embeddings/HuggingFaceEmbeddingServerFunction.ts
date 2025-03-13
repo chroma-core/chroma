@@ -1,3 +1,4 @@
+import { validateConfigSchema } from "../schemas/schemaUtils";
 import { IEmbeddingFunction } from "./IEmbeddingFunction";
 
 type StoredConfig = {
@@ -36,7 +37,7 @@ export class HuggingFaceEmbeddingServerFunction implements IEmbeddingFunction {
     return new HuggingFaceEmbeddingServerFunction(config);
   }
 
-  toConfig(): StoredConfig {
+  getConfig(): StoredConfig {
     return {
       url: this.url,
     };
@@ -49,5 +50,9 @@ export class HuggingFaceEmbeddingServerFunction implements IEmbeddingFunction {
     if (oldConfig.url !== newConfig.url) {
       throw new Error("Changing the URL is not allowed.");
     }
+  }
+
+  validateConfig(config: Record<string, any>): void {
+    validateConfigSchema(config, "huggingface_server");
   }
 }

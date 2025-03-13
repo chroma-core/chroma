@@ -1,5 +1,5 @@
 import { IEmbeddingFunction } from "./IEmbeddingFunction";
-
+import { validateConfigSchema } from "../schemas/schemaUtils";
 type StoredConfig = {
   api_key_env_var: string;
   model_name: string;
@@ -81,5 +81,9 @@ export class JinaEmbeddingFunction implements IEmbeddingFunction {
       api_key_env_var: this.api_key_env_var,
       model_name: this.model_name,
     };
+  }
+
+  validateConfig(config: StoredConfig): void {
+    validateConfigSchema(config, "jina");
   }
 }

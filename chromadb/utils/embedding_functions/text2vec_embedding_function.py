@@ -1,5 +1,5 @@
 from chromadb.api.types import EmbeddingFunction, Space, Embeddings, Documents
-from chromadb.utils.embedding_functions.schemas import validate_config
+from chromadb.utils.embedding_functions.schemas import validate_config_schema
 from typing import List, Dict, Any
 import numpy as np
 
@@ -76,7 +76,8 @@ class Text2VecEmbeddingFunction(EmbeddingFunction[Documents]):
                 "The model name cannot be changed after the embedding function has been initialized."
             )
 
-    def validate_config(self, config: Dict[str, Any]) -> None:
+    @staticmethod
+    def validate_config(config: Dict[str, Any]) -> None:
         """
         Validate the configuration using the JSON schema.
 
@@ -86,4 +87,4 @@ class Text2VecEmbeddingFunction(EmbeddingFunction[Documents]):
         Raises:
             ValidationError: If the configuration does not match the schema
         """
-        validate_config(config, "text2vec")
+        validate_config_schema(config, "text2vec")

@@ -1,3 +1,14 @@
+//! Manifests, and their immutable cousin, snapshots, are the metadata that describe a log.
+//!
+//! A manifest transitively names every file in object storage that is part of the log.
+//!
+//! Snapshots are content-addressable and immutable, while manifests get overwritten.  For that
+//! reason, manifests embed the ETag for conditional writes while snapshots do not.
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use chroma_storage::{ETag, PutOptions, Storage, StorageError};
 use setsum::Setsum;
 
 use crate::{
@@ -7,13 +18,12 @@ use crate::{
 
 /////////////////////////////////////////////// paths //////////////////////////////////////////////
 
-#[allow(dead_code)]
-fn manifest_path() -> String {
-    "manifest/MANIFEST".to_string()
+fn manifest_path(prefix: &str) -> String {
+    format!("{prefix}/manifest/MANIFEST")
 }
 
-fn snapshot_path(setsum: Setsum) -> String {
-    format!("snapshot/SNAPSHOT.{}", setsum.hexdigest())
+fn snapshot_path(prefix: &str, setsum: Setsum) -> String {
+    format!("{prefix}/snapshot/SNAPSHOT.{}", setsum.hexdigest())
 }
 
 fn snapshot_setsum(path: &str) -> Result<Setsum, Error> {
@@ -127,10 +137,67 @@ impl Snapshot {
         Ok(acc)
     }
 
-    pub async fn install(&self, _: &ThrottleOptions) -> Result<(), Error> {
-        todo!("robert will implement");
+    pub async fn load(
+        _options: &ThrottleOptions,
+        storage: &Storage,
+        pointer: &SnapshotPointer,
+    ) -> Result<Option<Snapshot>, Error> {
+        match storage
+            .get_with_e_tag(&pointer.path_to_snapshot)
+            .await
+            .map_err(Arc::new)
+        {
+            Ok((ref snapshot, _)) => {
+                let snapshot: Snapshot = serde_json::from_slice(snapshot).map_err(|e| {
+                    Error::CorruptManifest(format!("could not decode JSON snapshot: {e:?}"))
+                })?;
+                Ok(Some(snapshot))
+            }
+            Err(err) => match &*err {
+                StorageError::NotFound { path: _, source: _ } => Ok(None),
+                err => Err(Error::StorageError(Arc::new(err.clone()))),
+            },
+        }
+    }
+
+    pub async fn install(&self, options: &ThrottleOptions, storage: &Storage) -> Result<(), Error> {
+        let exp_backoff = crate::backoff::ExponentialBackoff::new(
+            options.throughput as f64,
+            options.headroom as f64,
+        );
+        loop {
+            let payload = serde_json::to_string(&self)
+                .map_err(|e| {
+                    Error::CorruptManifest(format!("could not encode JSON manifest: {e:?}"))
+                })?
+                .into_bytes();
+            let options = PutOptions::if_not_exists();
+            match storage.put_bytes(&self.path, payload, options).await {
+                Ok(_) => {
+                    println!("installed snapshot");
+                    return Ok(());
+                }
+                Err(StorageError::Precondition { path: _, source: _ }) => {
+                    // NOTE(rescrv):  This is something of a lie.  We know that someone put the
+                    // file before us, and we know the setsum of the file is embedded in the path.
+                    // Because the setsum is only calculable if you have the file and we assume
+                    // non-malicious code, anyone who puts the same setsum as us has, in all
+                    // likelihood, put something referencing the same content as us.
+                    return Ok(());
+                }
+                Err(e) => {
+                    tracing::error!("error uploading manifest: {e:?}");
+                    let mut backoff = exp_backoff.next();
+                    if backoff > Duration::from_secs(3_600) {
+                        backoff = Duration::from_secs(3_600);
+                    }
+                    tokio::time::sleep(backoff).await;
+                }
+            }
+        }
     }
 }
+
 ///////////////////////////////////////////// Manifest /////////////////////////////////////////////
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
@@ -141,19 +208,36 @@ pub struct Manifest {
         serialize_with = "super::serialize_setsum"
     )]
     pub setsum: Setsum,
+    pub acc_bytes: u64,
     pub writer: String,
     pub snapshots: Vec<SnapshotPointer>,
     pub fragments: Vec<Fragment>,
 }
 
 impl Manifest {
-    // Possibly generate a new snapshot from self if the conditions are right.
-    //
-    // This just creates a snapshot.  Install it to object store and then call apply_snapshot when
-    // it is durable to modify the manifest.
-    pub fn generate_snapshot(&self, snapshot_options: SnapshotOptions) -> Option<Snapshot> {
-        // TODO(rescrv):  A real, random string.
-        let writer = "TODO".to_string();
+    /// Generate a new manifest that's empty and suitable for initialization.
+    pub fn new_empty(prefix: &str, writer: &str) -> Self {
+        Self {
+            path: manifest_path(prefix),
+            setsum: Setsum::default(),
+            acc_bytes: 0,
+            writer: writer.to_string(),
+            snapshots: vec![],
+            fragments: vec![],
+        }
+    }
+
+    /// Possibly generate a new snapshot from self if the conditions are right.
+    ///
+    /// This just creates a snapshot.  Install it to object store and then call apply_snapshot when
+    /// it is durable to modify the manifest.
+    pub fn generate_snapshot(
+        &self,
+        snapshot_options: SnapshotOptions,
+        prefix: &str,
+        writer: &str,
+    ) -> Option<Snapshot> {
+        let writer = writer.to_string();
         let can_snapshot_snapshots = self.snapshots.iter().filter(|s| s.depth < 2).count()
             >= snapshot_options.snapshot_rollover_threshold;
         let can_snapshot_fragments =
@@ -202,7 +286,7 @@ impl Manifest {
             } else {
                 unreachable!("I checked A || B above, then checked A and B separately; should not reach here.");
             };
-            let path = snapshot_path(setsum);
+            let path = snapshot_path(prefix, setsum);
             Some(Snapshot {
                 path,
                 depth,
@@ -286,6 +370,7 @@ impl Manifest {
     /// Modify the manifest to apply the fragment to it.
     pub fn apply_fragment(&mut self, fragment: Fragment) {
         self.setsum += fragment.setsum;
+        self.acc_bytes = self.acc_bytes.saturating_add(fragment.num_bytes);
         self.fragments.push(fragment);
     }
 
@@ -368,20 +453,97 @@ impl Manifest {
     }
 
     /// Initialize the log with an empty manifest.
-    pub async fn initialize(_: &LogWriterOptions) -> Result<(), Error> {
-        todo!("robert will implement once storage supports If-Match");
+    pub async fn initialize(
+        _: &LogWriterOptions,
+        storage: &Storage,
+        prefix: &str,
+        writer: &str,
+    ) -> Result<(), Error> {
+        let writer = writer.to_string();
+        let initial = Manifest {
+            path: manifest_path(prefix),
+            writer,
+            setsum: Setsum::default(),
+            acc_bytes: 0,
+            snapshots: vec![],
+            fragments: vec![],
+        };
+        let payload = serde_json::to_string(&initial)
+            .map_err(|e| Error::CorruptManifest(format!("could not encode JSON manifest: {e:?}")))?
+            .into_bytes();
+        storage
+            .put_bytes(&initial.path, payload, PutOptions::if_not_exists())
+            .await
+            .map_err(Arc::new)?;
+        Ok(())
     }
 
     /// Load the latest manifest from object storage.
-    pub async fn load() -> Result<Option<Manifest>, Error> {
-        todo!("robert will implement");
+    pub async fn load(storage: &Storage, prefix: &str) -> Result<Option<(Manifest, ETag)>, Error> {
+        let path = manifest_path(prefix);
+        let (manifest, e_tag) = storage.get_with_e_tag(&path).await.map_err(Arc::new)?;
+        let Some(e_tag) = e_tag else {
+            return Err(Error::CorruptManifest(format!(
+                "no ETag for manifest at {}",
+                path
+            )));
+        };
+        serde_json::from_slice(&manifest)
+            .map_err(|e| Error::CorruptManifest(format!("could not decode JSON manifest: {e:?}")))
+            .map(|m| Some((m, e_tag)))
     }
 
     /// Install a manifest to object storage.
-    pub async fn install(&self, _: &ThrottleOptions, _: &Manifest) -> Result<(), Error> {
-        todo!("robert will implement");
+    pub async fn install(
+        &self,
+        options: &ThrottleOptions,
+        storage: &Storage,
+        current: Option<&ETag>,
+        new: &Manifest,
+    ) -> Result<ETag, Error> {
+        let exp_backoff = crate::backoff::ExponentialBackoff::new(
+            options.throughput as f64,
+            options.headroom as f64,
+        );
+        loop {
+            let payload = serde_json::to_string(&new)
+                .map_err(|e| {
+                    Error::CorruptManifest(format!("could not encode JSON manifest: {e:?}"))
+                })?
+                .into_bytes();
+            let options = if let Some(e_tag) = current {
+                PutOptions::if_matches(e_tag)
+            } else {
+                PutOptions::if_not_exists()
+            };
+            match storage.put_bytes(&self.path, payload, options).await {
+                Ok(Some(e_tag)) => {
+                    println!("installed manifest");
+                    return Ok(e_tag);
+                }
+                Ok(None) => {
+                    // NOTE(rescrv):  This is something of a lie.  We know that we put the log, but
+                    // without an e_tag we cannot do anything.  The log contention backoff protocol
+                    // cares for this case, rather than having to error-handle it separately
+                    // because it "crashes" the log and reinitializes.
+                    return Err(Error::LogContention);
+                }
+                Err(StorageError::Precondition { path: _, source: _ }) => {
+                    return Err(Error::LogContention);
+                }
+                Err(e) => {
+                    tracing::error!("error uploading manifest: {e:?}");
+                    let mut backoff = exp_backoff.next();
+                    if backoff > Duration::from_secs(3_600) {
+                        backoff = Duration::from_secs(3_600);
+                    }
+                    tokio::time::sleep(backoff).await;
+                }
+            }
+        }
     }
 }
+
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
 
 #[cfg(test)]
@@ -390,7 +552,11 @@ mod tests {
 
     #[test]
     fn paths() {
-        assert_eq!("manifest/MANIFEST", manifest_path());
+        assert_eq!("myprefix/manifest/MANIFEST", manifest_path("myprefix"));
+        assert_eq!(
+            "myprefix/snapshot/SNAPSHOT.0000000000000000000000000000000000000000000000000000000000000000",
+            snapshot_path("myprefix", Setsum::default())
+        );
     }
 
     #[test]
@@ -400,6 +566,7 @@ mod tests {
             seq_no: FragmentSeqNo(1),
             start: LogPosition::uni(1),
             limit: LogPosition::uni(42),
+            num_bytes: 4100,
             setsum: Setsum::default(),
         };
         assert!(!fragment.possibly_contains_position(LogPosition::uni(0)));
@@ -416,6 +583,7 @@ mod tests {
             seq_no: FragmentSeqNo(1),
             start: LogPosition::uni(1),
             limit: LogPosition::uni(22),
+            num_bytes: 4100,
             setsum: Setsum::default(),
         };
         let fragment2 = Fragment {
@@ -423,12 +591,14 @@ mod tests {
             seq_no: FragmentSeqNo(2),
             start: LogPosition::uni(22),
             limit: LogPosition::uni(42),
+            num_bytes: 4100,
             setsum: Setsum::default(),
         };
         let manifest = Manifest {
-            path: String::from("manifest/MANIFEST.ffffffffffffffff"),
+            path: String::from("manifest/MANIFEST"),
             writer: "manifest writer 1".to_string(),
             setsum: Setsum::default(),
+            acc_bytes: 8200,
             snapshots: vec![],
             fragments: vec![fragment1, fragment2],
         };
@@ -447,6 +617,7 @@ mod tests {
             seq_no: FragmentSeqNo(1),
             start: LogPosition::uni(1),
             limit: LogPosition::uni(22),
+            num_bytes: 4100,
             setsum: Setsum::from_hexdigest(
                 "4eec78e0b5cd15df7b36fd42cdc3aecb1986ffa3655c338201db88f80d855465",
             )
@@ -457,29 +628,32 @@ mod tests {
             seq_no: FragmentSeqNo(2),
             start: LogPosition::uni(22),
             limit: LogPosition::uni(42),
+            num_bytes: 4100,
             setsum: Setsum::from_hexdigest(
                 "dd901afef0e5d336aaa52a2df7f785c909091fd0aa011980de443a61a889d3e1",
             )
             .unwrap(),
         };
         let manifest = Manifest {
-            path: String::from("manifest/MANIFEST.ffffffffffffffff"),
+            path: String::from("manifest/MANIFEST"),
             writer: "manifest writer 1".to_string(),
             setsum: Setsum::from_hexdigest(
                 "307d93deb6b3e91525dc277027bc34958d8f1e74965e4c027820c3596e0f2847",
             )
             .unwrap(),
+            acc_bytes: 8200,
             snapshots: vec![],
             fragments: vec![fragment1.clone(), fragment2.clone()],
         };
         assert!(manifest.scrub().is_ok());
         let manifest = Manifest {
-            path: String::from("manifest/MANIFEST.ffffffffffffffff"),
+            path: String::from("manifest/MANIFEST"),
             writer: "manifest writer 1".to_string(),
             setsum: Setsum::from_hexdigest(
                 "6c5b5ee2c5e741a8d190d215d6cb2802a57ce0d3bb5a1a0223964e97acfa8083",
             )
             .unwrap(),
+            acc_bytes: 8200,
             snapshots: vec![],
             fragments: vec![fragment1, fragment2],
         };
@@ -493,6 +667,7 @@ mod tests {
             seq_no: FragmentSeqNo(1),
             start: LogPosition::uni(1),
             limit: LogPosition::uni(22),
+            num_bytes: 41,
             setsum: Setsum::from_hexdigest(
                 "4eec78e0b5cd15df7b36fd42cdc3aecb1986ffa3655c338201db88f80d855465",
             )
@@ -503,15 +678,17 @@ mod tests {
             seq_no: FragmentSeqNo(2),
             start: LogPosition::uni(22),
             limit: LogPosition::uni(42),
+            num_bytes: 42,
             setsum: Setsum::from_hexdigest(
                 "dd901afef0e5d336aaa52a2df7f785c909091fd0aa011980de443a61a889d3e1",
             )
             .unwrap(),
         };
         let mut manifest = Manifest {
-            path: String::from("manifest/MANIFEST.ffffffffffffffff"),
+            path: String::from("manifest/MANIFEST"),
             writer: "manifest writer 1".to_string(),
             setsum: Setsum::default(),
+            acc_bytes: 0,
             snapshots: vec![],
             fragments: vec![],
         };
@@ -522,12 +699,13 @@ mod tests {
         manifest.apply_fragment(fragment2);
         assert_eq!(
             Manifest {
-                path: String::from("manifest/MANIFEST.ffffffffffffffff"),
+                path: String::from("manifest/MANIFEST"),
                 writer: "manifest writer 1".to_string(),
                 setsum: Setsum::from_hexdigest(
                     "307d93deb6b3e91525dc277027bc34958d8f1e74965e4c027820c3596e0f2847",
                 )
                 .unwrap(),
+                acc_bytes: 83,
                 snapshots: vec![],
                 fragments: vec![
                     Fragment {
@@ -535,6 +713,7 @@ mod tests {
                         seq_no: FragmentSeqNo(1),
                         start: LogPosition::uni(1),
                         limit: LogPosition::uni(22),
+                        num_bytes: 41,
                         setsum: Setsum::from_hexdigest(
                             "4eec78e0b5cd15df7b36fd42cdc3aecb1986ffa3655c338201db88f80d855465"
                         )
@@ -545,6 +724,7 @@ mod tests {
                         seq_no: FragmentSeqNo(2),
                         start: LogPosition::uni(22),
                         limit: LogPosition::uni(42),
+                        num_bytes: 42,
                         setsum: Setsum::from_hexdigest(
                             "dd901afef0e5d336aaa52a2df7f785c909091fd0aa011980de443a61a889d3e1"
                         )
