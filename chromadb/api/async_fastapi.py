@@ -11,7 +11,9 @@ from chromadb.api.async_api import AsyncServerAPI
 from chromadb.api.base_http_client import BaseHTTPClient
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
+    UpdateCollectionConfiguration,
     create_collection_configuration_to_json_str,
+    update_collection_configuration_to_json,
 )
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System, Settings
 from chromadb.telemetry.opentelemetry import (
@@ -345,13 +347,14 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
+        new_configuration: Optional[UpdateCollectionConfiguration] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
         await self._make_request(
             "put",
             f"/tenants/{tenant}/databases/{database}/collections/{id}",
-            json={"new_metadata": new_metadata, "new_name": new_name},
+            json={"new_metadata": new_metadata, "new_name": new_name, "new_configuration": update_collection_configuration_to_json(new_configuration) if new_configuration else None},
         )
 
     @trace_method("AsyncFastAPI.delete_collection", OpenTelemetryGranularity.OPERATION)

@@ -6,7 +6,7 @@ from chromadb.api.types import (
     IncludeMetadataDocuments,
     IncludeMetadataDocumentsDistances,
 )
-
+from chromadb.api.collection_configuration import UpdateCollectionConfiguration
 
 class AddEmbedding(BaseModel):
     # Pydantic doesn't handle Union types cleanly like Embeddings which has
@@ -68,6 +68,7 @@ class CreateCollection(BaseModel):
 class UpdateCollection(BaseModel):
     new_name: Optional[str] = None
     new_metadata: Optional[CollectionMetadata] = None
+    new_configuration: Optional[Dict[str, Any]] = None
 
 
 class CreateDatabase(BaseModel):

@@ -1,6 +1,6 @@
 from typing import TypedDict, Dict, Any, Optional, cast
 import json
-from chromadb.api.types import EmbeddingFunction, Embeddable, Space, Metadata, CollectionMetadata
+from chromadb.api.types import EmbeddingFunction, Embeddable, Space, Metadata, CollectionMetadata, UpdateMetadata
 from chromadb.utils.embedding_functions import (
     DefaultEmbeddingFunction,
     known_embedding_functions,
@@ -147,6 +147,26 @@ class CreateHNSWConfiguration(TypedDict, total=False):
     batch_size: int
     sync_threshold: int
     resize_factor: float
+    
+def json_to_create_hnsw_configuration(json_map: Dict[str, Any]) -> CreateHNSWConfiguration:
+    config: CreateHNSWConfiguration = {}
+    if "space" in json_map:
+        config["space"] = json_map["space"]
+    if "ef_construction" in json_map:
+        config["ef_construction"] = json_map["ef_construction"]
+    if "max_neighbors" in json_map:
+        config["max_neighbors"] = json_map["max_neighbors"]
+    if "ef_search" in json_map:
+        config["ef_search"] = json_map["ef_search"]
+    if "num_threads" in json_map:
+        config["num_threads"] = json_map["num_threads"]
+    if "batch_size" in json_map:
+        config["batch_size"] = json_map["batch_size"]
+    if "sync_threshold" in json_map:
+        config["sync_threshold"] = json_map["sync_threshold"]
+    if "resize_factor" in json_map:
+        config["resize_factor"] = json_map["resize_factor"]
+    return config
 
 
 class CreateCollectionConfiguration(TypedDict, total=False):
@@ -180,9 +200,9 @@ def create_collection_configuration_from_legacy_collection_metadata(
         if name not in old_to_new:
             raise ValueError(f"unknown legacy parameter: {name}")
         json_map[old_to_new[name]] = value
-    hnsw_config = json_to_hnsw_configuration(json_map)
+    hnsw_config = json_to_create_hnsw_configuration(json_map)
     hnsw_config = populate_create_hnsw_defaults(hnsw_config)
-    validate_hnsw_config(hnsw_config)
+    validate_create_hnsw_config(hnsw_config)
 
     return CreateCollectionConfiguration(hnsw=hnsw_config)
 
@@ -206,9 +226,9 @@ def create_collection_configuration_from_legacy_metadata(
             raise ValueError(f"unknown legacy parameter: {name}")
         json_map[old_to_new[name]] = value
 
-    hnsw_config = json_to_hnsw_configuration(json_map)
+    hnsw_config = json_to_create_hnsw_configuration(json_map)
     hnsw_config = populate_create_hnsw_defaults(hnsw_config)
-    validate_hnsw_config(hnsw_config)
+    validate_create_hnsw_config(hnsw_config)
 
     return CreateCollectionConfiguration(hnsw=hnsw_config)
 
@@ -225,6 +245,56 @@ def legacy_create_collection_configuration_path(
         configuration = create_collection_configuration_from_legacy_collection_metadata(metadata)
     return configuration
 
+def load_create_collection_configuration_from_json_str(json_str: str) -> CreateCollectionConfiguration:
+    json_map = json.loads(json_str)
+    return load_create_collection_configuration_from_json(json_map)
+
+def load_create_collection_configuration_from_json(json_map: Dict[str, Any]) -> CreateCollectionConfiguration:
+    if "hnsw" not in json_map:
+        if "embedding_function" not in json_map:
+            return CreateCollectionConfiguration()
+        else:
+            if json_map["embedding_function"]["type"] == "legacy":
+                warnings.warn(
+                    "legacy embedding function config",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+                return CreateCollectionConfiguration()
+            else:
+                ef = cast(
+                    EmbeddingFunction[Embeddable],
+                    known_embedding_functions[json_map["embedding_function"]["name"]],
+                )
+                return CollectionConfiguration(
+                    embedding_function=ef.build_from_config(
+                        json_map["embedding_function"]["config"]
+                    )
+                )
+    else:
+        if "embedding_function" not in json_map:
+            return CreateCollectionConfiguration(hnsw=json_to_create_hnsw_configuration(json_map["hnsw"]))
+        else:
+            if json_map["embedding_function"]["type"] == "legacy":
+                warnings.warn(
+                    "legacy embedding function config",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+                return CreateCollectionConfiguration(
+                    hnsw=json_to_create_hnsw_configuration(json_map["hnsw"])
+                )
+            else:
+                ef = cast(
+                    EmbeddingFunction[Embeddable],
+                    known_embedding_functions[json_map["embedding_function"]["name"]],
+                )
+                return CreateCollectionConfiguration(
+                    hnsw=json_to_create_hnsw_configuration(json_map["hnsw"]),
+                    embedding_function=ef.build_from_config(
+                        json_map["embedding_function"]["config"]
+                    ),
+                )
 
 def create_collection_configuration_to_json_str(config: CreateCollectionConfiguration) -> str:
     """Convert a CreateCollection configuration to a JSON-serializable string"""
@@ -268,7 +338,7 @@ def create_collection_configuration_to_json(
 
     hnsw_config = populate_create_hnsw_defaults(hnsw_config, ef)
 
-    validate_hnsw_config(hnsw_config, ef)
+    validate_create_hnsw_config(hnsw_config, ef)
 
     return {
         "hnsw": hnsw_config,
@@ -313,7 +383,7 @@ def populate_create_hnsw_defaults(
     return config
 
 
-def validate_hnsw_config(
+def validate_create_hnsw_config(
     config: CreateHNSWConfiguration, ef: Optional[EmbeddingFunction[Embeddable]] = None
 ) -> None:
     """Validate a CreateHNSW configuration"""
@@ -361,12 +431,224 @@ class UpdateHNSWConfiguration(TypedDict, total=False):
     batch_size: int
     sync_threshold: int
     resize_factor: float
+    
+def json_to_update_hnsw_configuration(json_map: Dict[str, Any]) -> UpdateHNSWConfiguration:
+    config: UpdateHNSWConfiguration = {}
+    if "ef_search" in json_map:
+        config["ef_search"] = json_map["ef_search"]
+    if "num_threads" in json_map:
+        config["num_threads"] = json_map["num_threads"]
+    if "batch_size" in json_map:
+        config["batch_size"] = json_map["batch_size"]
+    if "sync_threshold" in json_map:
+        config["sync_threshold"] = json_map["sync_threshold"]
+    if "resize_factor" in json_map:
+        config["resize_factor"] = json_map["resize_factor"]
+    return config
+
+def validate_update_hnsw_config(
+    config: UpdateHNSWConfiguration,
+) -> None:
+    """Validate an UpdateHNSW configuration"""
+    if "ef_search" in config:
+        if config["ef_search"] <= 0:
+            raise ValueError("ef_search must be greater than 0")
+    if "num_threads" in config:
+        if config["num_threads"] > cpu_count():
+            raise ValueError("num_threads must be less than or equal to the number of available threads")
+        if config["num_threads"] <= 0:
+            raise ValueError("num_threads must be greater than 0")
+    if "batch_size" in config and "sync_threshold" in config:
+        if config["batch_size"] > config["sync_threshold"]:
+            raise ValueError("batch_size must be less than or equal to sync_threshold")
+    if "resize_factor" in config:
+        if config["resize_factor"] <= 0:
+            raise ValueError("resize_factor must be greater than 0")
 
 
 class UpdateCollectionConfiguration(TypedDict, total=False):
     hnsw: Optional[UpdateHNSWConfiguration]
     embedding_function: Optional[EmbeddingFunction[Embeddable]]
+    
+def update_collection_configuration_from_legacy_collection_metadata(
+    metadata: CollectionMetadata,
+) -> UpdateCollectionConfiguration:
+    """Create an UpdateCollectionConfiguration from legacy collection metadata"""
+    old_to_new = {
+        "hnsw:ef_search": "ef_search",
+        "hnsw:num_threads": "num_threads",
+        "hnsw:batch_size": "batch_size",
+        "hnsw:sync_threshold": "sync_threshold",
+        "hnsw:resize_factor": "resize_factor",
+    }
+    
+    json_map = {}
+    for name, value in metadata.items():
+        if name not in old_to_new:
+            raise ValueError(f"unknown legacy parameter: {name}")
+        json_map[old_to_new[name]] = value
+    hnsw_config = json_to_update_hnsw_configuration(json_map)
+    validate_update_hnsw_config(hnsw_config)
+    return UpdateCollectionConfiguration(hnsw=hnsw_config)
 
+def update_collection_configuration_from_legacy_update_metadata(
+    metadata: UpdateMetadata,
+) -> UpdateCollectionConfiguration:
+    """Create an UpdateCollectionConfiguration from legacy update metadata"""
+    old_to_new = {
+        "hnsw:ef_search": "ef_search",
+        "hnsw:num_threads": "num_threads",
+        "hnsw:batch_size": "batch_size",
+        "hnsw:sync_threshold": "sync_threshold",
+        "hnsw:resize_factor": "resize_factor",
+    }
+    json_map = {}
+    for name, value in metadata.items():
+        if name not in old_to_new:
+            raise ValueError(f"unknown legacy parameter: {name}")
+        json_map[old_to_new[name]] = value
+    hnsw_config = json_to_update_hnsw_configuration(json_map)
+    validate_update_hnsw_config(hnsw_config)
+    return UpdateCollectionConfiguration(hnsw=hnsw_config)
+
+def update_collection_configuration_to_json_str(config: UpdateCollectionConfiguration) -> str | None:
+    """Convert an UpdateCollectionConfiguration to a JSON-serializable string"""
+    json_dict = update_collection_configuration_to_json(config)
+    if json_dict is None:
+        return None
+    return json.dumps(json_dict)
+
+def update_collection_configuration_to_json(config: UpdateCollectionConfiguration) -> Dict[str, Any] | None:
+    """Convert an UpdateCollectionConfiguration to a JSON-serializable dict"""
+    if config.get("hnsw") is None:
+        return None
+    
+    try:
+        hnsw_config = cast(UpdateHNSWConfiguration, config.get("hnsw"))
+    except Exception as e:
+        raise ValueError(f"not a valid hnsw config: {e}")
+    
+    validate_update_hnsw_config(hnsw_config)
+    ef = config.get("embedding_function")
+    if ef is not None:
+        if ef.name() is NotImplemented:
+            ef_config = {"type": "legacy"}
+        else:
+            ef_config = {
+                "name": ef.name(),
+                "type": "known" if ef.name() in known_embedding_functions else "custom",
+                "config": ef.get_config(),
+            }
+            register_embedding_function(type(ef))
+    else:
+        ef_config = None
+
+    return {
+        "hnsw": hnsw_config,
+        "embedding_function": ef_config,
+    }
+    
+def load_update_collection_configuration_from_json_str(json_str: str) -> UpdateCollectionConfiguration:
+    json_map = json.loads(json_str)
+    return load_update_collection_configuration_from_json(json_map)
+
+def load_update_collection_configuration_from_json(json_map: Dict[str, Any]) -> UpdateCollectionConfiguration | None:
+    if "hnsw" not in json_map:
+        if "embedding_function" not in json_map:
+            return None
+        else:
+            if json_map["embedding_function"]["type"] == "legacy":
+                warnings.warn(
+                    "legacy embedding function config",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+                return CollectionConfiguration()
+            else:
+                ef = cast(
+                    EmbeddingFunction[Embeddable],
+                    known_embedding_functions[json_map["embedding_function"]["name"]],
+                )
+                return CollectionConfiguration(
+                    embedding_function=ef.build_from_config(
+                        json_map["embedding_function"]["config"]
+                    )
+                )
+    else:
+        if "embedding_function" not in json_map:
+            return CollectionConfiguration(hnsw=json_to_hnsw_configuration(json_map["hnsw"]))
+        else:
+            if json_map["embedding_function"]["type"] == "legacy":
+                warnings.warn(
+                    "legacy embedding function config",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+                return CollectionConfiguration(
+                    hnsw=json_to_hnsw_configuration(json_map["hnsw"])
+                )
+            else:
+                ef = cast(
+                    EmbeddingFunction[Embeddable],
+                    known_embedding_functions[json_map["embedding_function"]["name"]],
+                )
+                return CollectionConfiguration(
+                    hnsw=json_to_hnsw_configuration(json_map["hnsw"]),
+                    embedding_function=ef.build_from_config(
+                        json_map["embedding_function"]["config"]
+                    ),
+                )
+
+def overwrite_hnsw_configuration(existing_hnsw_config: HNSWConfiguration, update_hnsw_config: UpdateHNSWConfiguration) -> HNSWConfiguration:
+    """Overwrite a HNSWConfiguration with a new configuration"""
+    if update_hnsw_config.get("ef_search") is not None:
+        existing_hnsw_config["ef_search"] = update_hnsw_config["ef_search"] # type: ignore
+    if update_hnsw_config.get("num_threads") is not None:
+        existing_hnsw_config["num_threads"] = update_hnsw_config["num_threads"] # type: ignore
+    if update_hnsw_config.get("batch_size") is not None:
+        existing_hnsw_config["batch_size"] = update_hnsw_config["batch_size"] # type: ignore
+    if update_hnsw_config.get("sync_threshold") is not None:
+        existing_hnsw_config["sync_threshold"] = update_hnsw_config["sync_threshold"] # type: ignore
+    if update_hnsw_config.get("resize_factor") is not None:
+        existing_hnsw_config["resize_factor"] = update_hnsw_config["resize_factor"] # type: ignore
+    return existing_hnsw_config
+
+def overwrite_embedding_function(existing_embedding_function: EmbeddingFunction[Embeddable], update_embedding_function: EmbeddingFunction[Embeddable]) -> EmbeddingFunction[Embeddable]:
+    """Overwrite an EmbeddingFunction with a new configuration"""
+    if update_embedding_function.name() is NotImplemented:
+        warnings.warn(
+            "cannot update legacy embedding function config",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return existing_embedding_function
+    if existing_embedding_function.name() is NotImplemented:
+        warnings.warn(
+            "cannot update legacy embedding function config",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return existing_embedding_function
+    
+    if existing_embedding_function.name() != update_embedding_function.name():
+        raise ValueError("cannot update embedding function with different name")
+    
+    update_embedding_function.validate_config(update_embedding_function.get_config())
+    return update_embedding_function
+
+def overwrite_collection_configuration(existing_config: CollectionConfiguration, update_config: UpdateCollectionConfiguration) -> CollectionConfiguration:
+    """Overwrite a CollectionConfiguration with a new configuration"""
+    existing_hnsw_config = existing_config.get("hnsw")
+    new_hnsw_config = update_config.get("hnsw")
+    existing_embedding_function = existing_config.get("embedding_function")
+    new_embedding_function = update_config.get("embedding_function")
+    if existing_hnsw_config is not None:
+        if new_hnsw_config is not None:
+            updated_hnsw_config = overwrite_hnsw_configuration(existing_hnsw_config, new_hnsw_config)
+    if existing_embedding_function is not None:
+        if new_embedding_function is not None:
+            updated_embedding_function = overwrite_embedding_function(existing_embedding_function, new_embedding_function)
+    return CollectionConfiguration(hnsw=updated_hnsw_config, embedding_function=updated_embedding_function)
 
 class InvalidConfigurationError(ValueError):
     """Represents an error that occurs when a configuration is invalid."""

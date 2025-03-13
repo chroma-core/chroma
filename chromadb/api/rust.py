@@ -12,7 +12,7 @@ from chromadb import (
     URIs,
 )
 from chromadb.api import ServerAPI
-from chromadb.api.collection_configuration import CreateCollectionConfiguration
+from chromadb.api.collection_configuration import CreateCollectionConfiguration, UpdateCollectionConfiguration
 from chromadb.auth import UserIdentity
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.telemetry.product import ProductTelemetryClient
@@ -266,10 +266,11 @@ class RustBindingsAPI(ServerAPI):
         id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
+        new_configuration: Optional[UpdateCollectionConfiguration] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
-        self.bindings.update_collection(str(id), new_name, new_metadata)
+        self.bindings.update_collection(str(id), new_name, new_metadata, new_configuration)
 
     @override
     def _count(

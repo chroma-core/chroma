@@ -25,7 +25,9 @@ from functools import wraps
 
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
-    load_collection_configuration_from_json,
+    UpdateCollectionConfiguration,
+    load_create_collection_configuration_from_json,
+    load_update_collection_configuration_from_json,
 )
 from pydantic import BaseModel
 from chromadb import __version__ as chromadb_version
@@ -787,7 +789,7 @@ class FastAPI(Server):
             configuration = (
                 CreateCollectionConfiguration()
                 if not create.configuration
-                else load_collection_configuration_from_json(create.configuration)
+                else load_create_collection_configuration_from_json(create.configuration)
             )
 
             # NOTE(rescrv, iron will auth):  Implemented.
@@ -876,12 +878,18 @@ class FastAPI(Server):
                 database_name,
                 collection_id,
             )
+            configuration = (
+                None
+                if not update.new_configuration
+                else load_update_collection_configuration_from_json(update.new_configuration)
+            )
             self._set_request_context(request=request)
             add_attributes_to_current_span({"tenant": tenant})
             return self._api._modify(
                 id=_uuid(collection_id),
                 new_name=update.new_name,
                 new_metadata=update.new_metadata,
+                new_configuration=configuration,
                 tenant=tenant,
                 database=database_name,
             )
@@ -1707,7 +1715,7 @@ class FastAPI(Server):
             configuration = (
                 CreateCollectionConfiguration()
                 if not create.configuration
-                else load_collection_configuration_from_json(create.configuration)
+                else load_create_collection_configuration_from_json(create.configuration)
             )
 
             (
@@ -1806,10 +1814,16 @@ class FastAPI(Server):
                 None,
                 collection_id,
             )
+            configuration = (
+                None
+                if not update.new_configuration
+                else load_update_collection_configuration_from_json(update.new_configuration)
+            )
             return self._api._modify(
                 id=_uuid(collection_id),
                 new_name=update.new_name,
                 new_metadata=update.new_metadata,
+                new_configuration=configuration,
             )
 
         await to_thread.run_sync(
