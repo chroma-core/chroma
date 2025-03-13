@@ -217,7 +217,7 @@ mod tests {
     use crate::{LogWriterOptions, Manifest, SnapshotOptions, ThrottleOptions};
 
     #[tokio::test]
-    async fn test_batches() {
+    async fn test_k8s_integration_batches() {
         let batch_manager = BatchManager::new(ThrottleOptions {
             throughput: 100,
             headroom: 1,
