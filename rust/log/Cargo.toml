@@ -41,6 +41,7 @@ chroma-sysdb = { workspace = true }
 chroma-types = { workspace = true }
 chroma-sqlite = { workspace = true }
 wal3 = { workspace = true }
+figment.workspace = true
 
 [features]
 default = ["server"]

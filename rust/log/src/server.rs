@@ -14,6 +14,7 @@ use chroma_types::chroma_proto::{
     UpdateCollectionLogOffsetResponse,
 };
 use chroma_types::CollectionUuid;
+use figment::providers::{Env, Format, Yaml};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use prost::Message;
 use serde::{Deserialize, Serialize};
@@ -23,6 +24,8 @@ use uuid::Uuid;
 use wal3::{Limits, LogPosition, LogReader, LogReaderOptions, LogWriter, LogWriterOptions};
 
 use crate::state_hash_table::StateHashTable;
+
+const DEFAULT_CONFIG_PATH: &str = "./chroma_config.yaml";
 
 ///////////////////////////////////////// state maintenance ////////////////////////////////////////
 
@@ -147,6 +150,7 @@ async fn get_log_from_handle<'a>(
     options: &LogWriterOptions,
     storage: &Arc<Storage>,
     prefix: &str,
+    recurse: bool,
 ) -> Result<LogRef<'a>, wal3::Error> {
     let mut active = handle.active.lock().await;
     active.keep_alive(Duration::from_secs(60));
@@ -156,14 +160,27 @@ async fn get_log_from_handle<'a>(
             _phantom: std::marker::PhantomData,
         });
     }
-    let opened = LogWriter::open(
+    tracing::info!("Opening log at {}", prefix);
+    let opened = match LogWriter::open(
         options.clone(),
         Arc::clone(storage),
         prefix,
         // TODO(rescrv):  Configurable params.
         "log writer",
     )
-    .await?;
+    .await
+    {
+        Ok(opened) => opened,
+        Err(err) => {
+            if recurse && matches!(err, wal3::Error::UninitializedLog) {
+                LogWriter::initialize(options, storage, prefix, "log initialize").await?;
+                return Box::pin(get_log_from_handle(handle, options, storage, prefix, false))
+                    .await;
+            }
+            return Err(err);
+        }
+    };
+    tracing::info!("Opened log at {}", prefix);
     let opened = Arc::new(opened);
     active.log = Some(Arc::clone(&opened));
     let handle_clone = handle.clone();
@@ -221,7 +238,7 @@ impl LogService for LogServer {
         let prefix = storage_prefix_for_log(collection_id);
         let key = LogKey { collection_id };
         let handle = self.open_logs.get_or_create_state(key);
-        let log = get_log_from_handle(&handle, &self.config.writer, &self.storage, &prefix)
+        let log = get_log_from_handle(&handle, &self.config.writer, &self.storage, &prefix, true)
             .await
             // TODO(rescrv): better error handling.
             .map_err(|err| Status::unknown(err.to_string()))?;
@@ -237,6 +254,7 @@ impl LogService for LogServer {
             return Err(Status::invalid_argument("Too many records"));
         }
         let record_count = messages.len() as i32;
+        tracing::error!("Writing {} records to log", record_count);
         log.append_many(messages)
             .await
             .map_err(|err| Status::unknown(err.to_string()))?;
@@ -409,6 +427,18 @@ impl LogServer {
 
 /////////////////////////// Config ///////////////////////////
 
+#[derive(Deserialize, Serialize)]
+pub struct RootConfig {
+    // The root config object wraps the worker config object so that
+    // we can share the same config file between multiple services.
+    #[serde(default)]
+    pub log_service: LogServerConfig,
+}
+
+fn default_endpoint() -> String {
+    "http://otel-collector:4317".to_string()
+}
+
 fn default_otel_service_name() -> String {
     "rust-log-service".to_string()
 }
@@ -417,8 +447,68 @@ fn default_port() -> u16 {
     50051
 }
 
+impl RootConfig {
+    /// # Description
+    /// Load the config from the default location.
+    /// # Returns
+    /// The config object.
+    /// # Panics
+    /// - If the config file cannot be read.
+    /// - If the config file is not valid YAML.
+    /// - If the config file does not contain the required fields.
+    /// - If the config file contains invalid values.
+    /// - If the environment variables contain invalid values.
+    /// # Notes
+    /// The default location is the current working directory, with the filename chroma_config.yaml.
+    /// The environment variables are prefixed with CHROMA_ and are uppercase.
+    /// Values in the envionment variables take precedence over values in the YAML file.
+    pub fn load() -> Self {
+        Self::load_from_path(DEFAULT_CONFIG_PATH)
+    }
+
+    /// # Description
+    /// Load the config from a specific location.
+    /// # Arguments
+    /// - path: The path to the config file.
+    /// # Returns
+    /// The config object.
+    /// # Panics
+    /// - If the config file cannot be read.
+    /// - If the config file is not valid YAML.
+    /// - If the config file does not contain the required fields.
+    /// - If the config file contains invalid values.
+    /// - If the environment variables contain invalid values.
+    /// # Notes
+    /// The environment variables are prefixed with CHROMA_ and are uppercase.
+    /// Values in the envionment variables take precedence over values in the YAML file.
+    // NOTE:  Copied to ../load/src/config.rs.
+    pub fn load_from_path(path: &str) -> Self {
+        // Unfortunately, figment doesn't support environment variables with underscores. So we have to map and replace them.
+        // Excluding our own environment variables, which are prefixed with CHROMA_.
+        let mut f = figment::Figment::from(Env::prefixed("CHROMA_").map(|k| match k {
+            k if k == "my_member_id" => k.into(),
+            k => k.as_str().replace("__", ".").into(),
+        }));
+        if std::path::Path::new(path).exists() {
+            f = figment::Figment::from(Yaml::file(path)).merge(f);
+        }
+        // Apply defaults - this seems to be the best way to do it.
+        // https://github.com/SergioBenitez/Figment/issues/77#issuecomment-1642490298
+        // f = f.join(Serialized::default(
+        //     "worker.num_indexing_threads",
+        //     num_cpus::get(),
+        // ));
+        let res = f.extract();
+        match res {
+            Ok(config) => config,
+            Err(e) => panic!("Error loading config: {}", e),
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct OpenTelemetryConfig {
+    #[serde(default = "default_endpoint")]
     pub endpoint: String,
     #[serde(default = "default_otel_service_name")]
     pub service_name: String,

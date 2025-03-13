@@ -1633,6 +1633,7 @@ dependencies = [
  "chroma-system",
  "chroma-tracing",
  "chroma-types",
+ "figment",
  "futures",
  "opentelemetry",
  "parquet",
