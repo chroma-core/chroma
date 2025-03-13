@@ -39,11 +39,17 @@ pub struct LogReader { ...  }
 
 impl LogReader {
     pub async fn open(options: LogReaderOptions) -> Result<Self, Error>;
-    pub async fn read(
+
+    pub async fn scan(
         self: &Self,
         from: LogPosition,
         limits: Limits,
-    ) -> Result<(LogPosition, Vec<Message>), Error>;
+    ) -> Result<(LogPosition, Path), Error>;
+
+    pub async fn fetch(
+        self: &Self,
+        path: &str,
+    ) -> Result<Vec<u8>, Error>;
 }
 ```
 
