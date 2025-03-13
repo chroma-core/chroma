@@ -15,6 +15,7 @@
     "stripInternal": true,
     "paths": {
       "@internal/chromadb-core": ["../chromadb-core/src"]
-    }
+    },
+    "resolveJsonModule": true
   }
 }

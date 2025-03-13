@@ -12,6 +12,7 @@
     "allowSyntheticDefaultImports": true,
     "moduleResolution": "Node",
     "forceConsistentCasingInFileNames": true,
-    "stripInternal": true
+    "stripInternal": true,
+    "resolveJsonModule": true
   }
 }

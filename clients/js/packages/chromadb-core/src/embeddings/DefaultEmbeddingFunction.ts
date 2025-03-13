@@ -1,3 +1,4 @@
+import { validateConfigSchema } from "../schemas/schemaUtils";
 import { isBrowser } from "../utils";
 import { IEmbeddingFunction } from "./IEmbeddingFunction";
 
@@ -96,6 +97,10 @@ export class DefaultEmbeddingFunction implements IEmbeddingFunction {
         "DefaultEmbeddingFunction model_name cannot be changed after initialization.",
       );
     }
+  }
+
+  validateConfig(config: StoredConfig): void {
+    validateConfigSchema(config, "transformers");
   }
 
   private async loadClient() {
