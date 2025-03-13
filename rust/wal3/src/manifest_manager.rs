@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 use chroma_storage::{ETag, Storage};
 use setsum::Setsum;
@@ -220,16 +220,8 @@ impl ManifestManager {
 
     /// Assign a timestamp to a record.
     pub fn assign_timestamp(&self, record_count: usize) -> Option<(FragmentSeqNo, LogPosition)> {
-        let epoch_micros = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap_or(Duration::ZERO)
-            .as_micros() as u64;
         // SAFETY(rescrv):  Mutex poisoning.
         let mut staging = self.staging.lock().unwrap();
-        // Advance time.
-        if staging.next_log_position.timestamp_us < epoch_micros {
-            staging.next_log_position.timestamp_us = epoch_micros;
-        }
         // Steal the offset.
         let position = staging.next_log_position;
         // Advance the offset for the next assign_timestamp call.
@@ -480,8 +472,8 @@ mod tests {
                     path: "path2".to_string(),
                     seq_no: FragmentSeqNo(2),
                     num_bytes: 20,
-                    start: LogPosition::uni(22),
-                    limit: LogPosition::uni(42),
+                    start: LogPosition::from_offset(22),
+                    limit: LogPosition::from_offset(42),
                     setsum: Setsum::default(),
                 },
                 d1_tx,
@@ -501,8 +493,8 @@ mod tests {
                     path: "path1".to_string(),
                     seq_no: FragmentSeqNo(1),
                     num_bytes: 30,
-                    start: LogPosition::uni(1),
-                    limit: LogPosition::uni(22),
+                    start: LogPosition::from_offset(1),
+                    limit: LogPosition::from_offset(22),
                     setsum: Setsum::default(),
                 },
                 d2_tx,
@@ -545,16 +537,16 @@ mod tests {
                         path: "path1".to_string(),
                         seq_no: FragmentSeqNo(1),
                         num_bytes: 30,
-                        start: LogPosition::uni(1),
-                        limit: LogPosition::uni(22),
+                        start: LogPosition::from_offset(1),
+                        limit: LogPosition::from_offset(22),
                         setsum: Setsum::default(),
                     },
                     Fragment {
                         path: "path2".to_string(),
                         seq_no: FragmentSeqNo(2),
                         num_bytes: 20,
-                        start: LogPosition::uni(22),
-                        limit: LogPosition::uni(42),
+                        start: LogPosition::from_offset(22),
+                        limit: LogPosition::from_offset(42),
                         setsum: Setsum::default(),
                     }
                 ],
@@ -594,8 +586,8 @@ mod tests {
                     path: "path2".to_string(),
                     seq_no: FragmentSeqNo(2),
                     num_bytes: 20,
-                    start: LogPosition::uni(22),
-                    limit: LogPosition::uni(42),
+                    start: LogPosition::from_offset(22),
+                    limit: LogPosition::from_offset(42),
                     setsum: Setsum::default(),
                 },
                 d1_tx,
@@ -615,8 +607,8 @@ mod tests {
                     path: "path1".to_string(),
                     seq_no: FragmentSeqNo(1),
                     num_bytes: 30,
-                    start: LogPosition::uni(1),
-                    limit: LogPosition::uni(22),
+                    start: LogPosition::from_offset(1),
+                    limit: LogPosition::from_offset(22),
                     setsum: Setsum::default(),
                 },
                 d2_tx,
@@ -638,16 +630,16 @@ mod tests {
                         path: "path1".to_string(),
                         seq_no: FragmentSeqNo(1),
                         num_bytes: 30,
-                        start: LogPosition::uni(1),
-                        limit: LogPosition::uni(22),
+                        start: LogPosition::from_offset(1),
+                        limit: LogPosition::from_offset(22),
                         setsum: Setsum::default(),
                     },
                     Fragment {
                         path: "path2".to_string(),
                         seq_no: FragmentSeqNo(2),
                         num_bytes: 20,
-                        start: LogPosition::uni(22),
-                        limit: LogPosition::uni(42),
+                        start: LogPosition::from_offset(22),
+                        limit: LogPosition::from_offset(42),
                         setsum: Setsum::default(),
                     }
                 ],
