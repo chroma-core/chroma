@@ -12,9 +12,9 @@ use chroma_index::spann::utils::rng_query;
 use chroma_index::spann::utils::RngQueryError;
 use chroma_index::IndexUuid;
 use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::SpannIndexWriter};
-use chroma_types::SpannConfiguration;
 use chroma_types::DistributedSpannParametersFromSegmentError;
 use chroma_types::SegmentUuid;
+use chroma_types::SpannConfiguration;
 use chroma_types::{MaterializedLogOperation, Segment, SegmentScope, SegmentType};
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -526,8 +526,8 @@ mod test {
     use chroma_index::{hnsw_provider::HnswIndexProvider, Index};
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{
-        Chunk, CollectionUuid, SpannConfiguration, LogRecord, Operation, OperationRecord,
-        SegmentUuid, SpannPostingList,
+        Chunk, CollectionUuid, LogRecord, Operation, OperationRecord, SegmentUuid,
+        SpannConfiguration, SpannPostingList,
     };
 
     use crate::{
@@ -654,10 +654,7 @@ mod test {
         .await
         .expect("Error creating spann segment writer");
         assert_eq!(spann_writer.index.dimensionality, 3);
-        assert_eq!(
-            spann_writer.index.params,
-            SpannConfiguration::default()
-        );
+        assert_eq!(spann_writer.index.params, SpannConfiguration::default());
         // Next head id should be 2 since one centroid is already taken up.
         assert_eq!(
             spann_writer

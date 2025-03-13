@@ -11,8 +11,7 @@ use chroma_system::{
     PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::{
-    CollectionAndSegments, DistributedHnswParameters, SpannConfiguration, Segment,
-    SegmentType,
+    CollectionAndSegments, DistributedHnswParameters, Segment, SegmentType, SpannConfiguration,
 };
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
