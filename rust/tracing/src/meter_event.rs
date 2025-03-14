@@ -6,14 +6,14 @@ use serde::{Deserialize, Serialize};
 use tracing::Span;
 use uuid::Uuid;
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub enum ReadAction {
     Count,
     Get,
     Query,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub enum WriteAction {
     Add,
     Delete,
