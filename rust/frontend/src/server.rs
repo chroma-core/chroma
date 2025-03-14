@@ -11,14 +11,15 @@ use chroma_types::{
     CollectionUuid, CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
     CreateCollectionRequest, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest,
     CreateTenantResponse, DeleteCollectionRecordsResponse, DeleteDatabaseRequest,
-    DeleteDatabaseResponse, DistributedIndexType, GetCollectionRequest, GetDatabaseRequest,
-    GetDatabaseResponse, GetRequest, GetResponse, GetTenantRequest, GetTenantResponse,
-    GetUserIdentityResponse, HeartbeatResponse, IncludeList, ListCollectionsRequest,
-    ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest,
-    QueryResponse, UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateMetadata,
-    UpsertCollectionRecordsResponse,
+    DeleteDatabaseResponse, EmbeddingFunctionConfiguration, GetCollectionRequest,
+    GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantRequest,
+    GetTenantResponse, GetUserIdentityResponse, HeartbeatResponse, HnswConfiguration, IncludeList,
+    ListCollectionsRequest, ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse,
+    Metadata, QueryRequest, QueryResponse, SpannConfiguration, UpdateCollectionRecordsResponse,
+    UpdateCollectionResponse, UpdateMetadata, UpsertCollectionRecordsResponse,
+    VectorIndexConfiguration,
 };
-use chroma_types::{DistributedIndexTypeParam, RawWhereFields};
+use chroma_types::{CollectionConfiguration, RawWhereFields};
 use mdac::{Rule, Scorecard, ScorecardTicket};
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Meter};
@@ -29,6 +30,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
+use thiserror::Error;
 use tokio::{select, signal};
 use tower_http::cors::CorsLayer;
 use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityScheme};
@@ -817,10 +819,45 @@ async fn count_collections(
     Ok(Json(server.frontend.count_collections(request).await?))
 }
 
+#[derive(Debug, Error)]
+pub enum CollectionConfigurationPayloadToConfigurationError {
+    #[error("Multiple vector index configurations provided")]
+    MultipleVectorIndexConfigurations,
+}
+
+#[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
+pub struct CollectionConfigurationPayload {
+    hnsw: Option<HnswConfiguration>,
+    spann: Option<SpannConfiguration>,
+    embedding_function: Option<EmbeddingFunctionConfiguration>,
+}
+
+impl TryFrom<CollectionConfigurationPayload> for CollectionConfiguration {
+    type Error = CollectionConfigurationPayloadToConfigurationError;
+
+    fn try_from(value: CollectionConfigurationPayload) -> Result<Self, Self::Error> {
+        match (value.hnsw, value.spann) {
+            (Some(_), Some(_)) => Err(CollectionConfigurationPayloadToConfigurationError::MultipleVectorIndexConfigurations),
+            (Some(hnsw), None) => Ok(CollectionConfiguration {
+                vector_index: hnsw.into(),
+                embedding_function: value.embedding_function,
+            }),
+            (None, Some(spann)) => Ok(CollectionConfiguration {
+                vector_index: spann.into(),
+                embedding_function: value.embedding_function,
+            }),
+            (None, None) => Ok(CollectionConfiguration {
+                vector_index: HnswConfiguration::default().into(),
+                embedding_function: value.embedding_function,
+            }),
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
 pub struct CreateCollectionPayload {
     pub name: String,
-    pub configuration: Option<serde_json::Value>,
+    pub configuration: Option<CollectionConfigurationPayload>,
     pub metadata: Option<Metadata>,
     #[serde(default)]
     pub get_or_create: bool,
@@ -874,17 +911,30 @@ async fn create_collection(
         "op:create_collection",
         format!("tenant:{}", tenant).as_str(),
     ]);
-    let index_type = DistributedIndexTypeParam::try_from(&payload.metadata)?;
-    // spann index not allowed.
-    if index_type.index_type == DistributedIndexType::Spann && !server.config.enable_span_indexing {
-        return Err(ValidationError::SpannNotImplemented)?;
+
+    let configuration = payload
+        .configuration
+        .map(CollectionConfiguration::try_from)
+        .transpose()
+        .map_err(ValidationError::ParseCollectionConfiguration)?;
+
+    if let Some(configuration) = configuration.as_ref() {
+        if !server.config.enable_span_indexing
+            && matches!(
+                configuration.vector_index,
+                VectorIndexConfiguration::Spann(_)
+            )
+        {
+            return Err(ValidationError::SpannNotImplemented)?;
+        }
     }
+
     let request = CreateCollectionRequest::try_new(
         tenant,
         database,
         payload.name,
         payload.metadata,
-        payload.configuration,
+        configuration,
         payload.get_or_create,
     )?;
     let collection = server.frontend.create_collection(request).await?;

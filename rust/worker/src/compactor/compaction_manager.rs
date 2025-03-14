@@ -363,8 +363,8 @@ mod tests {
     use chroma_storage::local::LocalStorage;
     use chroma_sysdb::TestSysDb;
     use chroma_system::{Dispatcher, DispatcherConfig};
-    use chroma_types::SegmentUuid;
     use chroma_types::{Collection, LogRecord, Operation, OperationRecord, Segment};
+    use chroma_types::{CollectionConfiguration, SegmentUuid};
     use std::collections::HashMap;
     use std::path::PathBuf;
 
@@ -384,6 +384,7 @@ mod tests {
             .dimension(1)
             .tenant(tenant_1.clone())
             .database("database_1".to_string())
+            .config(CollectionConfiguration::default_hnsw())
             .log_position(-1)
             .build();
 
@@ -415,6 +416,7 @@ mod tests {
             .dimension(1)
             .tenant(tenant_2.clone())
             .database("database_2".to_string())
+            .config(CollectionConfiguration::default_hnsw())
             .log_position(-1)
             .build();
 
@@ -440,7 +442,6 @@ mod tests {
         );
 
         let mut sysdb = SysDb::Test(TestSysDb::new());
-
         match sysdb {
             SysDb::Test(ref mut sysdb) => {
                 sysdb.add_collection(collection_1);

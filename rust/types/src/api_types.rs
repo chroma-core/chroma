@@ -1,8 +1,10 @@
+use crate::collection_configuration::CollectionConfiguration;
 use crate::error::QueryConversionError;
 use crate::operator::GetResult;
 use crate::operator::KnnBatchResult;
 use crate::operator::KnnProjectionRecord;
 use crate::operator::ProjectionRecord;
+use crate::plan::PlanToProtoError;
 use crate::validators::{
     validate_name, validate_non_empty_collection_update_metadata, validate_non_empty_metadata,
 };
@@ -21,7 +23,6 @@ use chroma_error::ChromaValidationError;
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json::Value;
 use std::time::SystemTimeError;
 use thiserror::Error;
 use tonic::Status;
@@ -542,7 +543,7 @@ pub struct CreateCollectionRequest {
     pub name: String,
     #[validate(custom(function = "validate_non_empty_metadata"))]
     pub metadata: Option<Metadata>,
-    pub configuration_json: Option<Value>,
+    pub configuration: Option<CollectionConfiguration>,
     pub get_or_create: bool,
 }
 
@@ -552,7 +553,7 @@ impl CreateCollectionRequest {
         database_name: String,
         name: String,
         metadata: Option<Metadata>,
-        configuration_json: Option<Value>,
+        configuration: Option<CollectionConfiguration>,
         get_or_create: bool,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
@@ -560,7 +561,7 @@ impl CreateCollectionRequest {
             database_name,
             name,
             metadata,
-            configuration_json,
+            configuration,
             get_or_create,
         };
         request.validate().map_err(ChromaValidationError::from)?;
@@ -1456,12 +1457,16 @@ pub enum ExecutorError {
     AssignmentError(#[from] AssignmentError),
     #[error("Error converting: {0}")]
     Conversion(#[from] QueryConversionError),
+    #[error("Error converting plan to proto: {0}")]
+    PlanToProto(#[from] PlanToProtoError),
     #[error("Memberlist is empty")]
     EmptyMemberlist,
     #[error(transparent)]
     Grpc(#[from] Status),
     #[error("Inconsistent data")]
     InconsistentData,
+    #[error("Collection is missing HNSW configuration")]
+    CollectionMissingHnswConfiguration,
     #[error("Internal error: {0}")]
     Internal(Box<dyn ChromaError>),
     #[error("No client found for node: {0}")]
@@ -1475,9 +1480,11 @@ impl ChromaError for ExecutorError {
         match self {
             ExecutorError::AssignmentError(_) => ErrorCodes::Internal,
             ExecutorError::Conversion(_) => ErrorCodes::InvalidArgument,
+            ExecutorError::PlanToProto(_) => ErrorCodes::Internal,
             ExecutorError::EmptyMemberlist => ErrorCodes::Internal,
             ExecutorError::Grpc(e) => e.code().into(),
             ExecutorError::InconsistentData => ErrorCodes::Internal,
+            ExecutorError::CollectionMissingHnswConfiguration => ErrorCodes::Internal,
             ExecutorError::Internal(e) => e.code(),
             ExecutorError::NoClientFound(_) => ErrorCodes::Internal,
             ExecutorError::BackfillError => ErrorCodes::Internal,
