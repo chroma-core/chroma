@@ -1,5 +1,6 @@
 from typing import Optional
 
+import chromadb_rust_bindings
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 import typer.rich_utils
@@ -20,20 +21,16 @@ app = typer.Typer()
 utils_app = typer.Typer(short_help="Use maintenance utilities")
 app.add_typer(utils_app, name="utils")
 
-_logo = """
-                \033[38;5;069m(((((((((    \033[38;5;203m(((((\033[38;5;220m####
-             \033[38;5;069m(((((((((((((\033[38;5;203m(((((((((\033[38;5;220m#########
-           \033[38;5;069m(((((((((((((\033[38;5;203m(((((((((((\033[38;5;220m###########
-         \033[38;5;069m((((((((((((((\033[38;5;203m((((((((((((\033[38;5;220m############
-        \033[38;5;069m(((((((((((((\033[38;5;203m((((((((((((((\033[38;5;220m#############
-        \033[38;5;069m(((((((((((((\033[38;5;203m((((((((((((((\033[38;5;220m#############
-         \033[38;5;069m((((((((((((\033[38;5;203m(((((((((((((\033[38;5;220m##############
-         \033[38;5;069m((((((((((((\033[38;5;203m((((((((((((\033[38;5;220m##############
-           \033[38;5;069m((((((((((\033[38;5;203m(((((((((((\033[38;5;220m#############
-             \033[38;5;069m((((((((\033[38;5;203m((((((((\033[38;5;220m##############
-                \033[38;5;069m(((((\033[38;5;203m((((    \033[38;5;220m#########\033[0m
 
-    """
+def build_cli_args(**kwargs):
+    args = []
+    for key, value in kwargs.items():
+        if isinstance(value, bool):
+            if value:
+                args.append(f"--{key}")
+        elif value is not None:
+            args.extend([f"--{key}", str(value)])
+    return args
 
 
 @app.command()  # type: ignore
@@ -44,54 +41,18 @@ def run(
     host: Annotated[
         Optional[str], typer.Option(help="The host to listen to. Default: localhost")
     ] = "localhost",
-    log_path: Annotated[
-        Optional[str], typer.Option(help="The path to the log file.")
-    ] = "chroma.log",
     port: int = typer.Option(8000, help="The port to run the server on."),
     test: bool = typer.Option(False, help="Test mode.", show_envvar=False, hidden=True),
 ) -> None:
     """Run a chroma server"""
-    console = Console()
-
-    print("\033[1m")  # Bold logo
-    print(_logo)
-    print("\033[1m")  # Bold
-    print("Running Chroma")
-    print("\033[0m")  # Reset
-
-    console.print(f"[bold]Saving data to:[/bold] [green]{path}[/green]")
-    console.print(
-        f"[bold]Connect to chroma at:[/bold] [green]http://{host}:{port}[/green]"
-    )
-    console.print(
-        "[bold]Getting started guide[/bold]: [blue]https://docs.trychroma.com/getting-started[/blue]\n\n"
-    )
-
-    # set ENV variable for PERSIST_DIRECTORY to path
-    os.environ["IS_PERSISTENT"] = "True"
-    os.environ["PERSIST_DIRECTORY"] = path
-    os.environ["CHROMA_SERVER_NOFILE"] = "65535"
-    os.environ["CHROMA_CLI"] = "True"
-
-    # get the path where chromadb is installed
-    chromadb_path = os.path.dirname(os.path.realpath(__file__))
-
-    # this is the path of the CLI, we want to move up one directory
-    chromadb_path = os.path.dirname(chromadb_path)
-    log_config = set_log_file_path(f"{chromadb_path}/log_config.yml", f"{log_path}")
-    config = {
-        "app": "chromadb.app:app",
-        "host": host,
-        "port": port,
-        "workers": 1,
-        "log_config": log_config,  # Pass the modified log_config dictionary
-        "timeout_keep_alive": 30,
-    }
-
-    if test:
-        return
-
-    uvicorn.run(**config)
+    cli_args = ["chroma", "run"]
+    cli_args.extend(build_cli_args(
+        path=path,
+        host=host,
+        port=port,
+        test=test
+    ))
+    chromadb_rust_bindings.run_cli(cli_args)
 
 
 @utils_app.command()  # type: ignore
