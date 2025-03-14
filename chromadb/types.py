@@ -149,15 +149,19 @@ class Collection(
     @override
     def from_json(cls, json_map: Dict[str, Any]) -> Self:
         """Deserializes a Collection object from JSON"""
-        # Copy the JSON map so we can modify it
-        params_map = json_map.copy()
-
-        # Get the CollectionConfiguration from the JSON map, and remove it from the map
-        configuration = CollectionConfigurationInternal.from_json(
-            params_map.pop("configuration_json", None)
+        return cls(
+            id=json_map["id"],
+            name=json_map["name"],
+            configuration=CollectionConfigurationInternal.from_json(
+                json_map.get("configuration_json", None)
+            ),
+            metadata=json_map.get("metadata", None),
+            dimension=json_map.get("dimension", None),
+            tenant=json_map["tenant"],
+            database=json_map["database"],
+            version=json_map.get("version", 0),
+            log_position=json_map.get("log_position", 0),
         )
-
-        return cls(configuration=configuration, **params_map)
 
 
 class Database(TypedDict):
@@ -178,9 +182,11 @@ class Segment(TypedDict):
     metadata: Optional[Metadata]
     file_paths: Mapping[str, Sequence[str]]
 
+
 class CollectionAndSegments(TypedDict):
     collection: Collection
     segments: Sequence[Segment]
+
 
 # SeqID can be one of three types of value in our current and future plans:
 # 1. A Pulsar MessageID encoded as a 192-bit integer - This is no longer used as we removed pulsar
