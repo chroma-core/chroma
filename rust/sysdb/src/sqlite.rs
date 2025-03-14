@@ -350,7 +350,7 @@ impl SqliteSysDb {
         name: Option<String>,
         metadata: Option<CollectionMetadataUpdate>,
         dimension: Option<u32>,
-        configuration_json_str: Option<String>,
+        _configuration_json_str: Option<String>,
     ) -> Result<(), UpdateCollectionError> {
         let mut tx = self
             .db
