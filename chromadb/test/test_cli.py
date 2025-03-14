@@ -1,14 +1,14 @@
 import multiprocessing
 import multiprocessing.context
 import os
+import sys
 import time
 from multiprocessing.synchronize import Event
-
-from typer.testing import CliRunner
 
 import chromadb
 from chromadb.api.client import Client
 from chromadb.api.models.Collection import Collection
+from chromadb.cli import cli
 from chromadb.cli.cli import app, build_cli_args
 from chromadb.cli.utils import set_log_file_path
 from chromadb.config import Settings, System
@@ -19,14 +19,13 @@ import numpy as np
 
 from chromadb.test.property import invariants
 
-runner = CliRunner()
-
 def start_app(args: list[str]) -> None:
-    runner.invoke(app, args)
+    sys.argv = args
+    cli.app()
 
 def test_app() -> None:
     kwargs = {"path": "chroma_test_data", "port": 8001}
-    args = ["run"]
+    args = ["chroma", "run"]
     args.extend(build_cli_args(**kwargs))
     print(args)
     server_process = multiprocessing.Process(target=start_app, args=(args,))
