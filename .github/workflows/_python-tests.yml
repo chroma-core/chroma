@@ -173,7 +173,7 @@ jobs:
 
   merge-cluster-logs:
     runs-on: ubuntu-latest
-    needs: test-cluster-integration
+    needs: test-cluster-rust-frontend
     steps:
       - name: Merge
         uses: actions/upload-artifact/merge@v4
