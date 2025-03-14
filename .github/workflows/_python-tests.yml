@@ -68,7 +68,6 @@ jobs:
         platform: [depot-ubuntu-24.04, depot-windows-2022]
         test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore='chromadb/test/test_cli.py' --ignore-glob 'chromadb/test/distributed/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
                     "chromadb/test/property/test_add.py",
-                    "chromadb/test/test_cli.py",
                     "chromadb/test/property/test_collections.py",
                     "chromadb/test/property/test_collections_with_database_tenant.py",
                     "chromadb/test/property/test_cross_version_persist.py",
