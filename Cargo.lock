@@ -1786,6 +1786,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chroma-cache",
+ "chroma-cli",
  "chroma-config",
  "chroma-error",
  "chroma-frontend",

@@ -1,12 +1,15 @@
 import multiprocessing
 import multiprocessing.context
+import os
+import time
 from multiprocessing.synchronize import Event
 
 from typer.testing import CliRunner
 
+import chromadb
 from chromadb.api.client import Client
 from chromadb.api.models.Collection import Collection
-from chromadb.cli.cli import app
+from chromadb.cli.cli import app, build_cli_args
 from chromadb.cli.utils import set_log_file_path
 from chromadb.config import Settings, System
 from chromadb.db.base import get_sql
@@ -18,21 +21,26 @@ from chromadb.test.property import invariants
 
 runner = CliRunner()
 
+def start_app(args: list[str]) -> None:
+    runner.invoke(app, args)
 
 def test_app() -> None:
-    result = runner.invoke(
-        app,
-        [
-            "run",
-            "--path",
-            "chroma_test_data",
-            "--port",
-            "8001",
-            "--test",
-        ],
-    )
-    assert "chroma_test_data" in result.stdout
-    assert "8001" in result.stdout
+    kwargs = {"path": "chroma_test_data", "port": 8001}
+    args = ["run"]
+    args.extend(build_cli_args(**kwargs))
+    print(args)
+    server_process = multiprocessing.Process(target=start_app, args=(args,))
+    server_process.start()
+    time.sleep(5)
+
+    host = os.getenv("CHROMA_SERVER_HOST", kwargs.get("host", "localhost"))
+    port = os.getenv("CHROMA_SERVER_HTTP_PORT", kwargs.get("port", 8000))
+
+    client = chromadb.HttpClient(host=host, port=port)
+    heartbeat = client.heartbeat()
+    server_process.terminate()
+    server_process.join()
+    assert heartbeat > 0
 
 
 def test_utils_set_log_file_path() -> None:
