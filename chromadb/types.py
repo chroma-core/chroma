@@ -160,15 +160,22 @@ class Collection(
     @override
     def from_json(cls, json_map: Dict[str, Any]) -> Self:
         """Deserializes a Collection object from JSON"""
-        # Copy the JSON map so we can modify it
-        params_map = json_map.copy()
 
         # Get the CollectionConfiguration from the JSON map, and remove it from the map
         configuration = load_collection_configuration_from_json(
-            params_map.pop("configuration_json", None)
+            json_map.get("configuration_json", None)
         )
-
-        return cls(configuration=configuration, **params_map)
+        return cls(
+            id=json_map["id"],
+            name=json_map["name"],
+            configuration=configuration,
+            metadata=json_map.get("metadata", None),
+            dimension=json_map.get("dimension", None),
+            tenant=json_map["tenant"],
+            database=json_map["database"],
+            version=json_map.get("version", 0),
+            log_position=json_map.get("log_position", 0),
+        )
 
 
 class Database(TypedDict):

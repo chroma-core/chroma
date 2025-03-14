@@ -1,6 +1,6 @@
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use arrow::array::{ArrayRef, BinaryArray, RecordBatch, UInt64Array};
 use chroma_storage::{PutOptions, Storage, StorageError};
@@ -83,34 +83,41 @@ impl LogWriter {
 
     /// Append a message to a log.
     pub async fn append(&self, message: Vec<u8>) -> Result<LogPosition, Error> {
+        self.append_many(vec![message]).await
+    }
+
+    pub async fn append_many(&self, messages: Vec<Vec<u8>>) -> Result<LogPosition, Error> {
         // SAFETY(rescrv):  Mutex poisoning.
         let inner = { self.inner.lock().unwrap().clone() };
-        if let Some(epoch_writer) = inner {
-            let res = epoch_writer.writer.append(message).await;
-            if matches!(res, Err(Error::LogContention)) {
-                let writer = OnceLogWriter::open(
-                    epoch_writer.writer.options.clone(),
-                    epoch_writer.writer.storage.clone(),
-                    epoch_writer.writer.prefix.clone(),
-                    self.writer.clone(),
-                )
-                .await?;
-                // SAFETY(rescrv):  Mutex poisoning.
-                let mut inner = self.inner.lock().unwrap();
-                if let Some(second) = inner.as_mut() {
-                    if second.epoch == epoch_writer.epoch {
-                        second.epoch += 1;
-                        second.writer = writer;
+        loop {
+            if let Some(ref epoch_writer) = inner {
+                let res = epoch_writer.writer.append(messages.clone()).await;
+                if matches!(res, Err(Error::LogContention)) {
+                    let writer = OnceLogWriter::open(
+                        epoch_writer.writer.options.clone(),
+                        epoch_writer.writer.storage.clone(),
+                        epoch_writer.writer.prefix.clone(),
+                        self.writer.clone(),
+                    )
+                    .await?;
+                    // SAFETY(rescrv):  Mutex poisoning.
+                    let mut inner = self.inner.lock().unwrap();
+                    if let Some(second) = inner.as_mut() {
+                        if second.epoch == epoch_writer.epoch {
+                            second.epoch += 1;
+                            second.writer = writer;
+                        }
+                    } else {
+                        // This should never happen, so just be polite with an error.
+                        return Err(Error::LogClosed);
                     }
                 } else {
-                    // This should never happen, so just be polite with an error.
-                    return Err(Error::LogClosed);
+                    return res;
                 }
+            } else {
+                // This should never happen, so just be polite with an error.
+                return Err(Error::LogClosed);
             }
-            res
-        } else {
-            // This should never happen, so just be polite with an error.
-            Err(Error::LogClosed)
         }
     }
 }
@@ -234,9 +241,9 @@ impl OnceLogWriter {
         Ok(())
     }
 
-    async fn append(self: &Arc<Self>, message: Vec<u8>) -> Result<LogPosition, Error> {
+    async fn append(self: &Arc<Self>, messages: Vec<Vec<u8>>) -> Result<LogPosition, Error> {
         let (tx, rx) = tokio::sync::oneshot::channel();
-        self.batch_manager.push_work(message, tx);
+        self.batch_manager.push_work(messages, tx);
         if let Some((fragment_seq_no, log_position, work)) =
             self.batch_manager.take_work(&self.manifest_manager)?
         {
@@ -255,15 +262,15 @@ impl OnceLogWriter {
         fragment_seq_no: FragmentSeqNo,
         log_position: LogPosition,
         work: Vec<(
-            Vec<u8>,
+            Vec<Vec<u8>>,
             tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
         )>,
     ) {
         let mut messages = Vec::with_capacity(work.len());
         let mut notifies = Vec::with_capacity(work.len());
         for work in work.into_iter() {
-            messages.push(work.0);
-            notifies.push(work.1);
+            notifies.push((work.0.len(), work.1));
+            messages.extend(work.0);
         }
         if messages.is_empty() {
             tracing::error!("somehow got empty messages");
@@ -273,16 +280,16 @@ impl OnceLogWriter {
             .append_batch_internal(fragment_seq_no, log_position, messages)
             .await
         {
-            Ok(log_position) => {
-                for (idx, notify) in notifies.into_iter().enumerate() {
-                    let log_position = log_position + idx;
+            Ok(mut log_position) => {
+                for (num_messages, notify) in notifies.into_iter() {
                     if notify.send(Ok(log_position)).is_err() {
                         // TODO(rescrv):  Counter this.
                     }
+                    log_position += num_messages;
                 }
             }
             Err(e) => {
-                for notify in notifies {
+                for (_, notify) in notifies {
                     if notify.send(Err(e.clone())).is_err() {
                         // TODO(rescrv):  Counter this.
                     }
@@ -312,7 +319,11 @@ impl OnceLogWriter {
             bodies.push(message.as_slice());
         }
         let offsets = positions.iter().map(|p| p.offset).collect::<Vec<_>>();
-        let timestamps_us = positions.iter().map(|p| p.timestamp_us).collect::<Vec<_>>();
+        let epoch_micros = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_micros() as u64;
+        let timestamps_us = vec![epoch_micros; offsets.len()];
         let offsets = UInt64Array::from(offsets);
         let timestamps_us = UInt64Array::from(timestamps_us);
         let bodies = BinaryArray::from(bodies);
