@@ -23,7 +23,7 @@ docker_build(
 )
 
 if config.tilt_subcommand == "ci":
-  custom_build('local:rust-log-service', 'depot build -t $EXPECTED_REF ./rust/log', ['./rust/', './idl/', './Cargo.toml', './Cargo.lock'])
+  custom_build('local:rust-log-service', 'depot build --project 995d7q59th -t $EXPECTED_REF ./rust/log', ['./rust/', './idl/', './Cargo.toml', './Cargo.lock'])
 else:
   docker_build(
     'local:rust-log-service',
