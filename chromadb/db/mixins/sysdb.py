@@ -948,7 +948,8 @@ class SqlSysDB(SqlDB, SysDB):
         hnsw_metadata_params = PersistentHnswParams.extract(metadata or {})
 
         create_collection_config = create_collection_configuration_from_legacy_metadata(
-            existing_create_collection_configuration=None, metadata=hnsw_metadata_params
+            existing_create_collection_configuration=CreateCollectionConfiguration(),
+            metadata=hnsw_metadata_params,
         )
         # Write the configuration into the database
         configuration_json_str = create_collection_configuration_to_json_str(

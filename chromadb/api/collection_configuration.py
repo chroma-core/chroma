@@ -227,7 +227,7 @@ def create_collection_configuration_from_legacy_collection_metadata(
 
 
 def create_collection_configuration_from_legacy_metadata(
-    existing_create_collection_configuration: CreateCollectionConfiguration | None,
+    existing_create_collection_configuration: CreateCollectionConfiguration,
     metadata: Metadata,
 ) -> CreateCollectionConfiguration:
     """Create a CreateCollectionConfiguration from legacy parameters"""
@@ -246,7 +246,7 @@ def create_collection_configuration_from_legacy_metadata(
         if name in old_to_new:
             json_map[old_to_new[name]] = value
 
-    if existing_create_collection_configuration is None:
+    if existing_create_collection_configuration.get("hnsw") is None:
         hnsw_config = json_to_create_hnsw_configuration(json_map)
         hnsw_config = populate_create_hnsw_defaults(hnsw_config)
         validate_create_hnsw_config(hnsw_config)
