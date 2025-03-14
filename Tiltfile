@@ -54,7 +54,7 @@ docker_build(
 )
 
 if config.tilt_subcommand == "ci":
-  custom_build('local:rust-frontend-service', 'depot build -t $EXPECTED_REF ./rust/cli')
+  custom_build('local:rust-frontend-service', 'depot build -t $EXPECTED_REF ./rust/cli', ['./rust/', './idl/', './Cargo.toml', './Cargo.lock'])
 else:
   docker_build(
     'local:rust-frontend-service',
