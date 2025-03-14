@@ -33,7 +33,7 @@ jobs:
                   "chromadb/test/property/test_persist.py",
                   "chromadb/test/property/test_sysdb.py",
                   "chromadb/test/property/test_restart_persist.py",
-                  "chromadb/test/stress"]
+                  ]
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
@@ -180,3 +180,37 @@ jobs:
         with:
           name: cluster_test_logs
           pattern: cluster_logs_*
+
+  test-rust-bindings-stress:
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ${{fromJson(inputs.python_versions)}}
+        platform: [depot-ubuntu-24.04-16, depot-windows-2022-16]
+        test-globs: ["chromadb/test/stress"]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: ./.github/actions/python
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Setup Rust
+        uses: ./.github/actions/rust
+        with:
+          github-token: ${{ github.token }}
+      - name: Build Rust bindings
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          sccache: true
+      - name: Install built wheel
+        shell: bash
+        run: pip install --no-index --find-links target/wheels/ chromadb
+      - name: Test
+        run: python -m pytest ${{ matrix.test-globs }}
+        shell: bash
+        env:
+          PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
+          CHROMA_RUST_BINDINGS_TEST_ONLY: "1"
