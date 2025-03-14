@@ -711,11 +711,15 @@ def overwrite_collection_configuration(
             updated_hnsw_config = overwrite_hnsw_configuration(
                 existing_hnsw_config, new_hnsw_config
             )
+        else:
+            updated_hnsw_config = existing_hnsw_config
     if existing_embedding_function is not None:
         if new_embedding_function is not None:
             updated_embedding_function = overwrite_embedding_function(
                 existing_embedding_function, new_embedding_function
             )
+        else:
+            updated_embedding_function = existing_embedding_function
     return CollectionConfiguration(
         hnsw=updated_hnsw_config, embedding_function=updated_embedding_function
     )
