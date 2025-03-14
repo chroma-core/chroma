@@ -9,7 +9,7 @@ import chromadb
 from chromadb.api.client import Client
 from chromadb.api.models.Collection import Collection
 from chromadb.cli import cli
-from chromadb.cli.cli import app, build_cli_args
+from chromadb.cli.cli import build_cli_args
 from chromadb.cli.utils import set_log_file_path
 from chromadb.config import Settings, System
 from chromadb.db.base import get_sql
@@ -77,12 +77,8 @@ def test_vacuum(sqlite_persistent: System) -> None:
         cur.execute(sql, params)
         assert cur.fetchall() == []
 
-    result = runner.invoke(
-        app,
-        ["utils", "vacuum", "--path", system.settings.persist_directory],
-        input="y\n",
-    )
-    assert result.exit_code == 0
+    sys.argv = ["chroma", "vacuum", "--path", system.settings.persist_directory, "--force"]
+    cli.app()
 
     # Maintenance log should have a vacuum entry
     with sqlite.tx() as cur:
@@ -120,7 +116,7 @@ def simulate_transactional_write(
     system.stop()
 
 
-def test_vacuum_errors_if_locked(sqlite_persistent: System) -> None:
+def test_vacuum_errors_if_locked(sqlite_persistent: System, capfd) -> None:
     """Vacuum command should fail with details if there is a long-lived lock on the database."""
     ctx = multiprocessing.get_context("spawn")
     ready_event = ctx.Event()
@@ -133,19 +129,10 @@ def test_vacuum_errors_if_locked(sqlite_persistent: System) -> None:
     ready_event.wait()
 
     try:
-        result = runner.invoke(
-            app,
-            [
-                "utils",
-                "vacuum",
-                "--path",
-                sqlite_persistent.settings.persist_directory,
-                "--force",
-            ],
-            env={"CHROMA_API_IMPL": "chromadb.api.segment.SegmentAPI"},
-        )
-        assert result.exit_code == 1
-        assert "database is locked" in result.stdout
+        sys.argv = ["chroma", "vacuum", "--path", sqlite_persistent.settings.persist_directory, "--force"]
+        cli.app()
+        captured = capfd.readouterr()
+        assert "Failed to vacuum Chroma" in captured.err.strip()
     finally:
         shutdown_event.set()
         process.join()
