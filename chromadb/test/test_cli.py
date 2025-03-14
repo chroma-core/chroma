@@ -1,5 +1,6 @@
 import multiprocessing
 import multiprocessing.context
+import os
 import time
 from multiprocessing.synchronize import Event
 
@@ -31,7 +32,11 @@ def test_app() -> None:
     server_process = multiprocessing.Process(target=start_app, args=(args,))
     server_process.start()
     time.sleep(5)
-    client = chromadb.HttpClient(host=kwargs.get("host", "localhost"), port=kwargs.get("port", 8000))
+
+    host = os.getenv("CHROMA_SERVER_HOST", kwargs.get("host", "localhost"))
+    port = os.getenv("CHROMA_SERVER_HTTP_PORT", kwargs.get("port", 8000))
+
+    client = chromadb.HttpClient(host=host, port=port)
     heartbeat = client.heartbeat()
     server_process.terminate()
     server_process.join()
