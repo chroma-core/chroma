@@ -1,7 +1,6 @@
 #![doc = include_str!("../README.md")]
 
 use std::sync::Arc;
-use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 use setsum::Setsum;
@@ -102,39 +101,12 @@ pub struct LogPosition {
     /// The offset field of a LogPosition is a strictly increasing timestamp.  It has no gaps and
     /// spans [0, u64::MAX).
     offset: u64,
-    /// The timestamp_us field of a LogPosition is a strictly increasing timestamp.  It has gaps
-    /// and corresponds to wallclock time.
-    timestamp_us: u64,
 }
 
 impl LogPosition {
     /// Create a new log position from offset and current time.
     pub fn from_offset(offset: u64) -> Self {
-        let timestamp_us = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .expect("wal3 won't work before 1970")
-            .as_micros() as u64;
-        LogPosition {
-            offset,
-            timestamp_us,
-        }
-    }
-
-    /// Create a new offset and timestamp.
-    pub fn new(offset: u64, timestamp_us: u64) -> Self {
-        LogPosition {
-            offset,
-            timestamp_us,
-        }
-    }
-
-    #[cfg(test)]
-    pub fn uni(offset: u64) -> Self {
-        let timestamp_us = offset;
-        LogPosition {
-            offset,
-            timestamp_us,
-        }
+        LogPosition { offset }
     }
 
     /// The offset of the LogPosition.
@@ -142,19 +114,9 @@ impl LogPosition {
         self.offset
     }
 
-    /// The timestamp of the LogPosition.
-    pub fn timestamp_us(&self) -> u64 {
-        self.timestamp_us
-    }
-
     /// True iff this contains offset.
     pub fn contains_offset(start: LogPosition, end: LogPosition, offset: u64) -> bool {
         start.offset <= offset && offset < end.offset
-    }
-
-    /// True iff this contains timestamp.
-    pub fn contains_timestamp(start: LogPosition, end: LogPosition, timestamp: u64) -> bool {
-        start.offset <= timestamp && timestamp < end.offset
     }
 }
 
@@ -164,7 +126,6 @@ impl std::ops::Add<usize> for LogPosition {
     fn add(self, rhs: usize) -> Self::Output {
         LogPosition {
             offset: self.offset.wrapping_add(rhs as u64),
-            timestamp_us: self.timestamp_us.wrapping_add(rhs as u64),
         }
     }
 }

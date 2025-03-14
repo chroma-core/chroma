@@ -1,6 +1,6 @@
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use arrow::array::{ArrayRef, BinaryArray, RecordBatch, UInt64Array};
 use chroma_storage::{PutOptions, Storage, StorageError};
@@ -319,7 +319,11 @@ impl OnceLogWriter {
             bodies.push(message.as_slice());
         }
         let offsets = positions.iter().map(|p| p.offset).collect::<Vec<_>>();
-        let timestamps_us = positions.iter().map(|p| p.timestamp_us).collect::<Vec<_>>();
+        let epoch_micros = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_micros() as u64;
+        let timestamps_us = vec![epoch_micros; offsets.len()];
         let offsets = UInt64Array::from(offsets);
         let timestamps_us = UInt64Array::from(timestamps_us);
         let bodies = BinaryArray::from(bodies);
