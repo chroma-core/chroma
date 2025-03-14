@@ -66,7 +66,9 @@ def load_collection_configuration_from_json(
 ) -> CollectionConfiguration:
     if json_map.get("hnsw") is None:
         if json_map.get("embedding_function") is None:
-            return CollectionConfiguration()
+            return CollectionConfiguration(
+                hnsw=default_create_hnsw_configuration(),
+            )
         else:
             if json_map["embedding_function"]["type"] == "legacy":
                 warnings.warn(

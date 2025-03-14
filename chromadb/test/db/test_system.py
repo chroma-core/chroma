@@ -470,11 +470,12 @@ def test_get_or_create_collection(sysdb: SysDB) -> None:
         metadata=collection["metadata"],
     )
     assert result == collection
+    print("PASSED HERE 1")
 
     # Only one collection with the same name exists
     get_result = sysdb.get_collections(name=collection["name"])
     assert get_result == [collection]
-
+    print("PASSED HERE 2")
     # get_or_create = True creates new collection
     result, created = sysdb.create_collection(
         name=sample_collections[1].name,
@@ -494,7 +495,7 @@ def test_get_or_create_collection(sysdb: SysDB) -> None:
         metadata=sample_collections[1]["metadata"],
     )
     assert result == sample_collections[1]
-
+    print("PASSED HERE 3")
     # get_or_create = False creates new collection
     result, created = sysdb.create_collection(
         name=sample_collections[2].name,
@@ -514,7 +515,7 @@ def test_get_or_create_collection(sysdb: SysDB) -> None:
         metadata=sample_collections[2]["metadata"],
     )
     assert result == sample_collections[2]
-
+    print("PASSED HERE 4")
     # get_or_create = False fails if collection already exists
     with pytest.raises(UniqueConstraintError):
         sysdb.create_collection(
@@ -561,7 +562,7 @@ def test_get_or_create_collection(sysdb: SysDB) -> None:
 
     assert result["metadata"] != overlayed_metadata
     assert result["metadata"] == sample_collections[2]["metadata"]
-
+    print("PASSED HERE 5")
     # get_or_create = True with None metadata does not overwrite metadata
     result, created = sysdb.create_collection(
         name=sample_collections[2].name,
@@ -572,6 +573,7 @@ def test_get_or_create_collection(sysdb: SysDB) -> None:
         metadata=None,
     )
     assert result["metadata"] == sample_collections[2]["metadata"]
+    print("PASSED HERE 6")
 
 
 def test_create_get_delete_database_and_collection(sysdb: SysDB) -> None:

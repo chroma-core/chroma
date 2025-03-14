@@ -782,12 +782,13 @@ class SqlSysDB(SqlDB, SysDB):
             else:
                 if metadata != Unspecified():
                     metadata = cast(UpdateMetadata, metadata)
-                    update_configuration = (
-                        update_collection_configuration_from_legacy_update_metadata(
-                            metadata
+                    if metadata is not None:
+                        update_configuration = (
+                            update_collection_configuration_from_legacy_update_metadata(
+                                metadata
+                            )
                         )
-                    )
-                    self._update_config_json_str(cur, update_configuration, id)
+                        self._update_config_json_str(cur, update_configuration, id)
 
     def _update_config_json_str(
         self, cur: Cursor, update_configuration: UpdateCollectionConfiguration, id: UUID

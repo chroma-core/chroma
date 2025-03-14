@@ -22,7 +22,7 @@ use chroma_types::{
     ListCollectionsRequest, ListDatabasesRequest, Metadata, QueryResponse, UpdateCollectionRequest,
     UpdateMetadata,
 };
-use pyo3::{exceptions::PyValueError, pyclass, pymethods, types::PyAnyMethods, PyObject, Python};
+use pyo3::{exceptions::PyValueError, pyclass, pymethods, types::PyAnyMethods, Python};
 use std::time::SystemTime;
 
 const DEFAULT_DATABASE: &str = "default_database";
@@ -228,30 +228,24 @@ impl Bindings {
 
     #[allow(clippy::too_many_arguments)]
     #[pyo3(
-        signature = (name, configuration, metadata = None, get_or_create = false, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
+        signature = (name, configuration_json_str, metadata = None, get_or_create = false, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
     )]
     fn create_collection(
         &self,
         name: String,
-        configuration: Option<PyObject>,
+        configuration_json_str: Option<String>,
         metadata: Option<Metadata>,
         get_or_create: bool,
         tenant: String,
         database: String,
-        py: Python<'_>,
     ) -> ChromaPyResult<Collection> {
-        let configuration_json = match configuration {
-            Some(configuration) => {
-                let configuration_json_str = configuration
-                    .call_method0(py, "to_json_str")
-                    .map_err(WrappedPyErr)?
-                    .extract::<String>(py)
-                    .map_err(WrappedPyErr)?;
-
-                Some(
+        let configuration_json = match configuration_json_str {
+            Some(configuration_json_str) => {
+                let configuration_json =
                     serde_json::from_str::<serde_json::Value>(&configuration_json_str)
-                        .map_err(WrappedSerdeJsonError)?,
-                )
+                        .map_err(WrappedSerdeJsonError)?;
+
+                Some(configuration_json)
             }
             None => None,
         };
@@ -288,13 +282,14 @@ impl Bindings {
     }
 
     #[pyo3(
-        signature = (collection_id, new_name = None, new_metadata = None)
+        signature = (collection_id, new_name = None, new_metadata = None, new_configuration_json_str = None)
     )]
     fn update_collection(
         &self,
         collection_id: String,
         new_name: Option<String>,
         new_metadata: Option<UpdateMetadata>,
+        new_configuration_json_str: Option<String>,
     ) -> ChromaPyResult<()> {
         let collection_id = chroma_types::CollectionUuid(
             uuid::Uuid::parse_str(&collection_id).map_err(WrappedUuidError)?,
@@ -304,7 +299,7 @@ impl Bindings {
             collection_id,
             new_name,
             new_metadata.map(CollectionMetadataUpdate::UpdateMetadata),
-            None, // TODO: @jai add configuration_json_str here
+            new_configuration_json_str,
         )?;
 
         let mut frontend = self.frontend.clone();

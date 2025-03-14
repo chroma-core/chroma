@@ -12,7 +12,12 @@ from chromadb import (
     URIs,
 )
 from chromadb.api import ServerAPI
-from chromadb.api.collection_configuration import CreateCollectionConfiguration, UpdateCollectionConfiguration
+from chromadb.api.collection_configuration import (
+    CreateCollectionConfiguration,
+    UpdateCollectionConfiguration,
+    create_collection_configuration_to_json_str,
+    update_collection_configuration_to_json_str,
+)
 from chromadb.auth import UserIdentity
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.telemetry.product import ProductTelemetryClient
@@ -178,7 +183,7 @@ class RustBindingsAPI(ServerAPI):
             CollectionModel(
                 id=collection.id,
                 name=collection.name,
-                configuration=collection.configuration,  # type: ignore
+                configuration=collection.configuration,
                 metadata=collection.metadata,
                 dimension=collection.dimension,
                 tenant=collection.tenant,
@@ -205,14 +210,20 @@ class RustBindingsAPI(ServerAPI):
                 # embedding_function=embedding_function.__class__.__name__,
             )
         )
+        if configuration:
+            configuration_json_str = create_collection_configuration_to_json_str(
+                configuration
+            )
+        else:
+            configuration_json_str = None
 
         collection = self.bindings.create_collection(
-            name, configuration, metadata, get_or_create, tenant, database
+            name, configuration_json_str, metadata, get_or_create, tenant, database
         )
         collection = CollectionModel(
             id=collection.id,
             name=collection.name,
-            configuration=collection.configuration,  # type: ignore
+            configuration=collection.configuration,
             metadata=collection.metadata,
             dimension=collection.dimension,
             tenant=collection.tenant,
@@ -231,7 +242,7 @@ class RustBindingsAPI(ServerAPI):
         return CollectionModel(
             id=collection.id,
             name=collection.name,
-            configuration=collection.configuration,  # type: ignore
+            configuration=collection.configuration,
             metadata=collection.metadata,
             dimension=collection.dimension,
             tenant=collection.tenant,
@@ -270,7 +281,15 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
-        self.bindings.update_collection(str(id), new_name, new_metadata, new_configuration)
+        if new_configuration:
+            new_configuration_json_str = update_collection_configuration_to_json_str(
+                new_configuration
+            )
+        else:
+            new_configuration_json_str = None
+        self.bindings.update_collection(
+            str(id), new_name, new_metadata, new_configuration_json_str
+        )
 
     @override
     def _count(
