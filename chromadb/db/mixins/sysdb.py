@@ -310,7 +310,7 @@ class SqlSysDB(SqlDB, SysDB):
 
         if metadata:
             configuration = create_collection_configuration_from_legacy_metadata(
-                metadata
+                configuration, metadata
             )
 
         collection = Collection(
@@ -802,7 +802,6 @@ class SqlSysDB(SqlDB, SysDB):
         )
         sql, params = get_sql(q, self.parameter_format())
         row = cur.execute(sql, params).fetchone()
-        print(row)
         if not row:
             raise NotFoundError(f"Collection {id} not found")
         config_json_str = row[0]
@@ -949,7 +948,7 @@ class SqlSysDB(SqlDB, SysDB):
         hnsw_metadata_params = PersistentHnswParams.extract(metadata or {})
 
         create_collection_config = create_collection_configuration_from_legacy_metadata(
-            hnsw_metadata_params
+            existing_create_collection_configuration=None, metadata=hnsw_metadata_params
         )
         # Write the configuration into the database
         configuration_json_str = create_collection_configuration_to_json_str(
