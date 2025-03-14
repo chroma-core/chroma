@@ -1,7 +1,6 @@
 #![doc = include_str!("../README.md")]
 
 use std::sync::Arc;
-use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 use setsum::Setsum;
@@ -38,7 +37,7 @@ pub enum Error {
     GarbageCollected,
     #[error("log contention fails a write")]
     LogContention,
-    #[error("the log is full")]
+    #[error("the log took too long to write")]
     LogWriteTimeout,
     #[error("the log is full")]
     LogFull,
@@ -56,6 +55,27 @@ pub enum Error {
     ParquetError(#[from] Arc<parquet::errors::ParquetError>),
     #[error("storage error: {0}")]
     StorageError(#[from] Arc<chroma_storage::StorageError>),
+}
+
+impl chroma_error::ChromaError for Error {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        match self {
+            Self::Success => chroma_error::ErrorCodes::Success,
+            Self::UninitializedLog => chroma_error::ErrorCodes::FailedPrecondition,
+            Self::AlreadyInitialized => chroma_error::ErrorCodes::AlreadyExists,
+            Self::GarbageCollected => chroma_error::ErrorCodes::NotFound,
+            Self::LogContention => chroma_error::ErrorCodes::Aborted,
+            Self::LogFull => chroma_error::ErrorCodes::Aborted,
+            Self::LogWriteTimeout => chroma_error::ErrorCodes::DeadlineExceeded,
+            Self::LogClosed => chroma_error::ErrorCodes::FailedPrecondition,
+            Self::Internal => chroma_error::ErrorCodes::Internal,
+            Self::CorruptManifest(_) => chroma_error::ErrorCodes::DataLoss,
+            Self::CorruptCursor(_) => chroma_error::ErrorCodes::DataLoss,
+            Self::NoSuchCursor(_) => chroma_error::ErrorCodes::Unknown,
+            Self::ParquetError(_) => chroma_error::ErrorCodes::Unknown,
+            Self::StorageError(storage) => storage.code(),
+        }
+    }
 }
 
 //////////////////////////////////////////// ScrubError ////////////////////////////////////////////
@@ -81,39 +101,12 @@ pub struct LogPosition {
     /// The offset field of a LogPosition is a strictly increasing timestamp.  It has no gaps and
     /// spans [0, u64::MAX).
     offset: u64,
-    /// The timestamp_us field of a LogPosition is a strictly increasing timestamp.  It has gaps
-    /// and corresponds to wallclock time.
-    timestamp_us: u64,
 }
 
 impl LogPosition {
     /// Create a new log position from offset and current time.
     pub fn from_offset(offset: u64) -> Self {
-        let timestamp_us = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .expect("wal3 won't work before 1970")
-            .as_micros() as u64;
-        LogPosition {
-            offset,
-            timestamp_us,
-        }
-    }
-
-    /// Create a new offset and timestamp.
-    pub fn new(offset: u64, timestamp_us: u64) -> Self {
-        LogPosition {
-            offset,
-            timestamp_us,
-        }
-    }
-
-    #[cfg(test)]
-    pub fn uni(offset: u64) -> Self {
-        let timestamp_us = offset;
-        LogPosition {
-            offset,
-            timestamp_us,
-        }
+        LogPosition { offset }
     }
 
     /// The offset of the LogPosition.
@@ -121,19 +114,9 @@ impl LogPosition {
         self.offset
     }
 
-    /// The timestamp of the LogPosition.
-    pub fn timestamp_us(&self) -> u64 {
-        self.timestamp_us
-    }
-
     /// True iff this contains offset.
     pub fn contains_offset(start: LogPosition, end: LogPosition, offset: u64) -> bool {
         start.offset <= offset && offset < end.offset
-    }
-
-    /// True iff this contains timestamp.
-    pub fn contains_timestamp(start: LogPosition, end: LogPosition, timestamp: u64) -> bool {
-        start.offset <= timestamp && timestamp < end.offset
     }
 }
 
@@ -143,7 +126,6 @@ impl std::ops::Add<usize> for LogPosition {
     fn add(self, rhs: usize) -> Self::Output {
         LogPosition {
             offset: self.offset.wrapping_add(rhs as u64),
-            timestamp_us: self.timestamp_us.wrapping_add(rhs as u64),
         }
     }
 }

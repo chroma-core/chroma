@@ -36,7 +36,6 @@ pub struct RunArgs {
         help = "The port to run the server on"
     )]
     port: Option<u16>,
-
     #[clap(long, hide = true)]
     test: Option<bool>,
 }
@@ -90,7 +89,6 @@ fn display_run_message(config: &FrontendServerConfig) {
 
 pub fn run(args: RunArgs) {
     let test = args.test.unwrap_or(false);
-    
     let config = match &args.config_path {
         Some(config_path) => {
             if !std::path::Path::new(config_path).exists() {
@@ -109,7 +107,7 @@ pub fn run(args: RunArgs) {
     };
 
     display_run_message(&config);
-    
+  
     if test {
         return;
     }
