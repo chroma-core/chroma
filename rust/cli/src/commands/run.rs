@@ -36,7 +36,6 @@ pub struct RunArgs {
         help = "The port to run the server on"
     )]
     port: Option<u16>,
-
     #[clap(long, hide = true)]
     test: Option<bool>,
 }
