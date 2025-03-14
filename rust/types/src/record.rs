@@ -52,6 +52,12 @@ pub struct LogRecord {
     pub record: OperationRecord,
 }
 
+impl LogRecord {
+    pub fn size_byte(&self) -> u64 {
+        size_of_val(&self.log_offset) as u64 + self.record.size_byte()
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum RecordConversionError {
     #[error("Invalid UUID")]

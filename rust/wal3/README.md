@@ -39,11 +39,17 @@ pub struct LogReader { ...  }
 
 impl LogReader {
     pub async fn open(options: LogReaderOptions) -> Result<Self, Error>;
-    pub async fn read(
+
+    pub async fn scan(
         self: &Self,
         from: LogPosition,
         limits: Limits,
-    ) -> Result<(LogPosition, Vec<Message>), Error>;
+    ) -> Result<(LogPosition, Path), Error>;
+
+    pub async fn fetch(
+        self: &Self,
+        path: &str,
+    ) -> Result<Vec<u8>, Error>;
 }
 ```
 
@@ -131,12 +137,12 @@ wal3/Manifest/MANIFEST.json
 ```text
 ┌─ Writer ──────────────────────────────────────────────────┐
 │  ┌─────────────────────────────┐  ┌────────────────────┐  │
-│  │ fragment                    │  │ manifest           │  │
+│  │ fragment batch              │  │ manifest           │  │
 │  │ manager                     │  │ manager            │  │
 │  │                             │  │                    │  │
 │  │ - new                       │  │ - new              │  │
 │  │ - push_work                 │  │ - assign_timestamp │  │
-│  │ - take_work                 │  │ - apply_delta      │  │
+│  │ - take_work                 │  │ - apply_fragment   │  │
 │  │ - wait_for_writable         │  │                    │  │
 │  │ - update_average_batch_size │  │                    │  │
 │  │ - finish_write              │  │                    │  │
@@ -153,8 +159,8 @@ The write path is:
     a.  Enqueue and wait for some other task to signal that the work is ready.  Go to 6.
 4.  Flush the work from take_work to object storage.  This will call assign-timestamp on the
     manifest manager.
-5.  The writer creates a delta to the manifest---the new fragment and its setsum---and calls
-    `apply_delta` on the manifest manager.
+5.  The writer creates a change to the manifest---the new fragment and its setsum---and calls
+    `apply_fragment` on the manifest manager.
 6.  The write is durable.
 
 ## Cursoring
@@ -231,8 +237,8 @@ An end-to-end walkthrough of the write path is as follows:
 3.  If there is sufficient work available or sufficient time has passed and there is a fragment that
     can be written to, the writer takes a batch of work from the fragment manager and writes it to a
     single fragment.
-4.  The writer then creates a delta to the manifest and applies it to the manifest manager using
-    `apply_delta`.  Internally, the manifest manager allows deltas to be applied in their
+4.  The writer then creates a change to the manifest and applies it to the manifest manager using
+    `apply_fragment`.  Internally, the manifest manager allows fragments to be applied in their
     appropriate order.  It streams speculative writes to the manifest.
 5.  When there is capacity to write the manifest, the manifest manager writes the manifest to the
     object store.  The write is durable and readable by all readers.

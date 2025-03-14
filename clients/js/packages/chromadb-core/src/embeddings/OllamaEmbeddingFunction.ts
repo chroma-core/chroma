@@ -1,5 +1,5 @@
 import type { IEmbeddingFunction } from "./IEmbeddingFunction";
-
+import { validateConfigSchema } from "../schemas/schemaUtils";
 type StoredConfig = {
   url: string;
   model_name: string;
@@ -82,5 +82,9 @@ export class OllamaEmbeddingFunction implements IEmbeddingFunction {
       url: this.url,
       model_name: this.model,
     };
+  }
+
+  validateConfig(config: StoredConfig): void {
+    validateConfigSchema(config, "ollama");
   }
 }

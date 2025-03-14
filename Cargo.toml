@@ -22,6 +22,7 @@ opentelemetry-otlp = { version = "0.27", features = ["http-proto"] }
 opentelemetry-http = { version = "0.27", features = ["reqwest"] }
 opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
 parking_lot = { version = "0.12.3", features = ["serde"] }
+parquet = "52"
 prost = "0.13"
 prost-types = "0.12"
 roaring = "0.10.6"
@@ -74,6 +75,7 @@ chroma-sysdb = { path = "rust/sysdb" }
 chroma-tracing = { path = "rust/tracing" }
 chroma-types = { path = "rust/types" }
 chroma-sqlite = { path = "rust/sqlite" }
+chroma-cli = { path = "rust/cli" }
 mdac = { path = "rust/mdac" }
 wal3 = { path = "rust/wal3" }
 worker = { path = "rust/worker" }

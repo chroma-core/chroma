@@ -6,6 +6,7 @@ from typing import Any, Optional, cast, Tuple, Sequence, Dict
 import logging
 import httpx
 from overrides import override
+from chromadb import __version__
 from chromadb.auth import UserIdentity
 from chromadb.api.async_api import AsyncServerAPI
 from chromadb.api.base_http_client import BaseHTTPClient
@@ -108,6 +109,11 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         if loop_hash not in self._clients:
             headers = (self._settings.chroma_server_headers or {}).copy()
             headers["Content-Type"] = "application/json"
+            headers["User-Agent"] = (
+                "Chroma Python Client v"
+                + __version__
+                + " (https://github.com/chroma-core/chroma)"
+            )
 
             self._clients[loop_hash] = httpx.AsyncClient(
                 timeout=None,

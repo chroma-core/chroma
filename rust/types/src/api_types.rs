@@ -1192,7 +1192,7 @@ impl GetResponse {
 }
 
 impl From<(GetResult, IncludeList)> for GetResponse {
-    fn from((result_vec, IncludeList(include_vec)): (GetResult, IncludeList)) -> Self {
+    fn from((result, IncludeList(include_vec)): (GetResult, IncludeList)) -> Self {
         let mut res = Self {
             ids: Vec::new(),
             embeddings: include_vec
@@ -1212,7 +1212,7 @@ impl From<(GetResult, IncludeList)> for GetResponse {
             document,
             embedding,
             mut metadata,
-        } in result_vec.records
+        } in result.result.records
         {
             res.ids.push(id);
             if let (Some(emb), Some(embeddings)) = (embedding, res.embeddings.as_mut()) {
@@ -1336,7 +1336,7 @@ impl QueryResponse {
 }
 
 impl From<(KnnBatchResult, IncludeList)> for QueryResponse {
-    fn from((result_vec, IncludeList(include_vec)): (KnnBatchResult, IncludeList)) -> Self {
+    fn from((result, IncludeList(include_vec)): (KnnBatchResult, IncludeList)) -> Self {
         let mut res = Self {
             ids: Vec::new(),
             embeddings: include_vec
@@ -1354,7 +1354,7 @@ impl From<(KnnBatchResult, IncludeList)> for QueryResponse {
                 .then_some(Vec::new()),
             include: include_vec,
         };
-        for query_result in result_vec {
+        for query_result in result.results {
             let mut ids = Vec::new();
             let mut embeddings = Vec::new();
             let mut documents = Vec::new();

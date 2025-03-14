@@ -65,7 +65,7 @@ where
     }
 }
 
-type GetOutput = ProjectionOutput;
+type GetOutput = (ProjectionOutput, u64);
 
 type GetResult = Result<GetOutput, GetError>;
 
@@ -320,6 +320,19 @@ impl Handler<TaskResult<ProjectionOutput, ProjectionError>> for GetOrchestrator 
         message: TaskResult<ProjectionOutput, ProjectionError>,
         ctx: &ComponentContext<Self>,
     ) {
-        self.terminate_with_result(message.into_inner().map_err(|e| e.into()), ctx);
+        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+            Some(output) => output,
+            None => return,
+        };
+
+        let fetch_log_size_bytes = self
+            .fetched_logs
+            .as_ref()
+            .expect("FetchLogOperator should have finished already")
+            .iter()
+            .map(|(l, _)| l.size_byte())
+            .sum();
+
+        self.terminate_with_result(Ok((output, fetch_log_size_bytes)), ctx);
     }
 }

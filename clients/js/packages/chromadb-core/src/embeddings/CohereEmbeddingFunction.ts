@@ -2,7 +2,7 @@ import type {
   EmbeddingFunctionSpace,
   IEmbeddingFunction,
 } from "./IEmbeddingFunction";
-
+import { validateConfigSchema } from "../schemas/schemaUtils";
 interface CohereAIAPI {
   createEmbedding: (params: {
     model: string;
@@ -163,6 +163,10 @@ export class CohereEmbeddingFunction implements IEmbeddingFunction {
         "CohereEmbeddingFunction model_name cannot be changed after initialization.",
       );
     }
+  }
+
+  validateConfig(config: StoredConfig): void {
+    validateConfigSchema(config, "cohere");
   }
 
   supportedSpaces(): EmbeddingFunctionSpace[] {

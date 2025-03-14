@@ -107,7 +107,7 @@ impl LocalExecutor {
                     )
                     .await
                     .map_err(|err| ExecutorError::Internal(Box::new(err)))?;
-                for record in &mut result.records {
+                for record in &mut result.result.records {
                     record.embedding = Some(
                         hnsw_reader
                             .get_embedding_by_user_id(&record.id)
@@ -124,23 +124,34 @@ impl LocalExecutor {
         let collection_and_segments = plan.scan.collection_and_segments.clone();
         self.try_backfill_collection(&collection_and_segments)
             .await?;
-        if let Some(dimensionality) = collection_and_segments.collection.dimension {
-            let allowed_user_ids = if plan.filter.where_clause.is_none() {
-                match plan.filter.query_ids {
-                    Some(ids) => {
-                        if ids.is_empty() {
-                            return Ok(vec![Default::default(); plan.knn.embeddings.len()]);
-                        }
-                        ids
-                    }
-                    None => {
-                        vec![]
-                    }
-                }
-            } else {
+
+        let empty_result = Ok(KnnBatchResult {
+            pulled_log_bytes: 0,
+            results: vec![Default::default(); plan.knn.embeddings.len()],
+        });
+
+        let dimensionality = match collection_and_segments.collection.dimension {
+            Some(dim) => dim,
+            None => return empty_result,
+        };
+
+        let allowed_user_ids = match plan.filter {
+            Filter {
+                query_ids: None,
+                where_clause: None,
+            } => Vec::new(),
+            Filter {
+                query_ids: Some(uids),
+                where_clause: _,
+            } if uids.is_empty() => return empty_result,
+            Filter {
+                query_ids: Some(uids),
+                where_clause: None,
+            } => uids,
+            filter => {
                 let filter_plan = Get {
                     scan: plan.scan.clone(),
-                    filter: plan.filter.clone(),
+                    filter: filter.clone(),
                     limit: Default::default(),
                     proj: Default::default(),
                 };
@@ -148,133 +159,133 @@ impl LocalExecutor {
                 let allowed_uids = self
                     .get(filter_plan)
                     .await?
+                    .result
                     .records
                     .into_iter()
                     .map(|record| record.id)
                     .collect::<Vec<_>>();
 
                 if allowed_uids.is_empty() {
-                    return Ok(vec![Default::default(); plan.knn.embeddings.len()]);
+                    return empty_result;
                 }
 
                 allowed_uids
-            };
+            }
+        };
 
-            let hnsw_reader = self
-                .hnsw_manager
-                .get_hnsw_reader(
-                    &collection_and_segments.vector_segment,
-                    dimensionality as usize,
+        let hnsw_reader = self
+            .hnsw_manager
+            .get_hnsw_reader(
+                &collection_and_segments.vector_segment,
+                dimensionality as usize,
+            )
+            .await
+            .map_err(|err| ExecutorError::Internal(Box::new(err)))?;
+
+        let mut allowed_offset_ids = Vec::new();
+        for user_id in allowed_user_ids {
+            let offset_id = hnsw_reader
+                .get_offset_id_by_user_id(&user_id)
+                .await
+                .map_err(|err| ExecutorError::Internal(Box::new(err)))?;
+            allowed_offset_ids.push(offset_id);
+        }
+
+        let distance_function =
+            SingleNodeHnswParameters::try_from(&plan.scan.collection_and_segments.vector_segment)
+                .map_err(|err| ExecutorError::Internal(Box::new(err)))?
+                .space;
+        let mut results = Vec::new();
+        let mut returned_user_ids = Vec::new();
+        for embedding in plan.knn.embeddings {
+            let query_embedding = if let HnswSpace::Cosine = distance_function {
+                normalize(&embedding)
+            } else {
+                embedding
+            };
+            let distances = hnsw_reader
+                .query_embedding(
+                    allowed_offset_ids.as_slice(),
+                    query_embedding,
+                    plan.knn.fetch,
                 )
                 .await
                 .map_err(|err| ExecutorError::Internal(Box::new(err)))?;
 
-            let mut allowed_offset_ids = Vec::new();
-            for user_id in allowed_user_ids {
-                let offset_id = hnsw_reader
-                    .get_offset_id_by_user_id(&user_id)
+            let mut records = Vec::new();
+            for RecordDistance { offset_id, measure } in distances {
+                let user_id = hnsw_reader
+                    .get_user_id_by_offset_id(offset_id)
                     .await
                     .map_err(|err| ExecutorError::Internal(Box::new(err)))?;
-                allowed_offset_ids.push(offset_id);
-            }
-
-            let distance_function = SingleNodeHnswParameters::try_from(
-                &plan.scan.collection_and_segments.vector_segment,
-            )
-            .map_err(|err| ExecutorError::Internal(Box::new(err)))?
-            .space;
-            let mut knn_batch_results = Vec::new();
-            let mut returned_user_ids = Vec::new();
-            for embedding in plan.knn.embeddings {
-                let query_embedding = if let HnswSpace::Cosine = distance_function {
-                    normalize(&embedding)
-                } else {
-                    embedding
-                };
-                let distances = hnsw_reader
-                    .query_embedding(
-                        allowed_offset_ids.as_slice(),
-                        query_embedding,
-                        plan.knn.fetch,
-                    )
-                    .await
-                    .map_err(|err| ExecutorError::Internal(Box::new(err)))?;
-
-                let mut records = Vec::new();
-                for RecordDistance { offset_id, measure } in distances {
-                    let user_id = hnsw_reader
-                        .get_user_id_by_offset_id(offset_id)
-                        .await
-                        .map_err(|err| ExecutorError::Internal(Box::new(err)))?;
-                    returned_user_ids.push(user_id.clone());
-                    let knn_projection = KnnProjectionRecord {
-                        record: ProjectionRecord {
-                            id: user_id,
-                            document: None,
-                            embedding: plan.proj.projection.embedding.then_some(
-                                hnsw_reader
-                                    .get_embedding_by_offset_id(offset_id)
-                                    .await
-                                    .map_err(|err| ExecutorError::Internal(Box::new(err)))?,
-                            ),
-                            metadata: None,
-                        },
-                        distance: plan.proj.distance.then_some(measure),
-                    };
-                    records.push(knn_projection);
-                }
-
-                knn_batch_results.push(KnnProjectionOutput { records });
-            }
-
-            if plan.proj.projection.document || plan.proj.projection.metadata {
-                let projection_plan = Get {
-                    scan: plan.scan,
-                    filter: Filter {
-                        query_ids: Some(returned_user_ids),
-                        where_clause: None,
+                returned_user_ids.push(user_id.clone());
+                let knn_projection = KnnProjectionRecord {
+                    record: ProjectionRecord {
+                        id: user_id,
+                        document: None,
+                        embedding: plan.proj.projection.embedding.then_some(
+                            hnsw_reader
+                                .get_embedding_by_offset_id(offset_id)
+                                .await
+                                .map_err(|err| ExecutorError::Internal(Box::new(err)))?,
+                        ),
+                        metadata: None,
                     },
-                    limit: Default::default(),
-                    proj: Projection {
-                        document: plan.proj.projection.document,
-                        embedding: false,
-                        metadata: plan.proj.projection.metadata,
-                    },
+                    distance: plan.proj.distance.then_some(measure),
                 };
-
-                let hydrated_records = self.get(projection_plan).await?;
-                let mut user_id_to_document = HashMap::new();
-                let mut user_id_to_metadata = HashMap::new();
-                for ProjectionRecord {
-                    id,
-                    document,
-                    embedding: _,
-                    metadata,
-                } in hydrated_records.records
-                {
-                    user_id_to_document.insert(id.clone(), document);
-                    user_id_to_metadata.insert(id, metadata);
-                }
-
-                for result in &mut knn_batch_results {
-                    for record in &mut result.records {
-                        record.record.document = user_id_to_document
-                            .get(&record.record.id)
-                            .cloned()
-                            .flatten();
-                        record.record.metadata = user_id_to_metadata
-                            .get(&record.record.id)
-                            .cloned()
-                            .flatten();
-                    }
-                }
+                records.push(knn_projection);
             }
 
-            Ok(knn_batch_results)
-        } else {
-            // Collection is unintialized
-            Ok(vec![Default::default(); plan.knn.embeddings.len()])
+            results.push(KnnProjectionOutput { records });
         }
+
+        if plan.proj.projection.document || plan.proj.projection.metadata {
+            let projection_plan = Get {
+                scan: plan.scan,
+                filter: Filter {
+                    query_ids: Some(returned_user_ids),
+                    where_clause: None,
+                },
+                limit: Default::default(),
+                proj: Projection {
+                    document: plan.proj.projection.document,
+                    embedding: false,
+                    metadata: plan.proj.projection.metadata,
+                },
+            };
+
+            let hydrated_records = self.get(projection_plan).await?;
+            let mut user_id_to_document = HashMap::new();
+            let mut user_id_to_metadata = HashMap::new();
+            for ProjectionRecord {
+                id,
+                document,
+                embedding: _,
+                metadata,
+            } in hydrated_records.result.records
+            {
+                user_id_to_document.insert(id.clone(), document);
+                user_id_to_metadata.insert(id, metadata);
+            }
+
+            for result in &mut results {
+                for record in &mut result.records {
+                    record.record.document = user_id_to_document
+                        .get(&record.record.id)
+                        .cloned()
+                        .flatten();
+                    record.record.metadata = user_id_to_metadata
+                        .get(&record.record.id)
+                        .cloned()
+                        .flatten();
+                }
+            }
+        }
+
+        Ok(KnnBatchResult {
+            pulled_log_bytes: 0,
+            results,
+        })
     }
 
     pub async fn reset(&mut self) -> Result<(), Box<dyn ChromaError>> {
