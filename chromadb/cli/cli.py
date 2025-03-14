@@ -42,7 +42,6 @@ def run(
         Optional[str], typer.Option(help="The host to listen to. Default: localhost")
     ] = "localhost",
     port: int = typer.Option(8000, help="The port to run the server on."),
-    test: bool = typer.Option(False, help="Test mode.", show_envvar=False, hidden=True),
 ) -> None:
     """Run a chroma server"""
     cli_args = ["chroma", "run"]
@@ -50,9 +49,8 @@ def run(
         path=path,
         host=host,
         port=port,
-        test=test
     ))
-    chromadb_rust_bindings.run_cli(cli_args)
+    chromadb_rust_bindings.cli(cli_args)
 
 
 @utils_app.command()  # type: ignore

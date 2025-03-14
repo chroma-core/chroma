@@ -1,6 +1,7 @@
 mod bindings;
 mod errors;
 
+use crate::bindings::cli;
 use bindings::{Bindings, PythonBindingsConfig};
 use pyo3::prelude::*;
 
@@ -20,6 +21,8 @@ fn chromadb_rust_bindings(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<SqliteDBConfig>()?;
     m.add_class::<MigrationMode>()?;
     m.add_class::<MigrationHash>()?;
+
+    m.add_function(wrap_pyfunction!(cli, m)?)?;
 
     // Log config classes
     // TODO
