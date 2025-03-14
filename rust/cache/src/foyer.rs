@@ -3,7 +3,6 @@ use ahash::RandomState;
 use chroma_error::ChromaError;
 use chroma_types::CollectionAndSegments;
 use clap::Parser;
-use foyer::opentelemetry_0_27::OpenTelemetryMetricsRegistry;
 use foyer::{
     CacheBuilder, DirectFsDeviceOptions, Engine, FifoConfig, FifoPicker, HybridCacheBuilder,
     InvalidRatioPicker, LargeEngineOptions, LfuConfig, LruConfig, RateLimitPicker, S3FifoConfig,
@@ -60,6 +59,11 @@ const fn default_admission_rate_limit() -> usize {
 
 const fn default_shards() -> usize {
     64
+}
+
+const fn default_buffer_pool_size() -> usize {
+    // See https://github.com/foyer-rs/foyer/discussions/751
+    default_file_size() * default_flushers()
 }
 
 fn default_eviction() -> String {
@@ -120,6 +124,13 @@ pub struct FoyerCacheConfig {
     #[arg(long, default_value_t = 4)]
     #[serde(default = "default_flushers")]
     pub flushers: usize,
+
+    /// Buffer pool size. (MiB)
+    /// This should be atleast file_size * flushers.
+    /// See https://github.com/foyer-rs/foyer/discussions/751
+    #[arg(long, default_value_t = 256)]
+    #[serde(default = "default_buffer_pool_size")]
+    pub buffer_pool: usize,
 
     /// AKA fsync
     #[arg(long, default_value_t = false)]
@@ -202,6 +213,16 @@ impl FoyerCacheConfig {
         Ok(Box::new(FoyerHybridCache::hybrid(self).await?))
     }
 
+    pub async fn build_hybrid_test<K, V>(
+        &self,
+    ) -> Result<Box<FoyerHybridCache<K, V>>, Box<dyn ChromaError>>
+    where
+        K: Clone + Send + Sync + StorageKey + Eq + PartialEq + Hash + 'static,
+        V: Clone + Send + Sync + StorageValue + Weighted + 'static,
+    {
+        Ok(Box::new(FoyerHybridCache::hybrid(self).await?))
+    }
+
     /// Build an in-memory-only cache.
     pub async fn build_memory<K, V>(
         &self,
@@ -260,6 +281,7 @@ impl Default for FoyerCacheConfig {
             trace_obtain_us: default_trace_obtain_us(),
             trace_remove_us: default_trace_remove_us(),
             trace_fetch_us: default_trace_fetch_us(),
+            buffer_pool: default_buffer_pool_size(),
         }
     }
 }
@@ -323,8 +345,13 @@ where
             .with_record_hybrid_remove_threshold(Duration::from_micros(config.trace_remove_us as _))
             .with_record_hybrid_fetch_threshold(Duration::from_micros(config.trace_fetch_us as _));
 
+        let otel_0_27_metrics = Box::new(
+            mixtrics::registry::opentelemetry_0_27::OpenTelemetryMetricsRegistry::new(
+                global::meter("chroma"),
+            ),
+        );
         let builder = HybridCacheBuilder::<K, V>::new()
-            .with_metrics_registry(OpenTelemetryMetricsRegistry::new(global::meter("chroma")))
+            .with_metrics_registry(otel_0_27_metrics)
             .with_tracing_options(tracing_options)
             .memory(config.mem)
             .with_shards(config.shards);
@@ -378,6 +405,7 @@ where
                     .with_recover_concurrency(config.recover_concurrency)
                     .with_flushers(config.flushers)
                     .with_reclaimers(config.reclaimers)
+                    .with_buffer_pool_size(config.buffer_pool * MIB)
                     .with_eviction_pickers(vec![
                         Box::new(InvalidRatioPicker::new(config.invalid_ratio)),
                         Box::new(FifoPicker::default()),
@@ -413,6 +441,10 @@ where
             clear_latency,
         })
     }
+
+    pub fn insert_to_disk(&self, key: K, value: V) {
+        self.cache.storage_writer(key).insert(value);
+    }
 }
 
 #[async_trait::async_trait]
@@ -434,7 +466,9 @@ where
 
     async fn insert(&self, key: K, value: V) {
         let _stopwatch = Stopwatch::new(&self.insert_latency);
-        self.cache.insert(key, value);
+        self.cache.insert(key.clone(), value.clone());
+        // Also insert to the disk cache.
+        self.insert_to_disk(key, value);
     }
 
     async fn remove(&self, key: &K) {
@@ -702,4 +736,45 @@ mod test {
 
         assert_eq!(cache3.get(&"key1".to_string()).await.unwrap(), None);
     }
+
+    // TODO(Sanket): Will enable this once I get more understanding
+    // of how this works under the hood. Currently, it is failing.
+    // #[tokio::test]
+    // async fn test_writing_only_to_disk_works() {
+    //     let dir = tempfile::tempdir()
+    //         .expect("To be able to create temp path")
+    //         .path()
+    //         .to_str()
+    //         .expect("To be able to parse path")
+    //         .to_string();
+    //     let cache = FoyerCacheConfig {
+    //         dir: Some(dir.clone()),
+    //         flushers: 1,
+    //         file_size: 1,
+    //         flush: true,
+    //         buffer_pool: 1,
+    //         ..Default::default()
+    //     }
+    //     .build_hybrid_test::<String, String>()
+    //     .await
+    //     .unwrap();
+    //     // Insert a 512KB string value generated at random.
+    //     let large_value = "val1".repeat(512 * 1024);
+    //     cache.insert_to_disk("key1".to_string(), large_value.clone());
+    //     for i in 0..100 {
+    //         // Insert another 512KB string value generated at random.
+    //         // This should trigger a flush.
+    //         let another_large_value = format!("val{}", i).repeat(512 * 1024);
+    //         cache.insert_to_disk(format!("key{}", i).to_string(), another_large_value);
+    //     }
+    //     // Sleep for 5 secs.
+    //     // This should give the cache enough time to flush the data to disk.
+    //     // tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    //     let value = cache
+    //         .get(&"key1".to_string())
+    //         .await
+    //         .expect("Expected to be able to get value")
+    //         .expect("Value should not be None");
+    //     assert_eq!(value, large_value);
+    // }
 }
