@@ -4,7 +4,12 @@ from uuid import UUID
 from overrides import override
 import httpx
 from chromadb.api import AdminAPI, ClientAPI, ServerAPI
-from chromadb.api.collection_configuration import CreateCollectionConfiguration, UpdateCollectionConfiguration, legacy_create_collection_configuration_path
+from chromadb.api.collection_configuration import (
+    CreateCollectionConfiguration,
+    UpdateCollectionConfiguration,
+    legacy_create_collection_configuration_path,
+    load_collection_configuration_from_json,
+)
 from chromadb.api.shared_system_client import SharedSystemClient
 from chromadb.api.types import (
     CollectionMetadata,
@@ -178,6 +183,11 @@ class Client(SharedSystemClient, ClientAPI):
             tenant=self.tenant,
             database=self.database,
         )
+        configuration = load_collection_configuration_from_json(
+            model.configuration_json
+        )
+        if configuration.get("embedding_function") is not None:
+            embedding_function = configuration.get("embedding_function")
         return Collection(
             client=self._server,
             model=model,
