@@ -22,12 +22,15 @@ docker_build(
   target="logservice-migration"
 )
 
-docker_build(
-  'local:rust-log-service',
-  '.',
-  only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
-  dockerfile='./rust/log/Dockerfile',
-)
+if config.tilt_subcommand == "ci":
+  custom_build('local:rust-log-service', 'depot build -t $EXPECTED_REF ./rust/log', ['./rust/', './idl/', './Cargo.toml', './Cargo.lock'])
+else:
+  docker_build(
+    'local:rust-log-service',
+    '.',
+    only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
+    dockerfile='./rust/log/Dockerfile',
+  )
 
 docker_build(
   'local:sysdb',

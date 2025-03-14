@@ -149,6 +149,10 @@ jobs:
                     "chromadb/test/segment/distributed/test_memberlist_provider.py",
                     "chromadb/test/distributed/test_sanity.py"]
     runs-on: ${{ matrix.platform }}
+    # OIDC token auth for Depot & AWS
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/python
