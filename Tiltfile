@@ -53,12 +53,15 @@ docker_build(
   ignore=['**/*.pyc', 'chromadb/test/'],
 )
 
-docker_build(
-  'local:rust-frontend-service',
-  '.',
-  only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
-  dockerfile='./rust/cli/Dockerfile',
-)
+if config.tilt_subcommand == "ci":
+  custom_build('local:rust-frontend-service', 'depot build -t $EXPECTED_REF ./rust/cli')
+else:
+  docker_build(
+    'local:rust-frontend-service',
+    '.',
+    only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
+    dockerfile='./rust/cli/Dockerfile',
+  )
 
 
 docker_build(
