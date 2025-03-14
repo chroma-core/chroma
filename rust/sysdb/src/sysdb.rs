@@ -260,15 +260,28 @@ impl SysDb {
         name: Option<String>,
         metadata: Option<CollectionMetadataUpdate>,
         dimension: Option<u32>,
+        configuration_json_str: Option<String>,
     ) -> Result<(), UpdateCollectionError> {
         match self {
             SysDb::Grpc(grpc) => {
-                grpc.update_collection(collection_id, name, metadata, dimension)
-                    .await
+                grpc.update_collection(
+                    collection_id,
+                    name,
+                    metadata,
+                    dimension,
+                    configuration_json_str,
+                )
+                .await
             }
             SysDb::Sqlite(sqlite) => {
                 sqlite
-                    .update_collection(collection_id, name, metadata, dimension)
+                    .update_collection(
+                        collection_id,
+                        name,
+                        metadata,
+                        dimension,
+                        configuration_json_str,
+                    )
                     .await
             }
             SysDb::Test(_) => {
@@ -800,6 +813,7 @@ impl GrpcSysDb {
         name: Option<String>,
         metadata: Option<CollectionMetadataUpdate>,
         dimension: Option<u32>,
+        configuration_json_str: Option<String>,
     ) -> Result<(), UpdateCollectionError> {
         let req = chroma_proto::UpdateCollectionRequest {
             id: collection_id.0.to_string(),
@@ -815,6 +829,7 @@ impl GrpcSysDb {
                 }
             }),
             dimension: dimension.map(|dim| dim as i32),
+            configuration_json_str,
         };
 
         self.client.update_collection(req).await.map_err(|e| {
