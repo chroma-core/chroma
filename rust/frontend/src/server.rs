@@ -1004,6 +1004,7 @@ async fn update_collection(
         payload
             .new_metadata
             .map(CollectionMetadataUpdate::UpdateMetadata),
+        None, // TODO: @jai add configuration_json_str here
     )?;
 
     server.frontend.update_collection(request).await?;

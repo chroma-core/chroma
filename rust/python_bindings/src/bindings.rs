@@ -304,6 +304,7 @@ impl Bindings {
             collection_id,
             new_name,
             new_metadata.map(CollectionMetadataUpdate::UpdateMetadata),
+            None, // TODO: @jai add configuration_json_str here
         )?;
 
         let mut frontend = self.frontend.clone();

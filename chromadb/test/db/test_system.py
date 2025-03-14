@@ -22,7 +22,11 @@ from pytest import FixtureRequest
 import uuid
 import logging
 import time
-from chromadb.api.collection_configuration import CollectionConfiguration
+from chromadb.api.collection_configuration import (
+    CreateCollectionConfiguration,
+    create_collection_configuration_to_json,
+    load_collection_configuration_from_json,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +39,9 @@ sample_collections: List[Collection] = [
     Collection(
         id=uuid.UUID(int=1),
         name="test_collection_1",
-        configuration=CollectionConfiguration(),
+        configuration=load_collection_configuration_from_json(
+            create_collection_configuration_to_json(CreateCollectionConfiguration())
+        ),
         metadata={"test_str": "str1", "test_int": 1, "test_float": 1.3},
         dimension=128,
         database=DEFAULT_DATABASE,
@@ -45,7 +51,9 @@ sample_collections: List[Collection] = [
     Collection(
         id=uuid.UUID(int=2),
         name="test_collection_2",
-        configuration=CollectionConfiguration(),
+        configuration=load_collection_configuration_from_json(
+            create_collection_configuration_to_json(CreateCollectionConfiguration())
+        ),
         metadata={"test_str": "str2", "test_int": 2, "test_float": 2.3},
         dimension=None,
         database=DEFAULT_DATABASE,
@@ -55,7 +63,9 @@ sample_collections: List[Collection] = [
     Collection(
         id=uuid.UUID(int=3),
         name="test_collection_3",
-        configuration=CollectionConfiguration(),
+        configuration=load_collection_configuration_from_json(
+            create_collection_configuration_to_json(CreateCollectionConfiguration())
+        ),
         metadata={"test_str": "str3", "test_int": 3, "test_float": 3.3},
         dimension=None,
         database=DEFAULT_DATABASE,
@@ -65,7 +75,9 @@ sample_collections: List[Collection] = [
     Collection(
         id=uuid.UUID(int=4),
         name="test_collection_4",
-        configuration=CollectionConfiguration(),
+        configuration=load_collection_configuration_from_json(
+            create_collection_configuration_to_json(CreateCollectionConfiguration())
+        ),
         metadata={"test_str": "str4", "test_int": 4, "test_float": 4.4},
         dimension=None,
         database=DEFAULT_DATABASE,
