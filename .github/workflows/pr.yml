@@ -43,12 +43,6 @@ jobs:
             # Outside JS client
             outside-js-client:
               - '!clients/js/**'
-            # Workflow files
-            workflow:
-              - '.github/workflows/**'
-            # Outside workflow
-            outside-workflow:
-              - '!.github/workflows/**'
 
       - name: Determine tests to run
         id: determine-tests
@@ -64,14 +58,6 @@ jobs:
             exit 0
           else
             echo "docs-only=false" >> $GITHUB_OUTPUT
-          fi
-
-          # Check for workflow-only changes
-          if [[ "${{ steps.filter.outputs.workflow }}" == "true" && "${{ steps.filter.outputs.outside-workflow }}" == "false" ]]; then
-            echo "Workflow-only changes detected"
-            TESTS_TO_RUN='[]'
-            echo "tests-to-run=${TESTS_TO_RUN}" >> $GITHUB_OUTPUT
-            exit 0
           fi
 
           # Check for JS-only changes (changes in JS but not outside JS)
