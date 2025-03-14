@@ -205,7 +205,7 @@ impl Frontend {
         dimension: u32,
     ) -> Result<UpdateCollectionResponse, UpdateCollectionError> {
         self.sysdb_client
-            .update_collection(collection_id, None, None, Some(dimension))
+            .update_collection(collection_id, None, None, Some(dimension), None)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         // Invalidate the cache.
@@ -524,11 +524,18 @@ impl Frontend {
             collection_id,
             new_name,
             new_metadata,
+            // TODO: @jai add configuration_json_str here
             ..
         }: UpdateCollectionRequest,
     ) -> Result<UpdateCollectionResponse, UpdateCollectionError> {
         self.sysdb_client
-            .update_collection(collection_id, new_name, new_metadata, None)
+            .update_collection(
+                collection_id,
+                new_name,
+                new_metadata,
+                None,
+                None, // TODO: @jai add conversion from json string to collection configuration
+            )
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         // Invalidate the cache.
