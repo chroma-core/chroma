@@ -1,5 +1,6 @@
 use crate::errors::{ChromaPyResult, WrappedPyErr, WrappedSerdeJsonError, WrappedUuidError};
 use chroma_cache::FoyerCacheConfig;
+use chroma_cli::chroma_cli;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_frontend::{
     executor::config::{ExecutorConfig, LocalExecutorConfig},
@@ -22,9 +23,10 @@ use chroma_types::{
     ListCollectionsRequest, ListDatabasesRequest, Metadata, QueryResponse, UpdateCollectionRequest,
     UpdateMetadata,
 };
-use pyo3::{exceptions::PyValueError, pyclass, pyfunction, pymethods, types::PyAnyMethods, PyObject, Python};
+use pyo3::{
+    exceptions::PyValueError, pyclass, pyfunction, pymethods, types::PyAnyMethods, PyObject, Python,
+};
 use std::time::SystemTime;
-use chroma_cli::chroma_cli;
 
 const DEFAULT_DATABASE: &str = "default_database";
 const DEFAULT_TENANT: &str = "default_tenant";
