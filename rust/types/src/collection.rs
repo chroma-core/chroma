@@ -50,25 +50,35 @@ impl std::fmt::Display for CollectionUuid {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema, bon::Builder)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct Collection {
+    #[builder(default = CollectionUuid::new())]
     #[serde(rename(serialize = "id"))]
     pub collection_id: CollectionUuid,
+    #[builder(default)]
     pub name: String,
+    #[builder(default)]
     #[serde(default, rename(deserialize = "configuration_json_str"))]
     pub configuration_json: Value,
     pub metadata: Option<Metadata>,
     pub dimension: Option<i32>,
+    #[builder(default)]
     pub tenant: String,
+    #[builder(default)]
     pub database: String,
+    #[builder(default)]
     pub log_position: i64,
+    #[builder(default)]
     pub version: i32,
     #[serde(skip)]
+    #[builder(default)]
     pub total_records_post_compaction: u64,
     #[serde(skip)]
+    #[builder(default)]
     pub size_bytes_post_compaction: u64,
     #[serde(skip)]
+    #[builder(default)]
     pub last_compaction_time_secs: u64,
 }
 
