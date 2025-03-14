@@ -7,6 +7,21 @@ use tracing::Span;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum ReadAction {
+    Count,
+    Get,
+    Query,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum WriteAction {
+    Add,
+    Delete,
+    Update,
+    Upsert,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "event_name")]
 pub enum MeterEvent {
     CollectionRead {
@@ -16,6 +31,7 @@ pub enum MeterEvent {
         tenant: String,
         database: String,
         collection_id: Uuid,
+        action: ReadAction,
         read_bytes: u64,
         return_bytes: u64,
     },
@@ -26,6 +42,7 @@ pub enum MeterEvent {
         tenant: String,
         database: String,
         collection_id: Uuid,
+        action: WriteAction,
         write_bytes: u64,
     },
 }
@@ -38,6 +55,7 @@ impl MeterEvent {
         tenant: String,
         database: String,
         collection_id: Uuid,
+        action: ReadAction,
         read_bytes: u64,
         return_bytes: u64,
     ) -> Self {
@@ -47,6 +65,7 @@ impl MeterEvent {
             tenant,
             database,
             collection_id,
+            action,
             read_bytes,
             return_bytes,
         }
@@ -56,6 +75,7 @@ impl MeterEvent {
         tenant: String,
         database: String,
         collection_id: Uuid,
+        action: WriteAction,
         write_bytes: u64,
     ) -> Self {
         Self::CollectionWrite {
@@ -64,6 +84,7 @@ impl MeterEvent {
             tenant,
             database,
             collection_id,
+            action,
             write_bytes,
         }
     }
@@ -95,6 +116,7 @@ mod tests {
             "test_tenant".to_string(),
             "test_database".to_string(),
             Uuid::new_v4(),
+            crate::meter_event::ReadAction::Query,
             1000000,
             1000,
         );

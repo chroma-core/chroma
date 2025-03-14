@@ -10,7 +10,7 @@ use chroma_segment::local_segment_manager::LocalSegmentManager;
 use chroma_sqlite::db::SqliteDb;
 use chroma_sysdb::SysDb;
 use chroma_system::System;
-use chroma_tracing::meter_event::MeterEvent;
+use chroma_tracing::meter_event::{MeterEvent, ReadAction, WriteAction};
 use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
     plan::{Count, Get, Knn},
@@ -615,9 +615,15 @@ impl Frontend {
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
-        MeterEvent::collection_write(tenant_id, database_name, collection_id.0, log_bytes)
-            .submit()
-            .await;
+        MeterEvent::collection_write(
+            tenant_id,
+            database_name,
+            collection_id.0,
+            WriteAction::Add,
+            log_bytes,
+        )
+        .submit()
+        .await;
 
         Ok(AddCollectionRecordsResponse {})
     }
@@ -657,9 +663,15 @@ impl Frontend {
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
-        MeterEvent::collection_write(tenant_id, database_name, collection_id.0, log_bytes)
-            .submit()
-            .await;
+        MeterEvent::collection_write(
+            tenant_id,
+            database_name,
+            collection_id.0,
+            WriteAction::Update,
+            log_bytes,
+        )
+        .submit()
+        .await;
 
         Ok(UpdateCollectionRecordsResponse {})
     }
@@ -701,9 +713,15 @@ impl Frontend {
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
-        MeterEvent::collection_write(tenant_id, database_name, collection_id.0, log_bytes)
-            .submit()
-            .await;
+        MeterEvent::collection_write(
+            tenant_id,
+            database_name,
+            collection_id.0,
+            WriteAction::Upsert,
+            log_bytes,
+        )
+        .submit()
+        .await;
 
         Ok(UpsertCollectionRecordsResponse {})
     }
@@ -785,9 +803,15 @@ impl Frontend {
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
-        MeterEvent::collection_write(tenant_id, database_name, collection_id.0, log_bytes)
-            .submit()
-            .await;
+        MeterEvent::collection_write(
+            tenant_id,
+            database_name,
+            collection_id.0,
+            WriteAction::Delete,
+            log_bytes,
+        )
+        .submit()
+        .await;
 
         Ok(DeleteCollectionRecordsResponse {})
     }
@@ -857,9 +881,16 @@ impl Frontend {
             })
             .await?;
         // TODO: Calculate read bytes and returned bytes
-        MeterEvent::collection_read(tenant_id, database_name, collection_id.0, 0, 0)
-            .submit()
-            .await;
+        MeterEvent::collection_read(
+            tenant_id,
+            database_name,
+            collection_id.0,
+            ReadAction::Count,
+            0,
+            0,
+        )
+        .submit()
+        .await;
         Ok(res.count)
     }
 
@@ -949,9 +980,16 @@ impl Frontend {
             })
             .await?;
         // TODO: Calculate read bytes and returned bytes
-        MeterEvent::collection_read(tenant_id, database_name, collection_id.0, 0, 0)
-            .submit()
-            .await;
+        MeterEvent::collection_read(
+            tenant_id,
+            database_name,
+            collection_id.0,
+            ReadAction::Get,
+            0,
+            0,
+        )
+        .submit()
+        .await;
         Ok((get_result, include).into())
     }
 
@@ -1044,9 +1082,16 @@ impl Frontend {
             })
             .await?;
         // TODO: Calculate read bytes and return bytes
-        MeterEvent::collection_read(tenant_id, database_name, collection_id.0, 0, 0)
-            .submit()
-            .await;
+        MeterEvent::collection_read(
+            tenant_id,
+            database_name,
+            collection_id.0,
+            ReadAction::Query,
+            0,
+            0,
+        )
+        .submit()
+        .await;
         Ok((query_result, include).into())
     }
 
