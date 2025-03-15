@@ -1,13 +1,13 @@
 update_settings(max_parallel_updates=6)
 
 docker_build(
-  'local:postgres',
+  'postgres',
   context='./k8s/test/postgres',
   dockerfile='./k8s/test/postgres/Dockerfile'
 )
 
 docker_build(
-  'local:logservice',
+  'logservice',
   '.',
   only=['go/', 'idl/'],
   dockerfile='./go/Dockerfile',
@@ -15,7 +15,7 @@ docker_build(
 )
 
 docker_build(
-  'local:logservice-migration',
+  'logservice-migration',
   '.',
   only=['go/'],
   dockerfile='./go/Dockerfile.migration',
@@ -30,7 +30,7 @@ if config.tilt_subcommand == "ci":
   )
 else:
   docker_build(
-    'local:rust-log-service',
+    'rust-log-service',
     '.',
     only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
     dockerfile='./rust/log/Dockerfile',
@@ -38,7 +38,7 @@ else:
 
 
 docker_build(
-  'local:sysdb',
+  'sysdb',
   '.',
   only=['go/', 'idl/'],
   dockerfile='./go/Dockerfile',
@@ -46,7 +46,7 @@ docker_build(
 )
 
 docker_build(
-  'local:sysdb-migration',
+  'sysdb-migration',
   '.',
   only=['go/'],
   dockerfile='./go/Dockerfile.migration',
@@ -62,7 +62,7 @@ if config.tilt_subcommand == "ci":
   )
 else:
   docker_build(
-    'local:frontend-service',
+    'frontend-service',
     '.',
     only=['chromadb/', 'idl/', 'requirements.txt', 'bin/'],
     dockerfile='./Dockerfile',
@@ -77,7 +77,7 @@ if config.tilt_subcommand == "ci":
   )
 else:
   docker_build(
-    'local:rust-frontend-service',
+    'rust-frontend-service',
     '.',
     only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
     dockerfile='./rust/cli/Dockerfile',
@@ -91,7 +91,7 @@ if config.tilt_subcommand == "ci":
   )
 else:
   docker_build(
-    'local:query-service',
+    'query-service',
     '.',
     only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
     dockerfile='./rust/worker/Dockerfile',
@@ -106,7 +106,7 @@ if config.tilt_subcommand == "ci":
   )
 else:
   docker_build(
-    'local:compaction-service',
+    'compaction-service',
     '.',
     only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
     dockerfile='./rust/worker/Dockerfile',
