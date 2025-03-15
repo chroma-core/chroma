@@ -1,6 +1,11 @@
 from tenacity import retry, stop_after_attempt, retry_if_exception, wait_fixed
 from chromadb.api import ServerAPI
-from chromadb.api.configuration import CollectionConfigurationInternal
+from chromadb.api.collection_configuration import (
+    CreateCollectionConfiguration,
+    UpdateCollectionConfiguration,
+    default_create_collection_configuration,
+    load_collection_configuration_from_create_collection_configuration,
+)
 from chromadb.auth import UserIdentity
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.db.system import SysDB
@@ -205,7 +210,7 @@ class SegmentAPI(ServerAPI):
     def create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfigurationInternal] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
@@ -226,13 +231,16 @@ class SegmentAPI(ServerAPI):
 
         id = uuid4()
 
+        if configuration is None:
+            configuration = default_create_collection_configuration()
+
         model = CollectionModel(
             id=id,
             name=name,
             metadata=metadata,
-            configuration=configuration
-            if configuration is not None
-            else CollectionConfigurationInternal(),  # Use default configuration if none is provided
+            configuration=load_collection_configuration_from_create_collection_configuration(
+                configuration
+            ),
             tenant=tenant,
             database=database,
             dimension=None,
@@ -242,7 +250,7 @@ class SegmentAPI(ServerAPI):
         coll, created = self._sysdb.create_collection(
             id=model.id,
             name=model.name,
-            configuration=model.get_configuration(),
+            configuration=configuration,
             segments=[],  # Passing empty till backend changes are deployed.
             metadata=model.metadata,
             dimension=None,  # This is lazily populated on the first add
@@ -280,7 +288,7 @@ class SegmentAPI(ServerAPI):
     def get_or_create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfigurationInternal] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -353,6 +361,7 @@ class SegmentAPI(ServerAPI):
         id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
+        new_configuration: Optional[UpdateCollectionConfiguration] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
@@ -375,12 +384,29 @@ class SegmentAPI(ServerAPI):
 
         # TODO eventually we'll want to use OptionalArgument and Unspecified in the
         # signature of `_modify` but not changing the API right now.
-        if new_name and new_metadata:
+        if new_name and new_metadata and new_configuration:
+            self._sysdb.update_collection(
+                id,
+                name=new_name,
+                metadata=new_metadata,
+                configuration=new_configuration,
+            )
+        elif new_name and new_metadata:
             self._sysdb.update_collection(id, name=new_name, metadata=new_metadata)
+        elif new_name and new_configuration:
+            self._sysdb.update_collection(
+                id, name=new_name, configuration=new_configuration
+            )
+        elif new_metadata and new_configuration:
+            self._sysdb.update_collection(
+                id, metadata=new_metadata, configuration=new_configuration
+            )
         elif new_name:
             self._sysdb.update_collection(id, name=new_name)
         elif new_metadata:
             self._sysdb.update_collection(id, metadata=new_metadata)
+        elif new_configuration:
+            self._sysdb.update_collection(id, configuration=new_configuration)
 
     @trace_method("SegmentAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
     @override

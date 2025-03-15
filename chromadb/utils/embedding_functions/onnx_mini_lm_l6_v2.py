@@ -315,7 +315,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
         return Space.COSINE
 
     def supported_spaces(self) -> List[Space]:
-        return [Space.COSINE, Space.L2, Space.INNER_PRODUCT]
+        return [Space.COSINE, Space.L2, Space.IP]
 
     def max_tokens(self) -> int:
         # Default token limit for ONNX Mini LM L6 V2 model

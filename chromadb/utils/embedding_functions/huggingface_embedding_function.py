@@ -76,7 +76,7 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
         return Space.COSINE
 
     def supported_spaces(self) -> List[Space]:
-        return [Space.COSINE, Space.L2, Space.INNER_PRODUCT]
+        return [Space.COSINE, Space.L2, Space.IP]
 
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
@@ -169,7 +169,7 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
         return Space.COSINE
 
     def supported_spaces(self) -> List[Space]:
-        return [Space.COSINE, Space.L2, Space.INNER_PRODUCT]
+        return [Space.COSINE, Space.L2, Space.IP]
 
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":

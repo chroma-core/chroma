@@ -3,20 +3,24 @@ from chromadb.proto import convert
 from chromadb.segment import SegmentType
 from chromadb.types import (
     Collection,
-    CollectionConfigurationInternal,
     Segment,
     SegmentScope,
     Where,
     WhereDocument,
 )
+from chromadb.api.collection_configuration import (
+    CollectionConfiguration,
+    collection_configuration_to_json_str,
+)
 import chromadb.proto.chroma_pb2 as pb
 import chromadb.proto.query_executor_pb2 as query_pb
+
 
 def test_collection_to_proto() -> None:
     collection = Collection(
         id=uuid.uuid4(),
         name="test_collection",
-        configuration=CollectionConfigurationInternal(),
+        configuration=CollectionConfiguration(),
         metadata={"hnsw_m": 128},
         dimension=512,
         tenant="test_tenant",
@@ -28,8 +32,12 @@ def test_collection_to_proto() -> None:
     assert convert.to_proto_collection(collection) == pb.Collection(
         id=collection.id.hex,
         name="test_collection",
-        configuration_json_str=CollectionConfigurationInternal().to_json_str(),
-        metadata=pb.UpdateMetadata(metadata={"hnsw_m": pb.UpdateMetadataValue(int_value=128)}),
+        configuration_json_str=collection_configuration_to_json_str(
+            CollectionConfiguration()
+        ),
+        metadata=pb.UpdateMetadata(
+            metadata={"hnsw_m": pb.UpdateMetadataValue(int_value=128)}
+        ),
         dimension=512,
         tenant="test_tenant",
         database="test_database",
@@ -37,12 +45,17 @@ def test_collection_to_proto() -> None:
         log_position=42,
     )
 
+
 def test_collection_from_proto() -> None:
     proto = pb.Collection(
         id=uuid.uuid4().hex,
         name="test_collection",
-        configuration_json_str=CollectionConfigurationInternal().to_json_str(),
-        metadata=pb.UpdateMetadata(metadata={"hnsw_m": pb.UpdateMetadataValue(int_value=128)}),
+        configuration_json_str=collection_configuration_to_json_str(
+            CollectionConfiguration()
+        ),
+        metadata=pb.UpdateMetadata(
+            metadata={"hnsw_m": pb.UpdateMetadataValue(int_value=128)}
+        ),
         dimension=512,
         tenant="test_tenant",
         database="test_database",
@@ -52,7 +65,7 @@ def test_collection_from_proto() -> None:
     assert convert.from_proto_collection(proto) == Collection(
         id=uuid.UUID(proto.id),
         name="test_collection",
-        configuration=CollectionConfigurationInternal(),
+        configuration=CollectionConfiguration(),
         metadata={"hnsw_m": 128},
         dimension=512,
         tenant="test_tenant",
@@ -60,6 +73,7 @@ def test_collection_from_proto() -> None:
         version=1,
         log_position=42,
     )
+
 
 def test_segment_to_proto() -> None:
     segment = Segment(
@@ -75,9 +89,12 @@ def test_segment_to_proto() -> None:
         type=SegmentType.HNSW_DISTRIBUTED.value,
         scope=pb.SegmentScope.VECTOR,
         collection=segment["collection"].hex,
-        metadata=pb.UpdateMetadata(metadata={"hnsw_m": pb.UpdateMetadataValue(int_value=128)}),
+        metadata=pb.UpdateMetadata(
+            metadata={"hnsw_m": pb.UpdateMetadataValue(int_value=128)}
+        ),
         file_paths={"name": pb.FilePaths(paths=["path_0", "path_1"])},
     )
+
 
 def test_segment_from_proto() -> None:
     proto = pb.Segment(
@@ -85,7 +102,9 @@ def test_segment_from_proto() -> None:
         type=SegmentType.HNSW_DISTRIBUTED.value,
         scope=pb.SegmentScope.VECTOR,
         collection=uuid.uuid4().hex,
-        metadata=pb.UpdateMetadata(metadata={"hnsw_m": pb.UpdateMetadataValue(int_value=128)}),
+        metadata=pb.UpdateMetadata(
+            metadata={"hnsw_m": pb.UpdateMetadataValue(int_value=128)}
+        ),
         file_paths={"name": pb.FilePaths(paths=["path_0", "path_1"])},
     )
     assert convert.from_proto_segment(proto) == Segment(
@@ -96,6 +115,7 @@ def test_segment_from_proto() -> None:
         metadata={"hnsw_m": 128},
         file_paths={"name": ["path_0", "path_1"]},
     )
+
 
 def test_where_document_to_proto_not_contains() -> None:
     where_document: WhereDocument = {"$not_contains": "test"}

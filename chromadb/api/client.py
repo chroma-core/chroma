@@ -4,7 +4,11 @@ from uuid import UUID
 from overrides import override
 import httpx
 from chromadb.api import AdminAPI, ClientAPI, ServerAPI
-from chromadb.api.configuration import CollectionConfiguration
+from chromadb.api.collection_configuration import (
+    CreateCollectionConfiguration,
+    UpdateCollectionConfiguration,
+    load_collection_configuration_from_json,
+)
 from chromadb.api.shared_system_client import SharedSystemClient
 from chromadb.api.types import (
     CollectionMetadata,
@@ -136,7 +140,7 @@ class Client(SharedSystemClient, ClientAPI):
     def create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfiguration] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
@@ -173,6 +177,11 @@ class Client(SharedSystemClient, ClientAPI):
             tenant=self.tenant,
             database=self.database,
         )
+        configuration = load_collection_configuration_from_json(
+            model.configuration_json
+        )
+        if configuration.get("embedding_function") is not None:
+            embedding_function = configuration.get("embedding_function")
         return Collection(
             client=self._server,
             model=model,
@@ -184,7 +193,7 @@ class Client(SharedSystemClient, ClientAPI):
     def get_or_create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfiguration] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
@@ -211,6 +220,7 @@ class Client(SharedSystemClient, ClientAPI):
         id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
+        new_configuration: Optional[UpdateCollectionConfiguration] = None,
     ) -> None:
         return self._server._modify(
             id=id,
@@ -218,6 +228,7 @@ class Client(SharedSystemClient, ClientAPI):
             database=self.database,
             new_name=new_name,
             new_metadata=new_metadata,
+            new_configuration=new_configuration,
         )
 
     @override

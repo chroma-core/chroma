@@ -1,10 +1,10 @@
-use crate::server::CollectionConfigurationPayloadToConfigurationError;
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
     Json,
 };
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::CollectionConfigurationPayloadToConfigurationError;
 use chroma_types::{GetCollectionError, UpdateCollectionError};
 use serde::Serialize;
 use std::fmt;

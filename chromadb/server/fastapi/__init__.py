@@ -23,7 +23,11 @@ from fastapi.routing import APIRoute
 from fastapi import HTTPException, status
 from functools import wraps
 
-from chromadb.api.configuration import CollectionConfigurationInternal
+from chromadb.api.collection_configuration import (
+    load_create_collection_configuration_from_json_str,
+    load_update_collection_configuration_from_json_str,
+    default_create_collection_configuration,
+)
 from pydantic import BaseModel
 from chromadb import __version__ as chromadb_version
 from chromadb.api.types import (
@@ -472,7 +476,8 @@ class FastAPI(Server):
     ) -> None:
         return await to_thread.run_sync(
             # NOTE(rescrv, iron will auth):  No need to migrate because this is the utility call.
-            self.sync_auth_request, *(headers, action, tenant, database, collection)
+            self.sync_auth_request,
+            *(headers, action, tenant, database, collection),
         )
 
     @trace_method(
@@ -781,9 +786,11 @@ class FastAPI(Server):
         ) -> CollectionModel:
             create = validate_model(CreateCollection, orjson.loads(raw_body))
             configuration = (
-                CollectionConfigurationInternal()
+                default_create_collection_configuration()
                 if not create.configuration
-                else CollectionConfigurationInternal.from_json(create.configuration)
+                else load_create_collection_configuration_from_json_str(
+                    create.configuration
+                )
             )
 
             # NOTE(rescrv, iron will auth):  Implemented.
@@ -872,12 +879,20 @@ class FastAPI(Server):
                 database_name,
                 collection_id,
             )
+            configuration = (
+                None
+                if not update.new_configuration
+                else load_update_collection_configuration_from_json_str(
+                    update.new_configuration
+                )
+            )
             self._set_request_context(request=request)
             add_attributes_to_current_span({"tenant": tenant})
             return self._api._modify(
                 id=_uuid(collection_id),
                 new_name=update.new_name,
                 new_metadata=update.new_metadata,
+                new_configuration=configuration,
                 tenant=tenant,
                 database=database_name,
             )
@@ -1701,9 +1716,11 @@ class FastAPI(Server):
         ) -> CollectionModel:
             create = validate_model(CreateCollection, orjson.loads(raw_body))
             configuration = (
-                CollectionConfigurationInternal()
+                default_create_collection_configuration()
                 if not create.configuration
-                else CollectionConfigurationInternal.from_json(create.configuration)
+                else load_create_collection_configuration_from_json_str(
+                    create.configuration
+                )
             )
 
             (
@@ -1802,10 +1819,18 @@ class FastAPI(Server):
                 None,
                 collection_id,
             )
+            configuration = (
+                None
+                if not update.new_configuration
+                else load_update_collection_configuration_from_json_str(
+                    update.new_configuration
+                )
+            )
             return self._api._modify(
                 id=_uuid(collection_id),
                 new_name=update.new_name,
                 new_metadata=update.new_metadata,
+                new_configuration=configuration,
             )
 
         await to_thread.run_sync(

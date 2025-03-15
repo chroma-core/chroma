@@ -10,6 +10,7 @@ from chromadb.api import AdminAPI, AsyncClientAPI, ClientAPI
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
     CollectionMetadata,
+    UpdateMetadata,
     Documents,
     EmbeddingFunction,
     Embeddings,
@@ -41,6 +42,7 @@ __all__ = [
     "EmbeddingFunction",
     "Include",
     "CollectionMetadata",
+    "UpdateMetadata",
     "UpdateCollectionMetadata",
     "QueryResult",
     "GetResult",
