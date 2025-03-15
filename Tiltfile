@@ -23,7 +23,11 @@ docker_build(
 )
 
 if config.tilt_subcommand == "ci":
-  custom_build('local:rust-log-service', 'depot build --project 995d7q59th -t $EXPECTED_REF  -f ./rust/log/Dockerfile . --load', ['./rust/', './idl/', './Cargo.toml', './Cargo.lock'])
+  custom_build(
+    'local:rust-log-service',
+    'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF  -f ./rust/log/Dockerfile . --load',
+    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
+  )
 else:
   docker_build(
     'local:rust-log-service',
@@ -57,7 +61,11 @@ docker_build(
 )
 
 if config.tilt_subcommand == "ci":
-  custom_build('local:rust-frontend-service', 'depot build -t $EXPECTED_REF -f ./rust/cli/Dockerfile . --load', ['./rust/', './idl/', './Cargo.toml', './Cargo.lock'])
+  custom_build(
+    'local:rust-frontend-service',
+    'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF -f ./rust/cli/Dockerfile . --load',
+    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
+  )
 else:
   docker_build(
     'local:rust-frontend-service',
@@ -66,22 +74,35 @@ else:
     dockerfile='./rust/cli/Dockerfile',
   )
 
+if config.tilt_subcommand == "ci":
+  custom_build(
+    'local:query-service',
+    'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF --target query_service -f ./rust/worker/Dockerfile . --load ',
+    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
+  )
+else:
+  docker_build(
+    'local:query-service',
+    '.',
+    only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
+    dockerfile='./rust/worker/Dockerfile',
+    target='query_service'
+  )
 
-docker_build(
-  'local:query-service',
-  '.',
-  only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
-  dockerfile='./rust/worker/Dockerfile',
-  target='query_service'
-)
-
-docker_build(
-  'local:compaction-service',
-  '.',
-  only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
-  dockerfile='./rust/worker/Dockerfile',
-  target='compaction_service'
-)
+if config.tilt_subcommand == "ci":
+  custom_build(
+    'local:compaction-service',
+    'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF --target compaction_service -f ./rust/worker/Dockerfile . --load ',
+    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
+  )
+else:
+  docker_build(
+    'local:compaction-service',
+    '.',
+    only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
+    dockerfile='./rust/worker/Dockerfile',
+    target='compaction_service'
+  )
 
 
 # First install the CRD

@@ -1,5 +1,7 @@
 name: Start Tilt services
 description: "This action starts Tilt services"
+env:
+  DEPOT_PROJECT_ID: ${{ vars.DEPOT_PROJECT_ID }}
 runs:
   using: "composite"
   steps:
