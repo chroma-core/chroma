@@ -8,6 +8,11 @@ use chroma_error::ChromaError;
 use chroma_system::System;
 use serde::{Deserialize, Serialize};
 
+// 32 MB
+fn default_max_query_service_response_size_bytes() -> usize {
+    1024 * 1024 * 32
+}
+
 /// Configuration for the distributed executor.
 /// # Fields
 /// - `connections_per_node` - The number of connections to maintain per node
@@ -26,6 +31,8 @@ pub struct DistributedExecutorConfig {
     pub retry: RetryConfig,
     pub assignment: chroma_config::assignment::config::AssignmentPolicyConfig,
     pub memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig,
+    #[serde(default = "default_max_query_service_response_size_bytes")]
+    pub max_query_service_response_size_bytes: usize,
 }
 
 #[derive(Deserialize, Clone, Serialize, Debug)]

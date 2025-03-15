@@ -230,7 +230,11 @@ class DistributedExecutor(Executor):
         with self._mtx:
             if grpc_url not in self._grpc_stub_pool:
                 channel = grpc.insecure_channel(
-                    grpc_url, options=[("grpc.max_concurrent_streams", 1000)]
+                    grpc_url,
+                    options=[
+                        ("grpc.max_concurrent_streams", 1000),
+                        ("grpc.max_receive_message_length", 32000000),  # 32 MB
+                    ],
                 )
                 interceptors = [OtelInterceptor()]
                 channel = grpc.intercept_channel(channel, *interceptors)

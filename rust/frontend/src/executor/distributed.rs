@@ -55,6 +55,7 @@ impl Configurable<(config::DistributedExecutorConfig, System)> for DistributedEx
             config.connections_per_node,
             config.connect_timeout_ms,
             config.request_timeout_ms,
+            config.max_query_service_response_size_bytes,
         );
         let client_manager_handle = system.start_component(client_manager);
 
