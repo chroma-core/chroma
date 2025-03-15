@@ -1,9 +1,13 @@
 name: Start Tilt services
 description: "This action starts Tilt services"
-env:
-  DEPOT_PROJECT_ID: ${{ vars.DEPOT_PROJECT_ID }}
+inputs:
+  depot-project-id:
+    description: "Depot project ID"
+    required: true
 runs:
   using: "composite"
+  env:
+    DEPOT_PROJECT_ID: ${{ inputs.depot-project_id }}
   steps:
     - name: Install Tilt
       shell: bash
