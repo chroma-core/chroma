@@ -10,7 +10,7 @@ use chroma_blockstore::{
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::SpannPostingList;
-use chroma_types::{CollectionUuid, DistributedSpannParameters};
+use chroma_types::{CollectionUuid, SpannConfiguration};
 use rand::seq::SliceRandom;
 use thiserror::Error;
 use uuid::Uuid;
@@ -45,7 +45,7 @@ pub struct SpannIndexWriter {
     // TODO(Sanket): Finer grained locking for this map in future if perf is not satisfactory.
     pub versions_map: Arc<tokio::sync::RwLock<VersionsMapInner>>,
     pub dimensionality: usize,
-    pub params: DistributedSpannParameters,
+    pub params: SpannConfiguration,
 }
 
 // TODO(Sanket): Can compose errors whenever downstream returns Box<dyn ChromaError>.
@@ -147,7 +147,7 @@ impl SpannIndexWriter {
         next_head_id: u32,
         versions_map: VersionsMapInner,
         dimensionality: usize,
-        params: DistributedSpannParameters,
+        params: SpannConfiguration,
     ) -> Self {
         SpannIndexWriter {
             hnsw_index,
@@ -263,7 +263,7 @@ impl SpannIndexWriter {
         collection_id: &CollectionUuid,
         dimensionality: usize,
         blockfile_provider: &BlockfileProvider,
-        params: DistributedSpannParameters,
+        params: SpannConfiguration,
     ) -> Result<Self, SpannIndexWriterError> {
         let distance_function = DistanceFunction::from(params.space.clone());
         // Create the HNSW index.
@@ -1746,7 +1746,7 @@ mod tests {
     use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
     use chroma_distance::DistanceFunction;
     use chroma_storage::{local::LocalStorage, Storage};
-    use chroma_types::{CollectionUuid, DistributedSpannParameters, SpannPostingList};
+    use chroma_types::{CollectionUuid, SpannConfiguration, SpannPostingList};
     use rand::Rng;
     use tempfile::TempDir;
 
@@ -1781,7 +1781,7 @@ mod tests {
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
-        let params = DistributedSpannParameters::default();
+        let params = SpannConfiguration::default();
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
@@ -1971,7 +1971,7 @@ mod tests {
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
-        let params = DistributedSpannParameters::default();
+        let params = SpannConfiguration::default();
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
@@ -2151,7 +2151,7 @@ mod tests {
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
-        let params = DistributedSpannParameters::default();
+        let params = SpannConfiguration::default();
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
@@ -2335,7 +2335,7 @@ mod tests {
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
-        let params = DistributedSpannParameters::default();
+        let params = SpannConfiguration::default();
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
@@ -2571,7 +2571,7 @@ mod tests {
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
-        let params = DistributedSpannParameters::default();
+        let params = SpannConfiguration::default();
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
@@ -2821,7 +2821,7 @@ mod tests {
             new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
         let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
         let collection_id = CollectionUuid::new();
-        let params = DistributedSpannParameters::default();
+        let params = SpannConfiguration::default();
         let distance_function = params.space.clone().into();
         let dimensionality = 1000;
         let writer = SpannIndexWriter::from_id(
@@ -2906,7 +2906,7 @@ mod tests {
             new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
         let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
         let collection_id = CollectionUuid::new();
-        let params = DistributedSpannParameters::default();
+        let params = SpannConfiguration::default();
         let distance_function = params.space.clone().into();
         let dimensionality = 1000;
         let writer = SpannIndexWriter::from_id(
@@ -3005,7 +3005,7 @@ mod tests {
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let max_block_size_bytes = 8 * 1024 * 1024;
         let collection_id = CollectionUuid::new();
-        let params = DistributedSpannParameters::default();
+        let params = SpannConfiguration::default();
         let distance_function = params.space.clone().into();
         let dimensionality = 1000;
         let mut hnsw_path = None;
@@ -3104,7 +3104,7 @@ mod tests {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let max_block_size_bytes = 8 * 1024 * 1024;
-        let params = DistributedSpannParameters::default();
+        let params = SpannConfiguration::default();
         let distance_function = params.space.clone().into();
         let collection_id = CollectionUuid::new();
         let dimensionality = 1000;
@@ -3229,7 +3229,7 @@ mod tests {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let max_block_size_bytes = 8 * 1024 * 1024;
-        let params = DistributedSpannParameters::default();
+        let params = SpannConfiguration::default();
         let distance_function: DistanceFunction = params.space.clone().into();
         let collection_id = CollectionUuid::new();
         let dimensionality = 1000;
