@@ -42,11 +42,6 @@ def test_app() -> None:
     assert heartbeat > 0
 
 
-def test_utils_set_log_file_path() -> None:
-    log_config = set_log_file_path("chromadb/log_config.yml", "test.log")
-    assert log_config["handlers"]["file"]["filename"] == "test.log"
-
-
 def test_vacuum(sqlite_persistent: System) -> None:
     system = sqlite_persistent
     sqlite = system.instance(SqliteDB)

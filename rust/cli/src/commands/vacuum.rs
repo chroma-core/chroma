@@ -198,7 +198,7 @@ pub fn vacuum(args: VacuumArgs) {
     // The execution time of this command scales with the size of your database. It blocks both reads and writes to the database while it is running.
     println!("{}", "\nChroma Vacuum\n".underline().bold());
 
-    let config = FrontendServerConfig::single_node_default();
+    let mut config = FrontendServerConfig::single_node_default();
     let persistent_path = args.path.unwrap_or(config.persist_path);
 
     if !Path::new(&persistent_path).exists() {
@@ -209,7 +209,9 @@ pub fn vacuum(args: VacuumArgs) {
         return;
     }
 
-    if !Path::new(format!("{}/{}", &persistent_path, &config.sqlite_filename).as_str()).exists() {
+    let sqlite_url = format!("{}/{}", &persistent_path, &config.sqlite_filename);
+
+    if !Path::new(sqlite_url.as_str()).exists() {
         println!(
             "{}",
             format!("Not a Chroma path: {}", &persistent_path).red()
@@ -248,9 +250,18 @@ pub fn vacuum(args: VacuumArgs) {
         }
     };
 
-    let frontend_config = config.frontend.clone();
+    match config.frontend.sqlitedb.as_mut() {
+        Some(sqlite_config) => {
+            sqlite_config.url = Some(sqlite_url);
+        }
+        None => {
+            eprintln!("Cannot find Sqlite config for Chroma");
+            return;
+        }
+    };
+
     let runtime = tokio::runtime::Runtime::new().expect("Failed to start Chroma");
-    let vacuum_result = runtime.block_on(vacuum_chroma(frontend_config));
+    let vacuum_result = runtime.block_on(vacuum_chroma(config.frontend));
 
     if let Err(_e) = vacuum_result {
         eprintln!("Failed to vacuum Chroma");
