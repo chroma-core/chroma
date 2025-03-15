@@ -820,6 +820,10 @@ impl GrpcSysDb {
                 }
             }),
             dimension: dimension.map(|dim| dim as i32),
+            configuration_json_str: Some(
+                serde_json::to_string(&_configuration)
+                    .map_err(UpdateCollectionError::Configuration)?,
+            ),
         };
 
         // TODO: @jai if configuration exists, fetch config_json_str from table Collections, build into collection configuration object, and update config_json_str in table Collections

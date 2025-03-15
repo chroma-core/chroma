@@ -681,6 +681,8 @@ pub enum UpdateCollectionError {
     NotFound(String),
     #[error("Metadata reset unsupported")]
     MetadataResetUnsupported,
+    #[error("Could not serialize configuration")]
+    Configuration(#[from] serde_json::Error),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
 }
@@ -690,6 +692,7 @@ impl ChromaError for UpdateCollectionError {
         match self {
             UpdateCollectionError::NotFound(_) => ErrorCodes::NotFound,
             UpdateCollectionError::MetadataResetUnsupported => ErrorCodes::InvalidArgument,
+            UpdateCollectionError::Configuration(_) => ErrorCodes::Internal,
             UpdateCollectionError::Internal(err) => err.code(),
         }
     }
