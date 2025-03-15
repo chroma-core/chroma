@@ -65,19 +65,12 @@ else:
     target='sysdb'
   )
 
-if config.tilt_subcommand == "ci":
-  custom_build(
-    'local:sysdb-migration',
-    'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF -f ./go/Dockerfile.migration . --load',
-    ['./go/']
-  )
-else:
-  docker_build(
-    'local:sysdb-migration',
-    '.',
-    only=['go/'],
-    dockerfile='./go/Dockerfile.migration',
-  )
+docker_build(
+  'local:sysdb-migration',
+  '.',
+  only=['go/'],
+  dockerfile='./go/Dockerfile.migration',
+)
 
 
 if config.tilt_subcommand == "ci":
