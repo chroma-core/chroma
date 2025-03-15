@@ -11,7 +11,7 @@ name: Arize Phoenix
         |
         <a href="https://github.com/Arize-ai/phoenix">GitHub</a>
         |
-        <a href="https://join.slack.com/t/arize-ai/shared_invite/zt-1px8dcmlf-fmThhDFD_V_48oU7ALan4Q">Community</a>
+        <a href="https://arize-ai.slack.com/join/shared_invite/zt-11t1vbu4x-xkBIHmOREQnYnYDH1GDfCg?__hstc=259489365.a667dfafcfa0169c8aee4178d115dc81.1733501603539.1733501603539.1733501603539.1&__hssc=259489365.1.1733501603539&__hsfp=3822854628&submissionGuid=381a0676-8f38-437b-96f2-fc10875658df#/shared-invite/email">Community</a>
     </p>
 </center>
 
@@ -107,7 +107,7 @@ with tracer.start_as_current_span(
 
 * Website: [Arize Phoenix](https://phoenix.arize.com/)
 * Github: [Arize-ai/phoenix](https://github.com/Arize-ai/phoenix/)
-* Slack: [Join Arize Community](https://join.slack.com/t/arize-ai/shared_invite/zt-1px8dcmlf-fmThhDFD~zBCQoUdRjuBjg)
+* Slack: [Join Arize Community](https://arize-ai.slack.com/join/shared_invite/zt-11t1vbu4x-xkBIHmOREQnYnYDH1GDfCg?__hstc=259489365.a667dfafcfa0169c8aee4178d115dc81.1733501603539.1733501603539.1733501603539.1&__hssc=259489365.1.1733501603539&__hsfp=3822854628&submissionGuid=381a0676-8f38-437b-96f2-fc10875658df#/shared-invite/email)
 * Twitter: [@ArizePhoenix](https://twitter.com/ArizePhoenix)
 * Youtube: [@ArizeAI](https://www.youtube.com/@arizeai)
 
