@@ -23,7 +23,7 @@ docker_build(
 )
 
 if config.tilt_subcommand == "ci":
-  custom_build('local:rust-log-service', 'depot build --project 995d7q59th -t $EXPECTED_REF  -f ./rust/log/Dockerfile .', ['./rust/', './idl/', './Cargo.toml', './Cargo.lock'])
+  custom_build('local:rust-log-service', 'depot build --project 995d7q59th -t $EXPECTED_REF  -f ./rust/log/Dockerfile . --load', ['./rust/', './idl/', './Cargo.toml', './Cargo.lock'])
 else:
   docker_build(
     'local:rust-log-service',
@@ -57,7 +57,7 @@ docker_build(
 )
 
 if config.tilt_subcommand == "ci":
-  custom_build('local:rust-frontend-service', 'depot build -t $EXPECTED_REF -f ./rust/cli/Dockerfile .', ['./rust/', './idl/', './Cargo.toml', './Cargo.lock'])
+  custom_build('local:rust-frontend-service', 'depot build -t $EXPECTED_REF -f ./rust/cli/Dockerfile . --load', ['./rust/', './idl/', './Cargo.toml', './Cargo.lock'])
 else:
   docker_build(
     'local:rust-frontend-service',
