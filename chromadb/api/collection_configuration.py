@@ -120,33 +120,41 @@ def collection_configuration_to_json_str(config: CollectionConfiguration) -> str
 
 
 def collection_configuration_to_json(config: CollectionConfiguration) -> Dict[str, Any]:
-    hnsw_config = config.get("hnsw")
+    if config.get("hnsw") is None:
+        config["hnsw"] = default_create_hnsw_configuration()
+    if config.get("embedding_function") is None:
+        config["embedding_function"] = cast(
+            EmbeddingFunction[Embeddable], DefaultEmbeddingFunction()
+        )
+    try:
+        hnsw_config = cast(CreateHNSWConfiguration, config.get("hnsw"))
+    except Exception as e:
+        raise ValueError(f"not a valid hnsw config: {e}")
 
-    # Handle embedding function serialization
     ef_config: Dict[str, Any] | None = None
-    ef = config.get("embedding_function")
-    if ef is not None:
-        try:
-            if ef.name() is NotImplemented:
-                ef_config = {"type": "legacy"}
-            else:
-                ef_config = {
-                    "name": ef.name(),
-                    "type": "known"
-                    if ef.name() in known_embedding_functions
-                    else "custom",
-                    "config": ef.get_config(),
-                }
-                register_embedding_function(type(ef))
-        except Exception as e:
-            warnings.warn(
-                f"legacy embedding function config: {e}",
-                DeprecationWarning,
-                stacklevel=2,
-            )
+    try:
+        ef = cast(EmbeddingFunction[Embeddable], config.get("embedding_function"))
+        if ef.name() is NotImplemented:
             ef_config = {"type": "legacy"}
-    else:
-        ef_config = None
+        else:
+            ef_config = {
+                "name": ef.name(),
+                "type": "known" if ef.name() in known_embedding_functions else "custom",
+                "config": ef.get_config(),
+            }
+            register_embedding_function(type(ef))
+    except Exception as e:
+        warnings.warn(
+            f"legacy embedding function config: {e}",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        ef = None
+        ef_config = {"type": "legacy"}
+
+    hnsw_config = populate_create_hnsw_defaults(hnsw_config, ef)
+
+    validate_create_hnsw_config(hnsw_config, ef)
 
     return {
         "hnsw": hnsw_config,
