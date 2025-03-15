@@ -6,20 +6,13 @@ docker_build(
   dockerfile='./k8s/test/postgres/Dockerfile'
 )
 
-if config.tilt_subcommand == "ci":
-  custom_build(
-    'local:logservice',
-    'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF --target logservice -f ./go/Dockerfile . --load',
-    ['./go/', './idl/']
-  )
-else:
-  docker_build(
-    'local:logservice',
-    '.',
-    only=['go/', 'idl/'],
-    dockerfile='./go/Dockerfile',
-    target='logservice'
-  )
+docker_build(
+  'local:logservice',
+  '.',
+  only=['go/', 'idl/'],
+  dockerfile='./go/Dockerfile',
+  target='logservice'
+)
 
 docker_build(
   'local:logservice-migration',
@@ -43,20 +36,14 @@ else:
     dockerfile='./rust/log/Dockerfile',
   )
 
-if config.tilt_subcommand == "ci":
-  custom_build(
-    'local:sysdb',
-    'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF --target sysdb -f ./go/Dockerfile . --load',
-    ['./go/', './idl/']
-  )
-else:
-  docker_build(
-    'local:sysdb',
-    '.',
-    only=['go/', 'idl/'],
-    dockerfile='./go/Dockerfile',
-    target='sysdb'
-  )
+
+docker_build(
+  'local:sysdb',
+  '.',
+  only=['go/', 'idl/'],
+  dockerfile='./go/Dockerfile',
+  target='sysdb'
+)
 
 docker_build(
   'local:sysdb-migration',
