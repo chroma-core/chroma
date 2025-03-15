@@ -9,10 +9,6 @@ jobs:
       matrix:
         platform: [depot-ubuntu-22.04]
     runs-on: ${{ matrix.platform }}
-    # OIDC token auth for Depot & AWS
-    permissions:
-      contents: read
-      id-token: write
     env:
       CARGO_TERM_COLOR: always
     steps:
@@ -29,6 +25,10 @@ jobs:
       matrix:
         platform: [depot-ubuntu-22.04-16]
     runs-on: ${{ matrix.platform }}
+    # OIDC token auth for Depot & AWS
+    permissions:
+      contents: read
+      id-token: write
     env:
       CARGO_TERM_COLOR: always
     steps:
