@@ -21,20 +21,13 @@ else:
     target='logservice'
   )
 
-if config.tilt_subcommand == "ci":
-  custom_build(
-    'local:logservice-migration',
-    'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF --target logservice-migration -f ./go/Dockerfile.migration . --load',
-    ['./go/']
-  )
-else:
-  docker_build(
-    'local:logservice-migration',
-    '.',
-    only=['go/'],
-    dockerfile='./go/Dockerfile.migration',
-    target="logservice-migration"
-  )
+docker_build(
+  'local:logservice-migration',
+  '.',
+  only=['go/'],
+  dockerfile='./go/Dockerfile.migration',
+  target="logservice-migration"
+)
 
 if config.tilt_subcommand == "ci":
   custom_build(
