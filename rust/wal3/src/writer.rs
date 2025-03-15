@@ -122,6 +122,14 @@ impl LogWriter {
     }
 }
 
+impl std::fmt::Debug for LogWriter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LogWriter")
+            .field("writer", &self.writer)
+            .finish()
+    }
+}
+
 /////////////////////////////////////////// OnceLogWriter //////////////////////////////////////////
 
 /// OnceLogWriter writes to a log once until contention is discovered.  It must then be thrown away

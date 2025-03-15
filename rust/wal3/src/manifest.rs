@@ -142,20 +142,19 @@ impl Snapshot {
         storage: &Storage,
         pointer: &SnapshotPointer,
     ) -> Result<Option<Snapshot>, Error> {
-        match storage
-            .get_with_e_tag(&pointer.path_to_snapshot)
-            .await
-            .map_err(Arc::new)
-        {
+        match storage.get_with_e_tag(&pointer.path_to_snapshot).await {
             Ok((ref snapshot, _)) => {
                 let snapshot: Snapshot = serde_json::from_slice(snapshot).map_err(|e| {
                     Error::CorruptManifest(format!("could not decode JSON snapshot: {e:?}"))
                 })?;
                 Ok(Some(snapshot))
             }
-            Err(err) => match &*err {
+            Err(err) => match &err {
                 StorageError::NotFound { path: _, source: _ } => Ok(None),
-                err => Err(Error::StorageError(Arc::new(err.clone()))),
+                err => {
+                    tracing::error!("error downloading snapshot: {err:?}");
+                    Err(Error::StorageError(Arc::new(err.clone())))
+                }
             },
         }
     }
@@ -481,13 +480,24 @@ impl Manifest {
     /// Load the latest manifest from object storage.
     pub async fn load(storage: &Storage, prefix: &str) -> Result<Option<(Manifest, ETag)>, Error> {
         let path = manifest_path(prefix);
-        let (manifest, e_tag) = storage.get_with_e_tag(&path).await.map_err(Arc::new)?;
+
+        let (manifest, e_tag) = match storage.get_with_e_tag(&path).await {
+            Ok((manifest, e_tag)) => (manifest, e_tag),
+            Err(err) => match &err {
+                StorageError::NotFound { path: _, source: _ } => return Ok(None),
+                err => {
+                    return Err(Error::StorageError(Arc::new(err.clone())));
+                }
+            },
+        };
+
         let Some(e_tag) = e_tag else {
             return Err(Error::CorruptManifest(format!(
                 "no ETag for manifest at {}",
                 path
             )));
         };
+
         serde_json::from_slice(&manifest)
             .map_err(|e| Error::CorruptManifest(format!("could not decode JSON manifest: {e:?}")))
             .map(|m| Some((m, e_tag)))

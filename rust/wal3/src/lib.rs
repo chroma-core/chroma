@@ -246,7 +246,7 @@ impl Default for SnapshotOptions {
 ///////////////////////////////////////// LogWriterOptions /////////////////////////////////////////
 
 /// LogWriterOptions control the behavior of the log writer.
-#[derive(Clone, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Default, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct LogWriterOptions {
     /// Default throttling options for fragments.
     #[serde(default)]
@@ -262,7 +262,7 @@ pub struct LogWriterOptions {
 ///////////////////////////////////////// LogReaderOptions /////////////////////////////////////////
 
 /// LogReaderOptions control the behavior of the log writer.
-#[derive(Clone, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct LogReaderOptions {
     /// Default throttling options for manifest.
     #[serde(default)]
