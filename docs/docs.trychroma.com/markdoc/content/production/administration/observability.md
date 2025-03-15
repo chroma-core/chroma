@@ -32,3 +32,4 @@ We also have dedicated observability guides for various deployments:
 Several observability platforms offer built-in integrations for Chroma, allowing you to monitor your application's interactions with the Chroma server:
 - [OpenLLMetry Integration](../../integrations/frameworks/openllmetry).
 - [OpenLIT Integration](../../integrations/frameworks/openlit).
+- [Arize Phoenix Integration](../../integrations/frameworks/arize-phoenix.md)
