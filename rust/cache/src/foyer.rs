@@ -3,7 +3,6 @@ use ahash::RandomState;
 use chroma_error::ChromaError;
 use chroma_types::CollectionAndSegments;
 use clap::Parser;
-use foyer::opentelemetry_0_27::OpenTelemetryMetricsRegistry;
 use foyer::{
     CacheBuilder, DirectFsDeviceOptions, Engine, FifoConfig, FifoPicker, HybridCacheBuilder,
     InvalidRatioPicker, LargeEngineOptions, LfuConfig, LruConfig, RateLimitPicker, S3FifoConfig,
@@ -62,6 +61,12 @@ const fn default_shards() -> usize {
     64
 }
 
+const fn default_buffer_pool_size() -> usize {
+    // See https://github.com/foyer-rs/foyer/discussions/751
+    // This should be at least max_entry_size * flushers.
+    256
+}
+
 fn default_eviction() -> String {
     "lru".to_string()
 }
@@ -71,23 +76,23 @@ const fn default_invalid_ratio() -> f64 {
 }
 
 const fn default_trace_insert_us() -> usize {
-    1000 * 1000
+    1000 * 100
 }
 
 const fn default_trace_get_us() -> usize {
-    1000 * 1000
+    1000 * 100
 }
 
 const fn default_trace_obtain_us() -> usize {
-    1000 * 1000
+    1000 * 100
 }
 
 const fn default_trace_remove_us() -> usize {
-    1000 * 1000
+    1000 * 100
 }
 
 const fn default_trace_fetch_us() -> usize {
-    1000 * 1000
+    1000 * 100
 }
 
 #[derive(Deserialize, Debug, Clone, Serialize, Parser)]
@@ -120,6 +125,13 @@ pub struct FoyerCacheConfig {
     #[arg(long, default_value_t = 4)]
     #[serde(default = "default_flushers")]
     pub flushers: usize,
+
+    /// Buffer pool size. (MiB)
+    /// This should be atleast max_entry_size * flushers.
+    /// See https://github.com/foyer-rs/foyer/discussions/751
+    #[arg(long, default_value_t = 256)]
+    #[serde(default = "default_buffer_pool_size")]
+    pub buffer_pool: usize,
 
     /// AKA fsync
     #[arg(long, default_value_t = false)]
@@ -165,27 +177,27 @@ pub struct FoyerCacheConfig {
     pub invalid_ratio: f64,
 
     /// Record insert trace threshold. Only effective with "mtrace" feature.
-    #[arg(long, default_value_t = 1000 * 1000)]
+    #[arg(long, default_value_t = 1000 * 100)]
     #[serde(default = "default_trace_insert_us")]
     pub trace_insert_us: usize,
 
     /// Record get trace threshold. Only effective with "mtrace" feature.
-    #[arg(long, default_value_t = 1000 * 1000)]
+    #[arg(long, default_value_t = 1000 * 100)]
     #[serde(default = "default_trace_get_us")]
     pub trace_get_us: usize,
 
     /// Record obtain trace threshold. Only effective with "mtrace" feature.
-    #[arg(long, default_value_t = 1000 * 1000)]
+    #[arg(long, default_value_t = 1000 * 100)]
     #[serde(default = "default_trace_obtain_us")]
     pub trace_obtain_us: usize,
 
     /// Record remove trace threshold. Only effective with "mtrace" feature.
-    #[arg(long, default_value_t = 1000 * 1000)]
+    #[arg(long, default_value_t = 1000 * 100)]
     #[serde(default = "default_trace_remove_us")]
     pub trace_remove_us: usize,
 
     /// Record fetch trace threshold. Only effective with "mtrace" feature.
-    #[arg(long, default_value_t = 1000 * 1000)]
+    #[arg(long, default_value_t = 1000 * 100)]
     #[serde(default = "default_trace_fetch_us")]
     pub trace_fetch_us: usize,
 }
@@ -195,6 +207,16 @@ impl FoyerCacheConfig {
     pub async fn build_hybrid<K, V>(
         &self,
     ) -> Result<Box<dyn super::PersistentCache<K, V>>, Box<dyn ChromaError>>
+    where
+        K: Clone + Send + Sync + StorageKey + Eq + PartialEq + Hash + 'static,
+        V: Clone + Send + Sync + StorageValue + Weighted + 'static,
+    {
+        Ok(Box::new(FoyerHybridCache::hybrid(self).await?))
+    }
+
+    pub async fn build_hybrid_test<K, V>(
+        &self,
+    ) -> Result<Box<FoyerHybridCache<K, V>>, Box<dyn ChromaError>>
     where
         K: Clone + Send + Sync + StorageKey + Eq + PartialEq + Hash + 'static,
         V: Clone + Send + Sync + StorageValue + Weighted + 'static,
@@ -260,6 +282,7 @@ impl Default for FoyerCacheConfig {
             trace_obtain_us: default_trace_obtain_us(),
             trace_remove_us: default_trace_remove_us(),
             trace_fetch_us: default_trace_fetch_us(),
+            buffer_pool: default_buffer_pool_size(),
         }
     }
 }
@@ -323,9 +346,14 @@ where
             .with_record_hybrid_remove_threshold(Duration::from_micros(config.trace_remove_us as _))
             .with_record_hybrid_fetch_threshold(Duration::from_micros(config.trace_fetch_us as _));
 
+        let otel_0_27_metrics = Box::new(
+            mixtrics::registry::opentelemetry_0_27::OpenTelemetryMetricsRegistry::new(
+                global::meter("chroma"),
+            ),
+        );
         let builder = HybridCacheBuilder::<K, V>::new()
-            .with_metrics_registry(OpenTelemetryMetricsRegistry::new(global::meter("chroma")))
-            .with_tracing_options(tracing_options)
+            .with_metrics_registry(otel_0_27_metrics)
+            .with_tracing_options(tracing_options.clone())
             .memory(config.mem)
             .with_shards(config.shards);
 
@@ -378,6 +406,7 @@ where
                     .with_recover_concurrency(config.recover_concurrency)
                     .with_flushers(config.flushers)
                     .with_reclaimers(config.reclaimers)
+                    .with_buffer_pool_size(config.buffer_pool * MIB)
                     .with_eviction_pickers(vec![
                         Box::new(InvalidRatioPicker::new(config.invalid_ratio)),
                         Box::new(FifoPicker::default()),
@@ -393,9 +422,7 @@ where
             CacheError::InvalidCacheConfig(format!("builder failed: {:?}", e)).boxed()
         })?;
         cache.enable_tracing();
-        cache.update_tracing_options(
-            TracingOptions::new().with_record_hybrid_get_threshold(Duration::from_millis(10)),
-        );
+        cache.update_tracing_options(tracing_options);
         let meter = global::meter("chroma");
         let cache_hit = meter.u64_counter("cache_hit").build();
         let cache_miss = meter.u64_counter("cache_miss").build();
@@ -412,6 +439,10 @@ where
             remove_latency,
             clear_latency,
         })
+    }
+
+    pub fn insert_to_disk(&self, key: K, value: V) {
+        self.cache.storage_writer(key).insert(value);
     }
 }
 
@@ -434,7 +465,9 @@ where
 
     async fn insert(&self, key: K, value: V) {
         let _stopwatch = Stopwatch::new(&self.insert_latency);
-        self.cache.insert(key, value);
+        self.cache.insert(key.clone(), value.clone());
+        // Also insert to the disk cache.
+        self.insert_to_disk(key, value);
     }
 
     async fn remove(&self, key: &K) {
@@ -617,6 +650,8 @@ mod test {
 
     use tokio::{fs::File, sync::mpsc};
 
+    use crate::Cache;
+
     use super::*;
 
     impl crate::Weighted for Arc<File> {
@@ -701,5 +736,35 @@ mod test {
         .unwrap();
 
         assert_eq!(cache3.get(&"key1".to_string()).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn test_writing_only_to_disk_works() {
+        let dir = tempfile::tempdir()
+            .expect("To be able to create temp path")
+            .path()
+            .to_str()
+            .expect("To be able to parse path")
+            .to_string();
+        let cache = FoyerCacheConfig {
+            dir: Some(dir.clone()),
+            flush: true,
+            ..Default::default()
+        }
+        .build_hybrid_test::<String, String>()
+        .await
+        .unwrap();
+        // Insert a 512KB string value generated at random by passing memory.
+        let large_value = "val1".repeat(512 * 1024);
+        cache.insert_to_disk("key1".to_string(), large_value.clone());
+        // Sleep for 2 secs.
+        // This should give the cache enough time to flush the data to disk.
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        let value = cache
+            .get(&"key1".to_string())
+            .await
+            .expect("Expected to be able to get value")
+            .expect("Value should not be None");
+        assert_eq!(value, large_value);
     }
 }
