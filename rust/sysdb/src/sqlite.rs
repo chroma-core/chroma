@@ -666,7 +666,6 @@ impl SqliteSysDb {
                 let metadata = self.metadata_from_rows(rows.iter());
                 let first_row = rows.first().unwrap();
 
-                // todo: migrate config?
                 let configuration = match first_row.get::<Option<&str>, _>(2) {
                     Some(json_str) => {
                         match serde_json::from_str::<CollectionConfiguration>(json_str)
@@ -1420,5 +1419,47 @@ mod tests {
         assert_eq!(segments.len(), 1);
         let fetched_segment = fetched_segments.first().unwrap();
         assert_eq!(*fetched_segment, segments[0]);
+    }
+
+    #[tokio::test]
+    async fn test_get_collection_with_old_config() {
+        let db = get_new_sqlite_db().await;
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
+
+        let collection_id = CollectionUuid::new();
+        sysdb
+            .create_collection(
+                "default_tenant".to_string(),
+                "default_database".to_string(),
+                collection_id,
+                "test_collection".to_string(),
+                vec![],
+                CollectionConfiguration::default_hnsw(),
+                None,
+                None,
+                false,
+            )
+            .await
+            .unwrap();
+
+        // Set to legacy config shape
+        sqlx::query(
+            r#"
+            UPDATE collections
+            SET config_json_str = $1
+        "#,
+        )
+        .bind(r#"{"hnsw_configuration": {"space": "l2", "ef_construction": 100, "ef_search": 100, "num_threads": 16, "M": 16, "resize_factor": 1.2, "batch_size": 100, "sync_threshold": 1000, "_type": "HNSWConfigurationInternal"}, "_type": "CollectionConfigurationInternal"}"#)
+        .execute(sysdb.db.get_conn())
+        .await
+        .unwrap();
+
+        // Fetching the collection should not error and the config should be the default
+        let collections = sysdb
+            .get_collections(Some(collection_id), None, None, None, None, 0)
+            .await
+            .unwrap();
+        let collection = collections.first().unwrap();
+        assert_eq!(collection.config, CollectionConfiguration::default_hnsw());
     }
 }
