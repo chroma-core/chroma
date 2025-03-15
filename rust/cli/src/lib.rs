@@ -2,6 +2,7 @@ mod commands;
 mod utils;
 
 use crate::commands::run::{run, RunArgs};
+use crate::commands::update::update;
 use clap::{Parser, Subcommand};
 
 #[derive(Subcommand, Debug)]
@@ -9,6 +10,7 @@ enum Command {
     Docs,
     Run(RunArgs),
     Support,
+    Update,
 }
 
 #[derive(Parser, Debug)]
@@ -38,6 +40,9 @@ pub fn chroma_cli(args: Vec<String>) {
             if webbrowser::open(url).is_err() {
                 eprintln!("Error: Failed to open the browser. Visit {}.", url);
             }
+        }
+        Command::Update => {
+            update();
         }
     }
 }
