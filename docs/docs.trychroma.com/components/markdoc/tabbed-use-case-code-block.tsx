@@ -12,26 +12,24 @@ const TabbedUseCaseCodeBlock: React.FC<{
 }> = ({ language, children }) => {
   return (
     <Tabs defaultValue={children[0].props.label} className="flex flex-col">
-      <div className="flex items-center justify-between bg-gray-900 rounded-t-sm">
-        <div className="flex items-center gap-7">
-          <div className={tabLabelStyle} data-state={"active"}>
-            {capitalize(language)}
-          </div>
-          <TabsList className="bg-transparent dark:bg-transparent rounded-none p-0 h-fit">
-            {children.map((tab) => (
-              <TabsTrigger
-                key={`${tab.props.label}-header`}
-                value={tab.props.label}
-                className={cn(
-                  tabLabelStyle,
-                  "data-[state=active]:text-gray-200 data-[state=active]:border-gray-200 dark:data-[state=active]:bg-transparent",
-                )}
-              >
-                {tab.props.label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
+      <div className="flex items-center justify-between bg-gray-900 rounded-t-sm gap-2 md:gap-7">
+        <div className={tabLabelStyle} data-state={"active"}>
+          {capitalize(language)}
         </div>
+        <TabsList className="bg-transparent dark:bg-transparent rounded-none p-0 h-fit flex-1 overflow-x-auto">
+          {children.map((tab) => (
+            <TabsTrigger
+              key={`${tab.props.label}-header`}
+              value={tab.props.label}
+              className={cn(
+                tabLabelStyle,
+                "data-[state=active]:text-gray-200 data-[state=active]:border-gray-200 dark:data-[state=active]:bg-transparent",
+              )}
+            >
+              {tab.props.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
         <div className="flex items-center pr-3">
           {children.map((tab) => (
             <TabsContent
