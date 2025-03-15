@@ -76,23 +76,23 @@ const fn default_invalid_ratio() -> f64 {
 }
 
 const fn default_trace_insert_us() -> usize {
-    1000 * 10
+    1000 * 100
 }
 
 const fn default_trace_get_us() -> usize {
-    1000 * 10
+    1000 * 100
 }
 
 const fn default_trace_obtain_us() -> usize {
-    1000 * 10
+    1000 * 100
 }
 
 const fn default_trace_remove_us() -> usize {
-    1000 * 10
+    1000 * 100
 }
 
 const fn default_trace_fetch_us() -> usize {
-    1000 * 10
+    1000 * 100
 }
 
 #[derive(Deserialize, Debug, Clone, Serialize, Parser)]
@@ -177,27 +177,27 @@ pub struct FoyerCacheConfig {
     pub invalid_ratio: f64,
 
     /// Record insert trace threshold. Only effective with "mtrace" feature.
-    #[arg(long, default_value_t = 1000 * 1000)]
+    #[arg(long, default_value_t = 1000 * 100)]
     #[serde(default = "default_trace_insert_us")]
     pub trace_insert_us: usize,
 
     /// Record get trace threshold. Only effective with "mtrace" feature.
-    #[arg(long, default_value_t = 1000 * 1000)]
+    #[arg(long, default_value_t = 1000 * 100)]
     #[serde(default = "default_trace_get_us")]
     pub trace_get_us: usize,
 
     /// Record obtain trace threshold. Only effective with "mtrace" feature.
-    #[arg(long, default_value_t = 1000 * 1000)]
+    #[arg(long, default_value_t = 1000 * 100)]
     #[serde(default = "default_trace_obtain_us")]
     pub trace_obtain_us: usize,
 
     /// Record remove trace threshold. Only effective with "mtrace" feature.
-    #[arg(long, default_value_t = 1000 * 1000)]
+    #[arg(long, default_value_t = 1000 * 100)]
     #[serde(default = "default_trace_remove_us")]
     pub trace_remove_us: usize,
 
     /// Record fetch trace threshold. Only effective with "mtrace" feature.
-    #[arg(long, default_value_t = 1000 * 1000)]
+    #[arg(long, default_value_t = 1000 * 100)]
     #[serde(default = "default_trace_fetch_us")]
     pub trace_fetch_us: usize,
 }
