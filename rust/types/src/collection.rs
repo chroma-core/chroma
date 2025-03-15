@@ -111,7 +111,7 @@ impl Collection {
         &self,
         py: pyo3::Python<'py>,
     ) -> pyo3::PyResult<pyo3::Bound<'py, pyo3::PyAny>> {
-        let res = pyo3::prelude::PyModule::import(py, "chromadb.api")?
+        let res = pyo3::prelude::PyModule::import(py, "chromadb.api.configuration")?
             .getattr("CollectionConfigurationInternal")?
             .getattr("from_json_str")?
             .call1((CONFIGURATION_JSON_STR,))?;
