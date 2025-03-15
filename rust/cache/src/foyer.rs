@@ -63,7 +63,8 @@ const fn default_shards() -> usize {
 
 const fn default_buffer_pool_size() -> usize {
     // See https://github.com/foyer-rs/foyer/discussions/751
-    default_file_size() * default_flushers()
+    // This should be at least max_entry_size * flushers.
+    256
 }
 
 fn default_eviction() -> String {
@@ -75,23 +76,23 @@ const fn default_invalid_ratio() -> f64 {
 }
 
 const fn default_trace_insert_us() -> usize {
-    1000 * 1000
+    1000 * 10
 }
 
 const fn default_trace_get_us() -> usize {
-    1000 * 1000
+    1000 * 10
 }
 
 const fn default_trace_obtain_us() -> usize {
-    1000 * 1000
+    1000 * 10
 }
 
 const fn default_trace_remove_us() -> usize {
-    1000 * 1000
+    1000 * 10
 }
 
 const fn default_trace_fetch_us() -> usize {
-    1000 * 1000
+    1000 * 10
 }
 
 #[derive(Deserialize, Debug, Clone, Serialize, Parser)]
@@ -126,7 +127,7 @@ pub struct FoyerCacheConfig {
     pub flushers: usize,
 
     /// Buffer pool size. (MiB)
-    /// This should be atleast file_size * flushers.
+    /// This should be atleast max_entry_size * flushers.
     /// See https://github.com/foyer-rs/foyer/discussions/751
     #[arg(long, default_value_t = 256)]
     #[serde(default = "default_buffer_pool_size")]
@@ -352,7 +353,7 @@ where
         );
         let builder = HybridCacheBuilder::<K, V>::new()
             .with_metrics_registry(otel_0_27_metrics)
-            .with_tracing_options(tracing_options)
+            .with_tracing_options(tracing_options.clone())
             .memory(config.mem)
             .with_shards(config.shards);
 
@@ -421,9 +422,7 @@ where
             CacheError::InvalidCacheConfig(format!("builder failed: {:?}", e)).boxed()
         })?;
         cache.enable_tracing();
-        cache.update_tracing_options(
-            TracingOptions::new().with_record_hybrid_get_threshold(Duration::from_millis(10)),
-        );
+        cache.update_tracing_options(tracing_options);
         let meter = global::meter("chroma");
         let cache_hit = meter.u64_counter("cache_hit").build();
         let cache_miss = meter.u64_counter("cache_miss").build();
@@ -651,6 +650,8 @@ mod test {
 
     use tokio::{fs::File, sync::mpsc};
 
+    use crate::Cache;
+
     use super::*;
 
     impl crate::Weighted for Arc<File> {
@@ -737,44 +738,33 @@ mod test {
         assert_eq!(cache3.get(&"key1".to_string()).await.unwrap(), None);
     }
 
-    // TODO(Sanket): Will enable this once I get more understanding
-    // of how this works under the hood. Currently, it is failing.
-    // #[tokio::test]
-    // async fn test_writing_only_to_disk_works() {
-    //     let dir = tempfile::tempdir()
-    //         .expect("To be able to create temp path")
-    //         .path()
-    //         .to_str()
-    //         .expect("To be able to parse path")
-    //         .to_string();
-    //     let cache = FoyerCacheConfig {
-    //         dir: Some(dir.clone()),
-    //         flushers: 1,
-    //         file_size: 1,
-    //         flush: true,
-    //         buffer_pool: 1,
-    //         ..Default::default()
-    //     }
-    //     .build_hybrid_test::<String, String>()
-    //     .await
-    //     .unwrap();
-    //     // Insert a 512KB string value generated at random.
-    //     let large_value = "val1".repeat(512 * 1024);
-    //     cache.insert_to_disk("key1".to_string(), large_value.clone());
-    //     for i in 0..100 {
-    //         // Insert another 512KB string value generated at random.
-    //         // This should trigger a flush.
-    //         let another_large_value = format!("val{}", i).repeat(512 * 1024);
-    //         cache.insert_to_disk(format!("key{}", i).to_string(), another_large_value);
-    //     }
-    //     // Sleep for 5 secs.
-    //     // This should give the cache enough time to flush the data to disk.
-    //     // tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-    //     let value = cache
-    //         .get(&"key1".to_string())
-    //         .await
-    //         .expect("Expected to be able to get value")
-    //         .expect("Value should not be None");
-    //     assert_eq!(value, large_value);
-    // }
+    #[tokio::test]
+    async fn test_writing_only_to_disk_works() {
+        let dir = tempfile::tempdir()
+            .expect("To be able to create temp path")
+            .path()
+            .to_str()
+            .expect("To be able to parse path")
+            .to_string();
+        let cache = FoyerCacheConfig {
+            dir: Some(dir.clone()),
+            flush: true,
+            ..Default::default()
+        }
+        .build_hybrid_test::<String, String>()
+        .await
+        .unwrap();
+        // Insert a 512KB string value generated at random by passing memory.
+        let large_value = "val1".repeat(512 * 1024);
+        cache.insert_to_disk("key1".to_string(), large_value.clone());
+        // Sleep for 2 secs.
+        // This should give the cache enough time to flush the data to disk.
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        let value = cache
+            .get(&"key1".to_string())
+            .await
+            .expect("Expected to be able to get value")
+            .expect("Value should not be None");
+        assert_eq!(value, large_value);
+    }
 }
