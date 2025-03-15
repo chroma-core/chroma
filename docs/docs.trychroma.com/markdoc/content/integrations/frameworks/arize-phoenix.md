@@ -3,34 +3,54 @@ id: arize-phoenix
 name: Arize Phoenix
 ---
 
-# Arize Phoenix
+<center>
+    <p style="text-align:center">
+        <img alt="phoenix logo" src="https://storage.googleapis.com/arize-phoenix-assets/assets/phoenix-logo-light.svg" width="200"/>
+        <br>
+        <a href="https://docs.arize.com/phoenix/">Docs</a>
+        |
+        <a href="https://github.com/Arize-ai/phoenix">GitHub</a>
+        |
+        <a href="https://join.slack.com/t/arize-ai/shared_invite/zt-1px8dcmlf-fmThhDFD_V_48oU7ALan4Q">Community</a>
+    </p>
+</center>
+
+<p align="right">
+  <a href="https://github.com/Arize-ai/phoenix">
+    <img src="https://img.shields.io/github/stars/Arize-ai/phoenix?style=social" alt="GitHub stars">
+  </a>
+</p>
 
 [Arize Phoenix](https://github.com/Arize-ai/phoenix/) is an open-source observability and evaluation tool. It can be accessed as an online tool, or self-hosted.
 
-- [Tutorial: Trace and Evaluate an Agentic RAG app using Chroma](https://github.com/Arize-ai/phoenix/blob/main/tutorials/tracing/agentic_rag_tracing.ipynb)
+Phoenix allows you to trace calls made to your ChromaDBs and view retrieved documents.
+
+![Phoenix Chroma Integration Example](https://storage.googleapis.com/arize-phoenix-assets/assets/images/arize-phoenix-chroma-example-image.png)
+
+
+## Tutorials
+- [Trace and Evaluate an Agentic RAG app using Chroma](https://github.com/Arize-ai/phoenix/blob/main/tutorials/tracing/agentic_rag_tracing.ipynb)
+
+## Getting Started
+### Install and Launch Phoenix Locally
+The following code will launch a local version of Phoenix. If you prefer, you can access a cloud instance instead through [Phoenix Cloud](https://app.phoenix.arize.com).
+
+```bash
+pip install arize-phoenix
+phoenix serve
+```
 
 ### Automatic Tracing:
 
-Automatically trace calls to Chroma through LlamaIndex or Langchain:
+Phoenix is built to automatically trace calls made to instrumentation libraries like Langchain and LlamaIndex. If you're using Chroma through one of those libraries, we recommend using one of Phoenix's auto-instrumentors instead of Manually Tracing.
 
-```python
-from openinference.instrumentation.llama_index import LlamaIndexInstrumentor
-# from openinference.instrumentation.langchain import LangChainInstrumentor
-from phoenix.otel import register
-import os
-
-os.environ["PHOENIX_CLIENT_HEADERS"] = f"api_key={phoenix_api_key}"
-
-# configure the Phoenix tracer
-tracer_provider = register(
-    project_name="agentic-rag-demo",
-    endpoint="https://app.phoenix.arize.com/v1/traces",  # change this endpoint if you're running Phoenix locally
-    auto_instrument=True
-)
-
-```
+* [Langchain](https://docs.arize.com/phoenix/tracing/integrations-tracing/langchain) Auto Instrumentation
+* [LlamaIndex](https://docs.arize.com/phoenix/tracing/integrations-tracing/llamaindex) Auto Instrumentation
+* [Haystack](https://docs.arize.com/phoenix/tracing/integrations-tracing/haystack) Auto Instrumentation
 
 ### Manual Tracing:
+
+If you're not using one of the libraries above, you can manually instrument your app instead.
 
 ```python
 import os
@@ -38,12 +58,9 @@ import chromadb
 import chromadb.utils.embedding_functions as embedding_functions
 from phoenix.otel import register
 
-os.environ["PHOENIX_CLIENT_HEADERS"] = f"api_key={phoenix_api_key}"
-
 # configure the Phoenix tracer
 tracer_provider = register(
     project_name="agentic-rag-demo-2",
-    endpoint="https://app.phoenix.arize.com/v1/traces",  # change this endpoint if you're running Phoenix locally
 )
 
 tracer = tracer_provider.get_tracer(__name__)
@@ -83,4 +100,17 @@ with tracer.start_as_current_span(
           span.set_attribute(f"retrieval.documents.{i}.{key}", value)
 ```
 
-For more information see the [Phoenix Website](https://phoenix.arize.com).
+## Want to Learn More?
+
+* Arize's [Guide to LLM Evaluation](https://arize.com/llm-evaluation)
+* Arize's [Guide to Agent Evaluation](https://arize.com/ai-agents/)
+
+## Links & Resources
+
+* Website: [Arize Phoenix](https://phoenix.arize.com/)
+* Github: [Arize-ai/phoenix](https://github.com/Arize-ai/phoenix/)
+* Slack: [Join Arize Community](https://join.slack.com/t/arize-ai/shared_invite/zt-1px8dcmlf-fmThhDFD~zBCQoUdRjuBjg)
+* Twitter: [@ArizePhoenix](https://twitter.com/ArizePhoenix)
+* Youtube: [@ArizeAI](https://www.youtube.com/@arizeai)
+
+Arize Phoenix is licensed under the terms of the Elastic License 2.0 (ELv2). See [LICENSE](https://github.com/Arize-ai/phoenix/blob/main/LICENSE)
