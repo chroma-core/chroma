@@ -37,6 +37,10 @@ jobs:
 
   cluster-test:
     runs-on: "depot-ubuntu-22.04-16"
+    # OIDC token auth for Depot & AWS
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
