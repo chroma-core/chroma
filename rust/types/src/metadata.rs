@@ -471,8 +471,7 @@ impl Where {
         })
     }
 
-    pub fn complexity(&self) -> u32 {
-        // TODO: Properly estimate filter complexity
+    pub fn complexity(&self) -> u64 {
         match self {
             Where::Composite(composite_expression) => composite_expression
                 .children
@@ -480,9 +479,17 @@ impl Where {
                 .map(Where::complexity)
                 .sum(),
             Where::Document(document_expression) => {
-                document_expression.text.len().max(5) as u32 - 3
+                document_expression.text.len().max(5) as u64 - 3
             }
-            Where::Metadata(_metadata_expression) => 1,
+            Where::Metadata(metadata_expression) => match &metadata_expression.comparison {
+                MetadataComparison::Primitive(_, _) => 1,
+                MetadataComparison::Set(_, metadata_set_value) => match metadata_set_value {
+                    MetadataSetValue::Bool(items) => items.len() as u64,
+                    MetadataSetValue::Int(items) => items.len() as u64,
+                    MetadataSetValue::Float(items) => items.len() as u64,
+                    MetadataSetValue::Str(items) => items.len() as u64,
+                },
+            },
         }
     }
 }
