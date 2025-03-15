@@ -28,7 +28,7 @@ You can run a Chroma server in a Docker container, and access it using the `Http
 To start the server, run:
 
 ```terminal
-docker run -v ./chroma-data:/data -p 8000:8000 chroma-core/chroma
+docker run -v ./chroma-data:/data -p 8000:8000 chromadb/chroma
 ```
 
 This starts the server with the default configuration and stores data in `./chroma-data` (in your current working directory).
