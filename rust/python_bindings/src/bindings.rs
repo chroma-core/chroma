@@ -1,6 +1,7 @@
-use crate::errors::{ChromaPyResult, WrappedPyErr, WrappedUuidError};
+use crate::errors::{ChromaPyResult, WrappedPyErr, WrappedSerdeJsonError, WrappedUuidError};
 use chroma_cache::FoyerCacheConfig;
 use chroma_config::{registry::Registry, Configurable};
+use chroma_error::ChromaError;
 use chroma_frontend::{
     executor::config::{ExecutorConfig, LocalExecutorConfig},
     frontend::Frontend,
@@ -15,14 +16,14 @@ use chroma_sqlite::config::SqliteDBConfig;
 use chroma_sysdb::{SqliteSysDbConfig, SysDbConfig};
 use chroma_system::System;
 use chroma_types::{
-    Collection, CollectionMetadataUpdate, CountCollectionsRequest, CountResponse,
-    CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest, Database,
-    DeleteCollectionRequest, DeleteDatabaseRequest, GetCollectionRequest, GetDatabaseRequest,
-    GetResponse, GetTenantRequest, GetTenantResponse, HeartbeatError, IncludeList,
-    ListCollectionsRequest, ListDatabasesRequest, Metadata, QueryResponse, UpdateCollectionRequest,
-    UpdateMetadata,
+    Collection, CollectionConfiguration, CollectionConfigurationPayload, CollectionMetadataUpdate,
+    CountCollectionsRequest, CountResponse, CreateCollectionRequest, CreateDatabaseRequest,
+    CreateTenantRequest, Database, DeleteCollectionRequest, DeleteDatabaseRequest,
+    GetCollectionRequest, GetDatabaseRequest, GetResponse, GetTenantRequest, GetTenantResponse,
+    HeartbeatError, IncludeList, ListCollectionsRequest, ListDatabasesRequest, Metadata,
+    QueryResponse, UpdateCollectionRequest, UpdateMetadata,
 };
-use pyo3::{exceptions::PyValueError, pyclass, pymethods, types::PyAnyMethods, PyObject, Python};
+use pyo3::{exceptions::PyValueError, pyclass, pymethods, types::PyAnyMethods, Python};
 use std::time::SystemTime;
 
 const DEFAULT_DATABASE: &str = "default_database";
@@ -228,24 +229,38 @@ impl Bindings {
 
     #[allow(clippy::too_many_arguments)]
     #[pyo3(
-        signature = (name, configuration, metadata = None, get_or_create = false, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
+        signature = (name, configuration_json_str, metadata = None, get_or_create = false, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
     )]
     fn create_collection(
         &self,
         name: String,
-        #[allow(unused_variables)] configuration: Option<PyObject>,
+        configuration_json_str: Option<String>,
         metadata: Option<Metadata>,
         get_or_create: bool,
         tenant: String,
         database: String,
-        _py: Python<'_>,
     ) -> ChromaPyResult<Collection> {
+        let configuration_json = match configuration_json_str {
+            Some(configuration_json_str) => {
+                let configuration_json =
+                    serde_json::from_str::<CollectionConfigurationPayload>(&configuration_json_str)
+                        .map_err(WrappedSerdeJsonError)?;
+
+                Some(configuration_json)
+            }
+            None => None,
+        };
+        let config = configuration_json
+            .map(CollectionConfiguration::try_from)
+            .transpose()
+            .map_err(|e| e.boxed())?;
+
         let request = CreateCollectionRequest::try_new(
             tenant,
             database,
             name,
             metadata,
-            None,
+            config,
             get_or_create,
         )?;
 
@@ -272,22 +287,42 @@ impl Bindings {
     }
 
     #[pyo3(
-        signature = (collection_id, new_name = None, new_metadata = None)
+        signature = (collection_id, new_name = None, new_metadata = None, new_configuration_json_str = None)
     )]
     fn update_collection(
         &self,
         collection_id: String,
         new_name: Option<String>,
         new_metadata: Option<UpdateMetadata>,
+        new_configuration_json_str: Option<String>,
     ) -> ChromaPyResult<()> {
         let collection_id = chroma_types::CollectionUuid(
             uuid::Uuid::parse_str(&collection_id).map_err(WrappedUuidError)?,
         );
 
+        let configuration_json = match new_configuration_json_str {
+            Some(new_configuration_json_str) => {
+                let new_configuration_json =
+                    serde_json::from_str::<CollectionConfigurationPayload>(
+                        &new_configuration_json_str,
+                    )
+                    .map_err(WrappedSerdeJsonError)?;
+
+                Some(new_configuration_json)
+            }
+            None => None,
+        };
+
+        let config = configuration_json
+            .map(CollectionConfiguration::try_from)
+            .transpose()
+            .map_err(|e| e.boxed())?;
+
         let request = UpdateCollectionRequest::try_new(
             collection_id,
             new_name,
             new_metadata.map(CollectionMetadataUpdate::UpdateMetadata),
+            config,
         )?;
 
         let mut frontend = self.frontend.clone();

@@ -348,6 +348,7 @@ impl SqliteSysDb {
         name: Option<String>,
         metadata: Option<CollectionMetadataUpdate>,
         dimension: Option<u32>,
+        _configuration: Option<CollectionConfiguration>,
     ) -> Result<(), UpdateCollectionError> {
         let mut tx = self
             .db
@@ -370,6 +371,8 @@ impl SqliteSysDb {
             if let Some(dimension) = dimension {
                 query = query.value(table::Collections::Dimension, dimension);
             }
+
+            // TODO: @jai if configuration exists, fetch config_json_str from table Collections, build into collection configuration object, and update config_json_str in table Collections
 
             let (sql, values) = query.build_sqlx(sea_query::SqliteQueryBuilder);
 
@@ -1245,6 +1248,7 @@ mod tests {
                 Some("new_name".to_string()),
                 Some(CollectionMetadataUpdate::UpdateMetadata(metadata)),
                 Some(1024),
+                None,
             )
             .await
             .unwrap();

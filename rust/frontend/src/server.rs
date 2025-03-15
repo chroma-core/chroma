@@ -11,26 +11,25 @@ use chroma_types::{
     CollectionUuid, CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
     CreateCollectionRequest, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest,
     CreateTenantResponse, DeleteCollectionRecordsResponse, DeleteDatabaseRequest,
-    DeleteDatabaseResponse, EmbeddingFunctionConfiguration, GetCollectionRequest,
-    GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantRequest,
-    GetTenantResponse, GetUserIdentityResponse, HeartbeatResponse, HnswConfiguration, IncludeList,
-    ListCollectionsRequest, ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse,
-    Metadata, QueryRequest, QueryResponse, SpannConfiguration, UpdateCollectionRecordsResponse,
-    UpdateCollectionResponse, UpdateMetadata, UpsertCollectionRecordsResponse,
-    VectorIndexConfiguration,
+    DeleteDatabaseResponse, GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse,
+    GetRequest, GetResponse, GetTenantRequest, GetTenantResponse, GetUserIdentityResponse,
+    HeartbeatResponse, IncludeList, ListCollectionsRequest, ListCollectionsResponse,
+    ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
+    UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateMetadata,
+    UpsertCollectionRecordsResponse, VectorIndexConfiguration,
 };
-use chroma_types::{CollectionConfiguration, RawWhereFields};
+use chroma_types::{CollectionConfiguration, CollectionConfigurationPayload, RawWhereFields};
 use mdac::{Rule, Scorecard, ScorecardTicket};
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Meter};
 use opentelemetry::KeyValue;
 use serde::{Deserialize, Serialize};
+use serde_json;
 use std::str::FromStr;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
-use thiserror::Error;
 use tokio::{select, signal};
 use tower_http::cors::CorsLayer;
 use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityScheme};
@@ -49,6 +48,17 @@ use crate::{
     tower_tracing::add_tracing_middleware,
     types::errors::{ErrorResponse, ServerError, ValidationError},
 };
+
+// Define the WrappedSerdeJsonError struct
+#[derive(thiserror::Error, Debug)]
+#[error(transparent)]
+struct WrappedSerdeJsonError(#[from] serde_json::Error);
+
+impl chroma_error::ChromaError for WrappedSerdeJsonError {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        chroma_error::ErrorCodes::InvalidArgument
+    }
+}
 
 struct ScorecardGuard {
     scorecard: Arc<Scorecard<'static>>,
@@ -819,41 +829,6 @@ async fn count_collections(
     Ok(Json(server.frontend.count_collections(request).await?))
 }
 
-#[derive(Debug, Error)]
-pub enum CollectionConfigurationPayloadToConfigurationError {
-    #[error("Multiple vector index configurations provided")]
-    MultipleVectorIndexConfigurations,
-}
-
-#[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
-pub struct CollectionConfigurationPayload {
-    hnsw: Option<HnswConfiguration>,
-    spann: Option<SpannConfiguration>,
-    embedding_function: Option<EmbeddingFunctionConfiguration>,
-}
-
-impl TryFrom<CollectionConfigurationPayload> for CollectionConfiguration {
-    type Error = CollectionConfigurationPayloadToConfigurationError;
-
-    fn try_from(value: CollectionConfigurationPayload) -> Result<Self, Self::Error> {
-        match (value.hnsw, value.spann) {
-            (Some(_), Some(_)) => Err(CollectionConfigurationPayloadToConfigurationError::MultipleVectorIndexConfigurations),
-            (Some(hnsw), None) => Ok(CollectionConfiguration {
-                vector_index: hnsw.into(),
-                embedding_function: value.embedding_function,
-            }),
-            (None, Some(spann)) => Ok(CollectionConfiguration {
-                vector_index: spann.into(),
-                embedding_function: value.embedding_function,
-            }),
-            (None, None) => Ok(CollectionConfiguration {
-                vector_index: HnswConfiguration::default().into(),
-                embedding_function: value.embedding_function,
-            }),
-        }
-    }
-}
-
 #[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
 pub struct CreateCollectionPayload {
     pub name: String,
@@ -989,6 +964,7 @@ async fn get_collection(
 pub struct UpdateCollectionPayload {
     pub new_name: Option<String>,
     pub new_metadata: Option<UpdateMetadata>,
+    pub new_configuration_json_str: Option<String>,
 }
 
 /// Updates an existing collection's name or metadata.
@@ -1048,12 +1024,29 @@ async fn update_collection(
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
 
+    let configuration_json = match payload.new_configuration_json_str {
+        Some(configuration_json_str) => {
+            let configuration_json =
+                serde_json::from_str::<CollectionConfigurationPayload>(&configuration_json_str)
+                    .map_err(WrappedSerdeJsonError)?;
+
+            Some(configuration_json)
+        }
+        None => None,
+    };
+
+    let config = configuration_json
+        .map(CollectionConfiguration::try_from)
+        .transpose()
+        .map_err(ValidationError::ParseCollectionConfiguration)?;
+
     let request = chroma_types::UpdateCollectionRequest::try_new(
         collection_id,
         payload.new_name,
         payload
             .new_metadata
             .map(CollectionMetadataUpdate::UpdateMetadata),
+        config,
     )?;
 
     server.frontend.update_collection(request).await?;

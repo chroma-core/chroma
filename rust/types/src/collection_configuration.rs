@@ -1,12 +1,58 @@
 use crate::{
     HnswConfiguration, HnswParametersFromSegmentError, Metadata, Segment, SpannConfiguration,
 };
+use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use utoipa::ToSchema;
+
+#[derive(Debug, Error)]
+pub enum CollectionConfigurationPayloadToConfigurationError {
+    #[error("Multiple vector index configurations provided")]
+    MultipleVectorIndexConfigurations,
+    #[error("Error parsing collection configuration: {0}")]
+    ParseCollectionConfiguration(#[from] serde_json::Error),
+}
+
+impl ChromaError for CollectionConfigurationPayloadToConfigurationError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::InvalidArgument
+    }
+}
+
+#[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
+pub struct CollectionConfigurationPayload {
+    hnsw: Option<HnswConfiguration>,
+    spann: Option<SpannConfiguration>,
+    embedding_function: Option<EmbeddingFunctionConfiguration>,
+}
+
+impl TryFrom<CollectionConfigurationPayload> for CollectionConfiguration {
+    type Error = CollectionConfigurationPayloadToConfigurationError;
+
+    fn try_from(value: CollectionConfigurationPayload) -> Result<Self, Self::Error> {
+        match (value.hnsw, value.spann) {
+            (Some(_), Some(_)) => Err(CollectionConfigurationPayloadToConfigurationError::MultipleVectorIndexConfigurations),
+            (Some(hnsw), None) => Ok(CollectionConfiguration {
+                vector_index: hnsw.into(),
+                embedding_function: value.embedding_function,
+            }),
+            (None, Some(spann)) => Ok(CollectionConfiguration {
+                vector_index: spann.into(),
+                embedding_function: value.embedding_function,
+            }),
+            (None, None) => Ok(CollectionConfiguration {
+                vector_index: HnswConfiguration::default().into(),
+                embedding_function: value.embedding_function,
+            }),
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct EmbeddingFunctionConfiguration {
     pub name: String,
+    pub r#type: String,
     pub config: serde_json::Value,
 }
 

@@ -1,5 +1,4 @@
 import os
-import functools
 import shutil
 import tempfile
 import pytest
@@ -21,7 +20,10 @@ from chromadb.config import (
 from chromadb.db.system import SysDB
 from pytest import FixtureRequest
 import uuid
-from chromadb.api.configuration import CollectionConfigurationInternal
+from chromadb.api.collection_configuration import (
+    load_collection_configuration_from_create_collection_configuration,
+    default_create_collection_configuration,
+)
 import logging
 import time
 
@@ -36,7 +38,9 @@ sample_collections: List[Collection] = [
     Collection(
         id=uuid.UUID(int=1),
         name="test_collection_1",
-        configuration=CollectionConfigurationInternal(),
+        configuration=load_collection_configuration_from_create_collection_configuration(
+            default_create_collection_configuration()
+        ),
         metadata={"test_str": "str1", "test_int": 1, "test_float": 1.3},
         dimension=128,
         database=DEFAULT_DATABASE,
@@ -46,7 +50,9 @@ sample_collections: List[Collection] = [
     Collection(
         id=uuid.UUID(int=2),
         name="test_collection_2",
-        configuration=CollectionConfigurationInternal(),
+        configuration=load_collection_configuration_from_create_collection_configuration(
+            default_create_collection_configuration()
+        ),
         metadata={"test_str": "str2", "test_int": 2, "test_float": 2.3},
         dimension=None,
         database=DEFAULT_DATABASE,
@@ -56,7 +62,9 @@ sample_collections: List[Collection] = [
     Collection(
         id=uuid.UUID(int=3),
         name="test_collection_3",
-        configuration=CollectionConfigurationInternal(),
+        configuration=load_collection_configuration_from_create_collection_configuration(
+            default_create_collection_configuration()
+        ),
         metadata={"test_str": "str3", "test_int": 3, "test_float": 3.3},
         dimension=None,
         database=DEFAULT_DATABASE,
@@ -66,7 +74,9 @@ sample_collections: List[Collection] = [
     Collection(
         id=uuid.UUID(int=4),
         name="test_collection_4",
-        configuration=CollectionConfigurationInternal(),
+        configuration=load_collection_configuration_from_create_collection_configuration(
+            default_create_collection_configuration()
+        ),
         metadata={"test_str": "str4", "test_int": 4, "test_float": 4.4},
         dimension=None,
         database=DEFAULT_DATABASE,
@@ -160,14 +170,16 @@ def sysdb(request: FixtureRequest) -> Generator[SysDB, None, None]:
     yield next(request.param())
     logger.debug("Tearing down sysdb fixture")
 
-def sample_segment(collection_id: uuid.UUID = uuid.uuid4(),
-                   segment_type: str = "test_type_a",
-                   scope: SegmentScope = SegmentScope.VECTOR,
-                   metadata: Dict[str, Union[str, int, float]] = {
-                       "test_str": "str1",
-                       "test_int": 1,
-                       "test_float": 1.3,
-                   },
+
+def sample_segment(
+    collection_id: uuid.UUID = uuid.uuid4(),
+    segment_type: str = "test_type_a",
+    scope: SegmentScope = SegmentScope.VECTOR,
+    metadata: Dict[str, Union[str, int, float]] = {
+        "test_str": "str1",
+        "test_int": 1,
+        "test_float": 1.3,
+    },
 ) -> Segment:
     return Segment(
         id=uuid.uuid4(),
@@ -177,6 +189,7 @@ def sample_segment(collection_id: uuid.UUID = uuid.uuid4(),
         metadata=metadata,
         file_paths={},
     )
+
 
 # region Collection tests
 def test_create_get_delete_collections(sysdb: SysDB) -> None:
@@ -230,10 +243,17 @@ def test_create_get_delete_collections(sysdb: SysDB) -> None:
 
     # Verify segment information
     for collection in sample_collections:
-        collection_with_segments_result = sysdb.get_collection_with_segments(collection.id)
+        collection_with_segments_result = sysdb.get_collection_with_segments(
+            collection.id
+        )
         assert collection_with_segments_result["collection"] == collection
-        assert all([segment["collection"] == collection.id for segment in collection_with_segments_result["segments"]])
-        
+        assert all(
+            [
+                segment["collection"] == collection.id
+                for segment in collection_with_segments_result["segments"]
+            ]
+        )
+
     # Delete
     c1 = sample_collections[0]
     sysdb.delete_collection(id=c1.id)
@@ -281,7 +301,10 @@ def test_create_get_delete_collections(sysdb: SysDB) -> None:
             name=sample_collections[0].name,
             id=sample_collections[0].id,
             configuration=sample_collections[0].get_configuration(),
-            segments=[segments_created_with_collection[0], segments_created_with_collection[0]],
+            segments=[
+                segments_created_with_collection[0],
+                segments_created_with_collection[0],
+            ],
         )
     # Check that collection was not created.
     # Check that segments were not created.
@@ -290,6 +313,7 @@ def test_create_get_delete_collections(sysdb: SysDB) -> None:
     by_collection_result = sysdb.get_segments(collection=sample_collections[0].id)
     # Note: Segments are not immediately deleted because of soft deletes.
     assert len(by_collection_result) >= 0
+
 
 def test_count_collections(sysdb: SysDB) -> None:
     logger.debug("Resetting state")
@@ -311,13 +335,15 @@ def test_count_collections(sysdb: SysDB) -> None:
             segments=segments,
             metadata=collection["metadata"],
             dimension=collection["dimension"],
-            tenant = DEFAULT_TENANT,
-            database = DEFAULT_DATABASE,
+            tenant=DEFAULT_TENANT,
+            database=DEFAULT_DATABASE,
         )
         collection["database"] = DEFAULT_DATABASE
         collection["tenant"] = DEFAULT_TENANT
 
-    collection_count = sysdb.count_collections(tenant=DEFAULT_TENANT, database=DEFAULT_DATABASE)
+    collection_count = sysdb.count_collections(
+        tenant=DEFAULT_TENANT, database=DEFAULT_DATABASE
+    )
     logger.debug(f"Collection count: {collection_count}")
 
     assert collection_count == len(sample_collections)
@@ -328,15 +354,19 @@ def test_count_collections(sysdb: SysDB) -> None:
 
     assert collection_count == len(sample_collections)
 
+
 def test_get_collection_size(sysdb: SysDB) -> None:
     if not isinstance(sysdb, GrpcSysDB):
-        pytest.skip("Skipping because this functionality is only supported by GrpcSysDB")
-    
+        pytest.skip(
+            "Skipping because this functionality is only supported by GrpcSysDB"
+        )
+
     sysdb.reset_state()
 
     for collection in sample_collections:
         collection_size = sysdb.get_collection_size(collection.id)
         assert collection_size == 0
+
 
 def test_update_collections(sysdb: SysDB) -> None:
     coll = Collection(
@@ -435,7 +465,7 @@ def test_get_or_create_collection(sysdb: SysDB) -> None:
                 metadata={"test_str": "str1", "test_int": 1, "test_float": 1.3},
                 file_paths={},
             )
-        ], # This could have been empty - [].
+        ],  # This could have been empty - [].
         metadata=collection["metadata"],
     )
     assert result == collection
@@ -630,6 +660,7 @@ def test_create_get_delete_database_and_collection(sysdb: SysDB) -> None:
     with pytest.raises(NotFoundError):
         sysdb.delete_collection(id=sample_collections[1].id, database="new_database")
 
+
 def test_create_update_with_database(sysdb: SysDB) -> None:
     sysdb.reset_state()
 
@@ -721,6 +752,7 @@ def test_get_multiple_with_database(sysdb: SysDB) -> None:
     # Get all collections in the default database
     result = sysdb.get_collections()
     assert len(result) == 0
+
 
 def test_create_database_with_tenants(sysdb: SysDB) -> None:
     sysdb.reset_state()
@@ -932,6 +964,7 @@ def test_create_get_delete_segments(sysdb: SysDB) -> None:
     # Execute the call and expect no error or exception.
     s1 = segments_created_with_collection[0]
     sysdb.delete_segment(s1["collection"], s1["id"])
+
 
 def test_update_segment(sysdb: SysDB) -> None:
     metadata: Dict[str, Union[str, int, float]] = {

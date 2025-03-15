@@ -60,7 +60,7 @@ class CreateCollection(BaseModel):
     # In 0.5.4 we added the configuration field to the CreateCollection model
     # This field is optional, for backwards compatibility with older versions
     # we default to None.
-    configuration: Optional[Dict[str, Any]] = None
+    configuration: Optional[str] = None
     metadata: Optional[CollectionMetadata] = None
     get_or_create: bool = False
 
@@ -68,6 +68,7 @@ class CreateCollection(BaseModel):
 class UpdateCollection(BaseModel):
     new_name: Optional[str] = None
     new_metadata: Optional[CollectionMetadata] = None
+    new_configuration: Optional[str] = None
 
 
 class CreateDatabase(BaseModel):
