@@ -24,7 +24,7 @@ docker_build(
 
 if config.tilt_subcommand == "ci":
   custom_build(
-    'local:rust-log-service',
+    'rust-log-service',
     'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF  -f ./rust/log/Dockerfile . --load',
     ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
   )
@@ -56,7 +56,7 @@ docker_build(
 
 if config.tilt_subcommand == "ci":
   custom_build(
-    'local:frontend-service',
+    'frontend-service',
     'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF -f ./Dockerfile . --load',
     ['chromadb/', 'idl/', 'requirements.txt', 'bin/']
   )
@@ -71,7 +71,7 @@ else:
 
 if config.tilt_subcommand == "ci":
   custom_build(
-    'local:rust-frontend-service',
+    'rust-frontend-service',
     'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF -f ./rust/cli/Dockerfile . --load',
     ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
   )
@@ -85,7 +85,7 @@ else:
 
 if config.tilt_subcommand == "ci":
   custom_build(
-    'local:query-service',
+    'query-service',
     'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF --target query_service -f ./rust/worker/Dockerfile . --load ',
     ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
   )
@@ -100,7 +100,7 @@ else:
 
 if config.tilt_subcommand == "ci":
   custom_build(
-    'local:compaction-service',
+    'compaction-service',
     'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF --target compaction_service -f ./rust/worker/Dockerfile . --load ',
     ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
   )
