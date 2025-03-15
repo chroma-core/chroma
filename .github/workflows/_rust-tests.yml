@@ -36,6 +36,8 @@ jobs:
           github-token: ${{ github.token }}
       - name: Start services in Tilt
         uses: ./.github/actions/tilt
+        with:
+          depot-project-id: ${{ vars.DEPOT_PROJECT_ID }}
       - name: Run tests
         run: cargo nextest run --profile k8s_integration
       - name: Save service logs to artifact
