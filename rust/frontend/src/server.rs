@@ -24,7 +24,6 @@ use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Meter};
 use opentelemetry::KeyValue;
 use serde::{Deserialize, Serialize};
-use serde_json;
 use std::str::FromStr;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
