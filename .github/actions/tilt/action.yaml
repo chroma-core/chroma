@@ -6,8 +6,6 @@ inputs:
     required: true
 runs:
   using: "composite"
-  env:
-    DEPOT_PROJECT_ID: ${{ inputs.depot-project_id }}
   steps:
     - name: Install Tilt
       shell: bash
@@ -27,6 +25,8 @@ runs:
     - name: Start Tilt
       shell: bash
       run: tilt ci
+      env:
+        DEPOT_PROJECT_ID: ${{ inputs.depot-project-id }}
     - name: Forward ports
       shell: bash
       run: |
