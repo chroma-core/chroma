@@ -6,21 +6,35 @@ docker_build(
   dockerfile='./k8s/test/postgres/Dockerfile'
 )
 
-docker_build(
-  'logservice',
-  '.',
-  only=['go/', 'idl/'],
-  dockerfile='./go/Dockerfile',
-  target='logservice'
-)
+if config.tilt_subcommand == "ci":
+  custom_build(
+    'logservice',
+    'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF --target logservice -f ./go/Dockerfile . --load',
+    ['./go/', './idl/']
+  )
+else:
+  docker_build(
+    'logservice',
+    '.',
+    only=['go/', 'idl/'],
+    dockerfile='./go/Dockerfile',
+    target='logservice'
+  )
 
-docker_build(
-  'logservice-migration',
-  '.',
-  only=['go/'],
-  dockerfile='./go/Dockerfile.migration',
-  target="logservice-migration"
-)
+if config.tilt_subcommand == "ci":
+  custom_build(
+    'logservice-migration',
+    'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF --target logservice-migration -f ./go/Dockerfile.migration . --load',
+    ['./go/']
+  )
+else:
+  docker_build(
+    'logservice-migration',
+    '.',
+    only=['go/'],
+    dockerfile='./go/Dockerfile.migration',
+    target="logservice-migration"
+  )
 
 if config.tilt_subcommand == "ci":
   custom_build(
@@ -36,22 +50,35 @@ else:
     dockerfile='./rust/log/Dockerfile',
   )
 
+if config.tilt_subcommand == "ci":
+  custom_build(
+    'sysdb',
+    'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF --target sysdb -f ./go/Dockerfile . --load',
+    ['./go/', './idl/']
+  )
+else:
+  docker_build(
+    'sysdb',
+    '.',
+    only=['go/', 'idl/'],
+    dockerfile='./go/Dockerfile',
+    target='sysdb'
+  )
 
-docker_build(
-  'sysdb',
-  '.',
-  only=['go/', 'idl/'],
-  dockerfile='./go/Dockerfile',
-  target='sysdb'
-)
-
-docker_build(
-  'sysdb-migration',
-  '.',
-  only=['go/'],
-  dockerfile='./go/Dockerfile.migration',
-  target='sysdb-migration'
-)
+if config.tilt_subcommand == "ci":
+  custom_build(
+    'sysdb-migration',
+    'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF --target sysdb-migration -f ./go/Dockerfile.migration . --load',
+    ['./go/']
+  )
+else:
+  docker_build(
+    'sysdb-migration',
+    '.',
+    only=['go/'],
+    dockerfile='./go/Dockerfile.migration',
+    target='sysdb-migration'
+  )
 
 
 if config.tilt_subcommand == "ci":
