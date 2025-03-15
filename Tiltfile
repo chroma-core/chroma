@@ -50,6 +50,7 @@ docker_build(
   '.',
   only=['go/'],
   dockerfile='./go/Dockerfile.migration',
+  target='sysdb-migration'
 )
 
 
