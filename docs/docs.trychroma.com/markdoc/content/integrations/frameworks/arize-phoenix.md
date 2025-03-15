@@ -21,15 +21,13 @@ name: Arize Phoenix
   </a>
 </p>
 
-[Arize Phoenix](https://github.com/Arize-ai/phoenix/) is an open-source observability and evaluation tool. It can be accessed as an online tool, or self-hosted.
-
-Phoenix allows you to trace calls made to your ChromaDBs and view retrieved documents.
+[Arize Phoenix](https://github.com/Arize-ai/phoenix/) is an open-source observability and evaluation tool for AI agents, chatbots, and RAG applications. Phoenix allows you to trace calls made to your Chroma DB instances, view retrieved documents, and score document relevancy.
 
 ![Phoenix Chroma Integration Example](https://storage.googleapis.com/arize-phoenix-assets/assets/images/arize-phoenix-chroma-example-image.png)
 
 
 ## Tutorials
-- [Trace and Evaluate an Agentic RAG app using Chroma](https://github.com/Arize-ai/phoenix/blob/main/tutorials/tracing/agentic_rag_tracing.ipynb)
+- [Trace and Evaluate an Agentic RAG app using Chroma](https://github.com/Arize-ai/phoenix/blob/main/tutorials/tracing/agentic_rag_tracing.ipynb) - This tutorial shows how you can trace and evaluate an Agentic RAG app that uses Chroma as its VectorDB.
 
 ## Getting Started
 ### Install and Launch Phoenix Locally
@@ -60,7 +58,7 @@ from phoenix.otel import register
 
 # configure the Phoenix tracer
 tracer_provider = register(
-    project_name="agentic-rag-demo-2",
+    project_name="chroma-db-demo",
 )
 
 tracer = tracer_provider.get_tracer(__name__)
