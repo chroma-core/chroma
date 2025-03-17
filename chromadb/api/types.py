@@ -64,6 +64,19 @@ class Space(Enum):
     L2 = "l2"
     IP = "ip"
 
+    def __str__(self) -> str:
+        return self.value
+
+    def to_json(self) -> str:
+        return self.value
+
+    @classmethod
+    def from_json(cls, value: str) -> "Space":
+        return cls(value)
+
+    def __repr__(self) -> str:
+        return f"Space.{self.name}"
+
 
 def normalize_embeddings(
     target: Optional[Union[OneOrMany[Embedding], OneOrMany[PyEmbedding]]]

@@ -116,24 +116,35 @@ def load_collection_configuration_from_json(
 
 
 def collection_configuration_to_json_str(config: CollectionConfiguration) -> str:
-    return json.dumps(collection_configuration_to_json(config))
+    return json.dumps(collection_configuration_to_json(config), cls=ChromaJSONEncoder)
 
 
 def collection_configuration_to_json(config: CollectionConfiguration) -> Dict[str, Any]:
-    if config.get("hnsw") is None:
-        config["hnsw"] = default_create_hnsw_configuration()
-    if config.get("embedding_function") is None:
-        config["embedding_function"] = cast(
-            EmbeddingFunction[Embeddable], DefaultEmbeddingFunction()
-        )
+    if isinstance(config, dict):
+        hnsw_config = config.get("hnsw")
+        ef = config.get("embedding_function")
+    else:
+        try:
+            hnsw_config = config.get_parameter("hnsw").value
+        except ValueError:
+            hnsw_config = None
+        try:
+            ef = config.get_parameter("embedding_function").value
+        except ValueError:
+            ef = None
+
+    if hnsw_config is None:
+        hnsw_config = default_create_hnsw_configuration()
+    if ef is None:
+        ef = cast(EmbeddingFunction[Embeddable], DefaultEmbeddingFunction())
+
     try:
-        hnsw_config = cast(CreateHNSWConfiguration, config.get("hnsw"))
+        hnsw_config = cast(CreateHNSWConfiguration, hnsw_config)
     except Exception as e:
         raise ValueError(f"not a valid hnsw config: {e}")
 
     ef_config: Dict[str, Any] | None = None
     try:
-        ef = cast(EmbeddingFunction[Embeddable], config.get("embedding_function"))
         if ef.name() is NotImplemented:
             ef_config = {"type": "legacy"}
         else:
@@ -216,7 +227,7 @@ def create_collection_configuration_from_legacy_collection_metadata(
     old_to_new = {
         "hnsw:space": "space",
         "hnsw:ef_construction": "ef_construction",
-        "hnsw:max_neighbors": "max_neighbors",
+        "hnsw:M": "max_neighbors",
         "hnsw:ef_search": "ef_search",
         "hnsw:num_threads": "num_threads",
         "hnsw:batch_size": "batch_size",
@@ -242,7 +253,7 @@ def create_collection_configuration_from_legacy_metadata(
     old_to_new = {
         "hnsw:space": "space",
         "hnsw:ef_construction": "ef_construction",
-        "hnsw:max_neighbors": "max_neighbors",
+        "hnsw:M": "max_neighbors",
         "hnsw:ef_search": "ef_search",
         "hnsw:num_threads": "num_threads",
         "hnsw:batch_size": "batch_size",
@@ -359,7 +370,9 @@ def create_collection_configuration_to_json_str(
     config: CreateCollectionConfiguration,
 ) -> str:
     """Convert a CreateCollection configuration to a JSON-serializable string"""
-    return json.dumps(create_collection_configuration_to_json(config))
+    return json.dumps(
+        create_collection_configuration_to_json(config), cls=ChromaJSONEncoder
+    )
 
 
 def create_collection_configuration_to_json(
@@ -585,7 +598,7 @@ def update_collection_configuration_to_json_str(
 ) -> str:
     """Convert an UpdateCollectionConfiguration to a JSON-serializable string"""
     json_dict = update_collection_configuration_to_json(config)
-    return json.dumps(json_dict)
+    return json.dumps(json_dict, cls=ChromaJSONEncoder)
 
 
 def update_collection_configuration_to_json(
@@ -685,22 +698,21 @@ def overwrite_hnsw_configuration(
     existing_hnsw_config: HNSWConfiguration, update_hnsw_config: UpdateHNSWConfiguration
 ) -> HNSWConfiguration:
     """Overwrite a HNSWConfiguration with a new configuration"""
-    ef_search = update_hnsw_config.get("ef_search")
-    num_threads = update_hnsw_config.get("num_threads")
-    batch_size = update_hnsw_config.get("batch_size")
-    sync_threshold = update_hnsw_config.get("sync_threshold")
-    resize_factor = update_hnsw_config.get("resize_factor")
-    if ef_search is not None:
-        existing_hnsw_config["ef_search"] = ef_search
-    if num_threads is not None:
-        existing_hnsw_config["num_threads"] = num_threads
-    if batch_size is not None:
-        existing_hnsw_config["batch_size"] = batch_size
-    if sync_threshold is not None:
-        existing_hnsw_config["sync_threshold"] = sync_threshold
-    if resize_factor is not None:
-        existing_hnsw_config["resize_factor"] = resize_factor
-    return existing_hnsw_config
+    # Create a copy of the existing config and update with new values
+    result = dict(existing_hnsw_config)
+    update_fields = [
+        "ef_search",
+        "num_threads",
+        "batch_size",
+        "sync_threshold",
+        "resize_factor",
+    ]
+
+    for field in update_fields:
+        if field in update_hnsw_config:
+            result[field] = update_hnsw_config[field]  # type: ignore
+
+    return cast(HNSWConfiguration, result)
 
 
 def overwrite_embedding_function(
@@ -708,14 +720,11 @@ def overwrite_embedding_function(
     update_embedding_function: EmbeddingFunction[Embeddable],
 ) -> EmbeddingFunction[Embeddable]:
     """Overwrite an EmbeddingFunction with a new configuration"""
-    if update_embedding_function.name() is NotImplemented:
-        warnings.warn(
-            "cannot update legacy embedding function config",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return existing_embedding_function
-    if existing_embedding_function.name() is NotImplemented:
+    # Check for legacy embedding functions
+    if (
+        existing_embedding_function.name() is NotImplemented
+        or update_embedding_function.name() is NotImplemented
+    ):
         warnings.warn(
             "cannot update legacy embedding function config",
             DeprecationWarning,
@@ -723,9 +732,14 @@ def overwrite_embedding_function(
         )
         return existing_embedding_function
 
+    # Validate function compatibility
     if existing_embedding_function.name() != update_embedding_function.name():
-        raise ValueError("cannot update embedding function with different name")
+        raise ValueError(
+            f"Cannot update embedding function: incompatible types "
+            f"({existing_embedding_function.name()} vs {update_embedding_function.name()})"
+        )
 
+    # Validate and apply the configuration update
     update_embedding_function.validate_config_update(
         existing_embedding_function.get_config(), update_embedding_function.get_config()
     )
@@ -737,25 +751,25 @@ def overwrite_collection_configuration(
     update_config: UpdateCollectionConfiguration,
 ) -> CollectionConfiguration:
     """Overwrite a CollectionConfiguration with a new configuration"""
-    existing_hnsw_config = existing_config.get("hnsw")
-    new_hnsw_config = update_config.get("hnsw")
-    existing_embedding_function = existing_config.get("embedding_function")
-    new_embedding_function = update_config.get("embedding_function")
-    if existing_hnsw_config is not None:
-        if new_hnsw_config is not None:
-            updated_hnsw_config = overwrite_hnsw_configuration(
-                existing_hnsw_config, new_hnsw_config
+    # Handle HNSW configuration update
+    updated_hnsw_config = existing_config.get("hnsw")
+    update_hnsw = update_config.get("hnsw")
+    if updated_hnsw_config is not None and update_hnsw is not None:
+        updated_hnsw_config = overwrite_hnsw_configuration(
+            updated_hnsw_config, update_hnsw
+        )
+
+    # Handle embedding function update
+    updated_embedding_function = existing_config.get("embedding_function")
+    update_ef = update_config.get("embedding_function")
+    if update_ef is not None:
+        if updated_embedding_function is not None:
+            updated_embedding_function = overwrite_embedding_function(
+                updated_embedding_function, update_ef
             )
         else:
-            updated_hnsw_config = existing_hnsw_config
+            updated_embedding_function = update_ef
 
-    updated_embedding_function = existing_embedding_function
-    if existing_embedding_function is not None and new_embedding_function is not None:
-        updated_embedding_function = overwrite_embedding_function(
-            existing_embedding_function, new_embedding_function
-        )
-    elif new_embedding_function is not None:
-        updated_embedding_function = new_embedding_function
     return CollectionConfiguration(
         hnsw=updated_hnsw_config, embedding_function=updated_embedding_function
     )
@@ -765,3 +779,12 @@ class InvalidConfigurationError(ValueError):
     """Represents an error that occurs when a configuration is invalid."""
 
     pass
+
+
+class ChromaJSONEncoder(json.JSONEncoder):
+    def default(self, obj: Any) -> Any:
+        if isinstance(obj, Space):
+            return obj.to_json()
+        if obj is NotImplemented:
+            return None
+        return super().default(obj)
