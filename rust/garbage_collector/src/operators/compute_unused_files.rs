@@ -4,7 +4,6 @@ use chroma_cache::nop::NopCache;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::Storage;
 use chroma_system::{Operator, OperatorType};
-use chroma_types::chroma_proto::CollectionVersionHistory;
 use chroma_types::chroma_proto::{
     CollectionSegmentInfo, CollectionVersionFile, VersionListForCollection,
 };
@@ -12,24 +11,39 @@ use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 use uuid::Uuid;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ComputeUnusedFilesOperator {
     pub collection_id: String,
+    root_manager: RootManager,
+    min_versions_to_keep: u64,
+}
+
+impl std::fmt::Debug for ComputeUnusedFilesOperator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ComputeUnusedFilesOperator")
+            .field("collection_id", &self.collection_id)
+            .field("root_manager", &"<RootManager>") // Skip detailed debug for RootManager
+            .field("min_versions_to_keep", &self.min_versions_to_keep)
+            .finish()
+    }
 }
 
 impl ComputeUnusedFilesOperator {
-    pub fn new(collection_id: String) -> Self {
-        Self { collection_id }
+    pub fn new(collection_id: String, storage: Storage, min_versions_to_keep: u64) -> Self {
+        Self {
+            collection_id,
+            root_manager: RootManager::new(storage, Box::new(NopCache)),
+            min_versions_to_keep,
+        }
     }
 
     /// Compute unused files between two successive versions.
-    /// Returns a tuple of (unused_files, unused_hnsw_prefixes).
+    /// Returns a tuple of (unused_block_ids, unused_hnsw_prefixes).
     async fn compute_unused_between_successive_versions(
         &self,
         older_version: i64,
         newer_version: i64,
         version_to_segment_info: HashMap<i64, CollectionSegmentInfo>,
-        storage: Storage,
     ) -> Result<(Vec<String>, Vec<String>), ComputeUnusedFilesError> {
         let mut unused_s3_files = Vec::new();
         let mut unused_hnsw_prefixes = Vec::new();
@@ -73,7 +87,7 @@ impl ComputeUnusedFilesOperator {
         }
 
         let unused = self
-            .compute_unused_files(older_si_ids, newer_si_ids, storage)
+            .compute_unused_files(older_si_ids, newer_si_ids)
             .await?;
         unused_s3_files.extend(unused);
 
@@ -84,12 +98,9 @@ impl ComputeUnusedFilesOperator {
         &self,
         older_si_ids: Vec<String>,
         newer_si_ids: Vec<String>,
-        storage: Storage,
     ) -> Result<Vec<String>, ComputeUnusedFilesError> {
-        let s3_files_older_version = self
-            .s3_files_in_version(older_si_ids, storage.clone())
-            .await?;
-        let s3_files_newer_version = self.s3_files_in_version(newer_si_ids, storage).await?;
+        let s3_files_older_version = self.s3_files_in_version(older_si_ids).await?;
+        let s3_files_newer_version = self.s3_files_in_version(newer_si_ids).await?;
 
         let older_set: HashSet<_> = s3_files_older_version.into_iter().collect();
         let newer_set: HashSet<_> = s3_files_newer_version.into_iter().collect();
@@ -101,10 +112,8 @@ impl ComputeUnusedFilesOperator {
     async fn s3_files_in_version(
         &self,
         si_ids: Vec<String>,
-        storage: Storage,
     ) -> Result<Vec<String>, ComputeUnusedFilesError> {
         let mut s3_files = Vec::new();
-        let root_manager = RootManager::new(storage.clone(), Box::new(NopCache));
 
         for si_id in si_ids {
             let uuid = Uuid::parse_str(&si_id).map_err(|e| {
@@ -112,7 +121,7 @@ impl ComputeUnusedFilesOperator {
                 ComputeUnusedFilesError::ParseError(si_id.clone(), e.to_string())
             })?;
 
-            let block_ids = match root_manager.get_all_block_ids(&uuid).await {
+            let block_ids = match self.root_manager.get_all_block_ids(&uuid).await {
                 Ok(ids) => ids,
                 Err(e) => {
                     tracing::error!(error = %e, "Failed to get block IDs");
@@ -128,7 +137,6 @@ impl ComputeUnusedFilesOperator {
 #[derive(Clone)]
 pub struct ComputeUnusedFilesInput {
     pub version_file: CollectionVersionFile,
-    pub storage: Storage,
     pub versions_to_delete: VersionListForCollection,
     pub oldest_version_to_keep: i64,
 }
@@ -137,7 +145,6 @@ impl std::fmt::Debug for ComputeUnusedFilesInput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ComputeUnusedFilesInput")
             .field("version_file", &self.version_file)
-            .field("storage", &"<Storage>") // Skip detailed debug for Storage
             .field("versions_to_delete", &self.versions_to_delete)
             .field("oldest_version_to_keep", &self.oldest_version_to_keep)
             .finish()
@@ -146,7 +153,7 @@ impl std::fmt::Debug for ComputeUnusedFilesInput {
 
 #[derive(Clone, Debug)]
 pub struct ComputeUnusedFilesOutput {
-    pub unused_files: Vec<String>,
+    pub unused_block_ids: Vec<String>,
     pub unused_hnsw_prefixes: Vec<String>,
 }
 
@@ -156,6 +163,12 @@ pub enum ComputeUnusedFilesError {
     ParseError(String, String),
     #[error("Version file has missing content")]
     VersionFileMissingContent(i64),
+    #[error("Version history is missing")]
+    MissingVersionHistory,
+    #[error("Cannot delete versions: would leave fewer than minimum required versions ({0})")]
+    InsufficientVersionsRemaining(u64),
+    #[error("Invalid input to the operator.")]
+    InvalidInputToOperator(String),
 }
 
 impl ChromaError for ComputeUnusedFilesError {
@@ -182,10 +195,9 @@ impl Operator<ComputeUnusedFilesInput, ComputeUnusedFilesOutput> for ComputeUnus
         );
 
         let version_file = input.version_file.clone();
-        let storage = input.storage.clone();
 
         let mut output = ComputeUnusedFilesOutput {
-            unused_files: Vec::new(),
+            unused_block_ids: Vec::new(),
             unused_hnsw_prefixes: Vec::new(),
         };
 
@@ -194,7 +206,14 @@ impl Operator<ComputeUnusedFilesInput, ComputeUnusedFilesOutput> for ComputeUnus
 
         // Build a map to version to segment_info
         let mut version_to_segment_info = HashMap::new();
-        let version_history = version_file.version_history.unwrap_or_default();
+        let version_history = version_file
+            .version_history
+            .ok_or(ComputeUnusedFilesError::MissingVersionHistory)?;
+
+        // Check if version history is empty
+        if version_history.versions.is_empty() {
+            return Err(ComputeUnusedFilesError::MissingVersionHistory);
+        }
 
         for v in version_history.versions.iter() {
             // A version may appear multiple times in version_file.version_history
@@ -203,6 +222,30 @@ impl Operator<ComputeUnusedFilesInput, ComputeUnusedFilesOutput> for ComputeUnus
             if let Some(segment_info) = &v.segment_info {
                 version_to_segment_info.insert(v.version, segment_info.clone());
             }
+        }
+
+        // Count unique versions in version history using a HashSet
+        let total_versions = version_history
+            .versions
+            .iter()
+            .map(|v| v.version)
+            .collect::<HashSet<_>>()
+            .len() as u64;
+        let versions_to_delete = input.versions_to_delete.versions.len() as u64;
+
+        // Add check to prevent underflow
+        if versions_to_delete > total_versions {
+            return Err(ComputeUnusedFilesError::InvalidInputToOperator(
+                "versions to delete are greater than total versions".to_string(),
+            ));
+        }
+
+        let versions_remaining = total_versions - versions_to_delete;
+
+        if versions_remaining < self.min_versions_to_keep {
+            return Err(ComputeUnusedFilesError::InsufficientVersionsRemaining(
+                self.min_versions_to_keep,
+            ));
         }
 
         // Compare each successive version pair. The last version is not compared after this loop.
@@ -215,10 +258,9 @@ impl Operator<ComputeUnusedFilesInput, ComputeUnusedFilesOutput> for ComputeUnus
                     older_version,
                     newer_version,
                     version_to_segment_info.clone(),
-                    storage.clone(),
                 )
                 .await?;
-            output.unused_files.extend(unused_s3_files);
+            output.unused_block_ids.extend(unused_s3_files);
             output.unused_hnsw_prefixes.extend(unused_hnsw_prefixes);
         }
 
@@ -228,10 +270,9 @@ impl Operator<ComputeUnusedFilesInput, ComputeUnusedFilesOutput> for ComputeUnus
                 *versions.last().unwrap(),
                 input.oldest_version_to_keep,
                 version_to_segment_info.clone(),
-                storage.clone(),
             )
             .await?;
-        output.unused_files.extend(unused_s3_files);
+        output.unused_block_ids.extend(unused_s3_files);
         output.unused_hnsw_prefixes.extend(unused_hnsw_prefixes);
 
         Ok(output)
@@ -244,7 +285,8 @@ mod tests {
     use chroma_blockstore::test_utils::sparse_index_test_utils;
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::chroma_proto::{
-        self, CollectionSegmentInfo, CollectionVersionInfo, FilePaths, FlushSegmentCompactionInfo,
+        self, CollectionSegmentInfo, CollectionVersionHistory, CollectionVersionInfo, FilePaths,
+        FlushSegmentCompactionInfo,
     };
     use std::collections::HashMap;
     use tempfile::TempDir;
@@ -278,15 +320,23 @@ mod tests {
         Ok(root_id)
     }
 
+    /// Generates a vector of random UUIDs with length between 5 and 30
+    fn generate_random_block_ids() -> Vec<Uuid> {
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+        let count = rng.gen_range(5..=50);
+        (0..count).map(|_| Uuid::new_v4()).collect()
+    }
+
     #[tokio::test]
     async fn test_compute_unused_between_successive_versions() {
         let temp_dir = TempDir::new().unwrap();
         let storage = Storage::Local(LocalStorage::new(temp_dir.path().to_str().unwrap()));
 
-        // Create sparse index files with block IDs
-        let block_ids1 = vec![Uuid::new_v4(), Uuid::new_v4()];
-        let block_ids2 = vec![Uuid::new_v4(), Uuid::new_v4()];
-        let block_ids3 = vec![Uuid::new_v4(), Uuid::new_v4()];
+        // Replace the manual block_ids creation with the helper
+        let block_ids1 = generate_random_block_ids();
+        let block_ids2 = generate_random_block_ids();
+        let block_ids3 = generate_random_block_ids();
 
         let uuid1 = create_sparse_index_file(&storage, block_ids1.clone())
             .await
@@ -322,10 +372,14 @@ mod tests {
             )]),
         );
 
-        let operator = ComputeUnusedFilesOperator::new("test_collection".to_string());
+        let operator = ComputeUnusedFilesOperator::new(
+            "test_collection".to_string(),
+            storage.clone(),
+            1, // Add minimum versions parameter
+        );
 
         let (unused_files, unused_hnsw_prefixes) = operator
-            .compute_unused_between_successive_versions(1, 2, version_to_segment_info, storage)
+            .compute_unused_between_successive_versions(1, 2, version_to_segment_info)
             .await
             .unwrap();
 
@@ -365,7 +419,11 @@ mod tests {
             .await
             .unwrap();
 
-        let operator = ComputeUnusedFilesOperator::new("test_collection".to_string());
+        let operator = ComputeUnusedFilesOperator::new(
+            "test_collection".to_string(),
+            storage.clone(),
+            1, // Add minimum versions parameter
+        );
 
         let input = ComputeUnusedFilesInput {
             oldest_version_to_keep: 3,
@@ -412,7 +470,6 @@ mod tests {
                     ],
                 }),
             },
-            storage,
             versions_to_delete: chroma_proto::VersionListForCollection {
                 versions: vec![1, 2],
                 collection_id: "test_collection".to_string(),
@@ -425,14 +482,20 @@ mod tests {
 
         // Verify results - check all block IDs from uuid1 and uuid2 are marked unused
         for block_id in block_ids1 {
-            assert!(result.unused_files.contains(&format!("block/{}", block_id)));
+            assert!(result
+                .unused_block_ids
+                .contains(&format!("block/{}", block_id)));
         }
         for block_id in block_ids2 {
-            assert!(result.unused_files.contains(&format!("block/{}", block_id)));
+            assert!(result
+                .unused_block_ids
+                .contains(&format!("block/{}", block_id)));
         }
         // Check uuid3's blocks are not marked as unused
         for block_id in block_ids3 {
-            assert!(!result.unused_files.contains(&format!("block/{}", block_id)));
+            assert!(!result
+                .unused_block_ids
+                .contains(&format!("block/{}", block_id)));
         }
         assert!(result.unused_hnsw_prefixes.contains(&"hnsw1".to_string()));
     }
@@ -442,7 +505,11 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let storage = Storage::Local(LocalStorage::new(temp_dir.path().to_str().unwrap()));
 
-        let operator = ComputeUnusedFilesOperator::new("test_collection".to_string());
+        let operator = ComputeUnusedFilesOperator::new(
+            "test_collection".to_string(),
+            storage.clone(),
+            1, // Add minimum versions parameter
+        );
 
         // Create input with missing version info
         let input = ComputeUnusedFilesInput {
@@ -452,7 +519,6 @@ mod tests {
                     versions: vec![], // Empty version history wrapped in Some
                 }),
             },
-            storage,
             versions_to_delete: chroma_proto::VersionListForCollection {
                 versions: vec![1, 2], // Versions that don't exist in history
                 collection_id: "test_collection".to_string(),
@@ -467,7 +533,69 @@ mod tests {
         // Verify we get the expected error
         assert!(matches!(
             result,
-            Err(ComputeUnusedFilesError::VersionFileMissingContent(_))
+            Err(ComputeUnusedFilesError::MissingVersionHistory)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_minimum_versions_check() {
+        let temp_dir = TempDir::new().unwrap();
+        let storage = Storage::Local(LocalStorage::new(temp_dir.path().to_str().unwrap()));
+
+        let operator = ComputeUnusedFilesOperator::new(
+            "test_collection".to_string(),
+            storage.clone(),
+            3, // Require at least 3 versions to be kept
+        );
+
+        let input = ComputeUnusedFilesInput {
+            version_file: chroma_proto::CollectionVersionFile {
+                collection_info_immutable: None,
+                version_history: Some(CollectionVersionHistory {
+                    versions: vec![
+                        CollectionVersionInfo {
+                            version: 1,
+                            segment_info: None,
+                            collection_info_mutable: None,
+                            created_at_secs: 0,
+                            version_change_reason: 0,
+                            version_file_name: String::new(),
+                            marked_for_deletion: false,
+                        },
+                        CollectionVersionInfo {
+                            version: 2,
+                            segment_info: None,
+                            collection_info_mutable: None,
+                            created_at_secs: 0,
+                            version_change_reason: 0,
+                            version_file_name: String::new(),
+                            marked_for_deletion: false,
+                        },
+                        CollectionVersionInfo {
+                            version: 3,
+                            segment_info: None,
+                            collection_info_mutable: None,
+                            created_at_secs: 0,
+                            version_change_reason: 0,
+                            version_file_name: String::new(),
+                            marked_for_deletion: false,
+                        },
+                    ],
+                }),
+            },
+            versions_to_delete: chroma_proto::VersionListForCollection {
+                versions: vec![1, 2], // Try to delete 2 versions
+                collection_id: "test_collection".to_string(),
+                database_id: "test_db".to_string(),
+                tenant_id: "test_tenant".to_string(),
+            },
+            oldest_version_to_keep: 3,
+        };
+
+        let result = operator.run(&input).await;
+        assert!(matches!(
+            result,
+            Err(ComputeUnusedFilesError::InsufficientVersionsRemaining(3))
         ));
     }
 }
