@@ -128,6 +128,7 @@ impl ComputeUnusedFilesOperator {
                     return Err(ComputeUnusedFilesError::ParseError(si_id, e.to_string()));
                 }
             };
+            // TODO(rohitcp): Use const from the crate instead of hardcoding the prefix.
             s3_files.extend(block_ids.iter().map(|id| format!("block/{}", id)));
         }
         Ok(s3_files)
@@ -408,6 +409,7 @@ mod tests {
         let block_ids1 = vec![Uuid::new_v4(), Uuid::new_v4()];
         let block_ids2 = vec![Uuid::new_v4(), Uuid::new_v4()];
         let block_ids3 = vec![Uuid::new_v4(), Uuid::new_v4()];
+        let block_ids4 = vec![Uuid::new_v4(), Uuid::new_v4()]; // Added fourth set of block IDs
 
         let uuid1 = create_sparse_index_file(&storage, block_ids1.clone())
             .await
@@ -418,12 +420,12 @@ mod tests {
         let uuid3 = create_sparse_index_file(&storage, block_ids3.clone())
             .await
             .unwrap();
+        let uuid4 = create_sparse_index_file(&storage, block_ids4.clone()) // Added fourth UUID
+            .await
+            .unwrap();
 
-        let operator = ComputeUnusedFilesOperator::new(
-            "test_collection".to_string(),
-            storage.clone(),
-            1, // Add minimum versions parameter
-        );
+        let operator =
+            ComputeUnusedFilesOperator::new("test_collection".to_string(), storage.clone(), 2);
 
         let input = ComputeUnusedFilesInput {
             oldest_version_to_keep: 3,
@@ -467,6 +469,19 @@ mod tests {
                             version_file_name: String::new(),
                             marked_for_deletion: false,
                         },
+                        CollectionVersionInfo {
+                            // Added fourth version
+                            version: 4,
+                            segment_info: Some(create_test_segment_info(vec![(
+                                "data".to_string(),
+                                vec![uuid4.to_string()],
+                            )])),
+                            collection_info_mutable: None,
+                            created_at_secs: 0,
+                            version_change_reason: 0,
+                            version_file_name: String::new(),
+                            marked_for_deletion: false,
+                        },
                     ],
                 }),
             },
@@ -493,6 +508,12 @@ mod tests {
         }
         // Check uuid3's blocks are not marked as unused
         for block_id in block_ids3 {
+            assert!(!result
+                .unused_block_ids
+                .contains(&format!("block/{}", block_id)));
+        }
+        // Check uuid4's blocks are not marked as unused
+        for block_id in block_ids4 {
             assert!(!result
                 .unused_block_ids
                 .contains(&format!("block/{}", block_id)));
