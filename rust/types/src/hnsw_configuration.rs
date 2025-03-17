@@ -69,11 +69,11 @@ fn default_batch_size() -> usize {
 pub struct HnswConfiguration {
     #[serde(default)]
     pub space: HnswSpace,
-    #[serde(default = "default_construction_ef")]
+    #[serde(default = "default_construction_ef", rename = "ef_construction")]
     pub construction_ef: usize,
-    #[serde(default = "default_search_ef")]
+    #[serde(default = "default_search_ef", rename = "ef_search")]
     pub search_ef: usize,
-    #[serde(default = "default_m")]
+    #[serde(default = "default_m", rename = "max_neighbors")]
     pub m: usize,
     #[serde(default = "default_num_threads")]
     pub num_threads: usize,
