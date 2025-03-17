@@ -6,10 +6,12 @@ use chroma_benchmark::{
 };
 use chroma_blockstore::{arrow::provider::ArrowBlockfileProvider, provider::BlockfileProvider};
 use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
+use chroma_config::{registry::Registry, Configurable};
 use chroma_index::{
+    config::PlGarbageCollectionConfig,
     hnsw_provider::HnswIndexProvider,
     spann::{
-        types::{SpannIndexReader, SpannIndexWriter, SpannPosting},
+        types::{PlGarbageCollectionContext, SpannIndexReader, SpannIndexWriter, SpannPosting},
         utils::rng_query,
     },
 };
@@ -77,6 +79,12 @@ fn add_to_index_and_get_reader<'a>(
         let collection_id = CollectionUuid::new();
         let dimensionality = 128;
         let params = DistributedSpannParameters::default();
+        let gc_context = PlGarbageCollectionContext::try_from_config(
+            &PlGarbageCollectionConfig::default(),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
@@ -87,6 +95,7 @@ fn add_to_index_and_get_reader<'a>(
             dimensionality,
             &blockfile_provider,
             params.clone(),
+            gc_context,
         )
         .await
         .expect("Error creating spann index writer");
