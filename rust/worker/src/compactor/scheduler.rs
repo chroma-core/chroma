@@ -273,6 +273,10 @@ impl Scheduler {
     pub(crate) fn set_memberlist(&mut self, memberlist: Memberlist) {
         self.memberlist = Some(memberlist);
     }
+
+    pub(crate) fn has_memberlist(&self) -> bool {
+        self.memberlist.is_some()
+    }
 }
 
 #[cfg(test)]

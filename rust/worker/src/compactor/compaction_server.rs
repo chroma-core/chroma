@@ -4,11 +4,14 @@ use chroma_types::chroma_proto::{
     compactor_server::{Compactor, CompactorServer},
     CompactionRequest, CompactionResponse,
 };
-use tokio::signal::unix::{signal, SignalKind};
+use tokio::{
+    signal::unix::{signal, SignalKind},
+    sync::oneshot,
+};
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::trace_span;
 
-use crate::compactor::OneOffCompactionMessage;
+use crate::compactor::{OneOffCompactionMessage, RegisterOnReadySignal};
 
 use super::CompactionManager;
 
@@ -18,10 +21,30 @@ pub struct CompactionServer {
 }
 
 impl CompactionServer {
-    pub async fn run(self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn run(mut self) -> Result<(), Box<dyn std::error::Error>> {
         let addr = format!("[::]:{}", self.port).parse().unwrap();
         tracing::info!("Compaction server listening at {addr}");
-        let server = Server::builder().add_service(CompactorServer::new(self));
+
+        let (mut health_reporter, health_service) = tonic_health::server::health_reporter();
+        health_reporter
+            .set_not_serving::<CompactorServer<Self>>()
+            .await;
+
+        // Add readiness listener
+        let (on_ready_tx, on_ready_rx) = oneshot::channel::<()>();
+        tokio::spawn(async move {
+            let _ = on_ready_rx.await;
+            health_reporter.set_serving::<CompactorServer<Self>>().await;
+        });
+
+        // (Request the compactor to notify us when it's ready)
+        self.manager
+            .send(RegisterOnReadySignal { on_ready_tx }, None)
+            .await?;
+
+        let server = Server::builder()
+            .add_service(health_service)
+            .add_service(CompactorServer::new(self));
         server
             .serve_with_shutdown(addr, async {
                 match signal(SignalKind::terminate()) {

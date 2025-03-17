@@ -35,6 +35,9 @@ spec:
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 50051
+          readinessProbe:
+            grpc:
+              port: 50051
           {{ if .Values.rustLogService.resources }}
           resources:
             limits:
