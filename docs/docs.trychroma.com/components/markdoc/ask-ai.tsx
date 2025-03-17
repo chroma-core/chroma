@@ -31,7 +31,7 @@ const AskAI: React.FC<{ content: string }> = ({ content }) => {
         <DropdownMenuTrigger asChild>
           <Button
             variant="outline"
-            className="w-[100px] justify-between focus-visible:outline-none"
+            className="w-[120px] pl-4 pr-2 justify-between focus-visible:outline-none"
           >
             <p className="font-mono">Ask AI</p>
             <ChevronUpDownIcon className="w-5 h-5" />
