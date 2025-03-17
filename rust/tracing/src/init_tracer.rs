@@ -9,7 +9,7 @@ use opentelemetry::trace::TracerProvider;
 use opentelemetry::{global, InstrumentationScope};
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
-use tracing_bunyan_formatter::BunyanFormattingLayer;
+use tracing_subscriber::fmt;
 use tracing_subscriber::Registry;
 use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Layer};
 
@@ -109,8 +109,10 @@ pub fn init_otel_layer(
         .boxed()
 }
 
-pub fn init_stdout_layer(service_name: &str) -> Box<dyn Layer<Registry> + Send + Sync> {
-    BunyanFormattingLayer::new(service_name.to_string(), std::io::stdout)
+pub fn init_stdout_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
+    fmt::layer()
+        .pretty()
+        .with_target(false)
         .with_filter(tracing_subscriber::filter::FilterFn::new(|metadata| {
             // NOTE(rescrv):  This is a hack, too.  Not an uppercase hack, just a hack.  This
             // one's localized to the cache module.  There's not much to do to unify it with
@@ -162,7 +164,7 @@ pub fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
     let layers = vec![
         init_global_filter_layer(),
         init_otel_layer(service_name, otel_endpoint),
-        init_stdout_layer(service_name),
+        init_stdout_layer(),
     ];
     init_tracing(layers);
     init_panic_tracing_hook();

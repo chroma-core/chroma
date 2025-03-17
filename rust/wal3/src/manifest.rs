@@ -564,16 +564,16 @@ mod tests {
         let fragment = Fragment {
             path: "path".to_string(),
             seq_no: FragmentSeqNo(1),
-            start: LogPosition::uni(1),
-            limit: LogPosition::uni(42),
+            start: LogPosition::from_offset(1),
+            limit: LogPosition::from_offset(42),
             num_bytes: 4100,
             setsum: Setsum::default(),
         };
-        assert!(!fragment.possibly_contains_position(LogPosition::uni(0)));
-        assert!(fragment.possibly_contains_position(LogPosition::uni(1)));
-        assert!(fragment.possibly_contains_position(LogPosition::uni(41)));
-        assert!(!fragment.possibly_contains_position(LogPosition::uni(42)));
-        assert!(!fragment.possibly_contains_position(LogPosition::uni(u64::MAX)));
+        assert!(!fragment.possibly_contains_position(LogPosition::from_offset(0)));
+        assert!(fragment.possibly_contains_position(LogPosition::from_offset(1)));
+        assert!(fragment.possibly_contains_position(LogPosition::from_offset(41)));
+        assert!(!fragment.possibly_contains_position(LogPosition::from_offset(42)));
+        assert!(!fragment.possibly_contains_position(LogPosition::from_offset(u64::MAX)));
     }
 
     #[test]
@@ -581,16 +581,16 @@ mod tests {
         let fragment1 = Fragment {
             path: "path1".to_string(),
             seq_no: FragmentSeqNo(1),
-            start: LogPosition::uni(1),
-            limit: LogPosition::uni(22),
+            start: LogPosition::from_offset(1),
+            limit: LogPosition::from_offset(22),
             num_bytes: 4100,
             setsum: Setsum::default(),
         };
         let fragment2 = Fragment {
             path: "path2".to_string(),
             seq_no: FragmentSeqNo(2),
-            start: LogPosition::uni(22),
-            limit: LogPosition::uni(42),
+            start: LogPosition::from_offset(22),
+            limit: LogPosition::from_offset(42),
             num_bytes: 4100,
             setsum: Setsum::default(),
         };
@@ -602,12 +602,12 @@ mod tests {
             snapshots: vec![],
             fragments: vec![fragment1, fragment2],
         };
-        assert!(!manifest.contains_position(LogPosition::uni(0)));
-        assert!(manifest.contains_position(LogPosition::uni(1)));
-        assert!(manifest.contains_position(LogPosition::uni(41)));
-        assert!(manifest.contains_position(LogPosition::uni(41)));
-        assert!(!manifest.contains_position(LogPosition::uni(42)));
-        assert!(!manifest.contains_position(LogPosition::uni(u64::MAX)));
+        assert!(!manifest.contains_position(LogPosition::from_offset(0)));
+        assert!(manifest.contains_position(LogPosition::from_offset(1)));
+        assert!(manifest.contains_position(LogPosition::from_offset(41)));
+        assert!(manifest.contains_position(LogPosition::from_offset(41)));
+        assert!(!manifest.contains_position(LogPosition::from_offset(42)));
+        assert!(!manifest.contains_position(LogPosition::from_offset(u64::MAX)));
     }
 
     #[test]
@@ -615,8 +615,8 @@ mod tests {
         let fragment1 = Fragment {
             path: "path1".to_string(),
             seq_no: FragmentSeqNo(1),
-            start: LogPosition::uni(1),
-            limit: LogPosition::uni(22),
+            start: LogPosition::from_offset(1),
+            limit: LogPosition::from_offset(22),
             num_bytes: 4100,
             setsum: Setsum::from_hexdigest(
                 "4eec78e0b5cd15df7b36fd42cdc3aecb1986ffa3655c338201db88f80d855465",
@@ -626,8 +626,8 @@ mod tests {
         let fragment2 = Fragment {
             path: "path2".to_string(),
             seq_no: FragmentSeqNo(2),
-            start: LogPosition::uni(22),
-            limit: LogPosition::uni(42),
+            start: LogPosition::from_offset(22),
+            limit: LogPosition::from_offset(42),
             num_bytes: 4100,
             setsum: Setsum::from_hexdigest(
                 "dd901afef0e5d336aaa52a2df7f785c909091fd0aa011980de443a61a889d3e1",
@@ -665,8 +665,8 @@ mod tests {
         let fragment1 = Fragment {
             path: "path1".to_string(),
             seq_no: FragmentSeqNo(1),
-            start: LogPosition::uni(1),
-            limit: LogPosition::uni(22),
+            start: LogPosition::from_offset(1),
+            limit: LogPosition::from_offset(22),
             num_bytes: 41,
             setsum: Setsum::from_hexdigest(
                 "4eec78e0b5cd15df7b36fd42cdc3aecb1986ffa3655c338201db88f80d855465",
@@ -676,8 +676,8 @@ mod tests {
         let fragment2 = Fragment {
             path: "path2".to_string(),
             seq_no: FragmentSeqNo(2),
-            start: LogPosition::uni(22),
-            limit: LogPosition::uni(42),
+            start: LogPosition::from_offset(22),
+            limit: LogPosition::from_offset(42),
             num_bytes: 42,
             setsum: Setsum::from_hexdigest(
                 "dd901afef0e5d336aaa52a2df7f785c909091fd0aa011980de443a61a889d3e1",
@@ -711,8 +711,8 @@ mod tests {
                     Fragment {
                         path: "path1".to_string(),
                         seq_no: FragmentSeqNo(1),
-                        start: LogPosition::uni(1),
-                        limit: LogPosition::uni(22),
+                        start: LogPosition::from_offset(1),
+                        limit: LogPosition::from_offset(22),
                         num_bytes: 41,
                         setsum: Setsum::from_hexdigest(
                             "4eec78e0b5cd15df7b36fd42cdc3aecb1986ffa3655c338201db88f80d855465"
@@ -722,8 +722,8 @@ mod tests {
                     Fragment {
                         path: "path2".to_string(),
                         seq_no: FragmentSeqNo(2),
-                        start: LogPosition::uni(22),
-                        limit: LogPosition::uni(42),
+                        start: LogPosition::from_offset(22),
+                        limit: LogPosition::from_offset(42),
                         num_bytes: 42,
                         setsum: Setsum::from_hexdigest(
                             "dd901afef0e5d336aaa52a2df7f785c909091fd0aa011980de443a61a889d3e1"
