@@ -28,6 +28,9 @@ spec:
             {{ end }}
           image: "{{ .Values.sysdb.image.repository }}:{{ .Values.sysdb.image.tag }}"
           imagePullPolicy: IfNotPresent
+          readinessProbe:
+            grpc:
+              port: 50051
           name: sysdb
           ports:
             - containerPort: 50051
