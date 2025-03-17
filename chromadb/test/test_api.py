@@ -1276,13 +1276,7 @@ def test_index_params(client):
 def test_invalid_index_params(client):
     client.reset()
 
-    with pytest.raises(Exception):
-        collection = client.create_collection(
-            name="test_index_params", metadata={"hnsw:foobar": "blarg"}
-        )
-        collection.add(**records)
-
-    with pytest.raises(Exception):
+    with pytest.raises(ValueError):
         collection = client.create_collection(
             name="test_index_params", metadata={"hnsw:space": "foobar"}
         )

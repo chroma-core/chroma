@@ -224,6 +224,7 @@ def create_collection_configuration_from_legacy_collection_metadata(
     metadata: CollectionMetadata,
 ) -> CreateCollectionConfiguration:
     """Create a CreateCollectionConfiguration from legacy collection metadata"""
+    print(f"metadata: {metadata}")
     old_to_new = {
         "hnsw:space": "space",
         "hnsw:ef_construction": "ef_construction",
@@ -238,6 +239,7 @@ def create_collection_configuration_from_legacy_collection_metadata(
     for name, value in metadata.items():
         if name in old_to_new:
             json_map[old_to_new[name]] = value
+    print(f"json_map: {json_map}")
     hnsw_config = json_to_create_hnsw_configuration(json_map)
     hnsw_config = populate_create_hnsw_defaults(hnsw_config)
     validate_create_hnsw_config(hnsw_config)
@@ -476,13 +478,13 @@ def validate_create_hnsw_config(
         if config["resize_factor"] <= 0:
             raise ValueError("resize_factor must be greater than 0")
     if "space" in config:
+        print(f"space: {config['space']}")
         # Check if the space value is one of the string values of the Space enum
         valid_spaces = [space.value for space in Space]
         space_value = config["space"]
         space_str = space_value.value if isinstance(space_value, Space) else space_value
 
         if space_str not in valid_spaces:
-            print(space_str)
             raise ValueError(
                 f"space must be one of the following: {', '.join(valid_spaces)}"
             )
