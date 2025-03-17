@@ -32,7 +32,7 @@ use chroma_types::{
     UpdateCollectionError, UpdateCollectionRecordsError, UpdateCollectionRecordsRequest,
     UpdateCollectionRecordsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
     UpdateMetadata, UpdateMetadataValue, UpsertCollectionRecordsError,
-    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, CHROMA_DOCUMENT_KEY,
+    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, Where, CHROMA_DOCUMENT_KEY,
     CHROMA_URI_KEY,
 };
 use opentelemetry::global;
@@ -606,7 +606,7 @@ impl Frontend {
 
         let embeddings = embeddings.map(|embeddings| embeddings.into_iter().map(Some).collect());
 
-        let (records, log_bytes) =
+        let (records, log_size_bytes) =
             to_records(ids, embeddings, documents, uris, metadatas, Operation::Add)
                 .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
@@ -615,13 +615,13 @@ impl Frontend {
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
-        MeterEvent::collection_write(
-            tenant_id,
-            database_name,
-            collection_id.0,
-            WriteAction::Add,
-            log_bytes,
-        )
+        MeterEvent::CollectionWrite {
+            tenant: tenant_id,
+            database: database_name,
+            collection_id: collection_id.0,
+            action: WriteAction::Add,
+            log_size_bytes,
+        }
         .submit()
         .await;
 
@@ -648,7 +648,7 @@ impl Frontend {
         .await
         .map_err(|err| err.boxed())?;
 
-        let (records, log_bytes) = to_records(
+        let (records, log_size_bytes) = to_records(
             ids,
             embeddings,
             documents,
@@ -663,13 +663,13 @@ impl Frontend {
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
-        MeterEvent::collection_write(
-            tenant_id,
-            database_name,
-            collection_id.0,
-            WriteAction::Update,
-            log_bytes,
-        )
+        MeterEvent::CollectionWrite {
+            tenant: tenant_id,
+            database: database_name,
+            collection_id: collection_id.0,
+            action: WriteAction::Update,
+            log_size_bytes,
+        }
         .submit()
         .await;
 
@@ -698,7 +698,7 @@ impl Frontend {
 
         let embeddings = embeddings.map(|embeddings| embeddings.into_iter().map(Some).collect());
 
-        let (records, log_bytes) = to_records(
+        let (records, log_size_bytes) = to_records(
             ids,
             embeddings,
             documents,
@@ -713,13 +713,13 @@ impl Frontend {
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
-        MeterEvent::collection_write(
-            tenant_id,
-            database_name,
-            collection_id.0,
-            WriteAction::Upsert,
-            log_bytes,
-        )
+        MeterEvent::CollectionWrite {
+            tenant: tenant_id,
+            database: database_name,
+            collection_id: collection_id.0,
+            action: WriteAction::Upsert,
+            log_size_bytes,
+        }
         .submit()
         .await;
 
@@ -739,12 +739,13 @@ impl Frontend {
     ) -> Result<DeleteCollectionRecordsResponse, DeleteCollectionRecordsError> {
         let mut records = Vec::new();
 
-        if let Some(where_clause) = r#where {
+        let read_event = if let Some(where_clause) = r#where {
             let collection_and_segments = self
                 .collections_with_segments_provider
                 .get_collection_with_segments(collection_id)
                 .await
                 .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+            let filter_complexity = where_clause.complexity();
 
             let filter = Filter {
                 query_ids: ids,
@@ -780,6 +781,18 @@ impl Frontend {
                     metadata: None,
                 });
             }
+            // TODO: Inspect collection logical bytes and returned bytes
+            Some(MeterEvent::CollectionRead {
+                tenant: tenant_id.clone(),
+                database: database_name.clone(),
+                collection_id: collection_id.0,
+                action: ReadAction::Get,
+                filter_complexity,
+                vector_complexity: 0,
+                pulled_log_size_bytes: get_result.pulled_log_bytes,
+                latest_collection_logical_size_bytes: 0,
+                return_bytes: 0,
+            })
         } else if let Some(user_ids) = ids {
             records.extend(user_ids.into_iter().map(|id| OperationRecord {
                 id,
@@ -789,27 +802,33 @@ impl Frontend {
                 encoding: None,
                 metadata: None,
             }));
-        }
+            None
+        } else {
+            None
+        };
 
         if records.is_empty() {
             tracing::debug!("Bailing because no records were found");
             return Ok(DeleteCollectionRecordsResponse {});
         }
 
-        let log_bytes = records.iter().map(OperationRecord::size_byte).sum();
+        let log_size_bytes = records.iter().map(OperationRecord::size_byte).sum();
 
         self.log_client
             .push_logs(collection_id, records)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
-        MeterEvent::collection_write(
-            tenant_id,
-            database_name,
-            collection_id.0,
-            WriteAction::Delete,
-            log_bytes,
-        )
+        if let Some(event) = read_event {
+            event.submit().await;
+        }
+        MeterEvent::CollectionWrite {
+            tenant: tenant_id,
+            database: database_name,
+            collection_id: collection_id.0,
+            action: WriteAction::Delete,
+            log_size_bytes,
+        }
         .submit()
         .await;
 
@@ -880,15 +899,18 @@ impl Frontend {
                 },
             })
             .await?;
-        // TODO: Calculate read bytes and returned bytes
-        MeterEvent::collection_read(
-            tenant_id,
-            database_name,
-            collection_id.0,
-            ReadAction::Count,
-            0,
-            0,
-        )
+        // TODO: Inspect collection logical bytes and returned bytes
+        MeterEvent::CollectionRead {
+            tenant: tenant_id.clone(),
+            database: database_name.clone(),
+            collection_id: collection_id.0,
+            action: ReadAction::Count,
+            filter_complexity: 0,
+            vector_complexity: 0,
+            pulled_log_size_bytes: res.pulled_log_bytes,
+            latest_collection_logical_size_bytes: 0,
+            return_bytes: 0,
+        }
         .submit()
         .await;
         Ok(res.count)
@@ -956,6 +978,7 @@ impl Frontend {
             .get_collection_with_segments(collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        let filter_complexity = r#where.as_ref().map(Where::complexity).unwrap_or_default();
         let get_result = self
             .executor
             .get(Get {
@@ -979,15 +1002,18 @@ impl Frontend {
                 },
             })
             .await?;
-        // TODO: Calculate read bytes and returned bytes
-        MeterEvent::collection_read(
-            tenant_id,
-            database_name,
-            collection_id.0,
-            ReadAction::Get,
-            0,
-            0,
-        )
+        // TODO: Inspect collection logical bytes and returned bytes
+        MeterEvent::CollectionRead {
+            tenant: tenant_id.clone(),
+            database: database_name.clone(),
+            collection_id: collection_id.0,
+            action: ReadAction::Count,
+            filter_complexity,
+            vector_complexity: 0,
+            pulled_log_size_bytes: get_result.pulled_log_bytes,
+            latest_collection_logical_size_bytes: 0,
+            return_bytes: 0,
+        }
         .submit()
         .await;
         Ok((get_result, include).into())
@@ -1055,6 +1081,8 @@ impl Frontend {
             .get_collection_with_segments(collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        let filter_complexity = r#where.as_ref().map(Where::complexity).unwrap_or_default();
+        let vector_complexity = embeddings.len() as u64;
         let query_result = self
             .executor
             .knn(Knn {
@@ -1081,15 +1109,18 @@ impl Frontend {
                 },
             })
             .await?;
-        // TODO: Calculate read bytes and return bytes
-        MeterEvent::collection_read(
-            tenant_id,
-            database_name,
-            collection_id.0,
-            ReadAction::Query,
-            0,
-            0,
-        )
+        // TODO: Inspect collection logical bytes and returned bytes
+        MeterEvent::CollectionRead {
+            tenant: tenant_id.clone(),
+            database: database_name.clone(),
+            collection_id: collection_id.0,
+            action: ReadAction::Count,
+            filter_complexity,
+            vector_complexity,
+            pulled_log_size_bytes: query_result.pulled_log_bytes,
+            latest_collection_logical_size_bytes: 0,
+            return_bytes: 0,
+        }
         .submit()
         .await;
         Ok((query_result, include).into())
