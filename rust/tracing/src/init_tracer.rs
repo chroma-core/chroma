@@ -5,12 +5,11 @@
 
 use std::borrow::Cow;
 
-use opentelemetry::trace::{FutureExt, TracerProvider};
+use opentelemetry::trace::TracerProvider;
 use opentelemetry::{global, InstrumentationScope};
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use tracing_subscriber::fmt;
-use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::Registry;
 use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Layer};
 
