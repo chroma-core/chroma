@@ -58,6 +58,18 @@ pub enum ErrorCodes {
     VersionMismatch = 17,
 }
 
+impl ErrorCodes {
+    pub fn name(&self) -> &'static str {
+        match self {
+            ErrorCodes::InvalidArgument => "InvalidArgumentError",
+            ErrorCodes::NotFound => "NotFoundError",
+            ErrorCodes::Internal => "InternalError",
+            ErrorCodes::VersionMismatch => "VersionMismatchError",
+            _ => "ChromaError",
+        }
+    }
+}
+
 pub trait ChromaError: Error + Send {
     fn code(&self) -> ErrorCodes;
     fn boxed(self) -> Box<dyn ChromaError>
