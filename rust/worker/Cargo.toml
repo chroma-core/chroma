@@ -16,7 +16,6 @@ name = "query_service"
 path = "src/bin/query_service.rs"
 
 [dependencies]
-tracing-bunyan-formatter = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 tracing-subscriber = { workspace = true }
 opentelemetry = { workspace = true }
