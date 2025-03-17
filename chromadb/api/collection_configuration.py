@@ -224,7 +224,6 @@ def create_collection_configuration_from_legacy_collection_metadata(
     metadata: CollectionMetadata,
 ) -> CreateCollectionConfiguration:
     """Create a CreateCollectionConfiguration from legacy collection metadata"""
-    print(f"metadata: {metadata}")
     old_to_new = {
         "hnsw:space": "space",
         "hnsw:ef_construction": "ef_construction",
@@ -239,7 +238,6 @@ def create_collection_configuration_from_legacy_collection_metadata(
     for name, value in metadata.items():
         if name in old_to_new:
             json_map[old_to_new[name]] = value
-    print(f"json_map: {json_map}")
     hnsw_config = json_to_create_hnsw_configuration(json_map)
     hnsw_config = populate_create_hnsw_defaults(hnsw_config)
     validate_create_hnsw_config(hnsw_config)
@@ -323,7 +321,8 @@ def load_create_collection_configuration_from_json(
         if json_map.get("embedding_function") is None:
             return CreateCollectionConfiguration()
         else:
-            if json_map["embedding_function"]["type"] == "legacy":
+            ef_config = json_map["embedding_function"]
+            if ef_config["type"] == "legacy":
                 warnings.warn(
                     "legacy embedding function config",
                     DeprecationWarning,
@@ -333,12 +332,10 @@ def load_create_collection_configuration_from_json(
             else:
                 ef = cast(
                     EmbeddingFunction[Embeddable],
-                    known_embedding_functions[json_map["embedding_function"]["name"]],
+                    known_embedding_functions[ef_config["name"]],
                 )
                 return CollectionConfiguration(
-                    embedding_function=ef.build_from_config(
-                        json_map["embedding_function"]["config"]
-                    )
+                    embedding_function=ef.build_from_config(ef_config["config"])
                 )
     else:
         if json_map.get("embedding_function") is None:
@@ -346,7 +343,8 @@ def load_create_collection_configuration_from_json(
                 hnsw=json_to_create_hnsw_configuration(json_map["hnsw"])
             )
         else:
-            if json_map["embedding_function"]["type"] == "legacy":
+            ef_config = json_map["embedding_function"]
+            if ef_config["type"] == "legacy":
                 warnings.warn(
                     "legacy embedding function config",
                     DeprecationWarning,
@@ -358,13 +356,11 @@ def load_create_collection_configuration_from_json(
             else:
                 ef = cast(
                     EmbeddingFunction[Embeddable],
-                    known_embedding_functions[json_map["embedding_function"]["name"]],
+                    known_embedding_functions[ef_config["name"]],
                 )
                 return CreateCollectionConfiguration(
                     hnsw=json_to_create_hnsw_configuration(json_map["hnsw"]),
-                    embedding_function=ef.build_from_config(
-                        json_map["embedding_function"]["config"]
-                    ),
+                    embedding_function=ef.build_from_config(ef_config["config"]),
                 )
 
 
@@ -395,7 +391,11 @@ def create_collection_configuration_to_json(
     ef_config: Dict[str, Any] | None = None
     try:
         ef = cast(EmbeddingFunction[Embeddable], config.get("embedding_function"))
-        if ef.name() is NotImplemented:
+        if (
+            ef.name() is NotImplemented
+            or ef.get_config() is NotImplemented
+            or ef.build_from_config(ef.get_config()) is NotImplemented
+        ):
             ef_config = {"type": "legacy"}
         else:
             ef_config = {
@@ -478,7 +478,6 @@ def validate_create_hnsw_config(
         if config["resize_factor"] <= 0:
             raise ValueError("resize_factor must be greater than 0")
     if "space" in config:
-        print(f"space: {config['space']}")
         # Check if the space value is one of the string values of the Space enum
         valid_spaces = [space.value for space in Space]
         space_value = config["space"]

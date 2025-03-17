@@ -27,6 +27,7 @@ from chromadb.api.collection_configuration import (
     load_create_collection_configuration_from_json_str,
     load_update_collection_configuration_from_json_str,
     default_create_collection_configuration,
+    create_collection_configuration_from_legacy_collection_metadata,
 )
 from pydantic import BaseModel
 from chromadb import __version__ as chromadb_version
@@ -785,13 +786,19 @@ class FastAPI(Server):
             request: Request, tenant: str, database: str, raw_body: bytes
         ) -> CollectionModel:
             create = validate_model(CreateCollection, orjson.loads(raw_body))
-            configuration = (
-                default_create_collection_configuration()
-                if not create.configuration
-                else load_create_collection_configuration_from_json_str(
+            if not create.configuration:
+                if create.metadata:
+                    configuration = (
+                        create_collection_configuration_from_legacy_collection_metadata(
+                            create.metadata
+                        )
+                    )
+                else:
+                    configuration = default_create_collection_configuration()
+            else:
+                configuration = load_create_collection_configuration_from_json_str(
                     create.configuration
                 )
-            )
 
             # NOTE(rescrv, iron will auth):  Implemented.
             self.sync_auth_request(

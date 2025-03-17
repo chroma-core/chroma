@@ -1,58 +1,20 @@
 import pytest
-from typing import Generator, Dict, Any, cast
+from typing import Dict, Any, cast
 import numpy as np
-from chromadb.config import Settings, System
+from chromadb.config import System
 from chromadb.api.types import (
     EmbeddingFunction,
     Embeddings,
     Space,
     Embeddable,
 )
-import os
-import shutil
 from chromadb.api.client import Client as ClientCreator
+from chromadb.api import ClientAPI
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
     load_collection_configuration_from_json,
     CreateHNSWConfiguration,
 )
-
-configurations = (
-    [
-        Settings(
-            chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
-            chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
-            chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
-            chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
-            chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
-            allow_reset=True,
-            is_persistent=True,
-        )
-    ]
-    if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ
-    else [
-        Settings(
-            chroma_api_impl="chromadb.api.segment.SegmentAPI",
-            chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
-            chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
-            chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
-            chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
-            allow_reset=True,
-            is_persistent=True,
-        ),
-    ]
-)
-
-
-@pytest.fixture(scope="module", params=configurations)
-def settings(request: pytest.FixtureRequest) -> Generator[Settings, None, None]:
-    configuration = request.param
-    save_path = configuration.persist_directory
-    if not os.path.exists(save_path):
-        os.makedirs(save_path, exist_ok=True)
-    yield configuration
-    if os.path.exists(save_path):
-        shutil.rmtree(save_path, ignore_errors=True)
 
 
 class LegacyEmbeddingFunction(EmbeddingFunction[Embeddable]):
@@ -89,11 +51,8 @@ class CustomEmbeddingFunction(EmbeddingFunction[Embeddable]):
         return Space.COSINE
 
 
-def test_legacy_embedding_function(settings: Settings) -> None:
+def test_legacy_embedding_function(client: ClientAPI) -> None:
     """Test creating and getting collections with legacy embedding functions"""
-    system = System(settings)
-    system.start()
-    client = ClientCreator.from_system(system)
     client.reset()
 
     # Create with legacy embedding function
@@ -120,14 +79,9 @@ def test_legacy_embedding_function(settings: Settings) -> None:
     results = coll2.query(query_texts=["test"], n_results=1)
     assert len(results["ids"]) == 1
 
-    system.stop()
 
-
-def test_legacy_metadata(settings: Settings) -> None:
+def test_legacy_metadata(client: ClientAPI) -> None:
     """Test creating collections with legacy metadata format"""
-    system = System(settings)
-    system.start()
-    client = ClientCreator.from_system(system)
     client.reset()
 
     # Create with legacy metadata
@@ -149,14 +103,9 @@ def test_legacy_metadata(settings: Settings) -> None:
         assert hnsw_config.get("ef_construction") == 100
         assert hnsw_config.get("max_neighbors") == 10
 
-    system.stop()
 
-
-def test_new_configuration(settings: Settings) -> None:
+def test_new_configuration(client: ClientAPI) -> None:
     """Test creating collections with new configuration format"""
-    system = System(settings)
-    system.start()
-    client = ClientCreator.from_system(system)
     client.reset()
 
     # Create with new configuration
@@ -191,14 +140,9 @@ def test_new_configuration(settings: Settings) -> None:
             assert ef_config.get("type") == "known"
             assert ef_config.get("name") == "custom_ef"
 
-    system.stop()
 
-
-def test_invalid_configurations(settings: Settings) -> None:
+def test_invalid_configurations(client: ClientAPI) -> None:
     """Test validation of invalid configurations"""
-    system = System(settings)
-    system.start()
-    client = ClientCreator.from_system(system)
     client.reset()
 
     # Test invalid HNSW parameters
@@ -228,8 +172,6 @@ def test_invalid_configurations(settings: Settings) -> None:
                 "embedding_function": InvalidSpaceEF(),
             },
         )
-
-    system.stop()
 
 
 # TODO: @jai uncomment once update collection is implemented in rust
@@ -273,18 +215,15 @@ def test_invalid_configurations(settings: Settings) -> None:
 #     system.stop()
 
 
-def test_configuration_persistence(settings: Settings) -> None:
+def test_configuration_persistence(client: ClientAPI) -> None:
     """Test configuration persistence across client restarts"""
-    system = System(settings)
-    system.start()
-    client = ClientCreator.from_system(system)
     client.reset()
 
     # Create collection with specific configuration
     hnsw_config: CreateHNSWConfiguration = {
-        "space": Space.COSINE,  # Use enum value
+        "space": Space.COSINE,
         "ef_construction": 100,
-        "max_neighbors": 10,  # Changed from M to max_neighbors
+        "max_neighbors": 10,
     }
     config: CreateCollectionConfiguration = {
         "hnsw": hnsw_config,
@@ -296,13 +235,12 @@ def test_configuration_persistence(settings: Settings) -> None:
         configuration=config,
     )
 
+    system2 = System(client.get_settings())
+
     # Stop and restart system
-    system.stop()
     del client
-    del system
 
     # Create new system and verify configuration
-    system2 = System(settings)
     system2.start()
     client2 = ClientCreator.from_system(system2)
 

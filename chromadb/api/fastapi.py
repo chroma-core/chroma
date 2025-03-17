@@ -255,7 +255,6 @@ class FastAPI(BaseHTTPClient, ServerAPI):
                 "get_or_create": get_or_create,
             },
         )
-
         model = CollectionModel.from_json(resp_json)
         return model
 
