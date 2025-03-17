@@ -15,7 +15,7 @@ from chromadb.segment import VectorReader
 from chromadb.segment.impl.manager.local import LocalSegmentManager
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
-from strategies import hashing_embedding_function
+from chromadb.test.property.strategies import hashing_embedding_function
 from chromadb.test.property.test_embeddings import (
     EmbeddingStateMachineStates,
     trace,
@@ -473,7 +473,7 @@ def test_batch_size_less_than_sync_with_duplicate_adds_results_in_skipped_seq_id
                 "hnsw:sync_threshold": 9,
                 "hnsw:batch_size": 7,
             },
-            embedding_function=hashing_embedding_function(dim=92, dtype=np.float64),
+            embedding_function=hashing_embedding_function(dim=92, dtype=np.float64),  # type: ignore[arg-type]
             id=UUID("45c5c816-0a90-4293-8d01-4325ff860040"),
             dimension=92,
             dtype=np.float64,
