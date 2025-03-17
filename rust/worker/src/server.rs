@@ -12,8 +12,9 @@ use chroma_system::{ComponentHandle, Dispatcher, Orchestrator, System};
 use chroma_tracing::util::wrap_span_with_parent_context;
 use chroma_types::{
     chroma_proto::{
-        self, query_executor_server::QueryExecutor, CountPlan, CountResult, GetPlan, GetResult,
-        KnnBatchResult, KnnPlan,
+        self,
+        query_executor_server::{QueryExecutor, QueryExecutorServer},
+        CountPlan, CountResult, GetPlan, GetResult, KnnBatchResult, KnnPlan,
     },
     operator::Scan,
     CollectionAndSegments, SegmentType,
@@ -84,9 +85,15 @@ impl WorkerServer {
     pub(crate) async fn run(worker: WorkerServer) -> Result<(), Box<dyn std::error::Error>> {
         let addr = format!("[::]:{}", worker.port).parse().unwrap();
         println!("Worker listening on {}", addr);
-        let server = Server::builder().add_service(
-            chroma_proto::query_executor_server::QueryExecutorServer::new(worker.clone()),
-        );
+
+        let (mut health_reporter, health_service) = tonic_health::server::health_reporter();
+        health_reporter
+            .set_serving::<QueryExecutorServer<Self>>()
+            .await;
+
+        let server = Server::builder()
+            .add_service(health_service)
+            .add_service(QueryExecutorServer::new(worker.clone()));
 
         #[cfg(debug_assertions)]
         let server =

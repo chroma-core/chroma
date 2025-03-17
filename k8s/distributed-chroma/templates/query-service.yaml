@@ -64,6 +64,9 @@ spec:
         - name: query-service
           image: "{{ .Values.queryService.image.repository }}:{{ .Values.queryService.image.tag }}"
           imagePullPolicy: IfNotPresent
+          readinessProbe:
+            grpc:
+              port: 50051
           volumeMounts:
             {{if .Values.queryService.configuration}}
             - name: query-service-config
