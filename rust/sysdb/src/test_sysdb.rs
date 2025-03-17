@@ -10,6 +10,8 @@ use std::sync::Arc;
 
 use super::sysdb::FlushCompactionError;
 use super::sysdb::GetLastCompactionTimeError;
+use crate::sysdb::VERSION_FILE_S3_PREFIX;
+use chroma_storage::PutOptions;
 use chroma_types::chroma_proto::collection_version_info::VersionChangeReason;
 use chroma_types::chroma_proto::CollectionInfoImmutable;
 use chroma_types::chroma_proto::CollectionSegmentInfo;
@@ -20,18 +22,23 @@ use chroma_types::chroma_proto::FlushSegmentCompactionInfo;
 use chroma_types::chroma_proto::VersionListForCollection;
 use chroma_types::ListCollectionVersionsError;
 use chrono;
+use derivative::Derivative;
+use prost::Message;
 
 #[derive(Clone, Debug)]
 pub struct TestSysDb {
     inner: Arc<Mutex<Inner>>,
 }
 
-#[derive(Debug)]
+#[derive(Derivative)]
+#[derivative(Debug)]
 struct Inner {
     collections: HashMap<CollectionUuid, Collection>,
     segments: HashMap<SegmentUuid, Segment>,
     tenant_last_compaction_time: HashMap<String, i64>,
     collection_to_version_file: HashMap<CollectionUuid, CollectionVersionFile>,
+    #[derivative(Debug = "ignore")]
+    storage: Option<chroma_storage::Storage>,
 }
 
 impl TestSysDb {
@@ -43,6 +50,7 @@ impl TestSysDb {
                 segments: HashMap::new(),
                 tenant_last_compaction_time: HashMap::new(),
                 collection_to_version_file: HashMap::new(),
+                storage: None,
             })),
         }
     }
@@ -221,7 +229,7 @@ impl TestSysDb {
         &mut self,
         collection_id: CollectionUuid,
         segment_flush_info: Arc<[SegmentFlushInfo]>,
-    ) {
+    ) -> Result<(), String> {
         // Check if version file already exists for the collection.
         // If it does not, then create a new one with version 0.
         // Update the version file by adding a new entry for the new version.
@@ -280,21 +288,44 @@ impl TestSysDb {
 
         // Update the version file name.
         let version_file_name = format!(
-            "sysdb/version_files/{}/{}.json",
-            collection_id, next_version
+            "{}{}/{}",
+            VERSION_FILE_S3_PREFIX,
+            collection_id.to_string(),
+            next_version
         );
         inner
             .collections
             .get_mut(&collection_id)
             .unwrap()
             .version_file_name = version_file_name.clone();
-        // TODO: Write the version file to storage provided to this object.
-        // Currently the caller is responsible for writing the version file to storage.
 
-        // Update the version file in the collection_to_version_file map.
+        // Serialize the version file to bytes and write to storage
+        let version_file_bytes = version_file.encode_to_vec();
+
+        // Extract storage reference before unlocking
+        let storage = inner.storage.clone();
+        drop(inner);
+
+        // Write the serialized bytes to storage
+        if let Some(storage) = storage {
+            let result = tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(storage.put_bytes(
+                    &version_file_name,
+                    version_file_bytes,
+                    PutOptions::default(),
+                ))
+            });
+            if result.is_err() {
+                return Err("Failed to write version file to storage".to_string());
+            }
+        }
+
+        let mut inner = self.inner.lock();
+        // Update the version file in the collection_to_version_file map
         inner
             .collection_to_version_file
             .insert(collection_id, version_file);
+        Ok(())
     }
 
     pub(crate) async fn list_collection_versions(
@@ -315,6 +346,12 @@ impl TestSysDb {
             .unwrap()
             .versions
             .clone())
+    }
+
+    // For testing purposes, set the storage for the sysdb.
+    pub async fn set_storage(&mut self, storage: Option<chroma_storage::Storage>) {
+        let mut inner = self.inner.lock();
+        inner.storage = storage;
     }
 
     pub(crate) async fn flush_compaction(
@@ -340,6 +377,7 @@ impl TestSysDb {
             new_collection_version = collection_version + 1;
             collection.version = new_collection_version;
             collection.total_records_post_compaction = total_records_post_compaction;
+            // TODO(rohitcp): Derive the version file name and update the collection before inserting it back.
             inner
                 .collections
                 .insert(collection.collection_id, collection);
@@ -362,7 +400,12 @@ impl TestSysDb {
         }
 
         // Update the in-memory version file
-        self.update_collection_version_file(collection_id, segment_flush_info);
+        let result = self.update_collection_version_file(collection_id, segment_flush_info);
+        if result.is_err() {
+            return Err(FlushCompactionError::FailedToFlushCompaction(
+                tonic::Status::internal("Failed to update version file"),
+            ));
+        }
 
         Ok(FlushCompactionResponse::new(
             collection_id,

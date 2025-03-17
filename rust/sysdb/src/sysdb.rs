@@ -31,6 +31,8 @@ use tonic::Code;
 use tower::ServiceBuilder;
 use uuid::{Error, Uuid};
 
+pub const VERSION_FILE_S3_PREFIX: &str = "sysdb/version_files/";
+
 #[derive(Debug, Clone)]
 pub enum SysDb {
     Grpc(GrpcSysDb),
@@ -240,6 +242,7 @@ impl SysDb {
                     database: database.clone(),
                     log_position: 0,
                     version: 0,
+                    version_file_name: "".to_string(),
                     total_records_post_compaction: 0,
                     size_bytes_post_compaction: 0,
                     last_compaction_time_secs: 0,
