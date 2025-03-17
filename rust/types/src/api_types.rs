@@ -259,7 +259,7 @@ impl CreateDatabaseRequest {
     }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(ToSchema, Serialize)]
 pub struct CreateDatabaseResponse {}
 
 #[derive(Error, Debug)]
