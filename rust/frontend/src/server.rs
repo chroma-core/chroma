@@ -831,7 +831,7 @@ async fn count_collections(
 #[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
 pub struct CreateCollectionPayload {
     pub name: String,
-    pub configuration: Option<CollectionConfigurationPayload>,
+    pub configuration_json_str: Option<String>,
     pub metadata: Option<Metadata>,
     #[serde(default)]
     pub get_or_create: bool,
@@ -886,8 +886,18 @@ async fn create_collection(
         format!("tenant:{}", tenant).as_str(),
     ]);
 
-    let configuration = payload
-        .configuration
+    let configuration_json = match payload.configuration_json_str {
+        Some(configuration_json_str) => {
+            let configuration_json =
+                serde_json::from_str::<CollectionConfigurationPayload>(&configuration_json_str)
+                    .map_err(WrappedSerdeJsonError)?;
+
+            Some(configuration_json)
+        }
+        None => None,
+    };
+
+    let configuration = configuration_json
         .map(CollectionConfiguration::try_from)
         .transpose()
         .map_err(ValidationError::ParseCollectionConfiguration)?;
