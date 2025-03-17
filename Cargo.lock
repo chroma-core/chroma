@@ -1395,15 +1395,12 @@ dependencies = [
  "chroma-types",
  "clap",
  "colored",
-<<<<<<< HEAD
  "regex",
  "reqwest 0.12.9",
  "semver",
-=======
  "dialoguer",
  "indicatif",
  "sqlx",
->>>>>>> main
  "tokio",
  "webbrowser",
 ]
