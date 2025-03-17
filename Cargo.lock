@@ -1569,6 +1569,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tonic",
+ "tonic-health",
  "tower 0.5.2",
  "tracing",
  "tracing-opentelemetry",

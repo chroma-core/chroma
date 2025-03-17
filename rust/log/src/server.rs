@@ -51,7 +51,13 @@ impl LogServer {
     pub(crate) async fn run(log_server: LogServer) -> Result<(), Box<dyn std::error::Error>> {
         let addr = format!("[::]:{}", log_server.config.port).parse().unwrap();
         println!("Log listening on {}", addr);
-        let server = Server::builder().add_service(
+
+        let (mut health_reporter, health_service) = tonic_health::server::health_reporter();
+        health_reporter
+            .set_serving::<chroma_types::chroma_proto::log_service_server::LogServiceServer<Self>>()
+            .await;
+
+        let server = Server::builder().add_service(health_service).add_service(
             chroma_types::chroma_proto::log_service_server::LogServiceServer::new(
                 log_server.clone(),
             ),
