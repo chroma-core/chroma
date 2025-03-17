@@ -56,11 +56,7 @@ impl ComputeUnusedFilesOperator {
         )?;
 
         let mut older_si_ids = Vec::new();
-        for (_idx, segment_compaction_info) in older_segment_info
-            .segment_compaction_info
-            .iter()
-            .enumerate()
-        {
+        for segment_compaction_info in older_segment_info.segment_compaction_info.iter() {
             for (file_type, file_paths) in &segment_compaction_info.file_paths {
                 // For hnsw_index files, just add it without comparing with newer version.
                 if file_type == "hnsw_index" {
@@ -74,12 +70,8 @@ impl ComputeUnusedFilesOperator {
         }
 
         let mut newer_si_ids = Vec::new();
-        for (_idx, segment_compaction_info) in newer_segment_info
-            .segment_compaction_info
-            .iter()
-            .enumerate()
-        {
-            for (_file_type, file_paths) in &segment_compaction_info.file_paths {
+        for segment_compaction_info in newer_segment_info.segment_compaction_info.iter() {
+            for file_paths in segment_compaction_info.file_paths.values() {
                 for file_path in &file_paths.paths {
                     newer_si_ids.push(file_path.clone());
                 }
