@@ -3,6 +3,7 @@ mod utils;
 
 use crate::commands::run::{run, RunArgs};
 use crate::commands::update::update;
+use crate::commands::vacuum::{vacuum, VacuumArgs};
 use clap::{Parser, Subcommand};
 
 #[derive(Subcommand, Debug)]
@@ -11,6 +12,7 @@ enum Command {
     Run(RunArgs),
     Support,
     Update,
+    Vacuum(VacuumArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -43,6 +45,9 @@ pub fn chroma_cli(args: Vec<String>) {
         }
         Command::Update => {
             update();
+        }
+        Command::Vacuum(args) => {
+            vacuum(args);
         }
     }
 }

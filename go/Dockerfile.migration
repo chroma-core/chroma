@@ -1,9 +1,4 @@
-FROM debian:bookworm-slim AS sysdb-migration
-
-RUN apt update
-RUN apt upgrade -y
-RUN apt install -y curl jq
-RUN curl -sSf https://atlasgo.sh | sh -s -- --community
+FROM arigaio/atlas:latest AS sysdb-migration
 
 COPY ./go/pkg/sysdb/metastore/db/migrations migrations
 COPY ./go/pkg/sysdb/metastore/db/atlas.hcl atlas.hcl
