@@ -3,38 +3,36 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
 use chroma_index::{
-    config::{GarbageCollectionPolicy, SpannProviderConfig},
-    hnsw_provider::HnswIndexProvider,
+    config::SpannProviderConfig, hnsw_provider::HnswIndexProvider,
+    spann::types::PlGarbageCollectionContext,
 };
 use chroma_types::Segment;
 
-use crate::distributed_spann::{SpannSegmentReader, SpannSegmentReaderError};
+use crate::distributed_spann::{
+    SpannSegmentReader, SpannSegmentReaderError, SpannSegmentWriter, SpannSegmentWriterError,
+};
 
-pub struct GarbageCollection {
-    pub garbage_collection: bool,
-    pub garbage_collection_policy: GarbageCollectionPolicy,
-}
-
+#[derive(Debug, Clone)]
 pub struct SpannProvider {
     pub hnsw_provider: HnswIndexProvider,
     pub blockfile_provider: BlockfileProvider,
-    pub garbage_collection_config: GarbageCollection,
+    // Option because reader does not need it.
+    pub garbage_collection_context: Option<PlGarbageCollectionContext>,
 }
 
 #[async_trait]
 impl Configurable<(HnswIndexProvider, BlockfileProvider, SpannProviderConfig)> for SpannProvider {
     async fn try_from_config(
         config: &(HnswIndexProvider, BlockfileProvider, SpannProviderConfig),
-        _registry: &Registry,
+        registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
-        let garbage_collection_config = GarbageCollection {
-            garbage_collection: config.2.garbage_collection,
-            garbage_collection_policy: config.2.garbage_collection_policy.clone(),
-        };
+        let garbage_collection_context =
+            PlGarbageCollectionContext::try_from_config(&config.2.pl_garbage_collection, registry)
+                .await?;
         Ok(SpannProvider {
             hnsw_provider: config.0.clone(),
             blockfile_provider: config.1.clone(),
-            garbage_collection_config,
+            garbage_collection_context: Some(garbage_collection_context),
         })
     }
 }
@@ -50,6 +48,25 @@ impl SpannProvider {
             &self.blockfile_provider,
             &self.hnsw_provider,
             dimensionality,
+        )
+        .await
+    }
+
+    pub async fn write(
+        &self,
+        segment: &Segment,
+        dimensionality: usize,
+    ) -> Result<SpannSegmentWriter, SpannSegmentWriterError> {
+        let gc_context = self
+            .garbage_collection_context
+            .as_ref()
+            .ok_or(SpannSegmentWriterError::InvalidArgument)?;
+        SpannSegmentWriter::from_segment(
+            segment,
+            &self.blockfile_provider,
+            &self.hnsw_provider,
+            dimensionality,
+            gc_context.clone(),
         )
         .await
     }

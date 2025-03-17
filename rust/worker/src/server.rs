@@ -6,6 +6,7 @@ use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
 use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_log::Log;
+use chroma_segment::spann_provider::SpannProvider;
 use chroma_storage::Storage;
 use chroma_sysdb::SysDb;
 use chroma_system::{ComponentHandle, Dispatcher, Orchestrator, System};
@@ -277,13 +278,17 @@ impl WorkerServer {
         let pulled_log_bytes = matching_records.fetch_log_bytes;
 
         if vector_segment_type == SegmentType::Spann {
-            tracing::info!("Running KNN on SPANN segment");
+            tracing::debug!("Running KNN on SPANN segment");
+            let spann_provider = SpannProvider {
+                hnsw_provider: self.hnsw_index_provider.clone(),
+                blockfile_provider: self.blockfile_provider.clone(),
+                garbage_collection_context: None,
+            };
             let knn_orchestrator_futures = from_proto_knn(knn)?
                 .into_iter()
                 .map(|knn| {
                     SpannKnnOrchestrator::new(
-                        self.blockfile_provider.clone(),
-                        self.hnsw_index_provider.clone(),
+                        spann_provider.clone(),
                         dispatcher.clone(),
                         1000,
                         matching_records.clone(),

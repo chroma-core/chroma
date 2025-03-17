@@ -15,6 +15,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_log::Log;
 use chroma_memberlist::memberlist_provider::Memberlist;
+use chroma_segment::spann_provider::SpannProvider;
 use chroma_storage::Storage;
 use chroma_sysdb::SysDb;
 use chroma_system::Dispatcher;
@@ -45,6 +46,7 @@ pub(crate) struct CompactionManager {
     storage: Storage,
     blockfile_provider: BlockfileProvider,
     hnsw_index_provider: HnswIndexProvider,
+    spann_provider: SpannProvider,
     // Dispatcher
     dispatcher: Option<ComponentHandle<Dispatcher>>,
     // Config
@@ -79,6 +81,7 @@ impl CompactionManager {
         storage: Storage,
         blockfile_provider: BlockfileProvider,
         hnsw_index_provider: HnswIndexProvider,
+        spann_provider: SpannProvider,
         compaction_manager_queue_size: usize,
         compaction_interval: Duration,
         min_compaction_size: usize,
@@ -93,6 +96,7 @@ impl CompactionManager {
             storage,
             blockfile_provider,
             hnsw_index_provider,
+            spann_provider,
             dispatcher: None,
             compaction_manager_queue_size,
             compaction_interval,
@@ -124,6 +128,7 @@ impl CompactionManager {
                     self.sysdb.clone(),
                     self.blockfile_provider.clone(),
                     self.hnsw_index_provider.clone(),
+                    self.spann_provider.clone(),
                     dispatcher,
                     None,
                     self.max_compaction_size,
@@ -258,6 +263,16 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
         )
         .await?;
 
+        let spann_provider = SpannProvider::try_from_config(
+            &(
+                hnsw_index_provider.clone(),
+                blockfile_provider.clone(),
+                config.spann_provider.clone(),
+            ),
+            registry,
+        )
+        .await?;
+
         Ok(CompactionManager::new(
             scheduler,
             log,
@@ -265,6 +280,7 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
             storage.clone(),
             blockfile_provider,
             hnsw_index_provider,
+            spann_provider,
             compaction_manager_queue_size,
             Duration::from_secs(compaction_interval_sec),
             min_compaction_size,
@@ -358,6 +374,8 @@ mod tests {
     use chroma_blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES;
     use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
     use chroma_config::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
+    use chroma_index::config::PlGarbageCollectionConfig;
+    use chroma_index::spann::types::PlGarbageCollectionContext;
     use chroma_log::in_memory_log::{InMemoryLog, InternalLogRecord};
     use chroma_memberlist::memberlist_provider::Member;
     use chroma_storage::local::LocalStorage;
@@ -568,24 +586,38 @@ mod tests {
         let sparse_index_cache = new_cache_for_test();
         let hnsw_cache = new_non_persistent_cache_for_test();
         let (_, rx) = tokio::sync::mpsc::unbounded_channel();
+        let gc_context = PlGarbageCollectionContext::try_from_config(
+            &PlGarbageCollectionConfig::default(),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
+        let blockfile_provider = BlockfileProvider::new_arrow(
+            storage.clone(),
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
+        let hnsw_provider = HnswIndexProvider::new(
+            storage.clone(),
+            PathBuf::from(tmpdir.path().to_str().unwrap()),
+            hnsw_cache,
+            16,
+            rx,
+        );
+        let spann_provider = SpannProvider {
+            hnsw_provider: hnsw_provider.clone(),
+            blockfile_provider: blockfile_provider.clone(),
+            garbage_collection_context: Some(gc_context),
+        };
         let mut manager = CompactionManager::new(
             scheduler,
             log,
             sysdb,
             storage.clone(),
-            BlockfileProvider::new_arrow(
-                storage.clone(),
-                TEST_MAX_BLOCK_SIZE_BYTES,
-                block_cache,
-                sparse_index_cache,
-            ),
-            HnswIndexProvider::new(
-                storage,
-                PathBuf::from(tmpdir.path().to_str().unwrap()),
-                hnsw_cache,
-                16,
-                rx,
-            ),
+            blockfile_provider,
+            hnsw_provider,
+            spann_provider,
             compaction_manager_queue_size,
             compaction_interval,
             min_compaction_size,

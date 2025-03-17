@@ -145,5 +145,8 @@ compaction_service:
                 capacity: 8192 # 8192 MiB = 8GB
         permitted_parallelism: 180
     spann_provider:
-        garbage_collection: true
-        garbage_collection_policy: "random_10"
+        pl_garbage_collection:
+            enabled: true
+            policy:
+                random_sample:
+                    sample_size: 0.1

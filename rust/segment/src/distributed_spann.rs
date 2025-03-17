@@ -1,3 +1,5 @@
+use crate::spann_provider::SpannProvider;
+
 use super::blockfile_record::ApplyMaterializedLogError;
 use super::blockfile_record::RecordSegmentReader;
 use super::types::{
@@ -5,6 +7,7 @@ use super::types::{
 };
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_index::spann::types::PlGarbageCollectionContext;
 use chroma_index::spann::types::{
     SpannIndexFlusher, SpannIndexReader, SpannIndexReaderError, SpannIndexWriterError, SpannPosting,
 };
@@ -68,6 +71,8 @@ pub enum SpannSegmentWriterError {
     SpannSegmentWriterFlushError,
     #[error("Not implemented")]
     NotImplemented,
+    #[error("Error garbage collectin")]
+    GarbageCollectError,
 }
 
 impl ChromaError for SpannSegmentWriterError {
@@ -85,6 +90,7 @@ impl ChromaError for SpannSegmentWriterError {
             Self::SpannSegmentWriterFlushError => ErrorCodes::Internal,
             Self::SpannSegmentWriterAddRecordError(e) => e.code(),
             Self::InvalidConfiguration(e) => e.code(),
+            Self::GarbageCollectError => ErrorCodes::Internal,
         }
     }
 }
@@ -95,6 +101,7 @@ impl SpannSegmentWriter {
         blockfile_provider: &BlockfileProvider,
         hnsw_provider: &HnswIndexProvider,
         dimensionality: usize,
+        gc_context: PlGarbageCollectionContext,
     ) -> Result<SpannSegmentWriter, SpannSegmentWriterError> {
         if segment.r#type != SegmentType::Spann || segment.scope != SegmentScope::VECTOR {
             return Err(SpannSegmentWriterError::InvalidArgument);
@@ -181,6 +188,7 @@ impl SpannSegmentWriter {
             dimensionality,
             blockfile_provider,
             params,
+            gc_context,
         )
         .await
         {
@@ -271,6 +279,18 @@ impl SpannSegmentWriter {
             materialized_chunk.len()
         );
         Ok(())
+    }
+
+    pub async fn garbage_collect(&self) -> Result<(), Box<dyn ChromaError>> {
+        let r = self
+            .index
+            .garbage_collect()
+            .await
+            .map_err(|_| Box::new(SpannSegmentWriterError::GarbageCollectError));
+        match r {
+            Err(e) => Err(e),
+            Ok(_) => Ok(()),
+        }
     }
 
     pub async fn commit(self) -> Result<SpannSegmentFlusher, Box<dyn ChromaError>> {
@@ -380,8 +400,7 @@ impl ChromaError for SpannSegmentReaderError {
 #[derive(Debug)]
 pub struct SpannSegmentReaderContext {
     pub segment: Segment,
-    pub blockfile_provider: BlockfileProvider,
-    pub hnsw_provider: HnswIndexProvider,
+    pub spann_provider: SpannProvider,
     pub dimension: usize,
 }
 
@@ -523,7 +542,11 @@ mod test {
         provider::BlockfileProvider,
     };
     use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
-    use chroma_index::{hnsw_provider::HnswIndexProvider, Index};
+    use chroma_config::{registry::Registry, Configurable};
+    use chroma_index::{
+        config::PlGarbageCollectionConfig, hnsw_provider::HnswIndexProvider,
+        spann::types::PlGarbageCollectionContext, Index,
+    };
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{
         Chunk, CollectionUuid, DistributedSpannParameters, LogRecord, Operation, OperationRecord,
@@ -573,11 +596,18 @@ mod test {
             ),
             file_path: HashMap::new(),
         };
+        let gc_context = PlGarbageCollectionContext::try_from_config(
+            &PlGarbageCollectionConfig::default(),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
         let spann_writer = SpannSegmentWriter::from_segment(
             &spann_segment,
             &blockfile_provider,
             &hnsw_provider,
             3,
+            gc_context,
         )
         .await
         .expect("Error creating spann segment writer");
@@ -645,11 +675,18 @@ mod test {
             16,
             rx,
         );
+        let gc_context = PlGarbageCollectionContext::try_from_config(
+            &PlGarbageCollectionConfig::default(),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
         let spann_writer = SpannSegmentWriter::from_segment(
             &spann_segment,
             &blockfile_provider,
             &hnsw_provider,
             3,
+            gc_context,
         )
         .await
         .expect("Error creating spann segment writer");
@@ -759,11 +796,18 @@ mod test {
             ),
             file_path: HashMap::new(),
         };
+        let gc_context = PlGarbageCollectionContext::try_from_config(
+            &PlGarbageCollectionConfig::default(),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
         let spann_writer = SpannSegmentWriter::from_segment(
             &spann_segment,
             &blockfile_provider,
             &hnsw_provider,
             3,
+            gc_context,
         )
         .await
         .expect("Error creating spann segment writer");
