@@ -29,6 +29,7 @@ use std::fmt::Formatter;
 use std::str::FromStr;
 use std::time::Duration;
 use thiserror::Error;
+use tokio::sync::oneshot;
 use tracing::instrument;
 use tracing::span;
 use tracing::Instrument;
@@ -54,6 +55,7 @@ pub(crate) struct CompactionManager {
     min_compaction_size: usize,
     max_compaction_size: usize,
     max_partition_size: usize,
+    on_next_memberlist_signal: Option<oneshot::Sender<()>>,
 }
 
 #[derive(Error, Debug)]
@@ -99,6 +101,7 @@ impl CompactionManager {
             min_compaction_size,
             max_compaction_size,
             max_partition_size,
+            on_next_memberlist_signal: None,
         }
     }
 
@@ -349,6 +352,42 @@ impl Handler<Memberlist> for CompactionManager {
 
     async fn handle(&mut self, message: Memberlist, _ctx: &ComponentContext<CompactionManager>) {
         self.scheduler.set_memberlist(message);
+        if let Some(on_next_memberlist_update) = self.on_next_memberlist_signal.take() {
+            if let Err(e) = on_next_memberlist_update.send(()) {
+                tracing::error!("Failed to send on_next_memberlist_update: {:?}", e);
+            }
+        }
+    }
+}
+
+pub struct RegisterOnReadySignal {
+    pub on_ready_tx: oneshot::Sender<()>,
+}
+
+impl Debug for RegisterOnReadySignal {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OnReadySubscriber").finish()
+    }
+}
+
+#[async_trait]
+impl Handler<RegisterOnReadySignal> for CompactionManager {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: RegisterOnReadySignal,
+        _ctx: &ComponentContext<CompactionManager>,
+    ) {
+        if self.scheduler.has_memberlist() {
+            if let Some(on_next_memberlist_signal) = self.on_next_memberlist_signal.take() {
+                if let Err(e) = on_next_memberlist_signal.send(()) {
+                    tracing::error!("Failed to send on_next_memberlist_update: {:?}", e);
+                }
+            }
+        } else {
+            self.on_next_memberlist_signal = Some(message.on_ready_tx);
+        }
     }
 }
 
