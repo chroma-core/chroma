@@ -29,6 +29,7 @@ pub enum MeterEvent {
         tenant: String,
         database: String,
         collection_id: Uuid,
+        #[serde(flatten)]
         action: ReadAction,
         filter_complexity: u64,
         vector_complexity: u64,
@@ -40,6 +41,7 @@ pub enum MeterEvent {
         tenant: String,
         database: String,
         collection_id: Uuid,
+        #[serde(flatten)]
         action: WriteAction,
         log_size_bytes: u64,
     },
