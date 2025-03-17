@@ -50,9 +50,17 @@ impl TryFrom<CollectionConfigurationPayload> for CollectionConfiguration {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
-pub struct EmbeddingFunctionConfiguration {
+#[serde(tag = "type")]
+pub enum EmbeddingFunctionConfiguration {
+    #[serde(rename = "legacy")]
+    Legacy,
+    #[serde(rename = "known")]
+    Known(EmbeddingFunctionNewConfiguration),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct EmbeddingFunctionNewConfiguration {
     pub name: String,
-    pub r#type: String,
     pub config: serde_json::Value,
 }
 

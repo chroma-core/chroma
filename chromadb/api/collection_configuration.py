@@ -150,7 +150,7 @@ def collection_configuration_to_json(config: CollectionConfiguration) -> Dict[st
         else:
             ef_config = {
                 "name": ef.name(),
-                "type": "known" if ef.name() in known_embedding_functions else "custom",
+                "type": "known",
                 "config": ef.get_config(),
             }
             register_embedding_function(type(ef))
@@ -398,7 +398,7 @@ def create_collection_configuration_to_json(
         else:
             ef_config = {
                 "name": ef.name(),
-                "type": "known" if ef.name() in known_embedding_functions else "custom",
+                "type": "known",
                 "config": ef.get_config(),
             }
             register_embedding_function(type(ef))
@@ -622,7 +622,7 @@ def update_collection_configuration_to_json(
         else:
             ef_config = {
                 "name": ef.name(),
-                "type": "known" if ef.name() in known_embedding_functions else "custom",
+                "type": "known",
                 "config": ef.get_config(),
             }
             register_embedding_function(type(ef))

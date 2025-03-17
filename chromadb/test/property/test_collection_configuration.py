@@ -188,7 +188,7 @@ def test_new_configuration(settings: Settings) -> None:
             assert hnsw_config.get("space") == Space.COSINE
             assert hnsw_config.get("ef_construction") == 100
             assert hnsw_config.get("max_neighbors") == 10
-            assert ef_config.get("type") == "custom"
+            assert ef_config.get("type") == "known"
             assert ef_config.get("name") == "custom_ef"
 
     system.stop()
