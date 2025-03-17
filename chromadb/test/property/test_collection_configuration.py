@@ -145,7 +145,7 @@ def test_legacy_metadata(settings: Settings) -> None:
     config = load_collection_configuration_from_json(coll._model.configuration_json)
     if config and isinstance(config, dict):
         hnsw_config = cast(CreateHNSWConfiguration, config.get("hnsw", {}))
-        assert hnsw_config.get("space") == Space.COSINE
+        assert str(hnsw_config.get("space")) == str(Space.COSINE)
         assert hnsw_config.get("ef_construction") == 100
         assert hnsw_config.get("max_neighbors") == 10
 
