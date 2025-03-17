@@ -424,10 +424,10 @@ def create_collection_configuration_to_json(
 def default_create_hnsw_configuration() -> CreateHNSWConfiguration:
     """Create a default CreateHNSW configuration"""
     return CreateHNSWConfiguration(
-        space=cast(Space, "cosine"),
+        space=cast(Space, "l2"),
         ef_construction=100,
         max_neighbors=16,
-        ef_search=10,
+        ef_search=100,
         num_threads=cpu_count(),
         batch_size=100,
         sync_threshold=1000,
@@ -440,13 +440,13 @@ def populate_create_hnsw_defaults(
 ) -> CreateHNSWConfiguration:
     """Populate a CreateHNSW configuration with default values"""
     if config.get("space") is None:
-        config["space"] = ef.default_space() if ef else cast(Space, "cosine")
+        config["space"] = ef.default_space() if ef else cast(Space, "l2")
     if config.get("ef_construction") is None:
         config["ef_construction"] = 100
     if config.get("max_neighbors") is None:
         config["max_neighbors"] = 16
     if config.get("ef_search") is None:
-        config["ef_search"] = 10
+        config["ef_search"] = 100
     if config.get("num_threads") is None:
         config["num_threads"] = cpu_count()
     if config.get("batch_size") is None:
