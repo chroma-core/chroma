@@ -12,7 +12,6 @@ use chroma_system::{ComponentHandle, Dispatcher, Orchestrator, System};
 use chroma_tracing::util::wrap_span_with_parent_context;
 use chroma_types::{
     chroma_proto::{
-        self,
         query_executor_server::{QueryExecutor, QueryExecutorServer},
         CountPlan, CountResult, GetPlan, GetResult, KnnBatchResult, KnnPlan,
     },
@@ -96,8 +95,9 @@ impl WorkerServer {
             .add_service(QueryExecutorServer::new(worker.clone()));
 
         #[cfg(debug_assertions)]
-        let server =
-            server.add_service(chroma_proto::debug_server::DebugServer::new(worker.clone()));
+        let server = server.add_service(
+            chroma_types::chroma_proto::debug_server::DebugServer::new(worker.clone()),
+        );
 
         let server = server.serve_with_shutdown(addr, async {
             let mut sigterm = match signal(SignalKind::terminate()) {
@@ -400,17 +400,17 @@ impl QueryExecutor for WorkerServer {
 
 #[cfg(debug_assertions)]
 #[async_trait]
-impl chroma_proto::debug_server::Debug for WorkerServer {
+impl chroma_types::chroma_proto::debug_server::Debug for WorkerServer {
     async fn get_info(
         &self,
         request: Request<()>,
-    ) -> Result<Response<chroma_proto::GetInfoResponse>, Status> {
+    ) -> Result<Response<chroma_types::chroma_proto::GetInfoResponse>, Status> {
         // Note: We cannot write a middleware that instruments every service rpc
         // with a span because of https://github.com/hyperium/tonic/pull/1202.
         let request_span = trace_span!("Get info");
 
         wrap_span_with_parent_context(request_span, request.metadata()).in_scope(|| {
-            let response = chroma_proto::GetInfoResponse {
+            let response = chroma_types::chroma_proto::GetInfoResponse {
                 version: option_env!("CARGO_PKG_VERSION")
                     .unwrap_or("unknown")
                     .to_string(),
@@ -437,13 +437,14 @@ mod tests {
     use super::*;
     use chroma_index::test_hnsw_index_provider;
     use chroma_log::in_memory_log::InMemoryLog;
-    #[cfg(debug_assertions)]
-    use chroma_proto::debug_client::DebugClient;
-    use chroma_proto::query_executor_client::QueryExecutorClient;
     use chroma_segment::test::TestDistributedSegment;
     use chroma_sysdb::TestSysDb;
     use chroma_system::system;
     use chroma_system::DispatcherConfig;
+    use chroma_types::chroma_proto;
+    #[cfg(debug_assertions)]
+    use chroma_types::chroma_proto::debug_client::DebugClient;
+    use chroma_types::chroma_proto::query_executor_client::QueryExecutorClient;
     use uuid::Uuid;
 
     fn run_server() -> String {
