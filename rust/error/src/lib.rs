@@ -97,9 +97,9 @@ impl From<ErrorCodes> for http::StatusCode {
 }
 
 #[cfg(feature = "http")]
-impl Into<ErrorCodes> for http::StatusCode {
-    fn into(self) -> ErrorCodes {
-        match self {
+impl From<http::StatusCode> for ErrorCodes {
+    fn from(value: http::StatusCode) -> Self {
+        match value {
             http::StatusCode::OK => ErrorCodes::Success,
             http::StatusCode::BAD_REQUEST => ErrorCodes::InvalidArgument,
             http::StatusCode::UNAUTHORIZED => ErrorCodes::Unauthenticated,
