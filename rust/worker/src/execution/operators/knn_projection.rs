@@ -5,7 +5,6 @@ use chroma_error::ChromaError;
 use chroma_system::Operator;
 use chroma_types::Segment;
 use thiserror::Error;
-use tracing::trace;
 
 use super::{
     fetch_log::FetchLogOutput,

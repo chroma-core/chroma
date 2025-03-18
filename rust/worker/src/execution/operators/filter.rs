@@ -20,7 +20,7 @@ use chroma_types::{
 };
 use roaring::RoaringBitmap;
 use thiserror::Error;
-use tracing::{trace, Instrument, Span};
+use tracing::{Instrument, Span};
 
 /// The `FilterOperator` filters the collection with specified criteria
 ///
