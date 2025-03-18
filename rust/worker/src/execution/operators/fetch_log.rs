@@ -6,7 +6,6 @@ use chroma_log::Log;
 use chroma_system::{Operator, OperatorType};
 use chroma_types::{Chunk, CollectionUuid, LogRecord};
 use thiserror::Error;
-use tracing::trace;
 
 /// The `FetchLogOperator` fetches logs from the log service
 ///
@@ -66,7 +65,14 @@ impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
     }
 
     async fn run(&self, _: &FetchLogInput) -> Result<FetchLogOutput, FetchLogError> {
-        trace!("[{}]: {:?}", self.get_name(), self);
+        tracing::debug!(
+            batch_size = self.batch_size,
+            start_log_offset_id = self.start_log_offset_id,
+            maximum_fetch_count = self.maximum_fetch_count,
+            collection_uuid = ?self.collection_uuid.0,
+            "[{}]",
+            self.get_name(),
+        );
 
         let mut fetched = Vec::new();
         let mut log_client = self.log_client.clone();

@@ -81,7 +81,7 @@ impl Operator<KnnProjectionInput, KnnProjectionOutput> for KnnProjectionOperator
         &self,
         input: &KnnProjectionInput,
     ) -> Result<KnnProjectionOutput, KnnProjectionError> {
-        trace!("[{}]: {:?}", self.get_name(), input);
+        tracing::debug!("[{}]: {:?}", self.get_name(), input);
 
         let projection_input = ProjectionInput {
             logs: input.logs.clone(),
