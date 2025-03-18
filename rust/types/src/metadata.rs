@@ -471,16 +471,29 @@ impl Where {
         })
     }
 
-    pub fn complexity(&self) -> u64 {
+    pub fn fts_query_length(&self) -> u64 {
         match self {
             Where::Composite(composite_expression) => composite_expression
                 .children
                 .iter()
-                .map(Where::complexity)
+                .map(Where::fts_query_length)
                 .sum(),
+            // The query length is defined to be the number of trigram tokens
             Where::Document(document_expression) => {
-                document_expression.text.len().max(5) as u64 - 3
+                document_expression.text.len().max(3) as u64 - 2
             }
+            Where::Metadata(_) => 0,
+        }
+    }
+
+    pub fn metadata_predicate_count(&self) -> u64 {
+        match self {
+            Where::Composite(composite_expression) => composite_expression
+                .children
+                .iter()
+                .map(Where::metadata_predicate_count)
+                .sum(),
+            Where::Document(_) => 0,
             Where::Metadata(metadata_expression) => match &metadata_expression.comparison {
                 MetadataComparison::Primitive(_, _) => 1,
                 MetadataComparison::Set(_, metadata_set_value) => match metadata_set_value {

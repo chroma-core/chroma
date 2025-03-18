@@ -615,6 +615,7 @@ impl Frontend {
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
+        // TODO: Submit event after the response is sent
         MeterEvent::CollectionWrite {
             tenant: tenant_id,
             database: database_name,
@@ -663,6 +664,7 @@ impl Frontend {
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
+        // TODO: Submit event after the response is sent
         MeterEvent::CollectionWrite {
             tenant: tenant_id,
             database: database_name,
@@ -713,6 +715,7 @@ impl Frontend {
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
+        // TODO: Submit event after the response is sent
         MeterEvent::CollectionWrite {
             tenant: tenant_id,
             database: database_name,
@@ -745,7 +748,8 @@ impl Frontend {
                 .get_collection_with_segments(collection_id)
                 .await
                 .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
-            let filter_complexity = where_clause.complexity();
+            let fts_query_length = where_clause.fts_query_length();
+            let metadata_predicate_count = where_clause.metadata_predicate_count();
 
             let filter = Filter {
                 query_ids: ids,
@@ -782,13 +786,15 @@ impl Frontend {
                 });
             }
             // TODO: Inspect collection logical bytes and returned bytes
+            // TODO: Submit event after the response is sent
             Some(MeterEvent::CollectionRead {
                 tenant: tenant_id.clone(),
                 database: database_name.clone(),
                 collection_id: collection_id.0,
-                action: ReadAction::Get,
-                filter_complexity,
-                vector_complexity: 0,
+                action: ReadAction::GetForDelete,
+                fts_query_length,
+                metadata_predicate_count,
+                query_embedding_count: 0,
                 pulled_log_size_bytes: get_result.pulled_log_bytes,
                 latest_collection_logical_size_bytes: 0,
                 return_bytes: 0,
@@ -822,6 +828,7 @@ impl Frontend {
         if let Some(event) = read_event {
             event.submit().await;
         }
+        // TODO: Submit event after the response is sent
         MeterEvent::CollectionWrite {
             tenant: tenant_id,
             database: database_name,
@@ -900,13 +907,15 @@ impl Frontend {
             })
             .await?;
         // TODO: Inspect collection logical bytes and returned bytes
+        // TODO: Submit event after the response is sent
         MeterEvent::CollectionRead {
             tenant: tenant_id.clone(),
             database: database_name.clone(),
             collection_id: collection_id.0,
             action: ReadAction::Count,
-            filter_complexity: 0,
-            vector_complexity: 0,
+            fts_query_length: 0,
+            metadata_predicate_count: 0,
+            query_embedding_count: 0,
             pulled_log_size_bytes: res.pulled_log_bytes,
             latest_collection_logical_size_bytes: 0,
             return_bytes: 0,
@@ -978,7 +987,14 @@ impl Frontend {
             .get_collection_with_segments(collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
-        let filter_complexity = r#where.as_ref().map(Where::complexity).unwrap_or_default();
+        let metadata_predicate_count = r#where
+            .as_ref()
+            .map(Where::metadata_predicate_count)
+            .unwrap_or_default();
+        let fts_query_length = r#where
+            .as_ref()
+            .map(Where::fts_query_length)
+            .unwrap_or_default();
         let get_result = self
             .executor
             .get(Get {
@@ -1003,13 +1019,15 @@ impl Frontend {
             })
             .await?;
         // TODO: Inspect collection logical bytes and returned bytes
+        // TODO: Submit event after the response is sent
         MeterEvent::CollectionRead {
             tenant: tenant_id.clone(),
             database: database_name.clone(),
             collection_id: collection_id.0,
             action: ReadAction::Get,
-            filter_complexity,
-            vector_complexity: 0,
+            metadata_predicate_count,
+            fts_query_length,
+            query_embedding_count: 0,
             pulled_log_size_bytes: get_result.pulled_log_bytes,
             latest_collection_logical_size_bytes: 0,
             return_bytes: 0,
@@ -1081,8 +1099,15 @@ impl Frontend {
             .get_collection_with_segments(collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
-        let filter_complexity = r#where.as_ref().map(Where::complexity).unwrap_or_default();
-        let vector_complexity = embeddings.len() as u64;
+        let metadata_predicate_count = r#where
+            .as_ref()
+            .map(Where::metadata_predicate_count)
+            .unwrap_or_default();
+        let fts_query_length = r#where
+            .as_ref()
+            .map(Where::fts_query_length)
+            .unwrap_or_default();
+        let query_embedding_count = embeddings.len() as u64;
         let query_result = self
             .executor
             .knn(Knn {
@@ -1110,13 +1135,15 @@ impl Frontend {
             })
             .await?;
         // TODO: Inspect collection logical bytes and returned bytes
+        // TODO: Submit event after the response is sent
         MeterEvent::CollectionRead {
             tenant: tenant_id.clone(),
             database: database_name.clone(),
             collection_id: collection_id.0,
             action: ReadAction::Query,
-            filter_complexity,
-            vector_complexity,
+            metadata_predicate_count,
+            fts_query_length,
+            query_embedding_count,
             pulled_log_size_bytes: query_result.pulled_log_bytes,
             latest_collection_logical_size_bytes: 0,
             return_bytes: 0,

@@ -10,6 +10,7 @@ use uuid::Uuid;
 pub enum ReadAction {
     Count,
     Get,
+    GetForDelete,
     Query,
 }
 
@@ -31,8 +32,9 @@ pub enum MeterEvent {
         collection_id: Uuid,
         #[serde(flatten)]
         action: ReadAction,
-        filter_complexity: u64,
-        vector_complexity: u64,
+        fts_query_length: u64,
+        metadata_predicate_count: u64,
+        query_embedding_count: u64,
         pulled_log_size_bytes: u64,
         latest_collection_logical_size_bytes: u64,
         return_bytes: u64,
