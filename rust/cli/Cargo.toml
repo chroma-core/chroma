@@ -10,6 +10,7 @@ regex = "1.11.1"
 reqwest = "0.12.9"
 semver = "1.0.26"
 tokio = { workspace = true }
+webbrowser = "1.0.3"
 
 dialoguer = "0.11.0"
 indicatif.workspace = true
