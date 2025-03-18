@@ -1,10 +1,8 @@
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use chroma_storage::{ETag, Storage};
 use setsum::Setsum;
-use tokio::task::JoinHandle;
 
 use crate::manifest::{Manifest, Snapshot};
 use crate::reader::read_fragment;

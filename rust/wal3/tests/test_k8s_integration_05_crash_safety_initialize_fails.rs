@@ -1,15 +1,12 @@
 use std::sync::Arc;
 
 use chroma_storage::s3_client_for_test_with_new_bucket;
-use setsum::Setsum;
 
 use wal3::{upload_parquet, FragmentSeqNo, LogPosition, LogWriter, LogWriterOptions, Manifest};
 
 mod common;
 
-use common::{
-    assert_conditions, Condition, FragmentCondition, ManifestCondition, SnapshotCondition,
-};
+use common::{assert_conditions, Condition, FragmentCondition, ManifestCondition};
 
 #[tokio::test]
 async fn test_k8s_integration_05_crash_safety_initialize_fails() {
