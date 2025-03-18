@@ -30,7 +30,7 @@ pub(crate) async fn always_json_errors_middleware(req: Request, next: Next) -> R
     }
 
     let content_type = res.headers().get("content-type");
-    if let Some("text/plain; charset=utf-8") = content_type.and_then(|v| v.to_str().ok()) {
+    if !matches!(content_type, Some(content_type) if content_type == "text/plain; charset=utf-8") {
         return res;
     }
 
