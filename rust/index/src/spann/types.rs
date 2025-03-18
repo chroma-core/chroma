@@ -990,8 +990,6 @@ impl SpannIndexWriter {
                     .map_err(|_| SpannIndexWriterError::PostingListSetError)?;
             }
             // Next add to hnsw.
-            // This shouldn't exceed the capacity since this will happen only for the first few points
-            // so no need to check and increase the capacity.
             {
                 let mut write_guard = self.hnsw_index.inner.write();
                 let hnsw_len = write_guard.len_with_deleted();
@@ -1011,8 +1009,7 @@ impl SpannIndexWriter {
         }
         // Otherwise add to the posting list of these arrays.
         for (head_id, head_embedding) in ids.iter().zip(head_embeddings) {
-            self.append(*head_id as u32, id, version, embeddings, head_embedding)
-                .await?;
+            Box::pin(self.append(*head_id as u32, id, version, embeddings, head_embedding)).await?;
         }
 
         Ok(())
