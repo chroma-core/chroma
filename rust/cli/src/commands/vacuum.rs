@@ -42,6 +42,7 @@ fn sizeof_fmt(num: u64, suffix: Option<&str>) -> String {
     }
     format!("{:.1}Yi{}", n, suffix)
 }
+
 fn get_dir_size(path: &Path) -> io::Result<u64> {
     let mut total_size = 0;
     for entry in fs::read_dir(path)? {
@@ -56,6 +57,7 @@ fn get_dir_size(path: &Path) -> io::Result<u64> {
     }
     Ok(total_size)
 }
+
 async fn get_collection_ids_to_migrate(
     sqlite: &SqliteDb,
 ) -> Result<Vec<CollectionUuid>, Box<dyn Error>> {
@@ -65,21 +67,27 @@ async fn get_collection_ids_to_migrate(
                 WHERE "id" NOT IN (SELECT "segment_id" FROM "max_seq_id") AND "type" = 'urn:chroma:segment/vector/hnsw-local-persisted'
             "#,
     ).fetch_all(sqlite.get_conn()).await?;
+
     let collection_ids: Result<Vec<CollectionUuid>, _> = rows
         .into_iter()
         .map(|row| CollectionUuid::from_str(row.get::<&str, _>(0)))
         .collect();
+
     let collection_ids = collection_ids?;
+
     Ok(collection_ids)
 }
+
 async fn trigger_vector_segments_max_seq_id_migration(
     sqlite: &SqliteDb,
     sysdb: &mut SysDb,
     segment_manager: &LocalSegmentManager,
 ) -> Result<(), Box<dyn Error>> {
     let collection_ids = get_collection_ids_to_migrate(sqlite).await?;
+
     for collection_id in collection_ids {
         let collection = sysdb.get_collection_with_segments(collection_id).await?;
+
         // If collection is uninitialized, that means nothing has been written yet.
         let dim = match collection.collection.dimension {
             Some(dim) => dim,
@@ -97,39 +105,50 @@ async fn trigger_vector_segments_max_seq_id_migration(
 
     Ok(())
 }
+
 async fn configure_sql_embedding_queue(log: &SqliteLog) -> Result<(), Box<dyn Error>> {
     let config = LegacyEmbeddingsQueueConfig {
         automatically_purge: true,
         kind: legacy_embeddings_queue_config_default_kind(),
     };
+
     log.update_legacy_embeddings_queue_config(config).await?;
     Ok(())
 }
+
 pub async fn vacuum_chroma(config: FrontendConfig) -> Result<(), Box<dyn Error>> {
     let system = System::new();
     let registry = Registry::new();
     let mut frontend = Frontend::try_from_config(&(config, system), &registry).await?;
+
     let sqlite = registry.get::<SqliteDb>()?;
     let segment_manager = registry.get::<LocalSegmentManager>()?;
     let mut sysdb = registry.get::<SysDb>()?;
     let mut log = registry.get::<Log>()?;
+
     println!("Purging the log...\n");
+
     trigger_vector_segments_max_seq_id_migration(&sqlite, &mut sysdb, &segment_manager).await?;
+
     let tenant = String::from("default_tenant");
     let database = String::from("default_database");
+
     let list_collections_request = ListCollectionsRequest::try_new(tenant, database, None, 0)?;
     let collections = frontend.list_collections(list_collections_request).await?;
+
     let pb = ProgressBar::new(collections.len() as u64);
     pb.set_style(
         ProgressStyle::default_bar()
             .template("{bar:40.cyan/blue} {pos}/{len} ({percent}%)")?
             .progress_chars("=>-"),
     );
+
     if let Log::Sqlite(ref log) = log {
         configure_sql_embedding_queue(log).await?;
     } else {
         return Err("Expected a Sqlite log for vacuum".into());
     }
+
     for collection in collections {
         let seq_ids = sqlx::query(
             r#"
@@ -142,39 +161,48 @@ pub async fn vacuum_chroma(config: FrontendConfig) -> Result<(), Box<dyn Error>>
         .bind(collection.collection_id.to_string())
         .fetch_all(sqlite.get_conn())
         .await?;
+
         let min_seq_id: Option<i64> = seq_ids.iter().map(|row| row.get(0)).min().unwrap_or(None);
+
         if min_seq_id.is_none() {
             continue;
         }
+
         if min_seq_id.is_some() && min_seq_id.unwrap() < 0 {
             continue;
         }
+
         log.purge_logs(collection.collection_id, min_seq_id.unwrap() as u64)
             .await?;
+
         pb.inc(1);
     }
+
     println!("Vacuuming (this may take a while)...\n");
+
     sqlx::query(&format!("PRAGMA busy_timeout = {}", 5000))
         .execute(sqlite.get_conn())
         .await?;
+
     sqlx::query("VACUUM").execute(sqlite.get_conn()).await?;
+
     sqlx::query(
         "INSERT INTO maintenance_log (operation, timestamp)
          VALUES ('vacuum', CURRENT_TIMESTAMP)",
     )
     .execute(sqlite.get_conn())
     .await?;
+
     Ok(())
 }
+
 pub fn vacuum(args: VacuumArgs) {
     // Vacuum the database. This may result in a small increase in performance.
     // If you recently upgraded Chroma from a version below 0.5.6 to 0.5.6 or above, you should run this command once to greatly reduce the size of your database and enable continuous database pruning. In most other cases, vacuuming will save very little disk space.
     // The execution time of this command scales with the size of your database. It blocks both reads and writes to the database while it is running.
     println!("{}", "\nChroma Vacuum\n".underline().bold());
-
     let mut config = FrontendServerConfig::single_node_default();
     let persistent_path = args.path.unwrap_or(config.persist_path);
-
     if !Path::new(&persistent_path).exists() {
         println!(
             "{}",
@@ -182,9 +210,7 @@ pub fn vacuum(args: VacuumArgs) {
         );
         return;
     }
-
     let sqlite_url = format!("{}/{}", &persistent_path, &config.sqlite_filename);
-
     if !Path::new(sqlite_url.as_str()).exists() {
         println!(
             "{}",
@@ -192,6 +218,7 @@ pub fn vacuum(args: VacuumArgs) {
         );
         return;
     }
+
     let proceed = match args.force {
         true => true,
         false => {
@@ -207,11 +234,14 @@ pub fn vacuum(args: VacuumArgs) {
                 .unwrap_or(false)
         }
     };
+
     println!();
+
     if !proceed {
         println!("{}", "Vacuum cancelled\n".red());
         return;
     }
+
     let initial_size = match get_dir_size(Path::new(&persistent_path)) {
         Ok(size) => size,
         Err(_e) => {
@@ -219,7 +249,6 @@ pub fn vacuum(args: VacuumArgs) {
             return;
         }
     };
-
     match config.frontend.sqlitedb.as_mut() {
         Some(sqlite_config) => {
             sqlite_config.url = Some(sqlite_url);
@@ -229,14 +258,13 @@ pub fn vacuum(args: VacuumArgs) {
             return;
         }
     };
-
     let runtime = tokio::runtime::Runtime::new().expect("Failed to start Chroma");
     let vacuum_result = runtime.block_on(vacuum_chroma(config.frontend));
-
     if let Err(_e) = vacuum_result {
         eprintln!("Failed to vacuum Chroma");
         return;
     }
+
     let post_vacuum_size = match get_dir_size(Path::new(&persistent_path)) {
         Ok(size) => size,
         Err(_e) => {
@@ -244,7 +272,9 @@ pub fn vacuum(args: VacuumArgs) {
             return;
         }
     };
+
     let size_diff = initial_size - post_vacuum_size;
+
     println!("🧼 {}", "Vacuum complete!".green().bold());
     println!(
         "Database size reduced by {} (⬇️{:.1}%)",

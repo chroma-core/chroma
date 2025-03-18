@@ -36,3 +36,19 @@ impl From<ConversionError> for Status {
         Status::invalid_argument(value.to_string())
     }
 }
+
+#[derive(thiserror::Error, Debug)]
+#[error(transparent)]
+pub struct WrappedSerdeJsonError(#[from] serde_json::Error);
+
+impl WrappedSerdeJsonError {
+    pub fn new(err: serde_json::Error) -> Self {
+        Self(err)
+    }
+}
+
+impl ChromaError for WrappedSerdeJsonError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::InvalidArgument
+    }
+}

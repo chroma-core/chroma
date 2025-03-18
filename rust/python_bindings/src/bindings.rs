@@ -1,4 +1,4 @@
-use crate::errors::{ChromaPyResult, WrappedPyErr, WrappedSerdeJsonError, WrappedUuidError};
+use crate::errors::{ChromaPyResult, WrappedPyErr, WrappedUuidError};
 use chroma_cache::FoyerCacheConfig;
 use chroma_cli::chroma_cli;
 use chroma_config::{registry::Registry, Configurable};
@@ -21,7 +21,7 @@ use chroma_types::{
     DeleteCollectionRequest, DeleteDatabaseRequest, GetCollectionRequest, GetDatabaseRequest,
     GetResponse, GetTenantRequest, GetTenantResponse, HeartbeatError, IncludeList,
     ListCollectionsRequest, ListDatabasesRequest, Metadata, QueryResponse, UpdateCollectionRequest,
-    UpdateMetadata,
+    UpdateMetadata, WrappedSerdeJsonError,
 };
 use pyo3::{exceptions::PyValueError, pyclass, pyfunction, pymethods, types::PyAnyMethods, Python};
 use std::time::SystemTime;
@@ -258,7 +258,7 @@ impl Bindings {
             Some(configuration_json_str) => {
                 let configuration_json =
                     serde_json::from_str::<CollectionConfiguration>(&configuration_json_str)
-                        .map_err(WrappedSerdeJsonError)?;
+                        .map_err(WrappedSerdeJsonError::new)?;
 
                 Some(configuration_json)
             }
@@ -279,10 +279,6 @@ impl Bindings {
             .runtime
             .block_on(async { frontend.create_collection(request).await })?;
 
-        println!(
-            "collection configuration: {}",
-            serde_json::to_string(&collection.config).unwrap()
-        );
         Ok(collection)
     }
 
@@ -318,7 +314,7 @@ impl Bindings {
             Some(new_configuration_json_str) => {
                 let new_configuration_json =
                     serde_json::from_str::<CollectionConfiguration>(&new_configuration_json_str)
-                        .map_err(WrappedSerdeJsonError)?;
+                        .map_err(WrappedSerdeJsonError::new)?;
 
                 Some(new_configuration_json)
             }

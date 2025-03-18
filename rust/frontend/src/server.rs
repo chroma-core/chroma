@@ -18,6 +18,7 @@ use chroma_types::{
     ListCollectionsRequest, ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse,
     Metadata, QueryRequest, QueryResponse, UpdateCollectionRecordsResponse,
     UpdateCollectionResponse, UpdateMetadata, UpsertCollectionRecordsResponse,
+    WrappedSerdeJsonError,
 };
 use mdac::{Rule, Scorecard, ScorecardTicket};
 use opentelemetry::global;
@@ -47,17 +48,6 @@ use crate::{
     tower_tracing::add_tracing_middleware,
     types::errors::{ErrorResponse, ServerError, ValidationError},
 };
-
-// Define the WrappedSerdeJsonError struct
-#[derive(thiserror::Error, Debug)]
-#[error(transparent)]
-struct WrappedSerdeJsonError(#[from] serde_json::Error);
-
-impl chroma_error::ChromaError for WrappedSerdeJsonError {
-    fn code(&self) -> chroma_error::ErrorCodes {
-        chroma_error::ErrorCodes::InvalidArgument
-    }
-}
 
 struct ScorecardGuard {
     scorecard: Arc<Scorecard<'static>>,
@@ -890,7 +880,7 @@ async fn create_collection(
         Some(configuration_json_str) => {
             let configuration_json =
                 serde_json::from_str::<CollectionConfiguration>(&configuration_json_str)
-                    .map_err(WrappedSerdeJsonError)?;
+                    .map_err(WrappedSerdeJsonError::new)?;
 
             Some(configuration_json)
         }
@@ -1027,7 +1017,7 @@ async fn update_collection(
         Some(configuration_json_str) => {
             let configuration_json =
                 serde_json::from_str::<CollectionConfiguration>(&configuration_json_str)
-                    .map_err(WrappedSerdeJsonError)?;
+                    .map_err(WrappedSerdeJsonError::new)?;
 
             Some(configuration_json)
         }
