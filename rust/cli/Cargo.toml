@@ -23,6 +23,8 @@ chroma-log = { workspace = true }
 serde = { version = "1.0.215", features = ["derive"] }
 toml = "0.8.20"
 serde_json = "1.0.133"
+arboard = "3.4.1"
+reqwest = {workspace = true, features = ["blocking"]}
 
 
 [[bin]]

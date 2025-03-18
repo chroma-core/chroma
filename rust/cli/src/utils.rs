@@ -115,3 +115,14 @@ pub fn write_config(config: &CliConfig) -> Result<(), Box<dyn Error>> {
     fs::write(config_path, json_str)?;
     Ok(())
 }
+
+pub fn get_current_profile() -> Result<Profile, Box<dyn Error>> {
+    let config = read_config()?;
+    let profiles = get_profiles()?;
+    if !profiles.contains_key(config.current_profile.as_str()) {
+        Err(format!("Profile '{}' not found", config.current_profile).into())
+    }
+    else {
+        Ok(profiles[config.current_profile.as_str()].clone())
+    }
+}
