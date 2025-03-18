@@ -13,8 +13,8 @@ use chroma_index::spann::utils::RngQueryError;
 use chroma_index::IndexUuid;
 use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::SpannIndexWriter};
 use chroma_types::Collection;
+use chroma_types::InternalSpannConfiguration;
 use chroma_types::SegmentUuid;
-use chroma_types::SpannConfiguration;
 use chroma_types::{MaterializedLogOperation, Segment, SegmentScope, SegmentType};
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -395,7 +395,7 @@ pub struct SpannSegmentReader<'me> {
     pub index_reader: SpannIndexReader<'me>,
     #[allow(dead_code)]
     id: SegmentUuid,
-    pub params: SpannConfiguration,
+    pub params: InternalSpannConfiguration,
 }
 
 impl<'me> SpannSegmentReader<'me> {
@@ -536,8 +536,8 @@ mod test {
     use chroma_index::{hnsw_provider::HnswIndexProvider, Index};
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{
-        Chunk, CollectionUuid, LogRecord, Operation, OperationRecord, SegmentUuid,
-        SpannConfiguration, SpannPostingList,
+        Chunk, CollectionUuid, InternalSpannConfiguration, LogRecord, Operation, OperationRecord,
+        SegmentUuid, SpannPostingList,
     };
 
     use crate::{
@@ -570,7 +570,7 @@ mod test {
         );
         let collection_id = CollectionUuid::new();
         let segment_id = SegmentUuid::new();
-        let params = SpannConfiguration::default();
+        let params = InternalSpannConfiguration::default();
         let mut spann_segment = chroma_types::Segment {
             id: segment_id,
             collection: collection_id,
@@ -584,7 +584,7 @@ mod test {
         let collection = chroma_types::Collection {
             collection_id,
             name: "test".to_string(),
-            config: chroma_types::CollectionConfiguration {
+            config: chroma_types::InternalCollectionConfiguration {
                 vector_index: chroma_types::VectorIndexConfiguration::Spann(params),
                 embedding_function: None,
             },
@@ -683,7 +683,10 @@ mod test {
         .await
         .expect("Error creating spann segment writer");
         assert_eq!(spann_writer.index.dimensionality, 3);
-        assert_eq!(spann_writer.index.params, SpannConfiguration::default());
+        assert_eq!(
+            spann_writer.index.params,
+            InternalSpannConfiguration::default()
+        );
         // Next head id should be 2 since one centroid is already taken up.
         assert_eq!(
             spann_writer
@@ -772,7 +775,7 @@ mod test {
         );
         let collection_id = CollectionUuid::new();
         let segment_id = SegmentUuid::new();
-        let params = SpannConfiguration::default();
+        let params = InternalSpannConfiguration::default();
         let mut spann_segment = chroma_types::Segment {
             id: segment_id,
             collection: collection_id,
@@ -785,7 +788,7 @@ mod test {
 
         let collection = chroma_types::Collection::builder()
             .collection_id(collection_id)
-            .config(chroma_types::CollectionConfiguration {
+            .config(chroma_types::InternalCollectionConfiguration {
                 vector_index: chroma_types::VectorIndexConfiguration::Spann(params),
                 embedding_function: None,
             })
