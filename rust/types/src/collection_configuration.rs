@@ -2,6 +2,7 @@ use crate::{
     HnswConfiguration, HnswParametersFromSegmentError, InternalSpannConfiguration, Metadata,
     Segment, SpannConfiguration,
 };
+use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use utoipa::ToSchema;
@@ -106,6 +107,14 @@ impl InternalCollectionConfiguration {
 pub enum CollectionConfigurationToInternalConfigurationError {
     #[error("Multiple vector index configurations provided")]
     MultipleVectorIndexConfigurations,
+}
+
+impl ChromaError for CollectionConfigurationToInternalConfigurationError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            Self::MultipleVectorIndexConfigurations => ErrorCodes::InvalidArgument,
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]

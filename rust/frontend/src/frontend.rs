@@ -514,6 +514,8 @@ impl Frontend {
             ..
         }: UpdateCollectionRequest,
     ) -> Result<UpdateCollectionResponse, UpdateCollectionError> {
+        let new_configuration: Option<InternalCollectionConfiguration> =
+            new_configuration.map(|c| c.try_into()).transpose()?;
         self.sysdb_client
             .update_collection(
                 collection_id,

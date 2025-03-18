@@ -1,8 +1,7 @@
-use crate::errors::{ChromaPyResult, WrappedPyErr, WrappedUuidError};
+use crate::errors::{ChromaPyResult, WrappedPyErr, WrappedSerdeJsonError, WrappedUuidError};
 use chroma_cache::FoyerCacheConfig;
 use chroma_cli::chroma_cli;
 use chroma_config::{registry::Registry, Configurable};
-use chroma_error::ChromaError;
 use chroma_frontend::{
     executor::config::{ExecutorConfig, LocalExecutorConfig},
     frontend::Frontend,
@@ -17,16 +16,14 @@ use chroma_sqlite::config::SqliteDBConfig;
 use chroma_sysdb::{SqliteSysDbConfig, SysDbConfig};
 use chroma_system::System;
 use chroma_types::{
-    Collection, CollectionConfiguration, CollectionConfigurationPayload, CollectionMetadataUpdate,
-    CountCollectionsRequest, CountResponse, CreateCollectionRequest, CreateDatabaseRequest,
-    CreateTenantRequest, Database, DeleteCollectionRequest, DeleteDatabaseRequest,
-    GetCollectionRequest, GetDatabaseRequest, GetResponse, GetTenantRequest, GetTenantResponse,
-    HeartbeatError, IncludeList, ListCollectionsRequest, ListDatabasesRequest, Metadata,
-    QueryResponse, UpdateCollectionRequest, UpdateMetadata,
+    Collection, CollectionConfiguration, CollectionMetadataUpdate, CountCollectionsRequest,
+    CountResponse, CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest, Database,
+    DeleteCollectionRequest, DeleteDatabaseRequest, GetCollectionRequest, GetDatabaseRequest,
+    GetResponse, GetTenantRequest, GetTenantResponse, HeartbeatError, IncludeList,
+    ListCollectionsRequest, ListDatabasesRequest, Metadata, QueryResponse, UpdateCollectionRequest,
+    UpdateMetadata,
 };
-use pyo3::{
-    exceptions::PyValueError, pyclass, pyfunction, pymethods, types::PyAnyMethods, PyObject, Python,
-};
+use pyo3::{exceptions::PyValueError, pyclass, pyfunction, pymethods, types::PyAnyMethods, Python};
 use std::time::SystemTime;
 
 const DEFAULT_DATABASE: &str = "default_database";
@@ -260,24 +257,20 @@ impl Bindings {
         let configuration_json = match configuration_json_str {
             Some(configuration_json_str) => {
                 let configuration_json =
-                    serde_json::from_str::<CollectionConfigurationPayload>(&configuration_json_str)
+                    serde_json::from_str::<CollectionConfiguration>(&configuration_json_str)
                         .map_err(WrappedSerdeJsonError)?;
 
                 Some(configuration_json)
             }
             None => None,
         };
-        let config = configuration_json
-            .map(CollectionConfiguration::try_from)
-            .transpose()
-            .map_err(|e| e.boxed())?;
 
         let request = CreateCollectionRequest::try_new(
             tenant,
             database,
             name,
             metadata,
-            config,
+            configuration_json,
             get_or_create,
         )?;
 
@@ -320,26 +313,19 @@ impl Bindings {
         let configuration_json = match new_configuration_json_str {
             Some(new_configuration_json_str) => {
                 let new_configuration_json =
-                    serde_json::from_str::<CollectionConfigurationPayload>(
-                        &new_configuration_json_str,
-                    )
-                    .map_err(WrappedSerdeJsonError)?;
+                    serde_json::from_str::<CollectionConfiguration>(&new_configuration_json_str)
+                        .map_err(WrappedSerdeJsonError)?;
 
                 Some(new_configuration_json)
             }
             None => None,
         };
 
-        let config = configuration_json
-            .map(CollectionConfiguration::try_from)
-            .transpose()
-            .map_err(|e| e.boxed())?;
-
         let request = UpdateCollectionRequest::try_new(
             collection_id,
             new_name,
             new_metadata.map(CollectionMetadataUpdate::UpdateMetadata),
-            config,
+            configuration_json,
         )?;
 
         let mut frontend = self.frontend.clone();

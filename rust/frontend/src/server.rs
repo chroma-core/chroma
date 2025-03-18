@@ -889,7 +889,7 @@ async fn create_collection(
     let configuration_json = match payload.configuration_json_str {
         Some(configuration_json_str) => {
             let configuration_json =
-                serde_json::from_str::<CollectionConfigurationPayload>(&configuration_json_str)
+                serde_json::from_str::<CollectionConfiguration>(&configuration_json_str)
                     .map_err(WrappedSerdeJsonError)?;
 
             Some(configuration_json)
@@ -897,13 +897,8 @@ async fn create_collection(
         None => None,
     };
 
-    let configuration = configuration_json
-        .map(CollectionConfiguration::try_from)
-        .transpose()
-        .map_err(ValidationError::ParseCollectionConfiguration)?;
-
-    if let Some(configuration) = configuration.as_ref() {
-        if config.spann.is_some() {
+    if let Some(configuration_json) = configuration_json.as_ref() {
+        if configuration_json.spann.is_some() {
             return Err(ValidationError::SpannNotImplemented)?;
         }
     }
@@ -913,7 +908,7 @@ async fn create_collection(
         database,
         payload.name,
         payload.metadata,
-        configuration,
+        configuration_json,
         payload.get_or_create,
     )?;
     let collection = server.frontend.create_collection(request).await?;
@@ -1031,7 +1026,7 @@ async fn update_collection(
     let configuration_json = match payload.new_configuration_json_str {
         Some(configuration_json_str) => {
             let configuration_json =
-                serde_json::from_str::<CollectionConfigurationPayload>(&configuration_json_str)
+                serde_json::from_str::<CollectionConfiguration>(&configuration_json_str)
                     .map_err(WrappedSerdeJsonError)?;
 
             Some(configuration_json)
@@ -1039,18 +1034,13 @@ async fn update_collection(
         None => None,
     };
 
-    let config = configuration_json
-        .map(CollectionConfiguration::try_from)
-        .transpose()
-        .map_err(ValidationError::ParseCollectionConfiguration)?;
-
     let request = chroma_types::UpdateCollectionRequest::try_new(
         collection_id,
         payload.new_name,
         payload
             .new_metadata
             .map(CollectionMetadataUpdate::UpdateMetadata),
-        config,
+        configuration_json,
     )?;
 
     server.frontend.update_collection(request).await?;

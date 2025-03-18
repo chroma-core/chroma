@@ -9,7 +9,6 @@ use crate::validators::{
     validate_name, validate_non_empty_collection_update_metadata, validate_non_empty_metadata,
 };
 use crate::Collection;
-use crate::CollectionConfiguration;
 use crate::CollectionConfigurationToInternalConfigurationError;
 use crate::CollectionConversionError;
 use crate::CollectionUuid;
@@ -691,6 +690,8 @@ pub enum UpdateCollectionError {
     Configuration(#[from] serde_json::Error),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
+    #[error("Could not parse config: {0}")]
+    InvalidConfig(#[from] CollectionConfigurationToInternalConfigurationError),
 }
 
 impl ChromaError for UpdateCollectionError {
@@ -700,6 +701,7 @@ impl ChromaError for UpdateCollectionError {
             UpdateCollectionError::MetadataResetUnsupported => ErrorCodes::InvalidArgument,
             UpdateCollectionError::Configuration(_) => ErrorCodes::Internal,
             UpdateCollectionError::Internal(err) => err.code(),
+            UpdateCollectionError::InvalidConfig(_) => ErrorCodes::InvalidArgument,
         }
     }
 }
