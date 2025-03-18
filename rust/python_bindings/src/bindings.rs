@@ -1,4 +1,4 @@
-use crate::errors::{ChromaPyResult, WrappedPyErr, WrappedUuidError};
+use crate::errors::{ChromaPyResult, WrappedPyErr, WrappedSerdeJsonError, WrappedUuidError};
 use chroma_cache::FoyerCacheConfig;
 use chroma_cli::chroma_cli;
 use chroma_config::{registry::Registry, Configurable};
@@ -264,6 +264,7 @@ impl Bindings {
             }
             None => None,
         };
+        println!("configuration_json: {:?}", configuration_json);
 
         let request = CreateCollectionRequest::try_new(
             tenant,
