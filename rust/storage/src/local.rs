@@ -124,6 +124,9 @@ impl LocalStorage {
 
     pub async fn list_prefix(&self, prefix: &str) -> Result<Vec<String>, StorageError> {
         let search_path = Path::new(&self.root).join(prefix);
+        if !search_path.exists() {
+            return Ok(Vec::new());
+        }
         let entries = std::fs::read_dir(search_path).map_err(|e| StorageError::Generic {
             source: Arc::new(e),
         })?;

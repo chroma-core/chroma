@@ -1733,7 +1733,6 @@ name = "chroma-tracing"
 version = "0.1.0"
 dependencies = [
  "chroma-system",
- "chrono",
  "fastrace",
  "fastrace-opentelemetry",
  "http 1.1.0",
