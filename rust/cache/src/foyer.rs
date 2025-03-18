@@ -465,9 +465,10 @@ where
 
     async fn insert(&self, key: K, value: V) {
         let _stopwatch = Stopwatch::new(&self.insert_latency);
-        self.cache.insert(key.clone(), value.clone());
-        // Also insert to the disk cache.
-        self.insert_to_disk(key, value);
+        // Immediately insert to the disk cache
+        self.insert_to_disk(key.clone(), value.clone());
+        // Insert to the in-memory cache
+        self.cache.insert(key, value);
     }
 
     async fn remove(&self, key: &K) {
