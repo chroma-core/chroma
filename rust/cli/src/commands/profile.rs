@@ -1,8 +1,8 @@
+use crate::utils::{get_profiles, read_config, write_config, write_profiles};
 use clap::{Args, Subcommand};
 use colored::Colorize;
-use dialoguer::Input;
 use dialoguer::theme::ColorfulTheme;
-use crate::utils::{get_profiles, read_config, write_config, write_profiles};
+use dialoguer::Input;
 
 #[derive(Args, Debug)]
 pub struct DeleteArgs {
@@ -48,15 +48,23 @@ fn delete_profile(args: DeleteArgs) {
     };
 
     if config.current_profile == profile {
-        println!("{}", "\nWarning! You are deleting the currently active profile".yellow().bold());
+        println!(
+            "{}",
+            "\nWarning! You are deleting the currently active profile"
+                .yellow()
+                .bold()
+        );
         println!("All Chroma Cloud CLI operations will fail without an active profile.");
-        print!("If you wish to proceed, please use: `{}`, to set a new active profile", "chroma profile use <profile name>".yellow());
-        
+        print!(
+            "If you wish to proceed, please use: `{}`, to set a new active profile",
+            "chroma profile use <profile name>".yellow()
+        );
+
         println!("\nDo you want to delete profile {}? (Y/n)", profile);
         let confirm: String = Input::with_theme(&ColorfulTheme::default())
             .interact_text()
             .unwrap();
-        
+
         if confirm.to_lowercase() != "y" && confirm.to_lowercase() != "yes" {
             println!();
             return;
@@ -77,7 +85,7 @@ fn delete_profile(args: DeleteArgs) {
         Ok(_) => {}
         Err(_) => {
             eprintln!("\n{}\n", "Failed to save credentials file".red());
-            return; 
+            return;
         }
     }
 
@@ -108,7 +116,10 @@ fn list_profiles() {
     };
 
     if profiles.is_empty() {
-        println!("\nNo profiles defined at the moment. To set a new profile use {}\n", "chroma login".yellow());
+        println!(
+            "\nNo profiles defined at the moment. To set a new profile use {}\n",
+            "chroma login".yellow()
+        );
         return;
     }
 
@@ -136,7 +147,7 @@ fn use_profile(args: UseArgs) {
             return;
         }
     };
-    
+
     if !profiles.contains_key(&args.name) {
         let message = format!("Profile {} not found", args.name);
         eprintln!("\n{}\n", message.red());
@@ -150,7 +161,7 @@ fn use_profile(args: UseArgs) {
             return;
         }
     };
-    
+
     config.current_profile = args.name;
     match write_config(&config) {
         Ok(_) => {}
@@ -158,7 +169,6 @@ fn use_profile(args: UseArgs) {
             eprintln!("\n{}\n", "Failed to save CLI config".red());
         }
     };
-    
 }
 
 fn show() {
@@ -169,15 +179,17 @@ fn show() {
             return;
         }
     };
-    
+
     if config.current_profile.is_empty() {
-       println!("\nNo profile set currently. Please use {} to add a profile\n", "chroma login".yellow());
+        println!(
+            "\nNo profile set currently. Please use {} to add a profile\n",
+            "chroma login".yellow()
+        );
         return;
     }
 
     println!("\n{}", "Current profile: ".blue().bold());
     println!("{}\n", config.current_profile);
-
 }
 
 #[allow(dead_code)]
@@ -192,11 +204,14 @@ pub fn profile_command(command: ProfileCommand) {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
-    use colored::control;
-    use tempfile::TempDir;
-    use crate::commands::profile::{delete_profile, list_profiles, profile_command, show, use_profile, DeleteArgs, ProfileCommand, UseArgs};
+    use crate::commands::profile::{
+        delete_profile, list_profiles, profile_command, show, use_profile, DeleteArgs,
+        ProfileCommand, UseArgs,
+    };
     use crate::utils::{CliConfig, Profile, Profiles};
+    use colored::control;
+    use std::fs;
+    use tempfile::TempDir;
 
     // Helper function to create a temporary .chroma directory with initial files
     fn setup_test_environment(profiles: Option<Profiles>, config: Option<CliConfig>) -> TempDir {
@@ -221,8 +236,8 @@ mod tests {
             let default_config = CliConfig {
                 current_profile: String::new(),
             };
-            let json_str =
-                serde_json::to_string_pretty(&default_config).expect("Failed to serialize default config");
+            let json_str = serde_json::to_string_pretty(&default_config)
+                .expect("Failed to serialize default config");
             fs::write(&config_path, json_str).expect("Failed to write default config file");
         }
 
@@ -235,18 +250,37 @@ mod tests {
     #[test]
     fn test_delete_profile_success() {
         let profiles = Some(Profiles::from([
-            ("default".to_string(), Profile { name: "default".to_string(), api_key: "test_key".to_string(), team_id: "test_team".to_string() }),
-            ("test".to_string(), Profile { name: "test".to_string(), api_key: "another_key".to_string(), team_id: "another_team".to_string() }),
+            (
+                "default".to_string(),
+                Profile {
+                    name: "default".to_string(),
+                    api_key: "test_key".to_string(),
+                    team_id: "test_team".to_string(),
+                },
+            ),
+            (
+                "test".to_string(),
+                Profile {
+                    name: "test".to_string(),
+                    api_key: "another_key".to_string(),
+                    team_id: "another_team".to_string(),
+                },
+            ),
         ]));
-        let config = Some(CliConfig { current_profile: "default".to_string() });
+        let config = Some(CliConfig {
+            current_profile: "default".to_string(),
+        });
         let temp_dir = setup_test_environment(profiles, config);
 
-        let args = DeleteArgs { name: "test".to_string() };
+        let args = DeleteArgs {
+            name: "test".to_string(),
+        };
         delete_profile(args);
 
         let credentials_path = temp_dir.path().join(".chroma").join("credentials");
         let contents = fs::read_to_string(credentials_path).expect("Failed to read credentials");
-        let updated_profiles: Profiles = toml::from_str(&contents).expect("Failed to parse profiles");
+        let updated_profiles: Profiles =
+            toml::from_str(&contents).expect("Failed to parse profiles");
 
         assert!(updated_profiles.contains_key("default"));
         assert!(!updated_profiles.contains_key("test"));
@@ -254,13 +288,22 @@ mod tests {
 
     #[test]
     fn test_delete_profile_not_found() {
-        let profiles = Some(Profiles::from([
-            ("default".to_string(), Profile { name: "default".to_string(), api_key: "test_key".to_string(), team_id: "test_team".to_string() }),
-        ]));
-        let config = Some(CliConfig { current_profile: "default".to_string() });
-        let temp_dir = setup_test_environment(profiles, config);
+        let profiles = Some(Profiles::from([(
+            "default".to_string(),
+            Profile {
+                name: "default".to_string(),
+                api_key: "test_key".to_string(),
+                team_id: "test_team".to_string(),
+            },
+        )]));
+        let config = Some(CliConfig {
+            current_profile: "default".to_string(),
+        });
+        setup_test_environment(profiles, config);
 
-        let args = DeleteArgs { name: "nonexistent".to_string() };
+        let args = DeleteArgs {
+            name: "nonexistent".to_string(),
+        };
         let mut output = Vec::new();
         control::set_override(true); // Enable colored output for testing
         {
@@ -276,13 +319,31 @@ mod tests {
     #[test]
     fn test_delete_profile_current_profile() {
         let profiles = Some(Profiles::from([
-            ("default".to_string(), Profile { name: "default".to_string(), api_key: "test_key".to_string(), team_id: "test_team".to_string() }),
-            ("test".to_string(), Profile { name: "test".to_string(), api_key: "another_key".to_string(), team_id: "another_team".to_string() }),
+            (
+                "default".to_string(),
+                Profile {
+                    name: "default".to_string(),
+                    api_key: "test_key".to_string(),
+                    team_id: "test_team".to_string(),
+                },
+            ),
+            (
+                "test".to_string(),
+                Profile {
+                    name: "test".to_string(),
+                    api_key: "another_key".to_string(),
+                    team_id: "another_team".to_string(),
+                },
+            ),
         ]));
-        let config = Some(CliConfig { current_profile: "default".to_string() });
+        let config = Some(CliConfig {
+            current_profile: "default".to_string(),
+        });
         let temp_dir = setup_test_environment(profiles, config);
 
-        let args = DeleteArgs { name: "default".to_string() };
+        let args = DeleteArgs {
+            name: "default".to_string(),
+        };
         delete_profile(args);
 
         let config_path = temp_dir.path().join(".chroma").join("config.json");
@@ -296,10 +357,24 @@ mod tests {
     #[test]
     fn test_list_profiles_success() {
         let profiles = Some(Profiles::from([
-            ("default".to_string(), Profile { name: "default".to_string(), api_key: "test_key".to_string(), team_id: "test_team".to_string() }),
-            ("test".to_string(), Profile { name: "test".to_string(), api_key: "another_key".to_string(), team_id: "another_team".to_string() }),
+            (
+                "default".to_string(),
+                Profile {
+                    name: "default".to_string(),
+                    api_key: "test_key".to_string(),
+                    team_id: "test_team".to_string(),
+                },
+            ),
+            (
+                "test".to_string(),
+                Profile {
+                    name: "test".to_string(),
+                    api_key: "another_key".to_string(),
+                    team_id: "another_team".to_string(),
+                },
+            ),
         ]));
-        let temp_dir = setup_test_environment(profiles, None);
+        setup_test_environment(profiles, None);
 
         let mut output = Vec::new();
         control::set_override(true); // Enable colored output for testing
@@ -317,7 +392,7 @@ mod tests {
 
     #[test]
     fn test_list_profiles_empty() {
-        let temp_dir = setup_test_environment(None, None);
+        setup_test_environment(None, None);
 
         let mut output = Vec::new();
         control::set_override(true); // Enable colored output for testing
@@ -335,13 +410,31 @@ mod tests {
     #[test]
     fn test_use_profile_success() {
         let profiles = Some(Profiles::from([
-            ("default".to_string(), Profile { name: "default".to_string(), api_key: "test_key".to_string(), team_id: "test_team".to_string() }),
-            ("test".to_string(), Profile { name: "test".to_string(), api_key: "another_key".to_string(), team_id: "another_team".to_string() }),
+            (
+                "default".to_string(),
+                Profile {
+                    name: "default".to_string(),
+                    api_key: "test_key".to_string(),
+                    team_id: "test_team".to_string(),
+                },
+            ),
+            (
+                "test".to_string(),
+                Profile {
+                    name: "test".to_string(),
+                    api_key: "another_key".to_string(),
+                    team_id: "another_team".to_string(),
+                },
+            ),
         ]));
-        let config = Some(CliConfig { current_profile: "".to_string() });
+        let config = Some(CliConfig {
+            current_profile: "".to_string(),
+        });
         let temp_dir = setup_test_environment(profiles, config);
 
-        let args = UseArgs { name: "test".to_string() };
+        let args = UseArgs {
+            name: "test".to_string(),
+        };
         use_profile(args);
 
         let config_path = temp_dir.path().join(".chroma").join("config.json");
@@ -354,13 +447,22 @@ mod tests {
 
     #[test]
     fn test_use_profile_not_found() {
-        let profiles = Some(Profiles::from([
-            ("default".to_string(), Profile { name: "default".to_string(), api_key: "test_key".to_string(), team_id: "test_team".to_string() }),
-        ]));
-        let config = Some(CliConfig { current_profile: "".to_string() });
-        let temp_dir = setup_test_environment(profiles, config);
+        let profiles = Some(Profiles::from([(
+            "default".to_string(),
+            Profile {
+                name: "default".to_string(),
+                api_key: "test_key".to_string(),
+                team_id: "test_team".to_string(),
+            },
+        )]));
+        let config = Some(CliConfig {
+            current_profile: "".to_string(),
+        });
+        setup_test_environment(profiles, config);
 
-        let args = UseArgs { name: "nonexistent".to_string() };
+        let args = UseArgs {
+            name: "nonexistent".to_string(),
+        };
         let mut output = Vec::new();
         control::set_override(true); // Enable colored output for testing
         {
@@ -375,8 +477,10 @@ mod tests {
 
     #[test]
     fn test_show_no_profile_set() {
-        let config = Some(CliConfig { current_profile: "".to_string() });
-        let temp_dir = setup_test_environment(None, config);
+        let config = Some(CliConfig {
+            current_profile: "".to_string(),
+        });
+        setup_test_environment(None, config);
 
         let mut output = Vec::new();
         control::set_override(true); // Enable colored output for testing
@@ -393,8 +497,10 @@ mod tests {
 
     #[test]
     fn test_show_profile_set() {
-        let config = Some(CliConfig { current_profile: "test".to_string() });
-        let temp_dir = setup_test_environment(None, config);
+        let config = Some(CliConfig {
+            current_profile: "test".to_string(),
+        });
+        setup_test_environment(None, config);
 
         let mut output = Vec::new();
         control::set_override(true); // Enable colored output for testing
@@ -411,26 +517,39 @@ mod tests {
 
     #[test]
     fn test_profile_command_delete() {
-        let profiles = Some(Profiles::from([
-            ("default".to_string(), Profile { name: "default".to_string(), api_key: "test_key".to_string(), team_id: "test_team".to_string() }),
-        ]));
+        let profiles = Some(Profiles::from([(
+            "default".to_string(),
+            Profile {
+                name: "default".to_string(),
+                api_key: "test_key".to_string(),
+                team_id: "test_team".to_string(),
+            },
+        )]));
         let temp_dir = setup_test_environment(profiles, None);
 
-        let command = ProfileCommand::Delete(DeleteArgs { name: "default".to_string() });
+        let command = ProfileCommand::Delete(DeleteArgs {
+            name: "default".to_string(),
+        });
         profile_command(command);
 
         let credentials_path = temp_dir.path().join(".chroma").join("credentials");
         let contents = fs::read_to_string(credentials_path).expect("Failed to read credentials");
-        let updated_profiles: Profiles = toml::from_str(&contents).expect("Failed to parse profiles");
+        let updated_profiles: Profiles =
+            toml::from_str(&contents).expect("Failed to parse profiles");
         assert!(!updated_profiles.contains_key("default"));
     }
 
     #[test]
     fn test_profile_command_list() {
-        let profiles = Some(Profiles::from([
-            ("test".to_string(), Profile { name: "test".to_string(), api_key: "another_key".to_string(), team_id: "another_team".to_string() }),
-        ]));
-        let temp_dir = setup_test_environment(profiles, None);
+        let profiles = Some(Profiles::from([(
+            "test".to_string(),
+            Profile {
+                name: "test".to_string(),
+                api_key: "another_key".to_string(),
+                team_id: "another_team".to_string(),
+            },
+        )]));
+        setup_test_environment(profiles, None);
 
         let mut output = Vec::new();
         control::set_override(true); // Enable colored output for testing
@@ -447,8 +566,10 @@ mod tests {
 
     #[test]
     fn test_profile_command_show() {
-        let config = Some(CliConfig { current_profile: "test".to_string() });
-        let temp_dir = setup_test_environment(None, config);
+        let config = Some(CliConfig {
+            current_profile: "test".to_string(),
+        });
+        setup_test_environment(None, config);
 
         let mut output = Vec::new();
         control::set_override(true); // Enable colored output for testing
@@ -465,13 +586,22 @@ mod tests {
 
     #[test]
     fn test_profile_command_use() {
-        let profiles = Some(Profiles::from([
-            ("test".to_string(), Profile { name: "test".to_string(), api_key: "another_key".to_string(), team_id: "another_team".to_string() }),
-        ]));
-        let config = Some(CliConfig { current_profile: "".to_string() });
+        let profiles = Some(Profiles::from([(
+            "test".to_string(),
+            Profile {
+                name: "test".to_string(),
+                api_key: "another_key".to_string(),
+                team_id: "another_team".to_string(),
+            },
+        )]));
+        let config = Some(CliConfig {
+            current_profile: "".to_string(),
+        });
         let temp_dir = setup_test_environment(profiles, config);
 
-        let command = ProfileCommand::Use(UseArgs { name: "test".to_string() });
+        let command = ProfileCommand::Use(UseArgs {
+            name: "test".to_string(),
+        });
         profile_command(command);
 
         let config_path = temp_dir.path().join(".chroma").join("config.json");

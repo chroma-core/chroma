@@ -1,10 +1,10 @@
 mod commands;
 mod utils;
 
+use crate::commands::profile::{profile_command, ProfileCommand};
 use crate::commands::run::{run, RunArgs};
 use crate::commands::vacuum::{vacuum, VacuumArgs};
 use clap::{Parser, Subcommand};
-use crate::commands::profile::{profile_command, ProfileCommand};
 
 #[derive(Subcommand, Debug)]
 enum Command {
