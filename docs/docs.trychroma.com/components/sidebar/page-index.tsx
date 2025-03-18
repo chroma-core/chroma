@@ -1,6 +1,7 @@
 import React, { Suspense } from "react";
 import { Playfair_Display } from "next/font/google";
 import PageLink from "@/components/sidebar/page-link";
+import { AppPage } from "@/lib/content";
 
 const playfairDisplay = Playfair_Display({
   subsets: ["latin"],
@@ -11,7 +12,7 @@ const playfairDisplay = Playfair_Display({
 
 const PageIndex: React.FC<{
   path: string;
-  pages: { id: string; name: string }[];
+  pages: AppPage[];
   name?: string;
 }> = ({ path, pages, name }) => {
   return (
@@ -31,6 +32,7 @@ const PageIndex: React.FC<{
               name={page.name}
               path={`${path}/${page.id}`}
               sectionPage={name !== undefined}
+              latestUpdate={page.latestUpdate}
             />
           </Suspense>
         ))}

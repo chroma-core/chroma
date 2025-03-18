@@ -31,10 +31,12 @@ const sidebarConfig: AppSection[] = [
           {
             id: "migration",
             name: "Migration",
+            latestUpdate: "03/17/2025",
           },
           {
             id: "troubleshooting",
             name: "Troubleshooting",
+            latestUpdate: "03/17/2025",
           },
           {
             id: "roadmap",

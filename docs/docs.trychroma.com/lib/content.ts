@@ -5,6 +5,7 @@ export interface AppPage {
   name: string;
   slug?: string;
   path?: string;
+  latestUpdate?: string;
 }
 
 export interface AppSection {
