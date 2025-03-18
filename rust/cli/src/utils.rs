@@ -18,13 +18,6 @@ pub const LOGO: &str = "
                 \x1b[38;5;069m(((((\x1b[38;5;203m((((    \x1b[38;5;220m#########\x1b[0m
 ";
 
-#[derive(Debug, Deserialize)]
-pub struct CliEnvConfig {
-    pub dashboard_url: &'static str,
-    pub dashboard_api_url: &'static str,
-    pub frontend_url: &'static str,
-}
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Profile {
     pub name: String,
@@ -38,21 +31,6 @@ pub struct CliConfig {
 }
 
 pub type Profiles = HashMap<String, Profile>;
-
-pub fn load_cli_env_config(dev: bool) -> CliEnvConfig{
-    match dev {
-        true => CliEnvConfig {
-            dashboard_url: "http://localhost:3001",
-            dashboard_api_url: "http://localhost:8002",
-            frontend_url: "http://localhost:8000",
-        },
-        false => CliEnvConfig {
-            dashboard_url: "https://trychroma.com",
-            dashboard_api_url: "https://backend.trychroma.com",
-            frontend_url: "https://frontend.trychroma.com",
-        }
-    }
-}
 
 fn get_credentials_file_path() -> Result<PathBuf, Box<dyn Error>> {
     let home_dir = std::env::var("HOME")?;

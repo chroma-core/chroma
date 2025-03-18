@@ -134,8 +134,11 @@ fn show() {
     
     println!("\n{}", "Current profile: ".blue().bold());
     if config.current_profile.is_empty() {
-       println!("\nNo profile set currently. Please use {} to add a profile\n", "chroma login".yellow()); 
+       println!("\nNo profile set currently. Please use {} to add a profile\n", "chroma login".yellow());
+        return;
     }
+    println!("{}\n", config.current_profile);
+
 }
 
 #[allow(dead_code)]
