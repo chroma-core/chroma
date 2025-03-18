@@ -39,47 +39,6 @@ impl ChromaError for ValidationError {
     }
 }
 
-pub(crate) fn chroma_error_code_to_status_code(error_code: ErrorCodes) -> StatusCode {
-    match error_code {
-        ErrorCodes::Success => StatusCode::OK,
-        ErrorCodes::Cancelled => StatusCode::BAD_REQUEST,
-        ErrorCodes::Unknown => StatusCode::INTERNAL_SERVER_ERROR,
-        ErrorCodes::InvalidArgument => StatusCode::BAD_REQUEST,
-        ErrorCodes::DeadlineExceeded => StatusCode::GATEWAY_TIMEOUT,
-        ErrorCodes::NotFound => StatusCode::NOT_FOUND,
-        ErrorCodes::AlreadyExists => StatusCode::CONFLICT,
-        ErrorCodes::PermissionDenied => StatusCode::FORBIDDEN,
-        ErrorCodes::ResourceExhausted => StatusCode::TOO_MANY_REQUESTS,
-        ErrorCodes::FailedPrecondition => StatusCode::PRECONDITION_FAILED,
-        ErrorCodes::Aborted => StatusCode::BAD_REQUEST,
-        ErrorCodes::OutOfRange => StatusCode::BAD_REQUEST,
-        ErrorCodes::Unimplemented => StatusCode::NOT_IMPLEMENTED,
-        ErrorCodes::Internal => StatusCode::INTERNAL_SERVER_ERROR,
-        ErrorCodes::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
-        ErrorCodes::DataLoss => StatusCode::INTERNAL_SERVER_ERROR,
-        ErrorCodes::Unauthenticated => StatusCode::UNAUTHORIZED,
-        ErrorCodes::VersionMismatch => StatusCode::INTERNAL_SERVER_ERROR,
-    }
-}
-
-pub(crate) fn status_code_to_chroma_error(status_code: StatusCode) -> ErrorCodes {
-    match status_code {
-        StatusCode::OK => ErrorCodes::Success,
-        StatusCode::BAD_REQUEST => ErrorCodes::InvalidArgument,
-        StatusCode::UNAUTHORIZED => ErrorCodes::Unauthenticated,
-        StatusCode::FORBIDDEN => ErrorCodes::PermissionDenied,
-        StatusCode::NOT_FOUND => ErrorCodes::NotFound,
-        StatusCode::CONFLICT => ErrorCodes::AlreadyExists,
-        StatusCode::TOO_MANY_REQUESTS => ErrorCodes::ResourceExhausted,
-        StatusCode::INTERNAL_SERVER_ERROR => ErrorCodes::Internal,
-        StatusCode::SERVICE_UNAVAILABLE => ErrorCodes::Unavailable,
-        StatusCode::NOT_IMPLEMENTED => ErrorCodes::Unimplemented,
-        StatusCode::GATEWAY_TIMEOUT => ErrorCodes::DeadlineExceeded,
-        StatusCode::PRECONDITION_FAILED => ErrorCodes::FailedPrecondition,
-        _ => ErrorCodes::Unknown,
-    }
-}
-
 /// Wrapper around `dyn ChromaError` that implements `IntoResponse`. This means that route handlers can return `Result<_, ServerError>` and use the `?` operator to return arbitrary errors.
 pub struct ServerError(Box<dyn ChromaError>);
 
@@ -110,7 +69,7 @@ impl ErrorResponse {
 impl IntoResponse for ServerError {
     fn into_response(self) -> Response {
         tracing::error!("Error: {:?}", self.0);
-        let status_code = chroma_error_code_to_status_code(self.0.code());
+        let status_code: StatusCode = self.0.code().into();
 
         let error = ErrorResponse {
             error: self.0.code().name().to_string(),

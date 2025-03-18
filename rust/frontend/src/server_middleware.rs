@@ -1,8 +1,7 @@
 use axum::http::{header, StatusCode};
 use axum::response::IntoResponse;
 use axum::{extract::Request, middleware::Next, response::Response, Json};
-
-use crate::types::errors::status_code_to_chroma_error;
+use chroma_error::ErrorCodes;
 
 /// If the request does not have a `Content-Type` header, set it to `application/json`.
 pub(crate) async fn default_json_content_type_middleware(mut req: Request, next: Next) -> Response {
@@ -31,7 +30,7 @@ pub(crate) async fn always_json_errors_middleware(req: Request, next: Next) -> R
     }
 
     let content_type = res.headers().get("content-type");
-    if !matches!(content_type, Some(content_type) if content_type == "text/plain; charset=utf-8") {
+    if let Some("text/plain; charset=utf-8") = content_type.and_then(|v| v.to_str().ok()) {
         return res;
     }
 
@@ -57,7 +56,7 @@ pub(crate) async fn always_json_errors_middleware(req: Request, next: Next) -> R
         }
     };
 
-    let error_code = status_code_to_chroma_error(status);
+    let error_code: ErrorCodes = status.into();
     let json = serde_json::json!({ "error": error_code.name(), "message": text });
     (parts, Json(json)).into_response()
 }

@@ -70,6 +70,53 @@ impl ErrorCodes {
     }
 }
 
+#[cfg(feature = "http")]
+impl From<ErrorCodes> for http::StatusCode {
+    fn from(error_code: ErrorCodes) -> Self {
+        match error_code {
+            ErrorCodes::Success => http::StatusCode::OK,
+            ErrorCodes::Cancelled => http::StatusCode::BAD_REQUEST,
+            ErrorCodes::Unknown => http::StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorCodes::InvalidArgument => http::StatusCode::BAD_REQUEST,
+            ErrorCodes::DeadlineExceeded => http::StatusCode::GATEWAY_TIMEOUT,
+            ErrorCodes::NotFound => http::StatusCode::NOT_FOUND,
+            ErrorCodes::AlreadyExists => http::StatusCode::CONFLICT,
+            ErrorCodes::PermissionDenied => http::StatusCode::FORBIDDEN,
+            ErrorCodes::ResourceExhausted => http::StatusCode::TOO_MANY_REQUESTS,
+            ErrorCodes::FailedPrecondition => http::StatusCode::PRECONDITION_FAILED,
+            ErrorCodes::Aborted => http::StatusCode::BAD_REQUEST,
+            ErrorCodes::OutOfRange => http::StatusCode::BAD_REQUEST,
+            ErrorCodes::Unimplemented => http::StatusCode::NOT_IMPLEMENTED,
+            ErrorCodes::Internal => http::StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorCodes::Unavailable => http::StatusCode::SERVICE_UNAVAILABLE,
+            ErrorCodes::DataLoss => http::StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorCodes::Unauthenticated => http::StatusCode::UNAUTHORIZED,
+            ErrorCodes::VersionMismatch => http::StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
+
+#[cfg(feature = "http")]
+impl Into<ErrorCodes> for http::StatusCode {
+    fn into(self) -> ErrorCodes {
+        match self {
+            http::StatusCode::OK => ErrorCodes::Success,
+            http::StatusCode::BAD_REQUEST => ErrorCodes::InvalidArgument,
+            http::StatusCode::UNAUTHORIZED => ErrorCodes::Unauthenticated,
+            http::StatusCode::FORBIDDEN => ErrorCodes::PermissionDenied,
+            http::StatusCode::NOT_FOUND => ErrorCodes::NotFound,
+            http::StatusCode::CONFLICT => ErrorCodes::AlreadyExists,
+            http::StatusCode::TOO_MANY_REQUESTS => ErrorCodes::ResourceExhausted,
+            http::StatusCode::INTERNAL_SERVER_ERROR => ErrorCodes::Internal,
+            http::StatusCode::SERVICE_UNAVAILABLE => ErrorCodes::Unavailable,
+            http::StatusCode::NOT_IMPLEMENTED => ErrorCodes::Unimplemented,
+            http::StatusCode::GATEWAY_TIMEOUT => ErrorCodes::DeadlineExceeded,
+            http::StatusCode::PRECONDITION_FAILED => ErrorCodes::FailedPrecondition,
+            _ => ErrorCodes::Unknown,
+        }
+    }
+}
+
 pub trait ChromaError: Error + Send {
     fn code(&self) -> ErrorCodes;
     fn boxed(self) -> Box<dyn ChromaError>
