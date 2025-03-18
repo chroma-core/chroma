@@ -285,7 +285,6 @@ impl CompactOrchestrator {
         self.state = ExecutionState::Partition;
         let operator = PartitionOperator::new();
         tracing::info!("Sending N Records: {:?}", records.len());
-        println!("Sending N Records: {:?}", records.len());
         let input = PartitionInput::new(records, self.max_partition_size);
         let task = wrap(operator, input, ctx.receiver());
         self.send(task, ctx).await;

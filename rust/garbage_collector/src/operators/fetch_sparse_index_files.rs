@@ -81,14 +81,15 @@ impl Operator<FetchSparseIndexFilesInput, FetchSparseIndexFilesOutput>
         versions_to_fetch.push(input.oldest_version_to_keep);
 
         let mut hnsw_prefixes_for_deletion = Vec::new();
-        println!(
+        tracing::info!(
+            num_versions = versions_to_fetch.len(),
             "Starting to fetch files for {} versions to delete plus oldest to keep",
             versions_to_fetch.len()
         );
 
         // Extract file paths from CollectionVersionFile for the versions we want to delete
         for version in &versions_to_fetch {
-            println!("\n=== Processing version {} ===", version);
+            tracing::info!(version = *version, "Processing version {}", version);
             if let Some(version_info) = input
                 .version_file
                 .version_history
@@ -104,13 +105,17 @@ impl Operator<FetchSparseIndexFilesInput, FetchSparseIndexFilesOutput>
                     for (idx, segment_compaction_info) in
                         segment_info.segment_compaction_info.iter().enumerate()
                     {
-                        println!("  Processing Segment {}", idx);
+                        tracing::info!(segment = idx, "Processing Segment at index {}", idx);
                         // Iterate through file paths for each segment
                         for (file_type, file_paths) in &segment_compaction_info.file_paths {
-                            println!("    File type: {}", file_type);
+                            tracing::info!(
+                                file_type = file_type,
+                                "Processing file type {}",
+                                file_type
+                            );
                             // Skip hnsw_index files
                             if file_type == "hnsw_index" {
-                                println!("        Added prefix: {:?}", file_paths.paths);
+                                tracing::info!("Added prefix: {:?}", file_paths.paths);
                                 if *version == input.oldest_version_to_keep {
                                     continue;
                                 }
@@ -125,8 +130,8 @@ impl Operator<FetchSparseIndexFilesInput, FetchSparseIndexFilesOutput>
                                     Ok(content) => {
                                         total_files_fetched += 1;
                                         total_bytes_fetched += content.len();
-                                        println!(
-                                            "      ✓ Fetched: {} ({} bytes)",
+                                        tracing::info!(
+                                            "      ✓ Fetched:  {} ({} bytes)",
                                             prefixed_path,
                                             content.len()
                                         );
@@ -134,7 +139,12 @@ impl Operator<FetchSparseIndexFilesInput, FetchSparseIndexFilesOutput>
                                             .insert(file_path.clone(), (*content).to_vec());
                                     }
                                     Err(e) => {
-                                        println!("      ✗ Failed to fetch: {}", prefixed_path);
+                                        tracing::error!(
+                                            "Failed to fetch file {} for version {}: {}",
+                                            prefixed_path,
+                                            version,
+                                            e
+                                        );
                                         return Err(FetchSparseIndexFilesError::S3Error(format!(
                                             "Failed to fetch file {} for version {}: {}",
                                             prefixed_path, version, e
@@ -146,25 +156,28 @@ impl Operator<FetchSparseIndexFilesInput, FetchSparseIndexFilesOutput>
                     }
 
                     // Summary for this version
-                    println!("  === Version {} Summary ===", version);
-                    println!("    Total files fetched: {}", total_files_fetched);
-                    println!("    Total bytes fetched: {} bytes", total_bytes_fetched);
+                    tracing::info!(
+                        total_files_fetched = total_files_fetched,
+                        total_bytes_fetched = total_bytes_fetched,
+                        "Version {} Summary: Total files fetched: {}, Total bytes fetched: {} bytes",
+                        version,
+                        total_files_fetched,
+                        total_bytes_fetched
+                    );
 
                     // Only insert if we found any files
                     if !version_files.is_empty() {
                         version_to_content.insert(*version, version_files);
                     }
                 } else {
-                    println!("  ✗ No segment info found for version {}", version);
+                    tracing::error!("No segment info found for version {}", version);
                     return Err(FetchSparseIndexFilesError::FileNotFound(*version));
                 }
             } else {
-                println!("  ✗ Version {} not found in version history", version);
+                tracing::error!("Version {} not found in version history", version);
                 return Err(FetchSparseIndexFilesError::FileNotFound(*version));
             }
         }
-
-        println!("\nFetch operation completed successfully");
 
         Ok(FetchSparseIndexFilesOutput {
             version_file: input.version_file.clone(),
