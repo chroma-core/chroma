@@ -19,14 +19,6 @@ use std::str::FromStr;
 use std::sync::Arc;
 use uuid::Uuid;
 
-// type FilePath = HashMap<String, Vec<String>>;
-
-// #[derive(Clone, Debug)]
-// struct SegmentInfo {
-//     segment_type: chroma_types::SegmentType,
-//     segment_id: SegmentUuid,
-// }
-
 #[derive(Clone, Debug)] // Add Arbitrary derive
 enum Transition {
     // Create a new collection.
@@ -467,7 +459,7 @@ impl GcTest {
 
         let record_segment_id = SegmentUuid::from_str(&record_segment_info.segment_id).unwrap();
         let metadata_segment_id = SegmentUuid::from_str(&metadata_segment_info.segment_id).unwrap();
-        
+
         // Handle flush_compaction errors
         match block_on(
             self.sysdb.clone().flush_compaction(
@@ -533,7 +525,7 @@ impl GcTest {
             )
             .await
             .unwrap();
-        
+
         // Return early if no collection is found
         let collection = match collections.first() {
             Some(c) => c,
@@ -551,7 +543,7 @@ impl GcTest {
             dispatcher_handle,
             storage,
         );
-        
+
         match orchestrator.run(system).await {
             Ok(response) => {
                 tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
@@ -561,7 +553,7 @@ impl GcTest {
                 tracing::error!("Error during garbage collection: {:?}", e);
             }
         }
-        
+
         self
     }
 
