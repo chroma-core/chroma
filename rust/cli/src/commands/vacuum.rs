@@ -201,8 +201,10 @@ pub fn vacuum(args: VacuumArgs) {
     // If you recently upgraded Chroma from a version below 0.5.6 to 0.5.6 or above, you should run this command once to greatly reduce the size of your database and enable continuous database pruning. In most other cases, vacuuming will save very little disk space.
     // The execution time of this command scales with the size of your database. It blocks both reads and writes to the database while it is running.
     println!("{}", "\nChroma Vacuum\n".underline().bold());
+
     let mut config = FrontendServerConfig::single_node_default();
     let persistent_path = args.path.unwrap_or(config.persist_path);
+
     if !Path::new(&persistent_path).exists() {
         println!(
             "{}",
@@ -210,7 +212,9 @@ pub fn vacuum(args: VacuumArgs) {
         );
         return;
     }
+
     let sqlite_url = format!("{}/{}", &persistent_path, &config.sqlite_filename);
+
     if !Path::new(sqlite_url.as_str()).exists() {
         println!(
             "{}",
@@ -249,6 +253,7 @@ pub fn vacuum(args: VacuumArgs) {
             return;
         }
     };
+
     match config.frontend.sqlitedb.as_mut() {
         Some(sqlite_config) => {
             sqlite_config.url = Some(sqlite_url);
@@ -258,8 +263,10 @@ pub fn vacuum(args: VacuumArgs) {
             return;
         }
     };
+
     let runtime = tokio::runtime::Runtime::new().expect("Failed to start Chroma");
     let vacuum_result = runtime.block_on(vacuum_chroma(config.frontend));
+
     if let Err(_e) = vacuum_result {
         eprintln!("Failed to vacuum Chroma");
         return;
