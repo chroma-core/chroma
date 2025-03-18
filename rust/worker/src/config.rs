@@ -186,6 +186,8 @@ pub struct CompactionServiceConfig {
     pub blockfile_provider: chroma_blockstore::config::BlockfileProviderConfig,
     #[serde(default)]
     pub hnsw_provider: chroma_index::config::HnswProviderConfig,
+    #[serde(default)]
+    pub spann_provider: chroma_index::config::SpannProviderConfig,
 }
 
 impl CompactionServiceConfig {
