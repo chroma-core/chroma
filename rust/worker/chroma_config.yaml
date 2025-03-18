@@ -150,3 +150,6 @@ compaction_service:
             policy:
                 random_sample:
                     sample_size: 0.1
+        hnsw_garbage_collection:
+            enabled: true
+            policy: "full_rebuild"
