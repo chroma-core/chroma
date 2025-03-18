@@ -1838,7 +1838,9 @@ mod tests {
     use tempfile::TempDir;
 
     use crate::{
-        config::PlGarbageCollectionConfig,
+        config::{
+            PlGarbageCollectionConfig, PlGarbageCollectionPolicyConfig, RandomSamplePolicyConfig,
+        },
         hnsw_provider::HnswIndexProvider,
         spann::types::{
             PlGarbageCollectionContext, SpannIndexReader, SpannIndexWriter, SpannIndexWriterError,
@@ -2069,12 +2071,16 @@ mod tests {
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
         let params = DistributedSpannParameters::default();
-        let gc_context = PlGarbageCollectionContext::try_from_config(
-            &PlGarbageCollectionConfig::default(),
-            &Registry::default(),
-        )
-        .await
-        .expect("Error converting config to gc context");
+        let pl_gc_policy = PlGarbageCollectionConfig {
+            enabled: true,
+            policy: PlGarbageCollectionPolicyConfig::RandomSample(RandomSamplePolicyConfig {
+                sample_size: 1.0,
+            }),
+        };
+        let gc_context =
+            PlGarbageCollectionContext::try_from_config(&pl_gc_policy, &Registry::default())
+                .await
+                .expect("Error converting config to gc context");
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
@@ -2256,12 +2262,16 @@ mod tests {
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
         let params = DistributedSpannParameters::default();
-        let gc_context = PlGarbageCollectionContext::try_from_config(
-            &PlGarbageCollectionConfig::default(),
-            &Registry::default(),
-        )
-        .await
-        .expect("Error converting config to gc context");
+        let pl_gc_policy = PlGarbageCollectionConfig {
+            enabled: true,
+            policy: PlGarbageCollectionPolicyConfig::RandomSample(RandomSamplePolicyConfig {
+                sample_size: 1.0,
+            }),
+        };
+        let gc_context =
+            PlGarbageCollectionContext::try_from_config(&pl_gc_policy, &Registry::default())
+                .await
+                .expect("Error converting config to gc context");
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
@@ -2690,12 +2700,16 @@ mod tests {
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
         let params = DistributedSpannParameters::default();
-        let gc_context = PlGarbageCollectionContext::try_from_config(
-            &PlGarbageCollectionConfig::default(),
-            &Registry::default(),
-        )
-        .await
-        .expect("Error converting config to gc context");
+        let pl_gc_policy = PlGarbageCollectionConfig {
+            enabled: true,
+            policy: PlGarbageCollectionPolicyConfig::RandomSample(RandomSamplePolicyConfig {
+                sample_size: 1.0,
+            }),
+        };
+        let gc_context =
+            PlGarbageCollectionContext::try_from_config(&pl_gc_policy, &Registry::default())
+                .await
+                .expect("Error converting config to gc context");
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
