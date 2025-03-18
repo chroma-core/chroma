@@ -13,8 +13,8 @@ use common::{
 
 #[tokio::test]
 async fn test_k8s_integration_05_crash_safety_initialize_fails() {
-    // Appending to an initialized log should succeed and if you append enough, it should create a
-    // snapshot.
+    // Appending to a log that has failed to write its manifest fails with log contention.
+    // Subsequent writes will repair the log and continue to make progress.
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
     Manifest::initialize(
         &LogWriterOptions::default(),
