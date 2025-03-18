@@ -2,7 +2,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chroma_storage::s3_client_for_test_with_new_bucket;
-use setsum::Setsum;
 
 use wal3::{FragmentSeqNo, LogWriter, LogWriterOptions, Manifest};
 
