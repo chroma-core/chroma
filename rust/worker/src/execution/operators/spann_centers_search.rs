@@ -12,7 +12,6 @@ pub(crate) struct SpannCentersSearchInput {
     pub(crate) normalized_query: Vec<f32>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug)]
 pub(crate) struct SpannCentersSearchOutput {
     pub(crate) center_ids: Vec<usize>,
@@ -37,13 +36,6 @@ impl ChromaError for SpannCentersSearchError {
 
 #[derive(Debug, Clone)]
 pub(crate) struct SpannCentersSearchOperator {}
-
-impl SpannCentersSearchOperator {
-    #[allow(dead_code)]
-    pub fn new() -> Box<Self> {
-        Box::new(SpannCentersSearchOperator {})
-    }
-}
 
 #[async_trait]
 impl Operator<SpannCentersSearchInput, SpannCentersSearchOutput> for SpannCentersSearchOperator {

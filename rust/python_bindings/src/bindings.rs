@@ -1,4 +1,4 @@
-use crate::errors::{ChromaPyResult, WrappedPyErr, WrappedSerdeJsonError, WrappedUuidError};
+use crate::errors::{ChromaPyResult, WrappedPyErr, WrappedUuidError};
 use chroma_cache::FoyerCacheConfig;
 use chroma_cli::chroma_cli;
 use chroma_config::{registry::Registry, Configurable};
@@ -270,7 +270,7 @@ impl Bindings {
             database,
             name,
             metadata,
-            configuration_json,
+            None,
             get_or_create,
         )?;
 
