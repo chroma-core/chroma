@@ -189,7 +189,7 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        assert_eq!(overridden_config.construction_ef, 1);
+        assert_eq!(overridden_config.ef_construction, 1);
     }
 
     #[test]
@@ -205,7 +205,7 @@ mod tests {
 
         let config = InternalCollectionConfiguration {
             vector_index: VectorIndexConfiguration::Hnsw(HnswConfiguration {
-                construction_ef: 2,
+                ef_construction: 2,
                 ..Default::default()
             }),
             embedding_function: None,
@@ -217,6 +217,6 @@ mod tests {
             .unwrap();
 
         // Setting from metadata is ignored since the config is not default
-        assert_eq!(overridden_config.construction_ef, 2);
+        assert_eq!(overridden_config.ef_construction, 2);
     }
 }

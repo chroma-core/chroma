@@ -169,9 +169,9 @@ impl LocalHnswSegmentReader {
                     hnsw_configuration.space.clone().into(),
                 );
                 let hnsw_config = HnswIndexConfig::new_ephemeral(
-                    hnsw_configuration.m,
-                    hnsw_configuration.construction_ef,
-                    hnsw_configuration.search_ef,
+                    hnsw_configuration.max_neighbors,
+                    hnsw_configuration.ef_construction,
+                    hnsw_configuration.ef_search,
                 );
 
                 // TODO(Sanket): HnswIndex init is not thread safe. We should not call it from multiple threads
@@ -494,9 +494,9 @@ impl LocalHnswSegmentWriter {
                     hnsw_configuration.space.clone().into(),
                 );
                 let hnsw_config = HnswIndexConfig::new_persistent(
-                    hnsw_configuration.m,
-                    hnsw_configuration.construction_ef,
-                    hnsw_configuration.search_ef,
+                    hnsw_configuration.max_neighbors,
+                    hnsw_configuration.ef_construction,
+                    hnsw_configuration.ef_search,
                     &index_folder,
                 )?;
 
@@ -530,9 +530,9 @@ impl LocalHnswSegmentWriter {
                     hnsw_configuration.space.clone().into(),
                 );
                 let hnsw_config = HnswIndexConfig::new_ephemeral(
-                    hnsw_configuration.m,
-                    hnsw_configuration.construction_ef,
-                    hnsw_configuration.search_ef,
+                    hnsw_configuration.max_neighbors,
+                    hnsw_configuration.ef_construction,
+                    hnsw_configuration.ef_search,
                 );
 
                 // TODO(Sanket): HnswIndex init is not thread safe. We should not call it from multiple threads
