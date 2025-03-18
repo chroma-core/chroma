@@ -577,7 +577,6 @@ mod test {
             r#type: chroma_types::SegmentType::Spann,
             scope: chroma_types::SegmentScope::VECTOR,
             metadata: None,
-            metadata: None,
             file_path: HashMap::new(),
         };
 
@@ -781,7 +780,6 @@ mod test {
             collection: collection_id,
             r#type: chroma_types::SegmentType::Spann,
             scope: chroma_types::SegmentScope::VECTOR,
-            metadata: None,
             metadata: None,
             file_path: HashMap::new(),
         };
