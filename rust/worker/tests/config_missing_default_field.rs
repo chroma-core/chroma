@@ -1,3 +1,4 @@
+use chroma_index::config::PlGarbageCollectionPolicyConfig;
 use figment::Jail;
 use worker::config::RootConfig;
 
@@ -144,6 +145,23 @@ fn test_missing_default_field() {
             config.compaction_service.my_member_id,
             "compaction-service-0"
         );
+        assert!(
+            !config
+                .compaction_service
+                .spann_provider
+                .pl_garbage_collection
+                .enabled
+        );
+        match config
+            .compaction_service
+            .spann_provider
+            .pl_garbage_collection
+            .policy
+        {
+            PlGarbageCollectionPolicyConfig::RandomSample(config) => {
+                assert_eq!(config.sample_size, 0.1);
+            }
+        }
         Ok(())
     });
 }

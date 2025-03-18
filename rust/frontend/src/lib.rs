@@ -9,6 +9,7 @@ pub mod frontend;
 pub mod get_collection_with_segments_provider;
 pub mod quota;
 pub mod server;
+mod server_middleware;
 mod tower_tracing;
 mod types;
 
