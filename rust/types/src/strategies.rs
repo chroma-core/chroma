@@ -1,8 +1,8 @@
 use crate::{
-    Collection, CollectionAndSegments, CollectionConfiguration, CollectionUuid, DocumentExpression,
-    DocumentOperator, LogRecord, MetadataExpression, MetadataValue, Operation, OperationRecord,
-    PrimitiveOperator, ScalarEncoding, Segment, SegmentType, SegmentUuid, UpdateMetadata,
-    UpdateMetadataValue, Where,
+    Collection, CollectionAndSegments, CollectionUuid, DocumentExpression, DocumentOperator,
+    InternalCollectionConfiguration, LogRecord, MetadataExpression, MetadataValue, Operation,
+    OperationRecord, PrimitiveOperator, ScalarEncoding, Segment, SegmentType, SegmentUuid,
+    UpdateMetadata, UpdateMetadataValue, Where,
 };
 use proptest::{collection, prelude::*};
 
@@ -214,7 +214,7 @@ impl Arbitrary for TestCollectionData {
                         .dimension(3)
                         .tenant(PROP_TENANT.to_string())
                         .database(PROP_DB.to_string())
-                        .config(CollectionConfiguration::default_hnsw())
+                        .config(InternalCollectionConfiguration::default_hnsw())
                         .build(),
                     metadata_segment: Segment {
                         id: SegmentUuid::new(),

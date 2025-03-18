@@ -1,5 +1,5 @@
 use super::{Metadata, MetadataValueConversionError};
-use crate::{chroma_proto, test_segment, CollectionConfiguration, Segment, SegmentScope};
+use crate::{chroma_proto, test_segment, InternalCollectionConfiguration, Segment, SegmentScope};
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -67,7 +67,7 @@ pub struct Collection {
     #[builder(default)]
     pub name: String,
     #[serde(skip_serializing)]
-    pub config: CollectionConfiguration,
+    pub config: InternalCollectionConfiguration,
     pub metadata: Option<Metadata>,
     pub dimension: Option<i32>,
     #[builder(default)]
@@ -151,7 +151,7 @@ impl Collection {
             .dimension(dim)
             .tenant("default_tenant".to_string())
             .database("default_database".to_string())
-            .config(CollectionConfiguration::default_hnsw())
+            .config(InternalCollectionConfiguration::default_hnsw())
             .build()
     }
 }

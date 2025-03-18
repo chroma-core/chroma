@@ -13,6 +13,7 @@ from chromadb.api.collection_configuration import (
     create_collection_configuration_to_json_str,
     update_collection_configuration_to_json_str,
 )
+from chromadb import __version__
 from chromadb.api.base_http_client import BaseHTTPClient
 from chromadb.types import Database, Tenant, Collection as CollectionModel
 from chromadb.api import ServerAPI
@@ -69,6 +70,11 @@ class FastAPI(BaseHTTPClient, ServerAPI):
 
         self._header = system.settings.chroma_server_headers or {}
         self._header["Content-Type"] = "application/json"
+        self._header["User-Agent"] = (
+            "Chroma Python Client v"
+            + __version__
+            + " (https://github.com/chroma-core/chroma)"
+        )
 
         if self._settings.chroma_server_ssl_verify is not None:
             self._session = httpx.Client(verify=self._settings.chroma_server_ssl_verify)

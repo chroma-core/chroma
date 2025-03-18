@@ -8,14 +8,14 @@ use chroma_error::{ChromaError, ErrorCodes, TonicError, TonicMissingFieldError};
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
 use chroma_types::chroma_proto::VersionListForCollection;
 use chroma_types::{
-    chroma_proto, CollectionAndSegments, CollectionConfiguration, CollectionMetadataUpdate,
-    CountCollectionsError, CreateCollectionError, CreateDatabaseError, CreateDatabaseResponse,
-    CreateTenantError, CreateTenantResponse, Database, DeleteCollectionError, DeleteDatabaseError,
+    chroma_proto, CollectionAndSegments, CollectionMetadataUpdate, CountCollectionsError,
+    CreateCollectionError, CreateDatabaseError, CreateDatabaseResponse, CreateTenantError,
+    CreateTenantResponse, Database, DeleteCollectionError, DeleteDatabaseError,
     DeleteDatabaseResponse, GetCollectionSizeError, GetCollectionWithSegmentsError,
     GetCollectionsError, GetDatabaseError, GetDatabaseResponse, GetSegmentsError, GetTenantError,
-    GetTenantResponse, ListDatabasesError, ListDatabasesResponse, Metadata, ResetError,
-    ResetResponse, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
-    UpdateCollectionError,
+    GetTenantResponse, InternalCollectionConfiguration, ListDatabasesError, ListDatabasesResponse,
+    Metadata, ResetError, ResetResponse, SegmentFlushInfo, SegmentFlushInfoConversionError,
+    SegmentUuid, UpdateCollectionError,
 };
 use chroma_types::{
     Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
@@ -187,7 +187,7 @@ impl SysDb {
         collection_id: CollectionUuid,
         name: String,
         segments: Vec<Segment>,
-        configuration: Option<CollectionConfiguration>,
+        configuration: Option<InternalCollectionConfiguration>,
         metadata: Option<Metadata>,
         dimension: Option<i32>,
         get_or_create: bool,
@@ -196,9 +196,11 @@ impl SysDb {
             Some(config) => config,
             None => metadata
                 .clone()
-                .map(|m| CollectionConfiguration::from_legacy_metadata(m).map_err(|e| e.boxed()))
+                .map(|m| {
+                    InternalCollectionConfiguration::from_legacy_metadata(m).map_err(|e| e.boxed())
+                })
                 .transpose()?
-                .unwrap_or(CollectionConfiguration::default_hnsw()),
+                .unwrap_or(InternalCollectionConfiguration::default_hnsw()),
         };
 
         match self {
@@ -263,7 +265,7 @@ impl SysDb {
         name: Option<String>,
         metadata: Option<CollectionMetadataUpdate>,
         dimension: Option<u32>,
-        configuration: Option<CollectionConfiguration>,
+        configuration: Option<InternalCollectionConfiguration>,
     ) -> Result<(), UpdateCollectionError> {
         match self {
             SysDb::Grpc(grpc) => {
@@ -758,7 +760,7 @@ impl GrpcSysDb {
         collection_id: CollectionUuid,
         name: String,
         segments: Vec<Segment>,
-        configuration: CollectionConfiguration,
+        configuration: InternalCollectionConfiguration,
         metadata: Option<Metadata>,
         dimension: Option<i32>,
         get_or_create: bool,
@@ -804,7 +806,7 @@ impl GrpcSysDb {
         name: Option<String>,
         metadata: Option<CollectionMetadataUpdate>,
         dimension: Option<u32>,
-        _configuration: Option<CollectionConfiguration>,
+        _configuration: Option<InternalCollectionConfiguration>,
     ) -> Result<(), UpdateCollectionError> {
         let req = chroma_proto::UpdateCollectionRequest {
             id: collection_id.0.to_string(),

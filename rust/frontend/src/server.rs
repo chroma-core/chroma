@@ -6,19 +6,19 @@ use axum::{
     Json, Router, ServiceExt,
 };
 use chroma_system::System;
+use chroma_types::RawWhereFields;
 use chroma_types::{
-    AddCollectionRecordsResponse, ChecklistResponse, Collection, CollectionMetadataUpdate,
-    CollectionUuid, CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
-    CreateCollectionRequest, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest,
-    CreateTenantResponse, DeleteCollectionRecordsResponse, DeleteDatabaseRequest,
-    DeleteDatabaseResponse, GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse,
-    GetRequest, GetResponse, GetTenantRequest, GetTenantResponse, GetUserIdentityResponse,
-    HeartbeatResponse, IncludeList, ListCollectionsRequest, ListCollectionsResponse,
-    ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
-    UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateMetadata,
-    UpsertCollectionRecordsResponse, VectorIndexConfiguration,
+    AddCollectionRecordsResponse, ChecklistResponse, Collection, CollectionConfiguration,
+    CollectionMetadataUpdate, CollectionUuid, CountCollectionsRequest, CountCollectionsResponse,
+    CountRequest, CountResponse, CreateCollectionRequest, CreateDatabaseRequest,
+    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
+    DeleteCollectionRecordsResponse, DeleteDatabaseRequest, DeleteDatabaseResponse,
+    GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
+    GetTenantRequest, GetTenantResponse, GetUserIdentityResponse, HeartbeatResponse, IncludeList,
+    ListCollectionsRequest, ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse,
+    Metadata, QueryRequest, QueryResponse, UpdateCollectionRecordsResponse,
+    UpdateCollectionResponse, UpdateMetadata, UpsertCollectionRecordsResponse,
 };
-use chroma_types::{CollectionConfiguration, CollectionConfigurationPayload, RawWhereFields};
 use mdac::{Rule, Scorecard, ScorecardTicket};
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Meter};
@@ -903,12 +903,7 @@ async fn create_collection(
         .map_err(ValidationError::ParseCollectionConfiguration)?;
 
     if let Some(configuration) = configuration.as_ref() {
-        if !server.config.enable_span_indexing
-            && matches!(
-                configuration.vector_index,
-                VectorIndexConfiguration::Spann(_)
-            )
-        {
+        if config.spann.is_some() {
             return Err(ValidationError::SpannNotImplemented)?;
         }
     }

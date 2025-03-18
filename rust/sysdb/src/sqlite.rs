@@ -7,13 +7,13 @@ use chroma_sqlite::db::SqliteDb;
 use chroma_sqlite::helpers::{delete_metadata, get_embeddings_queue_topic_name, update_metadata};
 use chroma_sqlite::table;
 use chroma_types::{
-    Collection, CollectionAndSegments, CollectionConfiguration, CollectionMetadataUpdate,
-    CollectionUuid, CreateCollectionError, CreateCollectionResponse, CreateDatabaseError,
-    CreateDatabaseResponse, CreateTenantError, CreateTenantResponse, Database,
-    DeleteCollectionError, DeleteDatabaseError, DeleteDatabaseResponse,
-    GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError, GetSegmentsError,
-    GetTenantError, GetTenantResponse, ListDatabasesError, Metadata, MetadataValue, ResetError,
-    ResetResponse, Segment, SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError,
+    Collection, CollectionAndSegments, CollectionMetadataUpdate, CollectionUuid,
+    CreateCollectionError, CreateCollectionResponse, CreateDatabaseError, CreateDatabaseResponse,
+    CreateTenantError, CreateTenantResponse, Database, DeleteCollectionError, DeleteDatabaseError,
+    DeleteDatabaseResponse, GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError,
+    GetSegmentsError, GetTenantError, GetTenantResponse, InternalCollectionConfiguration,
+    ListDatabasesError, Metadata, MetadataValue, ResetError, ResetResponse, Segment, SegmentScope,
+    SegmentType, SegmentUuid, UpdateCollectionError,
 };
 use futures::TryStreamExt;
 use sea_query_binder::SqlxBinder;
@@ -237,7 +237,7 @@ impl SqliteSysDb {
         collection_id: CollectionUuid,
         name: String,
         segments: Vec<Segment>,
-        configuration: CollectionConfiguration,
+        configuration: InternalCollectionConfiguration,
         metadata: Option<Metadata>,
         dimension: Option<i32>,
         get_or_create: bool,
@@ -671,14 +671,14 @@ impl SqliteSysDb {
 
                 let configuration = match first_row.get::<Option<&str>, _>(2) {
                     Some(json_str) => {
-                        match serde_json::from_str::<CollectionConfiguration>(json_str)
+                        match serde_json::from_str::<InternalCollectionConfiguration>(json_str)
                             .map_err(GetCollectionsError::Configuration)
                         {
                             Ok(configuration) => configuration,
                             Err(e) => return Some(Err(e)),
                         }
                     }
-                    None => CollectionConfiguration::default_hnsw(),
+                    None => InternalCollectionConfiguration::default_hnsw(),
                 };
 
                 Some(Ok(Collection {
@@ -1100,7 +1100,7 @@ mod tests {
                 collection_id,
                 "test_collection".to_string(),
                 segments.clone(),
-                CollectionConfiguration::default_hnsw(),
+                InternalCollectionConfiguration::default_hnsw(),
                 Some(collection_metadata.clone()),
                 None,
                 false,
@@ -1140,7 +1140,7 @@ mod tests {
                 collection_id,
                 "test_collection".to_string(),
                 segments.clone(),
-                CollectionConfiguration::default_hnsw(),
+                InternalCollectionConfiguration::default_hnsw(),
                 None,
                 None,
                 false,
@@ -1157,7 +1157,7 @@ mod tests {
                 collection_id,
                 "test_collection".to_string(),
                 segments,
-                CollectionConfiguration::default_hnsw(),
+                InternalCollectionConfiguration::default_hnsw(),
                 None,
                 None,
                 false,
@@ -1187,7 +1187,7 @@ mod tests {
                 collection_id,
                 "test_collection".to_string(),
                 segments.clone(),
-                CollectionConfiguration::default_hnsw(),
+                InternalCollectionConfiguration::default_hnsw(),
                 None,
                 None,
                 false,
@@ -1204,7 +1204,7 @@ mod tests {
                 CollectionUuid::new(),
                 "test_collection".to_string(),
                 vec![],
-                CollectionConfiguration::default_hnsw(),
+                InternalCollectionConfiguration::default_hnsw(),
                 None,
                 None,
                 true,
@@ -1227,7 +1227,7 @@ mod tests {
                 collection_id,
                 "test_collection".to_string(),
                 vec![],
-                CollectionConfiguration::default_hnsw(),
+                InternalCollectionConfiguration::default_hnsw(),
                 None,
                 None,
                 false,
@@ -1280,7 +1280,7 @@ mod tests {
                 collection_id,
                 "test_collection".to_string(),
                 vec![],
-                CollectionConfiguration::default_hnsw(),
+                InternalCollectionConfiguration::default_hnsw(),
                 None,
                 None,
                 false,
@@ -1358,7 +1358,7 @@ mod tests {
                 collection_id,
                 "test_collection".to_string(),
                 segments.clone(),
-                CollectionConfiguration::default_hnsw(),
+                InternalCollectionConfiguration::default_hnsw(),
                 Some(collection_metadata.clone()),
                 None,
                 false,
@@ -1408,7 +1408,7 @@ mod tests {
                 collection_id,
                 "test_collection".to_string(),
                 segments.clone(),
-                CollectionConfiguration::default_hnsw(),
+                InternalCollectionConfiguration::default_hnsw(),
                 Some(collection_metadata.clone()),
                 None,
                 false,
@@ -1438,7 +1438,7 @@ mod tests {
                 collection_id,
                 "test_collection".to_string(),
                 vec![],
-                CollectionConfiguration::default_hnsw(),
+                InternalCollectionConfiguration::default_hnsw(),
                 None,
                 None,
                 false,
@@ -1464,6 +1464,9 @@ mod tests {
             .await
             .unwrap();
         let collection = collections.first().unwrap();
-        assert_eq!(collection.config, CollectionConfiguration::default_hnsw());
+        assert_eq!(
+            collection.config,
+            InternalCollectionConfiguration::default_hnsw()
+        );
     }
 }

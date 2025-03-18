@@ -86,8 +86,8 @@ impl ChromaError for DistributedSpannParametersFromSegmentError {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Validate, PartialEq, ToSchema)]
-pub struct SpannConfiguration {
+#[derive(Clone, Debug, Serialize, Deserialize, Validate, PartialEq)]
+pub struct InternalSpannConfiguration {
     #[serde(default = "default_search_nprobe")]
     #[validate(range(min = 8))]
     pub search_nprobe: u32,
@@ -126,8 +126,51 @@ pub struct SpannConfiguration {
     pub m: usize,
 }
 
-impl Default for SpannConfiguration {
+impl Default for InternalSpannConfiguration {
     fn default() -> Self {
         serde_json::from_str("{}").unwrap()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Validate, PartialEq, ToSchema)]
+pub struct SpannConfiguration {
+    pub search_nprobe: u32,
+    pub write_nprobe: u32,
+    pub space: HnswSpace,
+    pub construction_ef: usize,
+    pub search_ef: usize,
+    pub m: usize,
+}
+
+impl From<InternalSpannConfiguration> for SpannConfiguration {
+    fn from(config: InternalSpannConfiguration) -> Self {
+        Self {
+            search_nprobe: config.search_nprobe,
+            write_nprobe: config.write_nprobe,
+            space: config.space,
+            construction_ef: config.construction_ef,
+            search_ef: config.search_ef,
+            m: config.m,
+        }
+    }
+}
+
+impl From<SpannConfiguration> for InternalSpannConfiguration {
+    fn from(config: SpannConfiguration) -> Self {
+        Self {
+            search_nprobe: config.search_nprobe,
+            write_nprobe: config.write_nprobe,
+            space: config.space,
+            construction_ef: config.construction_ef,
+            search_ef: config.search_ef,
+            m: config.m,
+            ..Default::default()
+        }
+    }
+}
+
+impl Default for SpannConfiguration {
+    fn default() -> Self {
+        InternalSpannConfiguration::default().into()
     }
 }

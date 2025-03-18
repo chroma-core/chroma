@@ -1,3 +1,4 @@
+import { version } from "../package.json";
 import { AdminClient } from "./AdminClient";
 import { authOptionsToAuthProvider, ClientAuthProvider } from "./auth";
 import { chromaFetch } from "./ChromaFetch";
@@ -77,6 +78,11 @@ export class ChromaClient {
 
     this.api = new DefaultApi(apiConfig, undefined, chromaFetch);
     this.api.options = fetchOptions ?? {};
+
+    this.api.options.headers = {
+      ...this.api.options.headers,
+      "user-agent": `Chroma Javascript Client v${version} (https://github.com/chroma-core/chroma)`,
+    };
 
     if (auth !== undefined) {
       this.authProvider = authOptionsToAuthProvider(auth);

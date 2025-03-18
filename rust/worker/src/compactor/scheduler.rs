@@ -273,6 +273,10 @@ impl Scheduler {
     pub(crate) fn set_memberlist(&mut self, memberlist: Memberlist) {
         self.memberlist = Some(memberlist);
     }
+
+    pub(crate) fn has_memberlist(&self) -> bool {
+        self.memberlist.is_some()
+    }
 }
 
 #[cfg(test)]
@@ -286,7 +290,7 @@ mod tests {
     use chroma_memberlist::memberlist_provider::Member;
     use chroma_sysdb::TestSysDb;
     use chroma_types::{
-        Collection, CollectionConfiguration, LogRecord, Operation, OperationRecord,
+        Collection, InternalCollectionConfiguration, LogRecord, Operation, OperationRecord,
     };
 
     #[tokio::test]
@@ -306,7 +310,7 @@ mod tests {
             .dimension(1)
             .tenant(tenant_1.clone())
             .database("database_1".to_string())
-            .config(CollectionConfiguration::default_hnsw())
+            .config(InternalCollectionConfiguration::default_hnsw())
             .build();
         let collection_uuid_1 = collection_1.collection_id;
 
@@ -339,7 +343,7 @@ mod tests {
             .dimension(1)
             .tenant(tenant_2.clone())
             .database("database_2".to_string())
-            .config(CollectionConfiguration::default_hnsw())
+            .config(InternalCollectionConfiguration::default_hnsw())
             .build();
         let collection_uuid_2 = collection_2.collection_id;
 
@@ -502,7 +506,7 @@ mod tests {
             .dimension(1)
             .tenant(tenant_1.clone())
             .database("database_1".to_string())
-            .config(CollectionConfiguration::default_hnsw())
+            .config(InternalCollectionConfiguration::default_hnsw())
             .build();
 
         let collection_uuid_1 = collection_1.collection_id;

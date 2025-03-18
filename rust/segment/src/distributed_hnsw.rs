@@ -387,7 +387,7 @@ pub mod test {
 
     use chroma_index::{HnswIndexConfig, DEFAULT_MAX_ELEMENTS};
     use chroma_types::{
-        Collection, CollectionConfiguration, CollectionUuid, HnswConfiguration, Segment,
+        Collection, CollectionUuid, HnswConfiguration, InternalCollectionConfiguration, Segment,
         SegmentUuid,
     };
     use tempfile::tempdir;
@@ -420,7 +420,7 @@ pub mod test {
 
         // Try partial override
         let collection = Collection::builder()
-            .config(CollectionConfiguration {
+            .config(InternalCollectionConfiguration {
                 vector_index: chroma_types::VectorIndexConfiguration::Hnsw(HnswConfiguration {
                     m: 10,
                     ..Default::default()

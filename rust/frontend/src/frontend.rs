@@ -15,24 +15,23 @@ use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
     plan::{Count, Get, Knn},
     AddCollectionRecordsError, AddCollectionRecordsRequest, AddCollectionRecordsResponse,
-    CollectionConfiguration, CollectionUuid, CountCollectionsError, CountCollectionsRequest,
-    CountCollectionsResponse, CountRequest, CountResponse, CreateCollectionError,
-    CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseError, CreateDatabaseRequest,
-    CreateDatabaseResponse, CreateTenantError, CreateTenantRequest, CreateTenantResponse,
-    DeleteCollectionError, DeleteCollectionRecordsError, DeleteCollectionRecordsRequest,
-    DeleteCollectionRecordsResponse, DeleteCollectionRequest, DeleteDatabaseError,
-    DeleteDatabaseRequest, DeleteDatabaseResponse, GetCollectionError, GetCollectionRequest,
-    GetCollectionResponse, GetCollectionsError, GetDatabaseError, GetDatabaseRequest,
-    GetDatabaseResponse, GetRequest, GetResponse, GetTenantError, GetTenantRequest,
-    GetTenantResponse, HealthCheckResponse, HeartbeatError, HeartbeatResponse, Include,
-    ListCollectionsRequest, ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest,
-    ListDatabasesResponse, Operation, OperationRecord, QueryError, QueryRequest, QueryResponse,
-    ResetError, ResetResponse, ScalarEncoding, Segment, SegmentScope, SegmentType, SegmentUuid,
-    UpdateCollectionError, UpdateCollectionRecordsError, UpdateCollectionRecordsRequest,
-    UpdateCollectionRecordsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
-    UpdateMetadata, UpdateMetadataValue, UpsertCollectionRecordsError,
-    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, VectorIndexConfiguration,
-    Where, CHROMA_DOCUMENT_KEY, CHROMA_URI_KEY,
+    CollectionUuid, CountCollectionsError, CountCollectionsRequest, CountCollectionsResponse,
+    CountRequest, CountResponse, CreateCollectionError, CreateCollectionRequest,
+    CreateCollectionResponse, CreateDatabaseError, CreateDatabaseRequest, CreateDatabaseResponse,
+    CreateTenantError, CreateTenantRequest, CreateTenantResponse, DeleteCollectionError,
+    DeleteCollectionRecordsError, DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse,
+    DeleteCollectionRequest, DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse,
+    GetCollectionError, GetCollectionRequest, GetCollectionResponse, GetCollectionsError,
+    GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
+    GetTenantError, GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError,
+    HeartbeatResponse, Include, InternalCollectionConfiguration, ListCollectionsRequest,
+    ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
+    Operation, OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
+    ScalarEncoding, Segment, SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError,
+    UpdateCollectionRecordsError, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
+    UpdateCollectionRequest, UpdateCollectionResponse, UpdateMetadata, UpdateMetadataValue,
+    UpsertCollectionRecordsError, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse,
+    VectorIndexConfiguration, Where, CHROMA_DOCUMENT_KEY, CHROMA_URI_KEY,
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
@@ -421,17 +420,17 @@ impl Frontend {
         }: CreateCollectionRequest,
     ) -> Result<CreateCollectionResponse, CreateCollectionError> {
         let collection_id = CollectionUuid::new();
+        let configuration: Option<InternalCollectionConfiguration> =
+            configuration.map(|c| c.try_into()).transpose()?;
 
         let segments = match self.executor {
             Executor::Distributed(_) => {
-                let vector_segment_type = match configuration
-                    .as_ref()
-                    .unwrap_or(&CollectionConfiguration::default_hnsw())
-                    .vector_index
-                {
-                    VectorIndexConfiguration::Hnsw(_) => SegmentType::HnswDistributed,
-                    VectorIndexConfiguration::Spann(_) => SegmentType::Spann,
-                };
+                let mut vector_segment_type = SegmentType::HnswDistributed;
+                if let Some(config) = configuration.as_ref() {
+                    if matches!(config.vector_index, VectorIndexConfiguration::Spann(_)) {
+                        vector_segment_type = SegmentType::Spann;
+                    }
+                }
 
                 vec![
                     Segment {
