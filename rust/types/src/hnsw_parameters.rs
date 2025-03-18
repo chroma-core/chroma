@@ -291,7 +291,7 @@ impl ChromaError for DistributedSpannParametersFromSegmentError {
 #[derive(Clone, Debug, Serialize, Deserialize, Validate, PartialEq)]
 pub struct DistributedSpannParameters {
     #[serde(rename = "spann:search_nprobe", default = "default_search_nprobe")]
-    #[validate(range(min = 8))]
+    #[validate(range(min = 32))]
     pub search_nprobe: u32,
     #[serde(
         rename = "spann:search_rng_factor",
