@@ -17,6 +17,7 @@ from chromadb.api.collection_configuration import (
     UpdateCollectionConfiguration,
     create_collection_configuration_to_json_str,
     update_collection_configuration_to_json_str,
+    load_collection_configuration_from_json,
 )
 from chromadb.auth import UserIdentity
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
@@ -220,16 +221,19 @@ class RustBindingsAPI(ServerAPI):
         collection = self.bindings.create_collection(
             name, configuration_json_str, metadata, get_or_create, tenant, database
         )
-        collection = CollectionModel(
+
+        collection_model = CollectionModel(
             id=collection.id,
             name=collection.name,
-            configuration=collection.configuration,
+            configuration=load_collection_configuration_from_json(
+                collection.configuration
+            ),
             metadata=collection.metadata,
             dimension=collection.dimension,
             tenant=collection.tenant,
             database=collection.database,
         )
-        return collection
+        return collection_model
 
     @override
     def get_collection(
@@ -242,7 +246,9 @@ class RustBindingsAPI(ServerAPI):
         return CollectionModel(
             id=collection.id,
             name=collection.name,
-            configuration=collection.configuration,
+            configuration=load_collection_configuration_from_json(
+                collection.configuration
+            ),
             metadata=collection.metadata,
             dimension=collection.dimension,
             tenant=collection.tenant,

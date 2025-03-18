@@ -118,6 +118,7 @@ impl ChromaError for CollectionConfigurationToInternalConfigurationError {
 }
 
 #[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
+#[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct CollectionConfiguration {
     pub hnsw: Option<HnswConfiguration>,
     pub spann: Option<SpannConfiguration>,
@@ -145,6 +146,22 @@ impl TryFrom<CollectionConfiguration> for InternalCollectionConfiguration {
                 vector_index: HnswConfiguration::default().into(),
                 embedding_function: value.embedding_function,
             }),
+        }
+    }
+}
+
+impl From<InternalCollectionConfiguration> for CollectionConfiguration {
+    fn from(value: InternalCollectionConfiguration) -> Self {
+        Self {
+            hnsw: match value.vector_index.clone() {
+                VectorIndexConfiguration::Hnsw(config) => Some(config),
+                _ => None,
+            },
+            spann: match value.vector_index.clone() {
+                VectorIndexConfiguration::Spann(config) => Some(config.into()),
+                _ => None,
+            },
+            embedding_function: value.embedding_function,
         }
     }
 }

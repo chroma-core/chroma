@@ -66,6 +66,7 @@ fn default_batch_size() -> usize {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Validate, ToSchema)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct HnswConfiguration {
     #[serde(default)]
     pub space: HnswSpace,

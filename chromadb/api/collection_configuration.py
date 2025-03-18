@@ -31,7 +31,11 @@ class HNSWConfiguration(TypedDict, total=False):
 def json_to_hnsw_configuration(json_map: Dict[str, Any]) -> HNSWConfiguration:
     config: HNSWConfiguration = {}
     if "space" in json_map:
-        config["space"] = json_map["space"]
+        space_value = json_map["space"]
+        if isinstance(space_value, str):
+            config["space"] = Space(space_value)
+        else:
+            config["space"] = space_value
     if "ef_construction" in json_map:
         config["ef_construction"] = json_map["ef_construction"]
     if "max_neighbors" in json_map:
@@ -70,7 +74,8 @@ def load_collection_configuration_from_json(
                 hnsw=default_create_hnsw_configuration(),
             )
         else:
-            if json_map["embedding_function"]["type"] == "legacy":
+            ef_config = json_map["embedding_function"]
+            if ef_config["type"] == "legacy":
                 warnings.warn(
                     "legacy embedding function config",
                     DeprecationWarning,
@@ -80,12 +85,10 @@ def load_collection_configuration_from_json(
             else:
                 ef = cast(
                     EmbeddingFunction[Embeddable],
-                    known_embedding_functions[json_map["embedding_function"]["name"]],
+                    known_embedding_functions[ef_config["name"]],
                 )
                 return CollectionConfiguration(
-                    embedding_function=ef.build_from_config(
-                        json_map["embedding_function"]["config"]
-                    )
+                    embedding_function=ef.build_from_config(ef_config["config"])
                 )
     else:
         if json_map.get("embedding_function") is None:
@@ -93,7 +96,8 @@ def load_collection_configuration_from_json(
                 hnsw=json_to_hnsw_configuration(json_map["hnsw"])
             )
         else:
-            if json_map["embedding_function"].get("type") == "legacy":
+            ef_config = json_map["embedding_function"]
+            if ef_config["type"] == "legacy":
                 warnings.warn(
                     "legacy embedding function config",
                     DeprecationWarning,
@@ -105,13 +109,11 @@ def load_collection_configuration_from_json(
             else:
                 ef = cast(
                     EmbeddingFunction[Embeddable],
-                    known_embedding_functions[json_map["embedding_function"]["name"]],
+                    known_embedding_functions[ef_config["name"]],
                 )
                 return CollectionConfiguration(
                     hnsw=json_to_hnsw_configuration(json_map["hnsw"]),
-                    embedding_function=ef.build_from_config(
-                        json_map["embedding_function"]["config"]
-                    ),
+                    embedding_function=ef.build_from_config(ef_config["config"]),
                 )
 
 
@@ -189,7 +191,11 @@ def json_to_create_hnsw_configuration(
 ) -> CreateHNSWConfiguration:
     config: CreateHNSWConfiguration = {}
     if "space" in json_map:
-        config["space"] = json_map["space"]
+        space_value = json_map["space"]
+        if isinstance(space_value, str):
+            config["space"] = Space(space_value)
+        else:
+            config["space"] = space_value
     if "ef_construction" in json_map:
         config["ef_construction"] = json_map["ef_construction"]
     if "max_neighbors" in json_map:

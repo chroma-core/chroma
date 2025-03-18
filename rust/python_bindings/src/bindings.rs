@@ -264,14 +264,13 @@ impl Bindings {
             }
             None => None,
         };
-        println!("configuration_json: {:?}", configuration_json);
 
         let request = CreateCollectionRequest::try_new(
             tenant,
             database,
             name,
             metadata,
-            None,
+            configuration_json,
             get_or_create,
         )?;
 
@@ -280,6 +279,10 @@ impl Bindings {
             .runtime
             .block_on(async { frontend.create_collection(request).await })?;
 
+        println!(
+            "collection configuration: {}",
+            serde_json::to_string(&collection.config).unwrap()
+        );
         Ok(collection)
     }
 
