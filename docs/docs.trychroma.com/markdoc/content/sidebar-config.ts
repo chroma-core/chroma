@@ -29,6 +29,14 @@ const sidebarConfig: AppSection[] = [
             name: "Getting Started",
           },
           {
+            id: "migration",
+            name: "Migration",
+          },
+          {
+            id: "troubleshooting",
+            name: "Troubleshooting",
+          },
+          {
             id: "roadmap",
             name: "Roadmap",
           },

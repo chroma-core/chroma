@@ -34,8 +34,6 @@ const legacyPathsMapping: Record<string, string> = {
   "/deployment/gcp": "/production/cloud-providers/gcp",
   "/deployment/performance": "/production/administration/performance",
   "/deployment/observability": "/production/administration/observability",
-  "/deployment/migration": "/updates/migration",
-  "/production/administration/migration": "/updates/migration",
   "/deployment/auth": "/production/administration/auth",
   "/telemetry": "/docs/overview/telemetry",
   "/roadmap": "/docs/overview/roadmap",
@@ -47,7 +45,11 @@ const legacyPathsMapping: Record<string, string> = {
   "/reference/js-client": "/reference/js/client",
   "/reference/js-collection": "/reference/js/collection",
   "/reference/cli": "/cli/run",
-  "/troubleshooting": "/updates/troubleshooting",
+  "/updates/troubleshooting": "/docs/overview/troubleshooting",
+  "/troubleshooting": "/docs/overview/troubleshooting",
+  "/deployment/migration": "/docs/overview/migration",
+  "/production/administration/migration": "/docs/overview/migration",
+  "/updates/migration": "/docs/overview/migration",
 };
 
 export const middleware = (request: NextRequest) => {
