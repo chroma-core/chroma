@@ -254,7 +254,6 @@ impl LogService for LogServer {
             return Err(Status::invalid_argument("Too many records"));
         }
         let record_count = messages.len() as i32;
-        tracing::error!("Writing {} records to log", record_count);
         log.append_many(messages)
             .await
             .map_err(|err| Status::unknown(err.to_string()))?;
@@ -402,9 +401,7 @@ impl LogServer {
             .await;
 
         let server = Server::builder().add_service(health_service).add_service(
-            chroma_types::chroma_proto::log_service_server::LogServiceServer::new(
-                log_server.clone(),
-            ),
+            chroma_types::chroma_proto::log_service_server::LogServiceServer::new(log_server),
         );
 
         let server = server.serve_with_shutdown(addr, async {
