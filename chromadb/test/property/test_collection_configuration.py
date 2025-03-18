@@ -215,8 +215,9 @@ def test_invalid_configurations(client: ClientAPI) -> None:
 #     system.stop()
 
 
-def test_configuration_persistence(client: ClientAPI) -> None:
+def test_configuration_persistence(sqlite_persistent: System) -> None:
     """Test configuration persistence across client restarts"""
+    client = ClientCreator.from_system(sqlite_persistent)
     client.reset()
 
     # Create collection with specific configuration
