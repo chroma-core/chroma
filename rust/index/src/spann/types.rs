@@ -1660,6 +1660,7 @@ impl<'me> SpannIndexReader<'me> {
             .ok_or(SpannIndexReaderError::PostingListReadError)?;
 
         let mut posting_lists = Vec::with_capacity(res.doc_offset_ids.len());
+        let mut unique_ids = HashSet::new();
         for (index, doc_offset_id) in res.doc_offset_ids.iter().enumerate() {
             if self
                 .is_outdated(*doc_offset_id, res.doc_versions[index])
@@ -1667,6 +1668,10 @@ impl<'me> SpannIndexReader<'me> {
             {
                 continue;
             }
+            if unique_ids.contains(doc_offset_id) {
+                continue;
+            }
+            unique_ids.insert(*doc_offset_id);
             posting_lists.push(SpannPosting {
                 doc_offset_id: *doc_offset_id,
                 doc_embedding: res.doc_embeddings
