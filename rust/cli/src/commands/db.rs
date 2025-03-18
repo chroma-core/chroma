@@ -3,7 +3,7 @@ use colored::Colorize;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{Input, Select};
 use std::fmt;
-use crate::utils::Profile;
+use crate::utils::{load_cli_env_config, Profile};
 
 #[derive(Debug, Clone, ValueEnum)]
 pub enum Language {
@@ -94,6 +94,7 @@ pub fn prompt_db_name(prompt: &str) -> String {
 }
 
 pub fn connect(args: ConnectArgs, current_profile: Profile) {
+    let cli_env_config = load_cli_env_config(false);
     let language = args.language.unwrap_or_else(|| {
         let options = vec![
             format!("{} {}", ">".yellow(), "Python"),
