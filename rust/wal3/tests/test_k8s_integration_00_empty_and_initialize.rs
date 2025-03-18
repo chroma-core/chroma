@@ -1,5 +1,4 @@
 use chroma_storage::s3_client_for_test_with_new_bucket;
-use setsum::Setsum;
 
 use wal3::{LogWriterOptions, Manifest};
 
