@@ -29,11 +29,11 @@ fn chroma_server_request<T: DeserializeOwned, U: Serialize + ?Sized>(
 ) -> Result<Option<T>, Box<dyn Error>> {
     let (client, mut headers) = create_chroma_client(api_key)?;
     let url = format!("{}{}", api_url, route);
-
+    
     if let RequestMethod::Post = method {
         headers.insert("Content-Type", HeaderValue::from_static("application/json"));
     }
-
+    
     let response = match method {
         RequestMethod::Get => client.get(&url).headers(headers).send()?,
         RequestMethod::Post => {
@@ -44,16 +44,21 @@ fn chroma_server_request<T: DeserializeOwned, U: Serialize + ?Sized>(
             }
         },
         RequestMethod::Delete => {
+            println!("5");
             let response = client.delete(&url).headers(headers).send()?;
             return Ok(None); // Delete requests don't typically return a body to deserialize
         },
     };
 
+    println!("6");
+
     if let RequestMethod::Delete = method {
+        println!("7");
         Ok(None)
     } else {
         let response_text = response.text()?;
         let deserialized: T = serde_json::from_str(&response_text)?;
+        println!("8");
         Ok(Some(deserialized))
     }
 }
@@ -109,6 +114,7 @@ pub fn chroma_server_post_request<T: DeserializeOwned, U: Serialize>(
 
 pub fn create_database(api_url: &str, profile: &Profile, name: String) -> Result<(), Box<dyn Error>> {
     let create_db_route = format!("{}/api/v2/tenants/{}/databases", api_url, profile.team_id);
+    
     chroma_server_post_request::<(), CreateDatabasePayload>(
         api_url,
         &create_db_route,

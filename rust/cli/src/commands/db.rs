@@ -29,6 +29,7 @@ impl fmt::Display for Language {
 
 #[derive(Args, Debug)]
 pub struct DbArgs {
+    #[clap(long, hide = true, help = "Flag to use during development")]
     dev: bool,
 }
 
@@ -311,7 +312,7 @@ pub fn list(args: ListArgs, current_profile: Profile) {
     };
     
     if dbs.is_empty() {
-        println!("Profile {} has 0 DBs. To create a new Chroma DB use: {}", current_profile.name, "chroma db create <db name>".yellow());
+        println!("\nProfile {} has 0 DBs. To create a new Chroma DB use: {}\n", current_profile.name, "chroma db create <db name>".yellow());
         return;
     }
     

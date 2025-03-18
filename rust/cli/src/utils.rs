@@ -76,13 +76,6 @@ pub fn get_profiles() -> Result<Profiles, Box<dyn Error>> {
     Ok(profiles)
 }
 
-pub fn write_credentials(profiles: &Profiles) -> Result<(), Box<dyn Error>> {
-    let credentials_path = get_credentials_file_path()?;
-    let toml_str = toml::to_string(profiles)?;
-    fs::write(credentials_path, toml_str)?;
-    Ok(())
-}
-
 fn get_config_file_path() -> Result<PathBuf, Box<dyn Error>> {
     let home_dir = std::env::var("HOME")?;
     let chroma_dir = PathBuf::from(home_dir).join(".chroma");
@@ -107,13 +100,6 @@ pub fn read_config() -> Result<CliConfig, Box<dyn Error>> {
     let contents = fs::read_to_string(&config_path)?;
     let config: CliConfig = serde_json::from_str(&contents)?;
     Ok(config)
-}
-
-pub fn write_config(config: &CliConfig) -> Result<(), Box<dyn Error>> {
-    let config_path = get_config_file_path()?;
-    let json_str = serde_json::to_string_pretty(config)?;
-    fs::write(config_path, json_str)?;
-    Ok(())
 }
 
 pub fn get_current_profile() -> Result<Profile, Box<dyn Error>> {
