@@ -57,3 +57,4 @@ proptest-state-machine = "0.3"
 proptest-derive = "0.3"
 tokio-test = "0.4"
 rand = { workspace = true }
+itertools = { workspace = true }
