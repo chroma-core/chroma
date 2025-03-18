@@ -5,13 +5,7 @@ use clap::{Args, Subcommand, ValueEnum};
 use colored::Colorize;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{Input, Select};
-use reqwest::blocking::Client;
-use reqwest::header::{HeaderMap, HeaderValue};
-use serde::de::DeserializeOwned;
-use serde::Serialize;
-use std::error::Error;
 use std::fmt;
-use std::fmt::format;
 
 #[derive(Debug, Clone, ValueEnum)]
 pub enum Language {
