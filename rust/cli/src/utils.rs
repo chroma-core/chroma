@@ -1,8 +1,8 @@
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
-use serde::{Deserialize, Serialize};
 
 pub const LOGO: &str = "
                 \x1b[38;5;069m(((((((((    \x1b[38;5;203m(((((\x1b[38;5;220m####
@@ -39,7 +39,7 @@ pub struct CliConfig {
 
 pub type Profiles = HashMap<String, Profile>;
 
-pub fn load_cli_env_config(dev: bool) -> CliEnvConfig{
+pub fn load_cli_env_config(dev: bool) -> CliEnvConfig {
     match dev {
         true => CliEnvConfig {
             dashboard_url: "http://localhost:3001",
@@ -50,7 +50,7 @@ pub fn load_cli_env_config(dev: bool) -> CliEnvConfig{
             dashboard_url: "https://trychroma.com",
             dashboard_api_url: "https://backend.trychroma.com",
             frontend_url: "https://api.trychroma.com",
-        }
+        },
     }
 }
 
@@ -107,8 +107,7 @@ pub fn get_current_profile() -> Result<Profile, Box<dyn Error>> {
     let profiles = get_profiles()?;
     if !profiles.contains_key(config.current_profile.as_str()) {
         Err(format!("Profile '{}' not found", config.current_profile).into())
-    }
-    else {
+    } else {
         Ok(profiles[config.current_profile.as_str()].clone())
     }
 }

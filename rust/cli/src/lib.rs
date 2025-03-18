@@ -1,11 +1,11 @@
+mod client;
 mod commands;
 mod utils;
-mod client;
 
+use crate::commands::db::{db_command, DbCommand};
 use crate::commands::run::{run, RunArgs};
 use crate::commands::vacuum::{vacuum, VacuumArgs};
 use clap::{Parser, Subcommand};
-use crate::commands::db::{db_command, DbCommand};
 
 #[derive(Subcommand, Debug)]
 enum Command {
