@@ -357,7 +357,7 @@ impl SqliteSysDb {
                 .await;
             let collections = collections.unwrap();
             let collection = collections.into_iter().next().unwrap();
-            let mut existing_configuration = collection.get_configuration();
+            let mut existing_configuration = collection.config;
             existing_configuration.update(&configuration);
             configuration_json_str = Some(
                 serde_json::to_string(&existing_configuration)
@@ -387,10 +387,6 @@ impl SqliteSysDb {
                 query = query.value(table::Collections::Dimension, dimension);
             }
 
-            if let Some(configuration_json_str) = configuration_json_str {
-                query = query.value(table::Collections::ConfigJsonStr, configuration_json_str);
-            }
-
             let (sql, values) = query.build_sqlx(sea_query::SqliteQueryBuilder);
 
             let result = sqlx::query_with(&sql, values)
@@ -402,6 +398,25 @@ impl SqliteSysDb {
             }
         }
 
+        if let Some(configuration_json_str) = configuration_json_str {
+            println!("updating configuration: {:?}", configuration_json_str);
+            let mut query = sea_query::Query::update();
+            let mut query = query.table(table::Collections::Table).cond_where(
+                sea_query::Expr::col((table::Collections::Table, table::Collections::Id))
+                    .eq(collection_id.to_string()),
+            );
+            query = query.value(table::Collections::ConfigJsonStr, configuration_json_str);
+
+            let (sql, values) = query.build_sqlx(sea_query::SqliteQueryBuilder);
+
+            let result = sqlx::query_with(&sql, values)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| UpdateCollectionError::Internal(e.into()))?;
+            if result.rows_affected() == 0 {
+                return Err(UpdateCollectionError::NotFound(collection_id.to_string()));
+            }
+        }
         if let Some(metadata) = metadata {
             delete_metadata::<table::CollectionMetadata, _, _>(&mut *tx, collection_id.to_string())
                 .await

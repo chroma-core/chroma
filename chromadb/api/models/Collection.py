@@ -263,7 +263,7 @@ class Collection(CollectionCommon["ServerAPI"]):
             database=self.database,
         )
 
-        self._update_model_after_modify_success(name, metadata)
+        self._update_model_after_modify_success(name, metadata, configuration)
 
     def update(
         self,

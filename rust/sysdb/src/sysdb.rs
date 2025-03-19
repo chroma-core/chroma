@@ -815,7 +815,7 @@ impl GrpcSysDb {
                 .await;
             let collections = collections.unwrap();
             let collection = collections.into_iter().next().unwrap();
-            let mut existing_configuration = collection.get_configuration();
+            let mut existing_configuration = collection.config;
             existing_configuration.update(&configuration);
             configuration_json_str = Some(
                 serde_json::to_string(&existing_configuration)
