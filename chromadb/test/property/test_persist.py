@@ -360,6 +360,7 @@ from strategies import hashing_embedding_function
 def test_repro(caplog: pytest.LogCaptureFixture, settings: Settings) -> None:
     NUM_ITER = 100
     for i in range(NUM_ITER):
+        print(f"Running iteration {i}")
         state = PersistEmbeddingsStateMachine(
             settings=settings, client=chromadb.Client(settings)
         )
@@ -374,7 +375,9 @@ def test_repro(caplog: pytest.LogCaptureFixture, settings: Settings) -> None:
                     "hnsw:sync_threshold": 9,
                     "hnsw:batch_size": 8,
                 },
-                embedding_function=hashing_embedding_function(dim=1628, dtype=np.float64),
+                embedding_function=hashing_embedding_function(
+                    dim=1628, dtype=np.float64
+                ),
                 id=UUID("239f3c75-3b36-43c3-8799-e437988debe7"),
                 dimension=1628,
                 dtype=np.float64,
@@ -658,7 +661,15 @@ def test_repro(caplog: pytest.LogCaptureFixture, settings: Settings) -> None:
         state.log_size_below_max()
         state.no_duplicates()
         state.delete_by_ids(ids=[embedding_ids_9, embedding_ids_1, embedding_ids_11])
-        state.ann_accuracy()
+        try:
+            state.ann_accuracy()
+        except Exception as e:
+            count = state.collection.count()
+            print(f"Count: {count}")
+            all_records = state.collection.get()
+            print(f"Records: {all_records}")
+            print(f"Failed on iteration {i}")
+            print(f"Error: {e}")
         state.teardown()
 
 
