@@ -253,6 +253,9 @@ impl LogService for LogServer {
         if messages.len() > i32::MAX as usize {
             return Err(Status::invalid_argument("Too many records"));
         }
+        if messages.is_empty() {
+            return Err(Status::invalid_argument("Too few records"));
+        }
         let record_count = messages.len() as i32;
         log.append_many(messages)
             .await
