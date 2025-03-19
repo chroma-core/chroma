@@ -42,7 +42,7 @@ jobs:
         shell: bash
         run: pip install --no-index --find-links target/wheels/ chromadb
       - name: Test
-        run: python -m pytest ${{ matrix.test-globs }}
+        run: python -m pytest -s ${{ matrix.test-globs }}
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
