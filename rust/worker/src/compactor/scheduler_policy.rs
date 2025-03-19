@@ -77,7 +77,11 @@ mod tests {
                 first_record_time: 1,
                 offset: 0,
                 collection_version: 0,
+<<<<<<< HEAD
                 collection_logical_size_bytes: 100,
+=======
+                logical_size_bytes: 100,
+>>>>>>> 5d9b9c189 (Add logical size field to the compaction job)
             },
             CollectionRecord {
                 collection_id: collection_uuid_2,
@@ -86,7 +90,11 @@ mod tests {
                 first_record_time: 0,
                 offset: 0,
                 collection_version: 0,
+<<<<<<< HEAD
                 collection_logical_size_bytes: 100,
+=======
+                logical_size_bytes: 100,
+>>>>>>> 5d9b9c189 (Add logical size field to the compaction job)
             },
         ];
         let jobs = scheduler_policy.determine(collections.clone(), 1);
