@@ -85,6 +85,14 @@ impl chroma_error::ChromaError for Error {
     }
 }
 
+/////////////////////////////////////////// ScrubSuccess ///////////////////////////////////////////
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScrubSuccess {
+    pub calculated_setsum: Setsum,
+    pub bytes_read: u64,
+}
+
 //////////////////////////////////////////// ScrubError ////////////////////////////////////////////
 
 #[derive(Clone, Debug, thiserror::Error)]
@@ -122,13 +130,25 @@ pub enum ScrubError {
         reference: Fragment,
         empirical: Fragment,
     },
-    #[error("MismatchedSetsum: {reference:?} expected {} got {}", reference.setsum.hexdigest(), empirical.setsum.hexdigest())]
-    MismatchedSetsum {
+    #[error("MismatchedSnapshotSetsum: {reference:?} expected {} got {}", reference.setsum.hexdigest(), empirical.setsum.hexdigest())]
+    MismatchedSnapshotSetsum {
+        reference: SnapshotPointer,
+        empirical: Snapshot,
+    },
+    #[error("MismatchedFragmentSetsum: {reference:?} expected {} got {}", reference.setsum.hexdigest(), empirical.setsum.hexdigest())]
+    MismatchedFragmentSetsum {
         reference: Fragment,
         empirical: Fragment,
     },
     #[error("MissingFragment: {reference:?}")]
     MissingFragment { reference: Fragment },
+    #[error("MissingSnapshot: {reference:?}")]
+    MissingSnapshot { reference: SnapshotPointer },
+    #[error("OverallMismatch: {manifest:?} {observed:?}")]
+    OverallMismatch {
+        manifest: ScrubSuccess,
+        observed: ScrubSuccess,
+    },
 }
 
 //////////////////////////////////////////// LogPosition ///////////////////////////////////////////

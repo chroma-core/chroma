@@ -12,8 +12,8 @@ use chroma_storage::{ETag, PutOptions, Storage, StorageError};
 use setsum::Setsum;
 
 use crate::{
-    Error, Fragment, FragmentSeqNo, LogPosition, LogWriterOptions, ScrubError, SnapshotOptions,
-    ThrottleOptions,
+    Error, Fragment, FragmentSeqNo, LogPosition, LogWriterOptions, ScrubError, ScrubSuccess,
+    SnapshotOptions, ThrottleOptions,
 };
 
 /////////////////////////////////////////////// paths //////////////////////////////////////////////
@@ -50,6 +50,7 @@ pub struct SnapshotPointer {
     pub depth: u8,
     pub start: LogPosition,
     pub limit: LogPosition,
+    pub num_bytes: u64,
 }
 
 impl SnapshotPointer {
@@ -75,8 +76,14 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
+    /// Sums up the number of bytes referred to by this snapshot.
+    pub fn num_bytes(&self) -> u64 {
+        self.snapshots.iter().map(|s| s.num_bytes).sum::<u64>()
+            + self.fragments.iter().map(|f| f.num_bytes).sum::<u64>()
+    }
+
     /// Scrub the setsums of this snapshot and compare to the fragments.
-    pub fn scrub(&self) -> Result<Setsum, Box<ScrubError>> {
+    pub fn scrub(&self) -> Result<ScrubSuccess, Box<ScrubError>> {
         if !self.fragments.is_empty() && !self.snapshots.is_empty() {
             return Err(ScrubError::CorruptManifest {
                 manifest: self.path.to_string(),
@@ -89,9 +96,9 @@ impl Snapshot {
             }
             .into());
         }
-        let mut acc = Setsum::default();
+        let mut calculated_setsum = Setsum::default();
         for snapshot in self.snapshots.iter() {
-            acc += snapshot.setsum;
+            calculated_setsum += snapshot.setsum;
         }
         let depth = self.snapshots.iter().map(|s| s.depth).max().unwrap_or(0);
         if depth + 1 != self.depth {
@@ -105,16 +112,16 @@ impl Snapshot {
             )}.into());
         }
         for frag in self.fragments.iter() {
-            acc += frag.setsum;
+            calculated_setsum += frag.setsum;
         }
-        if acc != self.setsum {
+        if calculated_setsum != self.setsum {
             return Err(ScrubError::CorruptManifest{
                 manifest: self.path.to_string(),
                 what: format!(
                 "expected snapshot setsum does not match observed contents in {}: expected:{} != observed:{}",
                 self.path,
                 self.setsum.hexdigest(),
-                acc.hexdigest()
+                calculated_setsum.hexdigest()
             )}.into());
         }
         let path_setsum = snapshot_setsum(&self.path).map_err(|_| ScrubError::CorruptManifest {
@@ -135,7 +142,12 @@ impl Snapshot {
                 path_setsum.hexdigest(),
             )}.into());
         }
-        Ok(acc)
+        // TODO(rescrv): compute this
+        let bytes_read = 0;
+        Ok(ScrubSuccess {
+            calculated_setsum,
+            bytes_read,
+        })
     }
 
     pub async fn load(
@@ -368,6 +380,7 @@ impl Manifest {
                 .map(|f| f.limit)
                 .max_by_key(|p| p.offset())
                 .unwrap_or(LogPosition::default()),
+            num_bytes: snapshot.num_bytes(),
         });
         Ok(())
     }
@@ -437,25 +450,31 @@ impl Manifest {
     }
 
     /// Scrub the manifest.
-    pub fn scrub(&self) -> Result<Setsum, Box<ScrubError>> {
-        let mut acc = Setsum::default();
+    pub fn scrub(&self) -> Result<ScrubSuccess, Box<ScrubError>> {
+        let mut calculated_setsum = Setsum::default();
+        let mut bytes_read = 0u64;
         for snapshot in self.snapshots.iter() {
-            acc += snapshot.setsum;
+            calculated_setsum += snapshot.setsum;
+            bytes_read += snapshot.num_bytes;
         }
         for frag in self.fragments.iter() {
-            acc += frag.setsum;
+            calculated_setsum += frag.setsum;
+            bytes_read += frag.num_bytes;
         }
-        if self.setsum != acc {
+        if self.setsum != calculated_setsum {
             return Err(ScrubError::CorruptManifest{
                 manifest: format!("{:?}", self),
                 what: format!(
                 "expected manifest setsum does not match observed contents: expected:{} != observed:{}",
                 self.setsum.hexdigest(),
-                acc.hexdigest()
+                calculated_setsum.hexdigest()
             )}.into());
         }
         // TODO(rescrv):  Check the sequence numbers for sequentiality.
-        Ok(acc)
+        Ok(ScrubSuccess {
+            calculated_setsum,
+            bytes_read,
+        })
     }
 
     /// The next sequence number to generate, or None if the log has exhausted them.

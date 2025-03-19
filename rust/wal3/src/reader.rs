@@ -12,7 +12,7 @@ use chroma_storage::{Storage, StorageError};
 
 use crate::{
     parse_fragment_path, Error, Fragment, LogPosition, LogReaderOptions, Manifest, ScrubError,
-    Snapshot,
+    ScrubSuccess, Snapshot,
 };
 
 /// Limits allows encoding things like offset, timestamp, and byte size limits for the read.
@@ -133,17 +133,46 @@ impl LogReader {
             .0)
     }
 
-    pub async fn scrub(&self) -> Result<(), Error> {
+    pub async fn scrub(&self) -> Result<ScrubSuccess, Error> {
         let Some((manifest, _)) =
             Manifest::load(&self.options.throttle, &self.storage, &self.prefix).await?
         else {
             return Err(Error::UninitializedLog);
         };
-        manifest.scrub()?;
+        let manifest_scrub_success = manifest.scrub()?;
+        let mut calculated_setsum = Setsum::default();
+        let mut bytes_read = 0u64;
+        for reference in manifest.snapshots.iter() {
+            if let Some(empirical) =
+                Snapshot::load(&self.options.throttle, &self.storage, reference).await?
+            {
+                let empirical_scrub_success = empirical.scrub()?;
+                if empirical_scrub_success.calculated_setsum != empirical.setsum {
+                    return Err(Error::ScrubError(
+                        ScrubError::MismatchedSnapshotSetsum {
+                            reference: reference.clone(),
+                            empirical,
+                        }
+                        .into(),
+                    ));
+                }
+                calculated_setsum += empirical_scrub_success.calculated_setsum;
+                bytes_read += empirical_scrub_success.bytes_read;
+            } else {
+                return Err(Error::ScrubError(
+                    ScrubError::MissingSnapshot {
+                        reference: reference.clone(),
+                    }
+                    .into(),
+                ));
+            }
+        }
         for reference in manifest.fragments.iter() {
             if let Some(empirical) =
                 read_fragment(&self.storage, &self.prefix, &reference.path).await?
             {
+                calculated_setsum += empirical.setsum;
+                bytes_read += empirical.num_bytes;
                 if reference.path != empirical.path {
                     return Err(Error::ScrubError(
                         ScrubError::MismatchedPath {
@@ -191,7 +220,7 @@ impl LogReader {
                 }
                 if reference.setsum != empirical.setsum {
                     return Err(Error::ScrubError(
-                        ScrubError::MismatchedSetsum {
+                        ScrubError::MismatchedFragmentSetsum {
                             reference: reference.clone(),
                             empirical,
                         }
@@ -207,7 +236,20 @@ impl LogReader {
                 ));
             }
         }
-        Ok(())
+        let observed_scrub_success = ScrubSuccess {
+            calculated_setsum,
+            bytes_read,
+        };
+        if manifest_scrub_success != observed_scrub_success {
+            return Err(Error::ScrubError(
+                ScrubError::OverallMismatch {
+                    manifest: manifest_scrub_success,
+                    observed: observed_scrub_success,
+                }
+                .into(),
+            ));
+        }
+        Ok(observed_scrub_success)
     }
 }
 
