@@ -768,4 +768,31 @@ mod test {
             .expect("Value should not be None");
         assert_eq!(value, large_value);
     }
+
+    #[tokio::test]
+    async fn test_inserted_key_immediately_available() {
+        let dir = tempfile::tempdir()
+            .expect("To be able to create temp path")
+            .path()
+            .to_str()
+            .expect("To be able to parse path")
+            .to_string();
+        let cache = FoyerCacheConfig {
+            dir: Some(dir.clone()),
+            flush: true,
+            ..Default::default()
+        }
+        .build_hybrid_test::<String, String>()
+        .await
+        .unwrap();
+
+        cache.insert("key1".to_string(), "foo".to_string()).await;
+
+        let value = cache
+            .get(&"key1".to_string())
+            .await
+            .expect("Expected to be able to get value")
+            .expect("Value should not be None");
+        assert_eq!(value, "foo");
+    }
 }
