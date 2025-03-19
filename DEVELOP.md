@@ -70,6 +70,8 @@ To run unit tests using your current environment, run `pytest`.
 
 ## Manual Build
 
+To manually build the rust codebase and bindings for type safety, run `maturin dev`.
+
 To manually build a distribution, run `python -m build`.
 
 The project's source and wheel distributions will be placed in the `dist` directory.

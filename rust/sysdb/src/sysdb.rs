@@ -8,14 +8,14 @@ use chroma_error::{ChromaError, ErrorCodes, TonicError, TonicMissingFieldError};
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
 use chroma_types::chroma_proto::VersionListForCollection;
 use chroma_types::{
-    chroma_proto, CollectionAndSegments, InternalCollectionConfiguration, CollectionMetadataUpdate,
-    CountCollectionsError, CreateCollectionError, CreateDatabaseError, CreateDatabaseResponse,
-    CreateTenantError, CreateTenantResponse, Database, DeleteCollectionError, DeleteDatabaseError,
+    chroma_proto, CollectionAndSegments, CollectionMetadataUpdate, CountCollectionsError,
+    CreateCollectionError, CreateDatabaseError, CreateDatabaseResponse, CreateTenantError,
+    CreateTenantResponse, Database, DeleteCollectionError, DeleteDatabaseError,
     DeleteDatabaseResponse, GetCollectionSizeError, GetCollectionWithSegmentsError,
     GetCollectionsError, GetDatabaseError, GetDatabaseResponse, GetSegmentsError, GetTenantError,
-    GetTenantResponse, ListDatabasesError, ListDatabasesResponse, Metadata, ResetError,
-    ResetResponse, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
-    UpdateCollectionError,
+    GetTenantResponse, InternalCollectionConfiguration, InternalCollectionConfiguration,
+    ListDatabasesError, ListDatabasesResponse, Metadata, ResetError, ResetResponse,
+    SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid, UpdateCollectionError,
 };
 use chroma_types::{
     Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
@@ -196,7 +196,9 @@ impl SysDb {
             Some(config) => config,
             None => metadata
                 .clone()
-                .map(|m| InternalCollectionConfiguration::from_legacy_metadata(m).map_err(|e| e.boxed()))
+                .map(|m| {
+                    InternalCollectionConfiguration::from_legacy_metadata(m).map_err(|e| e.boxed())
+                })
                 .transpose()?
                 .unwrap_or(InternalCollectionConfiguration::default_hnsw()),
         };

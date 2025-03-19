@@ -18,6 +18,7 @@ use chroma_types::{
     ListCollectionsRequest, ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse,
     Metadata, QueryRequest, QueryResponse, UpdateCollectionRecordsResponse,
     UpdateCollectionResponse, UpdateMetadata, UpsertCollectionRecordsResponse,
+    WrappedSerdeJsonError,
 };
 use mdac::{Rule, Scorecard, ScorecardTicket};
 use opentelemetry::global;
@@ -809,7 +810,7 @@ async fn count_collections(
 #[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
 pub struct CreateCollectionPayload {
     pub name: String,
-    pub configuration: Option<CollectionConfiguration>,
+    pub configuration_json_str: Option<String>,
     pub metadata: Option<Metadata>,
     #[serde(default)]
     pub get_or_create: bool,
@@ -864,8 +865,19 @@ async fn create_collection(
         format!("tenant:{}", tenant).as_str(),
     ]);
 
-    if let Some(config) = payload.configuration.as_ref() {
-        if config.spann.is_some() {
+    let configuration_json = match payload.configuration_json_str {
+        Some(configuration_json_str) => {
+            let configuration_json =
+                serde_json::from_str::<CollectionConfiguration>(&configuration_json_str)
+                    .map_err(WrappedSerdeJsonError::SerdeJsonError)?;
+
+            Some(configuration_json)
+        }
+        None => None,
+    };
+
+    if let Some(configuration_json) = configuration_json.as_ref() {
+        if configuration_json.spann.is_some() {
             return Err(ValidationError::SpannNotImplemented)?;
         }
     }
@@ -875,7 +887,7 @@ async fn create_collection(
         database,
         payload.name,
         payload.metadata,
-        payload.configuration,
+        configuration_json,
         payload.get_or_create,
     )?;
     let collection = server.frontend.create_collection(request).await?;
