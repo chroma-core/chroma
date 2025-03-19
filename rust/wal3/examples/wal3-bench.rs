@@ -59,6 +59,7 @@ async fn main() {
             storage,
             "wal3bench",
             "benchmark writer",
+            (),
         )
         .await
         .unwrap(),

@@ -130,7 +130,6 @@ impl S3Storage {
                 ))
             }
             Err(e) => {
-                tracing::error!("error: {}", e);
                 match e {
                     SdkError::ServiceError(err) => {
                         let inner = err.into_err();
@@ -142,13 +141,13 @@ impl S3Storage {
                                 })
                             }
                             aws_sdk_s3::operation::get_object::GetObjectError::InvalidObjectState(msg) => {
-                                 tracing::error!("invalid object state: {}", msg);
+                                tracing::error!("invalid object state: {}", msg);
                                 Err(StorageError::Generic {
                                     source: Arc::new(inner),
                                 })
                             }
                             _ => {
-                                 tracing::error!("error: {}", inner.to_string());
+                                tracing::error!("error: {}", inner.to_string());
                                 Err(StorageError::Generic {
                                     source: Arc::new(inner),
                                 })
