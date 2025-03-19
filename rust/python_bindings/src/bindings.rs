@@ -314,7 +314,7 @@ impl Bindings {
             Some(new_configuration_json_str) => {
                 let new_configuration_json =
                     serde_json::from_str::<CollectionConfiguration>(&new_configuration_json_str)
-                        .map_err(WrappedSerdeJsonError::new)?;
+                        .map_err(WrappedSerdeJsonError::SerdeJsonError)?;
 
                 Some(new_configuration_json)
             }

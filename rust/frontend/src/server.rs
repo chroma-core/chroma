@@ -1017,7 +1017,7 @@ async fn update_collection(
         Some(configuration_json_str) => {
             let configuration_json =
                 serde_json::from_str::<CollectionConfiguration>(&configuration_json_str)
-                    .map_err(WrappedSerdeJsonError::new)?;
+                    .map_err(WrappedSerdeJsonError::SerdeJsonError)?;
 
             Some(configuration_json)
         }
