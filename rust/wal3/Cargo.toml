@@ -21,6 +21,7 @@ uuid = { workspace = true }
 chroma-storage = { workspace = true }
 rand.workspace = true
 chroma-error.workspace = true
+chroma-config.workspace = true
 
 [dev-dependencies]
 guacamole = { version = "0.11", default-features = false }

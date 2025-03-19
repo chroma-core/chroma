@@ -53,6 +53,8 @@ pub enum Error {
     CorruptCursor(String),
     #[error("missing cursor: {0}")]
     NoSuchCursor(String),
+    #[error("scrub error: {0}")]
+    ScrubError(#[from] Box<ScrubError>),
     #[error("parquet error: {0}")]
     ParquetError(#[from] Arc<parquet::errors::ParquetError>),
     #[error("storage error: {0}")]
@@ -76,6 +78,7 @@ impl chroma_error::ChromaError for Error {
             Self::CorruptFragment(_) => chroma_error::ErrorCodes::DataLoss,
             Self::CorruptCursor(_) => chroma_error::ErrorCodes::DataLoss,
             Self::NoSuchCursor(_) => chroma_error::ErrorCodes::Unknown,
+            Self::ScrubError(_) => chroma_error::ErrorCodes::DataLoss,
             Self::ParquetError(_) => chroma_error::ErrorCodes::Unknown,
             Self::StorageError(storage) => storage.code(),
         }
@@ -94,6 +97,38 @@ pub enum ScrubError {
         seq_no: FragmentSeqNo,
         what: String,
     },
+    #[error("MismatchedPath: {reference:?} expected {:?} got {:?}", reference.path, empirical.path)]
+    MismatchedPath {
+        reference: Fragment,
+        empirical: Fragment,
+    },
+    #[error("MismatchedSeqNo: {reference:?} expected {:?} got {:?}", reference.seq_no, empirical.seq_no)]
+    MismatchedSeqNo {
+        reference: Fragment,
+        empirical: Fragment,
+    },
+    #[error("MismatchedNumBytes: {reference:?} expected {:?} got {:?}", reference.num_bytes, empirical.num_bytes)]
+    MismatchedNumBytes {
+        reference: Fragment,
+        empirical: Fragment,
+    },
+    #[error("MismatchedStart: {reference:?} expected {:?} got {:?}", reference.start, empirical.start)]
+    MismatchedStart {
+        reference: Fragment,
+        empirical: Fragment,
+    },
+    #[error("MismatchedLimit: {reference:?} expected {:?} got {:?}", reference.limit, empirical.limit)]
+    MismatchedLimit {
+        reference: Fragment,
+        empirical: Fragment,
+    },
+    #[error("MismatchedSetsum: {reference:?} expected {} got {}", reference.setsum.hexdigest(), empirical.setsum.hexdigest())]
+    MismatchedSetsum {
+        reference: Fragment,
+        empirical: Fragment,
+    },
+    #[error("MissingFragment: {reference:?}")]
+    MissingFragment { reference: Fragment },
 }
 
 //////////////////////////////////////////// LogPosition ///////////////////////////////////////////

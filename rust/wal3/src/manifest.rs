@@ -76,7 +76,7 @@ pub struct Snapshot {
 
 impl Snapshot {
     /// Scrub the setsums of this snapshot and compare to the fragments.
-    pub fn scrub(&self) -> Result<Setsum, ScrubError> {
+    pub fn scrub(&self) -> Result<Setsum, Box<ScrubError>> {
         if !self.fragments.is_empty() && !self.snapshots.is_empty() {
             return Err(ScrubError::CorruptManifest {
                 manifest: self.path.to_string(),
@@ -86,7 +86,8 @@ impl Snapshot {
                 self.fragments.len(),
                 self.snapshots.len(),
             ),
-            });
+            }
+            .into());
         }
         let mut acc = Setsum::default();
         for snapshot in self.snapshots.iter() {
@@ -101,7 +102,7 @@ impl Snapshot {
                 self.path,
                 self.depth,
                 depth + 1,
-            )});
+            )}.into());
         }
         for frag in self.fragments.iter() {
             acc += frag.setsum;
@@ -114,7 +115,7 @@ impl Snapshot {
                 self.path,
                 self.setsum.hexdigest(),
                 acc.hexdigest()
-            )});
+            )}.into());
         }
         let path_setsum = snapshot_setsum(&self.path).map_err(|_| ScrubError::CorruptManifest {
             manifest: self.path.to_string(),
@@ -132,7 +133,7 @@ impl Snapshot {
                 self.path,
                 self.setsum.hexdigest(),
                 path_setsum.hexdigest(),
-            )});
+            )}.into());
         }
         Ok(acc)
     }
@@ -436,7 +437,7 @@ impl Manifest {
     }
 
     /// Scrub the manifest.
-    pub fn scrub(&self) -> Result<Setsum, ScrubError> {
+    pub fn scrub(&self) -> Result<Setsum, Box<ScrubError>> {
         let mut acc = Setsum::default();
         for snapshot in self.snapshots.iter() {
             acc += snapshot.setsum;
@@ -451,7 +452,7 @@ impl Manifest {
                 "expected manifest setsum does not match observed contents: expected:{} != observed:{}",
                 self.setsum.hexdigest(),
                 acc.hexdigest()
-            )});
+            )}.into());
         }
         // TODO(rescrv):  Check the sequence numbers for sequentiality.
         Ok(acc)
@@ -588,6 +589,28 @@ impl Manifest {
                     tokio::time::sleep(backoff).await;
                 }
             }
+        }
+    }
+
+    /// Return the lowest addressable offset in the log.
+    pub fn minimum_log_position(&self) -> LogPosition {
+        let frags = self
+            .fragments
+            .iter()
+            .map(|f| f.start)
+            .min_by_key(|p| p.offset());
+        let snaps = self
+            .snapshots
+            .iter()
+            .map(|s| s.start)
+            .min_by_key(|p| p.offset());
+        match (frags, snaps) {
+            (Some(f), Some(s)) => LogPosition {
+                offset: std::cmp::min(f.offset, s.offset),
+            },
+            (Some(f), None) => f,
+            (None, Some(s)) => s,
+            (None, None) => LogPosition::default(),
         }
     }
 }
