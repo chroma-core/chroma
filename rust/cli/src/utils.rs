@@ -48,7 +48,31 @@ pub struct CliConfig {
     pub current_profile: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct CliEnvConfig {
+    #[allow(dead_code)]
+    pub dashboard_url: String,
+    #[allow(dead_code)]
+    pub dashboard_api_url: String,
+    pub frontend_url: String,
+}
+
 pub type Profiles = HashMap<String, Profile>;
+
+pub fn load_cli_env_config(dev: bool) -> CliEnvConfig {
+    match dev {
+        true => CliEnvConfig {
+            dashboard_url: "http://localhost:3001".to_string(),
+            dashboard_api_url: "http://localhost:8002".to_string(),
+            frontend_url: "http://localhost:8000".to_string(),
+        },
+        false => CliEnvConfig {
+            dashboard_url: "https://trychroma.com".to_string(),
+            dashboard_api_url: "https://backend.trychroma.com".to_string(),
+            frontend_url: "https://api.trychroma.com".to_string(),
+        },
+    }
+}
 
 fn get_chroma_dir() -> Result<PathBuf, Box<dyn Error>> {
     let home_dir = dirs::home_dir().ok_or("Could not determine home directory")?;
@@ -149,5 +173,16 @@ pub fn save_profiles(profiles: &Profiles) -> Result<(), ChromaCliError> {
             eprintln!("{}", message);
             Err(ChromaCliError::new(&message))
         }
+    }
+}
+
+pub fn get_current_profile() -> Result<(String, Profile), Box<dyn Error>> {
+    let config = read_config()?;
+    let profiles = read_profiles()?;
+
+    if !profiles.contains_key(config.current_profile.as_str()) {
+        Err(format!("Profile '{}' not found", config.current_profile).into())
+    } else {
+        Ok((config.current_profile.clone(), profiles[config.current_profile.as_str()].clone()))
     }
 }

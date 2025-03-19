@@ -24,7 +24,9 @@ serde = { version = "1.0.215", features = ["derive"] }
 toml = "0.8.20"
 serde_json = { workspace = true }
 dirs = "6.0.0"
-tempfile = "3.14.0"
+reqwest = { workspace = true, features = ["blocking"] }
+mockito = "1.7.0"
+arboard = "3.4.1"
 
 
 [[bin]]
