@@ -1,8 +1,7 @@
 use crate::{
     Collection, CollectionAndSegments, CollectionUuid, DocumentExpression, DocumentOperator,
-    InternalCollectionConfiguration, LogRecord, MetadataExpression, MetadataValue, Operation,
-    OperationRecord, PrimitiveOperator, ScalarEncoding, Segment, SegmentType, SegmentUuid,
-    UpdateMetadata, UpdateMetadataValue, Where,
+    LogRecord, MetadataExpression, MetadataValue, Operation, OperationRecord, PrimitiveOperator,
+    ScalarEncoding, Segment, SegmentType, SegmentUuid, UpdateMetadata, UpdateMetadataValue, Where,
 };
 use proptest::{collection, prelude::*};
 
@@ -208,14 +207,14 @@ impl Arbitrary for TestCollectionData {
             .prop_map(move |logs| {
                 let collection_id = CollectionUuid::new();
                 let collection_and_segments = CollectionAndSegments {
-                    collection: Collection::builder()
-                        .collection_id(collection_id)
-                        .name(PROP_COLL.to_string())
-                        .dimension(3)
-                        .tenant(PROP_TENANT.to_string())
-                        .database(PROP_DB.to_string())
-                        .config(InternalCollectionConfiguration::default_hnsw())
-                        .build(),
+                    collection: Collection {
+                        collection_id,
+                        name: PROP_COLL.to_string(),
+                        dimension: Some(3),
+                        tenant: PROP_TENANT.to_string(),
+                        database: PROP_DB.to_string(),
+                        ..Default::default()
+                    },
                     metadata_segment: Segment {
                         id: SegmentUuid::new(),
                         r#type: SegmentType::Sqlite,

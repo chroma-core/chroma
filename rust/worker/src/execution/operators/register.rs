@@ -163,29 +163,29 @@ mod tests {
         let collection_version = 0;
 
         let tenant_1 = "tenant_1".to_string();
-        let collection_1 = Collection::builder()
-            .name("collection_1".to_string())
-            .dimension(1)
-            .tenant(tenant_1.clone())
-            .database("database_1".to_string())
-            .config(InternalCollectionConfiguration::default_hnsw())
-            .total_records_post_compaction(total_records_post_compaction)
-            .size_bytes_post_compaction(size_bytes_post_compaction)
-            .last_compaction_time_secs(last_compaction_time_secs)
-            .build();
+        let collection_1 = Collection {
+            name: "collection_1".to_string(),
+            dimension: Some(1),
+            tenant: tenant_1.clone(),
+            database: "database_1".to_string(),
+            total_records_post_compaction,
+            size_bytes_post_compaction,
+            last_compaction_time_secs,
+            ..Default::default()
+        };
         let collection_uuid_1 = collection_1.collection_id;
 
         let tenant_2 = "tenant_2".to_string();
-        let collection_2 = Collection::builder()
-            .name("collection_2".to_string())
-            .dimension(1)
-            .tenant(tenant_2.clone())
-            .database("database_2".to_string())
-            .config(InternalCollectionConfiguration::default_hnsw())
-            .total_records_post_compaction(total_records_post_compaction)
-            .size_bytes_post_compaction(size_bytes_post_compaction)
-            .last_compaction_time_secs(last_compaction_time_secs)
-            .build();
+        let collection_2 = Collection {
+            name: "collection_2".to_string(),
+            dimension: Some(1),
+            tenant: tenant_2.clone(),
+            database: "database_2".to_string(),
+            total_records_post_compaction,
+            size_bytes_post_compaction,
+            last_compaction_time_secs,
+            ..Default::default()
+        };
         let collection_uuid_2 = collection_2.collection_id;
 
         match sysdb {

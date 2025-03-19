@@ -654,7 +654,7 @@ impl CompactOrchestrator {
                 } else if vector_segment.r#type == SegmentType::Spann {
                     let spann_writer = match self
                         .spann_provider
-                        .write(&collection, &vector_segment, dim as usize)
+                        .write(collection, &vector_segment, dim as usize)
                         .await
                     {
                         Ok(writer) => writer,

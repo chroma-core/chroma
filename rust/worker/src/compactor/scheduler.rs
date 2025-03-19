@@ -302,16 +302,15 @@ mod tests {
         };
 
         let tenant_1 = "tenant_1".to_string();
-        let collection_1 = Collection::builder()
-            .collection_id(
-                CollectionUuid::from_str("00000000-0000-0000-0000-000000000001").unwrap(),
-            )
-            .name("collection_1".to_string())
-            .dimension(1)
-            .tenant(tenant_1.clone())
-            .database("database_1".to_string())
-            .config(InternalCollectionConfiguration::default_hnsw())
-            .build();
+        let collection_1 = Collection {
+            collection_id: CollectionUuid::from_str("00000000-0000-0000-0000-000000000001")
+                .unwrap(),
+            name: "collection_1".to_string(),
+            dimension: Some(1),
+            tenant: tenant_1.clone(),
+            database: "database_1".to_string(),
+            ..Default::default()
+        };
         let collection_uuid_1 = collection_1.collection_id;
 
         in_memory_log.add_log(
@@ -335,16 +334,15 @@ mod tests {
         );
 
         let tenant_2 = "tenant_2".to_string();
-        let collection_2 = Collection::builder()
-            .collection_id(
-                CollectionUuid::from_str("00000000-0000-0000-0000-000000000002").unwrap(),
-            )
-            .name("collection_2".to_string())
-            .dimension(1)
-            .tenant(tenant_2.clone())
-            .database("database_2".to_string())
-            .config(InternalCollectionConfiguration::default_hnsw())
-            .build();
+        let collection_2 = Collection {
+            collection_id: CollectionUuid::from_str("00000000-0000-0000-0000-000000000002")
+                .unwrap(),
+            name: "collection_2".to_string(),
+            dimension: Some(1),
+            tenant: tenant_2.clone(),
+            database: "database_2".to_string(),
+            ..Default::default()
+        };
         let collection_uuid_2 = collection_2.collection_id;
 
         in_memory_log.add_log(
@@ -501,13 +499,13 @@ mod tests {
         };
 
         let tenant_1 = "tenant_1".to_string();
-        let collection_1 = Collection::builder()
-            .name("collection_1".to_string())
-            .dimension(1)
-            .tenant(tenant_1.clone())
-            .database("database_1".to_string())
-            .config(InternalCollectionConfiguration::default_hnsw())
-            .build();
+        let collection_1 = Collection {
+            name: "collection_1".to_string(),
+            dimension: Some(1),
+            tenant: tenant_1.clone(),
+            database: "database_1".to_string(),
+            ..Default::default()
+        };
 
         let collection_uuid_1 = collection_1.collection_id;
 

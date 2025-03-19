@@ -1,8 +1,5 @@
 use super::{Metadata, MetadataValueConversionError};
-use crate::{
-    chroma_proto, test_segment, CollectionConfiguration, InternalCollectionConfiguration, Segment,
-    SegmentScope,
-};
+use crate::{chroma_proto, test_segment, InternalCollectionConfiguration, Segment, SegmentScope};
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -61,7 +58,7 @@ fn emit_legacy_config_json_str<S: serde::Serializer>(_: &(), s: S) -> Result<S::
         .map_err(serde::ser::Error::custom)
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema, bon::Builder)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct Collection {
     #[builder(default = CollectionUuid::new())]
@@ -94,8 +91,27 @@ pub struct Collection {
         serialize_with = "emit_legacy_config_json_str",
         rename = "configuration_json"
     )]
-    #[builder(default)]
     pub legacy_configuration_json: (),
+}
+
+impl Default for Collection {
+    fn default() -> Self {
+        Self {
+            collection_id: CollectionUuid::new(),
+            name: "".to_string(),
+            config: InternalCollectionConfiguration::default_hnsw(),
+            legacy_configuration_json: (),
+            metadata: None,
+            dimension: None,
+            tenant: "".to_string(),
+            database: "".to_string(),
+            log_position: 0,
+            version: 0,
+            total_records_post_compaction: 0,
+            size_bytes_post_compaction: 0,
+            last_compaction_time_secs: 0,
+        }
+    }
 }
 
 #[cfg(feature = "pyo3")]
@@ -150,13 +166,13 @@ impl Collection {
 
 impl Collection {
     pub fn test_collection(dim: i32) -> Self {
-        Self::builder()
-            .name("test_collection".to_string())
-            .dimension(dim)
-            .tenant("default_tenant".to_string())
-            .database("default_database".to_string())
-            .config(InternalCollectionConfiguration::default_hnsw())
-            .build()
+        Collection {
+            name: "test_collection".to_string(),
+            dimension: Some(dim),
+            tenant: "default_tenant".to_string(),
+            database: "default_database".to_string(),
+            ..Default::default()
+        }
     }
 }
 

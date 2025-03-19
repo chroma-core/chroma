@@ -419,15 +419,16 @@ pub mod test {
         );
 
         // Try partial override
-        let collection = Collection::builder()
-            .config(InternalCollectionConfiguration {
+        let collection = Collection {
+            config: InternalCollectionConfiguration {
                 vector_index: chroma_types::VectorIndexConfiguration::Hnsw(HnswConfiguration {
                     max_neighbors: 10,
                     ..Default::default()
                 }),
                 embedding_function: None,
-            })
-            .build();
+            },
+            ..Default::default()
+        };
 
         let segment = Segment {
             id: SegmentUuid(Uuid::new_v4()),

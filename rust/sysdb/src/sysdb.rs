@@ -14,8 +14,9 @@ use chroma_types::{
     DeleteDatabaseResponse, GetCollectionSizeError, GetCollectionWithSegmentsError,
     GetCollectionsError, GetDatabaseError, GetDatabaseResponse, GetSegmentsError, GetTenantError,
     GetTenantResponse, InternalCollectionConfiguration, InternalCollectionConfiguration,
-    ListDatabasesError, ListDatabasesResponse, Metadata, ResetError, ResetResponse,
-    SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid, UpdateCollectionError,
+    InternalCollectionConfiguration, ListDatabasesError, ListDatabasesResponse, Metadata,
+    ResetError, ResetResponse, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
+    UpdateCollectionError,
 };
 use chroma_types::{
     Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,

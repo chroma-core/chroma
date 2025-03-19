@@ -842,13 +842,14 @@ mod test {
         .await
         .expect("Error converting config to gc context");
 
-        let collection = chroma_types::Collection::builder()
-            .collection_id(collection_id)
-            .config(chroma_types::InternalCollectionConfiguration {
+        let collection = Collection {
+            collection_id,
+            config: InternalCollectionConfiguration {
                 vector_index: chroma_types::VectorIndexConfiguration::Spann(params),
                 embedding_function: None,
-            })
-            .build();
+            },
+            ..Default::default()
+        };
 
         let spann_writer = SpannSegmentWriter::from_segment(
             &collection,
@@ -989,10 +990,11 @@ mod test {
         );
         let collection_id = CollectionUuid::new();
 
-        let collection = Collection::builder()
-            .collection_id(collection_id)
-            .config(InternalCollectionConfiguration::default_spann())
-            .build();
+        let collection = Collection {
+            collection_id,
+            config: InternalCollectionConfiguration::default_spann(),
+            ..Default::default()
+        };
 
         let segment_id = SegmentUuid::new();
         let mut spann_segment = chroma_types::Segment {
@@ -1112,10 +1114,11 @@ mod test {
         .await
         .expect("Error converting config to gc context");
 
-        let collection = Collection::builder()
-            .collection_id(collection_id)
-            .config(InternalCollectionConfiguration::default_spann())
-            .build();
+        let collection = Collection {
+            collection_id,
+            config: InternalCollectionConfiguration::default_spann(),
+            ..Default::default()
+        };
 
         let spann_writer = SpannSegmentWriter::from_segment(
             &collection,
