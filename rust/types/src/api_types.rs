@@ -9,7 +9,6 @@ use crate::validators::{
     validate_name, validate_non_empty_collection_update_metadata, validate_non_empty_metadata,
 };
 use crate::Collection;
-use crate::CollectionConfiguration;
 use crate::CollectionConfigurationToInternalConfigurationError;
 use crate::CollectionConversionError;
 use crate::CollectionUuid;

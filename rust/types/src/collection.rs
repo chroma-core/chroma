@@ -1,5 +1,8 @@
 use super::{Metadata, MetadataValueConversionError};
-use crate::{chroma_proto, test_segment, InternalCollectionConfiguration, Segment, SegmentScope};
+use crate::{
+    chroma_proto, test_segment, CollectionConfiguration, InternalCollectionConfiguration, Segment,
+    SegmentScope,
+};
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -61,31 +64,22 @@ fn emit_legacy_config_json_str<S: serde::Serializer>(_: &(), s: S) -> Result<S::
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct Collection {
-    #[builder(default = CollectionUuid::new())]
     #[serde(rename(serialize = "id"))]
     pub collection_id: CollectionUuid,
-    #[builder(default)]
     pub name: String,
     #[serde(skip_serializing)]
     pub config: InternalCollectionConfiguration,
     pub metadata: Option<Metadata>,
     pub dimension: Option<i32>,
-    #[builder(default)]
     pub tenant: String,
-    #[builder(default)]
     pub database: String,
-    #[builder(default)]
     pub log_position: i64,
-    #[builder(default)]
     pub version: i32,
     #[serde(skip)]
-    #[builder(default)]
     pub total_records_post_compaction: u64,
     #[serde(skip)]
-    #[builder(default)]
     pub size_bytes_post_compaction: u64,
     #[serde(skip)]
-    #[builder(default)]
     pub last_compaction_time_secs: u64,
     #[serde(
         serialize_with = "emit_legacy_config_json_str",
