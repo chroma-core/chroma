@@ -1433,6 +1433,7 @@ dependencies = [
 name = "chroma-error"
 version = "0.1.0"
 dependencies = [
+ "http 1.1.0",
  "sqlx",
  "thiserror 1.0.69",
  "tonic",
@@ -1572,6 +1573,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tonic",
+ "tonic-health",
  "tower 0.5.2",
  "tracing",
  "tracing-opentelemetry",
@@ -1706,7 +1708,6 @@ dependencies = [
  "tonic",
  "tower 0.5.2",
  "tracing",
- "tracing-bunyan-formatter",
  "tracing-opentelemetry",
  "tracing-subscriber",
  "uuid",
@@ -1736,7 +1737,6 @@ name = "chroma-tracing"
 version = "0.1.0"
 dependencies = [
  "chroma-system",
- "chrono",
  "fastrace",
  "fastrace-opentelemetry",
  "http 1.1.0",
@@ -1749,7 +1749,6 @@ dependencies = [
  "tonic",
  "tower 0.5.2",
  "tracing",
- "tracing-bunyan-formatter",
  "tracing-opentelemetry",
  "tracing-subscriber",
  "uuid",
@@ -7461,6 +7460,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "tonic-health"
+version = "0.12.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1eaf34ddb812120f5c601162d5429933c9b527d901ab0e7f930d3147e33a09b2"
+dependencies = [
+ "async-stream",
+ "prost 0.13.3",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+]
+
+[[package]]
 name = "tower"
 version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7570,9 +7582,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-bunyan-formatter"
-version = "0.3.9"
+version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5c266b9ac83dedf0e0385ad78514949e6d89491269e7065bee51d2bb8ec7373"
+checksum = "2d637245a0d8774bd48df6482e086c59a8b5348a910c3b0579354045a9d82411"
 dependencies = [
  "ahash",
  "gethostname",
@@ -8564,8 +8576,8 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tonic",
+ "tonic-health",
  "tracing",
- "tracing-bunyan-formatter",
  "tracing-opentelemetry",
  "tracing-subscriber",
  "uuid",

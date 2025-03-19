@@ -15,6 +15,7 @@ rand = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 tonic = { workspace = true }
+tonic-health = { workspace = true }
 tracing = { workspace = true }
 # Used by tracing
 tracing-opentelemetry = { workspace = true }

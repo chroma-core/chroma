@@ -9,6 +9,7 @@ pub mod frontend;
 pub mod get_collection_with_segments_provider;
 pub mod quota;
 mod server;
+mod server_middleware;
 mod tower_tracing;
 mod types;
 
@@ -66,7 +67,7 @@ pub async fn frontend_service_entrypoint_with_config_system_registry(
         let tracing_layers = vec![
             init_global_filter_layer(),
             init_otel_layer(&config.service_name, &config.endpoint),
-            init_stdout_layer(&config.service_name),
+            init_stdout_layer(),
         ];
         init_tracing(tracing_layers);
         init_panic_tracing_hook();

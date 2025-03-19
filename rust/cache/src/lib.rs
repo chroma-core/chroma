@@ -26,7 +26,7 @@ pub use unbounded::UnboundedCacheConfig;
 pub enum CacheError {
     #[error("Invalid cache config")]
     InvalidCacheConfig(String),
-    #[error("I/O error when serving from cache")]
+    #[error("I/O error when serving from cache {0}")]
     DiskError(#[from] anyhow::Error),
 }
 

@@ -94,6 +94,7 @@ impl ChromaError for GetCollectionWithSegmentsError {
     }
 }
 
+#[derive(Serialize, ToSchema)]
 pub struct ResetResponse {}
 
 #[derive(Debug, Error)]
@@ -188,7 +189,7 @@ impl ChromaError for CreateTenantError {
 }
 
 #[non_exhaustive]
-#[derive(Validate)]
+#[derive(Validate, Serialize, ToSchema)]
 pub struct GetTenantRequest {
     pub name: String,
 }
@@ -234,7 +235,7 @@ impl ChromaError for GetTenantError {
 }
 
 #[non_exhaustive]
-#[derive(Validate)]
+#[derive(Validate, Serialize, ToSchema)]
 pub struct CreateDatabaseRequest {
     pub database_id: Uuid,
     pub tenant_id: String,
@@ -258,7 +259,7 @@ impl CreateDatabaseRequest {
     }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(ToSchema, Serialize)]
 pub struct CreateDatabaseResponse {}
 
 #[derive(Error, Debug)]
@@ -309,7 +310,7 @@ impl Database {
 }
 
 #[non_exhaustive]
-#[derive(Validate)]
+#[derive(Validate, Serialize, ToSchema)]
 pub struct ListDatabasesRequest {
     pub tenant_id: String,
     pub limit: Option<u32>,
@@ -352,7 +353,7 @@ impl ChromaError for ListDatabasesError {
 }
 
 #[non_exhaustive]
-#[derive(Validate)]
+#[derive(Validate, ToSchema, Serialize)]
 pub struct GetDatabaseRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -395,7 +396,7 @@ impl ChromaError for GetDatabaseError {
 }
 
 #[non_exhaustive]
-#[derive(Validate)]
+#[derive(Validate, Serialize, ToSchema)]
 pub struct DeleteDatabaseRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -439,7 +440,7 @@ impl ChromaError for DeleteDatabaseError {
 }
 
 #[non_exhaustive]
-#[derive(Validate, Debug)]
+#[derive(Validate, Debug, Serialize, ToSchema)]
 pub struct ListCollectionsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -468,7 +469,7 @@ impl ListCollectionsRequest {
 pub type ListCollectionsResponse = Vec<Collection>;
 
 #[non_exhaustive]
-#[derive(Validate)]
+#[derive(Validate, Serialize, ToSchema)]
 pub struct CountCollectionsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -491,7 +492,7 @@ impl CountCollectionsRequest {
 pub type CountCollectionsResponse = u32;
 
 #[non_exhaustive]
-#[derive(Validate)]
+#[derive(Validate, Serialize, ToSchema)]
 pub struct GetCollectionRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -534,7 +535,7 @@ impl ChromaError for GetCollectionError {
 }
 
 #[non_exhaustive]
-#[derive(Clone, Validate)]
+#[derive(Clone, Validate, Serialize, ToSchema)]
 pub struct CreateCollectionRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -636,14 +637,14 @@ impl ChromaError for GetCollectionsError {
     }
 }
 
-#[derive(Clone, Deserialize, Serialize, Debug)]
+#[derive(Clone, Deserialize, Serialize, Debug, ToSchema)]
 pub enum CollectionMetadataUpdate {
     ResetMetadata,
     UpdateMetadata(UpdateMetadata),
 }
 
 #[non_exhaustive]
-#[derive(Clone, Validate, Debug)]
+#[derive(Clone, Validate, Debug, Serialize, ToSchema)]
 pub struct UpdateCollectionRequest {
     pub collection_id: CollectionUuid,
     #[validate(custom(function = "validate_name"))]
@@ -692,7 +693,7 @@ impl ChromaError for UpdateCollectionError {
 }
 
 #[non_exhaustive]
-#[derive(Clone, Validate)]
+#[derive(Clone, Validate, Serialize, ToSchema)]
 pub struct DeleteCollectionRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -715,7 +716,7 @@ impl DeleteCollectionRequest {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct DeleteCollectionResponse {}
 
 #[derive(Error, Debug)]
@@ -767,7 +768,7 @@ pub const CHROMA_URI_KEY: &str = "chroma:uri";
 ////////////////////////// AddCollectionRecords //////////////////////////
 
 #[non_exhaustive]
-#[derive(Debug, Validate)]
+#[derive(Debug, Validate, Serialize, ToSchema)]
 pub struct AddCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -829,7 +830,7 @@ impl ChromaError for AddCollectionRecordsError {
 ////////////////////////// UpdateCollectionRecords //////////////////////////
 
 #[non_exhaustive]
-#[derive(Validate)]
+#[derive(Validate, Serialize, ToSchema)]
 pub struct UpdateCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -888,7 +889,7 @@ impl ChromaError for UpdateCollectionRecordsError {
 ////////////////////////// UpsertCollectionRecords //////////////////////////
 
 #[non_exhaustive]
-#[derive(Validate)]
+#[derive(Validate, Serialize, ToSchema)]
 pub struct UpsertCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -947,7 +948,7 @@ impl ChromaError for UpsertCollectionRecordsError {
 ////////////////////////// DeleteCollectionRecords //////////////////////////
 
 #[non_exhaustive]
-#[derive(Clone, Validate, ToSchema)]
+#[derive(Clone, Validate, Serialize, ToSchema)]
 pub struct DeleteCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -1111,7 +1112,7 @@ pub type CountResponse = u32;
 ////////////////////////// Get //////////////////////////
 
 #[non_exhaustive]
-#[derive(Clone, Validate)]
+#[derive(Clone, Validate, Serialize, ToSchema)]
 pub struct GetRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -1250,7 +1251,7 @@ impl From<(GetResult, IncludeList)> for GetResponse {
 ////////////////////////// Query //////////////////////////
 
 #[non_exhaustive]
-#[derive(Clone, Validate)]
+#[derive(Clone, Validate, Serialize, ToSchema)]
 pub struct QueryRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -1435,7 +1436,7 @@ impl ChromaError for QueryError {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct HealthCheckResponse {
     pub is_executor_ready: bool,
 }

@@ -36,6 +36,7 @@ thiserror = "1.0.69"
 tokio = { version = "1.41", features = ["fs", "macros", "rt-multi-thread"] }
 tokio-util = "0.7.12"
 tonic = "0.12"
+tonic-health = "0.12.3"
 tower = "0.5"
 backon = "1.3.0"
 tracing = { version = "0.1" }
@@ -49,6 +50,7 @@ sha2 = "0.10.8"
 md5 = "0.7.0"
 regex = "1.11.1"
 pyo3 = { version = "0.23.3", features = ["abi3-py39"] }
+http = "1.1.0"
 tower-http = { version = "0.6.2", features = ["trace", "cors"] }
 bytemuck = "1.21.0"
 rayon = "1.10.0"

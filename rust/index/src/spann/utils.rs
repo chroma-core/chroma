@@ -541,7 +541,7 @@ pub async fn rng_query(
             .query(normalized_query, k, &allowed_ids, &disallowed_ids)
             .map_err(|_| RngQueryError::HnswSearchError)?;
         for (id, distance) in ids.iter().zip(distances.iter()) {
-            if *distance <= (1_f32 + rng_epsilon) * distances[0] {
+            if !apply_rng_rule || *distance <= (1_f32 + rng_epsilon) * distances[0] {
                 nearby_ids.push(*id);
                 nearby_distances.push(*distance);
             }

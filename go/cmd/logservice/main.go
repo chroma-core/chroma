@@ -21,6 +21,8 @@ import (
 	"go.uber.org/automaxprocs/maxprocs"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 )
 
 func main() {
@@ -54,6 +56,9 @@ func main() {
 		log.Fatal("failed to listen", zap.Error(err))
 	}
 	s := grpc.NewServer(grpc.UnaryInterceptor(sharedOtel.ServerGrpcInterceptor))
+	healthcheck := health.NewServer()
+	healthgrpc.RegisterHealthServer(s, healthcheck)
+
 	logservicepb.RegisterLogServiceServer(s, server)
 	log.Info("log service started", zap.String("address", listener.Addr().String()))
 	go leader.AcquireLeaderLock(ctx, func(ctx context.Context) {
