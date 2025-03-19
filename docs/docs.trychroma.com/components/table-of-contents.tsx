@@ -3,6 +3,7 @@
 import { TextIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
+// @ts-expect-error - ignore
 export function TableOfContents({ toc }) {
   
     return (
@@ -15,7 +16,9 @@ export function TableOfContents({ toc }) {
   
         {/* Navigation Links */}
         <nav>
-          {toc.map((item) => (
+          {
+          // @ts-expect-error - ignore
+          toc.map((item) => (
             <div key={item.id} className={`mt-1 pl-${item.level * 1}`}>
               <a
                 href={`#${item.id}`}

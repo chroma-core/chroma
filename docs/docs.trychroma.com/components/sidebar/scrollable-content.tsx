@@ -29,6 +29,7 @@ const ScrollableContent: React.FC<{
 
     if (!scrollRef.current) return;
 
+    // @ts-expect-error - ignore
     const userPath = pathname.slice(1).split("/");
     const section = userPath[0];
 

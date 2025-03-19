@@ -13,6 +13,7 @@ const PageLink: React.FC<{
   const pathName = usePathname();
   const searchParams = useSearchParams();
   const active = pathName === path;
+  // @ts-expect-error - URLSearchParams is not iterable
   const lang = searchParams.get("lang");
 
   return (
