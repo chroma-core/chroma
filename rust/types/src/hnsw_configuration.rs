@@ -146,7 +146,7 @@ impl HnswConfiguration {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Validate, ToSchema)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, Validate, ToSchema)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct UpdateHnswConfiguration {
@@ -158,10 +158,4 @@ pub struct UpdateHnswConfiguration {
     pub sync_threshold: Option<usize>,
     #[validate(range(min = 2))]
     pub batch_size: Option<usize>,
-}
-
-impl Default for UpdateHnswConfiguration {
-    fn default() -> Self {
-        serde_json::from_str("{}").unwrap()
-    }
 }
