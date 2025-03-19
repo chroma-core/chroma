@@ -221,6 +221,7 @@ impl Arbitrary for TestCollectionData {
                         total_records_post_compaction: 0,
                         size_bytes_post_compaction: 0,
                         last_compaction_time_secs: 0,
+                        version_file_name: "".to_string(),
                     },
                     metadata_segment: Segment {
                         id: SegmentUuid::new(),

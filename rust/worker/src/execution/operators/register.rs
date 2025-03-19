@@ -175,6 +175,7 @@ mod tests {
             total_records_post_compaction,
             size_bytes_post_compaction,
             last_compaction_time_secs,
+            version_file_name: "".to_string(),
         };
 
         let collection_uuid_2 =
@@ -193,6 +194,7 @@ mod tests {
             total_records_post_compaction,
             size_bytes_post_compaction,
             last_compaction_time_secs,
+            version_file_name: "".to_string(),
         };
 
         match sysdb {

@@ -18,6 +18,17 @@ use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use std::sync::Arc;
 use uuid::Uuid;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use chroma_types::Segment;
+use chroma_types::SegmentType;
+use chroma_types::SegmentScope;
+
+#[derive(Clone, Debug)]
+struct SegmentBlockIdInfo {
+    segment_id: SegmentUuid,
+    block_ids: Vec<Uuid>,
+    segment_type: SegmentType,
+}
 
 #[derive(Clone, Debug)] // Add Arbitrary derive
 enum Transition {
@@ -25,11 +36,13 @@ enum Transition {
     CreateCollection {
         id: String,
         creation_time_secs: u64,
+        segments: Vec<Segment>,
     },
     // Add version to a specific collection.
     // id is the name of the collection.
     AddVersion {
         id: String,
+        segment_block_ids: Vec<SegmentBlockIdInfo>,
         version_block_ids: Vec<Uuid>,
         to_remove_block_ids: Vec<Uuid>,
         creation_time_secs: u64,
@@ -41,6 +54,7 @@ enum Transition {
     },
 }
 
+type VersionToSegmentBlockIdsMap = HashMap<u64, Vec<SegmentBlockIdInfo>>;
 type VersionToFilesMap = HashMap<u64, Vec<Uuid>>;
 type VersionToCreationTimeMap = HashMap<u64, u64>;
 
@@ -60,6 +74,8 @@ struct RefState {
     highest_registered_time: u64,
     // Keep track of the files that were deleted in the last cleanup.
     last_cleanup_files: Vec<String>,
+    coll_to_segment_ids: HashMap<String, Vec<Segment>>,
+    coll_to_segment_block_ids_map: HashMap<String, VersionToSegmentBlockIdsMap>,
 }
 
 impl RefState {
@@ -67,12 +83,22 @@ impl RefState {
         Self {
             collections: HashSet::new(),
             coll_to_files_map: HashMap::new(),
+            coll_to_segment_block_ids_map: HashMap::new(),
             coll_to_creation_time_map: HashMap::new(),
             coll_to_dropped_block_ids_map: HashMap::new(),
             min_versions_to_keep,
             highest_registered_time: 100,
             last_cleanup_files: Vec::new(),
+            coll_to_segment_ids: HashMap::new(),
         }
+    }
+
+    pub fn get_segment_block_ids_for_version(&self, collection_id: String, version: u64) -> Vec<SegmentBlockIdInfo> {
+        self.coll_to_segment_block_ids_map
+            .get(&collection_id)
+            .and_then(|versions| versions.get(&version))
+            .cloned()
+            .unwrap_or_default()
     }
 
     pub fn get_block_ids_for_version(&self, collection_id: String, version: u64) -> Vec<Uuid> {
@@ -97,6 +123,7 @@ impl RefState {
         id: String,
         version: u64,
         creation_time_secs: u64,
+        segment_block_ids: Vec<SegmentBlockIdInfo>,
         block_ids: Vec<Uuid>,
         dropped_block_ids: Vec<Uuid>,
     ) -> Self {
@@ -111,6 +138,9 @@ impl RefState {
             .entry(id.clone())
             .or_default();
         self.coll_to_dropped_block_ids_map
+            .entry(id.clone())
+            .or_default();
+        self.coll_to_segment_block_ids_map
             .entry(id.clone())
             .or_default();
 
@@ -131,11 +161,15 @@ impl RefState {
             .get_mut(&id)
             .unwrap()
             .insert(version, dropped_block_ids);
+        self.coll_to_segment_block_ids_map
+            .get_mut(&id)
+            .unwrap()
+            .insert(version, segment_block_ids);
 
         self
     }
 
-    fn create_collection(mut self, id: String) -> Self {
+    fn create_collection(mut self, id: String, segments: Vec<Segment>) -> Self {
         if self.collections.contains(&id) {
             tracing::debug!("RSM: create_collection: Collection already exists: {}", id);
             return self;
@@ -147,6 +181,9 @@ impl RefState {
             .insert(id.clone(), HashMap::new());
         self.coll_to_dropped_block_ids_map
             .insert(id.clone(), HashMap::new());
+        self.coll_to_segment_block_ids_map
+            .insert(id.clone(), HashMap::new());
+        self.coll_to_segment_ids.insert(id.clone(), segments);
         self
     }
 
@@ -212,6 +249,10 @@ impl RefState {
                 .get_mut(&collection_id)
                 .unwrap()
                 .remove(&version);
+            self.coll_to_segment_block_ids_map
+                .get_mut(&collection_id)
+                .unwrap()
+                .remove(&version);
         }
 
         // Convert the files to strings.
@@ -219,6 +260,7 @@ impl RefState {
             .into_iter()
             .map(|file| format!("block/{}", file))
             .collect();
+        tracing::info!("RSM: cleanup_versions: files_to_delete: {:?}", files_to_delete);
         self.last_cleanup_files = files_to_delete;
 
         self
@@ -235,9 +277,11 @@ impl ReferenceStateMachine for RefState {
             coll_to_files_map: HashMap::new(),
             coll_to_creation_time_map: HashMap::new(),
             coll_to_dropped_block_ids_map: HashMap::new(),
+            coll_to_segment_block_ids_map: HashMap::new(),
             min_versions_to_keep: 3,
             highest_registered_time: 100,
             last_cleanup_files: Vec::new(),
+            coll_to_segment_ids: HashMap::new(),
         })
         .boxed()
     }
@@ -247,6 +291,8 @@ impl ReferenceStateMachine for RefState {
         let existing_collection_ids: Vec<String> = 
             state.collections.iter().cloned().collect();
         let state_clone = state.clone();
+        // Create a random cutoff window between 1 and 10.
+        let cutoff_window_secs = 3;
 
         if existing_collection_ids.is_empty() {
             // If no collections exist, only generate CreateCollection transitions
@@ -254,8 +300,9 @@ impl ReferenceStateMachine for RefState {
                 .prop_map(move |id| {
                     let next_time = state_clone.highest_registered_time + 1;
                     Transition::CreateCollection {
-                        id,
+                        id: id.clone(),
                         creation_time_secs: next_time,
+                        segments: generate_segments_for_collection(CollectionUuid::from_str(&id.clone()).unwrap()),
                     }
                 })
                 .boxed()
@@ -267,27 +314,34 @@ impl ReferenceStateMachine for RefState {
                     .prop_map(move |id| {
                         let next_time = state_clone.highest_registered_time + 1;
                         Transition::CreateCollection {
-                            id,
+                            id: id.clone(),
                             creation_time_secs: next_time,
+                            segments: generate_segments_for_collection(CollectionUuid::from_str(&id.clone()).unwrap()),
                         }
                     }),
                 4 => prop::sample::select(existing_collection_ids.clone()).prop_map(move |id| {
-                    let (block_ids_new_version, block_ids_dropped) =
-                        blocks_ids_for_next_version(state_clone.get_block_ids_for_version(
-                            id.clone(),
-                            state_clone.get_current_version(id.clone()),
-                        ));
+                    // let (block_ids_new_version, block_ids_dropped) =
+                    //     blocks_ids_for_next_version(state_clone.get_block_ids_for_version(
+                    //         id.clone(),
+                    //         state_clone.get_current_version(id.clone()),
+                    //     ));
+                    let segment_block_ids = state_clone.get_segment_block_ids_for_version(
+                        id.clone(),
+                        state_clone.get_current_version(id.clone()),
+                    );
+                    let (segment_block_ids_new_version, dropped_block_ids) = segment_block_ids_for_next_version(segment_block_ids);
                     Transition::AddVersion {
                         id: id.clone(),
-                        version_block_ids: block_ids_new_version,
-                        to_remove_block_ids: block_ids_dropped,
+                        version_block_ids: Vec::new(), // block_ids_new_version,
+                        to_remove_block_ids: dropped_block_ids,
                         creation_time_secs: state_clone.highest_registered_time + 1,
+                        segment_block_ids: segment_block_ids_new_version,
                     }
                 }),
                 2 => prop::sample::select(existing_collection_ids).prop_map(move |id| {
                     Transition::CleanupVersions {
                         id: id.clone(),
-                        cutoff_window_secs: 100,
+                        cutoff_window_secs: cutoff_window_secs,
                     }
                 }),
             ]
@@ -302,6 +356,7 @@ impl ReferenceStateMachine for RefState {
                 version_block_ids: _,
                 to_remove_block_ids: _,
                 creation_time_secs: _,
+                segment_block_ids: _,
             } => state.collections.contains(id),
             Transition::CleanupVersions {
                 id,
@@ -317,22 +372,26 @@ impl ReferenceStateMachine for RefState {
             },
             Transition::CreateCollection {
                 id,
+                segments: _,
                 creation_time_secs: _,
             } => !state.collections.contains(id),
         }
     }
 
     fn apply(state: Self::State, transition: &Self::Transition) -> Self {
+        tracing::info!("Applying transition: {:?} to RefState", transition);
         match transition {
             Transition::AddVersion {
                 id,
                 version_block_ids,
                 to_remove_block_ids,
                 creation_time_secs,
+                segment_block_ids,
             } => state.clone().add_version(
                 id.clone(),
                 state.clone().get_current_version(id.clone()) + 1,
                 *creation_time_secs,
+                segment_block_ids.clone(),
                 version_block_ids.clone(),
                 to_remove_block_ids.clone(),
             ),
@@ -344,11 +403,15 @@ impl ReferenceStateMachine for RefState {
                 .cleanup_versions(id.clone(), *cutoff_window_secs),
             Transition::CreateCollection {
                 id,
+                segments,
                 creation_time_secs: _,
-            } => state.clone().create_collection(id.clone()),
+            } => state.clone().create_collection(id.clone(), segments.clone()),
         }
     }
 }
+
+// Add this at the top level of the file
+static INVARIANT_CHECK_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 struct GcTest {
     storage: Storage,
@@ -384,6 +447,7 @@ impl GcTest {
         id: String,
         _version: u64,
         _creation_time_secs: u64,
+        segment_block_ids: Vec<SegmentBlockIdInfo>,
         version_block_ids: Vec<Uuid>,
     ) -> Self {
         // 1. Get version file name and current version from sysdb
@@ -404,20 +468,20 @@ impl GcTest {
 
         // ----- Prepare to call flush compaction.  ---------
         // Use half of version_block_ids as the block ids for the new version.
-        let block_ids: Vec<Uuid> = version_block_ids
-            .iter()
-            .take(version_block_ids.len() / 2)
-            .cloned()
-            .collect();
+        // Create the new record segment.
+        let record_segment_info = segment_block_ids.iter()
+            .find(|sbi| sbi.segment_type == SegmentType::BlockfileRecord)
+            .unwrap()
+            .clone();
         // Create sparse index for record segment
         let sparse_index_id = block_on(create_test_sparse_index(
             &self.storage,
-            block_ids.clone(),
+            record_segment_info.block_ids.clone(),
             Some("test_si_".to_string()),
         ))
         .unwrap();
         // Create segment info for this version
-        let record_segment_id = SegmentUuid::new();
+        let record_segment_id = record_segment_info.segment_id;
         let mut file_paths = HashMap::new();
         file_paths.insert(
             "rec_blockfile_1".to_string(),
@@ -431,20 +495,18 @@ impl GcTest {
         };
 
         // Create sparse index for metadata segment
-        // Use the remaining half of version_block_ids as the block ids for the metadata segment.
-        let block_ids: Vec<Uuid> = version_block_ids
-            .iter()
-            .skip(version_block_ids.len() / 2)
-            .cloned()
-            .collect();
+        let metadata_segment_info = segment_block_ids.iter()
+            .find(|sbi| sbi.segment_type == SegmentType::BlockfileMetadata)
+            .unwrap()
+            .clone();
         let sparse_index_id = block_on(create_test_sparse_index(
             &self.storage,
-            block_ids.clone(),
+            metadata_segment_info.block_ids.clone(),
             Some("test_si_".to_string()),
         ))
         .unwrap();
         // Create segment info for this version
-        let metadata_segment_id = SegmentUuid::new();
+        let metadata_segment_id = metadata_segment_info.segment_id;
         let mut file_paths = HashMap::new();
         file_paths.insert(
             "metadata_blockfile_1".to_string(),
@@ -497,10 +559,19 @@ impl GcTest {
         self
     }
 
-    fn create_collection(self, _id: String, _creation_time_secs: u64) -> Self {
-        // Currently, TestSysDb does not have create collection, and creates it
-        // when a version is added.
-        // TODO(rohitcp): Call SysDb create collection.
+    fn create_collection(mut self, id: String, segments: Vec<Segment>, _creation_time_secs: u64) -> Self {
+        let collection_id = CollectionUuid::from_str(&id).unwrap();
+        let result = block_on(self.sysdb.create_collection(
+            "tenant".to_string(),
+            "database".to_string(),
+            collection_id,
+            "collection".to_string(),
+            segments,
+            None,
+            None,
+            false,
+        ));
+        assert!(result.is_ok(), "Failed to create collection: {:?}", result.err());
         self
     }
 
@@ -548,6 +619,7 @@ impl GcTest {
             Ok(response) => {
                 tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
                 self.last_cleanup_files = response.deletion_list.clone();
+                tracing::info!("RSM: cleanup_versions: last_cleanup_files: {:?}", self.last_cleanup_files);
             }
             Err(e) => {
                 tracing::error!("Error during garbage collection: {:?}", e);
@@ -570,6 +642,7 @@ impl StateMachineTest for GcTest {
     fn init_test(
         _ref_state: &<Self::Reference as ReferenceStateMachine>::State,
     ) -> Self::SystemUnderTest {
+        tracing::info!("Initializing new test instance");
         Self::default()
     }
 
@@ -578,22 +651,26 @@ impl StateMachineTest for GcTest {
         ref_state: &<Self::Reference as ReferenceStateMachine>::State,
         transition: <Self::Reference as ReferenceStateMachine>::Transition,
     ) -> Self::SystemUnderTest {
+        tracing::info!("Applying transition: {:?} to SUT", transition);
         let state = match transition {
             Transition::AddVersion {
                 id,
                 version_block_ids,
                 to_remove_block_ids: _,
                 creation_time_secs,
+                segment_block_ids,
             } => state.add_version(
                 id.clone(),
                 ref_state.get_current_version(id.clone()) + 1,
                 creation_time_secs,
+                segment_block_ids.clone(),
                 version_block_ids.clone(),
             ),
             Transition::CreateCollection {
                 id,
+                segments,
                 creation_time_secs,
-            } => state.create_collection(id, creation_time_secs),
+            } => state.create_collection(id, segments, creation_time_secs),
             Transition::CleanupVersions {
                 id,
                 cutoff_window_secs,
@@ -606,9 +683,53 @@ impl StateMachineTest for GcTest {
         state: &Self::SystemUnderTest,
         ref_state: &<Self::Reference as ReferenceStateMachine>::State,
     ) {
-        // Check that the last cleanup files are same as the files in the ref state.
+        INVARIANT_CHECK_COUNT.fetch_add(1, Ordering::SeqCst);
+        tracing::info!(
+            "Checking invariants (count: {})",
+            INVARIANT_CHECK_COUNT.load(Ordering::SeqCst)
+        );
+        
         assert_eq!(state.last_cleanup_files, ref_state.last_cleanup_files);
     }
+}
+
+fn generate_segments_for_collection(collection_id: CollectionUuid) -> Vec<Segment> {
+    let record_segment = Segment {
+        id: SegmentUuid::new(),
+        r#type: SegmentType::BlockfileRecord,
+        scope: SegmentScope::RECORD,
+        collection: collection_id,
+        metadata: None,
+        file_path: HashMap::new(),
+    };
+    let metadata_segment = Segment {
+        id: SegmentUuid::new(),
+        r#type: SegmentType::BlockfileMetadata,
+        scope: SegmentScope::METADATA,
+        collection: collection_id,
+        metadata: None,
+        file_path: HashMap::new(),
+    };
+
+    vec![record_segment, metadata_segment]
+}
+
+fn segment_block_ids_for_next_version(existing_segment_block_ids: Vec<SegmentBlockIdInfo>) -> (Vec<SegmentBlockIdInfo>, Vec<Uuid>) {
+    let mut new_segment_block_ids = Vec::new();
+    let mut dropped_block_ids = Vec::new();
+    for segment in existing_segment_block_ids {
+        let block_ids = segment.block_ids.clone();
+        let (new_block_ids, dropped_ids) = blocks_ids_for_next_version(block_ids);
+        new_segment_block_ids.push(SegmentBlockIdInfo {
+            segment_id: segment.segment_id,
+            block_ids: new_block_ids,
+            segment_type: segment.segment_type,
+        });
+        // Add dropped block ids to the list of dropped block ids
+        dropped_block_ids.extend(dropped_ids);
+    }
+
+    (new_segment_block_ids, dropped_block_ids)
 }
 
 fn blocks_ids_for_next_version(block_ids: Vec<Uuid>) -> (Vec<Uuid>, Vec<Uuid>) {
@@ -638,28 +759,6 @@ fn blocks_ids_for_next_version(block_ids: Vec<Uuid>) -> (Vec<Uuid>, Vec<Uuid>) {
     (kept_block_ids, dropped_block_ids)
 }
 
-fn _randomly_generate_block_ids_for_next_version(block_ids: Vec<Uuid>) -> Vec<Uuid> {
-    let mut rng = rand::thread_rng();
-
-    // Keep a random percentage (between 30% and 90%) of old block IDs
-    let keep_percentage = rng.gen_range(30..=90) as f64 / 100.0;
-    let num_to_keep = (block_ids.len() as f64 * keep_percentage).ceil() as usize;
-
-    // Randomly select block IDs to keep
-    let mut kept_block_ids: Vec<Uuid> = block_ids
-        .choose_multiple(&mut rng, num_to_keep)
-        .cloned()
-        .collect();
-
-    // Generate between 0 and 10 new block IDs
-    let num_new_blocks = rng.gen_range(0..=10);
-    let new_block_ids: Vec<Uuid> = (0..num_new_blocks).map(|_| Uuid::new_v4()).collect();
-
-    // Combine kept and new block IDs
-    kept_block_ids.extend(new_block_ids);
-    kept_block_ids
-}
-
 prop_state_machine! {
     #![proptest_config(ProptestConfig::with_cases(20))]
     // #[test]
@@ -673,5 +772,13 @@ prop_state_machine! {
 
 #[test]
 fn run_gc_test_ext() {
+    // Initialize tracing
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .try_init();
+
+    INVARIANT_CHECK_COUNT.store(0, Ordering::SeqCst);
     run_gc_test();
+    let checks = INVARIANT_CHECK_COUNT.load(Ordering::SeqCst);
+    assert!(checks > 0, "check_invariants was never called! Count: {}", checks);
 }
