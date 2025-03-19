@@ -302,11 +302,13 @@ impl TestReferenceSegment {
             .filter(|(k, (_, rec))| {
                 plan.filter
                     .query_ids
-                    .as_ref().is_none_or(|ids| ids.contains(k))
+                    .as_ref()
+                    .map_or(true, |ids| ids.contains(k))
                     && plan
                         .filter
                         .where_clause
-                        .as_ref().is_none_or(|w| w.eval(rec))
+                        .as_ref()
+                        .map_or(true, |w| w.eval(rec))
             })
             .map(|(_, v)| v.clone())
             .collect::<Vec<_>>();
