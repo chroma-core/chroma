@@ -353,101 +353,170 @@ def test_persist_embeddings_state(
         lambda: PersistEmbeddingsStateMachine(settings=settings, client=client),
     )  # type: ignore
 
+
 from strategies import hashing_embedding_function
+
+
 def test_repro(caplog: pytest.LogCaptureFixture, settings: Settings) -> None:
-    state = PersistEmbeddingsStateMachine(settings=settings, client=chromadb.Client(settings))
-    state.initialize(collection=strategies.Collection(name='yveGL50AGjsnV', metadata={'E4gAsZf': -40690, 'hnsw:construction_ef': 128, 'hnsw:search_ef': 128, 'hnsw:M': 128, 'hnsw:sync_threshold': 9, 'hnsw:batch_size': 8}, embedding_function=hashing_embedding_function(dim=1628, dtype=np.float64), id=UUID('239f3c75-3b36-43c3-8799-e437988debe7'), dimension=1628, dtype=np.float64, known_metadata_keys={}, known_document_keywords=[], has_documents=False, has_embeddings=True))
+    state = PersistEmbeddingsStateMachine(
+        settings=settings, client=chromadb.Client(settings)
+    )
+    state.initialize(
+        collection=strategies.Collection(
+            name="yveGL50AGjsnV",
+            metadata={
+                "E4gAsZf": -40690,
+                "hnsw:construction_ef": 128,
+                "hnsw:search_ef": 128,
+                "hnsw:M": 128,
+                "hnsw:sync_threshold": 9,
+                "hnsw:batch_size": 8,
+            },
+            embedding_function=hashing_embedding_function(dim=1628, dtype=np.float64),
+            id=UUID("239f3c75-3b36-43c3-8799-e437988debe7"),
+            dimension=1628,
+            dtype=np.float64,
+            known_metadata_keys={},
+            known_document_keywords=[],
+            has_documents=False,
+            has_embeddings=True,
+        )
+    )
     state.ann_accuracy()
     state.count()
     state.fields_match()
     state.log_size_below_max()
     state.no_duplicates()
-    (embedding_ids_0,) = state.add_embeddings(record_set={'ids': ['3k0Y'], 'embeddings': [[0.0]], 'metadatas': [{'-FK': -129, 'F8Ns5': 'geeww'}],'documents': None})
+    (embedding_ids_0,) = state.add_embeddings(
+        record_set={
+            "ids": ["3k0Y"],
+            "embeddings": [[0.0]],
+            "metadatas": [{"-FK": -129, "F8Ns5": "geeww"}],
+            "documents": None,
+        }
+    )
     state.ann_accuracy()
     # recall: 1.0, missing 0 out of 1, accuracy threshold 1e-06
     state.count()
     state.fields_match()
     state.log_size_below_max()
     state.no_duplicates()
-    embedding_ids_1, embedding_ids_2 = state.add_embeddings(record_set={'ids': ['gcJ4z', 'D'], 'embeddings': [[0.0], [0.0]], 'metadatas': [{'o': 100, 'Y': True, 'zjNOU_h': 1000000.0},{'EsQ8HsHzsRnAeC60': True}],'documents': None})
+    embedding_ids_1, embedding_ids_2 = state.add_embeddings(
+        record_set={
+            "ids": ["gcJ4z", "D"],
+            "embeddings": [[0.0], [0.0]],
+            "metadatas": [
+                {"o": 100, "Y": True, "zjNOU_h": 1000000.0},
+                {"EsQ8HsHzsRnAeC60": True},
+            ],
+            "documents": None,
+        }
+    )
     state.ann_accuracy()
     # recall: 1.0, missing 0 out of 3, accuracy threshold 1e-06
     state.count()
     state.fields_match()
     state.log_size_below_max()
     state.no_duplicates()
-    embedding_ids_3, embedding_ids_4, embedding_ids_5, embedding_ids_6, embedding_ids_7, embedding_ids_8 = state.add_embeddings(record_set={'ids': ['RJYHz', 'HvqDh', '4AWGd3', '3IL', 'EmdNP', 'MC1pDB'],
-    'embeddings': [[0.0], [0.0], [0.0], [0.0], [0.0], [0.0]],
-    'metadatas': [{'4qbpv9khd': 27121, 'immg': -40853, 'I7': True, '9e': False},
-        {'qzco7u6oOU2': -7576,
-        'maD': True,
-        '-lw7Z1v4R_TE': 1_543_784_195,
-        'hK': True},
-        {'j': 1.100000023841858, 'B_': -1_605_931_957},
-        {'dMVyEXHusU1': True},
-        {'7': False,
-        'igpaI75JMA_Zclr': 1.100000023841858,
-        'AZ': 'CVlcZX0e_u',
-        'YrY': 'QYhPN3N'},
-        {'nz6E3mZuLUn': False,
-        'HHRB1_RQ4KVc2Z05': 'o',
-        'J0YJGeAYjg2Lsn0AmS2jYIG': -15279,
-        '2Y692i': -1.100000023841858,
-        'zE-eL8_5wntUmNId4': -221,
-        'K_pE': -1.1754943508222875e-38,
-        'kQ': 'QO0',
-        'UpjJmXeuXb3hX_F7bRJU': '8gG',
-        '_B': 'RewTcjcZMhxy',
-        'hfdi5kS': 'N',
-        'GbPhY': True,
-        'WC': 1.1920928955078125e-07,
-        'i': False}],
-    'documents': None})
+    (
+        embedding_ids_3,
+        embedding_ids_4,
+        embedding_ids_5,
+        embedding_ids_6,
+        embedding_ids_7,
+        embedding_ids_8,
+    ) = state.add_embeddings(
+        record_set={
+            "ids": ["RJYHz", "HvqDh", "4AWGd3", "3IL", "EmdNP", "MC1pDB"],
+            "embeddings": [[0.0], [0.0], [0.0], [0.0], [0.0], [0.0]],
+            "metadatas": [
+                {"4qbpv9khd": 27121, "immg": -40853, "I7": True, "9e": False},
+                {
+                    "qzco7u6oOU2": -7576,
+                    "maD": True,
+                    "-lw7Z1v4R_TE": 1_543_784_195,
+                    "hK": True,
+                },
+                {"j": 1.100000023841858, "B_": -1_605_931_957},
+                {"dMVyEXHusU1": True},
+                {
+                    "7": False,
+                    "igpaI75JMA_Zclr": 1.100000023841858,
+                    "AZ": "CVlcZX0e_u",
+                    "YrY": "QYhPN3N",
+                },
+                {
+                    "nz6E3mZuLUn": False,
+                    "HHRB1_RQ4KVc2Z05": "o",
+                    "J0YJGeAYjg2Lsn0AmS2jYIG": -15279,
+                    "2Y692i": -1.100000023841858,
+                    "zE-eL8_5wntUmNId4": -221,
+                    "K_pE": -1.1754943508222875e-38,
+                    "kQ": "QO0",
+                    "UpjJmXeuXb3hX_F7bRJU": "8gG",
+                    "_B": "RewTcjcZMhxy",
+                    "hfdi5kS": "N",
+                    "GbPhY": True,
+                    "WC": 1.1920928955078125e-07,
+                    "i": False,
+                },
+            ],
+            "documents": None,
+        }
+    )
     state.ann_accuracy()
     # recall: 1.0, missing 0 out of 9, accuracy threshold 1e-06
     state.count()
     state.fields_match()
     state.log_size_below_max()
     state.no_duplicates()
-    state.update_embeddings(record_set={'ids': [embedding_ids_2,
-        embedding_ids_1,
-        embedding_ids_8,
-        embedding_ids_3,
-        embedding_ids_7],
-    'embeddings': [[0.0],
-        [0.0],
-        [0.0],
-        [0.0],
-        [0.0]],
-    'metadatas': [{'O': 1.1754943508222875e-38,
-        'k': -406571933,
-        'I4C6HJUHUxCS': 'jHYBmJmmV1QZC7',
-        'fduK9oTufUF_HVmOCffVu4-7Ay': -94,
-        'nmc': True,
-        'h_LM': -1469,
-        'W': True},
-        {'od': 1.1754943508222875e-38},
-        {'mvh-nCTnuZ3FigOyzDWfUrHm4u3Ci79cke': 1_019_066_597,
-        'Ku': False,
-        'Lm4G': True,
-        '4g1o': '6q',
-        'b': -47409,
-        'L5H': 'Ly0CRtvVp',
-        'gFH0Gg': -0.0,
-        'I0ezdhq': -1_751_083_351,
-        'VPn': 'v9x',
-        '-AF': 151017.3125,
-        'afb': 'V1dM8qg',
-        'OuV': 'ZSCLr_4UZ9ImWvmswCEe',
-        '4xiq4uG0-N-m': True,
-        'n16KYO': '68',
-        'BlkCT': -0.3333333432674408,
-        'WjcksGzGsP': False,
-        'z9S': -5.960464477539063e-08,
-        'Pob': 5.960464477539063e-08},
-        {'FG': False, '0': 1_011_702_138, '2': -156, 'axSqm9s7uWFQA': 201},
-        {'jE3': False}],
-    'documents': None})
+    state.update_embeddings(
+        record_set={
+            "ids": [
+                embedding_ids_2,
+                embedding_ids_1,
+                embedding_ids_8,
+                embedding_ids_3,
+                embedding_ids_7,
+            ],
+            "embeddings": [[0.0], [0.0], [0.0], [0.0], [0.0]],
+            "metadatas": [
+                {
+                    "O": 1.1754943508222875e-38,
+                    "k": -406571933,
+                    "I4C6HJUHUxCS": "jHYBmJmmV1QZC7",
+                    "fduK9oTufUF_HVmOCffVu4-7Ay": -94,
+                    "nmc": True,
+                    "h_LM": -1469,
+                    "W": True,
+                },
+                {"od": 1.1754943508222875e-38},
+                {
+                    "mvh-nCTnuZ3FigOyzDWfUrHm4u3Ci79cke": 1_019_066_597,
+                    "Ku": False,
+                    "Lm4G": True,
+                    "4g1o": "6q",
+                    "b": -47409,
+                    "L5H": "Ly0CRtvVp",
+                    "gFH0Gg": -0.0,
+                    "I0ezdhq": -1_751_083_351,
+                    "VPn": "v9x",
+                    "-AF": 151017.3125,
+                    "afb": "V1dM8qg",
+                    "OuV": "ZSCLr_4UZ9ImWvmswCEe",
+                    "4xiq4uG0-N-m": True,
+                    "n16KYO": "68",
+                    "BlkCT": -0.3333333432674408,
+                    "WjcksGzGsP": False,
+                    "z9S": -5.960464477539063e-08,
+                    "Pob": 5.960464477539063e-08,
+                },
+                {"FG": False, "0": 1_011_702_138, "2": -156, "axSqm9s7uWFQA": 201},
+                {"jE3": False},
+            ],
+            "documents": None,
+        }
+    )
     state.ann_accuracy()
     # recall: 1.0, missing 0 out of 9, accuracy threshold 1e-06
     state.count()
@@ -461,47 +530,69 @@ def test_repro(caplog: pytest.LogCaptureFixture, settings: Settings) -> None:
     state.fields_match()
     state.log_size_below_max()
     state.no_duplicates()
-    embedding_ids_9, embedding_ids_10, embedding_ids_11 = state.add_embeddings(record_set={'ids': ['U', 'RSeiQXYKIZxI', 'lN3AVOf-DlC'],
-    'embeddings': [[0.0], [0.0], [0.0]],
-    'metadatas': [{'pKQ': 'STWOTBR',
-        'z': -270,
-        'wnF': True,
-        'Vrv': True,
-        'o': False,
-        '1v51Jf3': True,
-        'fAThOoc': -9.999999747378752e-06},
-        {'KncedkhnNAAkd': False,
-        'x': -1.1754943508222875e-38,
-        '3Ra': -5.960464477539063e-08,
-        'Rvfb': 46996},
-        {'QoMB68tW4': False,
-        'Ws0q': 173851994,
-        '0eHu': 1000000.0,
-        'mY288M': 'HuiJ',
-        'vBygCv': 1.899999976158142,
-        'Ku7g': False}],
-    'documents': None})
+    embedding_ids_9, embedding_ids_10, embedding_ids_11 = state.add_embeddings(
+        record_set={
+            "ids": ["U", "RSeiQXYKIZxI", "lN3AVOf-DlC"],
+            "embeddings": [[0.0], [0.0], [0.0]],
+            "metadatas": [
+                {
+                    "pKQ": "STWOTBR",
+                    "z": -270,
+                    "wnF": True,
+                    "Vrv": True,
+                    "o": False,
+                    "1v51Jf3": True,
+                    "fAThOoc": -9.999999747378752e-06,
+                },
+                {
+                    "KncedkhnNAAkd": False,
+                    "x": -1.1754943508222875e-38,
+                    "3Ra": -5.960464477539063e-08,
+                    "Rvfb": 46996,
+                },
+                {
+                    "QoMB68tW4": False,
+                    "Ws0q": 173851994,
+                    "0eHu": 1000000.0,
+                    "mY288M": "HuiJ",
+                    "vBygCv": 1.899999976158142,
+                    "Ku7g": False,
+                },
+            ],
+            "documents": None,
+        }
+    )
     state.ann_accuracy()
     # recall: 1.0, missing 0 out of 9, accuracy threshold 1e-06
     state.count()
     state.fields_match()
     state.log_size_below_max()
     state.no_duplicates()
-    state.update_embeddings(record_set={'ids': [embedding_ids_1, embedding_ids_8, embedding_ids_2],
-    'embeddings': [[0.0], [0.0], [0.0]],
-    'metadatas': [{'4fOLyjLGI': 23335,
-        'EeB4JNVga1': 0.3333333432674408,
-        '8j': -1.1920928955078125e-07,
-        'oZlg': 114354.0703125,
-        'uEW1': 27414,
-        '6cKQIZR6': True,
-        'OR': 'Ac'},
-        {'kC': 'IT1', 'Y_lZBRAmw37zU': 'C', 'au_E': True, 'H1': True},
-        {'I': -1_171_948_616,
-        'D6Ntwt7rcen1S': -1.899999976158142,
-        '3X601pk': 24107,
-        'VFLnkz4x': 20}],
-    'documents': None})
+    state.update_embeddings(
+        record_set={
+            "ids": [embedding_ids_1, embedding_ids_8, embedding_ids_2],
+            "embeddings": [[0.0], [0.0], [0.0]],
+            "metadatas": [
+                {
+                    "4fOLyjLGI": 23335,
+                    "EeB4JNVga1": 0.3333333432674408,
+                    "8j": -1.1920928955078125e-07,
+                    "oZlg": 114354.0703125,
+                    "uEW1": 27414,
+                    "6cKQIZR6": True,
+                    "OR": "Ac",
+                },
+                {"kC": "IT1", "Y_lZBRAmw37zU": "C", "au_E": True, "H1": True},
+                {
+                    "I": -1_171_948_616,
+                    "D6Ntwt7rcen1S": -1.899999976158142,
+                    "3X601pk": 24107,
+                    "VFLnkz4x": 20,
+                },
+            ],
+            "documents": None,
+        }
+    )
     state.ann_accuracy()
     # recall: 1.0, missing 0 out of 9, accuracy threshold 1e-06
     state.count()
@@ -515,37 +606,49 @@ def test_repro(caplog: pytest.LogCaptureFixture, settings: Settings) -> None:
     state.fields_match()
     state.log_size_below_max()
     state.no_duplicates()
-    state.delete_by_ids(ids=[embedding_ids_3,
-    embedding_ids_4,
-    embedding_ids_2,
-    embedding_ids_10,
-    embedding_ids_8,
-    embedding_ids_6])
+    state.delete_by_ids(
+        ids=[
+            embedding_ids_3,
+            embedding_ids_4,
+            embedding_ids_2,
+            embedding_ids_10,
+            embedding_ids_8,
+            embedding_ids_6,
+        ]
+    )
     state.ann_accuracy()
     # recall: 1.0, missing 0 out of 3, accuracy threshold 1e-06
     state.count()
     state.fields_match()
     state.log_size_below_max()
     state.no_duplicates()
-    state.upsert_embeddings(record_set={'ids': [embedding_ids_9, embedding_ids_1, 'zk', '8ZRY'],
-    'embeddings': [[0.0], [0.0], [0.0], [0.0]],
-    'metadatas': [{'mrx6v': -1.100000023841858},
-        {'-M': 0.0, '3Ulo5AX9': True, 'VO': False},
-        {'C': 'poPLBK'},
-        {'4rZTHA4': 'mZ',
-        'sHk0': True,
-        'SRFiehcOa5_Xho3Fq': 'wD731w',
-        'nNV': 1.1754943508222875e-38,
-        'Ra': 'HLhpMtu8BVxpcqf',
-        'BHnTTXCACxHYFDq7': 'vSxq6',
-        'CfTjd4oMrT': False,
-        'kM': False,
-        'CWH': 'c38',
-        'X': 713662.3125,
-        'vNtlSZt': -9.999999747378752e-06,
-        'dhY': -24313,
-        're': 'RSC'}],
-    'documents': None})
+    state.upsert_embeddings(
+        record_set={
+            "ids": [embedding_ids_9, embedding_ids_1, "zk", "8ZRY"],
+            "embeddings": [[0.0], [0.0], [0.0], [0.0]],
+            "metadatas": [
+                {"mrx6v": -1.100000023841858},
+                {"-M": 0.0, "3Ulo5AX9": True, "VO": False},
+                {"C": "poPLBK"},
+                {
+                    "4rZTHA4": "mZ",
+                    "sHk0": True,
+                    "SRFiehcOa5_Xho3Fq": "wD731w",
+                    "nNV": 1.1754943508222875e-38,
+                    "Ra": "HLhpMtu8BVxpcqf",
+                    "BHnTTXCACxHYFDq7": "vSxq6",
+                    "CfTjd4oMrT": False,
+                    "kM": False,
+                    "CWH": "c38",
+                    "X": 713662.3125,
+                    "vNtlSZt": -9.999999747378752e-06,
+                    "dhY": -24313,
+                    "re": "RSC",
+                },
+            ],
+            "documents": None,
+        }
+    )
     state.ann_accuracy()
     # recall: 1.0, missing 0 out of 5, accuracy threshold 1e-06
     state.count()
@@ -555,6 +658,7 @@ def test_repro(caplog: pytest.LogCaptureFixture, settings: Settings) -> None:
     state.delete_by_ids(ids=[embedding_ids_9, embedding_ids_1, embedding_ids_11])
     state.ann_accuracy()
     state.teardown()
+
 
 def test_delete_less_than_k(
     caplog: pytest.LogCaptureFixture, settings: Settings
