@@ -12,7 +12,7 @@ mod tests {
     #[test]
     fn test_blockfile_shuttle() {
         let mut config = shuttle::Config::default();
-        config.stack_size = 1 * 1024 * 1024; // 1MB
+        config.stack_size = 1024 * 1024; // 1MB
 
         let scheduler = RandomScheduler::new(100);
         let runner = Runner::new(scheduler, config);
