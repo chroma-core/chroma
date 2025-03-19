@@ -1473,6 +1473,7 @@ dependencies = [
 name = "chroma-error"
 version = "0.1.0"
 dependencies = [
+ "http 1.1.0",
  "sqlx",
  "thiserror 1.0.69",
  "tonic",
@@ -1776,7 +1777,6 @@ name = "chroma-tracing"
 version = "0.1.0"
 dependencies = [
  "chroma-system",
- "chrono",
  "fastrace",
  "fastrace-opentelemetry",
  "http 1.1.0",

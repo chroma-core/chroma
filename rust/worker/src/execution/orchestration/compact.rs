@@ -40,7 +40,7 @@ use chroma_segment::blockfile_record::RecordSegmentReader;
 use chroma_segment::blockfile_record::RecordSegmentReaderCreationError;
 use chroma_segment::blockfile_record::RecordSegmentWriter;
 use chroma_segment::distributed_hnsw::DistributedHNSWSegmentWriter;
-use chroma_segment::distributed_spann::SpannSegmentWriter;
+use chroma_segment::spann_provider::SpannProvider;
 use chroma_segment::types::ChromaSegmentFlusher;
 use chroma_segment::types::ChromaSegmentWriter;
 use chroma_segment::types::MaterializeLogsResult;
@@ -120,6 +120,7 @@ pub struct CompactOrchestrator {
     sysdb: SysDb,
     blockfile_provider: BlockfileProvider,
     hnsw_index_provider: HnswIndexProvider,
+    spann_provider: SpannProvider,
     // State we hold across the execution
     pulled_log_offset: Option<i64>,
     // Dispatcher
@@ -248,6 +249,7 @@ impl CompactOrchestrator {
         sysdb: SysDb,
         blockfile_provider: BlockfileProvider,
         hnsw_index_provider: HnswIndexProvider,
+        spann_provider: SpannProvider,
         dispatcher: ComponentHandle<Dispatcher>,
         result_channel: Option<Sender<Result<CompactionResponse, CompactionError>>>,
         max_compaction_size: usize,
@@ -262,6 +264,7 @@ impl CompactOrchestrator {
             sysdb,
             blockfile_provider,
             hnsw_index_provider,
+            spann_provider,
             pulled_log_offset: None,
             dispatcher,
             num_uncompleted_materialization_tasks: 0,
@@ -285,7 +288,6 @@ impl CompactOrchestrator {
         self.state = ExecutionState::Partition;
         let operator = PartitionOperator::new();
         tracing::info!("Sending N Records: {:?}", records.len());
-        println!("Sending N Records: {:?}", records.len());
         let input = PartitionInput::new(records, self.max_partition_size);
         let task = wrap(operator, input, ctx.receiver());
         self.send(task, ctx).await;
@@ -572,7 +574,6 @@ impl CompactOrchestrator {
         // Nor should we create new writers across different tasks
 
         let blockfile_provider = self.blockfile_provider.clone();
-        let hnsw_provider = self.hnsw_index_provider.clone();
         let mut sysdb = self.sysdb.clone();
 
         let record_segment = self.get_segment(SegmentType::BlockfileRecord).await?;
@@ -657,13 +658,10 @@ impl CompactOrchestrator {
                         vector: VectorSegmentWriter::Hnsw(hnsw_segment_writer),
                     })
                 } else if vector_segment.r#type == SegmentType::Spann {
-                    let spann_writer = match SpannSegmentWriter::from_segment(
-                        &vector_segment,
-                        &blockfile_provider,
-                        &hnsw_provider,
-                        dim as usize,
-                    )
-                    .await
+                    let spann_writer = match self
+                        .spann_provider
+                        .write(&vector_segment, dim as usize)
+                        .await
                     {
                         Ok(writer) => writer,
                         Err(e) => {

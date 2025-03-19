@@ -60,7 +60,7 @@ impl System {
                 )
             }
             ComponentRuntime::Dedicated => {
-                println!("Spawning on dedicated thread");
+                tracing::debug!("Spawning on dedicated thread");
                 // Spawn on a dedicated thread
                 let rt = Builder::new_current_thread().enable_all().build().unwrap();
                 let _join_handle = std::thread::spawn(move || {

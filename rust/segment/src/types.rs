@@ -903,7 +903,10 @@ impl VectorSegmentWriter {
     }
 
     pub async fn finish(&mut self) -> Result<(), Box<dyn ChromaError>> {
-        Ok(())
+        match self {
+            VectorSegmentWriter::Hnsw(_) => Ok(()),
+            VectorSegmentWriter::Spann(writer) => writer.garbage_collect().await,
+        }
     }
 
     pub async fn commit(self) -> Result<ChromaSegmentFlusher, Box<dyn ChromaError>> {

@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-chrono = { workspace = true }
 fastrace = "0.7"
 fastrace-opentelemetry = "0.8"
 http = { version = "1", optional = true }

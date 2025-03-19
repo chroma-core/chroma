@@ -163,7 +163,7 @@ impl Dispatcher {
             Some((task, span)) => match request.reply_to.send(task, Some(span)).await {
                 Ok(_) => {}
                 Err(e) => {
-                    println!("Error sending task to worker: {:?}", e);
+                    tracing::error!("Error sending task to worker: {:?}", e);
                 }
             },
             None => {

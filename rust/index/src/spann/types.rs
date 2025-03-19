@@ -7,6 +7,7 @@ use chroma_blockstore::{
     provider::{BlockfileProvider, CreateError, OpenError},
     BlockfileFlusher, BlockfileReader, BlockfileWriter, BlockfileWriterOptions,
 };
+use chroma_config::{registry::Registry, Configurable};
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::SpannPostingList;
@@ -16,6 +17,10 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
+    config::{
+        HnswGarbageCollectionConfig, HnswGarbageCollectionPolicyConfig, PlGarbageCollectionConfig,
+        PlGarbageCollectionPolicyConfig, RandomSamplePolicyConfig,
+    },
     hnsw_provider::{
         HnswIndexProvider, HnswIndexProviderCreateError, HnswIndexProviderForkError, HnswIndexRef,
     },
@@ -29,11 +34,132 @@ pub struct VersionsMapInner {
     pub versions_map: HashMap<u32, u32>,
 }
 
+#[derive(Clone, Debug)]
+pub struct GarbageCollectionContext {
+    pl_context: PlGarbageCollectionContext,
+    hnsw_context: HnswGarbageCollectionContext,
+}
+
+#[async_trait::async_trait]
+impl Configurable<(PlGarbageCollectionConfig, HnswGarbageCollectionConfig)>
+    for GarbageCollectionContext
+{
+    async fn try_from_config(
+        config: &(PlGarbageCollectionConfig, HnswGarbageCollectionConfig),
+        registry: &Registry,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        let pl_context = PlGarbageCollectionContext::try_from_config(&config.0, registry).await?;
+        let hnsw_context =
+            HnswGarbageCollectionContext::try_from_config(&config.1, registry).await?;
+        Ok(GarbageCollectionContext {
+            pl_context,
+            hnsw_context,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct HnswGarbageCollectionContext {
+    pub enabled: bool,
+    pub policy: HnswGarbageCollectionPolicy,
+}
+
+#[async_trait::async_trait]
+impl Configurable<HnswGarbageCollectionConfig> for HnswGarbageCollectionContext {
+    async fn try_from_config(
+        config: &HnswGarbageCollectionConfig,
+        registry: &Registry,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        let policy = HnswGarbageCollectionPolicy::try_from_config(&config.policy, registry).await?;
+        Ok(HnswGarbageCollectionContext {
+            enabled: config.enabled,
+            policy,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct PlGarbageCollectionContext {
+    pub enabled: bool,
+    pub policy: PlGarbageCollectionPolicy,
+}
+
+#[async_trait::async_trait]
+impl Configurable<PlGarbageCollectionConfig> for PlGarbageCollectionContext {
+    async fn try_from_config(
+        config: &PlGarbageCollectionConfig,
+        registry: &Registry,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        let policy = PlGarbageCollectionPolicy::try_from_config(&config.policy, registry).await?;
+        Ok(PlGarbageCollectionContext {
+            enabled: config.enabled,
+            policy,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum PlGarbageCollectionPolicy {
+    RandomSample(RandomSamplePolicy),
+}
+
+#[async_trait::async_trait]
+impl Configurable<PlGarbageCollectionPolicyConfig> for PlGarbageCollectionPolicy {
+    async fn try_from_config(
+        config: &PlGarbageCollectionPolicyConfig,
+        registry: &Registry,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        match &config {
+            PlGarbageCollectionPolicyConfig::RandomSample(policy) => {
+                let policy = RandomSamplePolicy::try_from_config(policy, registry).await?;
+                Ok(PlGarbageCollectionPolicy::RandomSample(policy))
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum HnswGarbageCollectionPolicy {
+    FullRebuild,
+}
+
+#[async_trait::async_trait]
+impl Configurable<HnswGarbageCollectionPolicyConfig> for HnswGarbageCollectionPolicy {
+    async fn try_from_config(
+        config: &HnswGarbageCollectionPolicyConfig,
+        _registry: &Registry,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        match &config {
+            HnswGarbageCollectionPolicyConfig::FullRebuild => {
+                Ok(HnswGarbageCollectionPolicy::FullRebuild)
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct RandomSamplePolicy {
+    pub sample_size: f32,
+}
+
+#[async_trait::async_trait]
+impl Configurable<RandomSamplePolicyConfig> for RandomSamplePolicy {
+    async fn try_from_config(
+        config: &RandomSamplePolicyConfig,
+        _registry: &Registry,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        Ok(RandomSamplePolicy {
+            sample_size: config.sample_size,
+        })
+    }
+}
+
 #[derive(Clone)]
 // Note: Fields of this struct are public for testing.
 pub struct SpannIndexWriter {
     // HNSW index and its provider for centroid search.
     pub hnsw_index: HnswIndexRef,
+    pub cleaned_up_hnsw_index: Option<HnswIndexRef>,
     hnsw_provider: HnswIndexProvider,
     blockfile_provider: BlockfileProvider,
     // Posting list of the centroids.
@@ -46,6 +172,8 @@ pub struct SpannIndexWriter {
     pub versions_map: Arc<tokio::sync::RwLock<VersionsMapInner>>,
     pub dimensionality: usize,
     pub params: DistributedSpannParameters,
+    pub gc_context: GarbageCollectionContext,
+    pub collection_id: CollectionUuid,
 }
 
 // TODO(Sanket): Can compose errors whenever downstream returns Box<dyn ChromaError>.
@@ -148,9 +276,12 @@ impl SpannIndexWriter {
         versions_map: VersionsMapInner,
         dimensionality: usize,
         params: DistributedSpannParameters,
+        gc_context: GarbageCollectionContext,
+        collection_id: CollectionUuid,
     ) -> Self {
         SpannIndexWriter {
             hnsw_index,
+            cleaned_up_hnsw_index: None,
             hnsw_provider,
             blockfile_provider,
             posting_list_writer: Arc::new(tokio::sync::Mutex::new(posting_list_writer)),
@@ -158,6 +289,8 @@ impl SpannIndexWriter {
             versions_map: Arc::new(tokio::sync::RwLock::new(versions_map)),
             dimensionality,
             params,
+            gc_context,
+            collection_id,
         }
     }
 
@@ -264,6 +397,7 @@ impl SpannIndexWriter {
         dimensionality: usize,
         blockfile_provider: &BlockfileProvider,
         params: DistributedSpannParameters,
+        gc_context: GarbageCollectionContext,
     ) -> Result<Self, SpannIndexWriterError> {
         let distance_function = DistanceFunction::from(params.space.clone());
         // Create the HNSW index.
@@ -333,6 +467,8 @@ impl SpannIndexWriter {
             versions_map,
             dimensionality,
             params,
+            gc_context,
+            *collection_id,
         ))
     }
 
@@ -1217,6 +1353,15 @@ impl SpannIndexWriter {
 
                 return Ok(());
             }
+            if source_cluster_len == 0 {
+                tracing::info!("Posting list of {} is empty. Deleting from hnsw", head_id);
+                // Delete from hnsw.
+                let hnsw_write_guard = self.hnsw_index.inner.write();
+                hnsw_write_guard
+                    .delete(head_id)
+                    .map_err(|_| SpannIndexWriterError::HnswIndexAddError)?;
+                return Ok(());
+            }
             // Find candidates for merge.
             let (nearest_head_ids, _, nearest_head_embeddings) = self
                 .get_nearby_heads(head_embedding, self.params.num_centers_to_merge_to as usize)
@@ -1349,11 +1494,60 @@ impl SpannIndexWriter {
         Ok(())
     }
 
-    // TODO(Sanket): Hook in the gc policy.
-    // TODO(Sanket): Garbage collect HNSW also.
-    // Note(Sanket): This has not been tested for running concurrently with
-    // other add/update/delete operations.
-    pub async fn garbage_collect(&self) -> Result<(), SpannIndexWriterError> {
+    pub async fn garbage_collect_heads(&mut self) -> Result<(), SpannIndexWriterError> {
+        tracing::info!("Garbage collecting all the heads");
+        // Create a new hnsw index and add elements to it.
+        let clean_hnsw = self
+            .hnsw_provider
+            .create(
+                &self.collection_id,
+                self.params.m,
+                self.params.construction_ef,
+                self.params.search_ef,
+                self.dimensionality as i32,
+                self.params.space.clone().into(),
+            )
+            .await
+            .map_err(|e| {
+                tracing::error!("Error creating hnsw index during gc");
+                SpannIndexWriterError::HnswIndexCreateError(*e)
+            })?;
+        {
+            let hnsw_read_guard = self.hnsw_index.inner.read();
+            let mut clean_hnsw_write_guard = clean_hnsw.inner.write();
+            let (non_deleted_heads, _) = hnsw_read_guard
+                .get_all_ids()
+                .map_err(|_| SpannIndexWriterError::HnswIndexSearchError)?;
+            for head in non_deleted_heads {
+                let head_embedding = hnsw_read_guard
+                    .get(head)
+                    .map_err(|_| SpannIndexWriterError::HnswIndexSearchError)?
+                    .ok_or(SpannIndexWriterError::HnswIndexSearchError)?;
+                let hnsw_len = clean_hnsw_write_guard.len_with_deleted();
+                let hnsw_capacity = clean_hnsw_write_guard.capacity();
+                if hnsw_len + 1 > hnsw_capacity {
+                    tracing::info!("Resizing hnsw index");
+                    clean_hnsw_write_guard
+                        .resize(hnsw_capacity * 2)
+                        .map_err(|_| SpannIndexWriterError::HnswIndexResizeError)?;
+                }
+                clean_hnsw_write_guard
+                    .add(head, &head_embedding)
+                    .map_err(|e| {
+                        tracing::error!("Error adding head {} to clean hnsw index: {}", head, e);
+                        SpannIndexWriterError::HnswIndexAddError
+                    })?;
+            }
+        }
+        // Swap the hnsw index.
+        self.cleaned_up_hnsw_index.replace(clean_hnsw);
+        Ok(())
+    }
+
+    pub async fn pl_garbage_collect_random_sample(
+        &self,
+        sample_size: f32,
+    ) -> Result<(), SpannIndexWriterError> {
         // Get all the heads.
         let non_deleted_heads;
         {
@@ -1362,20 +1556,46 @@ impl SpannIndexWriter {
                 .get_all_ids()
                 .map_err(|_| SpannIndexWriterError::HnswIndexSearchError)?;
         }
+        // Randomly sample x% of heads for gc.
+        let sampled_heads = non_deleted_heads.choose_multiple(
+            &mut rand::thread_rng(),
+            (non_deleted_heads.len() as f32 * sample_size).floor() as usize,
+        );
         // Iterate over all the heads and gc heads.
-        for head_id in non_deleted_heads.into_iter() {
-            if self.is_head_deleted(head_id).await? {
+        for head_id in sampled_heads.into_iter() {
+            if self.is_head_deleted(*head_id).await? {
                 return Ok(());
             }
             let head_embedding = self
                 .hnsw_index
                 .inner
                 .read()
-                .get(head_id)
+                .get(*head_id)
                 .map_err(|_| SpannIndexWriterError::HnswIndexSearchError)?
                 .ok_or(SpannIndexWriterError::HnswIndexSearchError)?;
             tracing::info!("Garbage collecting head {}", head_id);
-            self.garbage_collect_head(head_id, &head_embedding).await?;
+            self.garbage_collect_head(*head_id, &head_embedding).await?;
+        }
+        Ok(())
+    }
+
+    // Note(Sanket): This has not been tested for running concurrently with
+    // other add/update/delete operations.
+    pub async fn garbage_collect(&mut self) -> Result<(), SpannIndexWriterError> {
+        if self.gc_context.pl_context.enabled {
+            match &self.gc_context.pl_context.policy {
+                PlGarbageCollectionPolicy::RandomSample(random_sample) => {
+                    self.pl_garbage_collect_random_sample(random_sample.sample_size)
+                        .await?;
+                }
+            }
+        }
+        if self.gc_context.hnsw_context.enabled {
+            match &self.gc_context.hnsw_context.policy {
+                HnswGarbageCollectionPolicy::FullRebuild => {
+                    self.garbage_collect_heads().await?;
+                }
+            }
         }
         Ok(())
     }
@@ -1435,11 +1655,20 @@ impl SpannIndexWriter {
             .map_err(|_| SpannIndexWriterError::MaxHeadIdCommitError)?;
         tracing::info!("Committed max head id");
 
-        let hnsw_id = self.hnsw_index.inner.read().id;
-
         // Hnsw.
+        let (hnsw_id, hnsw_index) = match self.cleaned_up_hnsw_index {
+            Some(index) => {
+                tracing::info!("Committing cleaned up hnsw index");
+                let index_id = index.inner.read().id;
+                (index_id, index)
+            }
+            None => {
+                let index_id = self.hnsw_index.inner.read().id;
+                (index_id, self.hnsw_index)
+            }
+        };
         self.hnsw_provider
-            .commit(self.hnsw_index)
+            .commit(hnsw_index)
             .map_err(|_| SpannIndexWriterError::HnswIndexCommitError)?;
         tracing::info!("Committed hnsw index");
 
@@ -1746,6 +1975,7 @@ mod tests {
         provider::BlockfileProvider,
     };
     use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
+    use chroma_config::{registry::Registry, Configurable};
     use chroma_distance::DistanceFunction;
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{CollectionUuid, DistributedSpannParameters, SpannPostingList};
@@ -1753,8 +1983,14 @@ mod tests {
     use tempfile::TempDir;
 
     use crate::{
+        config::{
+            HnswGarbageCollectionConfig, HnswGarbageCollectionPolicyConfig,
+            PlGarbageCollectionConfig, PlGarbageCollectionPolicyConfig, RandomSamplePolicyConfig,
+        },
         hnsw_provider::HnswIndexProvider,
-        spann::types::{SpannIndexReader, SpannIndexWriter, SpannIndexWriterError},
+        spann::types::{
+            GarbageCollectionContext, SpannIndexReader, SpannIndexWriter, SpannIndexWriterError,
+        },
         Index,
     };
 
@@ -1784,6 +2020,15 @@ mod tests {
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
         let params = DistributedSpannParameters::default();
+        let gc_context = GarbageCollectionContext::try_from_config(
+            &(
+                PlGarbageCollectionConfig::default(),
+                HnswGarbageCollectionConfig::default(),
+            ),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
@@ -1794,6 +2039,7 @@ mod tests {
             dimensionality,
             &blockfile_provider,
             params,
+            gc_context,
         )
         .await
         .expect("Error creating spann index writer");
@@ -1974,7 +2220,23 @@ mod tests {
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
         let params = DistributedSpannParameters::default();
-        let writer = SpannIndexWriter::from_id(
+        let pl_gc_policy = PlGarbageCollectionConfig {
+            enabled: true,
+            policy: PlGarbageCollectionPolicyConfig::RandomSample(RandomSamplePolicyConfig {
+                sample_size: 1.0,
+            }),
+        };
+        let hnsw_gc_policy = HnswGarbageCollectionConfig {
+            enabled: true,
+            policy: HnswGarbageCollectionPolicyConfig::FullRebuild,
+        };
+        let gc_context = GarbageCollectionContext::try_from_config(
+            &(pl_gc_policy, hnsw_gc_policy),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
+        let mut writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
             None,
@@ -1984,6 +2246,7 @@ mod tests {
             dimensionality,
             &blockfile_provider,
             params,
+            gc_context,
         )
         .await
         .expect("Error creating spann index writer");
@@ -2124,6 +2387,51 @@ mod tests {
                 assert_eq!(pl.2[(point - 41) * 2 + 1], 1000.0 + point as f32);
             }
         }
+        {
+            let hnsw_read_guard = writer.hnsw_index.inner.read();
+            assert_eq!(hnsw_read_guard.len(), 2);
+            let (mut non_deleted_ids, deleted_ids) = hnsw_read_guard
+                .get_all_ids()
+                .expect("Error getting all ids");
+            assert_eq!(non_deleted_ids.len(), 2);
+            assert_eq!(deleted_ids.len(), 0);
+            non_deleted_ids.sort();
+            assert_eq!(non_deleted_ids[0], 1);
+            assert_eq!(non_deleted_ids[1], 2);
+            let emb = hnsw_read_guard
+                .get(non_deleted_ids[0])
+                .expect("Error getting hnsw index")
+                .unwrap();
+            assert_eq!(emb, &[0.0, 0.0]);
+            let emb = hnsw_read_guard
+                .get(non_deleted_ids[1])
+                .expect("Error getting hnsw index")
+                .unwrap();
+            assert_eq!(emb, &[1000.0, 1000.0]);
+            assert!(writer.cleaned_up_hnsw_index.is_some());
+            let cleaned_hnsw = writer
+                .cleaned_up_hnsw_index
+                .expect("Expected cleaned up hnsw index to be set");
+            let cleaned_guard = cleaned_hnsw.inner.read();
+            assert_eq!(cleaned_guard.len(), 2);
+            let (mut non_deleted_ids, deleted_ids) =
+                cleaned_guard.get_all_ids().expect("Error getting all ids");
+            assert_eq!(non_deleted_ids.len(), 2);
+            assert_eq!(deleted_ids.len(), 0);
+            non_deleted_ids.sort();
+            assert_eq!(non_deleted_ids[0], 1);
+            assert_eq!(non_deleted_ids[1], 2);
+            let emb = cleaned_guard
+                .get(non_deleted_ids[0])
+                .expect("Error getting hnsw index")
+                .unwrap();
+            assert_eq!(emb, &[0.0, 0.0]);
+            let emb = cleaned_guard
+                .get(non_deleted_ids[1])
+                .expect("Error getting hnsw index")
+                .unwrap();
+            assert_eq!(emb, &[1000.0, 1000.0]);
+        }
     }
 
     #[tokio::test]
@@ -2154,7 +2462,23 @@ mod tests {
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
         let params = DistributedSpannParameters::default();
-        let writer = SpannIndexWriter::from_id(
+        let pl_gc_policy = PlGarbageCollectionConfig {
+            enabled: true,
+            policy: PlGarbageCollectionPolicyConfig::RandomSample(RandomSamplePolicyConfig {
+                sample_size: 1.0,
+            }),
+        };
+        let hnsw_gc_policy = HnswGarbageCollectionConfig {
+            enabled: true,
+            policy: HnswGarbageCollectionPolicyConfig::FullRebuild,
+        };
+        let gc_context = GarbageCollectionContext::try_from_config(
+            &(pl_gc_policy, hnsw_gc_policy),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
+        let mut writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
             None,
@@ -2164,6 +2488,7 @@ mod tests {
             dimensionality,
             &blockfile_provider,
             params,
+            gc_context,
         )
         .await
         .expect("Error creating spann index writer");
@@ -2297,6 +2622,22 @@ mod tests {
                 .expect("Error getting hnsw index")
                 .unwrap();
             assert_eq!(emb, &[0.0, 0.0]);
+            assert!(writer.cleaned_up_hnsw_index.is_some());
+            let cleaned_hnsw = writer
+                .cleaned_up_hnsw_index
+                .expect("Expected cleaned up hnsw index to be set");
+            let cleaned_guard = cleaned_hnsw.inner.read();
+            assert_eq!(cleaned_guard.len(), 1);
+            let (non_deleted_ids, deleted_ids) =
+                cleaned_guard.get_all_ids().expect("Error getting all ids");
+            assert_eq!(non_deleted_ids.len(), 1);
+            assert_eq!(deleted_ids.len(), 0);
+            assert_eq!(non_deleted_ids[0], 1);
+            let emb = cleaned_guard
+                .get(non_deleted_ids[0])
+                .expect("Error getting hnsw index")
+                .unwrap();
+            assert_eq!(emb, &[0.0, 0.0]);
         }
         // Expect the posting lists with id 1 to be 79.
         {
@@ -2338,6 +2679,15 @@ mod tests {
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
         let params = DistributedSpannParameters::default();
+        let gc_context = GarbageCollectionContext::try_from_config(
+            &(
+                PlGarbageCollectionConfig::default(),
+                HnswGarbageCollectionConfig::default(),
+            ),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
@@ -2348,6 +2698,7 @@ mod tests {
             dimensionality,
             &blockfile_provider,
             params,
+            gc_context,
         )
         .await
         .expect("Error creating spann index writer");
@@ -2574,7 +2925,23 @@ mod tests {
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
         let params = DistributedSpannParameters::default();
-        let writer = SpannIndexWriter::from_id(
+        let pl_gc_policy = PlGarbageCollectionConfig {
+            enabled: true,
+            policy: PlGarbageCollectionPolicyConfig::RandomSample(RandomSamplePolicyConfig {
+                sample_size: 1.0,
+            }),
+        };
+        let hnsw_gc_policy = HnswGarbageCollectionConfig {
+            enabled: true,
+            policy: HnswGarbageCollectionPolicyConfig::FullRebuild,
+        };
+        let gc_context = GarbageCollectionContext::try_from_config(
+            &(pl_gc_policy, hnsw_gc_policy),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
+        let mut writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
             None,
@@ -2584,6 +2951,7 @@ mod tests {
             dimensionality,
             &blockfile_provider,
             params,
+            gc_context,
         )
         .await
         .expect("Error creating spann index writer");
@@ -2780,6 +3148,28 @@ mod tests {
                 .expect("Error getting hnsw index")
                 .unwrap();
             assert_eq!(emb, &[10000.0, 10000.0]);
+            let cleaned_hnsw = writer
+                .cleaned_up_hnsw_index
+                .expect("Expected cleaned up hnsw index to be set");
+            let cleaned_guard = cleaned_hnsw.inner.read();
+            assert_eq!(cleaned_guard.len(), 2);
+            let (mut non_deleted_ids, deleted_ids) =
+                cleaned_guard.get_all_ids().expect("Error getting all ids");
+            non_deleted_ids.sort();
+            assert_eq!(non_deleted_ids.len(), 2);
+            assert_eq!(deleted_ids.len(), 0);
+            assert_eq!(non_deleted_ids[0], 1);
+            assert_eq!(non_deleted_ids[1], 3);
+            let emb = cleaned_guard
+                .get(non_deleted_ids[0])
+                .expect("Error getting hnsw index")
+                .unwrap();
+            assert_eq!(emb, &[0.0, 0.0]);
+            let emb = cleaned_guard
+                .get(non_deleted_ids[1])
+                .expect("Error getting hnsw index")
+                .unwrap();
+            assert_eq!(emb, &[10000.0, 10000.0]);
         }
     }
 
@@ -2826,6 +3216,15 @@ mod tests {
         let params = DistributedSpannParameters::default();
         let distance_function = params.space.clone().into();
         let dimensionality = 1000;
+        let gc_context = GarbageCollectionContext::try_from_config(
+            &(
+                PlGarbageCollectionConfig::default(),
+                HnswGarbageCollectionConfig::default(),
+            ),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
@@ -2836,6 +3235,7 @@ mod tests {
             dimensionality,
             &blockfile_provider,
             params,
+            gc_context,
         )
         .await
         .expect("Error creating spann index writer");
@@ -2911,6 +3311,15 @@ mod tests {
         let params = DistributedSpannParameters::default();
         let distance_function = params.space.clone().into();
         let dimensionality = 1000;
+        let gc_context = GarbageCollectionContext::try_from_config(
+            &(
+                PlGarbageCollectionConfig::default(),
+                HnswGarbageCollectionConfig::default(),
+            ),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
@@ -2921,6 +3330,7 @@ mod tests {
             dimensionality,
             &blockfile_provider,
             params,
+            gc_context,
         )
         .await
         .expect("Error creating spann index writer");
@@ -3008,6 +3418,15 @@ mod tests {
         let max_block_size_bytes = 8 * 1024 * 1024;
         let collection_id = CollectionUuid::new();
         let params = DistributedSpannParameters::default();
+        let gc_context = GarbageCollectionContext::try_from_config(
+            &(
+                PlGarbageCollectionConfig::default(),
+                HnswGarbageCollectionConfig::default(),
+            ),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
         let distance_function = params.space.clone().into();
         let dimensionality = 1000;
         let mut hnsw_path = None;
@@ -3030,6 +3449,7 @@ mod tests {
                 dimensionality,
                 &blockfile_provider,
                 params.clone(),
+                gc_context.clone(),
             )
             .await
             .expect("Error creating spann index writer");
@@ -3107,6 +3527,15 @@ mod tests {
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let max_block_size_bytes = 8 * 1024 * 1024;
         let params = DistributedSpannParameters::default();
+        let gc_context = GarbageCollectionContext::try_from_config(
+            &(
+                PlGarbageCollectionConfig::default(),
+                HnswGarbageCollectionConfig::default(),
+            ),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
         let distance_function = params.space.clone().into();
         let collection_id = CollectionUuid::new();
         let dimensionality = 1000;
@@ -3142,6 +3571,7 @@ mod tests {
                 dimensionality,
                 &blockfile_provider,
                 params.clone(),
+                gc_context.clone(),
             )
             .await
             .expect("Error creating spann index writer");
@@ -3232,6 +3662,23 @@ mod tests {
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let max_block_size_bytes = 8 * 1024 * 1024;
         let params = DistributedSpannParameters::default();
+        // Create a garbage collection context.
+        let pl_gc_config = PlGarbageCollectionConfig {
+            enabled: true,
+            policy: PlGarbageCollectionPolicyConfig::RandomSample(RandomSamplePolicyConfig {
+                sample_size: 1.0,
+            }),
+        };
+        let hnsw_gc_config = HnswGarbageCollectionConfig {
+            enabled: true,
+            policy: HnswGarbageCollectionPolicyConfig::FullRebuild,
+        };
+        let gc_context = GarbageCollectionContext::try_from_config(
+            &(pl_gc_config, hnsw_gc_config),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
         let distance_function: DistanceFunction = params.space.clone().into();
         let collection_id = CollectionUuid::new();
         let dimensionality = 1000;
@@ -3267,6 +3714,7 @@ mod tests {
                 dimensionality,
                 &blockfile_provider,
                 params.clone(),
+                gc_context.clone(),
             )
             .await
             .expect("Error creating spann index writer");
@@ -3380,6 +3828,7 @@ mod tests {
             dimensionality,
             &blockfile_provider,
             params.clone(),
+            gc_context.clone(),
         )
         .await
         .expect("Error creating spann index writer");
@@ -3485,7 +3934,7 @@ mod tests {
         }
         assert_eq!(results.len(), count);
         // After GC, it should return the same result.
-        let writer = SpannIndexWriter::from_id(
+        let mut writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             hnsw_path.as_ref(),
             versions_map_path.as_ref(),
@@ -3495,6 +3944,7 @@ mod tests {
             dimensionality,
             &blockfile_provider,
             params,
+            gc_context,
         )
         .await
         .expect("Error creating spann index writer");

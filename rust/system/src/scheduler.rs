@@ -139,7 +139,7 @@ impl Scheduler {
             match join_handle.await {
                 Ok(_) => {}
                 Err(e) => {
-                    println!("Error: {:?}", e);
+                    tracing::error!("Error joining scheduler task: {:?}", e);
                 }
             }
         }
