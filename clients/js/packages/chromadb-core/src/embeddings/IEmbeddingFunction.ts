@@ -1,4 +1,4 @@
-export type EmbeddingFunctionSpace = "cosine" | "l2" | "inner_product";
+export type EmbeddingFunctionSpace = "cosine" | "l2" | "ip";
 
 export interface IEmbeddingFunction {
   generate(texts: string[]): Promise<number[][]>;

@@ -171,11 +171,11 @@ export class CohereEmbeddingFunction implements IEmbeddingFunction {
 
   supportedSpaces(): EmbeddingFunctionSpace[] {
     if (this.model === "embed-english-v3.0") {
-      return ["cosine", "l2", "inner_product"];
+      return ["cosine", "l2", "ip"];
     }
 
     if (this.model === "embed-english-light-v3.0") {
-      return ["cosine", "inner_product", "l2"];
+      return ["cosine", "ip", "l2"];
     }
 
     if (this.model === "embed-english-v2.0") {
@@ -187,23 +187,23 @@ export class CohereEmbeddingFunction implements IEmbeddingFunction {
     }
 
     if (this.model === "embed-multilingual-v3.0") {
-      return ["cosine", "l2", "inner_product"];
+      return ["cosine", "l2", "ip"];
     }
 
     if (this.model === "embed-multilingual-light-v3.0") {
-      return ["cosine", "l2", "inner_product"];
+      return ["cosine", "l2", "ip"];
     }
 
     if (this.model === "embed-multilingual-v2.0") {
-      return ["inner_product"];
+      return ["ip"];
     }
 
-    return ["cosine", "l2", "inner_product"];
+    return ["cosine", "l2", "ip"];
   }
 
   defaultSpace(): EmbeddingFunctionSpace {
     if (this.model == "embed-multilingual-v2.0") {
-      return "inner_product";
+      return "ip";
     }
 
     return "cosine";
