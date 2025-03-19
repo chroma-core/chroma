@@ -314,7 +314,10 @@ impl LogService for LogServer {
         &self,
         _request: Request<GetAllCollectionInfoToCompactRequest>,
     ) -> Result<Response<GetAllCollectionInfoToCompactResponse>, Status> {
-        todo!("Implement wal3 backed get_all_collection_info_to_compact here")
+        // TODO(rescrv): Implement this.  NOP implementation for testing read.
+        Ok(Response::new(GetAllCollectionInfoToCompactResponse {
+            all_collection_info: vec![],
+        }))
     }
 
     async fn update_collection_log_offset(
