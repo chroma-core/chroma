@@ -17,6 +17,7 @@ use crate::execution::operators::flush_segment_writer::FlushSegmentWriterOutput;
 use crate::execution::operators::materialize_logs::MaterializeLogInput;
 use crate::execution::operators::materialize_logs::MaterializeLogOperator;
 use crate::execution::operators::materialize_logs::MaterializeLogOperatorError;
+use crate::execution::operators::materialize_logs::MaterializeLogOutput;
 use crate::execution::operators::partition::PartitionError;
 use crate::execution::operators::partition::PartitionInput;
 use crate::execution::operators::partition::PartitionOperator;
@@ -129,6 +130,8 @@ pub struct CompactOrchestrator {
     num_uncompleted_materialization_tasks: usize,
     // Tracks the total remaining number of tasks per segment
     num_uncompleted_tasks_by_segment: HashMap<SegmentUuid, usize>,
+    // Tracks the delta in logical size of the collection
+    logical_size_delta: i64,
     // Result Channel
     result_channel: Option<Sender<Result<CompactionResponse, CompactionError>>>,
     max_compaction_size: usize,
@@ -269,6 +272,7 @@ impl CompactOrchestrator {
             dispatcher,
             num_uncompleted_materialization_tasks: 0,
             num_uncompleted_tasks_by_segment: HashMap::new(),
+            logical_size_delta: 0,
             result_channel,
             max_compaction_size,
             max_partition_size,
@@ -312,7 +316,7 @@ impl CompactOrchestrator {
         &mut self,
         partitions: Vec<Chunk<LogRecord>>,
         self_address: Box<
-            dyn ReceiverForMessage<TaskResult<MaterializeLogsResult, MaterializeLogOperatorError>>,
+            dyn ReceiverForMessage<TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>>,
         >,
         ctx: &ComponentContext<CompactOrchestrator>,
     ) {
@@ -841,22 +845,22 @@ impl Handler<TaskResult<PartitionOutput, PartitionError>> for CompactOrchestrato
 }
 
 #[async_trait]
-impl Handler<TaskResult<MaterializeLogsResult, MaterializeLogOperatorError>>
+impl Handler<TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>>
     for CompactOrchestrator
 {
     type Result = ();
 
     async fn handle(
         &mut self,
-        message: TaskResult<MaterializeLogsResult, MaterializeLogOperatorError>,
+        message: TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>,
         ctx: &ComponentContext<CompactOrchestrator>,
     ) {
-        let materialized_result = match self.ok_or_terminate(message.into_inner(), ctx) {
-            Some(result) => result,
+        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+            Some(res) => res,
             None => return,
         };
 
-        if materialized_result.is_empty() {
+        if output.result.is_empty() {
             // We check the number of remaining materialization tasks to prevent a race condition
             if self.num_uncompleted_materialization_tasks == 1
                 && self.num_uncompleted_tasks_by_segment.is_empty()
@@ -865,12 +869,9 @@ impl Handler<TaskResult<MaterializeLogsResult, MaterializeLogOperatorError>>
                 self.register(self.pulled_log_offset.unwrap(), ctx).await;
             }
         } else {
-            self.dispatch_apply_log_to_segment_writer_tasks(
-                materialized_result,
-                ctx.receiver(),
-                ctx,
-            )
-            .await;
+            self.logical_size_delta += output.logical_size_delta;
+            self.dispatch_apply_log_to_segment_writer_tasks(output.result, ctx.receiver(), ctx)
+                .await;
         }
 
         self.num_uncompleted_materialization_tasks -= 1;
