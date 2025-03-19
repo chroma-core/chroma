@@ -163,7 +163,7 @@ fn test_missing_default_field() {
             }
         }
         assert!(
-            config
+            !config
                 .compaction_service
                 .spann_provider
                 .hnsw_garbage_collection
