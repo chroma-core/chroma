@@ -265,16 +265,15 @@ impl SysDb {
         name: Option<String>,
         metadata: Option<CollectionMetadataUpdate>,
         dimension: Option<u32>,
-        configuration: Option<InternalCollectionConfiguration>,
     ) -> Result<(), UpdateCollectionError> {
         match self {
             SysDb::Grpc(grpc) => {
-                grpc.update_collection(collection_id, name, metadata, dimension, configuration)
+                grpc.update_collection(collection_id, name, metadata, dimension)
                     .await
             }
             SysDb::Sqlite(sqlite) => {
                 sqlite
-                    .update_collection(collection_id, name, metadata, dimension, configuration)
+                    .update_collection(collection_id, name, metadata, dimension)
                     .await
             }
             SysDb::Test(_) => {
@@ -806,7 +805,6 @@ impl GrpcSysDb {
         name: Option<String>,
         metadata: Option<CollectionMetadataUpdate>,
         dimension: Option<u32>,
-        _configuration: Option<InternalCollectionConfiguration>,
     ) -> Result<(), UpdateCollectionError> {
         let req = chroma_proto::UpdateCollectionRequest {
             id: collection_id.0.to_string(),
@@ -822,13 +820,7 @@ impl GrpcSysDb {
                 }
             }),
             dimension: dimension.map(|dim| dim as i32),
-            configuration_json_str: Some(
-                serde_json::to_string(&_configuration)
-                    .map_err(UpdateCollectionError::Configuration)?,
-            ),
         };
-
-        // TODO: @jai if configuration exists, fetch config_json_str from table Collections, build into collection configuration object, and update config_json_str in table Collections
 
         self.client.update_collection(req).await.map_err(|e| {
             if e.code() == Code::NotFound {

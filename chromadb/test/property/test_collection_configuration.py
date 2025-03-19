@@ -174,47 +174,6 @@ def test_invalid_configurations(client: ClientAPI) -> None:
         )
 
 
-# TODO: @jai uncomment once update collection is implemented in rust
-# def test_configuration_updates(settings: Settings) -> None:
-#     """Test updating collection configurations"""
-#     system = System(settings)
-#     system.start()
-#     client = ClientCreator.from_system(system)
-#     client.reset()
-
-#     # Create initial collection
-#     initial_hnsw: CreateHNSWConfiguration = {
-#         "ef_search": 10,
-#         "num_threads": 2,
-#         "space": Space.COSINE,  # Required field
-#     }
-#     coll = client.create_collection(
-#         name="test_updates",
-#         configuration={"hnsw": initial_hnsw},
-#     )
-
-#     # Update configuration
-#     update_hnsw: CreateHNSWConfiguration = {
-#         "ef_search": 20,
-#         "num_threads": 4,
-#         "space": Space.COSINE,  # Required field
-#     }
-#     update_config: UpdateCollectionConfiguration = {
-#         "hnsw": update_hnsw,
-#     }
-#     coll.modify(configuration=update_config)
-
-#     # Verify updates
-#     loaded_config = load_collection_configuration_from_json(coll._model.configuration_json)
-#     if loaded_config and isinstance(loaded_config, dict):
-#         hnsw_config = loaded_config.get("hnsw", {})
-#         if isinstance(hnsw_config, dict):
-#             assert hnsw_config.get("ef_search") == 20
-#             assert hnsw_config.get("num_threads") == 4
-
-#     system.stop()
-
-
 def test_configuration_persistence(sqlite_persistent: System) -> None:
     """Test configuration persistence across client restarts"""
     client = ClientCreator.from_system(sqlite_persistent)

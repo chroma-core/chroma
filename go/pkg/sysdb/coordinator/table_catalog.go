@@ -582,7 +582,6 @@ func (tc *Catalog) UpdateCollection(ctx context.Context, updateCollection *model
 	log.Info("updating collection", zap.String("collectionId", updateCollection.ID.String()))
 	var result *model.Collection
 
-	// TODO @jai: add logic here
 	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		// Check if collection exists
 		collections, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(

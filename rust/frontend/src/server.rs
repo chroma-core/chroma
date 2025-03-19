@@ -953,7 +953,6 @@ async fn get_collection(
 pub struct UpdateCollectionPayload {
     pub new_name: Option<String>,
     pub new_metadata: Option<UpdateMetadata>,
-    pub new_configuration_json_str: Option<String>,
 }
 
 /// Updates an existing collection's name or metadata.
@@ -1013,24 +1012,12 @@ async fn update_collection(
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
 
-    let configuration_json = match payload.new_configuration_json_str {
-        Some(configuration_json_str) => {
-            let configuration_json =
-                serde_json::from_str::<CollectionConfiguration>(&configuration_json_str)
-                    .map_err(WrappedSerdeJsonError::new)?;
-
-            Some(configuration_json)
-        }
-        None => None,
-    };
-
     let request = chroma_types::UpdateCollectionRequest::try_new(
         collection_id,
         payload.new_name,
         payload
             .new_metadata
             .map(CollectionMetadataUpdate::UpdateMetadata),
-        configuration_json,
     )?;
 
     server.frontend.update_collection(request).await?;

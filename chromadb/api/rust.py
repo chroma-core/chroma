@@ -14,9 +14,7 @@ from chromadb import (
 from chromadb.api import ServerAPI
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
-    UpdateCollectionConfiguration,
     create_collection_configuration_to_json_str,
-    update_collection_configuration_to_json_str,
     load_collection_configuration_from_json,
 )
 from chromadb.auth import UserIdentity
@@ -283,18 +281,11 @@ class RustBindingsAPI(ServerAPI):
         id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
-        new_configuration: Optional[UpdateCollectionConfiguration] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
-        if new_configuration:
-            new_configuration_json_str = update_collection_configuration_to_json_str(
-                new_configuration
-            )
-        else:
-            new_configuration_json_str = None
         self.bindings.update_collection(
-            str(id), new_name, new_metadata, new_configuration_json_str
+            str(id), new_name, new_metadata, tenant, database
         )
 
     @override

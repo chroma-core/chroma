@@ -6,7 +6,6 @@ import httpx
 from chromadb.api import AdminAPI, ClientAPI, ServerAPI
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
-    UpdateCollectionConfiguration,
     load_collection_configuration_from_json,
     create_collection_configuration_from_legacy_collection_metadata,
 )
@@ -235,7 +234,6 @@ class Client(SharedSystemClient, ClientAPI):
         id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
-        new_configuration: Optional[UpdateCollectionConfiguration] = None,
     ) -> None:
         return self._server._modify(
             id=id,
@@ -243,7 +241,6 @@ class Client(SharedSystemClient, ClientAPI):
             database=self.database,
             new_name=new_name,
             new_metadata=new_metadata,
-            new_configuration=new_configuration,
         )
 
     @override
