@@ -47,7 +47,7 @@ pub struct DeleteArgs {
 pub struct ConnectArgs {
     #[clap(flatten)]
     db_args: DbArgs,
-    name: String,
+    name: Option<String>,
     language: Option<Language>,
 }
 
@@ -140,8 +140,39 @@ fn fetch_dbs(chroma_client: &ChromaClient, profile_name: &str) -> Option<Vec<Dat
     }
 }
 
-pub fn connect(args: ConnectArgs, current_profile: Profile) {
-    let cli_env_config = load_cli_env_config(args.db_args.dev);
+pub fn connect(args: ConnectArgs, profile_name: String, current_profile: Profile) {
+    let chroma_client = match get_chroma_client(&current_profile, args.db_args.dev) {
+        Some(client) => client,
+        None => return,
+    };
+
+    let dbs = match fetch_dbs(&chroma_client, &profile_name) {
+        Some(dbs) => dbs,
+        None => return,
+    };
+
+    let prompt = "Which DB would you like to connect to?";
+    let name = if dbs.len() < 5 {
+        println!(
+            "{}",
+            prompt.blue().bold()
+        );
+        let db_names: Vec<String> = dbs.iter().map(|db| db.name.clone()).collect();
+        let selection = Select::with_theme(&ColorfulTheme::default())
+            .items(&db_names)
+            .default(0)
+            .interact()
+            .unwrap();
+        db_names[selection].clone()
+    } else {
+        args.name.unwrap_or_else(|| prompt_db_name(prompt))
+    };
+
+    if !dbs.iter().any(|db| db.name == name) {
+        let message = format!("\nDB {} not found", name);
+        eprintln!("{}", message.red());
+        return;
+    }
 
     let language = args.language.unwrap_or_else(|| {
         let options = vec![
@@ -150,7 +181,7 @@ pub fn connect(args: ConnectArgs, current_profile: Profile) {
         ];
 
         println!(
-            "{}",
+            "\n{}",
             "Which language would you like to use?".blue().bold()
         );
         let selection = Select::with_theme(&ColorfulTheme::default())
@@ -169,15 +200,15 @@ pub fn connect(args: ConnectArgs, current_profile: Profile) {
 
     let connection_string = match language {
         Language::Python => get_python_connection(
-            cli_env_config.frontend_url.to_string(),
+            chroma_client.api_url,
             current_profile.team_id,
-            args.name,
+            name,
             current_profile.api_key,
         ),
         Language::JavaScript => get_js_connection(
-            cli_env_config.frontend_url.to_string(),
+            chroma_client.api_url,
             current_profile.team_id,
-            args.name,
+            name,
             current_profile.api_key,
         ),
     };
@@ -218,7 +249,7 @@ pub fn create(args: CreateArgs, profile_name: String, current_profile: Profile) 
     }
 
     println!(
-        "{} {}...",
+        "\n{} {}...",
         "Creating database".bold().blue(),
         name.bold().blue()
     );
@@ -255,7 +286,7 @@ pub fn delete(args: DeleteArgs, profile_name: String, current_profile: Profile) 
     };
 
     if !dbs.iter().any(|db| db.name == name) {
-        let message = format!("\nDB {} not found\n", name);
+        let message = format!("\nDB {} not found", name);
         eprintln!("{}", message.red());
         return;
     }
@@ -269,14 +300,14 @@ pub fn delete(args: DeleteArgs, profile_name: String, current_profile: Profile) 
         match chroma_client.delete_database(name.clone()) {
             Ok(_) => {}
             Err(_) => {
-                let message = format!("\nFailed to delete DB {}\n", name);
+                let message = format!("\nFailed to delete DB {}", name);
                 eprintln!("{}", message.red());
             }
         }
-        println!("\nDeleted DB {} successfully!\n", name);
+        println!("\nDeleted DB {} successfully!", name);
     } else {
         println!(
-            "\n{} '{}' {} '{}'\n",
+            "\n{} '{}' {} '{}'",
             "DB deletion cancelled. Confirmation input".yellow(),
             confirm.yellow(),
             "did not match DB name to delete: ".yellow(),
@@ -295,7 +326,7 @@ pub fn list(args: ListArgs, profile_name: String, current_profile: Profile) {
         Ok(dbs) => dbs,
         Err(_) => {
             let message = format!(
-                "\nFailed to fetch DBs for profile {}\n",
+                "Failed to fetch DBs for profile {}",
                 profile_name
             );
             eprintln!("Failed to fetch DBs for profile {}", message.red());
@@ -305,7 +336,7 @@ pub fn list(args: ListArgs, profile_name: String, current_profile: Profile) {
 
     if dbs.is_empty() {
         println!(
-            "\nProfile {} has 0 DBs. To create a new Chroma DB use: {}\n",
+            "Profile {} has 0 DBs. To create a new Chroma DB use: {}",
             profile_name,
             "chroma db create <db name>".yellow()
         );
@@ -313,7 +344,7 @@ pub fn list(args: ListArgs, profile_name: String, current_profile: Profile) {
     }
 
     println!(
-        "\n{} {} {}",
+        "{} {} {}",
         "Listing".blue().bold(),
         dbs.len().to_string().blue().bold(),
         "databases".blue().bold()
@@ -321,7 +352,6 @@ pub fn list(args: ListArgs, profile_name: String, current_profile: Profile) {
     for db in dbs {
         println!("{} {}", ">".yellow(), db.name);
     }
-    println!();
 }
 
 pub fn db_command(command: DbCommand) {
@@ -333,9 +363,9 @@ pub fn db_command(command: DbCommand) {
             return;
         }
     };
-    
+
     match command {
-        DbCommand::Connect(args) => connect(args, current_profile),
+        DbCommand::Connect(args) => connect(args, profile_name, current_profile),
         DbCommand::Create(args) => create(args, profile_name, current_profile),
         DbCommand::Delete(args) => delete(args, profile_name, current_profile),
         DbCommand::List(args) => list(args, profile_name, current_profile),

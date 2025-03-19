@@ -78,8 +78,8 @@ enum RequestMethod {
 
 pub struct ChromaClient {
     client: Client,
-    api_url: String,
-    tenant_id: String,
+    pub api_url: String,
+    pub tenant_id: String,
     headers: HeaderMap,
 }
 

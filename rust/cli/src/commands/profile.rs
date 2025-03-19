@@ -150,8 +150,9 @@ fn show<W: Write>(writer: &mut W, config: CliConfig) -> Result<(), std::io::Erro
             writer,
             "No profile set currently. Please use {} to add a profile, or {} to set an existing profile",
             "chroma login".yellow(),
-            "chroma use <profile name>".yellow()
+            "chroma profile use <profile name>".yellow()
         )?;
+        return Ok(())
     }
 
     writeln!(writer, "{}", "Current profile: ".blue().bold())?;
