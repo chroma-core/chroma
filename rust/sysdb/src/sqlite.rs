@@ -14,7 +14,6 @@ use chroma_types::{
     GetSegmentsError, GetTenantError, GetTenantResponse, InternalCollectionConfiguration,
     InternalUpdateCollectionConfiguration, ListDatabasesError, Metadata, MetadataValue, ResetError,
     ResetResponse, Segment, SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError,
-    UpdateVectorIndexConfiguration, VectorIndexConfiguration,
 };
 use futures::TryStreamExt;
 use sea_query_binder::SqlxBinder;
@@ -978,7 +977,7 @@ mod tests {
     use chroma_sqlite::db::test_utils::get_new_sqlite_db;
     use chroma_types::{
         SegmentScope, SegmentType, SegmentUuid, UpdateHnswConfiguration, UpdateMetadata,
-        UpdateMetadataValue,
+        UpdateMetadataValue, UpdateVectorIndexConfiguration, VectorIndexConfiguration,
     };
 
     #[tokio::test]
