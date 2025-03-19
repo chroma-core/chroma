@@ -1,8 +1,5 @@
 use super::{Metadata, MetadataValueConversionError};
-use crate::{
-    chroma_proto, test_segment, CollectionConfiguration, InternalCollectionConfiguration, Segment,
-    SegmentScope,
-};
+use crate::{chroma_proto, test_segment, InternalCollectionConfiguration, Segment, SegmentScope};
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -64,10 +61,10 @@ fn emit_legacy_config_json_str<S: serde::Serializer>(_: &(), s: S) -> Result<S::
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct Collection {
-    #[serde(rename(serialize = "id"))]
+    #[serde(rename = "id")]
     pub collection_id: CollectionUuid,
     pub name: String,
-    #[serde(skip_serializing)]
+    #[serde(skip, default = "InternalCollectionConfiguration::default_hnsw")]
     pub config: InternalCollectionConfiguration,
     pub metadata: Option<Metadata>,
     pub dimension: Option<i32>,
@@ -83,6 +80,7 @@ pub struct Collection {
     pub last_compaction_time_secs: u64,
     #[serde(
         serialize_with = "emit_legacy_config_json_str",
+        skip_deserializing,
         rename = "configuration_json"
     )]
     pub legacy_configuration_json: (),
@@ -124,7 +122,7 @@ impl Collection {
         &self,
         py: pyo3::Python<'py>,
     ) -> pyo3::PyResult<pyo3::Bound<'py, pyo3::PyAny>> {
-        let config: CollectionConfiguration = self.config.clone().into();
+        let config: crate::CollectionConfiguration = self.config.clone().into();
         let config_json_str = serde_json::to_string(&config).unwrap();
         let res = pyo3::prelude::PyModule::import(py, "json")?
             .getattr("loads")?
