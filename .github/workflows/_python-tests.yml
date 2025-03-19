@@ -41,6 +41,8 @@ jobs:
       - name: Install built wheel
         shell: bash
         run: pip install --no-index --find-links target/wheels/ chromadb
+      - name: Setup upterm session
+        uses: lhotari/action-upterm@v1
       - name: Test
         run: python -m pytest ${{ matrix.test-globs }}
         shell: bash
