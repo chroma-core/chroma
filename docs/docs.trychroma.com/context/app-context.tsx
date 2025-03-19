@@ -16,8 +16,7 @@ const AppContext = createContext<AppContextValue>(AppContextDefaultValue);
 export const AppContextProvider = ({ children }: { children: ReactNode }) => {
   const searchParams = useSearchParams();
   const [language, setLanguage] = useState<string>(
-    // @ts-expect-error - ignore
-    searchParams.get("lang") || "python",
+    searchParams?.get("lang") || "python",
   );
   const router = useRouter();
   const pathname = usePathname();
