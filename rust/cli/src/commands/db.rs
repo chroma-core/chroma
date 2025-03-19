@@ -296,12 +296,18 @@ pub fn connect<W: Write>(
     Ok(())
 }
 
-pub fn create<W: Write>(
+pub fn create<W, F, C>(
     writer: &mut W,
+    get_chroma_client_and_dbs: F,
     args: CreateArgs,
     profile_name: String,
     current_profile: Profile,
-) -> Result<(), std::io::Error> {
+) -> Result<(), std::io::Error>
+where
+    W: Write,
+    F: Fn(&mut W, &Profile, String, bool) -> Result<Option<(C, Vec<Database>)>, std::io::Error>,
+    C: ChromaClientTrait,
+{
     let (chroma_client, dbs) = match get_chroma_client_and_dbs(
         writer,
         &current_profile,
@@ -354,12 +360,18 @@ pub fn create<W: Write>(
     Ok(())
 }
 
-pub fn delete<W: Write>(
+pub fn delete<W, F, C>(
     writer: &mut W,
+    get_chroma_client_and_dbs: F,
     args: DeleteArgs,
     profile_name: String,
     current_profile: Profile,
-) -> Result<(), std::io::Error> {
+) -> Result<(), std::io::Error>
+where
+    W: Write,
+    F: Fn(&mut W, &Profile, String, bool) -> Result<Option<(C, Vec<Database>)>, std::io::Error>,
+    C: ChromaClientTrait,
+{
     let (chroma_client, dbs) = match get_chroma_client_and_dbs(
         writer,
         &current_profile,
@@ -409,12 +421,18 @@ pub fn delete<W: Write>(
     Ok(())
 }
 
-pub fn list<W: Write>(
+pub fn list<W, F, C>(
     writer: &mut W,
+    get_chroma_client_and_dbs: F,
     args: ListArgs,
     profile_name: String,
     current_profile: Profile,
-) -> Result<(), std::io::Error> {
+) -> Result<(), std::io::Error>
+where
+    W: Write,
+    F: Fn(&mut W, &Profile, String, bool) -> Result<Option<(C, Vec<Database>)>, std::io::Error>,
+    C: ChromaClientTrait,
+{
     let (_chroma_client, dbs) = match get_chroma_client_and_dbs(
         writer,
         &current_profile,
@@ -465,55 +483,246 @@ pub fn db_command<W: Write>(writer: &mut W, command: DbCommand) -> Result<(), st
 
     match command {
         DbCommand::Connect(args) => connect(writer, args, profile_name, current_profile),
-        DbCommand::Create(args) => create(writer, args, profile_name, current_profile),
-        DbCommand::Delete(args) => delete(writer, args, profile_name, current_profile),
-        DbCommand::List(args) => list(writer, args, profile_name, current_profile),
+        DbCommand::Create(args) => create(
+            writer,
+            get_chroma_client_and_dbs,
+            args,
+            profile_name,
+            current_profile,
+        ),
+        DbCommand::Delete(args) => delete(
+            writer,
+            get_chroma_client_and_dbs,
+            args,
+            profile_name,
+            current_profile,
+        ),
+        DbCommand::List(args) => list(
+            writer,
+            get_chroma_client_and_dbs,
+            args,
+            profile_name,
+            current_profile,
+        ),
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::client::{ChromaCliClientError, ChromaClientTrait};
+    use crate::commands::db::{create, list, CreateArgs, DbArgs, ListArgs};
+    use crate::utils::Profile;
+    use chroma_types::Database;
     use std::io::Cursor;
+    use uuid::Uuid;
 
+    #[derive(Default)]
+    pub struct MockChromaClient;
+
+    impl ChromaClientTrait for MockChromaClient {
+        fn list_databases(&self) -> Result<Vec<Database>, ChromaCliClientError> {
+            Ok(vec![])
+        }
+
+        fn create_database(&self, _name: String) -> Result<(), ChromaCliClientError> {
+            Ok(())
+        }
+
+        fn delete_database(&self, _name: String) -> Result<(), ChromaCliClientError> {
+            Ok(())
+        }
+    }
+
+    fn fake_get_client_and_dbs_some<W: std::io::Write>(
+        _writer: &mut W,
+        _profile: &Profile,
+        _profile_name: String,
+        _dev: bool,
+    ) -> Result<Option<(MockChromaClient, Vec<Database>)>, std::io::Error> {
+        let fake_dbs = vec![
+            Database {
+                id: Uuid::new_v4(),
+                name: "fake_db1".to_string(),
+                tenant: "tenant1".to_string(),
+            },
+            Database {
+                id: Uuid::new_v4(),
+                name: "fake_db2".to_string(),
+                tenant: "tenant2".to_string(),
+            },
+        ];
+        Ok(Some((MockChromaClient, fake_dbs)))
+    }
+
+    fn fake_get_client_and_dbs_empty<W: std::io::Write>(
+        _writer: &mut W,
+        _profile: &Profile,
+        _profile_name: String,
+        _dev: bool,
+    ) -> Result<Option<(MockChromaClient, Vec<Database>)>, std::io::Error> {
+        Ok(Some((MockChromaClient, vec![])))
+    }
+    
     #[test]
     fn test_list_with_no_dbs() {
-        // let mut cursor = Cursor::new(Vec::new());
-        // Set up test here
+        let mut output = Cursor::new(Vec::new());
+        let args = ListArgs {
+            db_args: DbArgs { dev: true },
+        };
+        let profile_name = "test_profile".to_string();
+        let current_profile = Profile {
+            api_key: "dummy_key".to_string(),
+            team_id: "dummy_team".to_string(),
+        };
+
+        list(
+            &mut output,
+            fake_get_client_and_dbs_empty,
+            args,
+            profile_name.clone(),
+            current_profile,
+        )
+        .expect("list should succeed");
+
+        let result = String::from_utf8(output.into_inner()).unwrap();
+        assert!(result.contains("has 0 DBs"));
+        assert!(result.contains("chroma db create <db name>"));
     }
 
     #[test]
     fn test_list_with_some_dbs() {
-        // let mut cursor = Cursor::new(Vec::new());
-        // Set up test here
+        let mut output = Cursor::new(Vec::new());
+        let args = ListArgs {
+            db_args: DbArgs { dev: true },
+        };
+        let profile_name = "test_profile".to_string();
+        let current_profile = Profile {
+            api_key: "dummy_key".to_string(),
+            team_id: "dummy_team".to_string(),
+        };
+
+        list(
+            &mut output,
+            fake_get_client_and_dbs_some,
+            args,
+            profile_name.clone(),
+            current_profile,
+        )
+        .expect("list should succeed");
+
+        let result = String::from_utf8(output.into_inner()).unwrap();
+        assert!(result.contains("Listing"));
+        assert!(result.contains("fake_db1"));
+        assert!(result.contains("fake_db2"));
     }
 
     #[test]
     fn test_create_with_invalid_name() {
-        // let mut cursor = Cursor::new(Vec::new());
-        // Set up test here
+        let mut output = Cursor::new(Vec::new());
+        let args = CreateArgs {
+            db_args: DbArgs { dev: true },
+            name: Some("invalid@name".to_string()),
+        };
+        let profile_name = "test_profile".to_string();
+        let current_profile = Profile {
+            api_key: "dummy_key".to_string(),
+            team_id: "dummy_team".to_string(),
+        };
+
+        create(
+            &mut output,
+            fake_get_client_and_dbs_some,
+            args,
+            profile_name.clone(),
+            current_profile,
+        )
+            .expect("create should execute without error");
+
+        let result = String::from_utf8(output.into_inner()).unwrap();
+        assert!(result.contains("Database name must contain only alphanumeric characters, hyphens, or underscores"));
     }
 
     #[test]
     fn test_create_success() {
-        // let mut cursor = Cursor::new(Vec::new());
-        // Set up test here
+        let mut output = Cursor::new(Vec::new());
+        let args = CreateArgs {
+            db_args: DbArgs { dev: true },
+            name: Some("new_valid_db".to_string()),
+        };
+        let profile_name = "test_profile".to_string();
+        let current_profile = Profile {
+            api_key: "dummy_key".to_string(),
+            team_id: "dummy_team".to_string(),
+        };
+
+        create(
+            &mut output,
+            fake_get_client_and_dbs_empty,
+            args,
+            profile_name.clone(),
+            current_profile,
+        )
+            .expect("create should execute without error");
+
+        let result = String::from_utf8(output.into_inner()).unwrap();
+        assert!(result.contains("Creating database"));
+        assert!(result.contains("Database new_valid_db created successfully!"));
+        assert!(result.contains("chroma db connect"));
     }
 
     #[test]
     fn test_create_with_name_that_already_exists() {
-        // let mut cursor = Cursor::new(Vec::new());
-        // Set up test here
-    }
+        let mut output = Cursor::new(Vec::new());
+        let args = CreateArgs {
+            db_args: DbArgs { dev: true },
+            name: Some("fake_db1".to_string()),
+        };
+        let profile_name = "test_profile".to_string();
+        let current_profile = Profile {
+            api_key: "dummy_key".to_string(),
+            team_id: "dummy_team".to_string(),
+        };
 
-    #[test]
-    fn test_delete_success() {
-        // let mut cursor = Cursor::new(Vec::new());
-        // Set up test here
-    }
+        create(
+            &mut output,
+            fake_get_client_and_dbs_some,
+            args,
+            profile_name.clone(),
+            current_profile,
+        )
+            .expect("create should execute without error");
 
+        let result = String::from_utf8(output.into_inner()).unwrap();
+        assert!(result.contains("DB with name fake_db1 already exists!"));
+        assert!(result.contains("chroma db delete"));
+    }
+    
     #[test]
     fn test_delete_for_name_that_doesnt_exist() {
-        // let mut cursor = Cursor::new(Vec::new());
-        // Set up test here
+        use crate::commands::db::{delete, DeleteArgs, DbArgs};
+        use std::io::Cursor;
+
+        let mut output = Cursor::new(Vec::new());
+        let args = DeleteArgs {
+            db_args: DbArgs { dev: true },
+            name: Some("nonexistent_db".to_string()),
+        };
+        let profile_name = "test_profile".to_string();
+        let current_profile = Profile {
+            api_key: "dummy_key".to_string(),
+            team_id: "dummy_team".to_string(),
+        };
+
+        delete(
+            &mut output,
+            fake_get_client_and_dbs_some,
+            args,
+            profile_name.clone(),
+            current_profile,
+        )
+            .expect("delete should execute without error");
+
+        let result = String::from_utf8(output.into_inner()).unwrap();
+        assert!(result.contains("DB nonexistent_db not found"));
     }
 }

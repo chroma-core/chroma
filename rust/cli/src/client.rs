@@ -91,7 +91,7 @@ pub trait ChromaClientTrait {
     fn delete_database(&self, name: String) -> Result<(), ChromaCliClientError>;
 }
 
-impl  ChromaClient {
+impl ChromaClient {
     pub fn new(
         api_url: String,
         api_key: String,

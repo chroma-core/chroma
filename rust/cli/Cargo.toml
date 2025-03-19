@@ -28,6 +28,7 @@ reqwest = { workspace = true, features = ["blocking"] }
 mockito = "1.7.0"
 arboard = "3.4.1"
 mockall = "0.13.1"
+uuid = { version = "1.11.0", features = ["v4"] }
 
 
 [[bin]]

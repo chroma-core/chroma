@@ -1441,6 +1441,7 @@ dependencies = [
  "sqlx",
  "tokio",
  "toml",
+ "uuid",
  "webbrowser",
 ]
 
