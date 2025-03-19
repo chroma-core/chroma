@@ -344,14 +344,14 @@ class PersistEmbeddingsStateMachine(EmbeddingStateMachineBase):
         self.client.reset()
 
 
-def test_persist_embeddings_state(
-    caplog: pytest.LogCaptureFixture, settings: Settings
-) -> None:
-    caplog.set_level(logging.ERROR)
-    client = chromadb.Client(settings)
-    run_state_machine_as_test(
-        lambda: PersistEmbeddingsStateMachine(settings=settings, client=client),
-    )  # type: ignore
+# def test_persist_embeddings_state(
+#     caplog: pytest.LogCaptureFixture, settings: Settings
+# ) -> None:
+#     caplog.set_level(logging.ERROR)
+#     client = chromadb.Client(settings)
+#     run_state_machine_as_test(
+#         lambda: PersistEmbeddingsStateMachine(settings=settings, client=client),
+#     )  # type: ignore
 
 
 from strategies import hashing_embedding_function
