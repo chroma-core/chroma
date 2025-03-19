@@ -562,7 +562,7 @@ mod tests {
     ) -> Result<Option<(MockChromaClient, Vec<Database>)>, std::io::Error> {
         Ok(Some((MockChromaClient, vec![])))
     }
-    
+
     #[test]
     fn test_list_with_no_dbs() {
         let mut output = Cursor::new(Vec::new());
@@ -636,10 +636,12 @@ mod tests {
             profile_name.clone(),
             current_profile,
         )
-            .expect("create should execute without error");
+        .expect("create should execute without error");
 
         let result = String::from_utf8(output.into_inner()).unwrap();
-        assert!(result.contains("Database name must contain only alphanumeric characters, hyphens, or underscores"));
+        assert!(result.contains(
+            "Database name must contain only alphanumeric characters, hyphens, or underscores"
+        ));
     }
 
     #[test]
@@ -662,7 +664,7 @@ mod tests {
             profile_name.clone(),
             current_profile,
         )
-            .expect("create should execute without error");
+        .expect("create should execute without error");
 
         let result = String::from_utf8(output.into_inner()).unwrap();
         assert!(result.contains("Creating database"));
@@ -690,16 +692,16 @@ mod tests {
             profile_name.clone(),
             current_profile,
         )
-            .expect("create should execute without error");
+        .expect("create should execute without error");
 
         let result = String::from_utf8(output.into_inner()).unwrap();
         assert!(result.contains("DB with name fake_db1 already exists!"));
         assert!(result.contains("chroma db delete"));
     }
-    
+
     #[test]
     fn test_delete_for_name_that_doesnt_exist() {
-        use crate::commands::db::{delete, DeleteArgs, DbArgs};
+        use crate::commands::db::{delete, DbArgs, DeleteArgs};
         use std::io::Cursor;
 
         let mut output = Cursor::new(Vec::new());
@@ -720,7 +722,7 @@ mod tests {
             profile_name.clone(),
             current_profile,
         )
-            .expect("delete should execute without error");
+        .expect("delete should execute without error");
 
         let result = String::from_utf8(output.into_inner()).unwrap();
         assert!(result.contains("DB nonexistent_db not found"));
