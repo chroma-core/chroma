@@ -1615,6 +1615,7 @@ dependencies = [
  "futures",
  "parking_lot",
  "proptest",
+ "prost 0.13.3",
  "rayon",
  "roaring",
  "sea-query",

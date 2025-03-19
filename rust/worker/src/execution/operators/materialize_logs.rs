@@ -4,9 +4,8 @@ use chroma_error::ChromaError;
 use chroma_segment::blockfile_record::{RecordSegmentReader, RecordSegmentReaderCreationError};
 use chroma_segment::types::{materialize_logs, LogMaterializerError, MaterializeLogsResult};
 use chroma_system::Operator;
-use chroma_types::{chroma_proto, Chunk, DataRecord, LogRecord, Segment};
+use chroma_types::{Chunk, LogRecord, Segment};
 use futures::TryFutureExt;
-use prost::Message;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use thiserror::Error;
@@ -64,7 +63,7 @@ impl MaterializeLogInput {
 #[derive(Debug)]
 pub struct MaterializeLogOutput {
     pub result: MaterializeLogsResult,
-    pub logical_size_delta: i64,
+    pub collection_logical_size_delta: i64,
 }
 
 #[async_trait]
@@ -100,34 +99,17 @@ impl Operator<MaterializeLogInput, MaterializeLogOutput> for MaterializeLogOpera
         .map_err(MaterializeLogOperatorError::LogMaterializationFailed)
         .await?;
 
-        let mut logical_size_delta = 0;
+        let mut collection_logical_size_delta = 0;
         for record in &result {
-            let hydrated = record.hydrate(record_segment_reader.as_ref()).await?;
-            let old_size = hydrated
-                .get_data_record()
-                .map(DataRecord::get_size)
-                .unwrap_or_default() as i64;
-            let merged_metadata = hydrated.merged_metadata();
-            // NOTE: The size calculation should mirror DataRecord::get_size
-            let new_size = (hydrated.get_user_id().len()
-                + size_of_val(hydrated.merged_embeddings_ref())
-                + if merged_metadata.is_empty() {
-                    0
-                } else {
-                    chroma_proto::UpdateMetadata::from(merged_metadata)
-                        .encode_to_vec()
-                        .len()
-                }
-                + hydrated
-                    .merged_document_ref()
-                    .map(|doc| doc.len())
-                    .unwrap_or_default()) as i64;
-            logical_size_delta += new_size - old_size;
+            collection_logical_size_delta += record
+                .hydrate(record_segment_reader.as_ref())
+                .await?
+                .compute_logical_size_delta_bytes();
         }
 
         Ok(MaterializeLogOutput {
             result,
-            logical_size_delta,
+            collection_logical_size_delta,
         })
     }
 }
