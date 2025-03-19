@@ -15,14 +15,14 @@ const PageIndex: React.FC<{
   name?: string;
   index: number;
 }> = ({ path, pages, name, index }) => {
-  const className = index === 0 ? "" : "border-t-2 pt-6";
+  const className = index === 0 ? "" : "border-t-2 pt-6 dark:border-t-gray-700";
 
   return (
     <div className="select-none cursor-default">
       {name && (
         <div className={className}>
         <p
-          className={`font-semibold text-black mb-2 cursor-default text-sm pl-2`}
+          className={`font-semibold text-black dark:text-white mb-2 cursor-default text-sm pl-2`}
         >
           {name}
         </p>

@@ -19,7 +19,7 @@ const PageLink: React.FC<{
   return (
     <div
       key={id}
-      className={`px-3 py-1 border-l-4 ${active && "border-blue-500 bg-blue-50 text-blue-500 font-bold hover:bg-blue-50"} ${!active && "border-transparent text-gray-600 hover:bg-gray-50 hover:border-gray-200"} `}
+      className={`px-3 py-1 border-l-4 ${active && "border-blue-500 bg-blue-50 text-blue-500 font-bold hover:bg-blue-50 dark:bg-blue-900 dark:text-blue-100"} ${!active && "border-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 hover:border-gray-200 dark:hover:bg-gray-800 dark:hover:border-gray-400"} `}
     >
       <Link href={lang ? `${path}?lang=${lang}` : path}>
         <p className="text-sm">{name}</p>
