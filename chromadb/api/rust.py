@@ -284,6 +284,8 @@ class RustBindingsAPI(ServerAPI):
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
         new_configuration: Optional[UpdateCollectionConfiguration] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> None:
         if new_configuration:
             new_configuration_json_str = update_collection_configuration_to_json_str(
