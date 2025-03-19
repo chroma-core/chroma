@@ -25,12 +25,12 @@ const UpdatesLink: React.FC = () => {
   return (
     <Link href="/updates/migration" onClick={handleUpdateClick}>
       <UIButton
-        className={`relative flex items-center justify-center p-[0.35rem] ${
+        className={`relative flex items-center justify-center p-[0.35rem] text-xs ${
           !upToDate &&
           "border-chroma-orange dark:border-chroma-orange border-[1px]"
         }`}
       >
-        <BellIcon className={`h-4 w-4 ${!upToDate && "text-chroma-orange"}`} />
+        <BellIcon className={`h-4 w-4 ${!upToDate && "text-chroma-orange"}`} />&nbsp;Updates
       </UIButton>
     </Link>
   );
