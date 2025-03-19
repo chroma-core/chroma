@@ -289,9 +289,7 @@ mod tests {
     use chroma_log::in_memory_log::{InMemoryLog, InternalLogRecord};
     use chroma_memberlist::memberlist_provider::Member;
     use chroma_sysdb::TestSysDb;
-    use chroma_types::{
-        Collection, InternalCollectionConfiguration, LogRecord, Operation, OperationRecord,
-    };
+    use chroma_types::{Collection, LogRecord, Operation, OperationRecord};
 
     #[tokio::test]
     async fn test_scheduler() {

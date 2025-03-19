@@ -420,8 +420,8 @@ mod tests {
     use chroma_storage::local::LocalStorage;
     use chroma_sysdb::TestSysDb;
     use chroma_system::{Dispatcher, DispatcherConfig};
+    use chroma_types::SegmentUuid;
     use chroma_types::{Collection, LogRecord, Operation, OperationRecord, Segment};
-    use chroma_types::{InternalCollectionConfiguration, SegmentUuid};
     use std::collections::HashMap;
     use std::path::PathBuf;
 

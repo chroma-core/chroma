@@ -146,10 +146,7 @@ mod tests {
     use super::*;
     use chroma_log::in_memory_log::InMemoryLog;
     use chroma_sysdb::TestSysDb;
-    use chroma_types::{
-        Collection, InternalCollectionConfiguration, Segment, SegmentScope, SegmentType,
-        SegmentUuid,
-    };
+    use chroma_types::{Collection, Segment, SegmentScope, SegmentType, SegmentUuid};
     use std::collections::HashMap;
     use std::str::FromStr;
 
