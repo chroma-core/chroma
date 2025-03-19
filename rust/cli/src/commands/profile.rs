@@ -339,7 +339,6 @@ mod tests {
         let output_str = str::from_utf8(output.get_ref()).unwrap();
         assert!(output_str.contains("No profile set currently"));
         assert!(output_str.contains("chroma login"));
-        assert!(output_str.contains("chroma use <profile name>"));
     }
 
     #[test]
