@@ -69,8 +69,6 @@ use core::panic;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
-use std::time::SystemTime;
-use std::time::UNIX_EPOCH;
 use thiserror::Error;
 use tokio::sync::oneshot::error::RecvError;
 use tokio::sync::oneshot::Sender;
@@ -519,10 +517,6 @@ impl CompactOrchestrator {
             // WARN: For legacy collections the logical size is initialized to zero, so the size after compaction might be negative
             // TODO: Backfill collection logical size
             u64::try_from(self.collection_logical_size).unwrap_or_default(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or_default(),
             self.sysdb.clone(),
             self.log.clone(),
         );
