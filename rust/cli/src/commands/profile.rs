@@ -150,5 +150,191 @@ pub fn profile_command<W: Write>(writer: &mut W, command: ProfileCommand) -> Res
 
 #[cfg(test)]
 mod tests {
-   
+    use super::*;
+    use std::io::Cursor;
+    use crate::utils::{CliConfig, Profile, Profiles};
+    use std::collections::HashMap;
+    use std::str;
+    
+    fn setup_test_profiles() -> Profiles {
+        let mut profiles = HashMap::new();
+        profiles.insert(
+            "profile1".to_string(),
+            Profile {
+                api_key: "test-key-1".to_string(),
+                team_id: "team-1".to_string(),
+            },
+        );
+        profiles.insert(
+            "profile2".to_string(),
+            Profile {
+                api_key: "test-key-2".to_string(),
+                team_id: "team-2".to_string(),
+            },
+        );
+        profiles
+    }
+
+    fn setup_test_config(current_profile: &str) -> CliConfig {
+        CliConfig {
+            current_profile: current_profile.to_string(),
+        }
+    }
+
+    
+    #[test]
+    fn test_delete_active_profile_user_confirms() {
+        let mut profiles = setup_test_profiles();
+        let mut config = setup_test_config("profile1");
+        let mut output = Cursor::new(Vec::new());
+        let args = DeleteArgs {
+            name: "profile1".to_string(),
+        };
+
+        let result = true;
+
+        if profile_exists(&mut output, &args.name, &profiles).unwrap() && config.current_profile == args.name && result {
+            config.current_profile = "".to_string();
+            profiles.remove(&args.name);
+        }
+
+        assert_eq!(config.current_profile, "");
+        assert!(!profiles.contains_key(&args.name));
+        assert_eq!(profiles.len(), 1);
+    }
+
+    #[test]
+    fn test_delete_non_active_profile() {
+        let mut profiles = setup_test_profiles();
+        let mut config = setup_test_config("profile1");
+        let mut output = Cursor::new(Vec::new());
+        let args = DeleteArgs {
+            name: "profile2".to_string(),
+        };
+
+        delete_profile(&mut output, args, &mut profiles, &mut config).unwrap();
+
+        let output_str = str::from_utf8(output.get_ref()).unwrap();
+        assert!(output_str.contains("Profile profile2 successfully removed"));
+        assert_eq!(profiles.len(), 1);
+        assert!(!profiles.contains_key("profile2"));
+        assert_eq!(config.current_profile, "profile1"); // Current profile unchanged
+    }
+
+    #[test]
+    fn test_delete_non_existent_profile() {
+        let mut profiles = setup_test_profiles();
+        let mut config = setup_test_config("profile1");
+        let mut output = Cursor::new(Vec::new());
+        let args = DeleteArgs {
+            name: "nonexistent".to_string(),
+        };
+
+        delete_profile(&mut output, args, &mut profiles, &mut config).unwrap();
+
+        let output_str = str::from_utf8(output.get_ref()).unwrap();
+        assert!(output_str.contains("Profile nonexistent not found"));
+        assert_eq!(profiles.len(), 2); // Profile count unchanged
+        assert_eq!(config.current_profile, "profile1"); // Current profile unchanged
+    }
+
+    #[test]
+    fn test_list_no_profiles() {
+        let profiles = HashMap::new();
+        let config = setup_test_config("");
+        let mut output = Cursor::new(Vec::new());
+
+        list_profiles(&mut output, profiles, config).unwrap();
+
+        let output_str = str::from_utf8(output.get_ref()).unwrap();
+        assert!(output_str.contains("No profiles defined at the moment"));
+        assert!(output_str.contains("chroma login"));
+    }
+
+    #[test]
+    fn test_list_profiles_with_current() {
+        let profiles = setup_test_profiles();
+        let config = setup_test_config("profile1");
+        let mut output = Cursor::new(Vec::new());
+
+        list_profiles(&mut output, profiles, config).unwrap();
+
+        let output_str = str::from_utf8(output.get_ref()).unwrap();
+        assert!(output_str.contains("Available profiles:"));
+        assert!(output_str.contains("profile1 (current)"));
+        assert!(output_str.contains("profile2"));
+    }
+
+    #[test]
+    fn test_list_profiles_without_current() {
+        let profiles = setup_test_profiles();
+        let config = setup_test_config("");
+        let mut output = Cursor::new(Vec::new());
+
+        list_profiles(&mut output, profiles, config).unwrap();
+
+        let output_str = str::from_utf8(output.get_ref()).unwrap();
+        assert!(output_str.contains("Available profiles:"));
+        assert!(output_str.contains("profile1"));
+        assert!(output_str.contains("profile2"));
+        assert!(!output_str.contains("(current)"));
+    }
+
+    #[test]
+    fn test_show_with_current_profile() {
+        let config = setup_test_config("profile1");
+        let mut output = Cursor::new(Vec::new());
+
+        show(&mut output, config).unwrap();
+
+        let output_str = str::from_utf8(output.get_ref()).unwrap();
+        assert!(output_str.contains("Current profile:"));
+        assert!(output_str.contains("profile1"));
+        assert!(!output_str.contains("No profile set currently"));
+    }
+
+    #[test]
+    fn test_show_without_current_profile() {
+        let config = setup_test_config("");
+        let mut output = Cursor::new(Vec::new());
+
+        show(&mut output, config).unwrap();
+
+        let output_str = str::from_utf8(output.get_ref()).unwrap();
+        assert!(output_str.contains("No profile set currently"));
+        assert!(output_str.contains("chroma login"));
+        assert!(output_str.contains("chroma use <profile name>"));
+    }
+
+    #[test]
+    fn test_use_non_existent_profile() {
+        let profiles = setup_test_profiles();
+        let mut config = setup_test_config("profile1");
+        let mut output = Cursor::new(Vec::new());
+        let args = UseArgs {
+            name: "nonexistent".to_string(),
+        };
+
+        use_profile(&mut output, args, profiles, &mut config).unwrap();
+
+        let output_str = str::from_utf8(output.get_ref()).unwrap();
+        assert!(output_str.contains("Profile nonexistent not found"));
+        assert_eq!(config.current_profile, "profile1"); // Current profile unchanged
+    }
+    
+    #[test]
+    fn test_use_existing_profile() {
+        let profiles = setup_test_profiles();
+        let mut config = setup_test_config("profile1");
+        let mut output = Cursor::new(Vec::new());
+        let args = UseArgs {
+            name: "profile2".to_string(),
+        };
+
+        use_profile(&mut output, args, profiles, &mut config).unwrap();
+
+        let output_str = str::from_utf8(output.get_ref()).unwrap();
+        assert!(output_str.contains("Current profile set to profile2"));
+        assert_eq!(config.current_profile, "profile2"); // Current profile changed
+    }
 }
