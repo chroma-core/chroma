@@ -16,19 +16,19 @@ import { useParams } from "next/navigation";
 
 const HeaderNav: React.FC = () => {
   const params = useParams();
-  // get current path from url using nextjs reouter
+  // get current path from url using nextjs router
   const currentSection = sidebarConfig.find((section) =>
-      params.slug.join("").startsWith(section.id),
+      params?.slug && Array.isArray(params.slug) && params.slug.join("").startsWith(section.id),
   );
 
   return (
     <div className="flex items-center flex-shrink-0 px-5 border-b-[1px] dark:border-gray-700 ">
       {sidebarConfig.map((section) => (
-        <MenuItem
-        key={section.id}
-        section={section}
-        active={currentSection.id === section.id}
-        />
+      <MenuItem
+      key={section.id}
+      section={section}
+      active={currentSection?.id === section.id}
+      />
     ))}
     </div>
   );

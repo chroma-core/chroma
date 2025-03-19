@@ -39,7 +39,7 @@ const AskAI: React.FC<{ content: string }> = ({ content }) => {
         </DropdownMenuTrigger>
         <DropdownMenuContent className="w-[230px]" align="end">
           <DropdownMenuItem className="flex w-full">
-            <Link
+            {/* <Link
               href={`https://chat.openai.com/?prompt=${encodeURIComponent(prompt(pathname))}`}
               target="_blank"
               rel="noopener noreferrer"
@@ -51,7 +51,7 @@ const AskAI: React.FC<{ content: string }> = ({ content }) => {
                 </div>
                 <p className="text-xs">Ask questions about this page</p>
               </div>
-            </Link>
+            </Link> */}
           </DropdownMenuItem>
           <DropdownMenuItem
             className="flex items-center gap-1.5 cursor-pointer"
