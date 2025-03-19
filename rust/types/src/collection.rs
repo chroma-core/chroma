@@ -168,6 +168,10 @@ impl Collection {
             ..Default::default()
         }
     }
+
+    pub fn get_configuration(&self) -> InternalCollectionConfiguration {
+        self.config.clone()
+    }
 }
 
 #[derive(Error, Debug)]

@@ -29,6 +29,29 @@ pub enum VectorIndexConfiguration {
     Spann(InternalSpannConfiguration),
 }
 
+impl VectorIndexConfiguration {
+    pub fn update(&mut self, vector_index: &VectorIndexConfiguration) {
+        match (self, vector_index) {
+            (VectorIndexConfiguration::Hnsw(hnsw), VectorIndexConfiguration::Hnsw(hnsw_new)) => {
+                *hnsw = hnsw_new.clone();
+            }
+            (
+                VectorIndexConfiguration::Spann(spann),
+                VectorIndexConfiguration::Spann(spann_new),
+            ) => {
+                *spann = spann_new.clone();
+            }
+            (VectorIndexConfiguration::Hnsw(_), VectorIndexConfiguration::Spann(_)) => {
+                // For now, we don't support converting between different index types
+                // This could be implemented in the future if needed
+            }
+            (VectorIndexConfiguration::Spann(_), VectorIndexConfiguration::Hnsw(_)) => {
+                // For now, we don't support converting between different index types
+                // This could be implemented in the future if needed
+            }
+        }
+    }
+}
 impl From<HnswConfiguration> for VectorIndexConfiguration {
     fn from(config: HnswConfiguration) -> Self {
         VectorIndexConfiguration::Hnsw(config)
@@ -106,6 +129,49 @@ impl InternalCollectionConfiguration {
         match &self.vector_index {
             VectorIndexConfiguration::Hnsw(config) => Some(config.clone()),
             _ => None,
+        }
+    }
+
+    pub fn update(&mut self, configuration: &InternalUpdateCollectionConfiguration) {
+        // Update vector_index if it exists in the update configuration
+        if let Some(vector_index) = &configuration.vector_index {
+            match vector_index {
+                UpdateVectorIndexConfiguration::Hnsw(Some(hnsw_config)) => {
+                    if let VectorIndexConfiguration::Hnsw(current_config) = &mut self.vector_index {
+                        // Update only the non-None fields from the update configuration
+                        if let Some(ef_search) = hnsw_config.ef_search {
+                            current_config.ef_search = ef_search;
+                        }
+                        if let Some(max_neighbors) = hnsw_config.max_neighbors {
+                            current_config.max_neighbors = max_neighbors;
+                        }
+                        if let Some(num_threads) = hnsw_config.num_threads {
+                            current_config.num_threads = num_threads;
+                        }
+                        if let Some(resize_factor) = hnsw_config.resize_factor {
+                            current_config.resize_factor = resize_factor;
+                        }
+                        if let Some(sync_threshold) = hnsw_config.sync_threshold {
+                            current_config.sync_threshold = sync_threshold;
+                        }
+                        if let Some(batch_size) = hnsw_config.batch_size {
+                            current_config.batch_size = batch_size;
+                        }
+                    }
+                }
+                UpdateVectorIndexConfiguration::Spann(Some(spann_config)) => {
+                    if let VectorIndexConfiguration::Spann(current_config) = &mut self.vector_index
+                    {
+                        *current_config = spann_config.clone();
+                    }
+                }
+                _ => {} // No update needed for None configurations
+            }
+        }
+
+        // Update embedding_function if it exists in the update configuration
+        if let Some(embedding_function) = &configuration.embedding_function {
+            self.embedding_function = Some(embedding_function.clone());
         }
     }
 }

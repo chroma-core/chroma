@@ -348,8 +348,23 @@ impl SqliteSysDb {
         name: Option<String>,
         metadata: Option<CollectionMetadataUpdate>,
         dimension: Option<u32>,
-        _configuration: Option<InternalUpdateCollectionConfiguration>,
+        configuration: Option<InternalUpdateCollectionConfiguration>,
     ) -> Result<(), UpdateCollectionError> {
+        let mut configuration_json_str = None;
+        if let Some(configuration) = configuration {
+            let collections = self
+                .get_collections(Some(collection_id), None, None, None, None, 0)
+                .await;
+            let collections = collections.unwrap();
+            let collection = collections.into_iter().next().unwrap();
+            let mut existing_configuration = collection.get_configuration();
+            existing_configuration.update(&configuration);
+            configuration_json_str = Some(
+                serde_json::to_string(&existing_configuration)
+                    .map_err(UpdateCollectionError::Configuration)?,
+            );
+        }
+
         let mut tx = self
             .db
             .get_conn()
@@ -372,7 +387,9 @@ impl SqliteSysDb {
                 query = query.value(table::Collections::Dimension, dimension);
             }
 
-            // TODO: @jai if configuration exists, fetch config_json_str from table Collections, build into collection configuration object, and update config_json_str in table Collections
+            if let Some(configuration_json_str) = configuration_json_str {
+                query = query.value(table::Collections::ConfigJsonStr, configuration_json_str);
+            }
 
             let (sql, values) = query.build_sqlx(sea_query::SqliteQueryBuilder);
 
