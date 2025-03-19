@@ -69,6 +69,8 @@ use core::panic;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 use thiserror::Error;
 use tokio::sync::oneshot::error::RecvError;
 use tokio::sync::oneshot::Sender;
@@ -116,6 +118,7 @@ pub struct CompactOrchestrator {
     state: ExecutionState,
     // Component Execution
     collection_id: CollectionUuid,
+    collection_logical_size: i64,
     // Dependencies
     log: Log,
     sysdb: SysDb,
@@ -130,8 +133,6 @@ pub struct CompactOrchestrator {
     num_uncompleted_materialization_tasks: usize,
     // Tracks the total remaining number of tasks per segment
     num_uncompleted_tasks_by_segment: HashMap<SegmentUuid, usize>,
-    // Tracks the delta in logical size of the collection
-    logical_size_delta: i64,
     // Result Channel
     result_channel: Option<Sender<Result<CompactionResponse, CompactionError>>>,
     max_compaction_size: usize,
@@ -248,6 +249,7 @@ impl CompactOrchestrator {
     pub fn new(
         compaction_job: CompactionJob,
         collection_id: CollectionUuid,
+        collection_logical_size: i64,
         log: Log,
         sysdb: SysDb,
         blockfile_provider: BlockfileProvider,
@@ -263,6 +265,7 @@ impl CompactOrchestrator {
             compaction_job,
             state: ExecutionState::Pending,
             collection_id,
+            collection_logical_size,
             log,
             sysdb,
             blockfile_provider,
@@ -272,7 +275,6 @@ impl CompactOrchestrator {
             dispatcher,
             num_uncompleted_materialization_tasks: 0,
             num_uncompleted_tasks_by_segment: HashMap::new(),
-            logical_size_delta: 0,
             result_channel,
             max_compaction_size,
             max_partition_size,
@@ -514,6 +516,13 @@ impl CompactOrchestrator {
             self.compaction_job.collection_version,
             self.flush_results.clone().into(),
             self.total_records_last_compaction,
+            // WARN: For legacy collections the logical size is initialized to zero, so the size after compaction might be negative
+            // TODO: Backfill collection logical size
+            u64::try_from(self.collection_logical_size).unwrap_or_default(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or_default(),
             self.sysdb.clone(),
             self.log.clone(),
         );
@@ -869,7 +878,7 @@ impl Handler<TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>>
                 self.register(self.pulled_log_offset.unwrap(), ctx).await;
             }
         } else {
-            self.logical_size_delta += output.logical_size_delta;
+            self.collection_logical_size += output.collection_logical_size_delta;
             self.dispatch_apply_log_to_segment_writer_tasks(output.result, ctx.receiver(), ctx)
                 .await;
         }

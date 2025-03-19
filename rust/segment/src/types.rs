@@ -1,9 +1,10 @@
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
-    Chunk, DataRecord, DeletedMetadata, LogRecord, MaterializedLogOperation, Metadata,
-    MetadataDelta, MetadataValue, MetadataValueConversionError, Operation, SegmentUuid,
+    chroma_proto, Chunk, DataRecord, DeletedMetadata, LogRecord, MaterializedLogOperation,
+    Metadata, MetadataDelta, MetadataValue, MetadataValueConversionError, Operation, SegmentUuid,
     UpdateMetadata, UpdateMetadataValue,
 };
+use prost::Message;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
@@ -439,6 +440,36 @@ impl<'log_data, 'segment_data: 'log_data> HydratedMaterializedLogRecord<'log_dat
             }
         }
         metadata_delta
+    }
+
+    pub fn compute_logical_size_delta_bytes(&self) -> i64 {
+        let old_size = self
+            .get_data_record()
+            .map(DataRecord::get_size)
+            .unwrap_or_default() as i64;
+        let merged_metadata = self.merged_metadata();
+        // NOTE: The size calculation should mirror DataRecord::get_size
+        let new_size = match self.get_operation() {
+            MaterializedLogOperation::AddNew
+            | MaterializedLogOperation::OverwriteExisting
+            | MaterializedLogOperation::UpdateExisting => {
+                (self.get_user_id().len()
+                    + size_of_val(self.merged_embeddings_ref())
+                    + if merged_metadata.is_empty() {
+                        0
+                    } else {
+                        chroma_proto::UpdateMetadata::from(merged_metadata)
+                            .encode_to_vec()
+                            .len()
+                    }
+                    + self
+                        .merged_document_ref()
+                        .map(|doc| doc.len())
+                        .unwrap_or_default()) as i64
+            }
+            _ => 0,
+        };
+        new_size - old_size
     }
 }
 

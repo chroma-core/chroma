@@ -6,7 +6,7 @@ pub(crate) struct CompactionJob {
     pub(crate) tenant_id: String,
     pub(crate) offset: i64,
     pub(crate) collection_version: i32,
-    pub(crate) logical_size_bytes: u64,
+    pub(crate) collection_logical_size_bytes: u64,
 }
 
 #[derive(Clone, Debug)]
