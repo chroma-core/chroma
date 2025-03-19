@@ -155,6 +155,7 @@ impl Scheduler {
                         first_record_time: collection_info.first_log_ts,
                         offset,
                         collection_version: collection[0].version,
+                        logical_size_bytes: collection[0].size_bytes_post_compaction,
                     });
                 }
                 Err(e) => {
@@ -207,6 +208,7 @@ impl Scheduler {
                     tenant_id: record.tenant_id,
                     offset: record.offset,
                     collection_version: record.collection_version,
+                    logical_size_bytes: record.logical_size_bytes,
                 });
                 self.oneoff_collections.remove(&record.collection_id);
                 if self.job_queue.len() == self.max_concurrent_jobs {
