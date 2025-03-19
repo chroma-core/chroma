@@ -1353,6 +1353,15 @@ impl SpannIndexWriter {
 
                 return Ok(());
             }
+            if source_cluster_len == 0 {
+                tracing::info!("Posting list of {} is empty. Deleting from hnsw", head_id);
+                // Delete from hnsw.
+                let hnsw_write_guard = self.hnsw_index.inner.write();
+                hnsw_write_guard
+                    .delete(head_id)
+                    .map_err(|_| SpannIndexWriterError::HnswIndexAddError)?;
+                return Ok(());
+            }
             // Find candidates for merge.
             let (nearest_head_ids, _, nearest_head_embeddings) = self
                 .get_nearby_heads(head_embedding, self.params.num_centers_to_merge_to as usize)
