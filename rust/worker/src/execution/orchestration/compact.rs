@@ -296,6 +296,7 @@ impl CompactOrchestrator {
         for segment in segments {
             if segment.r#type == SegmentType::BlockfileMetadata
                 || segment.r#type == SegmentType::BlockfileRecord
+                || segment.r#type == SegmentType::Spann
             {
                 let prefetch_task = wrap(
                     Box::new(PrefetchSegmentOperator::new()),
