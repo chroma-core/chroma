@@ -58,3 +58,4 @@ proptest-derive = "0.3"
 tokio-test = "0.4"
 rand = { workspace = true }
 itertools = { workspace = true }
+tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }
