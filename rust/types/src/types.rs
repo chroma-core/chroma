@@ -39,12 +39,9 @@ impl From<ConversionError> for Status {
 
 #[derive(thiserror::Error, Debug)]
 #[error(transparent)]
-pub struct WrappedSerdeJsonError(#[from] serde_json::Error);
-
-impl WrappedSerdeJsonError {
-    pub fn new(err: serde_json::Error) -> Self {
-        Self(err)
-    }
+pub enum WrappedSerdeJsonError {
+    #[error(transparent)]
+    SerdeJsonError(#[from] serde_json::Error),
 }
 
 impl ChromaError for WrappedSerdeJsonError {
