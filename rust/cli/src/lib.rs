@@ -1,6 +1,7 @@
 mod commands;
 mod utils;
 
+use std::io;
 use crate::commands::profile::{profile_command, ProfileCommand};
 use crate::commands::run::{run, RunArgs};
 use crate::commands::vacuum::{vacuum, VacuumArgs};
@@ -27,16 +28,20 @@ struct Cli {
 
 pub fn chroma_cli(args: Vec<String>) {
     let cli = Cli::parse_from(args);
+    println!();
+
+    let stdout = io::stdout();
+    let mut out = stdout.lock();
 
     match cli.command {
         Command::Docs => {
             let url = "https://docs.trychroma.com";
             if webbrowser::open(url).is_err() {
-                eprintln!("Error: Failed to open the browser. Visit {}.", url);
+                eprintln!("Error: Failed to open the browser. Visit {}\n.", url);
             }
         }
         Command::Profile(profile_subcommand) => {
-            profile_command(profile_subcommand);
+            profile_command(&mut out, profile_subcommand).expect("Failed to write output");
         }
         Command::Run(args) => {
             run(args);
@@ -44,11 +49,12 @@ pub fn chroma_cli(args: Vec<String>) {
         Command::Support => {
             let url = "https://discord.gg/MMeYNTmh3x";
             if webbrowser::open(url).is_err() {
-                eprintln!("Error: Failed to open the browser. Visit {}.", url);
+                eprintln!("Error: Failed to open the browser. Visit {}\n.", url);
             }
         }
         Command::Vacuum(args) => {
             vacuum(args);
         }
     }
+    println!();
 }

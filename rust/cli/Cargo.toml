@@ -22,7 +22,8 @@ chroma-types = { workspace = true }
 chroma-log = { workspace = true }
 serde = { version = "1.0.215", features = ["derive"] }
 toml = "0.8.20"
-serde_json = "1.0.133"
+serde_json = { workspace = true }
+dirs = "6.0.0"
 tempfile = "3.14.0"
 
 
