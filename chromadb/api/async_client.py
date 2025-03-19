@@ -9,6 +9,7 @@ from chromadb.auth.utils import maybe_set_tenant_and_database
 from chromadb.api import AsyncAdminAPI, AsyncClientAPI, AsyncServerAPI
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
+    UpdateCollectionConfiguration,
 )
 from chromadb.api.models.AsyncCollection import AsyncCollection
 from chromadb.api.shared_system_client import SharedSystemClient
@@ -247,11 +248,13 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
+        new_configuration: Optional[UpdateCollectionConfiguration] = None,
     ) -> None:
         return await self._server._modify(
             id=id,
             new_name=new_name,
             new_metadata=new_metadata,
+            new_configuration=new_configuration,
             tenant=self.tenant,
             database=self.database,
         )

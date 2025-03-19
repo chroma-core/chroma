@@ -25,6 +25,7 @@ from functools import wraps
 
 from chromadb.api.collection_configuration import (
     load_create_collection_configuration_from_json_str,
+    load_update_collection_configuration_from_json_str,
     default_create_collection_configuration,
     create_collection_configuration_from_legacy_collection_metadata,
 )
@@ -885,12 +886,20 @@ class FastAPI(Server):
                 database_name,
                 collection_id,
             )
+            configuration = (
+                None
+                if not update.new_configuration
+                else load_update_collection_configuration_from_json_str(
+                    update.new_configuration
+                )
+            )
             self._set_request_context(request=request)
             add_attributes_to_current_span({"tenant": tenant})
             return self._api._modify(
                 id=_uuid(collection_id),
                 new_name=update.new_name,
                 new_metadata=update.new_metadata,
+                new_configuration=configuration,
                 tenant=tenant,
                 database=database_name,
             )
@@ -1817,10 +1826,18 @@ class FastAPI(Server):
                 None,
                 collection_id,
             )
+            configuration = (
+                None
+                if not update.new_configuration
+                else load_update_collection_configuration_from_json_str(
+                    update.new_configuration
+                )
+            )
             return self._api._modify(
                 id=_uuid(collection_id),
                 new_name=update.new_name,
                 new_metadata=update.new_metadata,
+                new_configuration=configuration,
             )
 
         await to_thread.run_sync(

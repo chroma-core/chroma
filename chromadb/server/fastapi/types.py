@@ -68,6 +68,7 @@ class CreateCollection(BaseModel):
 class UpdateCollection(BaseModel):
     new_name: Optional[str] = None
     new_metadata: Optional[CollectionMetadata] = None
+    new_configuration: Optional[str] = None
 
 
 class CreateDatabase(BaseModel):
