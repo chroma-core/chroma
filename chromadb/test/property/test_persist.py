@@ -670,6 +670,7 @@ def test_repro(caplog: pytest.LogCaptureFixture, settings: Settings) -> None:
             print(f"Records: {all_records}")
             print(f"Failed on iteration {i}")
             print(f"Error: {e}")
+            raise e
         state.teardown()
 
 
