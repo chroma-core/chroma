@@ -8,7 +8,6 @@ from chromadb.api.fastapi import FastAPI
 from chromadb.api.types import QueryResult, EmbeddingFunction, Document
 from chromadb.config import Settings
 from chromadb.errors import NotFoundError
-import chromadb.server.fastapi
 import pytest
 import tempfile
 import numpy as np
