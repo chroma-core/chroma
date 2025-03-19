@@ -203,7 +203,7 @@ impl Frontend {
         dimension: u32,
     ) -> Result<UpdateCollectionResponse, UpdateCollectionError> {
         self.sysdb_client
-            .update_collection(collection_id, None, None, Some(dimension))
+            .update_collection(collection_id, None, None, Some(dimension), None)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         // Invalidate the cache.
@@ -510,11 +510,20 @@ impl Frontend {
             collection_id,
             new_name,
             new_metadata,
+            new_configuration,
             ..
         }: UpdateCollectionRequest,
     ) -> Result<UpdateCollectionResponse, UpdateCollectionError> {
+        let new_configuration: Option<InternalCollectionConfiguration> =
+            new_configuration.map(|c| c.try_into()).transpose()?;
         self.sysdb_client
-            .update_collection(collection_id, new_name, new_metadata, None)
+            .update_collection(
+                collection_id,
+                new_name,
+                new_metadata,
+                None,
+                new_configuration,
+            )
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         // Invalidate the cache.

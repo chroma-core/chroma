@@ -20,6 +20,7 @@ from chromadb.api.types import (
 )
 
 from chromadb.api.models.CollectionCommon import CollectionCommon
+from chromadb.api.collection_configuration import UpdateCollectionConfiguration
 
 if TYPE_CHECKING:
     from chromadb.api import AsyncServerAPI  # noqa: F401
@@ -231,6 +232,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         self,
         name: Optional[str] = None,
         metadata: Optional[CollectionMetadata] = None,
+        configuration: Optional[UpdateCollectionConfiguration] = None,
     ) -> None:
         """Modify the collection name or metadata
 
@@ -251,6 +253,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             id=self.id,
             new_name=name,
             new_metadata=metadata,
+            new_configuration=configuration,
         )
 
         self._update_model_after_modify_success(name, metadata)
