@@ -12,9 +12,7 @@ export const PostHogPageView: React.FC = () => {
   useEffect(() => {
     if (pathname && posthog) {
       let url = window.origin + pathname;
-      // @ts-expect-error - URLSearchParams is not iterable
-      if (searchParams.toString()) {
-        // @ts-expect-error - URLSearchParams is not iterable
+      if (searchParams?.toString()) {
         url = `${url}?${searchParams.toString()}`;
       }
 
