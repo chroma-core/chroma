@@ -12,8 +12,8 @@ use chroma_types::{
     CreateTenantError, CreateTenantResponse, Database, DeleteCollectionError, DeleteDatabaseError,
     DeleteDatabaseResponse, GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError,
     GetSegmentsError, GetTenantError, GetTenantResponse, InternalCollectionConfiguration,
-    ListDatabasesError, Metadata, MetadataValue, ResetError, ResetResponse, Segment, SegmentScope,
-    SegmentType, SegmentUuid, UpdateCollectionError,
+    InternalUpdateCollectionConfiguration, ListDatabasesError, Metadata, MetadataValue, ResetError,
+    ResetResponse, Segment, SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError,
 };
 use futures::TryStreamExt;
 use sea_query_binder::SqlxBinder;
@@ -348,7 +348,7 @@ impl SqliteSysDb {
         name: Option<String>,
         metadata: Option<CollectionMetadataUpdate>,
         dimension: Option<u32>,
-        _configuration: Option<InternalCollectionConfiguration>,
+        _configuration: Option<InternalUpdateCollectionConfiguration>,
     ) -> Result<(), UpdateCollectionError> {
         let mut tx = self
             .db

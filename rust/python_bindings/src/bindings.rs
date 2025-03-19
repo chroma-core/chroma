@@ -20,8 +20,8 @@ use chroma_types::{
     CountResponse, CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest, Database,
     DeleteCollectionRequest, DeleteDatabaseRequest, GetCollectionRequest, GetDatabaseRequest,
     GetResponse, GetTenantRequest, GetTenantResponse, HeartbeatError, IncludeList,
-    ListCollectionsRequest, ListDatabasesRequest, Metadata, QueryResponse, UpdateCollectionRequest,
-    UpdateMetadata, WrappedSerdeJsonError,
+    ListCollectionsRequest, ListDatabasesRequest, Metadata, QueryResponse,
+    UpdateCollectionConfiguration, UpdateCollectionRequest, UpdateMetadata, WrappedSerdeJsonError,
 };
 use pyo3::{exceptions::PyValueError, pyclass, pyfunction, pymethods, types::PyAnyMethods, Python};
 use std::time::SystemTime;
@@ -312,9 +312,10 @@ impl Bindings {
 
         let configuration_json = match new_configuration_json_str {
             Some(new_configuration_json_str) => {
-                let new_configuration_json =
-                    serde_json::from_str::<CollectionConfiguration>(&new_configuration_json_str)
-                        .map_err(WrappedSerdeJsonError::SerdeJsonError)?;
+                let new_configuration_json = serde_json::from_str::<UpdateCollectionConfiguration>(
+                    &new_configuration_json_str,
+                )
+                .map_err(WrappedSerdeJsonError::SerdeJsonError)?;
 
                 Some(new_configuration_json)
             }

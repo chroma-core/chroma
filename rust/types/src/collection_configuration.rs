@@ -1,6 +1,6 @@
 use crate::{
     HnswConfiguration, HnswParametersFromSegmentError, InternalSpannConfiguration, Metadata,
-    Segment, SpannConfiguration,
+    Segment, SpannConfiguration, UpdateHnswConfiguration,
 };
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
@@ -225,5 +225,102 @@ mod tests {
 
         // Setting from metadata is ignored since the config is not default
         assert_eq!(overridden_config.ef_construction, 2);
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateVectorIndexConfiguration {
+    Hnsw(Option<UpdateHnswConfiguration>),
+    Spann(Option<InternalSpannConfiguration>),
+}
+
+impl From<UpdateHnswConfiguration> for UpdateVectorIndexConfiguration {
+    fn from(config: UpdateHnswConfiguration) -> Self {
+        UpdateVectorIndexConfiguration::Hnsw(Some(config))
+    }
+}
+
+impl From<InternalSpannConfiguration> for UpdateVectorIndexConfiguration {
+    fn from(config: InternalSpannConfiguration) -> Self {
+        UpdateVectorIndexConfiguration::Spann(Some(config))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct InternalUpdateCollectionConfiguration {
+    pub vector_index: Option<UpdateVectorIndexConfiguration>,
+    pub embedding_function: Option<EmbeddingFunctionConfiguration>,
+}
+
+impl InternalUpdateCollectionConfiguration {
+    pub fn get_spann_config(&self) -> Option<InternalSpannConfiguration> {
+        match &self.vector_index {
+            Some(UpdateVectorIndexConfiguration::Spann(Some(config))) => Some(config.clone()),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum UpdateCollectionConfigurationToInternalConfigurationError {
+    #[error("Multiple vector index configurations provided")]
+    MultipleVectorIndexConfigurations,
+}
+
+impl ChromaError for UpdateCollectionConfigurationToInternalConfigurationError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            Self::MultipleVectorIndexConfigurations => ErrorCodes::InvalidArgument,
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
+#[cfg_attr(feature = "pyo3", pyo3::pyclass)]
+pub struct UpdateCollectionConfiguration {
+    pub hnsw: Option<UpdateHnswConfiguration>,
+    pub spann: Option<SpannConfiguration>,
+    pub embedding_function: Option<EmbeddingFunctionConfiguration>,
+}
+
+impl TryFrom<UpdateCollectionConfiguration> for InternalUpdateCollectionConfiguration {
+    type Error = UpdateCollectionConfigurationToInternalConfigurationError;
+
+    fn try_from(value: UpdateCollectionConfiguration) -> Result<Self, Self::Error> {
+        match (value.hnsw, value.spann) {
+            (Some(_), Some(_)) => Err(Self::Error::MultipleVectorIndexConfigurations),
+            (Some(hnsw), None) => Ok(InternalUpdateCollectionConfiguration {
+                vector_index: Some(hnsw.into()),
+                embedding_function: value.embedding_function,
+            }),
+            (None, Some(spann)) => {
+                let spann: InternalSpannConfiguration = spann.into();
+                Ok(InternalUpdateCollectionConfiguration {
+                    vector_index: Some(spann.into()),
+                    embedding_function: value.embedding_function,
+                })
+            }
+            (None, None) => Ok(InternalUpdateCollectionConfiguration {
+                vector_index: None,
+                embedding_function: value.embedding_function,
+            }),
+        }
+    }
+}
+
+impl From<InternalUpdateCollectionConfiguration> for UpdateCollectionConfiguration {
+    fn from(value: InternalUpdateCollectionConfiguration) -> Self {
+        Self {
+            hnsw: match value.vector_index.clone() {
+                Some(UpdateVectorIndexConfiguration::Hnsw(Some(config))) => Some(config),
+                _ => None,
+            },
+            spann: match value.vector_index.clone() {
+                Some(UpdateVectorIndexConfiguration::Spann(Some(config))) => Some(config.into()),
+                _ => None,
+            },
+            embedding_function: value.embedding_function,
+        }
     }
 }

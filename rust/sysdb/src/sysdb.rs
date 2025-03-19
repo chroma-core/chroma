@@ -13,9 +13,9 @@ use chroma_types::{
     CreateTenantResponse, Database, DeleteCollectionError, DeleteDatabaseError,
     DeleteDatabaseResponse, GetCollectionSizeError, GetCollectionWithSegmentsError,
     GetCollectionsError, GetDatabaseError, GetDatabaseResponse, GetSegmentsError, GetTenantError,
-    GetTenantResponse, InternalCollectionConfiguration, ListDatabasesError, ListDatabasesResponse,
-    Metadata, ResetError, ResetResponse, SegmentFlushInfo, SegmentFlushInfoConversionError,
-    SegmentUuid, UpdateCollectionError,
+    GetTenantResponse, InternalCollectionConfiguration, InternalUpdateCollectionConfiguration,
+    ListDatabasesError, ListDatabasesResponse, Metadata, ResetError, ResetResponse,
+    SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid, UpdateCollectionError,
 };
 use chroma_types::{
     Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
@@ -265,7 +265,7 @@ impl SysDb {
         name: Option<String>,
         metadata: Option<CollectionMetadataUpdate>,
         dimension: Option<u32>,
-        configuration: Option<InternalCollectionConfiguration>,
+        configuration: Option<InternalUpdateCollectionConfiguration>,
     ) -> Result<(), UpdateCollectionError> {
         match self {
             SysDb::Grpc(grpc) => {
@@ -806,7 +806,7 @@ impl GrpcSysDb {
         name: Option<String>,
         metadata: Option<CollectionMetadataUpdate>,
         dimension: Option<u32>,
-        _configuration: Option<InternalCollectionConfiguration>,
+        _configuration: Option<InternalUpdateCollectionConfiguration>,
     ) -> Result<(), UpdateCollectionError> {
         let req = chroma_proto::UpdateCollectionRequest {
             id: collection_id.0.to_string(),

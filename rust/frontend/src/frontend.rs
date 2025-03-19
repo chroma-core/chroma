@@ -24,14 +24,15 @@ use chroma_types::{
     GetCollectionError, GetCollectionRequest, GetCollectionResponse, GetCollectionsError,
     GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
     GetTenantError, GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError,
-    HeartbeatResponse, Include, InternalCollectionConfiguration, ListCollectionsRequest,
-    ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
-    Operation, OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
-    ScalarEncoding, Segment, SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError,
-    UpdateCollectionRecordsError, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
-    UpdateCollectionRequest, UpdateCollectionResponse, UpdateMetadata, UpdateMetadataValue,
-    UpsertCollectionRecordsError, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse,
-    VectorIndexConfiguration, Where, CHROMA_DOCUMENT_KEY, CHROMA_URI_KEY,
+    HeartbeatResponse, Include, InternalCollectionConfiguration,
+    InternalUpdateCollectionConfiguration, ListCollectionsRequest, ListCollectionsResponse,
+    ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse, Operation, OperationRecord,
+    QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse, ScalarEncoding, Segment,
+    SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError, UpdateCollectionRecordsError,
+    UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateCollectionRequest,
+    UpdateCollectionResponse, UpdateMetadata, UpdateMetadataValue, UpsertCollectionRecordsError,
+    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, VectorIndexConfiguration,
+    Where, CHROMA_DOCUMENT_KEY, CHROMA_URI_KEY,
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
@@ -514,8 +515,10 @@ impl Frontend {
             ..
         }: UpdateCollectionRequest,
     ) -> Result<UpdateCollectionResponse, UpdateCollectionError> {
-        let new_configuration: Option<InternalCollectionConfiguration> =
-            new_configuration.map(|c| c.try_into()).transpose()?;
+        let new_configuration: Option<InternalUpdateCollectionConfiguration> = new_configuration
+            .map(|c| c.try_into())
+            .transpose()
+            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
         self.sysdb_client
             .update_collection(
                 collection_id,

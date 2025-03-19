@@ -16,9 +16,9 @@ use chroma_types::{
     GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
     GetTenantRequest, GetTenantResponse, GetUserIdentityResponse, HeartbeatResponse, IncludeList,
     ListCollectionsRequest, ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse,
-    Metadata, QueryRequest, QueryResponse, UpdateCollectionRecordsResponse,
-    UpdateCollectionResponse, UpdateMetadata, UpsertCollectionRecordsResponse,
-    WrappedSerdeJsonError,
+    Metadata, QueryRequest, QueryResponse, UpdateCollectionConfiguration,
+    UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateMetadata,
+    UpsertCollectionRecordsResponse, WrappedSerdeJsonError,
 };
 use mdac::{Rule, Scorecard, ScorecardTicket};
 use opentelemetry::global;
@@ -1005,7 +1005,7 @@ async fn update_collection(
     let configuration_json = match payload.new_configuration_json_str {
         Some(configuration_json_str) => {
             let configuration_json =
-                serde_json::from_str::<CollectionConfiguration>(&configuration_json_str)
+                serde_json::from_str::<UpdateCollectionConfiguration>(&configuration_json_str)
                     .map_err(WrappedSerdeJsonError::SerdeJsonError)?;
 
             Some(configuration_json)
