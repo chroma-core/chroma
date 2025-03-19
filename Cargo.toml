@@ -59,7 +59,6 @@ rust-embed = { version = "8.5.0", features = ["include-exclude", "debug-embed"] 
 hnswlib = { version = "0.8.0", git = "https://github.com/chroma-core/hnswlib.git" }
 reqwest = { version = "0.12.9" }
 random-port = "0.1.1"
-bon = "3.4.0"
 
 chroma-benchmark = { path = "rust/benchmark" }
 chroma-blockstore = { path = "rust/blockstore" }
