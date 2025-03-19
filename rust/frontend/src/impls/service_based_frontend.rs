@@ -1190,3 +1190,98 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
         ))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use chroma_config::registry::Registry;
+    use chroma_sysdb::GrpcSysDbConfig;
+    use chroma_types::Collection;
+    use uuid::Uuid;
+
+    use crate::server::CreateCollectionPayload;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_default_sqlite_segments() {
+        // Creating a collection in SQLite should result in two segments.
+        let registry = Registry::new();
+        let system = System::new();
+        let config = FrontendConfig::sqlite_in_memory();
+        let mut frontend = ServiceBasedFrontend::try_from_config(&(config, system), &registry)
+            .await
+            .unwrap();
+
+        let collection = frontend
+            .create_collection(
+                CreateCollectionRequest::try_new(
+                    "default_tenant".to_string(),
+                    "default_database".to_string(),
+                    "test".to_string(),
+                    None,
+                    None,
+                    false,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let mut sysdb: SysDb = registry.get().unwrap();
+        let segments = sysdb
+            .get_segments(None, None, None, collection.collection_id)
+            .await
+            .unwrap();
+
+        assert_eq!(segments.len(), 2);
+        assert!(segments
+            .iter()
+            .any(|s| s.r#type == SegmentType::Sqlite && s.scope == SegmentScope::METADATA));
+        assert!(segments.iter().any(
+            |s| s.r#type == SegmentType::HnswLocalPersisted && s.scope == SegmentScope::VECTOR
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_default_distributed_segments() {
+        // Creating a collection in distributed should result in three segments.
+        // TODO: this should use our official Rust HTTP client, once we have one
+        let client = reqwest::Client::new();
+        let create_response = client
+            .post("http://localhost:3000/api/v2/tenants/default_tenant/databases/default_database/collections")
+            .json(
+                &CreateCollectionPayload { name: Uuid::new_v4().to_string(), configuration: None, metadata: None, get_or_create: false },
+            )
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(create_response.status(), 200);
+        let collection: Collection = create_response.json().await.unwrap();
+
+        let registry = Registry::new();
+        let sysdb_config = chroma_sysdb::SysDbConfig::Grpc(GrpcSysDbConfig {
+            host: "localhost".to_string(),
+            port: 50051,
+            ..Default::default()
+        });
+        let mut sysdb = SysDb::try_from_config(&sysdb_config, &registry)
+            .await
+            .unwrap();
+        let segments = sysdb
+            .get_segments(None, None, None, collection.collection_id)
+            .await
+            .unwrap();
+
+        assert_eq!(segments.len(), 3);
+        assert!(segments.iter().any(
+            |s| s.r#type == SegmentType::BlockfileMetadata && s.scope == SegmentScope::METADATA
+        ));
+        assert!(segments
+            .iter()
+            .any(|s| s.r#type == SegmentType::HnswDistributed && s.scope == SegmentScope::VECTOR));
+        assert!(segments
+            .iter()
+            .any(|s| s.r#type == SegmentType::BlockfileRecord && s.scope == SegmentScope::RECORD));
+    }
+}
