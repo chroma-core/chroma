@@ -157,7 +157,7 @@ async fn get_log_from_handle<'a>(
     options: &LogWriterOptions,
     storage: &Arc<Storage>,
     prefix: &str,
-    recurse: bool,
+    mark_dirty: MarkDirty,
 ) -> Result<LogRef<'a>, wal3::Error> {
     let mut active = handle.active.lock().await;
     active.keep_alive(Duration::from_secs(60));
@@ -168,25 +168,15 @@ async fn get_log_from_handle<'a>(
         });
     }
     tracing::info!("Opening log at {}", prefix);
-    let opened = match LogWriter::open(
+    let opened = LogWriter::open_or_initialize(
         options.clone(),
         Arc::clone(storage),
         prefix,
         // TODO(rescrv):  Configurable params.
         "log writer",
+        mark_dirty.clone(),
     )
-    .await
-    {
-        Ok(opened) => opened,
-        Err(err) => {
-            if recurse && matches!(err, wal3::Error::UninitializedLog) {
-                LogWriter::initialize(options, storage, prefix, "log initialize").await?;
-                return Box::pin(get_log_from_handle(handle, options, storage, prefix, false))
-                    .await;
-            }
-            return Err(err);
-        }
-    };
+    .await?;
     tracing::info!("Opened log at {}", prefix);
     let opened = Arc::new(opened);
     active.log = Some(Arc::clone(&opened));
@@ -218,6 +208,38 @@ async fn get_log_from_handle<'a>(
     })
 }
 
+//////////////////////////////////////////// DirtyMarker ///////////////////////////////////////////
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct DirtyMarker {
+    collection_id: CollectionUuid,
+    log_position: LogPosition,
+}
+
+///////////////////////////////////////////// MarkDirty ////////////////////////////////////////////
+
+#[derive(Clone, Debug)]
+pub struct MarkDirty {
+    collection_id: CollectionUuid,
+    dirty_log: Arc<LogWriter>,
+}
+
+#[async_trait::async_trait]
+impl wal3::MarkDirty for MarkDirty {
+    async fn mark_dirty(&self, log_position: LogPosition) -> Result<(), wal3::Error> {
+        let dirty_marker = DirtyMarker {
+            collection_id: self.collection_id,
+            log_position,
+        };
+        let dirty_marker_json = serde_json::to_string(&dirty_marker).map_err(|err| {
+            tracing::error!("Failed to serialize dirty marker: {}", err);
+            wal3::Error::Internal
+        })?;
+        self.dirty_log.append(Vec::from(dirty_marker_json)).await?;
+        Ok(())
+    }
+}
+
 ////////////////////////////////////// storage_prefix_for_log //////////////////////////////////////
 
 pub fn storage_prefix_for_log(collection: CollectionUuid) -> String {
@@ -230,6 +252,7 @@ pub struct LogServer {
     config: LogServerConfig,
     storage: Arc<Storage>,
     open_logs: Arc<StateHashTable<LogKey, LogStub>>,
+    dirty_log: Arc<LogWriter>,
 }
 
 #[async_trait::async_trait]
@@ -251,10 +274,20 @@ impl LogService for LogServer {
         let prefix = storage_prefix_for_log(collection_id);
         let key = LogKey { collection_id };
         let handle = self.open_logs.get_or_create_state(key);
-        let log = get_log_from_handle(&handle, &self.config.writer, &self.storage, &prefix, true)
-            .await
-            // TODO(rescrv): better error handling.
-            .map_err(|err| Status::unknown(err.to_string()))?;
+        let mark_dirty = MarkDirty {
+            collection_id,
+            dirty_log: Arc::clone(&self.dirty_log),
+        };
+        let log = get_log_from_handle(
+            &handle,
+            &self.config.writer,
+            &self.storage,
+            &prefix,
+            mark_dirty,
+        )
+        .await
+        // TODO(rescrv): better error handling.
+        .map_err(|err| Status::unknown(err.to_string()))?;
         let mut messages = Vec::with_capacity(push_logs.records.len());
         for record in push_logs.records {
             let mut buf = vec![];
@@ -558,10 +591,21 @@ impl Configurable<LogServerConfig> for LogServer {
     ) -> Result<Self, Box<dyn ChromaError>> {
         let storage = Storage::try_from_config(&config.storage, registry).await?;
         let storage = Arc::new(storage);
+        let dirty_log = LogWriter::open_or_initialize(
+            config.writer.clone(),
+            Arc::clone(&storage),
+            "dirty",
+            "dirty log writer",
+            (),
+        )
+        .await
+        .map_err(|err| -> Box<dyn ChromaError> { Box::new(err) as _ })?;
+        let dirty_log = Arc::new(dirty_log);
         Ok(Self {
             config: config.clone(),
             open_logs: Arc::new(StateHashTable::default()),
             storage,
+            dirty_log,
         })
     }
 }

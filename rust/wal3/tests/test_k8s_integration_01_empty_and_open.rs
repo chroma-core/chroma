@@ -25,6 +25,7 @@ async fn test_k8s_integration_01_empty_and_open() {
         Arc::clone(&storage),
         "test_k8s_integration_01_empty_and_append",
         "test writer",
+        (),
     )
     .await
     .unwrap_err();
