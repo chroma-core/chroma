@@ -1,4 +1,4 @@
-from chromadb.utils.embedding_functions.schemas import validate_config
+from chromadb.utils.embedding_functions.schemas import validate_config_schema
 from chromadb.api.types import (
     Documents,
     Embeddings,
@@ -113,7 +113,7 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Embeddable]):
         return Space.COSINE
 
     def supported_spaces(self) -> List[Space]:
-        return [Space.COSINE, Space.L2, Space.INNER_PRODUCT]
+        return [Space.COSINE, Space.L2, Space.IP]
 
     @staticmethod
     def build_from_config(
@@ -138,7 +138,8 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Embeddable]):
         # API URL can be changed, so no validation needed
         pass
 
-    def validate_config(self, config: Dict[str, Any]) -> None:
+    @staticmethod
+    def validate_config(config: Dict[str, Any]) -> None:
         """
         Validate the configuration using the JSON schema.
 
@@ -148,4 +149,4 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Embeddable]):
         Raises:
             ValidationError: If the configuration does not match the schema
         """
-        validate_config(config, "roboflow")
+        validate_config_schema(config, "roboflow")

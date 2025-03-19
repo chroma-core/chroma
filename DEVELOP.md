@@ -57,6 +57,7 @@ We use tilt for providing local dev setup. Tilt is an open source project
 - Docker
 - Local Kubernetes cluster (Recommended: [OrbStack](https://orbstack.dev/) for mac, [Kind](https://kind.sigs.k8s.io/) for linux)
 - [Tilt](https://docs.tilt.dev/)
+- [Helm](https://helm.sh)
 
 For starting the distributed Chroma in the workspace, use `tilt up`. It will create all the required resources and build the necessary Docker image in the current kubectl context.
 Once done, it will expose Chroma on port 8000. You can also visit the Tilt dashboard UI at http://localhost:10350/. To clean and remove all the resources created by Tilt, use `tilt down`.

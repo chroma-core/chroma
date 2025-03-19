@@ -1,0 +1,94 @@
+{{if .Values.rustLogService.configuration}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rust-log-service-config
+  namespace: {{ .Values.namespace }}
+data:
+  config.yaml: |
+{{  .Values.rustLogService.configuration | indent 4 }}
+{{ end }}
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rust-log-service
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: {{ .Values.rustLogService.replicaCount }}
+  selector:
+    matchLabels:
+      app: rust-log-service
+  template:
+    metadata:
+      labels:
+        app: rust-log-service
+    spec:
+      containers:
+        - name: rust-log-service
+          {{ if .Values.rustLogService.command }}
+          command: {{ .Values.rustLogService.command }}
+          {{ end }}
+          image: "{{ .Values.rustLogService.image.repository }}:{{ .Values.rustLogService.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 50051
+          readinessProbe:
+            grpc:
+              port: 50051
+          {{ if .Values.rustLogService.resources }}
+          resources:
+            limits:
+              cpu: {{ .Values.rustLogService.resources.limits.cpu }}
+              memory: {{ .Values.rustLogService.resources.limits.memory }}
+            requests:
+              cpu: {{ .Values.rustLogService.resources.requests.cpu }}
+              memory: {{ .Values.rustLogService.resources.requests.memory }}
+          {{ end }}
+          env:
+            - name: CONFIG_PATH
+              value: "/config/config.yaml"
+            {{ if .Values.rustLogService.otherEnvConfig }}
+              {{ .Values.rustLogService.otherEnvConfig | nindent 12 }}
+            {{ end }}
+          {{if .Values.rustLogService.configuration}}
+          volumeMounts:
+            - name: rust-log-service-config
+              mountPath: /config/
+          {{ end }}
+
+      {{if .Values.rustLogService.tolerations}}
+      tolerations:
+        {{ toYaml .Values.rustLogService.tolerations | nindent 8 }}
+      {{ end }}
+      {{if .Values.rustLogService.nodeSelector}}
+      nodeSelector:
+        {{ toYaml .Values.rustLogService.nodeSelector | nindent 8 }}
+      {{ end }}
+      {{if .Values.rustLogService.configuration}}
+      volumes:
+        - name: rust-frontend-service-config
+          configMap:
+            name: rust-frontend-service-config
+      {{ end }}
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: rust-log-service
+  namespace: {{ .Values.namespace }}
+spec:
+  ports:
+    - name: server-port
+      port: 50051
+      targetPort: 50051
+  selector:
+    app: rust-frontend-service
+  type: ClusterIP
+
+
+---

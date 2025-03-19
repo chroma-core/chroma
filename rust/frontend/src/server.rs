@@ -1,25 +1,24 @@
 use axum::{
     extract::{DefaultBodyLimit, Path, Query, State},
-    http::header::HeaderMap,
-    http::StatusCode,
+    http::{header::HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router, ServiceExt,
 };
 use chroma_system::System;
-use chroma_types::RawWhereFields;
 use chroma_types::{
     AddCollectionRecordsResponse, ChecklistResponse, Collection, CollectionMetadataUpdate,
     CollectionUuid, CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
     CreateCollectionRequest, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest,
     CreateTenantResponse, DeleteCollectionRecordsResponse, DeleteDatabaseRequest,
-    DeleteDatabaseResponse, GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse,
-    GetRequest, GetResponse, GetTenantRequest, GetTenantResponse, GetUserIdentityResponse,
-    HeartbeatResponse, IncludeList, ListCollectionsRequest, ListCollectionsResponse,
-    ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
-    UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateMetadata,
+    DeleteDatabaseResponse, DistributedIndexType, GetCollectionRequest, GetDatabaseRequest,
+    GetDatabaseResponse, GetRequest, GetResponse, GetTenantRequest, GetTenantResponse,
+    GetUserIdentityResponse, HeartbeatResponse, IncludeList, ListCollectionsRequest,
+    ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest,
+    QueryResponse, UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateMetadata,
     UpsertCollectionRecordsResponse,
 };
+use chroma_types::{DistributedIndexTypeParam, RawWhereFields};
 use mdac::{Rule, Scorecard, ScorecardTicket};
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Meter};
@@ -45,6 +44,7 @@ use crate::{
     config::FrontendServerConfig,
     frontend::Frontend,
     quota::{Action, QuotaEnforcer, QuotaPayload},
+    server_middleware::{always_json_errors_middleware, default_json_content_type_middleware},
     tower_tracing::add_tracing_middleware,
     types::errors::{ErrorResponse, ServerError, ValidationError},
 };
@@ -258,7 +258,12 @@ impl FrontendServer {
             )
             .merge(docs_router)
             .with_state(self)
-            .layer(DefaultBodyLimit::max(max_payload_size_bytes));
+            .layer(DefaultBodyLimit::max(max_payload_size_bytes))
+            .layer(axum::middleware::from_fn(
+                default_json_content_type_middleware,
+            ))
+            .layer(axum::middleware::from_fn(always_json_errors_middleware));
+
         let mut app = add_tracing_middleware(app);
 
         if let Some(cors_allow_origins) = cors_allow_origins {
@@ -487,8 +492,8 @@ async fn create_tenant(
     ),
     responses(
         (status = 200, description = "Tenant found", body = GetTenantResponse),
-        (status = 404, description = "Tenant not found", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Tenant not found", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
     )
 )]
@@ -806,6 +811,7 @@ pub struct CreateCollectionPayload {
     pub name: String,
     pub configuration: Option<serde_json::Value>,
     pub metadata: Option<Metadata>,
+    #[serde(default)]
     pub get_or_create: bool,
 }
 
@@ -857,6 +863,11 @@ async fn create_collection(
         "op:create_collection",
         format!("tenant:{}", tenant).as_str(),
     ]);
+    let index_type = DistributedIndexTypeParam::try_from(&payload.metadata)?;
+    // spann index not allowed.
+    if index_type.index_type == DistributedIndexType::Spann && !server.config.enable_span_indexing {
+        return Err(ValidationError::SpannNotImplemented)?;
+    }
     let request = CreateCollectionRequest::try_new(
         tenant,
         database,
@@ -876,8 +887,8 @@ async fn create_collection(
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}",
     responses(
         (status = 200, description = "Collection found", body = Collection),
-        (status = 404, description = "Collection not found", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Collection not found", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
     params(
@@ -1060,7 +1071,7 @@ async fn collection_add(
     Path((tenant, database, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
     Json(payload): Json<AddCollectionRecordsPayload>,
-) -> Result<Json<AddCollectionRecordsResponse>, ServerError> {
+) -> Result<(StatusCode, Json<AddCollectionRecordsResponse>), ServerError> {
     server.metrics.collection_add.add(1, &[]);
     server
         .authenticate_and_authorize(
@@ -1114,7 +1125,7 @@ async fn collection_add(
 
     let res = server.frontend.add(request).await?;
 
-    Ok(Json(res))
+    Ok((StatusCode::CREATED, Json(res)))
 }
 
 #[derive(Deserialize, Debug, Clone, ToSchema, Serialize)]
@@ -1673,6 +1684,33 @@ mod tests {
     use chroma_system::System;
     use std::sync::Arc;
 
+    async fn test_server() -> u16 {
+        let registry = Registry::new();
+        let system = System::new();
+
+        let port = random_port::PortPicker::new().random(true).pick().unwrap();
+
+        let mut config = FrontendServerConfig::single_node_default();
+        config.port = port;
+
+        let frontend = Frontend::try_from_config(&(config.clone().frontend, system), &registry)
+            .await
+            .unwrap();
+        let app = FrontendServer::new(
+            config,
+            frontend,
+            vec![],
+            Arc::new(()),
+            Arc::new(()),
+            System::new(),
+        );
+        tokio::task::spawn(async move {
+            app.run().await;
+        });
+
+        port
+    }
+
     #[tokio::test]
     async fn test_cors() {
         let registry = Registry::new();
@@ -1719,5 +1757,46 @@ mod tests {
 
         let allow_headers = res.headers().get("Access-Control-Allow-Headers");
         assert_eq!(allow_headers.unwrap(), "*");
+    }
+
+    #[tokio::test]
+    async fn test_defaults_to_json_content_type() {
+        let port = test_server().await;
+
+        // We don't send a content-type header
+        let client = reqwest::Client::new();
+        let res = client
+            .post(format!("http://localhost:{}/api/v2/tenants", port))
+            .body(serde_json::to_string(&serde_json::json!({ "name": "test" })).unwrap())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+    }
+
+    #[tokio::test]
+    async fn test_plaintext_error_conversion() {
+        // By default, axum returns plaintext errors for some errors. This asserts that there's middleware to ensure all errors are returned as JSON.
+        let port = test_server().await;
+
+        let client = reqwest::Client::new();
+        let res = client
+            .post(format!("http://localhost:{}/api/v2/tenants", port))
+            .header("content-type", "application/json")
+            .body("{") // invalid JSON
+            .send()
+            .await
+            .unwrap();
+
+        // Should have returned JSON
+        assert_eq!(
+            res.headers().get("content-type").unwrap(),
+            "application/json"
+        );
+        let response_json = res.json::<serde_json::Value>().await.unwrap();
+        assert_eq!(
+            response_json["error"],
+            serde_json::Value::String("InvalidArgumentError".to_string())
+        );
     }
 }

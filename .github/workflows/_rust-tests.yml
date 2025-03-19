@@ -11,6 +11,7 @@ jobs:
     runs-on: ${{ matrix.platform }}
     env:
       CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: 1
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -19,12 +20,16 @@ jobs:
         with:
           github-token: ${{ github.token }}
       - name: Test
-        run: cargo nextest run
+        run: cargo nextest run --no-capture
   test-integration:
     strategy:
       matrix:
         platform: [depot-ubuntu-22.04-16]
     runs-on: ${{ matrix.platform }}
+    # OIDC token auth for Depot & AWS
+    permissions:
+      contents: read
+      id-token: write
     env:
       CARGO_TERM_COLOR: always
     steps:
@@ -36,6 +41,8 @@ jobs:
           github-token: ${{ github.token }}
       - name: Start services in Tilt
         uses: ./.github/actions/tilt
+        with:
+          depot-project-id: ${{ vars.DEPOT_PROJECT_ID }}
       - name: Run tests
         run: cargo nextest run --profile k8s_integration
       - name: Save service logs to artifact
@@ -50,6 +57,7 @@ jobs:
         platform: [depot-ubuntu-22.04-16]
     runs-on: ${{ matrix.platform }}
     env:
+      RUST_BACKTRACE: 1
       CARGO_TERM_COLOR: always
     steps:
       - name: Checkout

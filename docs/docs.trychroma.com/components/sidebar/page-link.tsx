@@ -13,12 +13,13 @@ const PageLink: React.FC<{
   const pathName = usePathname();
   const searchParams = useSearchParams();
   const active = pathName === path;
+  // @ts-expect-error - URLSearchParams is not iterable
   const lang = searchParams.get("lang");
 
   return (
     <div
       key={id}
-      className={`${sectionPage ? "pl-7" : "pl-3"} py-0.5 border-l border-gray-300 hover:border-gray-900 dark:border-gray-500 dark:hover:border-gray-200 ${active && "border-gray-900 dark:border-white font-bold"}`}
+      className={`px-3 py-1 border-l-4 ${active && "border-blue-500 bg-blue-50 text-blue-500 font-bold hover:bg-blue-50 dark:bg-blue-900 dark:text-blue-100"} ${!active && "border-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 hover:border-gray-200 dark:hover:bg-gray-800 dark:hover:border-gray-400"} `}
     >
       <Link href={lang ? `${path}?lang=${lang}` : path}>
         <p className="text-sm">{name}</p>

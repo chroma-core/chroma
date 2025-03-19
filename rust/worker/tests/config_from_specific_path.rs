@@ -1,3 +1,4 @@
+use chroma_index::config::{HnswGarbageCollectionPolicyConfig, PlGarbageCollectionPolicyConfig};
 use figment::Jail;
 use serial_test::serial;
 use worker::config::RootConfig;
@@ -138,6 +139,15 @@ fn test_config_from_specific_path() {
                         disk:
                             capacity: 1073741824
                             eviction: lru
+                spann_provider:
+                    pl_garbage_collection:
+                        enabled: true
+                        policy:
+                            random_sample:
+                                sample_size: 0.1
+                    hnsw_garbage_collection:
+                        enabled: true
+                        policy: "full_rebuild"
             "#,
         );
         let config = RootConfig::load_from_path("random_path.yaml");
@@ -149,6 +159,38 @@ fn test_config_from_specific_path() {
             "compaction-service-0"
         );
         assert_eq!(config.compaction_service.my_port, 50051);
+        assert!(
+            config
+                .compaction_service
+                .spann_provider
+                .pl_garbage_collection
+                .enabled
+        );
+        match config
+            .compaction_service
+            .spann_provider
+            .pl_garbage_collection
+            .policy
+        {
+            PlGarbageCollectionPolicyConfig::RandomSample(config) => {
+                assert_eq!(config.sample_size, 0.1);
+            }
+        }
+        assert!(
+            config
+                .compaction_service
+                .spann_provider
+                .hnsw_garbage_collection
+                .enabled
+        );
+        match config
+            .compaction_service
+            .spann_provider
+            .hnsw_garbage_collection
+            .policy
+        {
+            HnswGarbageCollectionPolicyConfig::FullRebuild => {}
+        }
         Ok(())
     });
 }

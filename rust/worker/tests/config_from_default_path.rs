@@ -1,3 +1,4 @@
+use chroma_index::config::{HnswGarbageCollectionPolicyConfig, PlGarbageCollectionPolicyConfig};
 use figment::Jail;
 use serial_test::serial;
 use uuid::Uuid;
@@ -139,6 +140,15 @@ fn test_config_from_default_path() {
                         disk:
                             capacity: 8589934592 # 8GB
                             eviction: lru
+                spann_provider:
+                    pl_garbage_collection:
+                        enabled: true
+                        policy:
+                            random_sample:
+                                sample_size: 0.1
+                    hnsw_garbage_collection:
+                        enabled: true
+                        policy: "full_rebuild"
             "#,
         );
         let config = RootConfig::load();
@@ -166,6 +176,38 @@ fn test_config_from_default_path() {
             Uuid::parse_str(&config.compaction_service.compactor.disabled_collections[1]).unwrap(),
             Uuid::parse_str("496db4aa-fbe1-498a-b60b-81ec0fe59792").unwrap()
         );
+        assert!(
+            config
+                .compaction_service
+                .spann_provider
+                .pl_garbage_collection
+                .enabled
+        );
+        match config
+            .compaction_service
+            .spann_provider
+            .pl_garbage_collection
+            .policy
+        {
+            PlGarbageCollectionPolicyConfig::RandomSample(config) => {
+                assert_eq!(config.sample_size, 0.1);
+            }
+        }
+        assert!(
+            config
+                .compaction_service
+                .spann_provider
+                .hnsw_garbage_collection
+                .enabled
+        );
+        match config
+            .compaction_service
+            .spann_provider
+            .hnsw_garbage_collection
+            .policy
+        {
+            HnswGarbageCollectionPolicyConfig::FullRebuild => {}
+        }
         Ok(())
     });
 }

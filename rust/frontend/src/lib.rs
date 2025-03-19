@@ -9,6 +9,7 @@ pub mod frontend;
 pub mod get_collection_with_segments_provider;
 pub mod quota;
 mod server;
+mod server_middleware;
 mod tower_tracing;
 mod types;
 
@@ -66,7 +67,7 @@ pub async fn frontend_service_entrypoint_with_config_system_registry(
         let tracing_layers = vec![
             init_global_filter_layer(),
             init_otel_layer(&config.service_name, &config.endpoint),
-            init_stdout_layer(&config.service_name),
+            init_stdout_layer(),
         ];
         init_tracing(tracing_layers);
         init_panic_tracing_hook();
@@ -75,13 +76,11 @@ pub async fn frontend_service_entrypoint_with_config_system_registry(
     }
 
     let mut fe_cfg = config.frontend.clone();
-    if let (Some(path_str), Some(sql_cfg), Some(local_segman_cfg)) = (
-        &config.persist_path,
-        fe_cfg.sqlitedb.as_mut(),
-        fe_cfg.segment_manager.as_mut(),
-    ) {
-        let persist_root = Path::new(path_str);
-        let sqlite_url = persist_root.join("chroma.sqlite3");
+    if let (Some(sql_cfg), Some(local_segman_cfg)) =
+        (fe_cfg.sqlitedb.as_mut(), fe_cfg.segment_manager.as_mut())
+    {
+        let persist_root = Path::new(&config.persist_path);
+        let sqlite_url = persist_root.join(&config.sqlite_filename);
         local_segman_cfg.persist_path.get_or_insert(
             persist_root
                 .to_str()

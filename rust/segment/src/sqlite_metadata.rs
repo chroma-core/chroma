@@ -10,7 +10,9 @@ use chroma_sqlite::{
     table::{EmbeddingFulltextSearch, EmbeddingMetadata, Embeddings, MaxSeqId},
 };
 use chroma_types::{
-    operator::{CountResult, Filter, GetResult, Limit, Projection, ProjectionRecord, Scan},
+    operator::{
+        CountResult, Filter, GetResult, Limit, Projection, ProjectionOutput, ProjectionRecord, Scan,
+    },
     plan::{Count, Get},
     BooleanOperator, Chunk, CompositeExpression, DocumentExpression, DocumentOperator, LogRecord,
     MetadataComparison, MetadataExpression, MetadataSetValue, MetadataValue,
@@ -597,10 +599,14 @@ impl SqliteMetadataReader {
             .build_sqlx(SqliteQueryBuilder);
 
         // Count should yield exactly one row with exactly one column
-        Ok(sqlx::query_with(&sql, values)
+        let count = sqlx::query_with(&sql, values)
             .fetch_one(self.db.get_conn())
             .await?
-            .try_get(0)?)
+            .try_get(0)?;
+        Ok(CountResult {
+            count,
+            pulled_log_bytes: 0,
+        })
     }
 
     pub async fn get(
@@ -728,20 +734,24 @@ impl SqliteMetadataReader {
         }
 
         Ok(GetResult {
-            records: records
-                .into_values()
-                .map(|mut rec| {
-                    if let Some(mut meta) = rec.metadata.take() {
-                        if let Some(MetadataValue::Str(doc)) = meta.remove(CHROMA_DOCUMENT_KEY) {
-                            rec.document = Some(doc);
+            pulled_log_bytes: 0,
+            result: ProjectionOutput {
+                records: records
+                    .into_values()
+                    .map(|mut rec| {
+                        if let Some(mut meta) = rec.metadata.take() {
+                            if let Some(MetadataValue::Str(doc)) = meta.remove(CHROMA_DOCUMENT_KEY)
+                            {
+                                rec.document = Some(doc);
+                            }
+                            if !meta.is_empty() {
+                                rec.metadata = Some(meta)
+                            }
                         }
-                        if !meta.is_empty() {
-                            rec.metadata = Some(meta)
-                        }
-                    }
-                    rec
-                })
-                .collect(),
+                        rec
+                    })
+                    .collect(),
+            },
         })
     }
 }
@@ -784,8 +794,8 @@ mod tests {
                 db: sqlite_seg_writer.db
             };
             let plan = Count { scan: Scan { collection_and_segments: test_data.collection_and_segments.clone() }};
-            let ref_count = ref_seg.count(plan.clone()).expect("Count should not fail");
-            let sqlite_count = runtime.block_on(sqlite_seg_reader.count(plan)).expect("Count should not fail");
+            let ref_count = ref_seg.count(plan.clone()).expect("Count should not fail").count;
+            let sqlite_count = runtime.block_on(sqlite_seg_reader.count(plan)).expect("Count should not fail").count;
             assert_eq!(sqlite_count, ref_count);
         }
     }

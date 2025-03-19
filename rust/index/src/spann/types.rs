@@ -7,15 +7,20 @@ use chroma_blockstore::{
     provider::{BlockfileProvider, CreateError, OpenError},
     BlockfileFlusher, BlockfileReader, BlockfileWriter, BlockfileWriterOptions,
 };
+use chroma_config::{registry::Registry, Configurable};
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::CollectionUuid;
 use chroma_types::SpannPostingList;
+use chroma_types::{CollectionUuid, DistributedSpannParameters};
 use rand::seq::SliceRandom;
 use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
+    config::{
+        HnswGarbageCollectionConfig, HnswGarbageCollectionPolicyConfig, PlGarbageCollectionConfig,
+        PlGarbageCollectionPolicyConfig, RandomSamplePolicyConfig,
+    },
     hnsw_provider::{
         HnswIndexProvider, HnswIndexProviderCreateError, HnswIndexProviderForkError, HnswIndexRef,
     },
@@ -29,11 +34,132 @@ pub struct VersionsMapInner {
     pub versions_map: HashMap<u32, u32>,
 }
 
-#[allow(dead_code)]
+#[derive(Clone, Debug)]
+pub struct GarbageCollectionContext {
+    pl_context: PlGarbageCollectionContext,
+    hnsw_context: HnswGarbageCollectionContext,
+}
+
+#[async_trait::async_trait]
+impl Configurable<(PlGarbageCollectionConfig, HnswGarbageCollectionConfig)>
+    for GarbageCollectionContext
+{
+    async fn try_from_config(
+        config: &(PlGarbageCollectionConfig, HnswGarbageCollectionConfig),
+        registry: &Registry,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        let pl_context = PlGarbageCollectionContext::try_from_config(&config.0, registry).await?;
+        let hnsw_context =
+            HnswGarbageCollectionContext::try_from_config(&config.1, registry).await?;
+        Ok(GarbageCollectionContext {
+            pl_context,
+            hnsw_context,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct HnswGarbageCollectionContext {
+    pub enabled: bool,
+    pub policy: HnswGarbageCollectionPolicy,
+}
+
+#[async_trait::async_trait]
+impl Configurable<HnswGarbageCollectionConfig> for HnswGarbageCollectionContext {
+    async fn try_from_config(
+        config: &HnswGarbageCollectionConfig,
+        registry: &Registry,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        let policy = HnswGarbageCollectionPolicy::try_from_config(&config.policy, registry).await?;
+        Ok(HnswGarbageCollectionContext {
+            enabled: config.enabled,
+            policy,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct PlGarbageCollectionContext {
+    pub enabled: bool,
+    pub policy: PlGarbageCollectionPolicy,
+}
+
+#[async_trait::async_trait]
+impl Configurable<PlGarbageCollectionConfig> for PlGarbageCollectionContext {
+    async fn try_from_config(
+        config: &PlGarbageCollectionConfig,
+        registry: &Registry,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        let policy = PlGarbageCollectionPolicy::try_from_config(&config.policy, registry).await?;
+        Ok(PlGarbageCollectionContext {
+            enabled: config.enabled,
+            policy,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum PlGarbageCollectionPolicy {
+    RandomSample(RandomSamplePolicy),
+}
+
+#[async_trait::async_trait]
+impl Configurable<PlGarbageCollectionPolicyConfig> for PlGarbageCollectionPolicy {
+    async fn try_from_config(
+        config: &PlGarbageCollectionPolicyConfig,
+        registry: &Registry,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        match &config {
+            PlGarbageCollectionPolicyConfig::RandomSample(policy) => {
+                let policy = RandomSamplePolicy::try_from_config(policy, registry).await?;
+                Ok(PlGarbageCollectionPolicy::RandomSample(policy))
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum HnswGarbageCollectionPolicy {
+    FullRebuild,
+}
+
+#[async_trait::async_trait]
+impl Configurable<HnswGarbageCollectionPolicyConfig> for HnswGarbageCollectionPolicy {
+    async fn try_from_config(
+        config: &HnswGarbageCollectionPolicyConfig,
+        _registry: &Registry,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        match &config {
+            HnswGarbageCollectionPolicyConfig::FullRebuild => {
+                Ok(HnswGarbageCollectionPolicy::FullRebuild)
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct RandomSamplePolicy {
+    pub sample_size: f32,
+}
+
+#[async_trait::async_trait]
+impl Configurable<RandomSamplePolicyConfig> for RandomSamplePolicy {
+    async fn try_from_config(
+        config: &RandomSamplePolicyConfig,
+        _registry: &Registry,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        Ok(RandomSamplePolicy {
+            sample_size: config.sample_size,
+        })
+    }
+}
+
+#[derive(Clone)]
 // Note: Fields of this struct are public for testing.
 pub struct SpannIndexWriter {
     // HNSW index and its provider for centroid search.
     pub hnsw_index: HnswIndexRef,
+    pub cleaned_up_hnsw_index: Option<HnswIndexRef>,
     hnsw_provider: HnswIndexProvider,
     blockfile_provider: BlockfileProvider,
     // Posting list of the centroids.
@@ -43,9 +169,11 @@ pub struct SpannIndexWriter {
     pub next_head_id: Arc<AtomicU32>,
     // Version number of each point.
     // TODO(Sanket): Finer grained locking for this map in future if perf is not satisfactory.
-    pub versions_map: Arc<parking_lot::RwLock<VersionsMapInner>>,
-    pub distance_function: DistanceFunction,
+    pub versions_map: Arc<tokio::sync::RwLock<VersionsMapInner>>,
     pub dimensionality: usize,
+    pub params: DistributedSpannParameters,
+    pub gc_context: GarbageCollectionContext,
+    pub collection_id: CollectionUuid,
 }
 
 // TODO(Sanket): Can compose errors whenever downstream returns Box<dyn ChromaError>.
@@ -137,20 +265,6 @@ impl ChromaError for SpannIndexWriterError {
 
 const MAX_HEAD_OFFSET_ID: &str = "max_head_offset_id";
 
-// TODO(Sanket): Make these configurable.
-#[allow(dead_code)]
-const NUM_CENTROIDS_TO_SEARCH: u32 = 64;
-#[allow(dead_code)]
-const RNG_FACTOR: f32 = 1.0;
-#[allow(dead_code)]
-const SPLIT_THRESHOLD: usize = 100;
-const NUM_SAMPLES_FOR_KMEANS: usize = 1000;
-const INITIAL_LAMBDA: f32 = 100.0;
-const REASSIGN_NBR_COUNT: usize = 8;
-const QUERY_EPSILON: f32 = 10.0;
-const MERGE_THRESHOLD: usize = 50;
-const NUM_CENTERS_TO_MERGE_TO: usize = 8;
-
 impl SpannIndexWriter {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -160,18 +274,23 @@ impl SpannIndexWriter {
         posting_list_writer: BlockfileWriter,
         next_head_id: u32,
         versions_map: VersionsMapInner,
-        distance_function: DistanceFunction,
         dimensionality: usize,
+        params: DistributedSpannParameters,
+        gc_context: GarbageCollectionContext,
+        collection_id: CollectionUuid,
     ) -> Self {
         SpannIndexWriter {
             hnsw_index,
+            cleaned_up_hnsw_index: None,
             hnsw_provider,
             blockfile_provider,
             posting_list_writer: Arc::new(tokio::sync::Mutex::new(posting_list_writer)),
             next_head_id: Arc::new(AtomicU32::new(next_head_id)),
-            versions_map: Arc::new(parking_lot::RwLock::new(versions_map)),
-            distance_function,
+            versions_map: Arc::new(tokio::sync::RwLock::new(versions_map)),
             dimensionality,
+            params,
+            gc_context,
+            collection_id,
         }
     }
 
@@ -274,14 +393,13 @@ impl SpannIndexWriter {
         versions_map_id: Option<&Uuid>,
         posting_list_id: Option<&Uuid>,
         max_head_id_bf_id: Option<&Uuid>,
-        m: Option<usize>,
-        ef_construction: Option<usize>,
-        ef_search: Option<usize>,
         collection_id: &CollectionUuid,
-        distance_function: DistanceFunction,
         dimensionality: usize,
         blockfile_provider: &BlockfileProvider,
+        params: DistributedSpannParameters,
+        gc_context: GarbageCollectionContext,
     ) -> Result<Self, SpannIndexWriterError> {
+        let distance_function = DistanceFunction::from(params.space.clone());
         // Create the HNSW index.
         let hnsw_index = match hnsw_id {
             Some(hnsw_id) => {
@@ -300,9 +418,9 @@ impl SpannIndexWriter {
                     collection_id,
                     distance_function.clone(),
                     dimensionality,
-                    m.unwrap(), // Safe since caller should always provide this.
-                    ef_construction.unwrap(), // Safe since caller should always provide this.
-                    ef_search.unwrap(), // Safe since caller should always provide this.
+                    params.m,
+                    params.construction_ef,
+                    params.search_ef,
                 )
                 .await?
             }
@@ -347,19 +465,20 @@ impl SpannIndexWriter {
             posting_list_writer,
             max_head_id,
             versions_map,
-            distance_function,
             dimensionality,
+            params,
+            gc_context,
+            *collection_id,
         ))
     }
 
-    fn add_versions_map(&self, id: u32) -> u32 {
+    async fn add_versions_map(&self, id: u32) -> u32 {
         // 0 means deleted. Version counting starts from 1.
-        let mut write_lock = self.versions_map.write();
+        let mut write_lock = self.versions_map.write().await;
         write_lock.versions_map.insert(id, 1);
         *write_lock.versions_map.get(&id).unwrap()
     }
 
-    #[allow(dead_code)]
     async fn rng_query(
         &self,
         query: &[f32],
@@ -367,10 +486,10 @@ impl SpannIndexWriter {
         rng_query(
             query,
             self.hnsw_index.clone(),
-            NUM_CENTROIDS_TO_SEARCH as usize,
-            QUERY_EPSILON,
-            RNG_FACTOR,
-            self.distance_function.clone(),
+            self.params.write_nprobe as usize,
+            self.params.write_rng_epsilon,
+            self.params.write_rng_factor,
+            self.params.space.clone().into(),
             true,
         )
         .await
@@ -382,7 +501,7 @@ impl SpannIndexWriter {
         doc_offset_id: u32,
         version: u32,
     ) -> Result<bool, SpannIndexWriterError> {
-        let version_map_guard = self.versions_map.read();
+        let version_map_guard = self.versions_map.read().await;
         let current_version = version_map_guard
             .versions_map
             .get(&doc_offset_id)
@@ -418,11 +537,12 @@ impl SpannIndexWriter {
                 {
                     continue;
                 }
-                let old_dist = self.distance_function.distance(
+                let distance_function: DistanceFunction = self.params.space.clone().into();
+                let old_dist = distance_function.distance(
                     old_head_embedding,
                     &doc_embeddings[index * self.dimensionality..(index + 1) * self.dimensionality],
                 );
-                let new_dist = self.distance_function.distance(
+                let new_dist = distance_function.distance(
                     new_head_embeddings[k].unwrap(),
                     &doc_embeddings[index * self.dimensionality..(index + 1) * self.dimensionality],
                 );
@@ -476,10 +596,20 @@ impl SpannIndexWriter {
     ) -> Result<(), SpannIndexWriterError> {
         // Don't reassign if outdated by now.
         if self.is_outdated(doc_offset_id, doc_version).await? {
+            tracing::debug!(
+                "Outdated point {} for reassignment version {} current head id {}",
+                doc_offset_id,
+                doc_version,
+                prev_head_id
+            );
             return Ok(());
         }
         // RNG query to find the nearest heads.
         let (nearest_head_ids, _, nearest_head_embeddings) = self.rng_query(doc_embedding).await?;
+        // Don't reassign if empty.
+        if nearest_head_ids.is_empty() {
+            return Ok(());
+        }
         // If nearest_head_ids contain the previous_head_id then don't reassign.
         let prev_head_id = prev_head_id as usize;
         if nearest_head_ids.contains(&prev_head_id) {
@@ -488,12 +618,18 @@ impl SpannIndexWriter {
         // Increment version and trigger append.
         let next_version;
         {
-            let mut version_map_guard = self.versions_map.write();
+            let mut version_map_guard = self.versions_map.write().await;
             let current_version = version_map_guard
                 .versions_map
                 .get(&doc_offset_id)
                 .ok_or(SpannIndexWriterError::VersionNotFound)?;
             if doc_version < *current_version {
+                tracing::debug!(
+                    "Outdated point {} for reassignment version {} current head id {}",
+                    doc_offset_id,
+                    doc_version,
+                    prev_head_id
+                );
                 return Ok(());
             }
             next_version = *current_version + 1;
@@ -507,9 +643,21 @@ impl SpannIndexWriter {
             .zip(nearest_head_embeddings.into_iter())
         {
             if self.is_outdated(doc_offset_id, next_version).await? {
+                tracing::debug!(
+                    "Outdated point {} for reassignment version {} current head id {}",
+                    doc_offset_id,
+                    doc_version,
+                    prev_head_id
+                );
                 return Ok(());
             }
-            tracing::info!("Reassigning {} to {}", doc_offset_id, nearest_head_id);
+            tracing::debug!(
+                "Reassigning {} to head {} incremented version {} current head id {}",
+                doc_offset_id,
+                nearest_head_id,
+                next_version,
+                prev_head_id
+            );
             self.append(
                 nearest_head_id as u32,
                 doc_offset_id,
@@ -541,7 +689,10 @@ impl SpannIndexWriter {
             (doc_offset_ids, doc_versions, doc_embeddings) = write_guard
                 .get_owned::<u32, &SpannPostingList<'_>>("", head_id as u32)
                 .await
-                .map_err(|_| SpannIndexWriterError::PostingListGetError)?
+                .map_err(|e| {
+                    tracing::error!("Error getting posting list for head {}: {}", head_id, e);
+                    SpannIndexWriterError::PostingListGetError
+                })?
                 .ok_or(SpannIndexWriterError::PostingListGetError)?;
         }
         for (index, doc_offset_id) in doc_offset_ids.iter().enumerate() {
@@ -552,15 +703,16 @@ impl SpannIndexWriter {
             {
                 continue;
             }
-            let distance_from_curr_center = self.distance_function.distance(
+            let distance_function: DistanceFunction = self.params.space.clone().into();
+            let distance_from_curr_center = distance_function.distance(
                 &doc_embeddings[index * self.dimensionality..(index + 1) * self.dimensionality],
                 head_embedding,
             );
-            let distance_from_split_center1 = self.distance_function.distance(
+            let distance_from_split_center1 = distance_function.distance(
                 &doc_embeddings[index * self.dimensionality..(index + 1) * self.dimensionality],
                 new_head_embeddings[0].unwrap(),
             );
-            let distance_from_split_center2 = self.distance_function.distance(
+            let distance_from_split_center2 = distance_function.distance(
                 &doc_embeddings[index * self.dimensionality..(index + 1) * self.dimensionality],
                 new_head_embeddings[1].unwrap(),
             );
@@ -569,7 +721,7 @@ impl SpannIndexWriter {
             {
                 continue;
             }
-            let distance_from_old_head = self.distance_function.distance(
+            let distance_from_old_head = distance_function.distance(
                 &doc_embeddings[index * self.dimensionality..(index + 1) * self.dimensionality],
                 old_head_embedding,
             );
@@ -612,9 +764,9 @@ impl SpannIndexWriter {
             )
             .await?;
         // Reassign neighbors of this center if applicable.
-        if REASSIGN_NBR_COUNT > 0 {
+        if self.params.reassign_nbr_count > 0 {
             let (nearby_head_ids, _, nearby_head_embeddings) = self
-                .get_nearby_heads(old_head_embedding, REASSIGN_NBR_COUNT)
+                .get_nearby_heads(old_head_embedding, self.params.reassign_nbr_count as usize)
                 .await?;
             for (head_idx, head_id) in nearby_head_ids.iter().enumerate() {
                 // Skip the current split heads.
@@ -634,7 +786,6 @@ impl SpannIndexWriter {
         Ok(())
     }
 
-    #[allow(dead_code)]
     async fn append(
         &self,
         head_id: u32,
@@ -652,12 +803,26 @@ impl SpannIndexWriter {
         {
             let write_guard = self.posting_list_writer.lock().await;
             if self.is_head_deleted(head_id as usize).await? {
-                return Ok(());
+                tracing::info!(
+                    "Head {} got concurrently deleted for adding point {} at version {}. Reassigning now",
+                    head_id,
+                    id,
+                    version
+                );
+                if self.is_outdated(id, version).await? {
+                    return Ok(());
+                }
+                // Try again.
+                drop(write_guard);
+                return Box::pin(self.reassign(id, version, embedding, head_id)).await;
             }
             let (mut doc_offset_ids, mut doc_versions, mut doc_embeddings) = write_guard
                 .get_owned::<u32, &SpannPostingList<'_>>("", head_id)
                 .await
-                .map_err(|_| SpannIndexWriterError::PostingListGetError)?
+                .map_err(|e| {
+                    tracing::error!("Error getting posting list for head {}: {}", head_id, e);
+                    SpannIndexWriterError::PostingListGetError
+                })?
                 .ok_or(SpannIndexWriterError::PostingListGetError)?;
             // Append the new point to the posting list.
             doc_offset_ids.reserve_exact(1);
@@ -673,7 +838,7 @@ impl SpannIndexWriter {
             let mut local_indices = vec![0; doc_offset_ids.len()];
             let mut up_to_date_index = 0;
             {
-                let version_map_guard = self.versions_map.read();
+                let version_map_guard = self.versions_map.read().await;
                 for (index, doc_version) in doc_versions.iter().enumerate() {
                     let current_version = version_map_guard
                         .versions_map
@@ -688,7 +853,7 @@ impl SpannIndexWriter {
                 }
             }
             // If size is within threshold, write the new posting back and return.
-            if up_to_date_index <= SPLIT_THRESHOLD {
+            if up_to_date_index <= self.params.split_threshold as usize {
                 for idx in 0..up_to_date_index {
                     if local_indices[idx] == idx {
                         continue;
@@ -709,6 +874,17 @@ impl SpannIndexWriter {
                     doc_versions: &doc_versions,
                     doc_embeddings: &doc_embeddings,
                 };
+                // The only case when this can happen is if the point that is being appended
+                // was concurrently reassigned and its version incremented. In this case,
+                // we can safely ignore the append since the reassign will take care of
+                // adding the point to the correct heads.
+                if doc_offset_ids.is_empty() {
+                    tracing::info!(
+                        "Point {} at version {} was concurrently updated. Empty posting list after appending",
+                        id, version
+                    );
+                    return Ok(());
+                }
                 write_guard
                     .set("", head_id, &posting_list)
                     .await
@@ -716,7 +892,10 @@ impl SpannIndexWriter {
 
                 return Ok(());
             }
-            tracing::info!("Splitting posting list for head {}", head_id);
+            tracing::debug!(
+                "Splitting posting list of head {} since it exceeds threshold in lieu of appending point {} at version {}",
+                head_id, id, version
+            );
             // Otherwise split the posting list.
             local_indices.truncate(up_to_date_index);
             // Shuffle local_indices.
@@ -730,14 +909,16 @@ impl SpannIndexWriter {
                 /* k */ 2,
                 /* first */ 0,
                 last,
-                NUM_SAMPLES_FOR_KMEANS,
-                self.distance_function.clone(),
-                INITIAL_LAMBDA,
+                self.params.num_samples_kmeans,
+                self.params.space.clone().into(),
+                self.params.initial_lambda,
             );
             clustering_output =
                 cluster(&mut kmeans_input).map_err(SpannIndexWriterError::KMeansClusteringError)?;
             // TODO(Sanket): Not sure how this can happen. The reference implementation
             // just includes one point from the entire list in this case.
+            // My guess is that this can happen only when the total number of points
+            // that need to be split is 1.
             if clustering_output.num_clusters <= 1 {
                 tracing::warn!("Clustering split the posting list into only 1 cluster");
                 let mut single_doc_offset_ids = Vec::with_capacity(1);
@@ -770,6 +951,13 @@ impl SpannIndexWriter {
 
                 return Ok(());
             } else {
+                // None of the cluster_counts should be 0. Points to some error if it is.
+                if clustering_output.cluster_counts.iter().any(|&x| x == 0) {
+                    tracing::error!("Zero points in a cluster after clustering");
+                    return Err(SpannIndexWriterError::KMeansClusteringError(
+                        KMeansError::ZeroPointsInCluster,
+                    ));
+                }
                 new_posting_lists.push(Vec::with_capacity(
                     clustering_output.cluster_counts[0] * self.dimensionality,
                 ));
@@ -789,16 +977,19 @@ impl SpannIndexWriter {
                     );
                 }
                 let mut same_head = false;
+                let distance_function: DistanceFunction = self.params.space.clone().into();
                 for k in 0..2 {
                     // Update the existing head.
                     // TODO(Sanket): Need to understand what this achieves.
                     if !same_head
-                        && self
-                            .distance_function
+                        && distance_function
                             .distance(&clustering_output.cluster_centers[k], &head_embedding)
                             < 1e-6
                     {
-                        tracing::info!("Same head after splitting");
+                        tracing::info!(
+                            "One of the heads remains the same id {} after splitting in lieu of adding point {} at version {}",
+                            head_id, id, version
+                        );
                         same_head = true;
                         let posting_list = SpannPostingList {
                             doc_offset_ids: &new_doc_offset_ids[k],
@@ -808,7 +999,14 @@ impl SpannIndexWriter {
                         write_guard
                             .set("", head_id, &posting_list)
                             .await
-                            .map_err(|_| SpannIndexWriterError::PostingListSetError)?;
+                            .map_err(|e| {
+                                tracing::error!(
+                                    "Error setting posting list for head {}: {}",
+                                    head_id,
+                                    e
+                                );
+                                SpannIndexWriterError::PostingListSetError
+                            })?;
                         new_head_ids[k] = head_id as i32;
                         new_head_embeddings[k] = Some(&head_embedding);
                     } else {
@@ -816,6 +1014,10 @@ impl SpannIndexWriter {
                         let next_id = self
                             .next_head_id
                             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        tracing::info!(
+                            "Creating new head {}, old head {} in lieu of adding point {} at version {}",
+                            next_id, head_id, id, version
+                        );
                         let posting_list = SpannPostingList {
                             doc_offset_ids: &new_doc_offset_ids[k],
                             doc_versions: &new_doc_versions[k],
@@ -830,7 +1032,7 @@ impl SpannIndexWriter {
                         new_head_embeddings[k] = Some(&clustering_output.cluster_centers[k]);
                         // Insert to hnsw now.
                         let mut hnsw_write_guard = self.hnsw_index.inner.write();
-                        let hnsw_len = hnsw_write_guard.len();
+                        let hnsw_len = hnsw_write_guard.len_with_deleted();
                         let hnsw_capacity = hnsw_write_guard.capacity();
                         if hnsw_len + 1 > hnsw_capacity {
                             tracing::info!("Resizing hnsw index");
@@ -840,15 +1042,29 @@ impl SpannIndexWriter {
                         }
                         hnsw_write_guard
                             .add(next_id as usize, &clustering_output.cluster_centers[k])
-                            .map_err(|_| SpannIndexWriterError::HnswIndexAddError)?;
+                            .map_err(|e| {
+                                tracing::error!(
+                                    "Error adding new head {} to hnsw index: {}",
+                                    next_id,
+                                    e
+                                );
+                                SpannIndexWriterError::HnswIndexAddError
+                            })?;
                     }
                 }
                 if !same_head {
+                    tracing::info!(
+                        "Deleting head {} after splitting in lieu of adding point {} at version {}",
+                        head_id,
+                        id,
+                        version
+                    );
                     // Delete the old head
                     let hnsw_write_guard = self.hnsw_index.inner.write();
-                    hnsw_write_guard
-                        .delete(head_id as usize)
-                        .map_err(|_| SpannIndexWriterError::HnswIndexAddError)?;
+                    hnsw_write_guard.delete(head_id as usize).map_err(|e| {
+                        tracing::error!("Error deleting head {} from hnsw index: {}", head_id, e);
+                        SpannIndexWriterError::HnswIndexAddError
+                    })?;
                 }
             }
         }
@@ -866,7 +1082,6 @@ impl SpannIndexWriter {
         .await
     }
 
-    #[allow(dead_code)]
     async fn add_to_postings_list(
         &self,
         id: u32,
@@ -881,9 +1096,20 @@ impl SpannIndexWriter {
         // It's fine to create new centers for each of them since the number of such points
         // will be very small and we can also run GC to merge them later if needed.
         if ids.is_empty() {
+            tracing::info!(
+                "No nearby heads found for adding {} at version {}. Creating a new head",
+                id,
+                version
+            );
             let next_id = self
                 .next_head_id
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            tracing::info!(
+                "Created new head {} in lieu of adding point {} at version {}",
+                next_id,
+                id,
+                version
+            );
             // First add to postings list then to hnsw. This order is important
             // to ensure that if and when the center is discoverable, it also exists
             // in the postings list. Otherwise, it will be a dangling center.
@@ -900,30 +1126,37 @@ impl SpannIndexWriter {
                     .map_err(|_| SpannIndexWriterError::PostingListSetError)?;
             }
             // Next add to hnsw.
-            // This shouldn't exceed the capacity since this will happen only for the first few points
-            // so no need to check and increase the capacity.
             {
-                let write_guard = self.hnsw_index.inner.write();
-                write_guard
-                    .add(next_id as usize, embeddings)
-                    .map_err(|_| SpannIndexWriterError::HnswIndexAddError)?;
+                let mut write_guard = self.hnsw_index.inner.write();
+                let hnsw_len = write_guard.len_with_deleted();
+                let hnsw_capacity = write_guard.capacity();
+                if hnsw_len + 1 > hnsw_capacity {
+                    tracing::info!("Resizing hnsw index");
+                    write_guard
+                        .resize(hnsw_capacity * 2)
+                        .map_err(|_| SpannIndexWriterError::HnswIndexResizeError)?;
+                }
+                write_guard.add(next_id as usize, embeddings).map_err(|e| {
+                    tracing::error!("Error adding new head {} to hnsw index: {}", next_id, e);
+                    SpannIndexWriterError::HnswIndexAddError
+                })?;
             }
             return Ok(());
         }
         // Otherwise add to the posting list of these arrays.
         for (head_id, head_embedding) in ids.iter().zip(head_embeddings) {
-            self.append(*head_id as u32, id, version, embeddings, head_embedding)
-                .await?;
+            Box::pin(self.append(*head_id as u32, id, version, embeddings, head_embedding)).await?;
         }
 
         Ok(())
     }
 
     pub async fn add(&self, id: u32, embedding: &[f32]) -> Result<(), SpannIndexWriterError> {
-        let version = self.add_versions_map(id);
+        let version = self.add_versions_map(id).await;
         // Normalize the embedding in case of cosine.
         let mut normalized_embedding = embedding.to_vec();
-        if self.distance_function == DistanceFunction::Cosine {
+        let distance_function: DistanceFunction = self.params.space.clone().into();
+        if distance_function == DistanceFunction::Cosine {
             normalized_embedding = normalize(embedding);
         }
         // Add to the posting list.
@@ -932,13 +1165,37 @@ impl SpannIndexWriter {
     }
 
     pub async fn update(&self, id: u32, embedding: &[f32]) -> Result<(), SpannIndexWriterError> {
-        // Delete and then add.
-        self.delete(id).await?;
-        self.add(id, embedding).await
+        let inc_version;
+        {
+            // Increment version.
+            let mut version_map_guard = self.versions_map.write().await;
+            let curr_version = match version_map_guard.versions_map.get(&id) {
+                Some(version) => *version,
+                None => {
+                    tracing::error!("Point {} not found in version map", id);
+                    return Err(SpannIndexWriterError::VersionNotFound);
+                }
+            };
+            if curr_version == 0 {
+                tracing::error!("Trying to update a deleted point {}", id);
+                return Err(SpannIndexWriterError::VersionNotFound);
+            }
+            inc_version = curr_version + 1;
+            version_map_guard.versions_map.insert(id, inc_version);
+        }
+        // Normalize the embedding in case of cosine.
+        let mut normalized_embedding = embedding.to_vec();
+        let distance_function: DistanceFunction = self.params.space.clone().into();
+        if distance_function == DistanceFunction::Cosine {
+            normalized_embedding = normalize(embedding);
+        }
+        // Add to the posting list.
+        self.add_to_postings_list(id, inc_version, &normalized_embedding)
+            .await
     }
 
     pub async fn delete(&self, id: u32) -> Result<(), SpannIndexWriterError> {
-        let mut version_map_guard = self.versions_map.write();
+        let mut version_map_guard = self.versions_map.write().await;
         version_map_guard.versions_map.insert(id, 0);
         Ok(())
     }
@@ -949,7 +1206,7 @@ impl SpannIndexWriter {
         doc_versions: &[u32],
     ) -> Result<usize, SpannIndexWriterError> {
         let mut up_to_date_index = 0;
-        let version_map_guard = self.versions_map.read();
+        let version_map_guard = self.versions_map.read().await;
         for (index, doc_version) in doc_versions.iter().enumerate() {
             let current_version = version_map_guard
                 .versions_map
@@ -984,7 +1241,7 @@ impl SpannIndexWriter {
         let mut cluster_len = 0;
         let mut local_indices = vec![0; doc_offset_ids.len()];
         {
-            let version_map_guard = self.versions_map.read();
+            let version_map_guard = self.versions_map.read().await;
             for (index, doc_version) in doc_versions.iter().enumerate() {
                 let current_version = version_map_guard
                     .versions_map
@@ -1051,6 +1308,8 @@ impl SpannIndexWriter {
         ))
     }
 
+    // Note(Sanket): This has not been tested for running concurrently with
+    // other add/update/delete operations.
     async fn garbage_collect_head(
         &self,
         head_id: usize,
@@ -1081,7 +1340,7 @@ impl SpannIndexWriter {
                 .await?;
             source_cluster_len = doc_offset_ids.len();
             // Write the PL back and return if within the merge threshold.
-            if source_cluster_len > MERGE_THRESHOLD {
+            if source_cluster_len > self.params.merge_threshold as usize {
                 let posting_list = SpannPostingList {
                     doc_offset_ids: &doc_offset_ids,
                     doc_versions: &doc_versions,
@@ -1094,9 +1353,18 @@ impl SpannIndexWriter {
 
                 return Ok(());
             }
+            if source_cluster_len == 0 {
+                tracing::info!("Posting list of {} is empty. Deleting from hnsw", head_id);
+                // Delete from hnsw.
+                let hnsw_write_guard = self.hnsw_index.inner.write();
+                hnsw_write_guard
+                    .delete(head_id)
+                    .map_err(|_| SpannIndexWriterError::HnswIndexAddError)?;
+                return Ok(());
+            }
             // Find candidates for merge.
             let (nearest_head_ids, _, nearest_head_embeddings) = self
-                .get_nearby_heads(head_embedding, NUM_CENTERS_TO_MERGE_TO)
+                .get_nearby_heads(head_embedding, self.params.num_centers_to_merge_to as usize)
                 .await?;
             for (nearest_head_id, nearest_head_embedding) in nearest_head_ids
                 .into_iter()
@@ -1122,7 +1390,7 @@ impl SpannIndexWriter {
                     .get_up_to_date_count(&nearest_head_doc_offset_ids, &nearest_head_doc_versions)
                     .await?;
                 // If the total count exceeds the max posting list size then skip.
-                if target_cluster_len + source_cluster_len >= SPLIT_THRESHOLD {
+                if target_cluster_len + source_cluster_len >= self.params.split_threshold as usize {
                     continue;
                 }
                 // Merge the two PLs.
@@ -1179,12 +1447,13 @@ impl SpannIndexWriter {
         if source_cluster_len > target_cluster_len {
             // target_cluster points were merged to source_cluster
             // so they are candidates for reassignment.
+            let distance_function: DistanceFunction = self.params.space.clone().into();
             for idx in source_cluster_len..(source_cluster_len + target_cluster_len) {
-                let origin_dist = self.distance_function.distance(
+                let origin_dist = distance_function.distance(
                     &doc_embeddings[idx * self.dimensionality..(idx + 1) * self.dimensionality],
                     &target_embedding,
                 );
-                let new_dist = self.distance_function.distance(
+                let new_dist = distance_function.distance(
                     &doc_embeddings[idx * self.dimensionality..(idx + 1) * self.dimensionality],
                     head_embedding,
                 );
@@ -1201,12 +1470,13 @@ impl SpannIndexWriter {
         } else {
             // source_cluster points were merged to target_cluster
             // so they are candidates for reassignment.
+            let distance_function: DistanceFunction = self.params.space.clone().into();
             for idx in 0..source_cluster_len {
-                let origin_dist = self.distance_function.distance(
+                let origin_dist = distance_function.distance(
                     &doc_embeddings[idx * self.dimensionality..(idx + 1) * self.dimensionality],
                     head_embedding,
                 );
-                let new_dist = self.distance_function.distance(
+                let new_dist = distance_function.distance(
                     &doc_embeddings[idx * self.dimensionality..(idx + 1) * self.dimensionality],
                     &target_embedding,
                 );
@@ -1224,9 +1494,60 @@ impl SpannIndexWriter {
         Ok(())
     }
 
-    // TODO(Sanket): Hook in the gc policy.
-    // TODO(Sanket): Garbage collect HNSW also.
-    pub async fn garbage_collect(&self) -> Result<(), SpannIndexWriterError> {
+    pub async fn garbage_collect_heads(&mut self) -> Result<(), SpannIndexWriterError> {
+        tracing::info!("Garbage collecting all the heads");
+        // Create a new hnsw index and add elements to it.
+        let clean_hnsw = self
+            .hnsw_provider
+            .create(
+                &self.collection_id,
+                self.params.m,
+                self.params.construction_ef,
+                self.params.search_ef,
+                self.dimensionality as i32,
+                self.params.space.clone().into(),
+            )
+            .await
+            .map_err(|e| {
+                tracing::error!("Error creating hnsw index during gc");
+                SpannIndexWriterError::HnswIndexCreateError(*e)
+            })?;
+        {
+            let hnsw_read_guard = self.hnsw_index.inner.read();
+            let mut clean_hnsw_write_guard = clean_hnsw.inner.write();
+            let (non_deleted_heads, _) = hnsw_read_guard
+                .get_all_ids()
+                .map_err(|_| SpannIndexWriterError::HnswIndexSearchError)?;
+            for head in non_deleted_heads {
+                let head_embedding = hnsw_read_guard
+                    .get(head)
+                    .map_err(|_| SpannIndexWriterError::HnswIndexSearchError)?
+                    .ok_or(SpannIndexWriterError::HnswIndexSearchError)?;
+                let hnsw_len = clean_hnsw_write_guard.len_with_deleted();
+                let hnsw_capacity = clean_hnsw_write_guard.capacity();
+                if hnsw_len + 1 > hnsw_capacity {
+                    tracing::info!("Resizing hnsw index");
+                    clean_hnsw_write_guard
+                        .resize(hnsw_capacity * 2)
+                        .map_err(|_| SpannIndexWriterError::HnswIndexResizeError)?;
+                }
+                clean_hnsw_write_guard
+                    .add(head, &head_embedding)
+                    .map_err(|e| {
+                        tracing::error!("Error adding head {} to clean hnsw index: {}", head, e);
+                        SpannIndexWriterError::HnswIndexAddError
+                    })?;
+            }
+        }
+        // Swap the hnsw index.
+        self.cleaned_up_hnsw_index.replace(clean_hnsw);
+        Ok(())
+    }
+
+    pub async fn pl_garbage_collect_random_sample(
+        &self,
+        sample_size: f32,
+    ) -> Result<(), SpannIndexWriterError> {
         // Get all the heads.
         let non_deleted_heads;
         {
@@ -1235,38 +1556,64 @@ impl SpannIndexWriter {
                 .get_all_ids()
                 .map_err(|_| SpannIndexWriterError::HnswIndexSearchError)?;
         }
+        // Randomly sample x% of heads for gc.
+        let sampled_heads = non_deleted_heads.choose_multiple(
+            &mut rand::thread_rng(),
+            (non_deleted_heads.len() as f32 * sample_size).floor() as usize,
+        );
         // Iterate over all the heads and gc heads.
-        for head_id in non_deleted_heads.into_iter() {
-            if self.is_head_deleted(head_id).await? {
+        for head_id in sampled_heads.into_iter() {
+            if self.is_head_deleted(*head_id).await? {
                 return Ok(());
             }
             let head_embedding = self
                 .hnsw_index
                 .inner
                 .read()
-                .get(head_id)
+                .get(*head_id)
                 .map_err(|_| SpannIndexWriterError::HnswIndexSearchError)?
                 .ok_or(SpannIndexWriterError::HnswIndexSearchError)?;
             tracing::info!("Garbage collecting head {}", head_id);
-            self.garbage_collect_head(head_id, &head_embedding).await?;
+            self.garbage_collect_head(*head_id, &head_embedding).await?;
+        }
+        Ok(())
+    }
+
+    // Note(Sanket): This has not been tested for running concurrently with
+    // other add/update/delete operations.
+    pub async fn garbage_collect(&mut self) -> Result<(), SpannIndexWriterError> {
+        if self.gc_context.pl_context.enabled {
+            match &self.gc_context.pl_context.policy {
+                PlGarbageCollectionPolicy::RandomSample(random_sample) => {
+                    self.pl_garbage_collect_random_sample(random_sample.sample_size)
+                        .await?;
+                }
+            }
+        }
+        if self.gc_context.hnsw_context.enabled {
+            match &self.gc_context.hnsw_context.policy {
+                HnswGarbageCollectionPolicy::FullRebuild => {
+                    self.garbage_collect_heads().await?;
+                }
+            }
         }
         Ok(())
     }
 
     // TODO(Sanket): Change the error types.
     pub async fn commit(self) -> Result<SpannIndexFlusher, SpannIndexWriterError> {
+        // NOTE(Sanket): This is not the best way to drain the writer but the orchestrator keeps a
+        // reference to the writer so cannot do an Arc::try_unwrap() here.
         // Pl list.
-        let pl_flusher = match Arc::try_unwrap(self.posting_list_writer) {
-            Ok(writer) => writer
-                .into_inner()
-                .commit::<u32, &SpannPostingList<'_>>()
-                .await
-                .map_err(|_| SpannIndexWriterError::PostingListCommitError)?,
-            Err(_) => {
-                // This should never happen.
-                panic!("Failed to unwrap posting list writer");
-            }
-        };
+        let pl_writer_clone = self.posting_list_writer.lock().await.clone();
+        let pl_flusher = pl_writer_clone
+            .commit::<u32, &SpannPostingList<'_>>()
+            .await
+            .map_err(|e| {
+                tracing::error!("Error committing posting list: {}", e);
+                SpannIndexWriterError::PostingListCommitError
+            })?;
+        tracing::info!("Committed posting list");
         // Versions map. Create a writer, write all the data and commit.
         let mut bf_options = BlockfileWriterOptions::new();
         bf_options = bf_options.unordered_mutations();
@@ -1275,25 +1622,20 @@ impl SpannIndexWriter {
             .write::<u32, u32>(bf_options)
             .await
             .map_err(|_| SpannIndexWriterError::VersionsMapWriterCreateError)?;
-        let versions_map_flusher = match Arc::try_unwrap(self.versions_map) {
-            Ok(writer) => {
-                let writer = writer.into_inner();
-                for (doc_offset_id, doc_version) in writer.versions_map.into_iter() {
-                    versions_map_bf_writer
-                        .set("", doc_offset_id, doc_version)
-                        .await
-                        .map_err(|_| SpannIndexWriterError::VersionsMapSetError)?;
-                }
+        {
+            let mut version_map_guard = self.versions_map.write().await;
+            for (doc_offset_id, doc_version) in version_map_guard.versions_map.drain() {
                 versions_map_bf_writer
-                    .commit::<u32, u32>()
+                    .set("", doc_offset_id, doc_version)
                     .await
-                    .map_err(|_| SpannIndexWriterError::VersionsMapCommitError)?
+                    .map_err(|_| SpannIndexWriterError::VersionsMapSetError)?;
             }
-            Err(_) => {
-                // This should never happen.
-                panic!("Failed to unwrap posting list writer");
-            }
-        };
+        }
+        let versions_map_flusher = versions_map_bf_writer
+            .commit::<u32, u32>()
+            .await
+            .map_err(|_| SpannIndexWriterError::VersionsMapCommitError)?;
+        tracing::info!("Committed versions map");
         // Next head.
         let mut bf_options = BlockfileWriterOptions::new();
         bf_options = bf_options.unordered_mutations();
@@ -1302,30 +1644,33 @@ impl SpannIndexWriter {
             .write::<&str, u32>(bf_options)
             .await
             .map_err(|_| SpannIndexWriterError::MaxHeadIdWriterCreateError)?;
-        let max_head_id_flusher = match Arc::try_unwrap(self.next_head_id) {
-            Ok(value) => {
-                let value = value.into_inner();
-                max_head_id_bf
-                    .set("", MAX_HEAD_OFFSET_ID, value)
-                    .await
-                    .map_err(|_| SpannIndexWriterError::MaxHeadIdSetError)?;
-                max_head_id_bf
-                    .commit::<&str, u32>()
-                    .await
-                    .map_err(|_| SpannIndexWriterError::MaxHeadIdCommitError)?
-            }
-            Err(_) => {
-                // This should never happen.
-                panic!("Failed to unwrap next head id");
-            }
-        };
-
-        let hnsw_id = self.hnsw_index.inner.read().id;
+        let max_head_oid = self.next_head_id.load(std::sync::atomic::Ordering::SeqCst);
+        max_head_id_bf
+            .set("", MAX_HEAD_OFFSET_ID, max_head_oid)
+            .await
+            .map_err(|_| SpannIndexWriterError::MaxHeadIdSetError)?;
+        let max_head_id_flusher = max_head_id_bf
+            .commit::<&str, u32>()
+            .await
+            .map_err(|_| SpannIndexWriterError::MaxHeadIdCommitError)?;
+        tracing::info!("Committed max head id");
 
         // Hnsw.
+        let (hnsw_id, hnsw_index) = match self.cleaned_up_hnsw_index {
+            Some(index) => {
+                tracing::info!("Committing cleaned up hnsw index");
+                let index_id = index.inner.read().id;
+                (index_id, index)
+            }
+            None => {
+                let index_id = self.hnsw_index.inner.read().id;
+                (index_id, self.hnsw_index)
+            }
+        };
         self.hnsw_provider
-            .commit(self.hnsw_index)
+            .commit(hnsw_index)
             .map_err(|_| SpannIndexWriterError::HnswIndexCommitError)?;
+        tracing::info!("Committed hnsw index");
 
         Ok(SpannIndexFlusher {
             pl_flusher,
@@ -1345,6 +1690,7 @@ pub struct SpannIndexFlusher {
     hnsw_flusher: HnswIndexProvider,
 }
 
+#[derive(Debug)]
 pub struct SpannIndexIds {
     pub pl_id: Uuid,
     pub versions_map_id: Uuid,
@@ -1390,6 +1736,10 @@ pub enum SpannIndexReaderError {
     UninitializedIndex,
     #[error("Error reading posting list")]
     PostingListReadError,
+    #[error("Chroma error: {0}")]
+    ChromaError(#[from] Box<dyn ChromaError>),
+    #[error("Data inconsistency error")]
+    DataInconsistencyError,
 }
 
 impl ChromaError for SpannIndexReaderError {
@@ -1399,6 +1749,8 @@ impl ChromaError for SpannIndexReaderError {
             Self::BlockfileReaderConstructionError => ErrorCodes::Internal,
             Self::UninitializedIndex => ErrorCodes::Internal,
             Self::PostingListReadError => ErrorCodes::Internal,
+            Self::ChromaError(err) => err.code(),
+            Self::DataInconsistencyError => ErrorCodes::Internal,
         }
     }
 }
@@ -1534,6 +1886,7 @@ impl<'me> SpannIndexReader<'me> {
             .ok_or(SpannIndexReaderError::PostingListReadError)?;
 
         let mut posting_lists = Vec::with_capacity(res.doc_offset_ids.len());
+        let mut unique_ids = HashSet::new();
         for (index, doc_offset_id) in res.doc_offset_ids.iter().enumerate() {
             if self
                 .is_outdated(*doc_offset_id, res.doc_versions[index])
@@ -1541,6 +1894,10 @@ impl<'me> SpannIndexReader<'me> {
             {
                 continue;
             }
+            if unique_ids.contains(doc_offset_id) {
+                continue;
+            }
+            unique_ids.insert(*doc_offset_id);
             posting_lists.push(SpannPosting {
                 doc_offset_id: *doc_offset_id,
                 doc_embedding: res.doc_embeddings
@@ -1550,22 +1907,92 @@ impl<'me> SpannIndexReader<'me> {
         }
         Ok(posting_lists)
     }
+
+    // Only for testing purposes as of 5 March 2024.
+    // Returns all the ids with embeddings.
+    // Intentionally dumb and not paginated.
+    pub async fn scan(&self) -> Result<Vec<SpannPosting>, SpannIndexReaderError> {
+        // Get all the heads.
+        let (non_deleted_heads, _) = self.hnsw_index.inner.read().get_all_ids()?;
+        let mut postings_map: HashMap<u32, Vec<f32>> = HashMap::new();
+        for head in non_deleted_heads {
+            let res = self
+                .posting_lists
+                .get("", head as u32)
+                .await
+                .map_err(|_| SpannIndexReaderError::PostingListReadError)?
+                .ok_or(SpannIndexReaderError::PostingListReadError)?;
+            for (index, doc_offset_id) in res.doc_offset_ids.iter().enumerate() {
+                if self
+                    .is_outdated(*doc_offset_id, res.doc_versions[index])
+                    .await?
+                {
+                    continue;
+                }
+                // Deduplicate.
+                if let Some(posting) = postings_map.get(doc_offset_id) {
+                    // values should be same.
+                    if posting
+                        != &res.doc_embeddings
+                            [index * self.dimensionality..(index + 1) * self.dimensionality]
+                    {
+                        let actual_version = self
+                            .versions_map
+                            .get("", *doc_offset_id)
+                            .await
+                            .map_err(|_| SpannIndexReaderError::PostingListReadError)?
+                            .ok_or(SpannIndexReaderError::PostingListReadError)?;
+                        tracing::error!("Duplicate doc offset id {} at latest version {} with different embeddings", doc_offset_id, actual_version);
+                        return Err(SpannIndexReaderError::DataInconsistencyError);
+                    }
+                    continue;
+                }
+                postings_map.insert(
+                    *doc_offset_id,
+                    res.doc_embeddings
+                        [index * self.dimensionality..(index + 1) * self.dimensionality]
+                        .to_vec(),
+                );
+            }
+        }
+        let mut postings = Vec::with_capacity(postings_map.len());
+        for (doc_offset_id, embedding) in postings_map {
+            postings.push(SpannPosting {
+                doc_offset_id,
+                doc_embedding: embedding,
+            });
+        }
+        Ok(postings)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{f32::consts::PI, path::PathBuf};
+    use std::{collections::HashSet, f32::consts::PI, path::PathBuf, sync::Arc};
 
     use chroma_blockstore::{
         arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
         provider::BlockfileProvider,
     };
     use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
+    use chroma_config::{registry::Registry, Configurable};
+    use chroma_distance::DistanceFunction;
     use chroma_storage::{local::LocalStorage, Storage};
-    use chroma_types::{CollectionUuid, SpannPostingList};
+    use chroma_types::{CollectionUuid, DistributedSpannParameters, SpannPostingList};
     use rand::Rng;
+    use tempfile::TempDir;
 
-    use crate::{hnsw_provider::HnswIndexProvider, spann::types::SpannIndexWriter, Index};
+    use crate::{
+        config::{
+            HnswGarbageCollectionConfig, HnswGarbageCollectionPolicyConfig,
+            PlGarbageCollectionConfig, PlGarbageCollectionPolicyConfig, RandomSamplePolicyConfig,
+        },
+        hnsw_provider::HnswIndexProvider,
+        spann::types::{
+            GarbageCollectionContext, SpannIndexReader, SpannIndexWriter, SpannIndexWriterError,
+        },
+        Index,
+    };
 
     #[tokio::test]
     async fn test_split() {
@@ -1590,25 +2017,29 @@ mod tests {
             16,
             rx,
         );
-        let m = 16;
-        let ef_construction = 200;
-        let ef_search = 200;
         let collection_id = CollectionUuid::new();
-        let distance_function = chroma_distance::DistanceFunction::Euclidean;
         let dimensionality = 2;
+        let params = DistributedSpannParameters::default();
+        let gc_context = GarbageCollectionContext::try_from_config(
+            &(
+                PlGarbageCollectionConfig::default(),
+                HnswGarbageCollectionConfig::default(),
+            ),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
             None,
             None,
             None,
-            Some(m),
-            Some(ef_construction),
-            Some(ef_search),
             &collection_id,
-            distance_function,
             dimensionality,
             &blockfile_provider,
+            params,
+            gc_context,
         )
         .await
         .expect("Error creating spann index writer");
@@ -1786,25 +2217,36 @@ mod tests {
             16,
             rx,
         );
-        let m = 16;
-        let ef_construction = 200;
-        let ef_search = 200;
         let collection_id = CollectionUuid::new();
-        let distance_function = chroma_distance::DistanceFunction::Euclidean;
         let dimensionality = 2;
-        let writer = SpannIndexWriter::from_id(
+        let params = DistributedSpannParameters::default();
+        let pl_gc_policy = PlGarbageCollectionConfig {
+            enabled: true,
+            policy: PlGarbageCollectionPolicyConfig::RandomSample(RandomSamplePolicyConfig {
+                sample_size: 1.0,
+            }),
+        };
+        let hnsw_gc_policy = HnswGarbageCollectionConfig {
+            enabled: true,
+            policy: HnswGarbageCollectionPolicyConfig::FullRebuild,
+        };
+        let gc_context = GarbageCollectionContext::try_from_config(
+            &(pl_gc_policy, hnsw_gc_policy),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
+        let mut writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
             None,
             None,
             None,
-            Some(m),
-            Some(ef_construction),
-            Some(ef_search),
             &collection_id,
-            distance_function,
             dimensionality,
             &blockfile_provider,
+            params,
+            gc_context,
         )
         .await
         .expect("Error creating spann index writer");
@@ -1857,7 +2299,7 @@ mod tests {
         }
         // Insert the points in the version map as well.
         {
-            let mut version_map_guard = writer.versions_map.write();
+            let mut version_map_guard = writer.versions_map.write().await;
             for point in 1..=100 {
                 version_map_guard.versions_map.insert(point as u32, 1);
                 version_map_guard.versions_map.insert(100 + point as u32, 1);
@@ -1876,7 +2318,7 @@ mod tests {
         }
         // Expect the version map to be properly updated.
         {
-            let version_map_guard = writer.versions_map.read();
+            let version_map_guard = writer.versions_map.read().await;
             for point in 1..=40 {
                 assert_eq!(version_map_guard.versions_map.get(&point), Some(&0));
                 assert_eq!(version_map_guard.versions_map.get(&(100 + point)), Some(&0));
@@ -1945,6 +2387,51 @@ mod tests {
                 assert_eq!(pl.2[(point - 41) * 2 + 1], 1000.0 + point as f32);
             }
         }
+        {
+            let hnsw_read_guard = writer.hnsw_index.inner.read();
+            assert_eq!(hnsw_read_guard.len(), 2);
+            let (mut non_deleted_ids, deleted_ids) = hnsw_read_guard
+                .get_all_ids()
+                .expect("Error getting all ids");
+            assert_eq!(non_deleted_ids.len(), 2);
+            assert_eq!(deleted_ids.len(), 0);
+            non_deleted_ids.sort();
+            assert_eq!(non_deleted_ids[0], 1);
+            assert_eq!(non_deleted_ids[1], 2);
+            let emb = hnsw_read_guard
+                .get(non_deleted_ids[0])
+                .expect("Error getting hnsw index")
+                .unwrap();
+            assert_eq!(emb, &[0.0, 0.0]);
+            let emb = hnsw_read_guard
+                .get(non_deleted_ids[1])
+                .expect("Error getting hnsw index")
+                .unwrap();
+            assert_eq!(emb, &[1000.0, 1000.0]);
+            assert!(writer.cleaned_up_hnsw_index.is_some());
+            let cleaned_hnsw = writer
+                .cleaned_up_hnsw_index
+                .expect("Expected cleaned up hnsw index to be set");
+            let cleaned_guard = cleaned_hnsw.inner.read();
+            assert_eq!(cleaned_guard.len(), 2);
+            let (mut non_deleted_ids, deleted_ids) =
+                cleaned_guard.get_all_ids().expect("Error getting all ids");
+            assert_eq!(non_deleted_ids.len(), 2);
+            assert_eq!(deleted_ids.len(), 0);
+            non_deleted_ids.sort();
+            assert_eq!(non_deleted_ids[0], 1);
+            assert_eq!(non_deleted_ids[1], 2);
+            let emb = cleaned_guard
+                .get(non_deleted_ids[0])
+                .expect("Error getting hnsw index")
+                .unwrap();
+            assert_eq!(emb, &[0.0, 0.0]);
+            let emb = cleaned_guard
+                .get(non_deleted_ids[1])
+                .expect("Error getting hnsw index")
+                .unwrap();
+            assert_eq!(emb, &[1000.0, 1000.0]);
+        }
     }
 
     #[tokio::test]
@@ -1972,25 +2459,36 @@ mod tests {
             16,
             rx,
         );
-        let m = 16;
-        let ef_construction = 200;
-        let ef_search = 200;
         let collection_id = CollectionUuid::new();
-        let distance_function = chroma_distance::DistanceFunction::Euclidean;
         let dimensionality = 2;
-        let writer = SpannIndexWriter::from_id(
+        let params = DistributedSpannParameters::default();
+        let pl_gc_policy = PlGarbageCollectionConfig {
+            enabled: true,
+            policy: PlGarbageCollectionPolicyConfig::RandomSample(RandomSamplePolicyConfig {
+                sample_size: 1.0,
+            }),
+        };
+        let hnsw_gc_policy = HnswGarbageCollectionConfig {
+            enabled: true,
+            policy: HnswGarbageCollectionPolicyConfig::FullRebuild,
+        };
+        let gc_context = GarbageCollectionContext::try_from_config(
+            &(pl_gc_policy, hnsw_gc_policy),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
+        let mut writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
             None,
             None,
             None,
-            Some(m),
-            Some(ef_construction),
-            Some(ef_search),
             &collection_id,
-            distance_function,
             dimensionality,
             &blockfile_provider,
+            params,
+            gc_context,
         )
         .await
         .expect("Error creating spann index writer");
@@ -2043,7 +2541,7 @@ mod tests {
         }
         // Insert the points in the version map as well.
         {
-            let mut version_map_guard = writer.versions_map.write();
+            let mut version_map_guard = writer.versions_map.write().await;
             for point in 1..=100 {
                 version_map_guard.versions_map.insert(point as u32, 1);
                 version_map_guard.versions_map.insert(100 + point as u32, 1);
@@ -2068,7 +2566,7 @@ mod tests {
             .expect("Error deleting from spann index writer");
         // Expect the version map to be properly updated.
         {
-            let version_map_guard = writer.versions_map.read();
+            let version_map_guard = writer.versions_map.read().await;
             for point in 1..=60 {
                 assert_eq!(version_map_guard.versions_map.get(&point), Some(&0));
                 assert_eq!(version_map_guard.versions_map.get(&(100 + point)), Some(&0));
@@ -2124,6 +2622,22 @@ mod tests {
                 .expect("Error getting hnsw index")
                 .unwrap();
             assert_eq!(emb, &[0.0, 0.0]);
+            assert!(writer.cleaned_up_hnsw_index.is_some());
+            let cleaned_hnsw = writer
+                .cleaned_up_hnsw_index
+                .expect("Expected cleaned up hnsw index to be set");
+            let cleaned_guard = cleaned_hnsw.inner.read();
+            assert_eq!(cleaned_guard.len(), 1);
+            let (non_deleted_ids, deleted_ids) =
+                cleaned_guard.get_all_ids().expect("Error getting all ids");
+            assert_eq!(non_deleted_ids.len(), 1);
+            assert_eq!(deleted_ids.len(), 0);
+            assert_eq!(non_deleted_ids[0], 1);
+            let emb = cleaned_guard
+                .get(non_deleted_ids[0])
+                .expect("Error getting hnsw index")
+                .unwrap();
+            assert_eq!(emb, &[0.0, 0.0]);
         }
         // Expect the posting lists with id 1 to be 79.
         {
@@ -2162,25 +2676,29 @@ mod tests {
             16,
             rx,
         );
-        let m = 16;
-        let ef_construction = 200;
-        let ef_search = 200;
         let collection_id = CollectionUuid::new();
-        let distance_function = chroma_distance::DistanceFunction::Euclidean;
         let dimensionality = 2;
+        let params = DistributedSpannParameters::default();
+        let gc_context = GarbageCollectionContext::try_from_config(
+            &(
+                PlGarbageCollectionConfig::default(),
+                HnswGarbageCollectionConfig::default(),
+            ),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
             None,
             None,
             None,
-            Some(m),
-            Some(ef_construction),
-            Some(ef_search),
             &collection_id,
-            distance_function,
             dimensionality,
             &blockfile_provider,
+            params,
+            gc_context,
         )
         .await
         .expect("Error creating spann index writer");
@@ -2291,7 +2809,7 @@ mod tests {
         }
         // Insert these 150 points to version map.
         {
-            let mut version_map_guard = writer.versions_map.write();
+            let mut version_map_guard = writer.versions_map.write().await;
             for i in 1..=150 {
                 version_map_guard.versions_map.insert(i as u32, 1);
             }
@@ -2404,25 +2922,36 @@ mod tests {
             16,
             rx,
         );
-        let m = 16;
-        let ef_construction = 200;
-        let ef_search = 200;
         let collection_id = CollectionUuid::new();
-        let distance_function = chroma_distance::DistanceFunction::Euclidean;
         let dimensionality = 2;
-        let writer = SpannIndexWriter::from_id(
+        let params = DistributedSpannParameters::default();
+        let pl_gc_policy = PlGarbageCollectionConfig {
+            enabled: true,
+            policy: PlGarbageCollectionPolicyConfig::RandomSample(RandomSamplePolicyConfig {
+                sample_size: 1.0,
+            }),
+        };
+        let hnsw_gc_policy = HnswGarbageCollectionConfig {
+            enabled: true,
+            policy: HnswGarbageCollectionPolicyConfig::FullRebuild,
+        };
+        let gc_context = GarbageCollectionContext::try_from_config(
+            &(pl_gc_policy, hnsw_gc_policy),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
+        let mut writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
             None,
             None,
             None,
-            Some(m),
-            Some(ef_construction),
-            Some(ef_search),
             &collection_id,
-            distance_function,
             dimensionality,
             &blockfile_provider,
+            params,
+            gc_context,
         )
         .await
         .expect("Error creating spann index writer");
@@ -2533,7 +3062,7 @@ mod tests {
         }
         // Initialize the versions map appropriately.
         {
-            let mut version_map_guard = writer.versions_map.write();
+            let mut version_map_guard = writer.versions_map.write().await;
             for i in 1..=160 {
                 version_map_guard.versions_map.insert(i as u32, 1);
             }
@@ -2619,6 +3148,850 @@ mod tests {
                 .expect("Error getting hnsw index")
                 .unwrap();
             assert_eq!(emb, &[10000.0, 10000.0]);
+            let cleaned_hnsw = writer
+                .cleaned_up_hnsw_index
+                .expect("Expected cleaned up hnsw index to be set");
+            let cleaned_guard = cleaned_hnsw.inner.read();
+            assert_eq!(cleaned_guard.len(), 2);
+            let (mut non_deleted_ids, deleted_ids) =
+                cleaned_guard.get_all_ids().expect("Error getting all ids");
+            non_deleted_ids.sort();
+            assert_eq!(non_deleted_ids.len(), 2);
+            assert_eq!(deleted_ids.len(), 0);
+            assert_eq!(non_deleted_ids[0], 1);
+            assert_eq!(non_deleted_ids[1], 3);
+            let emb = cleaned_guard
+                .get(non_deleted_ids[0])
+                .expect("Error getting hnsw index")
+                .unwrap();
+            assert_eq!(emb, &[0.0, 0.0]);
+            let emb = cleaned_guard
+                .get(non_deleted_ids[1])
+                .expect("Error getting hnsw index")
+                .unwrap();
+            assert_eq!(emb, &[10000.0, 10000.0]);
         }
+    }
+
+    fn new_blockfile_provider_for_tests(
+        max_block_size_bytes: usize,
+        storage: Storage,
+    ) -> BlockfileProvider {
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
+        let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            max_block_size_bytes,
+            block_cache,
+            sparse_index_cache,
+        );
+        BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider)
+    }
+
+    fn new_hnsw_provider_for_tests(storage: Storage, temp_dir: &TempDir) -> HnswIndexProvider {
+        let hnsw_cache = new_non_persistent_cache_for_test();
+        let (_, rx) = tokio::sync::mpsc::unbounded_channel();
+        HnswIndexProvider::new(
+            storage,
+            PathBuf::from(temp_dir.path().to_str().unwrap()),
+            hnsw_cache,
+            16,
+            rx,
+        )
+    }
+
+    #[tokio::test]
+    async fn test_data_integrity() {
+        // Inserts 10k randomly generated embeddings each of 1000 dimensions.
+        // Commits and flushes the data to disk. Then reads the data back using scan api
+        // and verifies that all the data is present and correct.
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let max_block_size_bytes = 8 * 1024 * 1024;
+
+        let blockfile_provider =
+            new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
+        let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
+        let collection_id = CollectionUuid::new();
+        let params = DistributedSpannParameters::default();
+        let distance_function = params.space.clone().into();
+        let dimensionality = 1000;
+        let gc_context = GarbageCollectionContext::try_from_config(
+            &(
+                PlGarbageCollectionConfig::default(),
+                HnswGarbageCollectionConfig::default(),
+            ),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
+        let writer = SpannIndexWriter::from_id(
+            &hnsw_provider,
+            None,
+            None,
+            None,
+            None,
+            &collection_id,
+            dimensionality,
+            &blockfile_provider,
+            params,
+            gc_context,
+        )
+        .await
+        .expect("Error creating spann index writer");
+        let mut rng = rand::thread_rng();
+        let mut doc_offset_ids = vec![0u32; 10000];
+        let mut doc_embeddings: Vec<Vec<f32>> = Vec::new();
+        for i in 1..=10000 {
+            // Generate 1000 randomly generated f32.
+            let embedding = (0..1000).map(|_| rng.gen::<f32>()).collect::<Vec<f32>>();
+            writer
+                .add(i as u32, &embedding)
+                .await
+                .expect("Error adding to spann index writer");
+            doc_offset_ids[i - 1] = i as u32;
+            doc_embeddings.push(embedding);
+        }
+        let flusher = writer
+            .commit()
+            .await
+            .expect("Error committing spann index writer");
+        let paths = flusher
+            .flush()
+            .await
+            .expect("Error flushing spann index writer");
+        println!("Wrote 10k records of 1000 dimensions each");
+        // Construct a reader.
+        // Clear the cache.
+        let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
+        let blockfile_provider = new_blockfile_provider_for_tests(max_block_size_bytes, storage);
+        let reader = SpannIndexReader::from_id(
+            Some(&paths.hnsw_id),
+            &hnsw_provider,
+            &collection_id,
+            distance_function,
+            dimensionality,
+            Some(&paths.pl_id),
+            Some(&paths.versions_map_id),
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating spann index reader");
+        // Scan the reader and verify the data.
+        let mut results = reader
+            .scan()
+            .await
+            .expect("Error scanning spann index reader");
+        assert_eq!(results.len(), 10000);
+        results.sort_by(|a, b| a.doc_offset_id.cmp(&b.doc_offset_id));
+
+        for i in 0..10000 {
+            assert_eq!(results[i].doc_offset_id, doc_offset_ids[i]);
+            assert_eq!(results[i].doc_embedding, doc_embeddings[i].as_slice());
+        }
+    }
+
+    // NOTE(Sanket): It is non-trivial to use shuttle for this test since it requires
+    // a tokio runtime for creating the hnsw provider - the cache requires a mpsc channel,
+    // the construction of hnsw provider calls async tokio filesystem apis that also need
+    // a runtime which is not supported by shuttle.
+    #[tokio::test]
+    async fn test_data_integrity_parallel() {
+        // Inserts 10k randomly generated embeddings each of 1000 dimensions using 500 parallel tasks.
+        // Commits and flushes the data to disk. Then reads the data back using scan api
+        // and verifies that all the data is present and correct.
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let max_block_size_bytes = 8 * 1024 * 1024;
+
+        let blockfile_provider =
+            new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
+        let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
+        let collection_id = CollectionUuid::new();
+        let params = DistributedSpannParameters::default();
+        let distance_function = params.space.clone().into();
+        let dimensionality = 1000;
+        let gc_context = GarbageCollectionContext::try_from_config(
+            &(
+                PlGarbageCollectionConfig::default(),
+                HnswGarbageCollectionConfig::default(),
+            ),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
+        let writer = SpannIndexWriter::from_id(
+            &hnsw_provider,
+            None,
+            None,
+            None,
+            None,
+            &collection_id,
+            dimensionality,
+            &blockfile_provider,
+            params,
+            gc_context,
+        )
+        .await
+        .expect("Error creating spann index writer");
+        let mut rng = rand::thread_rng();
+        let mut doc_offset_ids = vec![0u32; 10000];
+        let mut doc_embeddings: Vec<Vec<f32>> = Vec::new();
+        for i in 1..=10000 {
+            // Generate 1000 randomly generated f32.
+            let embedding = (0..1000).map(|_| rng.gen::<f32>()).collect::<Vec<f32>>();
+            doc_offset_ids[i - 1] = i as u32;
+            doc_embeddings.push(embedding);
+        }
+        let doc_offset_ids_arc = Arc::new(doc_offset_ids);
+        let doc_embeddings_arc = Arc::new(doc_embeddings);
+
+        // 500 tokio tasks each adding 20 embeddings.
+        let mut tasks = Vec::new();
+        for i in 0..500 {
+            let writer_clone = writer.clone();
+            let doc_offset_ids_clone = doc_offset_ids_arc.clone();
+            let doc_embeddings_clone = doc_embeddings_arc.clone();
+            let join_handle = tokio::task::spawn(async move {
+                for j in 1..=20 {
+                    let id = i * 20 + j;
+                    writer_clone
+                        .add(doc_offset_ids_clone[id - 1], &doc_embeddings_clone[id - 1])
+                        .await
+                        .expect("Error adding to spann index writer");
+                }
+            });
+            tasks.push(join_handle);
+        }
+        futures::future::join_all(tasks)
+            .await
+            .into_iter()
+            .for_each(|result| {
+                result.expect("Error in tokio task");
+            });
+        let flusher = writer
+            .commit()
+            .await
+            .expect("Error committing spann index writer");
+        let paths = flusher
+            .flush()
+            .await
+            .expect("Error flushing spann index writer");
+        println!("Wrote 10k records of 1000 dimensions each");
+        // Construct a reader.
+        // Clear the cache.
+        let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
+        let blockfile_provider = new_blockfile_provider_for_tests(max_block_size_bytes, storage);
+        let reader = SpannIndexReader::from_id(
+            Some(&paths.hnsw_id),
+            &hnsw_provider,
+            &collection_id,
+            distance_function,
+            dimensionality,
+            Some(&paths.pl_id),
+            Some(&paths.versions_map_id),
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating spann index reader");
+        // Scan the reader and verify the data.
+        let mut results = reader
+            .scan()
+            .await
+            .expect("Error scanning spann index reader");
+        assert_eq!(results.len(), 10000);
+        results.sort_by(|a, b| a.doc_offset_id.cmp(&b.doc_offset_id));
+
+        for i in 0..10000 {
+            assert_eq!(results[i].doc_offset_id, doc_offset_ids_arc[i]);
+            assert_eq!(results[i].doc_embedding, doc_embeddings_arc[i].as_slice());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_data_integrity_multiple_runs() {
+        // Inserts 10k randomly generated embeddings each of 1000 dimensions in batches of 1k.
+        // After each batch of 1k, it commits and flushes to disk. Then reads the data back using scan api
+        // and verifies that all the data is present and correct.
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let max_block_size_bytes = 8 * 1024 * 1024;
+        let collection_id = CollectionUuid::new();
+        let params = DistributedSpannParameters::default();
+        let gc_context = GarbageCollectionContext::try_from_config(
+            &(
+                PlGarbageCollectionConfig::default(),
+                HnswGarbageCollectionConfig::default(),
+            ),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
+        let distance_function = params.space.clone().into();
+        let dimensionality = 1000;
+        let mut hnsw_path = None;
+        let mut versions_map_path = None;
+        let mut pl_path = None;
+        let mut max_bf_id_path = None;
+        let mut doc_offset_ids = vec![0u32; 10000];
+        let mut doc_embeddings: Vec<Vec<f32>> = Vec::new();
+        for k in 0..10 {
+            let blockfile_provider =
+                new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
+            let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
+            let writer = SpannIndexWriter::from_id(
+                &hnsw_provider,
+                hnsw_path.as_ref(),
+                versions_map_path.as_ref(),
+                pl_path.as_ref(),
+                max_bf_id_path.as_ref(),
+                &collection_id,
+                dimensionality,
+                &blockfile_provider,
+                params.clone(),
+                gc_context.clone(),
+            )
+            .await
+            .expect("Error creating spann index writer");
+            let mut rng = rand::thread_rng();
+            for i in 1..=1000 {
+                let id = 1000 * k + i;
+                // Generate 1000 randomly generated f32.
+                let embedding = (0..1000).map(|_| rng.gen::<f32>()).collect::<Vec<f32>>();
+                writer
+                    .add(id as u32, &embedding)
+                    .await
+                    .expect("Error adding to spann index writer");
+                doc_offset_ids[id - 1] = id as u32;
+                doc_embeddings.push(embedding);
+            }
+            let flusher = writer
+                .commit()
+                .await
+                .expect("Error committing spann index writer");
+            let paths = flusher
+                .flush()
+                .await
+                .expect("Error flushing spann index writer");
+            println!(
+                "Wrote 1k records of 1000 dimensions each to path {:?}",
+                paths
+            );
+            // Update paths for the next run.
+            hnsw_path = Some(paths.hnsw_id);
+            versions_map_path = Some(paths.versions_map_id);
+            pl_path = Some(paths.pl_id);
+            max_bf_id_path = Some(paths.max_head_id_id);
+        }
+        // Construct a reader.
+        // Clear the cache.
+        let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
+        let blockfile_provider = new_blockfile_provider_for_tests(max_block_size_bytes, storage);
+        let reader = SpannIndexReader::from_id(
+            hnsw_path.as_ref(),
+            &hnsw_provider,
+            &collection_id,
+            distance_function,
+            dimensionality,
+            pl_path.as_ref(),
+            versions_map_path.as_ref(),
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating spann index reader");
+        // Scan the reader and verify the data.
+        let mut results = reader
+            .scan()
+            .await
+            .expect("Error scanning spann index reader");
+        assert_eq!(results.len(), 10000);
+        results.sort_by(|a, b| a.doc_offset_id.cmp(&b.doc_offset_id));
+
+        for i in 0..10000 {
+            assert_eq!(results[i].doc_offset_id, doc_offset_ids[i]);
+            assert_eq!(results[i].doc_embedding, doc_embeddings[i].as_slice());
+        }
+    }
+
+    // NOTE(Sanket): It is non-trivial to use shuttle for this test since it requires
+    // a tokio runtime for creating the hnsw provider - the cache requires a mpsc channel,
+    // the construction of hnsw provider calls async tokio filesystem apis that also need
+    // a runtime which is not supported by shuttle.
+    #[tokio::test]
+    async fn test_data_integrity_multiple_parallel_runs() {
+        // Inserts 10k randomly generated embeddings each of 1000 dimensions in batches of 1k.
+        // Each batch of 1k records is inserted in parallel using 10 tokio tasks.
+        // After each batch of 1k, it commits and flushes to disk. Then reads the data back using scan api
+        // and verifies that all the data is present and correct.
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let max_block_size_bytes = 8 * 1024 * 1024;
+        let params = DistributedSpannParameters::default();
+        let gc_context = GarbageCollectionContext::try_from_config(
+            &(
+                PlGarbageCollectionConfig::default(),
+                HnswGarbageCollectionConfig::default(),
+            ),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
+        let distance_function = params.space.clone().into();
+        let collection_id = CollectionUuid::new();
+        let dimensionality = 1000;
+        let mut hnsw_path = None;
+        let mut versions_map_path = None;
+        let mut pl_path = None;
+        let mut max_bf_id_path = None;
+        let mut doc_offset_ids = Vec::new();
+        let mut doc_embeddings: Vec<Vec<f32>> = Vec::new();
+        // Generate 10k random embeddings.
+        for i in 1..=10000 {
+            let embedding = (0..1000)
+                .map(|_| rand::thread_rng().gen::<f32>())
+                .collect::<Vec<f32>>();
+            doc_offset_ids.push(i as u32);
+            doc_embeddings.push(embedding);
+        }
+        let doc_offset_ids_arc = Arc::new(doc_offset_ids);
+        let doc_embeddings_arc = Arc::new(doc_embeddings);
+        println!("Generated 10k random embeddings");
+        for k in 0..10 {
+            // Create tokio task for each batch.
+            let blockfile_provider =
+                new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
+            let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
+            let writer = SpannIndexWriter::from_id(
+                &hnsw_provider,
+                hnsw_path.as_ref(),
+                versions_map_path.as_ref(),
+                pl_path.as_ref(),
+                max_bf_id_path.as_ref(),
+                &collection_id,
+                dimensionality,
+                &blockfile_provider,
+                params.clone(),
+                gc_context.clone(),
+            )
+            .await
+            .expect("Error creating spann index writer");
+            // Create tokio tasks for each batch.
+            let mut join_handles = Vec::new();
+            for batch in 0..10 {
+                let writer_clone = writer.clone();
+                let doc_offset_ids_clone = doc_offset_ids_arc.clone();
+                let doc_embeddings_clone = doc_embeddings_arc.clone();
+                let join_handle = tokio::task::spawn(async move {
+                    for i in 1..=100 {
+                        let id = 1000 * k + 100 * batch + i;
+                        writer_clone
+                            .add(doc_offset_ids_clone[id - 1], &doc_embeddings_clone[id - 1])
+                            .await
+                            .expect("Error adding to spann index writer");
+                    }
+                });
+                join_handles.push(join_handle);
+            }
+            // wait on all the futures.
+            let r = futures::future::join_all(join_handles).await;
+            for res in r {
+                res.expect("Error adding to spann index writer");
+            }
+            let flusher = writer
+                .commit()
+                .await
+                .expect("Error committing spann index writer");
+            let paths = flusher
+                .flush()
+                .await
+                .expect("Error flushing spann index writer");
+            println!(
+                "Wrote 1k records of 1000 dimensions each to path {:?}",
+                paths
+            );
+            // Update paths for the next run.
+            hnsw_path = Some(paths.hnsw_id);
+            versions_map_path = Some(paths.versions_map_id);
+            pl_path = Some(paths.pl_id);
+            max_bf_id_path = Some(paths.max_head_id_id);
+        }
+        // Construct a reader.
+        // Clear the cache.
+        let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
+        let blockfile_provider = new_blockfile_provider_for_tests(max_block_size_bytes, storage);
+        let reader = SpannIndexReader::from_id(
+            hnsw_path.as_ref(),
+            &hnsw_provider,
+            &collection_id,
+            distance_function,
+            dimensionality,
+            pl_path.as_ref(),
+            versions_map_path.as_ref(),
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating spann index reader");
+        // Scan the reader and verify the data.
+        let mut results = reader
+            .scan()
+            .await
+            .expect("Error scanning spann index reader");
+        assert_eq!(results.len(), 10000);
+        results.sort_by(|a, b| a.doc_offset_id.cmp(&b.doc_offset_id));
+
+        for i in 0..10000 {
+            assert_eq!(results[i].doc_offset_id, doc_offset_ids_arc[i]);
+            assert_eq!(results[i].doc_embedding, doc_embeddings_arc[i].as_slice());
+        }
+    }
+
+    // NOTE(Sanket): It is non-trivial to use shuttle for this test since it requires
+    // a tokio runtime for creating the hnsw provider - the cache requires a mpsc channel,
+    // the construction of hnsw provider calls async tokio filesystem apis that also need
+    // a runtime which is not supported by shuttle.
+    #[tokio::test]
+    async fn test_data_integrity_multiple_parallel_runs_with_updates_deletes() {
+        // Inserts 5k randomly generated embeddings each of 1000 dimensions in batches of 1k.
+        // Each batch of 1k records is inserted in parallel using 10 tokio tasks.
+        // After each batch of 1k, it commits and flushes to disk.
+        // Inserts another 1k adds/updates/deletes randomly chosen, commits and flushes.
+        // Then reads the data back using scan api
+        // and verifies that all the data is present and correct.
+        // Additionally runs GC after and verifies that the data is still correct.
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let max_block_size_bytes = 8 * 1024 * 1024;
+        let params = DistributedSpannParameters::default();
+        // Create a garbage collection context.
+        let pl_gc_config = PlGarbageCollectionConfig {
+            enabled: true,
+            policy: PlGarbageCollectionPolicyConfig::RandomSample(RandomSamplePolicyConfig {
+                sample_size: 1.0,
+            }),
+        };
+        let hnsw_gc_config = HnswGarbageCollectionConfig {
+            enabled: true,
+            policy: HnswGarbageCollectionPolicyConfig::FullRebuild,
+        };
+        let gc_context = GarbageCollectionContext::try_from_config(
+            &(pl_gc_config, hnsw_gc_config),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
+        let distance_function: DistanceFunction = params.space.clone().into();
+        let collection_id = CollectionUuid::new();
+        let dimensionality = 1000;
+        let mut hnsw_path = None;
+        let mut versions_map_path = None;
+        let mut pl_path = None;
+        let mut max_bf_id_path = None;
+        let mut doc_offset_ids = Vec::new();
+        let mut doc_embeddings: Vec<Option<Vec<f32>>> = Vec::new();
+        // Generate 10k random embeddings.
+        for i in 1..=5000 {
+            let embedding = (0..1000)
+                .map(|_| rand::thread_rng().gen::<f32>())
+                .collect::<Vec<f32>>();
+            doc_offset_ids.push(i as u32);
+            doc_embeddings.push(Some(embedding));
+        }
+        let doc_offset_ids_arc = Arc::new(doc_offset_ids.clone());
+        let doc_embeddings_arc = Arc::new(doc_embeddings.clone());
+        println!("Generated 10k random embeddings");
+        for k in 0..5 {
+            // Create tokio task for each batch.
+            let blockfile_provider =
+                new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
+            let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
+            let writer = SpannIndexWriter::from_id(
+                &hnsw_provider,
+                hnsw_path.as_ref(),
+                versions_map_path.as_ref(),
+                pl_path.as_ref(),
+                max_bf_id_path.as_ref(),
+                &collection_id,
+                dimensionality,
+                &blockfile_provider,
+                params.clone(),
+                gc_context.clone(),
+            )
+            .await
+            .expect("Error creating spann index writer");
+            // Create tokio tasks for each batch.
+            let mut join_handles = Vec::new();
+            for batch in 0..10 {
+                let writer_clone = writer.clone();
+                let doc_offset_ids_clone = doc_offset_ids_arc.clone();
+                let doc_embeddings_clone = doc_embeddings_arc.clone();
+                let join_handle = tokio::task::spawn(async move {
+                    for i in 1..=100 {
+                        let id = 1000 * k + 100 * batch + i;
+                        writer_clone
+                            .add(
+                                doc_offset_ids_clone[id - 1],
+                                doc_embeddings_clone[id - 1].as_ref().unwrap(),
+                            )
+                            .await
+                            .expect("Error adding to spann index writer");
+                    }
+                });
+                join_handles.push(join_handle);
+            }
+            // wait on all the futures.
+            let r = futures::future::join_all(join_handles).await;
+            for res in r {
+                res.expect("Error adding to spann index writer");
+            }
+            let flusher = writer
+                .commit()
+                .await
+                .expect("Error committing spann index writer");
+            let paths = flusher
+                .flush()
+                .await
+                .expect("Error flushing spann index writer");
+            println!(
+                "Wrote 1k records of 1000 dimensions each to path {:?}",
+                paths
+            );
+            // Update paths for the next run.
+            hnsw_path = Some(paths.hnsw_id);
+            versions_map_path = Some(paths.versions_map_id);
+            pl_path = Some(paths.pl_id);
+            max_bf_id_path = Some(paths.max_head_id_id);
+        }
+
+        // 10 tokio tasks, each randomly either inserting, or updating or deleting 100 records.
+        // Generate data for this.
+        let mut operations: Vec<(u32, u32, Vec<f32>)> = Vec::new();
+        let mut count_ops = 0;
+        let mut touched_ids = HashSet::new();
+        while count_ops < 1000 {
+            // Generate a random integer between 0 and 2.
+            let operation = rand::thread_rng().gen_range(0..3);
+            match operation {
+                0 => {
+                    // Insert
+                    let id = rand::thread_rng().gen_range(5001..=10000);
+                    if touched_ids.contains(&id) {
+                        continue;
+                    }
+                    touched_ids.insert(id);
+                    count_ops += 1;
+                    let embedding = (0..1000)
+                        .map(|_| rand::thread_rng().gen::<f32>())
+                        .collect::<Vec<f32>>();
+                    operations.push((id, 0, embedding.clone()));
+                    doc_offset_ids.push(id);
+                    doc_embeddings.push(Some(embedding));
+                }
+                1 => {
+                    // Update
+                    // Generate a random index between 0 and 5000.
+                    let id = rand::thread_rng().gen_range(1..=5000);
+                    if touched_ids.contains(&id) {
+                        continue;
+                    }
+                    touched_ids.insert(id);
+                    count_ops += 1;
+                    let embedding = (0..1000)
+                        .map(|_| rand::thread_rng().gen::<f32>())
+                        .collect::<Vec<f32>>();
+                    operations.push((id, 1, embedding.clone()));
+                    doc_embeddings[id as usize - 1] = Some(embedding);
+                }
+                2 => {
+                    // Delete
+                    let id = rand::thread_rng().gen_range(1..=5000);
+                    if touched_ids.contains(&id) {
+                        continue;
+                    }
+                    touched_ids.insert(id);
+                    count_ops += 1;
+                    operations.push((id, 2, Vec::new()));
+                    doc_embeddings[id as usize - 1] = None;
+                }
+                _ => panic!("Invalid operation"),
+            }
+        }
+        let blockfile_provider =
+            new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
+        let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
+        let writer = SpannIndexWriter::from_id(
+            &hnsw_provider,
+            hnsw_path.as_ref(),
+            versions_map_path.as_ref(),
+            pl_path.as_ref(),
+            max_bf_id_path.as_ref(),
+            &collection_id,
+            dimensionality,
+            &blockfile_provider,
+            params.clone(),
+            gc_context.clone(),
+        )
+        .await
+        .expect("Error creating spann index writer");
+        let operations_arc = Arc::new(operations);
+        let mut join_handles = Vec::new();
+        for t in 0..100 {
+            let operations_clone = operations_arc.clone();
+            let writer_clone = writer.clone();
+            let join_handle = tokio::task::spawn(async move {
+                for k in 1..=10 {
+                    let (id, operation, embedding) = &operations_clone[t * 10 + k - 1];
+                    match operation {
+                        0 => {
+                            writer_clone
+                                .add(*id, embedding)
+                                .await
+                                .expect("Error adding to spann index writer");
+                        }
+                        1 => match writer_clone.update(*id, embedding).await {
+                            Ok(_) => {}
+                            Err(e) => {
+                                if matches!(e, SpannIndexWriterError::VersionNotFound) {
+                                    // If the id is not found, then ignore.
+                                    continue;
+                                }
+                                panic!("Error updating spann index writer: {:?}", e);
+                            }
+                        },
+                        2 => {
+                            writer_clone
+                                .delete(*id)
+                                .await
+                                .expect("Error deleting from spann index writer");
+                        }
+                        _ => panic!("Invalid operation"),
+                    }
+                }
+            });
+            join_handles.push(join_handle);
+        }
+        // wait on all the futures.
+        let r = futures::future::join_all(join_handles).await;
+        for res in r {
+            res.expect("Error adding to spann index writer");
+        }
+
+        // Commit and flush.
+        let flusher = writer
+            .commit()
+            .await
+            .expect("Error committing spann index writer");
+        let paths = flusher
+            .flush()
+            .await
+            .expect("Error flushing spann index writer");
+        hnsw_path = Some(paths.hnsw_id);
+        versions_map_path = Some(paths.versions_map_id);
+        pl_path = Some(paths.pl_id);
+        max_bf_id_path = Some(paths.max_head_id_id);
+
+        // Construct a reader.
+        // Clear the cache.
+        let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
+        let blockfile_provider = new_blockfile_provider_for_tests(max_block_size_bytes, storage);
+        let reader = SpannIndexReader::from_id(
+            hnsw_path.as_ref(),
+            &hnsw_provider,
+            &collection_id,
+            distance_function.clone(),
+            dimensionality,
+            pl_path.as_ref(),
+            versions_map_path.as_ref(),
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating spann index reader");
+        // Scan the reader and verify the data.
+        let mut results = reader
+            .scan()
+            .await
+            .expect("Error scanning spann index reader");
+        results.sort_by(|a, b| a.doc_offset_id.cmp(&b.doc_offset_id));
+
+        let mut actual_pairs: Vec<(u32, Option<Vec<f32>>)> = doc_offset_ids
+            .iter()
+            .cloned()
+            .zip(doc_embeddings.drain(..))
+            .collect();
+
+        // Sort the pairs by id
+        actual_pairs.sort_by_key(|(id, _)| *id);
+        let mut count = 0;
+        for (id, embedding) in actual_pairs.iter() {
+            if embedding.is_none() {
+                continue;
+            }
+            assert_eq!(results[count].doc_offset_id, *id);
+            assert_eq!(
+                results[count].doc_embedding,
+                embedding.as_ref().unwrap().as_slice(),
+            );
+            count += 1;
+        }
+        assert_eq!(results.len(), count);
+        // After GC, it should return the same result.
+        let mut writer = SpannIndexWriter::from_id(
+            &hnsw_provider,
+            hnsw_path.as_ref(),
+            versions_map_path.as_ref(),
+            pl_path.as_ref(),
+            max_bf_id_path.as_ref(),
+            &collection_id,
+            dimensionality,
+            &blockfile_provider,
+            params,
+            gc_context,
+        )
+        .await
+        .expect("Error creating spann index writer");
+        writer
+            .garbage_collect()
+            .await
+            .expect("Error garbage collecting");
+        let flusher = writer
+            .commit()
+            .await
+            .expect("Error committing spann index writer");
+        let paths = flusher
+            .flush()
+            .await
+            .expect("Error flushing spann index writer");
+        hnsw_path = Some(paths.hnsw_id);
+        versions_map_path = Some(paths.versions_map_id);
+        pl_path = Some(paths.pl_id);
+        let reader = SpannIndexReader::from_id(
+            hnsw_path.as_ref(),
+            &hnsw_provider,
+            &collection_id,
+            distance_function.clone(),
+            dimensionality,
+            pl_path.as_ref(),
+            versions_map_path.as_ref(),
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating spann index reader");
+        let mut results = reader
+            .scan()
+            .await
+            .expect("Error scanning spann index reader");
+        results.sort_by(|a, b| a.doc_offset_id.cmp(&b.doc_offset_id));
+        let mut count = 0;
+        for (id, embedding) in actual_pairs.iter() {
+            if embedding.is_none() {
+                continue;
+            }
+            assert_eq!(results[count].doc_offset_id, *id);
+            assert_eq!(
+                results[count].doc_embedding,
+                embedding.as_ref().unwrap().as_slice(),
+            );
+            count += 1;
+        }
+        assert_eq!(results.len(), count);
     }
 }

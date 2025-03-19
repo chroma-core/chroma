@@ -7,7 +7,7 @@ import numpy as np
 from unittest.mock import MagicMock
 from pytest import MonkeyPatch
 from chromadb.utils.embedding_functions.schemas import (
-    validate_config,
+    validate_config_schema,
     load_schema,
     get_available_schemas,
 )
@@ -39,6 +39,22 @@ class MockInstructorEmbeddingFunction:
 
     def encode(
         self: Any, texts: List[str], instruction: Optional[str] = None
+    ) -> np.ndarray[Any, np.dtype[np.float32]]:
+        return np.array([[0.1, 0.2, 0.3] for _ in range(len(texts))])
+
+
+# Mock SentenceTransformer class
+class MockSentenceTransformer:
+    def __init__(self, model_name: str, device: str = "cpu", **kwargs: Any) -> None:
+        self.model_name = model_name
+        self.device = device
+        self.kwargs = kwargs
+
+    def encode(
+        self,
+        texts: List[str],
+        convert_to_numpy: bool = True,
+        normalize_embeddings: bool = False,
     ) -> np.ndarray[Any, np.dtype[np.float32]]:
         return np.array([[0.1, 0.2, 0.3] for _ in range(len(texts))])
 
@@ -91,6 +107,9 @@ EMBEDDING_FUNCTION_CONFIGS: Dict[str, Dict[str, Any]] = {
         "config": {
             "model_name": "all-MiniLM-L6-v2",
         },
+        "mocks": [
+            ("sentence_transformers.SentenceTransformer", MockSentenceTransformer),
+        ],
     },
     "cohere": {
         "args": {
@@ -399,7 +418,7 @@ def test_schema_required_fields() -> None:
 
                 # Validation should fail
                 with pytest.raises(ValidationError):
-                    validate_config(test_config, schema_name)
+                    validate_config_schema(test_config, schema_name)
 
 
 def test_schema_additional_properties() -> None:
@@ -438,4 +457,4 @@ def test_schema_additional_properties() -> None:
         # Validation should fail if additionalProperties is false
         if schema.get("additionalProperties", True) is False:
             with pytest.raises(ValidationError):
-                validate_config(test_config, schema_name)
+                validate_config_schema(test_config, schema_name)

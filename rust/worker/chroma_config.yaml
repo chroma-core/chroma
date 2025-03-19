@@ -144,3 +144,12 @@ compaction_service:
             weighted_lru:
                 capacity: 8192 # 8192 MiB = 8GB
         permitted_parallelism: 180
+    spann_provider:
+        pl_garbage_collection:
+            enabled: true
+            policy:
+                random_sample:
+                    sample_size: 0.1
+        hnsw_garbage_collection:
+            enabled: true
+            policy: "full_rebuild"

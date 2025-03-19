@@ -56,7 +56,29 @@ impl From<Scan> for chroma_proto::ScanOperator {
     }
 }
 
-pub type CountResult = u32;
+#[derive(Clone, Debug)]
+pub struct CountResult {
+    pub count: u32,
+    pub pulled_log_bytes: u64,
+}
+
+impl From<chroma_proto::CountResult> for CountResult {
+    fn from(value: chroma_proto::CountResult) -> Self {
+        Self {
+            count: value.count,
+            pulled_log_bytes: value.pulled_log_bytes,
+        }
+    }
+}
+
+impl From<CountResult> for chroma_proto::CountResult {
+    fn from(value: CountResult) -> Self {
+        Self {
+            count: value.count,
+            pulled_log_bytes: value.pulled_log_bytes,
+        }
+    }
+}
 
 /// The `FetchLog` operator fetches logs from the log service
 ///
@@ -387,26 +409,37 @@ pub struct ProjectionOutput {
     pub records: Vec<ProjectionRecord>,
 }
 
-impl TryFrom<chroma_proto::GetResult> for ProjectionOutput {
+#[derive(Debug, Eq, PartialEq)]
+pub struct GetResult {
+    pub pulled_log_bytes: u64,
+    pub result: ProjectionOutput,
+}
+
+impl TryFrom<chroma_proto::GetResult> for GetResult {
     type Error = QueryConversionError;
 
     fn try_from(value: chroma_proto::GetResult) -> Result<Self, Self::Error> {
         Ok(Self {
-            records: value
-                .records
-                .into_iter()
-                .map(TryInto::try_into)
-                .collect::<Result<_, _>>()?,
+            pulled_log_bytes: value.pulled_log_bytes,
+            result: ProjectionOutput {
+                records: value
+                    .records
+                    .into_iter()
+                    .map(TryInto::try_into)
+                    .collect::<Result<_, _>>()?,
+            },
         })
     }
 }
 
-impl TryFrom<ProjectionOutput> for chroma_proto::GetResult {
+impl TryFrom<GetResult> for chroma_proto::GetResult {
     type Error = QueryConversionError;
 
-    fn try_from(value: ProjectionOutput) -> Result<Self, Self::Error> {
+    fn try_from(value: GetResult) -> Result<Self, Self::Error> {
         Ok(Self {
+            pulled_log_bytes: value.pulled_log_bytes,
             records: value
+                .result
                 .records
                 .into_iter()
                 .map(TryInto::try_into)
@@ -414,8 +447,6 @@ impl TryFrom<ProjectionOutput> for chroma_proto::GetResult {
         })
     }
 }
-
-pub type GetResult = ProjectionOutput;
 
 /// The `KnnProjection` operator retrieves record content by offset ids
 /// It is based on `ProjectionOperator`, and it attaches the distance
@@ -517,25 +548,37 @@ impl TryFrom<KnnProjectionOutput> for chroma_proto::KnnResult {
     }
 }
 
-pub type KnnBatchResult = Vec<KnnProjectionOutput>;
-
-pub fn from_proto_knn_batch_result(
-    results: chroma_proto::KnnBatchResult,
-) -> Result<KnnBatchResult, QueryConversionError> {
-    results
-        .results
-        .into_iter()
-        .map(TryInto::try_into)
-        .collect::<Result<_, _>>()
+pub struct KnnBatchResult {
+    pub pulled_log_bytes: u64,
+    pub results: Vec<KnnProjectionOutput>,
 }
 
-pub fn to_proto_knn_batch_result(
-    results: KnnBatchResult,
-) -> Result<chroma_proto::KnnBatchResult, QueryConversionError> {
-    Ok(chroma_proto::KnnBatchResult {
-        results: results
-            .into_iter()
-            .map(TryInto::try_into)
-            .collect::<Result<_, _>>()?,
-    })
+impl TryFrom<chroma_proto::KnnBatchResult> for KnnBatchResult {
+    type Error = QueryConversionError;
+
+    fn try_from(value: chroma_proto::KnnBatchResult) -> Result<Self, Self::Error> {
+        Ok(Self {
+            pulled_log_bytes: value.pulled_log_bytes,
+            results: value
+                .results
+                .into_iter()
+                .map(TryInto::try_into)
+                .collect::<Result<_, _>>()?,
+        })
+    }
+}
+
+impl TryFrom<KnnBatchResult> for chroma_proto::KnnBatchResult {
+    type Error = QueryConversionError;
+
+    fn try_from(value: KnnBatchResult) -> Result<Self, Self::Error> {
+        Ok(Self {
+            pulled_log_bytes: value.pulled_log_bytes,
+            results: value
+                .results
+                .into_iter()
+                .map(TryInto::try_into)
+                .collect::<Result<_, _>>()?,
+        })
+    }
 }

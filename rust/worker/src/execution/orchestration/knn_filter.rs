@@ -10,7 +10,10 @@ use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
     PanicError, TaskError, TaskMessage, TaskResult,
 };
-use chroma_types::{CollectionAndSegments, DistributedHnswParameters, Segment};
+use chroma_types::{
+    CollectionAndSegments, DistributedHnswParameters, DistributedSpannParameters, Segment,
+    SegmentType,
+};
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 
@@ -111,6 +114,7 @@ pub struct KnnFilterOutput {
     pub record_segment: Segment,
     pub vector_segment: Segment,
     pub dimension: usize,
+    pub fetch_log_bytes: u64,
 }
 
 type KnnFilterResult = Result<KnnFilterOutput, KnnError>;
@@ -277,42 +281,64 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
             None => return,
         };
 
-        let hnsw_configuration = match self.ok_or_terminate(
-            DistributedHnswParameters::try_from(&self.collection_and_segments.vector_segment)
-                .map_err(|_| KnnError::InvalidDistanceFunction),
-            ctx,
-        ) {
-            Some(hnsw_configuration) => hnsw_configuration,
-            None => return,
-        };
-        let hnsw_reader = match DistributedHNSWSegmentReader::from_segment(
-            &self.collection_and_segments.vector_segment,
-            collection_dimension as usize,
-            self.hnsw_provider.clone(),
-        )
-        .await
+        let (hnsw_reader, distance_function) = if self.collection_and_segments.vector_segment.r#type
+            == SegmentType::HnswDistributed
         {
-            Ok(hnsw_reader) => Some(hnsw_reader),
-            Err(err) if matches!(*err, DistributedHNSWSegmentFromSegmentError::Uninitialized) => {
-                None
-            }
+            let hnsw_configuration = match self.ok_or_terminate(
+                DistributedHnswParameters::try_from(&self.collection_and_segments.vector_segment)
+                    .map_err(|_| KnnError::InvalidDistanceFunction),
+                ctx,
+            ) {
+                Some(hnsw_configuration) => hnsw_configuration,
+                None => return,
+            };
+            match DistributedHNSWSegmentReader::from_segment(
+                &self.collection_and_segments.vector_segment,
+                collection_dimension as usize,
+                self.hnsw_provider.clone(),
+            )
+            .await
+            {
+                Ok(hnsw_reader) => (Some(hnsw_reader), hnsw_configuration.space.into()),
+                Err(err)
+                    if matches!(*err, DistributedHNSWSegmentFromSegmentError::Uninitialized) =>
+                {
+                    (None, hnsw_configuration.space.into())
+                }
 
-            Err(err) => {
-                self.terminate_with_result(Err((*err).into()), ctx);
-                return;
+                Err(err) => {
+                    self.terminate_with_result(Err((*err).into()), ctx);
+                    return;
+                }
             }
+        } else {
+            let params = match self.ok_or_terminate(
+                DistributedSpannParameters::try_from(&self.collection_and_segments.vector_segment)
+                    .map_err(|_| KnnError::InvalidDistanceFunction),
+                ctx,
+            ) {
+                Some(params) => params,
+                None => return,
+            };
+            (None, params.space.into())
         };
+
+        let logs = self
+            .fetched_logs
+            .take()
+            .expect("FetchLogOperator should have finished already");
+
+        let fetch_log_bytes = logs.iter().map(|(l, _)| l.size_byte()).sum();
+
         let output = KnnFilterOutput {
-            logs: self
-                .fetched_logs
-                .take()
-                .expect("FetchLogOperator should have finished already"),
-            distance_function: hnsw_configuration.space.into(),
+            logs,
+            distance_function,
             filter_output: output,
             hnsw_reader,
             record_segment: self.collection_and_segments.record_segment.clone(),
             vector_segment: self.collection_and_segments.vector_segment.clone(),
             dimension: collection_dimension as usize,
+            fetch_log_bytes,
         };
         self.terminate_with_result(Ok(output), ctx);
     }

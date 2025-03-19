@@ -63,6 +63,23 @@ pub struct FrontendConfig {
     pub executor: ExecutorConfig,
 }
 
+impl FrontendConfig {
+    pub fn sqlite_in_memory() -> Self {
+        Self {
+            allow_reset: false,
+            sqlitedb: Some(SqliteDBConfig {
+                url: None,
+                ..Default::default()
+            }),
+            segment_manager: default_segment_manager_config(),
+            sysdb: default_sysdb_config(),
+            collections_with_segments_provider: Default::default(),
+            log: default_log_config(),
+            executor: default_executor_config(),
+        }
+    }
+}
+
 fn default_otel_service_name() -> String {
     "chromadb".to_string()
 }
@@ -72,6 +89,14 @@ pub struct OpenTelemetryConfig {
     pub endpoint: String,
     #[serde(default = "default_otel_service_name")]
     pub service_name: String,
+}
+
+fn default_persist_path() -> String {
+    "./chroma".to_string()
+}
+
+fn default_sqlite_filename() -> String {
+    "chroma.sqlite3".to_string()
 }
 
 fn default_port() -> u16 {
@@ -84,6 +109,10 @@ fn default_listen_address() -> String {
 
 fn default_max_payload_size_bytes() -> usize {
     40 * 1024 * 1024 // 40 MB
+}
+
+fn default_enable_span_indexing() -> bool {
+    false
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
@@ -103,10 +132,14 @@ pub struct FrontendServerConfig {
     #[serde(default)]
     pub scorecard: Vec<ScorecardRule>,
     pub open_telemetry: Option<OpenTelemetryConfig>,
-    #[serde(default)]
-    pub persist_path: Option<String>,
+    #[serde(default = "default_persist_path")]
+    pub persist_path: String,
+    #[serde(default = "default_sqlite_filename")]
+    pub sqlite_filename: String,
     #[serde(default)]
     pub cors_allow_origins: Option<Vec<String>>,
+    #[serde(default = "default_enable_span_indexing")]
+    pub enable_span_indexing: bool,
 }
 
 const DEFAULT_CONFIG_PATH: &str = "sample_configs/distributed.yaml";

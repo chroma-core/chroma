@@ -3,7 +3,7 @@ from typing import List, Dict, Any, cast, Optional
 import os
 import numpy as np
 import numpy.typing as npt
-from chromadb.utils.embedding_functions.schemas import validate_config
+from chromadb.utils.embedding_functions.schemas import validate_config_schema
 
 
 class GooglePalmEmbeddingFunction(EmbeddingFunction[Documents]):
@@ -73,7 +73,7 @@ class GooglePalmEmbeddingFunction(EmbeddingFunction[Documents]):
         return Space.COSINE
 
     def supported_spaces(self) -> List[Space]:
-        return [Space.COSINE, Space.L2, Space.INNER_PRODUCT]
+        return [Space.COSINE, Space.L2, Space.IP]
 
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
@@ -98,7 +98,8 @@ class GooglePalmEmbeddingFunction(EmbeddingFunction[Documents]):
                 "The model name cannot be changed after the embedding function has been initialized."
             )
 
-    def validate_config(self, config: Dict[str, Any]) -> None:
+    @staticmethod
+    def validate_config(config: Dict[str, Any]) -> None:
         """
         Validate the configuration using the JSON schema.
 
@@ -108,7 +109,7 @@ class GooglePalmEmbeddingFunction(EmbeddingFunction[Documents]):
         Raises:
             ValidationError: If the configuration does not match the schema
         """
-        validate_config(config, "google_palm")
+        validate_config_schema(config, "google_palm")
 
 
 class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
@@ -189,7 +190,7 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
         return Space.COSINE
 
     def supported_spaces(self) -> List[Space]:
-        return [Space.COSINE, Space.L2, Space.INNER_PRODUCT]
+        return [Space.COSINE, Space.L2, Space.IP]
 
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
@@ -223,7 +224,8 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
                 "The task type cannot be changed after the embedding function has been initialized."
             )
 
-    def validate_config(self, config: Dict[str, Any]) -> None:
+    @staticmethod
+    def validate_config(config: Dict[str, Any]) -> None:
         """
         Validate the configuration using the JSON schema.
 
@@ -233,7 +235,7 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
         Raises:
             ValidationError: If the configuration does not match the schema
         """
-        validate_config(config, "google_generative_ai")
+        validate_config_schema(config, "google_generative_ai")
 
 
 class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
@@ -312,7 +314,7 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
         return Space.COSINE
 
     def supported_spaces(self) -> List[Space]:
-        return [Space.COSINE, Space.L2, Space.INNER_PRODUCT]
+        return [Space.COSINE, Space.L2, Space.IP]
 
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
@@ -360,7 +362,8 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
                 "The region cannot be changed after the embedding function has been initialized."
             )
 
-    def validate_config(self, config: Dict[str, Any]) -> None:
+    @staticmethod
+    def validate_config(config: Dict[str, Any]) -> None:
         """
         Validate the configuration using the JSON schema.
 
@@ -370,4 +373,4 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
         Raises:
             ValidationError: If the configuration does not match the schema
         """
-        validate_config(config, "google_vertex")
+        validate_config_schema(config, "google_vertex")

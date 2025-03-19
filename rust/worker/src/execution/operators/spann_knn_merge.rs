@@ -1,4 +1,7 @@
-use std::{cmp::Ordering, collections::BinaryHeap};
+use std::{
+    cmp::Ordering,
+    collections::{BinaryHeap, HashSet},
+};
 
 use async_trait::async_trait;
 
@@ -77,15 +80,19 @@ impl Operator<SpannKnnMergeInput, SpannKnnMergeOutput> for SpannKnnMergeOperator
         }
         let mut count = 0;
         let mut result = Vec::with_capacity(self.k as usize);
+        let mut unique_ids = HashSet::new();
         while let Some(v) = pq.pop() {
             if count == self.k {
                 break;
             }
-            result.push(RecordDistance {
-                offset_id: v.offset_id,
-                measure: v.distance,
-            });
-            count += 1;
+            if !unique_ids.contains(&v.offset_id) {
+                unique_ids.insert(v.offset_id);
+                result.push(RecordDistance {
+                    offset_id: v.offset_id,
+                    measure: v.distance,
+                });
+                count += 1;
+            }
             indices[v.array_index] += 1;
             if indices[v.array_index] < input.records[v.array_index].len() {
                 pq.push(RecordHeapEntry {
@@ -103,16 +110,13 @@ impl Operator<SpannKnnMergeInput, SpannKnnMergeOutput> for SpannKnnMergeOperator
 
 #[cfg(test)]
 mod test {
+    use crate::execution::operators::knn::RecordDistance;
+    use crate::execution::operators::spann_knn_merge::{SpannKnnMergeInput, SpannKnnMergeOperator};
     use chroma_system::Operator;
 
     // Basic operator test.
     #[tokio::test]
     async fn test_spann_knn_merge_operator() {
-        use crate::execution::operators::knn::RecordDistance;
-        use crate::execution::operators::spann_knn_merge::{
-            SpannKnnMergeInput, SpannKnnMergeOperator,
-        };
-
         let input = SpannKnnMergeInput {
             records: vec![
                 vec![
@@ -172,5 +176,62 @@ mod test {
         assert_eq!(output.merged_records[2].offset_id, 4);
         assert_eq!(output.merged_records[3].offset_id, 5);
         assert_eq!(output.merged_records[4].offset_id, 6);
+    }
+
+    #[tokio::test]
+    async fn test_non_duplicates() {
+        let input = SpannKnnMergeInput {
+            records: vec![
+                vec![
+                    RecordDistance {
+                        offset_id: 1,
+                        measure: 0.1,
+                    },
+                    RecordDistance {
+                        offset_id: 2,
+                        measure: 0.5,
+                    },
+                    RecordDistance {
+                        offset_id: 5,
+                        measure: 1.0,
+                    },
+                ],
+                vec![
+                    RecordDistance {
+                        offset_id: 2,
+                        measure: 0.5,
+                    },
+                    RecordDistance {
+                        offset_id: 3,
+                        measure: 0.6,
+                    },
+                    RecordDistance {
+                        offset_id: 6,
+                        measure: 0.7,
+                    },
+                ],
+                vec![
+                    RecordDistance {
+                        offset_id: 3,
+                        measure: 0.6,
+                    },
+                    RecordDistance {
+                        offset_id: 5,
+                        measure: 1.0,
+                    },
+                ],
+            ],
+        };
+
+        let operator = SpannKnnMergeOperator { k: 5 };
+        let output = operator.run(&input).await.unwrap();
+
+        assert_eq!(output.merged_records.len(), 5);
+        // output is sorted by distance.
+        assert_eq!(output.merged_records[0].offset_id, 1);
+        assert_eq!(output.merged_records[1].offset_id, 2);
+        assert_eq!(output.merged_records[2].offset_id, 3);
+        assert_eq!(output.merged_records[3].offset_id, 6);
+        assert_eq!(output.merged_records[4].offset_id, 5);
     }
 }

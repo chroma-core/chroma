@@ -40,9 +40,11 @@ use chroma_segment::blockfile_record::RecordSegmentReader;
 use chroma_segment::blockfile_record::RecordSegmentReaderCreationError;
 use chroma_segment::blockfile_record::RecordSegmentWriter;
 use chroma_segment::distributed_hnsw::DistributedHNSWSegmentWriter;
+use chroma_segment::spann_provider::SpannProvider;
 use chroma_segment::types::ChromaSegmentFlusher;
 use chroma_segment::types::ChromaSegmentWriter;
 use chroma_segment::types::MaterializeLogsResult;
+use chroma_segment::types::VectorSegmentWriter;
 use chroma_sysdb::SysDb;
 use chroma_system::wrap;
 use chroma_system::ChannelError;
@@ -59,6 +61,7 @@ use chroma_system::TaskResult;
 use chroma_types::Chunk;
 use chroma_types::GetCollectionsError;
 use chroma_types::GetSegmentsError;
+use chroma_types::SegmentScope;
 use chroma_types::SegmentUuid;
 use chroma_types::{CollectionUuid, LogRecord, Segment, SegmentFlushInfo, SegmentType};
 use core::panic;
@@ -102,7 +105,7 @@ enum ExecutionState {
 pub(crate) struct CompactWriters {
     pub(crate) metadata: MetadataSegmentWriter<'static>,
     pub(crate) record: RecordSegmentWriter,
-    pub(crate) vector: Box<DistributedHNSWSegmentWriter>,
+    pub(crate) vector: VectorSegmentWriter,
 }
 
 #[derive(Debug)]
@@ -117,6 +120,7 @@ pub struct CompactOrchestrator {
     sysdb: SysDb,
     blockfile_provider: BlockfileProvider,
     hnsw_index_provider: HnswIndexProvider,
+    spann_provider: SpannProvider,
     // State we hold across the execution
     pulled_log_offset: Option<i64>,
     // Dispatcher
@@ -149,8 +153,10 @@ pub enum GetSegmentWritersError {
     RecordSegmentWriterError,
     #[error("Error creating Metadata Segment Writer")]
     MetadataSegmentWriterError,
-    #[error("Error creating HNSW Segment Writer")]
-    HnswSegmentWriterError,
+    #[error("Error creating Vector Segment Writer")]
+    VectorSegmentWriterError,
+    #[error("Error creating Vector Segment Writer. Unknown Vector Segment Type")]
+    UnknownVectorSegmentType,
     #[error("Collection not found")]
     CollectionNotFound,
     #[error("Error getting collection")]
@@ -243,6 +249,7 @@ impl CompactOrchestrator {
         sysdb: SysDb,
         blockfile_provider: BlockfileProvider,
         hnsw_index_provider: HnswIndexProvider,
+        spann_provider: SpannProvider,
         dispatcher: ComponentHandle<Dispatcher>,
         result_channel: Option<Sender<Result<CompactionResponse, CompactionError>>>,
         max_compaction_size: usize,
@@ -257,6 +264,7 @@ impl CompactOrchestrator {
             sysdb,
             blockfile_provider,
             hnsw_index_provider,
+            spann_provider,
             pulled_log_offset: None,
             dispatcher,
             num_uncompleted_materialization_tasks: 0,
@@ -280,7 +288,6 @@ impl CompactOrchestrator {
         self.state = ExecutionState::Partition;
         let operator = PartitionOperator::new();
         tracing::info!("Sending N Records: {:?}", records.len());
-        println!("Sending N Records: {:?}", records.len());
         let input = PartitionInput::new(records, self.max_partition_size);
         let task = wrap(operator, input, ctx.receiver());
         self.send(task, ctx).await;
@@ -440,13 +447,13 @@ impl CompactOrchestrator {
 
         {
             self.num_uncompleted_tasks_by_segment
-                .entry(writers.vector.id)
+                .entry(writers.vector.get_id())
                 .and_modify(|v| {
                     *v += 1;
                 })
                 .or_insert(1);
 
-            let writer = ChromaSegmentWriter::DistributedHNSWSegment(writers.vector);
+            let writer = ChromaSegmentWriter::VectorSegment(writers.vector);
             let span = self.get_segment_writer_span(&writer);
             let operator = ApplyLogToSegmentWriterOperator::new();
             let input =
@@ -543,18 +550,35 @@ impl CompactOrchestrator {
         }
     }
 
+    async fn get_segment_from_scope(
+        &mut self,
+        segment_scope: SegmentScope,
+    ) -> Result<Segment, GetSegmentWritersError> {
+        let segments = self.get_all_segments().await?;
+        let segment = segments
+            .iter()
+            .find(|segment| segment.scope == segment_scope)
+            .cloned();
+
+        tracing::debug!("Found {:?} segment: {:?}", segment_scope, segment);
+
+        match segment {
+            Some(segment) => Ok(segment),
+            None => Err(GetSegmentWritersError::NoSegmentsFound),
+        }
+    }
+
     async fn get_segment_writers(&mut self) -> Result<CompactWriters, GetSegmentWritersError> {
         // Care should be taken to use the same writers across the compaction process
         // Since the segment writers are stateful, we should not create new writers for each partition
         // Nor should we create new writers across different tasks
 
         let blockfile_provider = self.blockfile_provider.clone();
-        let hnsw_provider = self.hnsw_index_provider.clone();
         let mut sysdb = self.sysdb.clone();
 
         let record_segment = self.get_segment(SegmentType::BlockfileRecord).await?;
         let mt_segment = self.get_segment(SegmentType::BlockfileMetadata).await?;
-        let hnsw_segment = self.get_segment(SegmentType::HnswDistributed).await?;
+        let vector_segment = self.get_segment_from_scope(SegmentScope::VECTOR).await?;
 
         let borrowed_writers = self
             .writers
@@ -587,7 +611,6 @@ impl CompactOrchestrator {
 
                 tracing::debug!("Metadata Segment Writer created");
 
-                // Create a hnsw segment writer
                 let collection_res = sysdb
                     .get_collections(Some(self.collection_id), None, None, None, None, 0)
                     .await;
@@ -603,31 +626,59 @@ impl CompactOrchestrator {
                         return Err(GetSegmentWritersError::GetCollectionError(e));
                     }
                 };
-                let collection = &collection_res[0];
 
-                if let Some(dimension) = collection.dimension {
+                let dim = match collection_res[0].dimension {
+                    Some(dim) => dim,
+                    None => {
+                        tracing::error!(
+                            "Error creating vector segment writer. Collection dim missing"
+                        );
+                        return Err(GetSegmentWritersError::CollectionMissingDimension);
+                    }
+                };
+
+                if vector_segment.r#type == SegmentType::HnswDistributed {
+                    // Create a hnsw segment writer
                     let hnsw_segment_writer = match DistributedHNSWSegmentWriter::from_segment(
-                        &hnsw_segment,
-                        dimension as usize,
-                        hnsw_provider,
+                        &vector_segment,
+                        dim as usize,
+                        self.hnsw_index_provider.clone(),
                     )
                     .await
                     {
                         Ok(writer) => writer,
                         Err(e) => {
                             tracing::error!("Error creating HNSW segment writer: {:?}", e);
-                            return Err(GetSegmentWritersError::HnswSegmentWriterError);
+                            return Err(GetSegmentWritersError::VectorSegmentWriterError);
+                        }
+                    };
+                    Ok(CompactWriters {
+                        metadata: mt_segment_writer,
+                        record: record_segment_writer,
+                        vector: VectorSegmentWriter::Hnsw(hnsw_segment_writer),
+                    })
+                } else if vector_segment.r#type == SegmentType::Spann {
+                    let spann_writer = match self
+                        .spann_provider
+                        .write(&vector_segment, dim as usize)
+                        .await
+                    {
+                        Ok(writer) => writer,
+                        Err(e) => {
+                            tracing::error!("Error creating Spann segment writer: {:?}", e);
+                            return Err(GetSegmentWritersError::VectorSegmentWriterError);
                         }
                     };
 
-                    return Ok(CompactWriters {
+                    Ok(CompactWriters {
                         metadata: mt_segment_writer,
                         record: record_segment_writer,
-                        vector: hnsw_segment_writer,
-                    });
+                        vector: VectorSegmentWriter::Spann(spann_writer),
+                    })
+                } else {
+                    tracing::error!("Error creating vector segment writer. Unknown segment type");
+                    Err(GetSegmentWritersError::UnknownVectorSegmentType)
                 }
-
-                Err(GetSegmentWritersError::CollectionMissingDimension)
             })
             .await?;
 
@@ -648,8 +699,8 @@ impl CompactOrchestrator {
             return Ok(ChromaSegmentWriter::RecordSegment(writers.record));
         }
 
-        if writers.vector.id == segment_id {
-            return Ok(ChromaSegmentWriter::DistributedHNSWSegment(writers.vector));
+        if writers.vector.get_id() == segment_id {
+            return Ok(ChromaSegmentWriter::VectorSegment(writers.vector));
         }
 
         Err(GetSegmentWritersError::NoSegmentsFound)

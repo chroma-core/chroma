@@ -56,7 +56,7 @@ Embeddings = List[Embedding]
 class Space(Enum):
     COSINE = "cosine"
     L2 = "l2"
-    INNER_PRODUCT = "inner_product"
+    IP = "IP"
 
 
 def normalize_embeddings(
@@ -529,9 +529,7 @@ class EmbeddingFunction(Protocol[D]):
             DeprecationWarning,
             stacklevel=2,
         )
-        raise NotImplementedError(
-            "name() is not implemented for this embedding function."
-        )
+        return NotImplemented
 
     def default_space(self) -> Space:
         """
@@ -543,7 +541,7 @@ class EmbeddingFunction(Protocol[D]):
         """
         Return the supported spaces for the embedding function.
         """
-        return [Space.COSINE, Space.L2, Space.INNER_PRODUCT]
+        return [Space.COSINE, Space.L2, Space.IP]
 
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[D]":
@@ -562,9 +560,7 @@ class EmbeddingFunction(Protocol[D]):
             DeprecationWarning,
             stacklevel=2,
         )
-        raise NotImplementedError(
-            "build_from_config() is not implemented for this embedding function."
-        )
+        return NotImplemented
 
     def get_config(self) -> Dict[str, Any]:
         """
@@ -582,9 +578,7 @@ class EmbeddingFunction(Protocol[D]):
             DeprecationWarning,
             stacklevel=2,
         )
-        raise NotImplementedError(
-            "get_config() is not implemented for this embedding function."
-        )
+        return NotImplemented
 
     def validate_config_update(
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
@@ -594,7 +588,8 @@ class EmbeddingFunction(Protocol[D]):
         """
         return
 
-    def validate_config(self, config: Dict[str, Any]) -> None:
+    @staticmethod
+    def validate_config(config: Dict[str, Any]) -> None:
         """
         Validate the config.
         """

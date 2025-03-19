@@ -91,9 +91,10 @@ class DefaultEmbeddingFunction(EmbeddingFunction[Documents]):
         # Delegate to ONNXMiniLM_L6_V2
         return ONNXMiniLM_L6_V2()(input)
 
-    @classmethod
-    def build_from_config(cls, config: Dict[str, Any]) -> "DefaultEmbeddingFunction":
-        return cls()
+    @staticmethod
+    def build_from_config(config: Dict[str, Any]) -> "DefaultEmbeddingFunction":
+        DefaultEmbeddingFunction.validate_config(config)
+        return DefaultEmbeddingFunction()
 
     @staticmethod
     def name() -> str:
@@ -104,6 +105,10 @@ class DefaultEmbeddingFunction(EmbeddingFunction[Documents]):
 
     def max_tokens(self) -> int:
         return 256
+
+    @staticmethod
+    def validate_config(config: Dict[str, Any]) -> None:
+        return
 
 
 # Dictionary of supported embedding functions

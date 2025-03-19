@@ -1,5 +1,5 @@
 from chromadb.api.types import EmbeddingFunction, Space
-from chromadb.utils.embedding_functions.schemas import validate_config
+from chromadb.utils.embedding_functions.schemas import validate_config_schema
 from chromadb.api.types import (
     Document,
     Documents,
@@ -137,7 +137,7 @@ class OpenCLIPEmbeddingFunction(EmbeddingFunction[Embeddable]):
         return Space.COSINE
 
     def supported_spaces(self) -> List[Space]:
-        return [Space.COSINE, Space.L2, Space.INNER_PRODUCT]
+        return [Space.COSINE, Space.L2, Space.IP]
 
     @staticmethod
     def build_from_config(
@@ -173,7 +173,8 @@ class OpenCLIPEmbeddingFunction(EmbeddingFunction[Embeddable]):
                 "The checkpoint cannot be changed after the embedding function has been initialized."
             )
 
-    def validate_config(self, config: Dict[str, Any]) -> None:
+    @staticmethod
+    def validate_config(config: Dict[str, Any]) -> None:
         """
         Validate the configuration using the JSON schema.
 
@@ -183,4 +184,4 @@ class OpenCLIPEmbeddingFunction(EmbeddingFunction[Embeddable]):
         Raises:
             ValidationError: If the configuration does not match the schema
         """
-        validate_config(config, "open_clip")
+        validate_config_schema(config, "open_clip")

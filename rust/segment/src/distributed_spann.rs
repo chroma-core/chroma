@@ -1,3 +1,5 @@
+use crate::spann_provider::SpannProvider;
+
 use super::blockfile_record::ApplyMaterializedLogError;
 use super::blockfile_record::RecordSegmentReader;
 use super::types::{
@@ -5,16 +7,21 @@ use super::types::{
 };
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_index::spann::types::GarbageCollectionContext;
 use chroma_index::spann::types::{
     SpannIndexFlusher, SpannIndexReader, SpannIndexReaderError, SpannIndexWriterError, SpannPosting,
 };
+use chroma_index::spann::utils::rng_query;
+use chroma_index::spann::utils::RngQueryError;
 use chroma_index::IndexUuid;
 use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::SpannIndexWriter};
-use chroma_types::DistributedHnswParameters;
-use chroma_types::HnswParametersFromSegmentError;
+use chroma_types::DistributedSpannParameters;
+use chroma_types::DistributedSpannParametersFromSegmentError;
 use chroma_types::SegmentUuid;
 use chroma_types::{MaterializedLogOperation, Segment, SegmentScope, SegmentType};
 use std::collections::HashMap;
+use std::fmt::Debug;
+use std::fmt::Formatter;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -23,10 +30,18 @@ const VERSION_MAP_PATH: &str = "version_map_path";
 const POSTING_LIST_PATH: &str = "posting_list_path";
 const MAX_HEAD_ID_BF_PATH: &str = "max_head_id_path";
 
-pub(crate) struct SpannSegmentWriter {
+#[derive(Clone)]
+pub struct SpannSegmentWriter {
     index: SpannIndexWriter,
-    #[allow(dead_code)]
-    id: SegmentUuid,
+    pub id: SegmentUuid,
+}
+
+impl Debug for SpannSegmentWriter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DistributedSpannSegmentWriter")
+            .field("id", &self.id)
+            .finish()
+    }
 }
 
 // TODO(Sanket): Better error composability here.
@@ -34,8 +49,8 @@ pub(crate) struct SpannSegmentWriter {
 pub enum SpannSegmentWriterError {
     #[error("Invalid argument")]
     InvalidArgument,
-    #[error("Could not parse HNSW configuration: {0}")]
-    InvalidHnswConfiguration(#[from] HnswParametersFromSegmentError),
+    #[error("Could not parse spann configuration: {0}")]
+    InvalidConfiguration(#[from] DistributedSpannParametersFromSegmentError),
     #[error("Error parsing index uuid from string")]
     IndexIdParsingError,
     #[error("Invalid file path for HNSW index")]
@@ -56,6 +71,8 @@ pub enum SpannSegmentWriterError {
     SpannSegmentWriterFlushError,
     #[error("Not implemented")]
     NotImplemented,
+    #[error("Error garbage collectin")]
+    GarbageCollectError,
 }
 
 impl ChromaError for SpannSegmentWriterError {
@@ -63,7 +80,6 @@ impl ChromaError for SpannSegmentWriterError {
         match self {
             Self::InvalidArgument => ErrorCodes::InvalidArgument,
             Self::IndexIdParsingError => ErrorCodes::Internal,
-            Self::InvalidHnswConfiguration(_) => ErrorCodes::Internal,
             Self::HnswInvalidFilePath => ErrorCodes::Internal,
             Self::VersionMapInvalidFilePath => ErrorCodes::Internal,
             Self::PostingListInvalidFilePath => ErrorCodes::Internal,
@@ -73,24 +89,26 @@ impl ChromaError for SpannSegmentWriterError {
             Self::SpannSegmentWriterCommitError => ErrorCodes::Internal,
             Self::SpannSegmentWriterFlushError => ErrorCodes::Internal,
             Self::SpannSegmentWriterAddRecordError(e) => e.code(),
+            Self::InvalidConfiguration(e) => e.code(),
+            Self::GarbageCollectError => ErrorCodes::Internal,
         }
     }
 }
 
 impl SpannSegmentWriter {
-    #[allow(dead_code)]
     pub async fn from_segment(
         segment: &Segment,
         blockfile_provider: &BlockfileProvider,
         hnsw_provider: &HnswIndexProvider,
         dimensionality: usize,
+        gc_context: GarbageCollectionContext,
     ) -> Result<SpannSegmentWriter, SpannSegmentWriterError> {
         if segment.r#type != SegmentType::Spann || segment.scope != SegmentScope::VECTOR {
             return Err(SpannSegmentWriterError::InvalidArgument);
         }
-        let hnsw_configuration = DistributedHnswParameters::try_from(segment)?;
+        let params = DistributedSpannParameters::try_from(segment)?;
 
-        let (hnsw_id, m, ef_construction, ef_search) = match segment.file_path.get(HNSW_PATH) {
+        let hnsw_id = match segment.file_path.get(HNSW_PATH) {
             Some(hnsw_path) => match hnsw_path.first() {
                 Some(index_id) => {
                     let index_uuid = match Uuid::parse_str(index_id) {
@@ -99,18 +117,13 @@ impl SpannSegmentWriter {
                             return Err(SpannSegmentWriterError::IndexIdParsingError);
                         }
                     };
-                    (Some(IndexUuid(index_uuid)), None, None, None)
+                    Some(IndexUuid(index_uuid))
                 }
                 None => {
                     return Err(SpannSegmentWriterError::HnswInvalidFilePath);
                 }
             },
-            None => (
-                None,
-                Some(hnsw_configuration.m),
-                Some(hnsw_configuration.construction_ef),
-                Some(hnsw_configuration.search_ef),
-            ),
+            None => None,
         };
         let versions_map_id = match segment.file_path.get(VERSION_MAP_PATH) {
             Some(version_map_path) => match version_map_path.first() {
@@ -171,13 +184,11 @@ impl SpannSegmentWriter {
             versions_map_id.as_ref(),
             posting_list_id.as_ref(),
             max_head_id_bf_id.as_ref(),
-            m,
-            ef_construction,
-            ef_search,
             &segment.collection,
-            hnsw_configuration.space.into(),
             dimensionality,
             blockfile_provider,
+            params,
+            gc_context,
         )
         .await
         {
@@ -223,12 +234,15 @@ impl SpannSegmentWriter {
             .map_err(SpannSegmentWriterError::SpannSegmentWriterAddRecordError)
     }
 
-    #[allow(dead_code)]
     pub async fn apply_materialized_log_chunk(
         &self,
         record_segment_reader: &Option<RecordSegmentReader<'_>>,
         materialized_chunk: &MaterializeLogsResult,
     ) -> Result<(), ApplyMaterializedLogError> {
+        tracing::info!(
+            "Applying {} materialized logs to spann segment writer",
+            materialized_chunk.len()
+        );
         for record in materialized_chunk {
             match record.get_operation() {
                 MaterializedLogOperation::AddNew => {
@@ -260,11 +274,27 @@ impl SpannSegmentWriter {
                 ),
             }
         }
+        tracing::info!(
+            "Applied {} materialized logs to spann segment writer",
+            materialized_chunk.len()
+        );
         Ok(())
     }
 
-    #[allow(dead_code)]
+    pub async fn garbage_collect(&mut self) -> Result<(), Box<dyn ChromaError>> {
+        let r = self
+            .index
+            .garbage_collect()
+            .await
+            .map_err(|_| Box::new(SpannSegmentWriterError::GarbageCollectError));
+        match r {
+            Err(e) => Err(e),
+            Ok(_) => Ok(()),
+        }
+    }
+
     pub async fn commit(self) -> Result<SpannSegmentFlusher, Box<dyn ChromaError>> {
+        tracing::info!("Committing spann segment writer {}", self.id);
         let index_flusher = self
             .index
             .commit()
@@ -281,14 +311,19 @@ impl SpannSegmentWriter {
 }
 
 pub struct SpannSegmentFlusher {
-    #[allow(dead_code)]
-    id: SegmentUuid,
+    pub id: SegmentUuid,
     index_flusher: SpannIndexFlusher,
 }
 
+impl Debug for SpannSegmentFlusher {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SpannSegmentFlusher").finish()
+    }
+}
+
 impl SpannSegmentFlusher {
-    #[allow(dead_code)]
-    async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
+    pub async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
+        tracing::info!("Flushing spann segment flusher {}", self.id);
         let index_flusher_res = self
             .index_flusher
             .flush()
@@ -311,6 +346,10 @@ impl SpannSegmentFlusher {
                     MAX_HEAD_ID_BF_PATH.to_string(),
                     vec![index_ids.max_head_id_id.to_string()],
                 );
+                tracing::info!(
+                    "Flushed file paths for spann segment flusher {:?}",
+                    index_id_map
+                );
                 Ok(index_id_map)
             }
         }
@@ -321,8 +360,8 @@ impl SpannSegmentFlusher {
 pub enum SpannSegmentReaderError {
     #[error("Invalid argument")]
     InvalidArgument,
-    #[error("Could not parse HNSW configuration: {0}")]
-    InvalidHnswConfiguration(#[from] HnswParametersFromSegmentError),
+    #[error("Could not parse configuration: {0}")]
+    InvalidConfiguration(#[from] DistributedSpannParametersFromSegmentError),
     #[error("Error parsing index uuid from string")]
     IndexIdParsingError,
     #[error("Invalid file path for HNSW index")]
@@ -337,6 +376,8 @@ pub enum SpannSegmentReaderError {
     UninitializedSegment,
     #[error("Error reading key")]
     KeyReadError,
+    #[error("Error doing rng {0}")]
+    RngError(#[from] RngQueryError),
 }
 
 impl ChromaError for SpannSegmentReaderError {
@@ -344,13 +385,14 @@ impl ChromaError for SpannSegmentReaderError {
         match self {
             Self::InvalidArgument => ErrorCodes::InvalidArgument,
             Self::IndexIdParsingError => ErrorCodes::Internal,
-            Self::InvalidHnswConfiguration(_) => ErrorCodes::Internal,
             Self::HnswInvalidFilePath => ErrorCodes::Internal,
             Self::VersionMapInvalidFilePath => ErrorCodes::Internal,
             Self::PostingListInvalidFilePath => ErrorCodes::Internal,
             Self::SpannSegmentReaderCreateError => ErrorCodes::Internal,
             Self::UninitializedSegment => ErrorCodes::Internal,
             Self::KeyReadError => ErrorCodes::Internal,
+            Self::InvalidConfiguration(e) => e.code(),
+            Self::RngError(e) => e.code(),
         }
     }
 }
@@ -358,20 +400,19 @@ impl ChromaError for SpannSegmentReaderError {
 #[derive(Debug)]
 pub struct SpannSegmentReaderContext {
     pub segment: Segment,
-    pub blockfile_provider: BlockfileProvider,
-    pub hnsw_provider: HnswIndexProvider,
+    pub spann_provider: SpannProvider,
     pub dimension: usize,
 }
 
 #[derive(Clone)]
-#[allow(dead_code)]
 pub struct SpannSegmentReader<'me> {
     pub index_reader: SpannIndexReader<'me>,
+    #[allow(dead_code)]
     id: SegmentUuid,
+    pub params: DistributedSpannParameters,
 }
 
 impl<'me> SpannSegmentReader<'me> {
-    #[allow(dead_code)]
     pub async fn from_segment(
         segment: &Segment,
         blockfile_provider: &BlockfileProvider,
@@ -381,7 +422,7 @@ impl<'me> SpannSegmentReader<'me> {
         if segment.r#type != SegmentType::Spann || segment.scope != SegmentScope::VECTOR {
             return Err(SpannSegmentReaderError::InvalidArgument);
         }
-        let hnsw_configuration = DistributedHnswParameters::try_from(segment)?;
+        let params = DistributedSpannParameters::try_from(segment)?;
         let hnsw_id = match segment.file_path.get(HNSW_PATH) {
             Some(hnsw_path) => match hnsw_path.first() {
                 Some(index_id) => {
@@ -438,7 +479,7 @@ impl<'me> SpannSegmentReader<'me> {
             hnsw_id.as_ref(),
             hnsw_provider,
             &segment.collection,
-            hnsw_configuration.space.into(),
+            params.space.clone().into(),
             dimensionality,
             posting_list_id.as_ref(),
             versions_map_id.as_ref(),
@@ -460,6 +501,7 @@ impl<'me> SpannSegmentReader<'me> {
         Ok(SpannSegmentReader {
             index_reader,
             id: segment.id,
+            params,
         })
     }
 
@@ -472,6 +514,23 @@ impl<'me> SpannSegmentReader<'me> {
             .await
             .map_err(|_| SpannSegmentReaderError::KeyReadError)
     }
+
+    pub async fn rng_query(
+        &self,
+        normalized_query: &[f32],
+    ) -> Result<(Vec<usize>, Vec<f32>, Vec<Vec<f32>>), SpannSegmentReaderError> {
+        let r = rng_query(
+            normalized_query,
+            self.index_reader.hnsw_index.clone(),
+            self.params.search_nprobe as usize,
+            self.params.search_rng_epsilon,
+            self.params.search_rng_factor,
+            self.params.space.clone().into(),
+            false,
+        )
+        .await?;
+        Ok(r)
+    }
 }
 
 #[cfg(test)]
@@ -483,11 +542,19 @@ mod test {
         provider::BlockfileProvider,
     };
     use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
-    use chroma_distance::DistanceFunction;
-    use chroma_index::{hnsw_provider::HnswIndexProvider, Index};
+    use chroma_config::{registry::Registry, Configurable};
+    use chroma_index::{
+        config::{
+            HnswGarbageCollectionConfig, HnswGarbageCollectionPolicyConfig,
+            PlGarbageCollectionConfig, PlGarbageCollectionPolicyConfig, RandomSamplePolicyConfig,
+        },
+        hnsw_provider::HnswIndexProvider,
+        spann::types::GarbageCollectionContext,
+        Index,
+    };
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{
-        Chunk, CollectionUuid, LogRecord, Metadata, MetadataValue, Operation, OperationRecord,
+        Chunk, CollectionUuid, DistributedSpannParameters, LogRecord, Operation, OperationRecord,
         SegmentUuid, SpannPostingList,
     };
 
@@ -521,27 +588,34 @@ mod test {
         );
         let collection_id = CollectionUuid::new();
         let segment_id = SegmentUuid::new();
-        let mut metadata_hash_map = Metadata::new();
-        metadata_hash_map.insert(
-            "hnsw:space".to_string(),
-            MetadataValue::Str("l2".to_string()),
-        );
-        metadata_hash_map.insert("hnsw:M".to_string(), MetadataValue::Int(16));
-        metadata_hash_map.insert("hnsw:construction_ef".to_string(), MetadataValue::Int(100));
-        metadata_hash_map.insert("hnsw:search_ef".to_string(), MetadataValue::Int(100));
+        let params = DistributedSpannParameters::default();
         let mut spann_segment = chroma_types::Segment {
             id: segment_id,
             collection: collection_id,
             r#type: chroma_types::SegmentType::Spann,
             scope: chroma_types::SegmentScope::VECTOR,
-            metadata: Some(metadata_hash_map),
+            metadata: Some(
+                params
+                    .try_into()
+                    .expect("Error converting params to metadata"),
+            ),
             file_path: HashMap::new(),
         };
+        let gc_context = GarbageCollectionContext::try_from_config(
+            &(
+                PlGarbageCollectionConfig::default(),
+                HnswGarbageCollectionConfig::default(),
+            ),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
         let spann_writer = SpannSegmentWriter::from_segment(
             &spann_segment,
             &blockfile_provider,
             &hnsw_provider,
             3,
+            gc_context,
         )
         .await
         .expect("Error creating spann segment writer");
@@ -609,18 +683,28 @@ mod test {
             16,
             rx,
         );
+        let gc_context = GarbageCollectionContext::try_from_config(
+            &(
+                PlGarbageCollectionConfig::default(),
+                HnswGarbageCollectionConfig::default(),
+            ),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
         let spann_writer = SpannSegmentWriter::from_segment(
             &spann_segment,
             &blockfile_provider,
             &hnsw_provider,
             3,
+            gc_context,
         )
         .await
         .expect("Error creating spann segment writer");
         assert_eq!(spann_writer.index.dimensionality, 3);
         assert_eq!(
-            spann_writer.index.distance_function,
-            DistanceFunction::Euclidean
+            spann_writer.index.params,
+            DistributedSpannParameters::default()
         );
         // Next head id should be 2 since one centroid is already taken up.
         assert_eq!(
@@ -631,7 +715,7 @@ mod test {
             2
         );
         {
-            let read_guard = spann_writer.index.versions_map.read();
+            let read_guard = spann_writer.index.versions_map.read().await;
             assert_eq!(read_guard.versions_map.len(), 2);
             assert_eq!(
                 *read_guard
@@ -710,27 +794,34 @@ mod test {
         );
         let collection_id = CollectionUuid::new();
         let segment_id = SegmentUuid::new();
-        let mut metadata_hash_map = Metadata::new();
-        metadata_hash_map.insert(
-            "hnsw:space".to_string(),
-            MetadataValue::Str("l2".to_string()),
-        );
-        metadata_hash_map.insert("hnsw:M".to_string(), MetadataValue::Int(16));
-        metadata_hash_map.insert("hnsw:construction_ef".to_string(), MetadataValue::Int(100));
-        metadata_hash_map.insert("hnsw:search_ef".to_string(), MetadataValue::Int(100));
+        let params = DistributedSpannParameters::default();
         let mut spann_segment = chroma_types::Segment {
             id: segment_id,
             collection: collection_id,
             r#type: chroma_types::SegmentType::Spann,
             scope: chroma_types::SegmentScope::VECTOR,
-            metadata: Some(metadata_hash_map),
+            metadata: Some(
+                params
+                    .try_into()
+                    .expect("Error converting params to metadata"),
+            ),
             file_path: HashMap::new(),
         };
+        let gc_context = GarbageCollectionContext::try_from_config(
+            &(
+                PlGarbageCollectionConfig::default(),
+                HnswGarbageCollectionConfig::default(),
+            ),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
         let spann_writer = SpannSegmentWriter::from_segment(
             &spann_segment,
             &blockfile_provider,
             &hnsw_provider,
             3,
+            gc_context,
         )
         .await
         .expect("Error creating spann segment writer");
@@ -835,5 +926,225 @@ mod test {
             .expect("Error gettting all data from reader");
         versions_map.sort_by(|a, b| a.0.cmp(&b.0));
         assert_eq!(versions_map, vec![(1, 1), (2, 1)]);
+    }
+
+    #[tokio::test]
+    async fn test_spann_segment_writer_with_gc() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
+        let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+            storage.clone(),
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
+        let blockfile_provider =
+            BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+        let hnsw_cache = new_non_persistent_cache_for_test();
+        let (_, rx) = tokio::sync::mpsc::unbounded_channel();
+        let hnsw_provider = HnswIndexProvider::new(
+            storage.clone(),
+            PathBuf::from(tmp_dir.path().to_str().unwrap()),
+            hnsw_cache,
+            16,
+            rx,
+        );
+        let collection_id = CollectionUuid::new();
+        let segment_id = SegmentUuid::new();
+        let params = DistributedSpannParameters::default();
+        let mut spann_segment = chroma_types::Segment {
+            id: segment_id,
+            collection: collection_id,
+            r#type: chroma_types::SegmentType::Spann,
+            scope: chroma_types::SegmentScope::VECTOR,
+            metadata: Some(
+                params
+                    .try_into()
+                    .expect("Error converting params to metadata"),
+            ),
+            file_path: HashMap::new(),
+        };
+        let gc_context = GarbageCollectionContext::try_from_config(
+            &(
+                PlGarbageCollectionConfig {
+                    enabled: true,
+                    policy: PlGarbageCollectionPolicyConfig::RandomSample(
+                        RandomSamplePolicyConfig { sample_size: 1.0 },
+                    ),
+                },
+                HnswGarbageCollectionConfig {
+                    enabled: true,
+                    policy: HnswGarbageCollectionPolicyConfig::FullRebuild,
+                },
+            ),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
+        let spann_writer = SpannSegmentWriter::from_segment(
+            &spann_segment,
+            &blockfile_provider,
+            &hnsw_provider,
+            3,
+            gc_context,
+        )
+        .await
+        .expect("Error creating spann segment writer");
+        let data = vec![
+            LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: Some(vec![1.0, 2.0, 3.0]),
+                    encoding: None,
+                    metadata: None,
+                    document: Some(String::from("This is a document about cats.")),
+                    operation: Operation::Add,
+                },
+            },
+            LogRecord {
+                log_offset: 2,
+                record: OperationRecord {
+                    id: "embedding_id_2".to_string(),
+                    embedding: Some(vec![4.0, 5.0, 6.0]),
+                    encoding: None,
+                    metadata: None,
+                    document: Some(String::from("This is a document about dogs.")),
+                    operation: Operation::Add,
+                },
+            },
+        ];
+        let chunked_log = Chunk::new(data.into());
+        // Materialize the logs.
+        let materialized_log = materialize_logs(&None, chunked_log, None)
+            .await
+            .expect("Error materializing logs");
+        spann_writer
+            .apply_materialized_log_chunk(&None, &materialized_log)
+            .await
+            .expect("Error applying materialized log");
+        let flusher = spann_writer
+            .commit()
+            .await
+            .expect("Error committing spann writer");
+        spann_segment.file_path = flusher.flush().await.expect("Error flushing spann writer");
+        assert_eq!(spann_segment.file_path.len(), 4);
+        assert!(spann_segment.file_path.contains_key("hnsw_path"));
+        assert!(spann_segment.file_path.contains_key("version_map_path"),);
+        assert!(spann_segment.file_path.contains_key("posting_list_path"),);
+        assert!(spann_segment.file_path.contains_key("max_head_id_path"),);
+        // Load this segment and check if the embeddings are present. New cache
+        // so that the previous cache is not used.
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
+        let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+            storage.clone(),
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
+        let blockfile_provider =
+            BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+        let hnsw_cache = new_non_persistent_cache_for_test();
+        let (_, rx) = tokio::sync::mpsc::unbounded_channel();
+        let hnsw_provider = HnswIndexProvider::new(
+            storage,
+            PathBuf::from(tmp_dir.path().to_str().unwrap()),
+            hnsw_cache,
+            16,
+            rx,
+        );
+        let gc_context = GarbageCollectionContext::try_from_config(
+            &(
+                PlGarbageCollectionConfig {
+                    enabled: true,
+                    policy: PlGarbageCollectionPolicyConfig::RandomSample(
+                        RandomSamplePolicyConfig { sample_size: 1.0 },
+                    ),
+                },
+                HnswGarbageCollectionConfig {
+                    enabled: true,
+                    policy: HnswGarbageCollectionPolicyConfig::FullRebuild,
+                },
+            ),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
+        let spann_writer = SpannSegmentWriter::from_segment(
+            &spann_segment,
+            &blockfile_provider,
+            &hnsw_provider,
+            3,
+            gc_context,
+        )
+        .await
+        .expect("Error creating spann segment writer");
+        assert_eq!(spann_writer.index.dimensionality, 3);
+        assert_eq!(
+            spann_writer.index.params,
+            DistributedSpannParameters::default()
+        );
+        // Next head id should be 2 since one centroid is already taken up.
+        assert_eq!(
+            spann_writer
+                .index
+                .next_head_id
+                .load(std::sync::atomic::Ordering::SeqCst),
+            2
+        );
+        {
+            let read_guard = spann_writer.index.versions_map.read().await;
+            assert_eq!(read_guard.versions_map.len(), 2);
+            assert_eq!(
+                *read_guard
+                    .versions_map
+                    .get(&1)
+                    .expect("Doc offset id 1 not found"),
+                1
+            );
+            assert_eq!(
+                *read_guard
+                    .versions_map
+                    .get(&2)
+                    .expect("Doc offset id 2 not found"),
+                1
+            );
+        }
+        {
+            // Test HNSW.
+            let hnsw_index = spann_writer.index.hnsw_index.inner.read();
+            assert_eq!(hnsw_index.len(), 1);
+            let r = hnsw_index
+                .get(1)
+                .expect("Expect one centroid")
+                .expect("Expect centroid embedding");
+            assert_eq!(r.len(), 3);
+            assert_eq!(r[0], 1.0);
+            assert_eq!(r[1], 2.0);
+            assert_eq!(r[2], 3.0);
+        }
+        // Test PL.
+        let read_guard = spann_writer.index.posting_list_writer.lock().await;
+        let res = read_guard
+            .get_owned::<u32, &SpannPostingList<'_>>("", 1)
+            .await
+            .expect("Expected posting list to be present")
+            .expect("Expected posting list to be present");
+        assert_eq!(res.0.len(), 2);
+        assert_eq!(res.1.len(), 2);
+        assert_eq!(res.2.len(), 6);
+        assert_eq!(res.0[0], 1);
+        assert_eq!(res.0[1], 2);
+        assert_eq!(res.1[0], 1);
+        assert_eq!(res.1[1], 1);
+        assert_eq!(res.2[0], 1.0);
+        assert_eq!(res.2[1], 2.0);
+        assert_eq!(res.2[2], 3.0);
+        assert_eq!(res.2[3], 4.0);
+        assert_eq!(res.2[4], 5.0);
+        assert_eq!(res.2[5], 6.0);
     }
 }
