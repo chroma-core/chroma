@@ -1,9 +1,9 @@
+use colored::Colorize;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
-use colored::Colorize;
 
 pub const LOGO: &str = "
                 \x1b[38;5;069m(((((((((    \x1b[38;5;203m(((((\x1b[38;5;220m####
@@ -31,7 +31,9 @@ pub struct ChromaCliError {
 
 impl ChromaCliError {
     fn new(msg: &str) -> ChromaCliError {
-        ChromaCliError { message: msg.to_string() }
+        ChromaCliError {
+            message: msg.to_string(),
+        }
     }
 }
 
