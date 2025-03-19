@@ -4,6 +4,9 @@ use std::time::{Duration, Instant};
 use guacamole::combinators::*;
 use guacamole::Guacamole;
 
+use chroma_config::{registry::Registry, Configurable};
+use chroma_storage::config::{S3CredentialsConfig, S3StorageConfig, StorageConfig};
+
 use wal3::{Error, LogWriter, LogWriterOptions};
 
 ///////////////////////////////////////////// benchmark ////////////////////////////////////////////
@@ -39,8 +42,20 @@ async fn append_once(mut guac: Guacamole, log: Arc<LogWriter>) {
 async fn main() {
     let options = Options::default();
 
-    // setup the log
-    let storage = Arc::new(chroma_storage::s3_client_for_test_with_new_bucket().await);
+    // Setup the storage.
+    let storage_config = StorageConfig::S3(S3StorageConfig {
+        bucket: "chroma-storage".to_string(),
+        credentials: S3CredentialsConfig::Minio,
+        ..Default::default()
+    });
+
+    let registry = Registry::default();
+    let storage = Arc::new(
+        Configurable::try_from_config(&storage_config, &registry)
+            .await
+            .unwrap(),
+    );
+
     // NOTE(rescrv):  Outside benchmarking we don't want to initialize except when we create a new
     // log.  A durability event that loses the manifest will cause the log to become truncated.
     // Recovery is necessary, not just creating the manifest.
