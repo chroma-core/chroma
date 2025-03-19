@@ -10,7 +10,7 @@ import UpdatesLink from "@/components/header/updates-link";
 
 const Header: React.FC = () => {
   return (
-    <div className="flex items-center justify-between flex-shrink-0 p-3 px-5 h-14 border-b-[1px] dark:border-gray-700 xl:w-[1256px] xl:mx-auto">
+    <div className="flex items-center justify-between flex-shrink-0 p-3 px-5 h-14 border-b-[1px] dark:border-gray-700 ">
       <div className="flex items-center gap-5">
         <Link href="/">
           <Logo />

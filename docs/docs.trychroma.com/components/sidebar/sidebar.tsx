@@ -50,10 +50,10 @@ const Sidebar: React.FC<{ path: string[]; mobile?: boolean }> = ({
 
   return (
     <div
-      className={`h-full xl:ml-[calc((100vw-1256px)/2)] ${!mobile && "hidden md:block"}`}
+      className={`h-full ${!mobile && "md:block"}`}
     >
-      <div className="flex flex-col h-full w-64 p-5 border-r-[1px] flex-shrink-0 dark:border-gray-700">
-        <div className="flex flex-col gap-y-1.5 pb-10">
+      <div className="overflow-y-scroll text-sm flex flex-col h-full w-64 p-5 border-r-[1px] flex-shrink-0 dark:border-gray-700">
+        {/* <div className="flex flex-col gap-y-1.5 pb-10">
           {sidebarConfig.map((section) => (
             <MenuItem
               key={section.id}
@@ -61,19 +61,21 @@ const Sidebar: React.FC<{ path: string[]; mobile?: boolean }> = ({
               active={currentSection.id === section.id}
             />
           ))}
-        </div>
+        </div> */}
         <ScrollableContent pagesIndex={allSectionPages}>
           {currentSection.pages && (
             <div className="flex flex-col gap-2">
               <PageIndex
                 path={`/${currentSection.id}`}
                 pages={currentSection.pages}
+                index={0}
               />
             </div>
           )}
-          {currentSection.subsections?.map((subsection) => (
+          {currentSection.subsections?.map((subsection, index) => (
             <PageIndex
               key={subsection.id}
+              index={index}
               name={subsection.name}
               path={`/${currentSection.id}/${subsection.id}`}
               pages={

@@ -29,6 +29,7 @@ const ScrollableContent: React.FC<{
 
     if (!scrollRef.current) return;
 
+    // @ts-expect-error - ignore
     const userPath = pathname.slice(1).split("/");
     const section = userPath[0];
 
@@ -59,7 +60,7 @@ const ScrollableContent: React.FC<{
   return (
     <div
       ref={scrollRef}
-      className="flex flex-col flex-grow overflow-scroll pb-10 pr-5"
+      className="flex flex-col flex-grow  pb-10 pr-5"
     >
       <div className="flex flex-col gap-5">{children}</div>
     </div>
