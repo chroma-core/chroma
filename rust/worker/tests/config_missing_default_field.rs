@@ -1,4 +1,4 @@
-use chroma_index::config::PlGarbageCollectionPolicyConfig;
+use chroma_index::config::{HnswGarbageCollectionPolicyConfig, PlGarbageCollectionPolicyConfig};
 use figment::Jail;
 use worker::config::RootConfig;
 
@@ -161,6 +161,21 @@ fn test_missing_default_field() {
             PlGarbageCollectionPolicyConfig::RandomSample(config) => {
                 assert_eq!(config.sample_size, 0.1);
             }
+        }
+        assert!(
+            !config
+                .compaction_service
+                .spann_provider
+                .hnsw_garbage_collection
+                .enabled
+        );
+        match config
+            .compaction_service
+            .spann_provider
+            .hnsw_garbage_collection
+            .policy
+        {
+            HnswGarbageCollectionPolicyConfig::FullRebuild => {}
         }
         Ok(())
     });

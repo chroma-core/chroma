@@ -4,7 +4,7 @@ use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
 use chroma_index::{
     config::SpannProviderConfig, hnsw_provider::HnswIndexProvider,
-    spann::types::PlGarbageCollectionContext,
+    spann::types::GarbageCollectionContext,
 };
 use chroma_types::Segment;
 
@@ -17,7 +17,7 @@ pub struct SpannProvider {
     pub hnsw_provider: HnswIndexProvider,
     pub blockfile_provider: BlockfileProvider,
     // Option because reader does not need it.
-    pub garbage_collection_context: Option<PlGarbageCollectionContext>,
+    pub garbage_collection_context: Option<GarbageCollectionContext>,
 }
 
 #[async_trait]
@@ -26,9 +26,14 @@ impl Configurable<(HnswIndexProvider, BlockfileProvider, SpannProviderConfig)> f
         config: &(HnswIndexProvider, BlockfileProvider, SpannProviderConfig),
         registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
-        let garbage_collection_context =
-            PlGarbageCollectionContext::try_from_config(&config.2.pl_garbage_collection, registry)
-                .await?;
+        let garbage_collection_context = GarbageCollectionContext::try_from_config(
+            &(
+                config.2.pl_garbage_collection.clone(),
+                config.2.hnsw_garbage_collection.clone(),
+            ),
+            registry,
+        )
+        .await?;
         Ok(SpannProvider {
             hnsw_provider: config.0.clone(),
             blockfile_provider: config.1.clone(),

@@ -50,6 +50,7 @@ impl Default for PlGarbageCollectionPolicyConfig {
 pub struct SpannProviderConfig {
     #[serde(default = "default_garbage_collection")]
     pub pl_garbage_collection: PlGarbageCollectionConfig,
+    pub hnsw_garbage_collection: HnswGarbageCollectionConfig,
 }
 
 #[derive(Deserialize, Debug, Clone, Serialize, Default)]
@@ -67,4 +68,17 @@ impl Default for RandomSamplePolicyConfig {
     fn default() -> Self {
         RandomSamplePolicyConfig { sample_size: 0.1 }
     }
+}
+
+#[derive(Deserialize, Debug, Clone, Serialize, Default)]
+pub enum HnswGarbageCollectionPolicyConfig {
+    #[default]
+    #[serde(rename = "full_rebuild")]
+    FullRebuild,
+}
+
+#[derive(Deserialize, Debug, Clone, Serialize, Default)]
+pub struct HnswGarbageCollectionConfig {
+    pub enabled: bool,
+    pub policy: HnswGarbageCollectionPolicyConfig,
 }
