@@ -359,7 +359,6 @@ impl SysDb {
         segment_flush_info: Arc<[SegmentFlushInfo]>,
         total_records_post_compaction: u64,
         size_bytes_post_compaction: u64,
-        last_compaction_time_secs: u64,
     ) -> Result<FlushCompactionResponse, FlushCompactionError> {
         match self {
             SysDb::Grpc(grpc) => {
@@ -371,7 +370,6 @@ impl SysDb {
                     segment_flush_info,
                     total_records_post_compaction,
                     size_bytes_post_compaction,
-                    last_compaction_time_secs,
                 )
                 .await
             }
@@ -991,7 +989,6 @@ impl GrpcSysDb {
         segment_flush_info: Arc<[SegmentFlushInfo]>,
         total_records_post_compaction: u64,
         size_bytes_post_compaction: u64,
-        last_compaction_time_secs: u64,
     ) -> Result<FlushCompactionResponse, FlushCompactionError> {
         let segment_compaction_info =
             segment_flush_info
@@ -1017,7 +1014,6 @@ impl GrpcSysDb {
             segment_compaction_info,
             total_records_post_compaction,
             size_bytes_post_compaction,
-            last_compaction_time_secs,
         };
 
         let res = self.client.flush_collection_compaction(req).await;

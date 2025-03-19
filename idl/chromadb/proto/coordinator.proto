@@ -236,7 +236,6 @@ message FlushCollectionCompactionRequest {
   repeated FlushSegmentCompactionInfo segment_compaction_info = 5;
   uint64 total_records_post_compaction = 6;
   uint64 size_bytes_post_compaction = 7;
-  uint64 last_compaction_time_secs = 8;
 }
 
 message FlushCollectionCompactionResponse {

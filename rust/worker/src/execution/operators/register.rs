@@ -44,7 +44,6 @@ pub struct RegisterInput {
     segment_flush_info: Arc<[SegmentFlushInfo]>,
     total_records_post_compaction: u64,
     collection_logical_size_bytes: u64,
-    collection_compaction_time_secs: u64,
     sysdb: SysDb,
     log: Log,
 }
@@ -60,7 +59,6 @@ impl RegisterInput {
         segment_flush_info: Arc<[SegmentFlushInfo]>,
         total_records_post_compaction: u64,
         collection_logical_size_bytes: u64,
-        collection_compaction_time_secs: u64,
         sysdb: SysDb,
         log: Log,
     ) -> Self {
@@ -72,7 +70,6 @@ impl RegisterInput {
             segment_flush_info,
             total_records_post_compaction,
             collection_logical_size_bytes,
-            collection_compaction_time_secs,
             sysdb,
             log,
         }
@@ -124,7 +121,6 @@ impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
                 input.segment_flush_info.clone(),
                 input.total_records_post_compaction,
                 input.collection_logical_size_bytes,
-                input.collection_compaction_time_secs,
             )
             .await;
 
@@ -269,7 +265,6 @@ mod tests {
             segment_flush_info.into(),
             total_records_post_compaction,
             size_bytes_post_compaction,
-            last_compaction_time_secs,
             sysdb.clone(),
             log.clone(),
         );
