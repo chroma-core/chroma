@@ -164,7 +164,7 @@ jobs:
     if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
     uses: ./.github/workflows/_python-tests.yml
     with:
-      property_testing_preset: 'fast'
+      property_testing_preset: 'normal'
 
   python-vulnerability-scan:
     name: Python vulnerability scan
