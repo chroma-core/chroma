@@ -11,7 +11,8 @@ use setsum::Setsum;
 use chroma_storage::{Storage, StorageError};
 
 use crate::{
-    parse_fragment_path, Error, Fragment, LogPosition, LogReaderOptions, Manifest, Snapshot,
+    parse_fragment_path, Error, Fragment, LogPosition, LogReaderOptions, Manifest, ScrubError,
+    Snapshot,
 };
 
 /// Limits allows encoding things like offset, timestamp, and byte size limits for the read.
@@ -47,6 +48,15 @@ impl LogReader {
             storage,
             prefix,
         })
+    }
+
+    pub async fn minimum_log_position(&self) -> Result<LogPosition, Error> {
+        let Some((manifest, _)) =
+            Manifest::load(&self.options.throttle, &self.storage, &self.prefix).await?
+        else {
+            return Err(Error::UninitializedLog);
+        };
+        Ok(manifest.minimum_log_position())
     }
 
     /// Scan up to:
@@ -121,6 +131,83 @@ impl LogReader {
             .await
             .map_err(Arc::new)?
             .0)
+    }
+
+    pub async fn scrub(&self) -> Result<(), Error> {
+        let Some((manifest, _)) =
+            Manifest::load(&self.options.throttle, &self.storage, &self.prefix).await?
+        else {
+            return Err(Error::UninitializedLog);
+        };
+        manifest.scrub()?;
+        for reference in manifest.fragments.iter() {
+            if let Some(empirical) =
+                read_fragment(&self.storage, &self.prefix, &reference.path).await?
+            {
+                if reference.path != empirical.path {
+                    return Err(Error::ScrubError(
+                        ScrubError::MismatchedPath {
+                            reference: reference.clone(),
+                            empirical,
+                        }
+                        .into(),
+                    ));
+                }
+                if reference.seq_no != empirical.seq_no {
+                    return Err(Error::ScrubError(
+                        ScrubError::MismatchedSeqNo {
+                            reference: reference.clone(),
+                            empirical,
+                        }
+                        .into(),
+                    ));
+                }
+                if reference.num_bytes != empirical.num_bytes {
+                    return Err(Error::ScrubError(
+                        ScrubError::MismatchedNumBytes {
+                            reference: reference.clone(),
+                            empirical,
+                        }
+                        .into(),
+                    ));
+                }
+                if reference.start != empirical.start {
+                    return Err(Error::ScrubError(
+                        ScrubError::MismatchedStart {
+                            reference: reference.clone(),
+                            empirical,
+                        }
+                        .into(),
+                    ));
+                }
+                if reference.limit != empirical.limit {
+                    return Err(Error::ScrubError(
+                        ScrubError::MismatchedLimit {
+                            reference: reference.clone(),
+                            empirical,
+                        }
+                        .into(),
+                    ));
+                }
+                if reference.setsum != empirical.setsum {
+                    return Err(Error::ScrubError(
+                        ScrubError::MismatchedSetsum {
+                            reference: reference.clone(),
+                            empirical,
+                        }
+                        .into(),
+                    ));
+                }
+            } else {
+                return Err(Error::ScrubError(
+                    ScrubError::MissingFragment {
+                        reference: reference.clone(),
+                    }
+                    .into(),
+                ));
+            }
+        }
+        Ok(())
     }
 }
 
