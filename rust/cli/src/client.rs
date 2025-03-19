@@ -33,7 +33,9 @@ impl fmt::Display for ChromaCliClientError {
             ChromaCliClientError::ApiError(status, message) => {
                 write!(f, "API error ({}): {}", status, message)
             }
-            ChromaCliClientError::MissingResponseBody => write!(f, "Expected response body but none found"),
+            ChromaCliClientError::MissingResponseBody => {
+                write!(f, "Expected response body but none found")
+            }
             ChromaCliClientError::InvalidApiKey(msg) => write!(f, "Invalid API key: {}", msg),
             ChromaCliClientError::Other(msg) => write!(f, "{}", msg),
         }
@@ -83,13 +85,24 @@ pub struct ChromaClient {
     headers: HeaderMap,
 }
 
-impl ChromaClient {
-    pub fn new(api_url: String, api_key: String, tenant_id: String) -> Result<Self, ChromaCliClientError> {
+pub trait ChromaClientTrait {
+    fn list_databases(&self) -> Result<Vec<Database>, ChromaCliClientError>;
+    fn create_database(&self, name: String) -> Result<(), ChromaCliClientError>;
+    fn delete_database(&self, name: String) -> Result<(), ChromaCliClientError>;
+}
+
+impl  ChromaClient {
+    pub fn new(
+        api_url: String,
+        api_key: String,
+        tenant_id: String,
+    ) -> Result<Self, ChromaCliClientError> {
         let client = Client::new();
         let mut headers = HeaderMap::new();
         headers.insert(
             "X-Chroma-Token",
-            HeaderValue::from_str(&api_key).map_err(|e| ChromaCliClientError::InvalidApiKey(e.to_string()))?,
+            HeaderValue::from_str(&api_key)
+                .map_err(|e| ChromaCliClientError::InvalidApiKey(e.to_string()))?,
         );
 
         Ok(Self {
@@ -114,10 +127,7 @@ impl ChromaClient {
         let mut headers = self.headers.clone();
 
         if let RequestMethod::Post = method {
-            headers.insert(
-                "Content-Type",
-                HeaderValue::from_static("application/json"),
-            );
+            headers.insert("Content-Type", HeaderValue::from_static("application/json"));
         }
 
         let response = match method {
@@ -126,7 +136,9 @@ impl ChromaClient {
                 if let Some(data) = body {
                     self.client.post(&url).headers(headers).json(data).send()?
                 } else {
-                    return Err(ChromaCliClientError::Other("POST request requires a body".into()));
+                    return Err(ChromaCliClientError::Other(
+                        "POST request requires a body".into(),
+                    ));
                 }
             }
             RequestMethod::Delete => {
@@ -145,7 +157,9 @@ impl ChromaClient {
     ) -> Result<Option<T>, ChromaCliClientError> {
         if !response.status().is_success() {
             let status = response.status();
-            let error_text = response.text().unwrap_or_else(|_| String::from("No error message"));
+            let error_text = response
+                .text()
+                .unwrap_or_else(|_| String::from("No error message"));
             return Err(ChromaCliClientError::ApiError(status, error_text));
         }
 
@@ -177,22 +191,24 @@ impl ChromaClient {
         self.request::<(), ()>(RequestMethod::Delete, route, None)?;
         Ok(())
     }
+}
 
-    pub fn create_database(&self, name: String) -> Result<(), ChromaCliClientError> {
+impl ChromaClientTrait for ChromaClient {
+    fn list_databases(&self) -> Result<Vec<Database>, ChromaCliClientError> {
+        let route = format!("/api/v2/tenants/{}/databases", self.tenant_id);
+        let response = self.get::<ListDatabasesResponse>(&route)?;
+        Ok(response)
+    }
+
+    fn create_database(&self, name: String) -> Result<(), ChromaCliClientError> {
         let route = format!("/api/v2/tenants/{}/databases", self.tenant_id);
         self.post::<EmptyResponse, _>(&route, &CreateDatabasePayload { name })?;
         Ok(())
     }
 
-    pub fn delete_database(&self, name: String) -> Result<(), ChromaCliClientError> {
+    fn delete_database(&self, name: String) -> Result<(), ChromaCliClientError> {
         let route = format!("/api/v2/tenants/{}/databases/{}", self.tenant_id, name);
         self.delete(&route)?;
         Ok(())
-    }
-
-    pub fn list_databases(&self) -> Result<Vec<Database>, ChromaCliClientError> {
-        let route = format!("/api/v2/tenants/{}/databases", self.tenant_id);
-        let response = self.get::<ListDatabasesResponse>(&route)?;
-        Ok(response)
     }
 }

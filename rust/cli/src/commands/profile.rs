@@ -152,7 +152,7 @@ fn show<W: Write>(writer: &mut W, config: CliConfig) -> Result<(), std::io::Erro
             "chroma login".yellow(),
             "chroma profile use <profile name>".yellow()
         )?;
-        return Ok(())
+        return Ok(());
     }
 
     writeln!(writer, "{}", "Current profile: ".blue().bold())?;

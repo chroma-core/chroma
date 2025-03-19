@@ -27,6 +27,7 @@ dirs = "6.0.0"
 reqwest = { workspace = true, features = ["blocking"] }
 mockito = "1.7.0"
 arboard = "3.4.1"
+mockall = "0.13.1"
 
 
 [[bin]]

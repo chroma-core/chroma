@@ -1,13 +1,13 @@
+mod client;
 mod commands;
 mod utils;
-mod client;
 
+use crate::commands::db::{db_command, DbCommand};
 use crate::commands::profile::{profile_command, ProfileCommand};
 use crate::commands::run::{run, RunArgs};
 use crate::commands::vacuum::{vacuum, VacuumArgs};
 use clap::{Parser, Subcommand};
 use std::io;
-use crate::commands::db::{db_command, DbCommand};
 
 #[derive(Subcommand, Debug)]
 enum Command {
@@ -39,7 +39,7 @@ pub fn chroma_cli(args: Vec<String>) {
 
     match cli.command {
         Command::DB(db_subcommand) => {
-            db_command(db_subcommand);
+            db_command(&mut out, db_subcommand).expect("Failed to write output");
         }
         Command::Docs => {
             let url = "https://docs.trychroma.com";

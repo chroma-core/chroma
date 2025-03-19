@@ -183,6 +183,9 @@ pub fn get_current_profile() -> Result<(String, Profile), Box<dyn Error>> {
     if !profiles.contains_key(config.current_profile.as_str()) {
         Err(format!("Profile '{}' not found", config.current_profile).into())
     } else {
-        Ok((config.current_profile.clone(), profiles[config.current_profile.as_str()].clone()))
+        Ok((
+            config.current_profile.clone(),
+            profiles[config.current_profile.as_str()].clone(),
+        ))
     }
 }
