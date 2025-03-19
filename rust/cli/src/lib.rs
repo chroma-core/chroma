@@ -33,12 +33,11 @@ struct Cli {
 pub fn chroma_cli(args: Vec<String>) {
     let cli = Cli::parse_from(args);
     println!();
-
-    let stdout = io::stdout();
-    let mut out = stdout.lock();
-
+    
     match cli.command {
         Command::DB(db_subcommand) => {
+            let stdout = io::stdout();
+            let mut out = stdout.lock();
             db_command(&mut out, db_subcommand).expect("Failed to write output");
         }
         Command::Docs => {
@@ -48,6 +47,8 @@ pub fn chroma_cli(args: Vec<String>) {
             }
         }
         Command::Profile(profile_subcommand) => {
+            let stdout = io::stdout();
+            let mut out = stdout.lock();
             profile_command(&mut out, profile_subcommand).expect("Failed to write output");
         }
         Command::Run(args) => {
