@@ -75,16 +75,6 @@ _abstract_type_keys: Dict[str, str] = {
     "chromadb.auth.ClientAuthProvider": "chroma_client_auth_provider",
     "chromadb.auth.ServerAuthenticationProvider": "chroma_server_authn_provider",
     "chromadb.auth.ServerAuthorizationProvider": "chroma_server_authz_provider",
-    "chromadb.db.system.SysDB": "chroma_sysdb_impl",
-    "chromadb.execution.executor.abstract.Executor": "chroma_executor_impl",
-    "chromadb.ingest.Consumer": "chroma_consumer_impl",
-    "chromadb.ingest.Producer": "chroma_producer_impl",
-    "chromadb.quota.QuotaEnforcer": "chroma_quota_enforcer_impl",
-    "chromadb.rate_limit.RateLimitEnforcer": "chroma_rate_limit_enforcer_impl",
-    "chromadb.rate_limit.AsyncRateLimitEnforcer": "chroma_async_rate_limit_enforcer_impl",
-    "chromadb.segment.SegmentManager": "chroma_segment_manager_impl",
-    "chromadb.segment.distributed.SegmentDirectory": "chroma_segment_directory_impl",
-    "chromadb.segment.distributed.MemberlistProvider": "chroma_memberlist_provider_impl",
     "chromadb.telemetry.product.ProductTelemetryClient": "chroma_product_telemetry_impl",
 }
 
