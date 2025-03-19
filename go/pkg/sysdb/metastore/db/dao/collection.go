@@ -52,15 +52,31 @@ func (s *collectionDb) GetCollections(id *string, name *string, tenantID string,
 	return s.getCollections(id, name, tenantID, databaseName, limit, offset, false)
 }
 
-func (s *collectionDb) ListCollectionsToGc() ([]*dbmodel.CollectionToGc, error) {
+func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64) ([]*dbmodel.CollectionToGc, error) {
 	var collections []*dbmodel.CollectionToGc
 	// Use the read replica for this so as to not overwhelm the writer.
-	// Skip collections that have not been compacted even once.
-	err := s.read_db.Table("collections").Select("id, name, version, version_file_name").Find(&collections).Where("version > 0").Error
+	query := s.read_db.Table("collections").
+		Select("id, name, version, version_file_name, oldest_version_ts, num_versions").
+		Where("version > 0")
+
+	// Apply cutoff time filter only if provided
+	if cutoffTimeSecs != nil {
+		cutoffTime := time.Unix(int64(*cutoffTimeSecs), 0)
+		query = query.Where("oldest_version_ts < ?", cutoffTime)
+	}
+
+	query = query.Order("num_versions DESC")
+
+	// Apply limit only if provided
+	if limit != nil {
+		query = query.Limit(int(*limit))
+	}
+
+	err := query.Find(&collections).Error
 	if err != nil {
 		return nil, err
 	}
-	log.Info("collections to gc", zap.Any("collections", collections))
+	log.Debug("collections to gc", zap.Any("collections", collections))
 	return collections, nil
 }
 
@@ -400,8 +416,23 @@ func (s *collectionDb) UpdateLogPositionVersionAndTotalRecords(collectionID stri
 	return version, nil
 }
 
-func (s *collectionDb) UpdateVersionFileName(collectionID, existingVersionFileName, newVersionFileName string) (int64, error) {
-	result := s.db.Model(&dbmodel.Collection{}).Where("id = ? AND version_file_name = ?", collectionID, existingVersionFileName).Updates(map[string]interface{}{"version_file_name": newVersionFileName})
+func (s *collectionDb) UpdateVersionRelatedFields(collectionID, existingVersionFileName, newVersionFileName string, oldestVersionTs *time.Time, numActiveVersions *int) (int64, error) {
+	// Create updates map with required version_file_name
+	updates := map[string]interface{}{
+		"version_file_name": newVersionFileName,
+	}
+
+	// Only add optional fields if they are not nil
+	if oldestVersionTs != nil {
+		updates["oldest_version_ts"] = oldestVersionTs
+	}
+	if numActiveVersions != nil {
+		updates["num_versions"] = numActiveVersions
+	}
+
+	result := s.db.Model(&dbmodel.Collection{}).
+		Where("id = ? AND version_file_name = ?", collectionID, existingVersionFileName).
+		Updates(updates)
 	if result.Error != nil {
 		return 0, result.Error
 	}

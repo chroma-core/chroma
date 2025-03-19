@@ -26,3 +26,59 @@ impl HnswProviderConfig {
         180
     }
 }
+
+fn default_garbage_collection() -> PlGarbageCollectionConfig {
+    PlGarbageCollectionConfig {
+        enabled: false,
+        policy: PlGarbageCollectionPolicyConfig::RandomSample(RandomSamplePolicyConfig::default()),
+    }
+}
+
+#[derive(Deserialize, Debug, Clone, Serialize)]
+pub enum PlGarbageCollectionPolicyConfig {
+    #[serde(rename = "random_sample")]
+    RandomSample(RandomSamplePolicyConfig),
+}
+
+impl Default for PlGarbageCollectionPolicyConfig {
+    fn default() -> Self {
+        PlGarbageCollectionPolicyConfig::RandomSample(RandomSamplePolicyConfig::default())
+    }
+}
+
+#[derive(Deserialize, Debug, Clone, Serialize, Default)]
+pub struct SpannProviderConfig {
+    #[serde(default = "default_garbage_collection")]
+    pub pl_garbage_collection: PlGarbageCollectionConfig,
+    pub hnsw_garbage_collection: HnswGarbageCollectionConfig,
+}
+
+#[derive(Deserialize, Debug, Clone, Serialize, Default)]
+pub struct PlGarbageCollectionConfig {
+    pub enabled: bool,
+    pub policy: PlGarbageCollectionPolicyConfig,
+}
+
+#[derive(Deserialize, Debug, Clone, Serialize)]
+pub struct RandomSamplePolicyConfig {
+    pub sample_size: f32,
+}
+
+impl Default for RandomSamplePolicyConfig {
+    fn default() -> Self {
+        RandomSamplePolicyConfig { sample_size: 0.1 }
+    }
+}
+
+#[derive(Deserialize, Debug, Clone, Serialize, Default)]
+pub enum HnswGarbageCollectionPolicyConfig {
+    #[default]
+    #[serde(rename = "full_rebuild")]
+    FullRebuild,
+}
+
+#[derive(Deserialize, Debug, Clone, Serialize, Default)]
+pub struct HnswGarbageCollectionConfig {
+    pub enabled: bool,
+    pub policy: HnswGarbageCollectionPolicyConfig,
+}

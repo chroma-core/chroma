@@ -11,6 +11,7 @@ import Link from "next/link";
 import { getAllPages, getPagePrevNext } from "@/lib/content";
 import sidebarConfig from "@/markdoc/content/sidebar-config";
 import PageNav from "@/components/markdoc/page-nav";
+import AskAI from "@/components/markdoc/ask-ai";
 
 const MarkdocRenderer: React.FC<{ slug: string[] }> = ({ slug }) => {
   const filePath = `${path.join(process.cwd(), "markdoc", "content", ...slug)}.md`;
@@ -39,6 +40,7 @@ const MarkdocRenderer: React.FC<{ slug: string[] }> = ({ slug }) => {
     <MarkdocPage>
       <div className="relative w-full h-full marker:text-black dark:marker:text-gray-200">
         <SidebarToggle path={slug} />
+        <AskAI content={source} />
         {output}
         <div className="flex items-center justify-between mt-5">
           {prev ? (
