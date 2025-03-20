@@ -86,8 +86,7 @@ impl Staging {
         }
         self.last_batch = Instant::now();
         // If the manifest can create a snapshot based upon the options.
-        let mut snapshot =
-            new_manifest.generate_snapshot(manager.snapshot, &manager.prefix, &manager.writer);
+        let snapshot = new_manifest.generate_snapshot(manager.snapshot, &manager.writer);
         if let Some(s) = snapshot.as_ref() {
             if let Err(err) = new_manifest.apply_snapshot(s) {
                 // It failed to apply, so error everyone waiting.  The backoff/retry/reseat
@@ -97,9 +96,6 @@ impl Staging {
                     let _ = notifier.send(Some(err.clone()));
                 }
                 return None;
-            } else {
-                // This snapshot has been applied.  Remove it from the staged snapshots.
-                snapshot = None;
             }
         }
         self.next_seq_no_to_apply = next_seq_no_to_apply;

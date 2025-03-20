@@ -22,8 +22,8 @@ fn manifest_path(prefix: &str) -> String {
     format!("{prefix}/manifest/MANIFEST")
 }
 
-fn snapshot_path(prefix: &str, setsum: Setsum) -> String {
-    format!("{prefix}/snapshot/SNAPSHOT.{}", setsum.hexdigest())
+fn unprefixed_snapshot_path(setsum: Setsum) -> String {
+    format!("snapshot/SNAPSHOT.{}", setsum.hexdigest())
 }
 
 fn snapshot_setsum(path: &str) -> Result<Setsum, Error> {
@@ -97,8 +97,10 @@ impl Snapshot {
             .into());
         }
         let mut calculated_setsum = Setsum::default();
+        let mut bytes_read = 0u64;
         for snapshot in self.snapshots.iter() {
             calculated_setsum += snapshot.setsum;
+            bytes_read += snapshot.num_bytes;
         }
         let depth = self.snapshots.iter().map(|s| s.depth).max().unwrap_or(0);
         if depth + 1 != self.depth {
@@ -142,8 +144,6 @@ impl Snapshot {
                 path_setsum.hexdigest(),
             )}.into());
         }
-        // TODO(rescrv): compute this
-        let bytes_read = 0;
         Ok(ScrubSuccess {
             calculated_setsum,
             bytes_read,
@@ -153,6 +153,7 @@ impl Snapshot {
     pub async fn load(
         options: &ThrottleOptions,
         storage: &Storage,
+        prefix: &str,
         pointer: &SnapshotPointer,
     ) -> Result<Option<Snapshot>, Error> {
         let exp_backoff = crate::backoff::ExponentialBackoff::new(
@@ -160,12 +161,9 @@ impl Snapshot {
             options.headroom as f64,
         );
         let mut retries = 0;
+        let path = format!("{}/{}", prefix, pointer.path_to_snapshot);
         loop {
-            match storage
-                .get_with_e_tag(&pointer.path_to_snapshot)
-                .await
-                .map_err(Arc::new)
-            {
+            match storage.get_with_e_tag(&path).await.map_err(Arc::new) {
                 Ok((ref snapshot, _)) => {
                     let snapshot: Snapshot = serde_json::from_slice(snapshot).map_err(|e| {
                         Error::CorruptManifest(format!("could not decode JSON snapshot: {e:?}"))
@@ -264,7 +262,6 @@ impl Manifest {
     pub fn generate_snapshot(
         &self,
         snapshot_options: SnapshotOptions,
-        prefix: &str,
         writer: &str,
     ) -> Option<Snapshot> {
         let writer = writer.to_string();
@@ -319,7 +316,7 @@ impl Manifest {
             if snapshots.is_empty() && fragments.is_empty() {
                 return None;
             }
-            let path = snapshot_path(prefix, setsum);
+            let path = unprefixed_snapshot_path(setsum);
             Some(Snapshot {
                 path,
                 depth,
@@ -336,9 +333,6 @@ impl Manifest {
     /// Given a snapshot, apply it to the manifest.  This modifies the manifest to refer to the
     /// snapshot and removes from the manifest all data that is now part of the snapshot.
     pub fn apply_snapshot(&mut self, snapshot: &Snapshot) -> Result<(), Error> {
-        if snapshot.fragments.is_empty() {
-            return Ok(());
-        }
         if snapshot.fragments.len() > self.fragments.len() {
             return Err(Error::CorruptManifest(format!(
                 "snapshot has more fragments than manifest: {} > {}",
@@ -644,8 +638,8 @@ mod tests {
     fn paths() {
         assert_eq!("myprefix/manifest/MANIFEST", manifest_path("myprefix"));
         assert_eq!(
-            "myprefix/snapshot/SNAPSHOT.0000000000000000000000000000000000000000000000000000000000000000",
-            snapshot_path("myprefix", Setsum::default())
+            "snapshot/SNAPSHOT.0000000000000000000000000000000000000000000000000000000000000000",
+            unprefixed_snapshot_path(Setsum::default())
         );
     }
 
