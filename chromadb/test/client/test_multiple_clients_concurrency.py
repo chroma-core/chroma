@@ -34,7 +34,19 @@ def test_multiple_clients_concurrently(client_factories: ClientFactories) -> Non
             )
 
     with ThreadPoolExecutor(max_workers=CLIENT_COUNT) as executor:
-        executor.map(run_target, range(CLIENT_COUNT))
+        futures = []
+
+        for i in range(CLIENT_COUNT):
+            futures.append(executor.submit(run_target, i))
+
+        # Wait for all threads to finish
+        for future in futures:
+            try:
+                future.result()
+            except Exception as e:
+                print(f"Thread raised an exception: {e}")
+                raise e
+
     executor.shutdown(wait=True)
     # Create a final client, which will be used to verify the collections were created
     client = client_factories.create_client(settings=client._system.settings)
