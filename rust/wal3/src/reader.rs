@@ -89,7 +89,7 @@ impl LogReader {
                 .map(|s| {
                     let options = self.options.clone();
                     let storage = Arc::clone(&self.storage);
-                    async move { Snapshot::load(&options.throttle, &storage, s).await }
+                    async move { Snapshot::load(&options.throttle, &storage, &self.prefix, s).await }
                 })
                 .collect::<Vec<_>>();
             let resolved = futures::future::try_join_all(futures).await?;
@@ -143,11 +143,18 @@ impl LogReader {
         let mut calculated_setsum = Setsum::default();
         let mut bytes_read = 0u64;
         for reference in manifest.snapshots.iter() {
-            if let Some(empirical) =
-                Snapshot::load(&self.options.throttle, &self.storage, reference).await?
+            if let Some(empirical) = Snapshot::load(
+                &self.options.throttle,
+                &self.storage,
+                &self.prefix,
+                reference,
+            )
+            .await?
             {
                 let empirical_scrub_success = empirical.scrub()?;
-                if empirical_scrub_success.calculated_setsum != empirical.setsum {
+                if empirical_scrub_success.calculated_setsum != reference.setsum
+                    || empirical_scrub_success.calculated_setsum != empirical.setsum
+                {
                     return Err(Error::ScrubError(
                         ScrubError::MismatchedSnapshotSetsum {
                             reference: reference.clone(),
