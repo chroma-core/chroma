@@ -6,6 +6,7 @@ docker_build(
   dockerfile='./k8s/test/postgres/Dockerfile'
 )
 
+
 if config.tilt_subcommand == "ci":
   custom_build(
     'logservice',
@@ -140,6 +141,14 @@ else:
     target='compaction_service'
   )
 
+# For Garbage Collector
+docker_build(
+  'garbage-collector',
+  '.',
+  only=['rust/', 'idl/', 'Cargo.toml', 'Cargo.lock'],
+  dockerfile='./rust/garbage_collector/Dockerfile',
+  target='garbage_collector',
+)
 
 # First install the CRD
 k8s_yaml(
@@ -227,6 +236,7 @@ k8s_resource('jaeger', resource_deps=['k8s_setup'], labels=["observability"])
 k8s_resource('grafana', resource_deps=['k8s_setup'], labels=["observability"])
 k8s_resource('prometheus', resource_deps=['k8s_setup'], labels=["observability"])
 k8s_resource('otel-collector', resource_deps=['k8s_setup'], labels=["observability"])
-
+k8s_resource('garbage-collector', resource_deps=['k8s_setup'], labels=["chroma"])
 # Local S3
 k8s_resource('minio-deployment', resource_deps=['k8s_setup'], labels=["debug"], port_forwards=['9000:9000', '9005:9005'])
+

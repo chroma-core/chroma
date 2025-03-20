@@ -1,0 +1,53 @@
+{{if .Values.garbageCollector.configuration}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: garbage-collector-config
+  namespace: {{ .Values.namespace }}
+data:
+  config.yaml: |
+{{ .Values.garbageCollector.configuration | indent 4 }}
+---
+{{ end }}
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: garbage-collector
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: garbage-collector
+spec:
+  replicas: {{ .Values.garbageCollector.replicaCount }}
+  selector:
+    matchLabels:
+      app: garbage-collector
+  template:
+    metadata:
+      labels:
+        app: garbage-collector
+    spec:
+      serviceAccountName: compaction-service-serviceaccount # TODO: change to garbage-collector-serviceaccount
+      volumes:
+        {{if .Values.garbageCollector.configuration}}
+        - name: garbage-collector-config
+          configMap:
+            name: garbage-collector-config
+        {{ end }}
+      containers:
+      - name: garbage-collector
+        image: "{{ .Values.garbageCollector.image.repository }}:{{ .Values.garbageCollector.image.tag }}"
+        imagePullPolicy: IfNotPresent
+        resources:
+          {{- toYaml .Values.garbageCollector.resources | nindent 10 }}
+        volumeMounts:
+          {{if .Values.garbageCollector.configuration}}
+          - name: garbage-collector-config
+            mountPath: /config/
+          {{ end }}
+        env:
+          {{if .Values.garbageCollector.configuration}}
+          - name: CONFIG_PATH
+            value: /config/config.yaml
+          {{ end }}

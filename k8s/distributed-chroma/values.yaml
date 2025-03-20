@@ -123,3 +123,45 @@ logServiceMigration:
   env:
   - name: CHROMA_DB_LOG_URL
     value: 'value: "postgresql://chroma:chroma@postgres.chroma.svc.cluster.local:5432/log?sslmode=disable"'
+
+# Add the garbage collector configuration
+garbageCollector:
+  image:
+    repository: 'garbage-collector'
+    tag: 'latest'
+  replicaCount: 1
+  resources:
+    limits:
+      cpu: '200m'
+      memory: '256Mi'
+    requests:
+      cpu: '100m'
+      memory: '128Mi'
+  configuration: |
+    service_name: "garbage-collector"
+    otel_endpoint: "http://otel-collector:4317"
+    cutoff_time_hours: 12
+    max_collections_to_gc: 1000
+    gc_interval_mins: 120
+    disallow_collections: []
+    sysdb_config:
+      host: "sysdb.chroma"
+      port: 50051
+      connect_timeout_ms: 60000
+      request_timeout_ms: 60000
+    dispatcher_config:
+      num_worker_threads: 4
+      dispatcher_queue_size: 100
+      worker_queue_size: 100
+    storage_config:
+      s3:
+        bucket: "chroma-storage"
+      # object_store:
+      #   bucket:
+      #     name: "chroma-storage"
+      #     type: "minio"
+      #   credentials: "Minio"
+      #   connect_timeout_ms: 5000
+      #   request_timeout_ms: 30000
+      #   upload_part_size_bytes: 536870912
+      #   download_part_size_bytes: 8388608
