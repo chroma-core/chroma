@@ -94,6 +94,7 @@ impl RefState {
     }
 
     pub fn get_segment_block_ids_for_version(&self, collection_id: String, version: u64) -> Vec<SegmentBlockIdInfo> {
+        tracing::info!("RSM: get_segment_block_ids_for_version: collection_id: {}, version: {}", collection_id, version);
         self.coll_to_segment_block_ids_map
             .get(&collection_id)
             .and_then(|versions| versions.get(&version))
@@ -101,13 +102,13 @@ impl RefState {
             .unwrap_or_default()
     }
 
-    pub fn get_block_ids_for_version(&self, collection_id: String, version: u64) -> Vec<Uuid> {
-        self.coll_to_files_map
-            .get(&collection_id)
-            .and_then(|versions| versions.get(&version))
-            .cloned()
-            .unwrap_or_default()  // Return empty Vec if collection or version doesn't exist
-    }
+    // pub fn get_block_ids_for_version(&self, collection_id: String, version: u64) -> Vec<Uuid> {
+    //     self.coll_to_files_map
+    //         .get(&collection_id)
+    //         .and_then(|versions| versions.get(&version))
+    //         .cloned()
+    //         .unwrap_or_default()  // Return empty Vec if collection or version doesn't exist
+    // }
 
     pub fn get_current_version(&self, collection_id: String) -> u64 {
         self.coll_to_creation_time_map
@@ -161,6 +162,7 @@ impl RefState {
             .get_mut(&id)
             .unwrap()
             .insert(version, dropped_block_ids);
+        tracing::info!("RSM: add_version: version: {}, segment_block_ids: {:?}", version, segment_block_ids);
         self.coll_to_segment_block_ids_map
             .get_mut(&id)
             .unwrap()
@@ -169,7 +171,7 @@ impl RefState {
         self
     }
 
-    fn create_collection(mut self, id: String, segments: Vec<Segment>) -> Self {
+    fn create_collection(mut self, id: String, segments: Vec<Segment>, creation_time_secs: u64) -> Self {
         if self.collections.contains(&id) {
             tracing::debug!("RSM: create_collection: Collection already exists: {}", id);
             return self;
@@ -177,13 +179,30 @@ impl RefState {
         self.collections.insert(id.clone());
         // Initialize empty maps for the new collection
         self.coll_to_files_map.insert(id.clone(), HashMap::new());
-        self.coll_to_creation_time_map
-            .insert(id.clone(), HashMap::new());
         self.coll_to_dropped_block_ids_map
             .insert(id.clone(), HashMap::new());
+        
+        // Put the segment block ids for the collection.
+        // AddVersion calls will need to use this to find the segment block ids for the collection.
         self.coll_to_segment_block_ids_map
             .insert(id.clone(), HashMap::new());
+        let segment_block_ids = segments.iter().map(|s| SegmentBlockIdInfo {
+            segment_id: s.id,
+            block_ids: vec![],
+            segment_type: s.r#type,
+        }).collect();
+        self.coll_to_segment_block_ids_map.get_mut(&id).unwrap().insert(0, segment_block_ids);
+
+        // NOT NEEDED anymore.
+        // TODO(rohitcp): Remove this later.
         self.coll_to_segment_ids.insert(id.clone(), segments);
+        
+        // Insert the initial version to creation time mapping.
+        // This is used to find current version for the collection, and the creation time for the initial version.
+        let mut initial_version_to_creation_time = HashMap::new();
+        initial_version_to_creation_time.insert(0, creation_time_secs);
+        self.coll_to_creation_time_map
+            .insert(id.clone(), initial_version_to_creation_time);
         self
     }
 
@@ -329,6 +348,7 @@ impl ReferenceStateMachine for RefState {
                         id.clone(),
                         state_clone.get_current_version(id.clone()),
                     );
+                    tracing::info!("RSM: transitions: segment_block_ids for existing collection: {:?}", segment_block_ids);
                     let (segment_block_ids_new_version, dropped_block_ids) = segment_block_ids_for_next_version(segment_block_ids);
                     Transition::AddVersion {
                         id: id.clone(),
@@ -404,8 +424,8 @@ impl ReferenceStateMachine for RefState {
             Transition::CreateCollection {
                 id,
                 segments,
-                creation_time_secs: _,
-            } => state.clone().create_collection(id.clone(), segments.clone()),
+                creation_time_secs,
+            } => state.clone().create_collection(id.clone(), segments.clone(), *creation_time_secs),
         }
     }
 }
@@ -739,6 +759,7 @@ fn blocks_ids_for_next_version(block_ids: Vec<Uuid>) -> (Vec<Uuid>, Vec<Uuid>) {
     if block_ids.is_empty() {
         let num_new_blocks = rng.gen_range(1..=10);
         let new_block_ids: Vec<Uuid> = (0..num_new_blocks).map(|_| Uuid::new_v4()).collect();
+        tracing::info!("RSM: new blocks_ids_for_next_version: new_block_ids: {:?}", new_block_ids);
         return (new_block_ids, Vec::new());
     }
 
