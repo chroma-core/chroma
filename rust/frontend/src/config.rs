@@ -91,10 +91,6 @@ pub struct OpenTelemetryConfig {
     pub service_name: String,
 }
 
-fn default_persist_path() -> String {
-    "./chroma".to_string()
-}
-
 fn default_sqlite_filename() -> String {
     "chroma.sqlite3".to_string()
 }
@@ -132,8 +128,8 @@ pub struct FrontendServerConfig {
     #[serde(default)]
     pub scorecard: Vec<ScorecardRule>,
     pub open_telemetry: Option<OpenTelemetryConfig>,
-    #[serde(default = "default_persist_path")]
-    pub persist_path: String,
+    #[serde(default)]
+    pub persist_path: Option<String>,
     #[serde(default = "default_sqlite_filename")]
     pub sqlite_filename: String,
     #[serde(default)]
