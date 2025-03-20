@@ -35,6 +35,15 @@ pub struct RunArgs {
 
     #[clap(
         long,
+        conflicts_with = "path",
+        help = "Run the server in ephemeral mode (no persistence)",
+        hide = true,
+        default_value_t = false
+    )]
+    ephemeral: bool,
+
+    #[clap(
+        long,
         default_value = "localhost",
         conflicts_with = "config_path",
         help = "The host to listen to. Default: localhost"
@@ -57,8 +66,10 @@ fn validate_host(address: &String, port: u16) -> bool {
 fn override_default_config_with_args(args: RunArgs) -> Result<FrontendServerConfig, CliError> {
     let mut config = FrontendServerConfig::single_node_default();
 
-    if let Some(path) = args.path {
-        config.persist_path = path;
+    if args.ephemeral {
+        config.persist_path = None;
+    } else {
+        config.persist_path = Some(args.path.clone().unwrap_or("./chroma".to_string()));
     }
 
     if let Some(port) = args.port {
@@ -78,7 +89,16 @@ fn override_default_config_with_args(args: RunArgs) -> Result<FrontendServerConf
 
 fn display_run_message(config: &FrontendServerConfig) {
     println!("{}", LOGO);
-    println!("Saving data to: {}", config.persist_path.bold());
+
+    if let Some(persist_path) = &config.persist_path {
+        println!("Persisting data to: {}", persist_path.bold());
+    } else {
+        println!(
+            "Running in ephemeral mode ({})",
+            "no persistence".red().bold()
+        );
+    }
+
     println!(
         "Connect to Chroma at: {}",
         format!("http://localhost:{}", config.port)
