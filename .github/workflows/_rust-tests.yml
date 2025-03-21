@@ -50,11 +50,16 @@ jobs:
         uses: ./.github/actions/export-tilt-logs
         with:
           artifact-name: "rust-integration-test"
-
   test-benches:
     strategy:
       matrix:
         platform: [depot-ubuntu-22.04-16]
+        bench-command:
+          - "--bench blockfile_writer -- --sample-size 10"
+          - "--bench dataset_utilities --bench distance_metrics"
+          - "--bench full_text --bench load"
+          - "--bench filter --bench get --bench limit"
+          - "--bench query --bench spann"
     runs-on: ${{ matrix.platform }}
     env:
       RUST_BACKTRACE: 1
@@ -66,9 +71,8 @@ jobs:
         uses: ./.github/actions/rust
         with:
           github-token: ${{ github.token }}
-      - name: Test compile
-        # run: cargo bench --no-run
-        run: cargo bench
+      - name: Run benchmark
+        run: cargo bench ${{ matrix.bench-command }}
 
   can-build-release:
     runs-on: depot-ubuntu-22.04-16
