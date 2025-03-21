@@ -72,6 +72,25 @@ pub struct Collection {
     pub last_compaction_time_secs: u64,
 }
 
+impl Default for Collection {
+    fn default() -> Self {
+        Self {
+            collection_id: CollectionUuid::new(),
+            name: "".to_string(),
+            configuration_json: Value::Null,
+            metadata: None,
+            dimension: None,
+            tenant: "".to_string(),
+            database: "".to_string(),
+            log_position: 0,
+            version: 0,
+            total_records_post_compaction: 0,
+            size_bytes_post_compaction: 0,
+            last_compaction_time_secs: 0,
+        }
+    }
+}
+
 #[cfg(feature = "pyo3")]
 #[pyo3::pymethods]
 impl Collection {

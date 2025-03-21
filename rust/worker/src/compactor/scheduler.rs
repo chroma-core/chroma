@@ -290,7 +290,6 @@ mod tests {
     use chroma_memberlist::memberlist_provider::Member;
     use chroma_sysdb::TestSysDb;
     use chroma_types::{Collection, CollectionUuid, LogRecord, Operation, OperationRecord};
-    use serde_json::Value;
 
     #[tokio::test]
     async fn test_scheduler() {
@@ -300,8 +299,18 @@ mod tests {
             _ => panic!("Invalid log type"),
         };
 
-        let collection_uuid_1 =
-            CollectionUuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
+        let tenant_1 = "tenant_1".to_string();
+        let collection_1 = Collection {
+            collection_id: CollectionUuid::from_str("00000000-0000-0000-0000-000000000001")
+                .unwrap(),
+            name: "collection_1".to_string(),
+            dimension: Some(1),
+            tenant: tenant_1.clone(),
+            database: "database_1".to_string(),
+            ..Default::default()
+        };
+        let collection_uuid_1 = collection_1.collection_id;
+
         in_memory_log.add_log(
             collection_uuid_1,
             InternalLogRecord {
@@ -322,8 +331,18 @@ mod tests {
             },
         );
 
-        let collection_uuid_2 =
-            CollectionUuid::from_str("00000000-0000-0000-0000-000000000002").unwrap();
+        let tenant_2 = "tenant_2".to_string();
+        let collection_2 = Collection {
+            collection_id: CollectionUuid::from_str("00000000-0000-0000-0000-000000000002")
+                .unwrap(),
+            name: "collection_2".to_string(),
+            dimension: Some(1),
+            tenant: tenant_2.clone(),
+            database: "database_2".to_string(),
+            ..Default::default()
+        };
+        let collection_uuid_2 = collection_2.collection_id;
+
         in_memory_log.add_log(
             collection_uuid_2,
             InternalLogRecord {
@@ -346,37 +365,6 @@ mod tests {
 
         let mut sysdb = SysDb::Test(TestSysDb::new());
 
-        let tenant_1 = "tenant_1".to_string();
-        let collection_1 = Collection {
-            collection_id: collection_uuid_1,
-            name: "collection_1".to_string(),
-            configuration_json: Value::Null,
-            metadata: None,
-            dimension: Some(1),
-            tenant: tenant_1.clone(),
-            database: "database_1".to_string(),
-            log_position: 0,
-            version: 0,
-            total_records_post_compaction: 0,
-            size_bytes_post_compaction: 0,
-            last_compaction_time_secs: 0,
-        };
-
-        let tenant_2 = "tenant_2".to_string();
-        let collection_2 = Collection {
-            collection_id: collection_uuid_2,
-            name: "collection_2".to_string(),
-            configuration_json: Value::Null,
-            metadata: None,
-            dimension: Some(1),
-            tenant: tenant_2.clone(),
-            database: "database_2".to_string(),
-            log_position: 0,
-            version: 0,
-            total_records_post_compaction: 0,
-            size_bytes_post_compaction: 0,
-            last_compaction_time_secs: 0,
-        };
         match sysdb {
             SysDb::Test(ref mut sysdb) => {
                 sysdb.add_collection(collection_1);
@@ -449,7 +437,7 @@ mod tests {
         // Set disable list.
         std::env::set_var(
             "CHROMA_COMPACTION_SERVICE__COMPACTOR__DISABLED_COLLECTIONS",
-            "[\"00000000-0000-0000-0000-000000000001\"]",
+            format!("[\"{}\"]", collection_uuid_1.0),
         );
         scheduler.schedule().await;
         let jobs = scheduler.get_jobs();
@@ -463,11 +451,11 @@ mod tests {
         // Even . should work.
         std::env::set_var(
             "CHROMA_COMPACTION_SERVICE.COMPACTOR.DISABLED_COLLECTIONS",
-            "[\"00000000-0000-0000-0000-000000000002\"]",
+            format!("[\"{}\"]", collection_uuid_2.0),
         );
         std::env::set_var(
             "CHROMA_COMPACTION_SERVICE.IRRELEVANT",
-            "[\"00000000-0000-0000-0000-000000000001\"]",
+            format!("[\"{}\"]", collection_uuid_1.0),
         );
         scheduler.schedule().await;
         let jobs = scheduler.get_jobs();
@@ -508,8 +496,17 @@ mod tests {
             _ => panic!("Invalid log type"),
         };
 
-        let collection_uuid_1 =
-            CollectionUuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
+        let tenant_1 = "tenant_1".to_string();
+        let collection_1 = Collection {
+            name: "collection_1".to_string(),
+            dimension: Some(1),
+            tenant: tenant_1.clone(),
+            database: "database_1".to_string(),
+            ..Default::default()
+        };
+
+        let collection_uuid_1 = collection_1.collection_id;
+
         in_memory_log.add_log(
             collection_uuid_1,
             InternalLogRecord {
@@ -589,22 +586,6 @@ mod tests {
         let _ = log.update_collection_log_offset(collection_uuid_1, 2).await;
 
         let mut sysdb = SysDb::Test(TestSysDb::new());
-
-        let tenant_1 = "tenant_1".to_string();
-        let collection_1 = Collection {
-            collection_id: collection_uuid_1,
-            name: "collection_1".to_string(),
-            configuration_json: Value::Null,
-            metadata: None,
-            dimension: Some(1),
-            tenant: tenant_1.clone(),
-            database: "database_1".to_string(),
-            log_position: 0,
-            version: 0,
-            total_records_post_compaction: 0,
-            size_bytes_post_compaction: 0,
-            last_compaction_time_secs: 0,
-        };
 
         match sysdb {
             SysDb::Test(ref mut sysdb) => {
