@@ -43,7 +43,6 @@ enum Transition {
     AddVersion {
         id: String,
         segment_block_ids: Vec<SegmentBlockIdInfo>,
-        version_block_ids: Vec<Uuid>,
         to_remove_block_ids: Vec<Uuid>,
         creation_time_secs: u64,
     },
@@ -62,8 +61,6 @@ type VersionToCreationTimeMap = HashMap<u64, u64>;
 struct RefState {
     // Keep track of collections.
     collections: HashSet<String>,
-    // Keep track of version files for each collection.
-    coll_to_files_map: HashMap<String, VersionToFilesMap>,
     // Keep track of creation time for each version.
     coll_to_creation_time_map: HashMap<String, VersionToCreationTimeMap>,
     // Keep track of dropped block ids for each version.
@@ -74,7 +71,7 @@ struct RefState {
     highest_registered_time: u64,
     // Keep track of the files that were deleted in the last cleanup.
     last_cleanup_files: Vec<String>,
-    coll_to_segment_ids: HashMap<String, Vec<Segment>>,
+    // Keep track of the segment and corresponding block ids for each version.
     coll_to_segment_block_ids_map: HashMap<String, VersionToSegmentBlockIdsMap>,
 }
 
@@ -82,14 +79,12 @@ impl RefState {
     fn _new(min_versions_to_keep: u64) -> Self {
         Self {
             collections: HashSet::new(),
-            coll_to_files_map: HashMap::new(),
             coll_to_segment_block_ids_map: HashMap::new(),
             coll_to_creation_time_map: HashMap::new(),
             coll_to_dropped_block_ids_map: HashMap::new(),
             min_versions_to_keep,
             highest_registered_time: 100,
             last_cleanup_files: Vec::new(),
-            coll_to_segment_ids: HashMap::new(),
         }
     }
 
@@ -107,14 +102,6 @@ impl RefState {
             .unwrap_or_default()
     }
 
-    // pub fn get_block_ids_for_version(&self, collection_id: String, version: u64) -> Vec<Uuid> {
-    //     self.coll_to_files_map
-    //         .get(&collection_id)
-    //         .and_then(|versions| versions.get(&version))
-    //         .cloned()
-    //         .unwrap_or_default()  // Return empty Vec if collection or version doesn't exist
-    // }
-
     pub fn get_current_version(&self, collection_id: String) -> u64 {
         self.coll_to_creation_time_map
             .get(&collection_id)
@@ -130,7 +117,6 @@ impl RefState {
         version: u64,
         creation_time_secs: u64,
         segment_block_ids: Vec<SegmentBlockIdInfo>,
-        block_ids: Vec<Uuid>,
         dropped_block_ids: Vec<Uuid>,
     ) -> Self {
         // Only proceed if collection exists
@@ -139,7 +125,6 @@ impl RefState {
         }
 
         // Initialize maps for new collections if they don't exist
-        self.coll_to_files_map.entry(id.clone()).or_default();
         self.coll_to_creation_time_map
             .entry(id.clone())
             .or_default();
@@ -155,10 +140,6 @@ impl RefState {
         self.highest_registered_time = creation_time_secs;
 
         // Update the mappings
-        self.coll_to_files_map
-            .get_mut(&id)
-            .unwrap()
-            .insert(version, block_ids);
         self.coll_to_creation_time_map
             .get_mut(&id)
             .unwrap()
@@ -186,7 +167,6 @@ impl RefState {
         }
         self.collections.insert(id.clone());
         // Initialize empty maps for the new collection
-        self.coll_to_files_map.insert(id.clone(), HashMap::new());
         self.coll_to_dropped_block_ids_map
             .insert(id.clone(), HashMap::new());
         
@@ -201,10 +181,6 @@ impl RefState {
         }).collect();
         self.coll_to_segment_block_ids_map.get_mut(&id).unwrap().insert(0, segment_block_ids);
 
-        // NOT NEEDED anymore.
-        // TODO(rohitcp): Remove this later.
-        self.coll_to_segment_ids.insert(id.clone(), segments);
-        
         // Insert the initial version to creation time mapping.
         // This is used to find current version for the collection, and the creation time for the initial version.
         let mut initial_version_to_creation_time = HashMap::new();
@@ -304,14 +280,12 @@ impl ReferenceStateMachine for RefState {
     fn init_state() -> BoxedStrategy<Self> {
         Just(Self {
             collections: HashSet::new(),
-            coll_to_files_map: HashMap::new(),
             coll_to_creation_time_map: HashMap::new(),
             coll_to_dropped_block_ids_map: HashMap::new(),
             coll_to_segment_block_ids_map: HashMap::new(),
             min_versions_to_keep: 3,
             highest_registered_time: 100,
             last_cleanup_files: Vec::new(),
-            coll_to_segment_ids: HashMap::new(),
         })
         .boxed()
     }
@@ -350,11 +324,6 @@ impl ReferenceStateMachine for RefState {
                         }
                     }),
                 4 => prop::sample::select(existing_collection_ids.clone()).prop_map(move |id| {
-                    // let (block_ids_new_version, block_ids_dropped) =
-                    //     blocks_ids_for_next_version(state_clone.get_block_ids_for_version(
-                    //         id.clone(),
-                    //         state_clone.get_current_version(id.clone()),
-                    //     ));
                     let segment_block_ids = state_clone.get_segment_block_ids_for_version(
                         id.clone(),
                         state_clone.get_current_version(id.clone()),
@@ -367,7 +336,6 @@ impl ReferenceStateMachine for RefState {
                     let (segment_block_ids_new_version, dropped_block_ids) = segment_block_ids_for_next_version(segment_block_ids);
                     Transition::AddVersion {
                         id: id.clone(),
-                        version_block_ids: Vec::new(), // block_ids_new_version,
                         to_remove_block_ids: dropped_block_ids,
                         creation_time_secs: state_clone.highest_registered_time + 1,
                         segment_block_ids: segment_block_ids_new_version,
@@ -388,7 +356,6 @@ impl ReferenceStateMachine for RefState {
         match transition {
             Transition::AddVersion {
                 id,
-                version_block_ids: _,
                 to_remove_block_ids: _,
                 creation_time_secs: _,
                 segment_block_ids: _,
@@ -422,7 +389,6 @@ impl ReferenceStateMachine for RefState {
         match transition {
             Transition::AddVersion {
                 id,
-                version_block_ids,
                 to_remove_block_ids,
                 creation_time_secs,
                 segment_block_ids,
@@ -431,7 +397,6 @@ impl ReferenceStateMachine for RefState {
                 state.clone().get_current_version(id.clone()) + 1,
                 *creation_time_secs,
                 segment_block_ids.clone(),
-                version_block_ids.clone(),
                 to_remove_block_ids.clone(),
             ),
             Transition::CleanupVersions {
@@ -498,7 +463,6 @@ impl GcTest {
         _version: u64,
         _creation_time_secs: u64,
         segment_block_ids: Vec<SegmentBlockIdInfo>,
-        version_block_ids: Vec<Uuid>,
     ) -> Self {
         // 1. Get version file name and current version from sysdb
         let collection_id = CollectionUuid::from_str(&id).unwrap();
@@ -517,7 +481,6 @@ impl GcTest {
         let _version_file_name = collection.version_file_name.clone();
 
         // ----- Prepare to call flush compaction.  ---------
-        // Use half of version_block_ids as the block ids for the new version.
         // Create the new record segment.
         let record_segment_info = segment_block_ids.iter()
             .find(|sbi| sbi.segment_type == SegmentType::BlockfileRecord)
@@ -724,7 +687,6 @@ impl StateMachineTest for GcTest {
         let state = match transition {
             Transition::AddVersion {
                 id,
-                version_block_ids,
                 to_remove_block_ids: _,
                 creation_time_secs,
                 segment_block_ids,
@@ -733,7 +695,6 @@ impl StateMachineTest for GcTest {
                 ref_state.get_current_version(id.clone()) + 1,
                 creation_time_secs,
                 segment_block_ids.clone(),
-                version_block_ids.clone(),
             ),
             Transition::CreateCollection {
                 id,
