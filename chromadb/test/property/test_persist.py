@@ -535,7 +535,7 @@ def test_repro(caplog: pytest.LogCaptureFixture, settings: Settings) -> None:
         state.delete_by_ids(ids=[embedding_ids_7, embedding_ids_0, embedding_ids_5])
         # DEBUG - DELETES EmdNP, 3k0Y, 4AWGd3
         # DEBUG - EXPECT gcJ4z, D, RJYHz, HvqDh, 3IL, MC1pDB to be in the index
-        ids = state.collection.get()['ids']
+        ids = state.collection.get()["ids"]
         assert len(ids) == 6
         assert "gcJ4z" in ids
         assert "D" in ids
@@ -613,7 +613,7 @@ def test_repro(caplog: pytest.LogCaptureFixture, settings: Settings) -> None:
                 "documents": None,
             }
         )
-         # DEBUG - EXPECT gcJ4z, D, RJYHz, HvqDh, 3IL, MC1pDB, U, RSeiQXYKIZxI, lN3AVOf-DlC to be in the index
+        # DEBUG - EXPECT gcJ4z, D, RJYHz, HvqDh, 3IL, MC1pDB, U, RSeiQXYKIZxI, lN3AVOf-DlC to be in the index
         state.ann_accuracy()
         # recall: 1.0, missing 0 out of 9, accuracy threshold 1e-06
         state.count()
@@ -638,7 +638,7 @@ def test_repro(caplog: pytest.LogCaptureFixture, settings: Settings) -> None:
             ]
         )
         # DEBUG - EXPECT gcJ4z, U, lN3AVOf-DlC to be in the index
-        ids = state.collection.get()['ids']
+        ids = state.collection.get()["ids"]
         assert len(ids) == 3
         assert "gcJ4z" in ids
         assert "U" in ids

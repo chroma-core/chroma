@@ -268,12 +268,16 @@ impl LocalHnswSegmentReader {
             .iter()
             .map(|oid| *oid as usize)
             .collect::<Vec<_>>();
-        println!("RUST Allowed ids: {:?}", allowed_ids);
         let (offset_ids, distances) = guard
             .index
             .query(&embedding, k as usize, allowed_ids.as_slice(), &[])
             .map_err(|_| LocalHnswSegmentReaderError::QueryError)?;
         println!("RUST Offset ids: {:?}", offset_ids);
+        println!(
+            "RUST index len with deleted {:?}, without deleted {:?}",
+            guard.index.len_with_deleted(),
+            guard.index.len()
+        );
         Ok(offset_ids
             .into_iter()
             .zip(distances)
