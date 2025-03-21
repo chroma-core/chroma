@@ -271,12 +271,18 @@ impl LocalHnswSegmentReader {
         let guard = self.index.inner.read().await;
         let len_with_deleted = guard.index.len_with_deleted();
         let actual_len = guard.index.len();
+
+        // Bail if the index is empty
+        if actual_len == 0 {
+            return Ok(Vec::new());
+        }
+
         let delete_percentage = (len_with_deleted - actual_len) as f32 / len_with_deleted as f32;
 
         // If the index is small and the delete percentage is high, its quite likely that the index is
         // degraded, so we brute force the search
+        // Otherwise search the index normally
         if delete_percentage > 0.2 && actual_len < 100 {
-            println!("Index is degraded");
             match guard.index.get_all_ids() {
                 Ok((valid_ids, _deleted_ids)) => {
                     let mut max_heap = BinaryHeap::new();
@@ -308,6 +314,8 @@ impl LocalHnswSegmentReader {
                                         measure: curr_distance,
                                     });
                                 } else {
+                                    // SAFETY(hammadb): We are sure that the heap has at least one element
+                                    // because we insert until we have k elements.
                                     let top = max_heap.peek().unwrap();
                                     if top.measure < curr_distance {
                                         max_heap.pop();
@@ -323,7 +331,6 @@ impl LocalHnswSegmentReader {
                             }
                         }
                     }
-                    println!("Record distances: {:?}", max_heap.as_slice());
                     Ok(max_heap.into_sorted_vec())
                 }
                 Err(_) => Err(LocalHnswSegmentReaderError::QueryError),
