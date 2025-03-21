@@ -39,6 +39,10 @@ from chromadb.api.async_client import (
 from chromadb.utils.async_to_sync import async_class_to_sync
 import logging
 import sys
+import numpy as np
+from unittest.mock import MagicMock
+from pytest import MonkeyPatch
+from chromadb.api.types import Documents, Embeddings
 
 logger = logging.getLogger(__name__)
 
@@ -997,72 +1001,59 @@ def log_tests(request: pytest.FixtureRequest) -> Generator[None, None, None]:
     logger.debug(f"Finished test: {test_name}")
 
 
-@pytest.fixture(scope="session")
-def embedding_function_dependencies() -> Generator[None, None, None]:
-    """
-    Fixture to install and uninstall dependencies required for embedding function tests.
-    This fixture has session scope to ensure dependencies are installed only once
-    for the entire test session and cleaned up afterward.
-    """
-    # List of packages to install
-    packages = [
-        "openai",
-        "cohere",
-        "sentence_transformers",
-        "google-generativeai",
-        "ollama",
-        "pillow",
-        "voyageai",
-        "open-clip-torch",
-        "text2vec",
-        "InstructorEmbedding",
-    ]
+@pytest.fixture
+def mock_embeddings() -> Callable[[Documents], Embeddings]:
+    """Return mock embeddings for testing"""
 
-    # Install packages
-    logger.info("Installing embedding function dependencies...")
+    def _mock_embeddings(input: Documents) -> Embeddings:
+        return [np.array([0.1, 0.2, 0.3], dtype=np.float32) for _ in input]
 
-    executable_command = [sys.executable, "-m", "pip", "install"] + packages
-    try:
-        subprocess.check_call(executable_command)
-    except subprocess.CalledProcessError as e:
-        logger.warning(f"Failed to install embedding function dependencies: {e}")
-
-    # Yield control back to the tests
-    yield
-
-    # Uninstall packages after tests complete
-    logger.info("Uninstalling embedding function dependencies...")
-    executable_command = [sys.executable, "-m", "pip", "uninstall", "-y"] + packages
-    try:
-        subprocess.check_call(executable_command)
-    except subprocess.CalledProcessError as e:
-        logger.warning(f"Failed to uninstall embedding function dependencies: {e}")
+    return _mock_embeddings
 
 
-@pytest.fixture(scope="session")
-def openai_dependency() -> Generator[None, None, None]:
-    """
-    Fixture to install and uninstall only the OpenAI dependency.
-    This is a lighter-weight alternative to embedding_function_dependencies
-    when only OpenAI functionality is being tested.
-    """
-    # Install OpenAI package
-    logger.info("Installing OpenAI dependency...")
-    try:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "openai"])
-        logger.info("Installed openai")
-    except subprocess.CalledProcessError as e:
-        logger.warning(f"Failed to install openai: {e}")
+@pytest.fixture
+def mock_common_deps(monkeypatch: MonkeyPatch) -> MonkeyPatch:
+    """Mock common dependencies"""
+    # Create mock modules
+    mock_modules = {
+        "PIL": MagicMock(),
+        "torch": MagicMock(),
+        "openai": MagicMock(),
+        "cohere": MagicMock(),
+        "sentence_transformers": MagicMock(),
+        "ollama": MagicMock(),
+        "InstructorEmbedding": MagicMock(),
+        "voyageai": MagicMock(),
+        "text2vec": MagicMock(),
+        "open_clip": MagicMock(),
+        "boto3": MagicMock(),
+    }
 
-    # Yield control back to the tests
-    yield
+    # Mock all modules at once using monkeypatch.setitem
+    monkeypatch.setattr(sys, "modules", dict(sys.modules, **mock_modules))
 
-    # Uninstall OpenAI package after tests complete
-    logger.info("Uninstalling OpenAI dependency...")
-    try:
-        subprocess.check_call(
-            [sys.executable, "-m", "pip", "uninstall", "-y", "openai"]
-        )
-        logger.info("Uninstalled openai")
-    except subprocess.CalledProcessError as e:
-        logger.warning(f"Failed to uninstall openai: {e}")
+    # Mock submodules and attributes
+    mock_attributes = {
+        "PIL.Image": MagicMock(),
+        "sentence_transformers.SentenceTransformer": MagicMock(),
+        "ollama.Client": MagicMock(),
+        "InstructorEmbedding.INSTRUCTOR": MagicMock(),
+        "voyageai.Client": MagicMock(),
+        "text2vec.SentenceModel": MagicMock(),
+    }
+
+    # Setup OpenCLIP mock with specific behavior
+    mock_model = MagicMock()
+    mock_model.encode_text.return_value = np.array([[0.1, 0.2, 0.3]])
+    mock_model.encode_image.return_value = np.array([[0.1, 0.2, 0.3]])
+    mock_modules["open_clip"].create_model_and_transforms.return_value = (
+        mock_model,
+        MagicMock(),
+        mock_model,
+    )
+
+    # Mock all attributes
+    for path, mock in mock_attributes.items():
+        monkeypatch.setattr(path, mock, raising=False)
+
+    return monkeypatch
