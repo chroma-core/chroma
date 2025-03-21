@@ -276,6 +276,7 @@ impl LocalHnswSegmentReader {
         // If the index is small and the delete percentage is high, its quite likely that the index is
         // degraded, so we brute force the search
         if delete_percentage > 0.2 && actual_len < 100 {
+            println!("Index is degraded");
             match guard.index.get_all_ids() {
                 Ok((valid_ids, _deleted_ids)) => {
                     let mut max_heap = BinaryHeap::new();
@@ -291,6 +292,12 @@ impl LocalHnswSegmentReader {
                         let curr_embedding = guard.index.get(*curr_id);
                         match curr_embedding {
                             Ok(Some(curr_embedding)) => {
+                                let curr_embedding = match guard.index.distance_function {
+                                    chroma_distance::DistanceFunction::Cosine => {
+                                        chroma_distance::normalize(&curr_embedding)
+                                    }
+                                    _ => curr_embedding,
+                                };
                                 let curr_distance = guard
                                     .index
                                     .distance_function
@@ -316,6 +323,7 @@ impl LocalHnswSegmentReader {
                             }
                         }
                     }
+                    println!("Record distances: {:?}", max_heap.as_slice());
                     Ok(max_heap.into_sorted_vec())
                 }
                 Err(_) => Err(LocalHnswSegmentReaderError::QueryError),
