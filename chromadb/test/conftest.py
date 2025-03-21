@@ -38,7 +38,6 @@ from chromadb.api.async_client import (
 )
 from chromadb.utils.async_to_sync import async_class_to_sync
 import logging
-import sys
 
 logger = logging.getLogger(__name__)
 
@@ -995,74 +994,3 @@ def log_tests(request: pytest.FixtureRequest) -> Generator[None, None, None]:
     yield
 
     logger.debug(f"Finished test: {test_name}")
-
-
-@pytest.fixture(scope="session")
-def embedding_function_dependencies() -> Generator[None, None, None]:
-    """
-    Fixture to install and uninstall dependencies required for embedding function tests.
-    This fixture has session scope to ensure dependencies are installed only once
-    for the entire test session and cleaned up afterward.
-    """
-    # List of packages to install
-    packages = [
-        "openai",
-        "cohere",
-        "sentence_transformers",
-        "google-generativeai",
-        "ollama",
-        "pillow",
-        "voyageai",
-        "open-clip-torch",
-        "text2vec",
-        "InstructorEmbedding",
-    ]
-
-    # Install packages
-    logger.info("Installing embedding function dependencies...")
-
-    executable_command = [sys.executable, "-m", "pip", "install"] + packages
-    try:
-        subprocess.check_call(executable_command)
-    except subprocess.CalledProcessError as e:
-        logger.warning(f"Failed to install embedding function dependencies: {e}")
-
-    # Yield control back to the tests
-    yield
-
-    # Uninstall packages after tests complete
-    logger.info("Uninstalling embedding function dependencies...")
-    executable_command = [sys.executable, "-m", "pip", "uninstall", "-y"] + packages
-    try:
-        subprocess.check_call(executable_command)
-    except subprocess.CalledProcessError as e:
-        logger.warning(f"Failed to uninstall embedding function dependencies: {e}")
-
-
-@pytest.fixture(scope="session")
-def openai_dependency() -> Generator[None, None, None]:
-    """
-    Fixture to install and uninstall only the OpenAI dependency.
-    This is a lighter-weight alternative to embedding_function_dependencies
-    when only OpenAI functionality is being tested.
-    """
-    # Install OpenAI package
-    logger.info("Installing OpenAI dependency...")
-    try:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "openai"])
-        logger.info("Installed openai")
-    except subprocess.CalledProcessError as e:
-        logger.warning(f"Failed to install openai: {e}")
-
-    # Yield control back to the tests
-    yield
-
-    # Uninstall OpenAI package after tests complete
-    logger.info("Uninstalling OpenAI dependency...")
-    try:
-        subprocess.check_call(
-            [sys.executable, "-m", "pip", "uninstall", "-y", "openai"]
-        )
-        logger.info("Uninstalled openai")
-    except subprocess.CalledProcessError as e:
-        logger.warning(f"Failed to uninstall openai: {e}")
