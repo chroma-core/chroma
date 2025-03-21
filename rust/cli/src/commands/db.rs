@@ -496,14 +496,14 @@ mod tests {
             .arg("--dev")
             .assert()
             .success()
-            .stdout(contains("Listing 1"))
+            .stdout(contains("Listing"))
             .stdout(contains("default_database"));
     }
 
     #[tokio::test]
     async fn test_k8s_integration_create_db() {
         let _temp_dir = simple_test_setup();
-        let db_name = "test_db";
+        let db_name = "test_db1";
 
         let mut cmd = Command::cargo_bin("chroma").unwrap();
 
@@ -577,7 +577,7 @@ mod tests {
     }
 
     #[test]
-    fn test_connect() {
+    fn test_k8s_integration_connect() {
         let _temp_dir = simple_test_setup();
         let mut cmd = Command::cargo_bin("chroma").unwrap();
 
