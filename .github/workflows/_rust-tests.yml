@@ -56,8 +56,7 @@ jobs:
         platform: [depot-ubuntu-22.04-16]
         bench-command:
           - "--bench blockfile_writer -- --sample-size 10"
-          - "--bench dataset_utilities --bench distance_metrics"
-          - "--bench full_text --bench load"
+          - "--bench distance_metrics"
           - "--bench filter --bench get --bench limit"
           - "--bench query --bench spann"
     runs-on: ${{ matrix.platform }}

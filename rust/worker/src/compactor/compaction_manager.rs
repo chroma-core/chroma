@@ -124,6 +124,7 @@ impl CompactionManager {
 
         match self.system {
             Some(ref system) => {
+                tracing::trace!("[COMPACTION-INFO] Jon: {compaction_job:?}");
                 let orchestrator = CompactOrchestrator::new(
                     compaction_job.clone(),
                     compaction_job.collection_id,
