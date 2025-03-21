@@ -1,14 +1,16 @@
-use crate::utils::{copy_to_clipboard, get_address_book, get_current_profile, CliError, Profile, UtilsError};
+use crate::client::ChromaClient;
+use crate::utils::{
+    copy_to_clipboard, get_address_book, get_current_profile, CliError, Profile, UtilsError,
+};
 use chroma_types::Database;
 use clap::{Args, Subcommand, ValueEnum};
 use colored::Colorize;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{Input, Select};
 use std::fmt;
-use thiserror::Error;
-use crate::client::ChromaClient;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
+use thiserror::Error;
 
 const LIST_DB_SELECTION_LIMIT: usize = 5;
 
@@ -23,7 +25,7 @@ pub enum DbError {
     #[error("DB {0} not found")]
     DbNotFound(String),
     #[error("Failed to get runtime for DB commands")]
-    RuntimeError
+    RuntimeError,
 }
 
 #[derive(Debug, Clone, ValueEnum, EnumIter)]
@@ -34,8 +36,14 @@ pub enum Language {
 }
 
 impl Language {
-    fn get_connection(&self, url: String, tenant_id: String, db_name: String, api_key: String) -> String {
-        match self { 
+    fn get_connection(
+        &self,
+        url: String,
+        tenant_id: String,
+        db_name: String,
+        api_key: String,
+    ) -> String {
+        match self {
             Language::Python => get_python_connection(url, tenant_id, db_name, api_key),
             Language::JavaScript => get_js_connection(url, tenant_id, db_name, api_key),
             Language::TypeScript => get_js_connection(url, tenant_id, db_name, api_key),
@@ -63,7 +71,7 @@ pub struct DbArgs {
 pub struct CreateArgs {
     #[clap(flatten)]
     db_args: DbArgs,
-    #[clap(long, help = "The name of the DB to create")]
+    #[clap(index = 1, help = "The name of the DB to create")]
     name: Option<String>,
 }
 
@@ -71,17 +79,22 @@ pub struct CreateArgs {
 pub struct DeleteArgs {
     #[clap(flatten)]
     db_args: DbArgs,
-    #[clap(long, help = "The name of the DB to delete")]
+    #[clap(index = 1, help = "The name of the DB to delete")]
     name: Option<String>,
+    #[clap(long, hide = true, default_value_t = false, help = "Delete without confirmation")]
+    force: bool,
 }
 
 #[derive(Args, Debug)]
 pub struct ConnectArgs {
     #[clap(flatten)]
     db_args: DbArgs,
-    #[clap(long, help = "The name of the DB to get a connection snippet for")]
+    #[clap(index = 1, help = "The name of the DB to get a connection snippet for")]
     name: Option<String>,
-    #[clap(long, help = "The programming language to use for the connection snippet")]
+    #[clap(
+        long,
+        help = "The programming language to use for the connection snippet"
+    )]
     language: Option<Language>,
 }
 
@@ -137,15 +150,33 @@ fn select_language_message() -> String {
 }
 
 fn create_db_already_exists_message(name: &str) -> String {
-    format!("{} {} {}\nIf you want to delete it, use: {} {}", "DB with name".red(), name.red(), "already exists!".red(), "chroma db delete".yellow(), name.yellow())
+    format!(
+        "{} {} {}\nIf you want to delete it, use: {} {}",
+        "DB with name".red(),
+        name.red(),
+        "already exists!".red(),
+        "chroma db delete".yellow(),
+        name.yellow()
+    )
 }
 
 fn creating_db_message(name: &str) -> String {
-    format!("\n{} {}...", "Creating database".bold().blue(), name.bold().blue())
+    format!(
+        "\n{} {}...",
+        "Creating database".bold().blue(),
+        name.bold().blue()
+    )
 }
 
 fn create_db_success_message(name: &str) -> String {
-    format!("{} {} {}\nTo get a connection string, run:\n   {} {}", "\nDatabase".green(), name.green(), "created successfully!".green(), "chroma db connect".yellow(), name.yellow())
+    format!(
+        "{} {} {}\nTo get a connection string, run:\n   {} {}",
+        "\nDatabase".green(),
+        name.green(),
+        "created successfully!".green(),
+        "chroma db connect".yellow(),
+        name.yellow()
+    )
 }
 
 fn db_delete_confirm_message() -> String {
@@ -156,15 +187,20 @@ fn db_delete_success_message(name: &str) -> String {
     format!("\nDeleted DB {} successfully!", name)
 }
 
-fn list_dbs_message(dbs: &Vec<Database>) -> String {
-    format!("{} {} {}",
-            "Listing".blue().bold(),
-            dbs.len().to_string().blue().bold(),
-            "databases".blue().bold())
+fn list_dbs_message(dbs: &[Database]) -> String {
+    format!(
+        "{} {} {}",
+        "Listing".blue().bold(),
+        dbs.len().to_string().blue().bold(),
+        "databases".blue().bold()
+    )
 }
 
 fn db_delete_cancelled() -> String {
-    format!("\n{}", "DB deletion cancelled. Confirmation input did not match DB name to delete".yellow())
+    format!(
+        "\n{}",
+        "DB deletion cancelled. Confirmation input did not match DB name to delete".yellow()
+    )
 }
 
 fn get_python_connection(
@@ -174,7 +210,7 @@ fn get_python_connection(
     api_key: String,
 ) -> String {
     format!(
-        "
+        "Python connection snippet:
     import chromadb
     client = chromadb.HttpClient(
         ssl=True,
@@ -189,14 +225,9 @@ fn get_python_connection(
     )
 }
 
-fn get_js_connection(
-    url: String,
-    tenant_id: String,
-    db_name: String,
-    api_key: String,
-) -> String {
+fn get_js_connection(url: String, tenant_id: String, db_name: String, api_key: String) -> String {
     format!(
-        "
+        "Javascript/Typescript connection snippet:
     import {{ ChromaClient }} from 'chromadb';
     const client = new ChromaClient({{
         path: '{}',
@@ -236,7 +267,7 @@ fn get_chroma_client(profile: Option<&Profile>, dev: bool) -> ChromaClient {
     let address_book = get_address_book(dev);
     match profile {
         Some(profile) => ChromaClient::from_profile(profile, address_book.frontend_url),
-        None => ChromaClient::local_default()
+        None => ChromaClient::local_default(),
     }
 }
 
@@ -245,11 +276,14 @@ fn select_db(dbs: &[Database]) -> Result<String, CliError> {
     let selection = Select::with_theme(&ColorfulTheme::default())
         .items(&db_names)
         .default(0)
-        .interact().map_err(|_| UtilsError::UserInputFailed)?;
-    Ok(db_names[selection].clone())
+        .interact()
+        .map_err(|_| UtilsError::UserInputFailed)?;
+    let name = db_names[selection].clone();
+    println!("{}\n", name);
+    Ok(name)
 }
 
-fn get_db_name(dbs: &Vec<Database>, prompt: &str) -> Result<String, CliError> {
+fn get_db_name(dbs: &[Database], prompt: &str) -> Result<String, CliError> {
     if dbs.is_empty() {
         return Err(CliError::Db(DbError::NoDBs));
     }
@@ -265,15 +299,17 @@ fn get_db_name(dbs: &Vec<Database>, prompt: &str) -> Result<String, CliError> {
 
 fn select_language() -> Result<Language, CliError> {
     let languages: Vec<Language> = Language::iter().collect();
-    let options: Vec<String> = languages.iter()
+    let options: Vec<String> = languages
+        .iter()
         .map(|language| format!("{} {}", ">".yellow(), capitalize(&language.to_string())))
         .collect();
-    
+
     println!("{}", select_language_message().blue().bold());
     let selection = Select::with_theme(&ColorfulTheme::default())
         .items(&options)
         .default(0)
-        .interact().map_err(|_| CliError::Utils(UtilsError::UserInputFailed))?;
+        .interact()
+        .map_err(|_| CliError::Utils(UtilsError::UserInputFailed))?;
 
     let language = languages[selection].clone();
     println!("{}", language.to_string().green());
@@ -284,20 +320,18 @@ fn select_language() -> Result<Language, CliError> {
 fn confirm_db_deletion(name: &str) -> Result<bool, CliError> {
     println!("{}", db_delete_confirm_message());
     let confirm: String = Input::with_theme(&ColorfulTheme::default())
-        .interact_text().map_err(|_| UtilsError::UserInputFailed)?;
+        .interact_text()
+        .map_err(|_| UtilsError::UserInputFailed)?;
     Ok(confirm.eq(name))
 }
 
-pub async fn connect(
-    args: ConnectArgs,
-    current_profile: Profile,
-) -> Result<(), CliError> {
+pub async fn connect(args: ConnectArgs, current_profile: Profile) -> Result<(), CliError> {
     let chroma_client = get_chroma_client(Some(&current_profile), args.db_args.dev);
     let dbs = chroma_client.list_databases().await?;
 
     let name = match args.name {
         Some(name) => validate_db_name(&name),
-        None => get_db_name(&dbs, &connect_db_name_prompt())
+        None => get_db_name(&dbs, &connect_db_name_prompt()),
     }?;
 
     if !dbs.iter().any(|db| db.name == name) {
@@ -308,29 +342,30 @@ pub async fn connect(
         Some(language) => language,
         None => select_language()?,
     };
-    
-    let connection_string = language.get_connection(chroma_client.api_url, current_profile.tenant_id, name, chroma_client.api_key.unwrap_or("".to_string()));
+
+    let connection_string = language.get_connection(
+        chroma_client.api_url,
+        current_profile.tenant_id,
+        name,
+        chroma_client.api_key.unwrap_or("".to_string()),
+    );
     println!("{}", connection_string);
-    
+
     copy_to_clipboard(&connection_string)?;
 
     Ok(())
 }
 
-pub async fn create(
-    args: CreateArgs,
-    current_profile: Profile,
-) -> Result<(), CliError>
-{
+pub async fn create(args: CreateArgs, current_profile: Profile) -> Result<(), CliError> {
     let chroma_client = get_chroma_client(Some(&current_profile), args.db_args.dev);
     let dbs = chroma_client.list_databases().await?;
-    
+
     let mut name = match args.name {
         Some(name) => name,
-        None => prompt_db_name(&create_db_name_prompt())?
+        None => prompt_db_name(&create_db_name_prompt())?,
     };
     name = validate_db_name(&name)?;
-    
+
     if dbs.iter().any(|db| db.name == name) {
         println!("{}", create_db_already_exists_message(&name));
         return Ok(());
@@ -345,24 +380,20 @@ pub async fn create(
     Ok(())
 }
 
-pub async fn delete(
-    args: DeleteArgs,
-    current_profile: Profile,
-) -> Result<(), CliError>
-{
+pub async fn delete(args: DeleteArgs, current_profile: Profile) -> Result<(), CliError> {
     let chroma_client = get_chroma_client(Some(&current_profile), args.db_args.dev);
     let dbs = chroma_client.list_databases().await?;
 
     let name = match args.name {
         Some(name) => validate_db_name(&name),
-        None => get_db_name(&dbs, &delete_db_name_prompt())
+        None => get_db_name(&dbs, &delete_db_name_prompt()),
     }?;
-    
+
     if !dbs.iter().any(|db| db.name == name) {
         return Err(CliError::Db(DbError::DbNotFound(name)));
     }
-    
-    if confirm_db_deletion(&name)? {
+
+    if args.force || confirm_db_deletion(&name)? {
         chroma_client.delete_database(name.clone()).await?;
         println!("{}", db_delete_success_message(&name));
     } else {
@@ -376,8 +407,7 @@ pub async fn list(
     args: ListArgs,
     profile_name: String,
     current_profile: Profile,
-) -> Result<(), CliError>
-{
+) -> Result<(), CliError> {
     let chroma_client = get_chroma_client(Some(&current_profile), args.db_args.dev);
     let dbs = chroma_client.list_databases().await?;
 
@@ -410,20 +440,17 @@ pub fn db_command(command: DbCommand) -> Result<(), CliError> {
 }
 
 #[cfg(test)]
-// #[cfg(feature = "test_cli")]
 mod tests {
-    use std::collections::HashMap;
-    use std::env;
-    use std::sync::Arc;
-    use std::time::Duration;
+    use crate::client::ChromaClient;
+    use crate::commands::db::DbError::{DbNotFound, InvalidDbName};
+    use crate::commands::db::{create_db_already_exists_message, create_db_success_message, db_delete_success_message, get_python_connection};
+    use crate::commands::profile::ProfileError::NoActiveProfile;
+    use crate::utils::{get_current_profile, write_config, write_profiles, AddressBook, CliConfig, Profile};
     use assert_cmd::Command;
     use predicates::str::contains;
+    use std::collections::HashMap;
+    use std::env;
     use tempfile::TempDir;
-    use chroma_frontend::config::FrontendServerConfig;
-    use chroma_frontend::frontend_service_entrypoint_with_config;
-    use crate::client::ChromaClient;
-    use crate::commands::db::no_dbs_message;
-    use crate::utils::{write_config, write_profiles, CliConfig, Profile};
 
     fn simple_test_setup() -> TempDir {
         let temp_home = tempfile::tempdir().expect("Failed to create temp home dir");
@@ -433,11 +460,11 @@ mod tests {
         profiles.insert(
             "profile".to_string(),
             Profile {
-                api_key: "".to_string(),
+                api_key: "key".to_string(),
                 tenant_id: "default_tenant".to_string(),
             },
         );
-        
+
         let config = CliConfig {
             current_profile: "profile".to_string(),
         };
@@ -449,37 +476,163 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_list_success() {
+    async fn test_k8s_integration_list_success() {
         let _temp_dir = simple_test_setup();
 
-        tokio::spawn(async {
-            frontend_service_entrypoint_with_config(Arc::new(()), Arc::new(()), &FrontendServerConfig::single_node_default()).await;
-        });
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        let mut cmd = Command::cargo_bin("chroma").unwrap();
+
+        cmd.arg("db")
+            .arg("list")
+            .arg("--dev")
+            .assert()
+            .success()
+            .stdout(contains("Listing 1"))
+            .stdout(contains("default_database"));
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_create_db() {
+        let _temp_dir = simple_test_setup();
+        let db_name = "test_db";
 
         let mut cmd = Command::cargo_bin("chroma").unwrap();
-        
+
         cmd.arg("db")
-            .arg("list")
+            .arg("create")
+            .arg(db_name)
             .arg("--dev")
             .assert()
             .success()
-            .stdout(contains(no_dbs_message("profile")));
-        
-        let client = ChromaClient::local_default();
-        client.create_database("test_db".to_string()).await.unwrap();
+            .stdout(contains(create_db_success_message(db_name)));
+
+        let chroma_client = ChromaClient::local_default();
+        let dbs = chroma_client.list_databases().await.unwrap();
+        let db_names = dbs
+            .iter()
+            .filter(|db| db.name.eq(db_name))
+            .collect::<Vec<_>>();
+        assert_eq!(db_names.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_create_already_exists() {
+        let _temp_dir = simple_test_setup();
+        let db_name = "test_db";
+
+        let chroma_client = ChromaClient::local_default();
+        chroma_client
+            .create_database(db_name.to_string())
+            .await
+            .unwrap();
+
+        let mut cmd = Command::cargo_bin("chroma").unwrap();
+
+        cmd.arg("db")
+            .arg("create")
+            .arg(db_name)
+            .arg("--dev")
+            .assert()
+            .success()
+            .stdout(contains(create_db_already_exists_message(db_name)));
+    }
+
+    #[test]
+    fn test_k8s_integration_create_bad_name() {
+        let _temp_dir = simple_test_setup();
+        let db_name = "test db";
+
+        let mut cmd = Command::cargo_bin("chroma").unwrap();
+
+        cmd.arg("db")
+            .arg("create")
+            .arg(db_name)
+            .arg("--dev")
+            .assert()
+            .success()
+            .stdout(contains(InvalidDbName.to_string()));
+    }
+
+    #[test]
+    fn test_no_active_profile() {
+        let temp_home = tempfile::tempdir().expect("Failed to create temp home dir");
+        env::set_var("HOME", temp_home.path());
+        let mut cmd = Command::cargo_bin("chroma").unwrap();
 
         cmd.arg("db")
             .arg("list")
             .arg("--dev")
             .assert()
             .success()
-            .stdout(contains(no_dbs_message("test_db")));
-        
+            .stdout(contains(NoActiveProfile.to_string()));
     }
-    
+
     #[test]
-    fn test_no_active_profile() {
+    fn test_connect() {
+        let _temp_dir = simple_test_setup();
+        let mut cmd = Command::cargo_bin("chroma").unwrap();
         
+        let (_profile_name, profile) = get_current_profile().unwrap();
+        let chroma_client = ChromaClient::from_profile(&profile, AddressBook::local().frontend_url);
+        let db_name = "default_database".to_string(); 
+
+        cmd.arg("db")
+            .arg("connect")
+            .arg(&db_name)
+            .arg("--language")
+            .arg("python")
+            .arg("--dev")
+            .assert()
+            .success()
+            .stdout(contains(get_python_connection(chroma_client.api_url, profile.tenant_id, db_name, profile.api_key)));
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_delete_db() {
+        let _temp_dir = simple_test_setup();
+        let db_name = "db_to_delete";
+
+        let chroma_client = ChromaClient::local_default();
+        chroma_client.create_database(db_name.to_string()).await.unwrap();
+
+        let mut dbs = chroma_client.list_databases().await.unwrap();
+        let db_names = dbs
+            .iter()
+            .filter(|db| db.name.eq(db_name))
+            .collect::<Vec<_>>();
+        assert_eq!(db_names.len(), 1);
+
+        let mut cmd = Command::cargo_bin("chroma").unwrap();
+
+        cmd.arg("db")
+            .arg("delete")
+            .arg(db_name)
+            .arg("--force")
+            .arg("--dev")
+            .assert()
+            .success()
+            .stdout(contains(db_delete_success_message(db_name)));
+        
+        dbs = chroma_client.list_databases().await.unwrap();
+        let db_names = dbs
+            .iter()
+            .filter(|db| db.name.eq(db_name))
+            .collect::<Vec<_>>();
+        assert_eq!(db_names.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_delete_not_exists() {
+        let _temp_dir = simple_test_setup();
+        let db_name = "db_to_delete";
+        
+        let mut cmd = Command::cargo_bin("chroma").unwrap();
+
+        cmd.arg("db")
+            .arg("delete")
+            .arg(db_name)
+            .arg("--dev")
+            .assert()
+            .success()
+            .stdout(contains(DbNotFound(db_name.to_string()).to_string()));
     }
 }

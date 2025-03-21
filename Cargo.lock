@@ -1436,7 +1436,6 @@ dependencies = [
  "chroma-sysdb",
  "chroma-system",
  "chroma-types",
- "chromadb 2.2.2",
  "clap",
  "colored",
  "dialoguer",
@@ -1577,7 +1576,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "axum 0.8.1",
- "chromadb 2.0.0",
+ "chromadb",
  "chrono",
  "clap",
  "figment",
@@ -1842,21 +1841,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
-]
-
-[[package]]
-name = "chromadb"
-version = "2.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac28cac4b28301e43a7aeedafeed6cd50b48d2c7640e902e09e4df6ae59f95d0"
-dependencies = [
- "anyhow",
- "async-trait",
- "base64 0.22.1",
- "minreq",
- "reqwest 0.11.27",
- "serde",
- "serde_json",
 ]
 
 [[package]]

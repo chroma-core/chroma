@@ -1,16 +1,16 @@
+use crate::client::ClientError;
+use crate::commands::db::DbError;
 use crate::commands::profile::ProfileError;
 use crate::commands::run::RunError;
 use crate::commands::vacuum::VacuumError;
+use arboard::Clipboard;
+use colored::Colorize;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
-use arboard::Clipboard;
-use colored::Colorize;
 use thiserror::Error;
-use crate::client::ClientError;
-use crate::commands::db::DbError;
 
 pub const LOGO: &str = "
                 \x1b[38;5;069m(((((((((    \x1b[38;5;203m(((((\x1b[38;5;220m####
@@ -159,7 +159,7 @@ fn get_config_file_path() -> Result<PathBuf, CliError> {
 }
 
 pub fn get_address_book(dev: bool) -> AddressBook {
-    match dev { 
+    match dev {
         true => Environment::Local.address_book(),
         false => Environment::Cloud.address_book(),
     }
@@ -219,7 +219,9 @@ pub fn get_current_profile() -> Result<(String, Profile), CliError> {
 
 pub fn copy_to_clipboard(copy_string: &str) -> Result<(), CliError> {
     let mut clipboard = Clipboard::new().map_err(|_| UtilsError::CopyToClipboardFailed)?;
-    clipboard.set_text(copy_string).map_err(|_| UtilsError::CopyToClipboardFailed)?;
+    clipboard
+        .set_text(copy_string)
+        .map_err(|_| UtilsError::CopyToClipboardFailed)?;
     println!("\n{}", "Copied to clipboard!".blue().bold());
     Ok(())
 }

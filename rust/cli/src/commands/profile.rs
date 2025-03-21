@@ -20,8 +20,12 @@ pub enum ProfileError {
 pub struct DeleteArgs {
     #[clap(index = 1, help = "The name of the profile to delete")]
     name: String,
-    #[clap(long, default_value_t = false, help = "Skip delete confirmation for the active profile")]
-    force: bool
+    #[clap(
+        long,
+        default_value_t = false,
+        help = "Skip delete confirmation for the active profile"
+    )]
+    force: bool,
 }
 
 #[derive(Args, Debug)]
@@ -193,10 +197,14 @@ pub fn profile_command(command: ProfileCommand) -> Result<(), CliError> {
 }
 
 #[cfg(test)]
-#[cfg(feature = "test_cli")]
 mod tests {
-    use crate::commands::profile::{current_profile_set_message, no_current_profile_message, no_profiles_found_message, profile_delete_success_message, ProfileError};
-    use crate::utils::{read_config, read_profiles, write_config, write_profiles, CliConfig, Profile};
+    use crate::commands::profile::{
+        current_profile_set_message, no_current_profile_message, no_profiles_found_message,
+        profile_delete_success_message, ProfileError,
+    };
+    use crate::utils::{
+        read_config, read_profiles, write_config, write_profiles, CliConfig, Profile,
+    };
     use assert_cmd::Command;
     use predicates::str::contains;
     use std::collections::HashMap;
@@ -279,7 +287,9 @@ mod tests {
             .arg(profile_name)
             .assert()
             .success()
-            .stdout(contains(ProfileError::ProfileNotFound(profile_name.to_string()).to_string()));
+            .stdout(contains(
+                ProfileError::ProfileNotFound(profile_name.to_string()).to_string(),
+            ));
     }
 
     #[test]
@@ -345,7 +355,7 @@ mod tests {
             .assert()
             .success()
             .stdout(contains(current_profile_set_message(profile_name)));
-        
+
         let config = read_config().unwrap();
         assert_eq!(config.current_profile, profile_name);
     }
@@ -361,6 +371,8 @@ mod tests {
             .arg(profile_name)
             .assert()
             .success()
-            .stdout(contains(ProfileError::ProfileNotFound(profile_name.to_string()).to_string()));
+            .stdout(contains(
+                ProfileError::ProfileNotFound(profile_name.to_string()).to_string(),
+            ));
     }
 }
