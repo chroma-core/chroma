@@ -7,7 +7,6 @@ pub mod memory;
 pub mod provider;
 // This module is not gated as [#cfg(test)] because it is used in crates external to blockstore.
 pub mod test_utils;
-
 use chroma_cache::new_cache_for_test;
 use chroma_storage::test_storage;
 use provider::BlockfileProvider;

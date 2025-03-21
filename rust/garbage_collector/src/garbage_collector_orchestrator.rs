@@ -108,9 +108,10 @@ impl Debug for GarbageCollectorOrchestrator {
 #[allow(dead_code)]
 #[derive(Debug)]
 pub struct GarbageCollectorResponse {
-    collection_id: CollectionUuid,
-    version_file_path: String,
-    num_versions_deleted: u32,
+    pub collection_id: CollectionUuid,
+    pub version_file_path: String,
+    pub num_versions_deleted: u32,
+    pub deletion_list: Vec<String>,
 }
 
 impl GarbageCollectorOrchestrator {
@@ -322,6 +323,7 @@ impl Handler<TaskResult<ComputeVersionsToDeleteOutput, ComputeVersionsToDeleteEr
                 collection_id: self.collection_id,
                 version_file_path: self.version_file_path.clone(),
                 num_versions_deleted: 0,
+                deletion_list: Vec::new(),
             };
             tracing::info!(?response, "Garbage collection completed early");
             self.terminate_with_result(Ok(response), ctx);
@@ -546,6 +548,7 @@ impl Handler<TaskResult<DeleteVersionsAtSysDbOutput, DeleteVersionsAtSysDbError>
             collection_id: self.collection_id,
             version_file_path: self.version_file_path.clone(),
             num_versions_deleted: self.num_versions_deleted,
+            deletion_list: Vec::new(),
         };
 
         self.terminate_with_result(Ok(response), ctx);
