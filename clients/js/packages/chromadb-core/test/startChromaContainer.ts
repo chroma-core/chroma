@@ -72,9 +72,6 @@ export async function startChromaContainer({
         target: "/chromadb/test.htpasswd",
       },
     ]);
-    container = container.withEnvironment({
-      CHROMA_API_IMPL: "chromadb.api.segment.SegmentAPI",
-    });
     container.withLogConsumer((stream) => {
       stream.on("data", (line: Buffer) => {
         console.log(
