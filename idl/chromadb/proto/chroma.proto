@@ -56,6 +56,7 @@ message Collection {
   uint64 total_records_post_compaction = 10;
   uint64 size_bytes_post_compaction = 11;
   uint64 last_compaction_time_secs = 12;
+  string version_file_name = 14;
 }
 
 message Database {
