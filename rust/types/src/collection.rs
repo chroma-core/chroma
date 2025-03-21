@@ -76,6 +76,8 @@ pub struct Collection {
     pub log_position: i64,
     pub version: i32,
     #[serde(skip)]
+    pub version_file_name: String,
+    #[serde(skip)]
     pub total_records_post_compaction: u64,
     #[serde(skip)]
     pub size_bytes_post_compaction: u64,
@@ -164,6 +166,7 @@ impl Collection {
             name: "test_collection".to_string(),
             dimension: Some(dim),
             tenant: "default_tenant".to_string(),
+            version_file_name: "".to_string(),
             database: "default_database".to_string(),
             ..Default::default()
         }
@@ -216,6 +219,7 @@ impl TryFrom<chroma_proto::Collection> for Collection {
             database: proto_collection.database,
             log_position: proto_collection.log_position,
             version: proto_collection.version,
+            version_file_name: "".to_string(),
             total_records_post_compaction: proto_collection.total_records_post_compaction,
             size_bytes_post_compaction: proto_collection.size_bytes_post_compaction,
             last_compaction_time_secs: proto_collection.last_compaction_time_secs,
@@ -252,6 +256,7 @@ impl TryFrom<Collection> for chroma_proto::Collection {
             database: value.database,
             log_position: value.log_position,
             version: value.version,
+            version_file_name: value.version_file_name,
             total_records_post_compaction: value.total_records_post_compaction,
             size_bytes_post_compaction: value.size_bytes_post_compaction,
             last_compaction_time_secs: value.last_compaction_time_secs,

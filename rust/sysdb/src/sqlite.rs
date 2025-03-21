@@ -339,6 +339,7 @@ impl SqliteSysDb {
             size_bytes_post_compaction: 0,
             last_compaction_time_secs: 0,
             legacy_configuration_json: (),
+            version_file_name: "".to_string(),
         })
     }
 
@@ -684,6 +685,7 @@ impl SqliteSysDb {
                     metadata,
                     total_records_post_compaction: 0,
                     version: 0,
+                    version_file_name: "".to_string(),
                     log_position: 0,
                     dimension: first_row.get(3),
                     name: first_row.get(1),
