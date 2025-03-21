@@ -688,8 +688,12 @@ impl GcTest {
     }
 
     fn cleanup_versions(self, id: String, cutoff_window_secs: u64) -> Self {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(self.cleanup_versions_async(id, cutoff_window_secs))
+        let result = tokio::task::block_in_place(|| {
+            // Get the current runtime handle.
+            let handle = tokio::runtime::Handle::current();
+            handle.block_on(self.cleanup_versions_async(id, cutoff_window_secs))
+        });
+        result
     }
 }
 
@@ -841,7 +845,7 @@ prop_state_machine! {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn run_gc_test_ext() {
     // Initialize tracing
     let _ = tracing_subscriber::fmt()
