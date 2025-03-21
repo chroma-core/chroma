@@ -414,8 +414,8 @@ mod tests {
     use chroma_blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES;
     use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
     use chroma_config::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
-    use chroma_index::config::PlGarbageCollectionConfig;
-    use chroma_index::spann::types::PlGarbageCollectionContext;
+    use chroma_index::config::{HnswGarbageCollectionConfig, PlGarbageCollectionConfig};
+    use chroma_index::spann::types::GarbageCollectionContext;
     use chroma_log::in_memory_log::{InMemoryLog, InternalLogRecord};
     use chroma_memberlist::memberlist_provider::Member;
     use chroma_storage::local::LocalStorage;
@@ -626,8 +626,11 @@ mod tests {
         let sparse_index_cache = new_cache_for_test();
         let hnsw_cache = new_non_persistent_cache_for_test();
         let (_, rx) = tokio::sync::mpsc::unbounded_channel();
-        let gc_context = PlGarbageCollectionContext::try_from_config(
-            &PlGarbageCollectionConfig::default(),
+        let gc_context = GarbageCollectionContext::try_from_config(
+            &(
+                PlGarbageCollectionConfig::default(),
+                HnswGarbageCollectionConfig::default(),
+            ),
             &Registry::default(),
         )
         .await

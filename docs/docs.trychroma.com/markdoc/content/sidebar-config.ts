@@ -90,7 +90,7 @@ const sidebarConfig: AppSection[] = [
     id: "cloud",
     name: "Chroma Cloud",
     icon: CloudIcon,
-    tag: "New",
+    tag: "",
     pages: [{ id: "getting-started", name: "Getting Started" }],
   },
   {
@@ -186,13 +186,14 @@ const sidebarConfig: AppSection[] = [
       },
     ],
   },
-  {
-    id: "guides-and-examples",
-    name: "Guides & Examples",
-    icon: GraduationCap,
-    disable: true,
-    tag: "Coming Soon",
-  },
+  // {
+  //   id: "guides-and-examples",
+  //   name: "Guides & Examples",
+  //   icon: GraduationCap,
+  //   disable: true,
+  //   tag: "Coming Soon",
+  // },
 ];
 
 export default sidebarConfig;
+

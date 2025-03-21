@@ -1,4 +1,4 @@
-use chroma_index::config::PlGarbageCollectionPolicyConfig;
+use chroma_index::config::{HnswGarbageCollectionPolicyConfig, PlGarbageCollectionPolicyConfig};
 use figment::Jail;
 use serial_test::serial;
 use uuid::Uuid;
@@ -146,6 +146,9 @@ fn test_config_from_default_path() {
                         policy:
                             random_sample:
                                 sample_size: 0.1
+                    hnsw_garbage_collection:
+                        enabled: true
+                        policy: "full_rebuild"
             "#,
         );
         let config = RootConfig::load();
@@ -189,6 +192,21 @@ fn test_config_from_default_path() {
             PlGarbageCollectionPolicyConfig::RandomSample(config) => {
                 assert_eq!(config.sample_size, 0.1);
             }
+        }
+        assert!(
+            config
+                .compaction_service
+                .spann_provider
+                .hnsw_garbage_collection
+                .enabled
+        );
+        match config
+            .compaction_service
+            .spann_provider
+            .hnsw_garbage_collection
+            .policy
+        {
+            HnswGarbageCollectionPolicyConfig::FullRebuild => {}
         }
         Ok(())
     });
