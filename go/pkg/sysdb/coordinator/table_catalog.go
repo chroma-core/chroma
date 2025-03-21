@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -320,9 +321,8 @@ func (tc *Catalog) createCollectionImpl(txCtx context.Context, createCollection 
 		log.Error("error getting collection", zap.Error(err))
 		return nil, false, err
 	}
-	result := convertCollectionToModel(collectionList)[0]
-	return result, true, nil
-
+	collection := convertCollectionToModel(collectionList)[0]
+	return collection, true, nil
 }
 
 func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model.CreateCollection, ts types.Timestamp) (*model.Collection, bool, error) {
@@ -578,11 +578,124 @@ func (tc *Catalog) GetSoftDeletedCollections(ctx context.Context, collectionID *
 	return collectionList, nil
 }
 
+// updateCollectionConfiguration handles parsing and updating collection configuration
+func (tc *Catalog) updateCollectionConfiguration(
+	existingConfigJsonStr *string,
+	updateConfigJsonStr *string,
+	collectionMetadata []*dbmodel.CollectionMetadata,
+) (*string, error) {
+	if updateConfigJsonStr == nil {
+		return nil, nil
+	}
+
+	// Parse existing configuration
+	var existingConfig model.InternalCollectionConfiguration
+	var parseErr error
+	if existingConfigJsonStr != nil {
+		parseErr = json.Unmarshal([]byte(*existingConfigJsonStr), &existingConfig)
+		if parseErr != nil {
+			// Try to create config from legacy metadata
+			metadataMap := make(map[string]interface{})
+			for _, m := range collectionMetadata {
+				if m.StrValue != nil {
+					metadataMap[*m.Key] = *m.StrValue
+				} else if m.IntValue != nil {
+					metadataMap[*m.Key] = float64(*m.IntValue)
+				} else if m.FloatValue != nil {
+					metadataMap[*m.Key] = *m.FloatValue
+				} else if m.BoolValue != nil {
+					metadataMap[*m.Key] = *m.BoolValue
+				}
+			}
+			existingConfig = *model.FromLegacyMetadata(metadataMap)
+		} else if existingConfig.VectorIndex == nil {
+			// If the config was parsed but has no vector index, use default HNSW
+			existingConfig = *model.DefaultHnswCollectionConfiguration()
+		}
+	} else {
+		// If no existing config, try to create from legacy metadata first
+		metadataMap := make(map[string]interface{})
+		for _, m := range collectionMetadata {
+			if m.StrValue != nil {
+				metadataMap[*m.Key] = *m.StrValue
+			} else if m.IntValue != nil {
+				metadataMap[*m.Key] = float64(*m.IntValue)
+			} else if m.FloatValue != nil {
+				metadataMap[*m.Key] = *m.FloatValue
+			} else if m.BoolValue != nil {
+				metadataMap[*m.Key] = *m.BoolValue
+			}
+		}
+		if len(metadataMap) > 0 {
+			existingConfig = *model.FromLegacyMetadata(metadataMap)
+		} else {
+			// If no legacy metadata, use default HNSW
+			existingConfig = *model.DefaultHnswCollectionConfiguration()
+		}
+	}
+
+	// Parse update configuration
+	var updateConfig model.InternalUpdateCollectionConfiguration
+	if err := json.Unmarshal([]byte(*updateConfigJsonStr), &updateConfig); err != nil {
+		return nil, fmt.Errorf("failed to parse update configuration: %w", err)
+	}
+
+	// Update existing configuration with new values
+	if updateConfig.VectorIndex != nil {
+		if updateConfig.VectorIndex.Type == "hnsw" && updateConfig.VectorIndex.Hnsw != nil {
+			if existingConfig.VectorIndex == nil || existingConfig.VectorIndex.Type != "hnsw" {
+				existingConfig.VectorIndex = &model.VectorIndexConfiguration{
+					Type: "hnsw",
+					Hnsw: model.DefaultHnswConfiguration(),
+				}
+			}
+			if updateConfig.VectorIndex.Hnsw.EfSearch != nil {
+				existingConfig.VectorIndex.Hnsw.EfSearch = *updateConfig.VectorIndex.Hnsw.EfSearch
+			}
+			if updateConfig.VectorIndex.Hnsw.MaxNeighbors != nil {
+				existingConfig.VectorIndex.Hnsw.MaxNeighbors = *updateConfig.VectorIndex.Hnsw.MaxNeighbors
+			}
+			if updateConfig.VectorIndex.Hnsw.NumThreads != nil {
+				existingConfig.VectorIndex.Hnsw.NumThreads = *updateConfig.VectorIndex.Hnsw.NumThreads
+			}
+			if updateConfig.VectorIndex.Hnsw.ResizeFactor != nil {
+				existingConfig.VectorIndex.Hnsw.ResizeFactor = *updateConfig.VectorIndex.Hnsw.ResizeFactor
+			}
+			if updateConfig.VectorIndex.Hnsw.SyncThreshold != nil {
+				existingConfig.VectorIndex.Hnsw.SyncThreshold = *updateConfig.VectorIndex.Hnsw.SyncThreshold
+			}
+			if updateConfig.VectorIndex.Hnsw.BatchSize != nil {
+				existingConfig.VectorIndex.Hnsw.BatchSize = *updateConfig.VectorIndex.Hnsw.BatchSize
+			}
+		} else if updateConfig.VectorIndex.Type == "spann" && updateConfig.VectorIndex.Spann != nil {
+			if existingConfig.VectorIndex == nil || existingConfig.VectorIndex.Type != "spann" {
+				existingConfig.VectorIndex = &model.VectorIndexConfiguration{
+					Type:  "spann",
+					Spann: updateConfig.VectorIndex.Spann.SpannConfig,
+				}
+			} else {
+				existingConfig.VectorIndex.Spann = updateConfig.VectorIndex.Spann.SpannConfig
+			}
+		}
+	}
+
+	if updateConfig.EmbeddingFunction != nil {
+		existingConfig.EmbeddingFunction = updateConfig.EmbeddingFunction
+	}
+
+	// Serialize updated config back to JSON
+	updatedConfigBytes, err := json.Marshal(existingConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialize updated configuration: %w", err)
+	}
+	updatedConfigStr := string(updatedConfigBytes)
+	return &updatedConfigStr, nil
+}
+
 func (tc *Catalog) UpdateCollection(ctx context.Context, updateCollection *model.UpdateCollection, ts types.Timestamp) (*model.Collection, error) {
 	log.Info("updating collection", zap.String("collectionId", updateCollection.ID.String()))
 	var result *model.Collection
 
-	// TODO @jai: add logic here
 	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		// Check if collection exists
 		collections, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(
@@ -599,12 +712,24 @@ func (tc *Catalog) UpdateCollection(ctx context.Context, updateCollection *model
 		if len(collections) == 0 {
 			return common.ErrCollectionNotFound
 		}
+		collection := collections[0]
+
+		// Update configuration
+		newConfigJsonStr, err := tc.updateCollectionConfiguration(
+			collection.Collection.ConfigurationJsonStr,
+			updateCollection.NewConfigurationJsonStr,
+			collection.CollectionMetadata,
+		)
+		if err != nil {
+			return err
+		}
 
 		dbCollection := &dbmodel.Collection{
-			ID:        updateCollection.ID.String(),
-			Name:      updateCollection.Name,
-			Dimension: updateCollection.Dimension,
-			Ts:        ts,
+			ID:                   updateCollection.ID.String(),
+			Name:                 updateCollection.Name,
+			Dimension:            updateCollection.Dimension,
+			ConfigurationJsonStr: newConfigJsonStr,
+			Ts:                   ts,
 		}
 		err = tc.metaDomain.CollectionDb(txCtx).Update(dbCollection)
 		if err != nil {
