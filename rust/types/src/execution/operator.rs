@@ -4,9 +4,10 @@ use std::{
 };
 use thiserror::Error;
 
-use prost::Message;
-
-use crate::{chroma_proto, CollectionAndSegments, CollectionUuid, Metadata, ScalarEncoding, Where};
+use crate::{
+    chroma_proto, logical_size_of_metadata, CollectionAndSegments, CollectionUuid, Metadata,
+    ScalarEncoding, Where,
+};
 
 use super::error::QueryConversionError;
 
@@ -74,8 +75,8 @@ pub struct CountResult {
 }
 
 impl CountResult {
-    pub fn size_bytes(self) -> u64 {
-        chroma_proto::CountResult::from(self).encode_to_vec().len() as u64
+    pub fn size_bytes(&self) -> u64 {
+        size_of_val(&self.count) as u64
     }
 }
 
@@ -380,6 +381,27 @@ pub struct ProjectionRecord {
     pub metadata: Option<Metadata>,
 }
 
+impl ProjectionRecord {
+    pub fn size_bytes(&self) -> u64 {
+        (self.id.len()
+            + self
+                .document
+                .as_ref()
+                .map(|doc| doc.len())
+                .unwrap_or_default()
+            + self
+                .embedding
+                .as_ref()
+                .map(|emb| size_of_val(&emb[..]))
+                .unwrap_or_default()
+            + self
+                .metadata
+                .as_ref()
+                .map(logical_size_of_metadata)
+                .unwrap_or_default()) as u64
+    }
+}
+
 impl Eq for ProjectionRecord {}
 
 impl TryFrom<chroma_proto::ProjectionRecord> for ProjectionRecord {
@@ -433,10 +455,12 @@ pub struct GetResult {
 }
 
 impl GetResult {
-    pub fn size_bytes(self) -> u64 {
-        chroma_proto::GetResult::try_from(self)
-            .map(|proto_get_res| proto_get_res.encode_to_vec().len())
-            .unwrap_or_default() as u64
+    pub fn size_bytes(&self) -> u64 {
+        self.result
+            .records
+            .iter()
+            .map(ProjectionRecord::size_bytes)
+            .sum()
     }
 }
 
@@ -580,10 +604,15 @@ pub struct KnnBatchResult {
 }
 
 impl KnnBatchResult {
-    pub fn size_bytes(self) -> u64 {
-        chroma_proto::KnnBatchResult::try_from(self)
-            .map(|proto_knn_batch_res| proto_knn_batch_res.encode_to_vec().len())
-            .unwrap_or_default() as u64
+    pub fn size_bytes(&self) -> u64 {
+        self.results
+            .iter()
+            .flat_map(|res| {
+                res.records
+                    .iter()
+                    .map(|rec| rec.record.size_bytes() + size_of_val(&rec.distance) as u64)
+            })
+            .sum()
     }
 }
 

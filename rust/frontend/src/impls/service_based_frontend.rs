@@ -689,7 +689,7 @@ impl ServiceBasedFrontend {
                 })
                 .await?;
 
-            let return_bytes = get_result.clone().size_bytes();
+            let return_bytes = get_result.size_bytes();
 
             for record in get_result.result.records {
                 records.push(OperationRecord {
@@ -824,7 +824,7 @@ impl ServiceBasedFrontend {
                 },
             })
             .await?;
-        let return_bytes = count_result.clone().size_bytes();
+        let return_bytes = count_result.size_bytes();
         // TODO: Submit event after the response is sent
         MeterEvent::CollectionRead {
             tenant: tenant_id.clone(),
@@ -939,7 +939,7 @@ impl ServiceBasedFrontend {
                 },
             })
             .await?;
-        let return_bytes = get_result.clone().size_bytes();
+        let return_bytes = get_result.size_bytes();
         // TODO: Submit event after the response is sent
         MeterEvent::CollectionRead {
             tenant: tenant_id.clone(),
@@ -1058,7 +1058,7 @@ impl ServiceBasedFrontend {
                 },
             })
             .await?;
-        let return_bytes = query_result.clone().size_bytes();
+        let return_bytes = query_result.size_bytes();
         // TODO: Submit event after the response is sent
         MeterEvent::CollectionRead {
             tenant: tenant_id.clone(),
