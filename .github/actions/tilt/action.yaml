@@ -7,6 +7,8 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: Set up Depot CLI
+      uses: depot/setup-action@v1
     - name: Install Tilt
       shell: bash
       run: |
