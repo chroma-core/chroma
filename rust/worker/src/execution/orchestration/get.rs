@@ -330,7 +330,7 @@ impl Handler<TaskResult<ProjectionOutput, ProjectionError>> for GetOrchestrator 
             .as_ref()
             .expect("FetchLogOperator should have finished already")
             .iter()
-            .map(|(l, _)| l.size_byte())
+            .map(|(l, _)| l.size_bytes())
             .sum();
 
         self.terminate_with_result(Ok((output, fetch_log_size_bytes)), ctx);

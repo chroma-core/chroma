@@ -5,6 +5,7 @@ use super::{
 };
 use crate::{chroma_proto, CHROMA_DOCUMENT_KEY};
 use chroma_error::{ChromaError, ErrorCodes};
+use prost::Message;
 use thiserror::Error;
 
 #[derive(Clone, Debug)]
@@ -21,26 +22,19 @@ pub struct OperationRecord {
 }
 
 impl OperationRecord {
-    pub fn size_byte(&self) -> u64 {
+    pub fn size_bytes(&self) -> u64 {
         let mut size_byte = 0;
         size_byte += self.id.len();
-        if let Some(emb) = &self.embedding {
-            size_byte += size_of::<f32>() * emb.len();
-        }
-        if let Some(meta) = &self.metadata {
-            size_byte += meta.iter().fold(0, |acc, (k, v)| {
-                acc + k.len()
-                    + match v {
-                        UpdateMetadataValue::Bool(b) => size_of_val(b),
-                        UpdateMetadataValue::Int(i) => size_of_val(i),
-                        UpdateMetadataValue::Float(f) => size_of_val(f),
-                        UpdateMetadataValue::Str(s) => s.len(),
-                        UpdateMetadataValue::None => 0,
-                    }
-            });
-        }
         if let Some(doc) = &self.document {
             size_byte += doc.len();
+        }
+        if let Some(emb) = &self.embedding {
+            size_byte += size_of_val(&emb[..]);
+        }
+        if let Some(meta) = &self.metadata {
+            size_byte += chroma_proto::UpdateMetadata::from(meta.clone())
+                .encode_to_vec()
+                .len();
         }
         size_byte as u64
     }
@@ -53,8 +47,8 @@ pub struct LogRecord {
 }
 
 impl LogRecord {
-    pub fn size_byte(&self) -> u64 {
-        size_of_val(&self.log_offset) as u64 + self.record.size_byte()
+    pub fn size_bytes(&self) -> u64 {
+        size_of_val(&self.log_offset) as u64 + self.record.size_bytes()
     }
 }
 
