@@ -48,6 +48,10 @@ func (s *collectionDb) GetCollectionEntry(collectionID *string, databaseName *st
 	return collections[0], nil
 }
 
+func (s *collectionDb) GetCollectionEntries(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*dbmodel.CollectionAndMetadata, error) {
+	return s.getCollections(id, name, tenantID, databaseName, limit, offset, true)
+}
+
 func (s *collectionDb) GetCollections(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*dbmodel.CollectionAndMetadata, error) {
 	return s.getCollections(id, name, tenantID, databaseName, limit, offset, false)
 }

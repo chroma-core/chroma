@@ -145,6 +145,19 @@ message DeleteCollectionResponse {
   reserved "status";
 }
 
+// Request to get a single collection.
+message GetCollectionRequest {
+  string id = 1;
+  optional string name = 2;
+  optional string tenant = 3;
+  optional string database = 4;
+}
+
+// Response to GetCollectionRequest.
+message GetCollectionResponse {
+  Collection collection = 1;
+}
+
 message GetCollectionsRequest {
   optional string id = 1;
   optional string name = 2;
@@ -449,6 +462,7 @@ service SysDB {
   rpc UpdateSegment(UpdateSegmentRequest) returns (UpdateSegmentResponse) {}
   rpc CreateCollection(CreateCollectionRequest) returns (CreateCollectionResponse) {}
   rpc DeleteCollection(DeleteCollectionRequest) returns (DeleteCollectionResponse) {}
+  rpc GetCollection(GetCollectionRequest) returns (GetCollectionResponse) {}
   rpc GetCollections(GetCollectionsRequest) returns (GetCollectionsResponse) {}
   rpc CountCollections(CountCollectionsRequest) returns (CountCollectionsResponse) {}
   rpc GetCollectionWithSegments(GetCollectionWithSegmentsRequest) returns (GetCollectionWithSegmentsResponse) {}

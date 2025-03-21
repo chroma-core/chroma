@@ -523,12 +523,15 @@ pub enum GetCollectionError {
     Internal(#[from] Box<dyn ChromaError>),
     #[error("Collection [{0}] does not exists")]
     NotFound(String),
+    #[error("Collection [{0}] was soft deleted")]
+    SoftDeleted(String),
 }
 
 impl ChromaError for GetCollectionError {
     fn code(&self) -> ErrorCodes {
         match self {
             GetCollectionError::Internal(err) => err.code(),
+            GetCollectionError::SoftDeleted(_) => ErrorCodes::FailedPrecondition,
             GetCollectionError::NotFound(_) => ErrorCodes::NotFound,
         }
     }
