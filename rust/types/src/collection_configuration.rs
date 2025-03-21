@@ -132,43 +132,48 @@ impl InternalCollectionConfiguration {
         }
     }
 
-    pub fn update(&mut self, configuration: &InternalUpdateCollectionConfiguration) {
+    pub fn update(&mut self, configuration: &UpdateCollectionConfiguration) {
         // Update vector_index if it exists in the update configuration
-        if let Some(vector_index) = &configuration.vector_index {
-            match vector_index {
-                UpdateVectorIndexConfiguration::Hnsw(Some(hnsw_config)) => {
-                    if let VectorIndexConfiguration::Hnsw(current_config) = &mut self.vector_index {
-                        // Update only the non-None fields from the update configuration
-                        if let Some(ef_search) = hnsw_config.ef_search {
-                            current_config.ef_search = ef_search;
-                        }
-                        if let Some(max_neighbors) = hnsw_config.max_neighbors {
-                            current_config.max_neighbors = max_neighbors;
-                        }
-                        if let Some(num_threads) = hnsw_config.num_threads {
-                            current_config.num_threads = num_threads;
-                        }
-                        if let Some(resize_factor) = hnsw_config.resize_factor {
-                            current_config.resize_factor = resize_factor;
-                        }
-                        if let Some(sync_threshold) = hnsw_config.sync_threshold {
-                            current_config.sync_threshold = sync_threshold;
-                        }
-                        if let Some(batch_size) = hnsw_config.batch_size {
-                            current_config.batch_size = batch_size;
-                        }
-                    }
+
+        if let Some(hnsw_config) = &configuration.hnsw {
+            if let VectorIndexConfiguration::Hnsw(current_config) = &mut self.vector_index {
+                // Update only the non-None fields from the update configuration
+                if let Some(ef_search) = hnsw_config.ef_search {
+                    current_config.ef_search = ef_search;
                 }
-                UpdateVectorIndexConfiguration::Spann(Some(spann_config)) => {
-                    if let VectorIndexConfiguration::Spann(current_config) = &mut self.vector_index
-                    {
-                        *current_config = spann_config.clone();
-                    }
+                if let Some(max_neighbors) = hnsw_config.max_neighbors {
+                    current_config.max_neighbors = max_neighbors;
                 }
-                _ => {} // No update needed for None configurations
+                if let Some(num_threads) = hnsw_config.num_threads {
+                    current_config.num_threads = num_threads;
+                }
+                if let Some(resize_factor) = hnsw_config.resize_factor {
+                    current_config.resize_factor = resize_factor;
+                }
+                if let Some(sync_threshold) = hnsw_config.sync_threshold {
+                    current_config.sync_threshold = sync_threshold;
+                }
+                if let Some(batch_size) = hnsw_config.batch_size {
+                    current_config.batch_size = batch_size;
+                }
             }
         }
-
+        if let Some(spann_config) = &configuration.spann {
+            if let VectorIndexConfiguration::Spann(current_config) = &mut self.vector_index {
+                let search_nprobe = spann_config.search_nprobe;
+                current_config.search_nprobe = search_nprobe;
+                let write_nprobe = spann_config.write_nprobe;
+                current_config.write_nprobe = write_nprobe;
+                let space = spann_config.space.clone();
+                current_config.space = space;
+                let construction_ef = spann_config.construction_ef;
+                current_config.construction_ef = construction_ef;
+                let search_ef = spann_config.search_ef;
+                current_config.search_ef = search_ef;
+                let m = spann_config.m;
+                current_config.m = m;
+            }
+        }
         // Update embedding_function if it exists in the update configuration
         if let Some(embedding_function) = &configuration.embedding_function {
             self.embedding_function = Some(embedding_function.clone());
@@ -313,21 +318,6 @@ impl From<InternalSpannConfiguration> for UpdateVectorIndexConfiguration {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct InternalUpdateCollectionConfiguration {
-    pub vector_index: Option<UpdateVectorIndexConfiguration>,
-    pub embedding_function: Option<EmbeddingFunctionConfiguration>,
-}
-
-impl InternalUpdateCollectionConfiguration {
-    pub fn get_spann_config(&self) -> Option<InternalSpannConfiguration> {
-        match &self.vector_index {
-            Some(UpdateVectorIndexConfiguration::Spann(Some(config))) => Some(config.clone()),
-            _ => None,
-        }
-    }
-}
-
 #[derive(Debug, Error)]
 pub enum UpdateCollectionConfigurationToInternalConfigurationError {
     #[error("Multiple vector index configurations provided")]
@@ -348,45 +338,4 @@ pub struct UpdateCollectionConfiguration {
     pub hnsw: Option<UpdateHnswConfiguration>,
     pub spann: Option<SpannConfiguration>,
     pub embedding_function: Option<EmbeddingFunctionConfiguration>,
-}
-
-impl TryFrom<UpdateCollectionConfiguration> for InternalUpdateCollectionConfiguration {
-    type Error = UpdateCollectionConfigurationToInternalConfigurationError;
-
-    fn try_from(value: UpdateCollectionConfiguration) -> Result<Self, Self::Error> {
-        match (value.hnsw, value.spann) {
-            (Some(_), Some(_)) => Err(Self::Error::MultipleVectorIndexConfigurations),
-            (Some(hnsw), None) => Ok(InternalUpdateCollectionConfiguration {
-                vector_index: Some(hnsw.into()),
-                embedding_function: value.embedding_function,
-            }),
-            (None, Some(spann)) => {
-                let spann: InternalSpannConfiguration = spann.into();
-                Ok(InternalUpdateCollectionConfiguration {
-                    vector_index: Some(spann.into()),
-                    embedding_function: value.embedding_function,
-                })
-            }
-            (None, None) => Ok(InternalUpdateCollectionConfiguration {
-                vector_index: None,
-                embedding_function: value.embedding_function,
-            }),
-        }
-    }
-}
-
-impl From<InternalUpdateCollectionConfiguration> for UpdateCollectionConfiguration {
-    fn from(value: InternalUpdateCollectionConfiguration) -> Self {
-        Self {
-            hnsw: match value.vector_index.clone() {
-                Some(UpdateVectorIndexConfiguration::Hnsw(Some(config))) => Some(config),
-                _ => None,
-            },
-            spann: match value.vector_index.clone() {
-                Some(UpdateVectorIndexConfiguration::Spann(Some(config))) => Some(config.into()),
-                _ => None,
-            },
-            embedding_function: value.embedding_function,
-        }
-    }
 }

@@ -12,8 +12,8 @@ use chroma_types::{
     CreateTenantError, CreateTenantResponse, Database, DeleteCollectionError, DeleteDatabaseError,
     DeleteDatabaseResponse, GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError,
     GetSegmentsError, GetTenantError, GetTenantResponse, InternalCollectionConfiguration,
-    InternalUpdateCollectionConfiguration, ListDatabasesError, Metadata, MetadataValue, ResetError,
-    ResetResponse, Segment, SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError,
+    ListDatabasesError, Metadata, MetadataValue, ResetError, ResetResponse, Segment, SegmentScope,
+    SegmentType, SegmentUuid, UpdateCollectionConfiguration, UpdateCollectionError,
 };
 use futures::TryStreamExt;
 use sea_query_binder::SqlxBinder;
@@ -348,7 +348,7 @@ impl SqliteSysDb {
         name: Option<String>,
         metadata: Option<CollectionMetadataUpdate>,
         dimension: Option<u32>,
-        configuration: Option<InternalUpdateCollectionConfiguration>,
+        configuration: Option<UpdateCollectionConfiguration>,
     ) -> Result<(), UpdateCollectionError> {
         let mut configuration_json_str = None;
         if let Some(configuration) = configuration {
@@ -977,7 +977,7 @@ mod tests {
     use chroma_sqlite::db::test_utils::get_new_sqlite_db;
     use chroma_types::{
         SegmentScope, SegmentType, SegmentUuid, UpdateHnswConfiguration, UpdateMetadata,
-        UpdateMetadataValue, UpdateVectorIndexConfiguration, VectorIndexConfiguration,
+        UpdateMetadataValue, VectorIndexConfiguration,
     };
 
     #[tokio::test]
@@ -1279,14 +1279,13 @@ mod tests {
                 Some("new_name".to_string()),
                 Some(CollectionMetadataUpdate::UpdateMetadata(metadata)),
                 Some(1024),
-                Some(InternalUpdateCollectionConfiguration {
-                    vector_index: Some(UpdateVectorIndexConfiguration::Hnsw(Some(
-                        UpdateHnswConfiguration {
-                            ef_search: Some(20),
-                            num_threads: Some(4),
-                            ..Default::default()
-                        },
-                    ))),
+                Some(UpdateCollectionConfiguration {
+                    hnsw: Some(UpdateHnswConfiguration {
+                        ef_search: Some(20),
+                        num_threads: Some(4),
+                        ..Default::default()
+                    }),
+                    spann: None,
                     embedding_function: None,
                 }),
             )
