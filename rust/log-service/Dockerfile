@@ -19,7 +19,7 @@ FROM builder AS log_service_builder
 # sharing=locked is necessary to prevent cargo build from running concurrently on the same mounted directory
 RUN --mount=type=cache,sharing=locked,target=/chroma/target/ \
     --mount=type=cache,sharing=locked,target=/usr/local/cargo/registry/ \
-    cd rust/log && \
+    cd rust/log-service && \
     if [ "$RELEASE_MODE" = "1" ]; then cargo build --features server --bin log_service --release; else cargo build --features server --bin log_service; fi && \
     cd ../.. && \
     if [ "$RELEASE_MODE" = "1" ]; then mv target/release/log_service ./log_service; else mv target/debug/log_service ./log_service; fi

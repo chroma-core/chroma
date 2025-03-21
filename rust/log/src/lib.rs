@@ -15,14 +15,6 @@ pub use local_compaction_manager::*;
 pub use log::*;
 pub use types::*;
 
-#[cfg(feature = "server")]
-mod server;
-// NOTE(rescrv): pub for tests
-#[cfg(feature = "server")]
-pub mod state_hash_table;
-#[cfg(feature = "server")]
-use server::LogServer;
-
 use async_trait::async_trait;
 
 impl Injectable for Log {}
@@ -44,38 +36,5 @@ impl Configurable<LogConfig> for Log {
 
         registry.register(res.clone());
         Ok(res)
-    }
-}
-
-const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
-
-// Entrypoint for the wal3 based log server
-#[cfg(feature = "server")]
-pub async fn log_entrypoint() {
-    let config = match std::env::var(CONFIG_PATH_ENV_VAR) {
-        Ok(config_path) => server::RootConfig::load_from_path(&config_path),
-        Err(_) => server::RootConfig::load(),
-    };
-    let config = config.log_service;
-    let registry = chroma_config::registry::Registry::new();
-    if let Some(otel_config) = &config.opentelemetry {
-        eprintln!("enabling tracing");
-        chroma_tracing::init_otel_tracing(&otel_config.service_name, &otel_config.endpoint);
-    } else {
-        eprintln!("tracing disabled");
-    }
-    let log_server = LogServer::try_from_config(&config, &registry)
-        .await
-        .expect("Failed to create log server");
-
-    let server_join_handle = tokio::spawn(async move {
-        let _ = crate::server::LogServer::run(log_server).await;
-    });
-
-    match server_join_handle.await {
-        Ok(_) => {}
-        Err(e) => {
-            tracing::error!("Error terminating server: {:?}", e);
-        }
     }
 }

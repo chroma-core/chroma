@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use async_trait::async_trait;
 use bytes::Bytes;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
@@ -23,9 +22,15 @@ use tonic::{transport::Server, Request, Response, Status};
 use uuid::Uuid;
 use wal3::{Limits, LogPosition, LogReader, LogReaderOptions, LogWriter, LogWriterOptions};
 
+pub mod state_hash_table;
+
 use crate::state_hash_table::StateHashTable;
 
+///////////////////////////////////////////// constants ////////////////////////////////////////////
+
 const DEFAULT_CONFIG_PATH: &str = "./chroma_config.yaml";
+
+const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
 
 ///////////////////////////////////////// state maintenance ////////////////////////////////////////
 
@@ -225,7 +230,7 @@ pub struct LogServer {
     open_logs: Arc<StateHashTable<LogKey, LogStub>>,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl LogService for LogServer {
     async fn push_logs(
         &self,
@@ -543,7 +548,7 @@ impl Default for LogServerConfig {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl Configurable<LogServerConfig> for LogServer {
     async fn try_from_config(
         config: &LogServerConfig,
@@ -556,5 +561,37 @@ impl Configurable<LogServerConfig> for LogServer {
             open_logs: Arc::new(StateHashTable::default()),
             storage,
         })
+    }
+}
+
+////////////////////////////////////////// log_entrypoint //////////////////////////////////////////
+
+// Entrypoint for the wal3 based log server
+pub async fn log_entrypoint() {
+    let config = match std::env::var(CONFIG_PATH_ENV_VAR) {
+        Ok(config_path) => RootConfig::load_from_path(&config_path),
+        Err(_) => RootConfig::load(),
+    };
+    let config = config.log_service;
+    let registry = chroma_config::registry::Registry::new();
+    if let Some(otel_config) = &config.opentelemetry {
+        eprintln!("enabling tracing");
+        chroma_tracing::init_otel_tracing(&otel_config.service_name, &otel_config.endpoint);
+    } else {
+        eprintln!("tracing disabled");
+    }
+    let log_server = LogServer::try_from_config(&config, &registry)
+        .await
+        .expect("Failed to create log server");
+
+    let server_join_handle = tokio::spawn(async move {
+        let _ = LogServer::run(log_server).await;
+    });
+
+    match server_join_handle.await {
+        Ok(_) => {}
+        Err(e) => {
+            tracing::error!("Error terminating server: {:?}", e);
+        }
     }
 }
