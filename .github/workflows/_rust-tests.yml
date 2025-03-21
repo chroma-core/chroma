@@ -67,7 +67,8 @@ jobs:
         with:
           github-token: ${{ github.token }}
       - name: Test compile
-        run: cargo bench --no-run
+        # run: cargo bench --no-run
+        run: cargo bench
 
   can-build-release:
     runs-on: depot-ubuntu-22.04-16
