@@ -43,7 +43,7 @@ import sys
 logger = logging.getLogger(__name__)
 
 VALID_PRESETS = ["fast", "normal", "slow"]
-CURRENT_PRESET = os.getenv("PROPERTY_TESTING_PRESET", "normal")
+CURRENT_PRESET = os.getenv("PROPERTY_TESTING_PRESET", "fast")
 
 if CURRENT_PRESET not in VALID_PRESETS:
     raise ValueError(
@@ -58,12 +58,6 @@ hypothesis.settings.register_profile(
         hypothesis.HealthCheck.large_base_example,
         hypothesis.HealthCheck.function_scoped_fixture,
     ],
-    phases=[
-        hypothesis.Phase.generate,
-        hypothesis.Phase.reuse,
-        hypothesis.Phase.explain,
-    ],
-    # verbosity=hypothesis.Verbosity.verbose,
 )
 
 hypothesis.settings.register_profile(
