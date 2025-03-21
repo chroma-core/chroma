@@ -389,6 +389,8 @@ def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
         start_http_server_and_get_client,
         start_http_server_and_get_async_client,
         start_persistent_http_server_and_get_client,
+        rust_ephemeral_fixture,
+        rust_persistent_fixture,
     ]
     if "CHROMA_INTEGRATION_TEST" in os.environ:
         fixtures.append(integration)
@@ -396,8 +398,6 @@ def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
         fixtures = [integration]
     if "CHROMA_CLUSTER_TEST_ONLY" in os.environ:
         fixtures = [basic_http_client]
-    if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ:
-        fixtures = [rust_ephemeral_fixture, rust_persistent_fixture]
     return fixtures
 
 
