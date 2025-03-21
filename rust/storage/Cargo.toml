@@ -7,13 +7,13 @@ edition = "2021"
 path = "src/lib.rs"
 
 [dependencies]
-bytes = "1.8.0"
-aws-sdk-s3 = "1.78"
-aws-smithy-types = "1.2"
 aws-config = { version = "1.5", features = ["behavior-version-latest"] }
 object_store = { version = "0.11", features = ["aws"] }
 
 async-trait = { workspace = true }
+aws-sdk-s3 = { workspace = true }
+aws-smithy-types = { workspace = true }
+bytes = { workspace = true }
 futures = { workspace = true }
 parking_lot = { workspace = true }
 rand = { workspace = true}

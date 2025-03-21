@@ -6,6 +6,8 @@ members = ["rust/benchmark", "rust/blockstore", "rust/cache", "rust/chroma", "ru
 [workspace.dependencies]
 arrow = "52.2.0"
 async-trait = "0.1"
+aws-sdk-s3 = "1.63"
+aws-smithy-types = "1.2"
 axum = { version = "0.8", features = ["macros"] }
 bytes = "1.10"
 chrono = { version = "0.4", features = ["serde"] }
