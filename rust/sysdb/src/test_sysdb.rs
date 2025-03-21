@@ -225,7 +225,7 @@ impl TestSysDb {
         Ok(tenants)
     }
 
-    fn update_collection_version_file(
+    async fn update_collection_version_file(
         &mut self,
         collection_id: CollectionUuid,
         segment_flush_info: Arc<[SegmentFlushInfo]>,
@@ -306,16 +306,18 @@ impl TestSysDb {
         let storage = inner.storage.clone();
         drop(inner);
 
+        tracing::info!("GcTest: version_file_name: {:?}", version_file_name);
         // Write the serialized bytes to storage
         if let Some(storage) = storage {
-            let result = tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(storage.put_bytes(
+            if storage
+                .put_bytes(
                     &version_file_name,
                     version_file_bytes,
                     PutOptions::default(),
-                ))
-            });
-            if result.is_err() {
+                )
+                .await
+                .is_err()
+            {
                 return Err("Failed to write version file to storage".to_string());
             }
         }
@@ -349,7 +351,7 @@ impl TestSysDb {
     }
 
     // For testing purposes, set the storage for the sysdb.
-    pub async fn set_storage(&mut self, storage: Option<chroma_storage::Storage>) {
+    pub fn set_storage(&mut self, storage: Option<chroma_storage::Storage>) {
         let mut inner = self.inner.lock();
         inner.storage = storage;
     }
@@ -400,7 +402,9 @@ impl TestSysDb {
         }
 
         // Update the in-memory version file
-        let result = self.update_collection_version_file(collection_id, segment_flush_info);
+        let result = self
+            .update_collection_version_file(collection_id, segment_flush_info)
+            .await;
         if result.is_err() {
             return Err(FlushCompactionError::FailedToFlushCompaction(
                 tonic::Status::internal("Failed to update version file"),

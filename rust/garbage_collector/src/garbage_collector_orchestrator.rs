@@ -97,6 +97,7 @@ pub struct GarbageCollectorOrchestrator {
     pending_epoch_id: Option<i64>,
     hnsw_prefixes_for_deletion: Vec<String>,
     num_versions_deleted: u32,
+    deletion_list: Vec<String>,
 }
 
 impl Debug for GarbageCollectorOrchestrator {
@@ -136,6 +137,7 @@ impl GarbageCollectorOrchestrator {
             pending_epoch_id: None,
             hnsw_prefixes_for_deletion: Vec::new(),
             num_versions_deleted: 0,
+            deletion_list: Vec::new(),
         }
     }
 }
@@ -494,6 +496,9 @@ impl Handler<TaskResult<DeleteUnusedFilesOutput, DeleteUnusedFilesError>>
             None => return,
         };
 
+        // Update the deletion list.
+        self.deletion_list = output.deleted_files.clone().into_iter().collect();
+
         // Get stored state
         let version_file = self
             .pending_version_file
@@ -548,7 +553,7 @@ impl Handler<TaskResult<DeleteVersionsAtSysDbOutput, DeleteVersionsAtSysDbError>
             collection_id: self.collection_id,
             version_file_path: self.version_file_path.clone(),
             num_versions_deleted: self.num_versions_deleted,
-            deletion_list: Vec::new(),
+            deletion_list: self.deletion_list.clone(),
         };
 
         self.terminate_with_result(Ok(response), ctx);
