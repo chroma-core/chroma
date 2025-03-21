@@ -63,60 +63,6 @@ jobs:
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
-          CHROMA_RUST_BINDINGS_TEST_ONLY: "1"
-
-  test-rust-single-node-integration:
-    strategy:
-      fail-fast: false
-      matrix:
-        python: ${{fromJson(inputs.python_versions)}}
-        # NOTE(hammadb): For some reason depot-windows fails so leaving default windows-latest
-        # on chromadb/test/client/test_multiple_clients_concurrency.py::test_multiple_clients_concurrently
-        platform: [depot-ubuntu-24.04, windows-latest]
-        test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore='chromadb/test/test_cli.py' --ignore-glob 'chromadb/test/distributed/*'",
-                    "chromadb/test/property/test_add.py",
-                    "chromadb/test/property/test_collections.py",
-                    "chromadb/test/property/test_collections_with_database_tenant.py",
-                    "chromadb/test/property/test_cross_version_persist.py",
-                    "chromadb/test/property/test_embeddings.py",
-                    "chromadb/test/property/test_filtering.py",
-                    "chromadb/test/property/test_persist.py",
-                    "chromadb/test/stress"]
-        include:
-          - platform: depot-ubuntu-24.04
-            env-file: compose-env.linux
-    runs-on: ${{ matrix.platform }}
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-    - name: Set up Python (${{ matrix.python }})
-      uses: ./.github/actions/python
-    - name: Setup Rust
-      uses: ./.github/actions/rust
-      with:
-          github-token: ${{ github.token }}
-    - name: Build Rust bindings
-      uses: PyO3/maturin-action@v1
-      with:
-        command: build
-        sccache: true
-    - name: Install built wheel
-      shell: bash
-      run: pip install --no-index --find-links target/wheels/ chromadb
-    - name: Configure pytest to upload results to Datadog
-      uses: datadog/test-visibility-github-action@v2
-      # This action currently fails on Windows (https://github.com/DataDog/test-visibility-github-action/issues/36)
-      if: ${{ !contains(matrix.platform, 'windows') }}
-      with:
-        languages: python
-        api_key: ${{ secrets.DD_API_KEY }}
-        site: ${{ vars.DD_SITE }}
-    - name: Rust Integration Test
-      run: bin/rust-integration-test.sh ${{ matrix.test-globs }}
-      shell: bash
-      env:
-        ENV_FILE: ${{ matrix.env-file }}
-        PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
 
   test-rust-thin-client:
     strategy:
@@ -272,7 +218,6 @@ jobs:
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
-          CHROMA_RUST_BINDINGS_TEST_ONLY: "1"
 
   test-python-cli:
     strategy:
