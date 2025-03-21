@@ -32,25 +32,20 @@ os.environ["AWS_SECRET_ACCESS_KEY"] = "dummy_aws_secret_key"
 os.environ["AWS_REGION"] = "us-east-1"
 
 
-# Mock for embedding functions to avoid actual API calls
-class MockEmbeddings:
-    @staticmethod
-    def mock_embeddings(input: Documents) -> Embeddings:
-        """Return mock embeddings for testing"""
-        return [np.array([0.1, 0.2, 0.3], dtype=np.float32) for _ in input]
+def mock_embeddings(input: Documents) -> Embeddings:
+    """Return mock embeddings for testing"""
+    return [np.array([0.1, 0.2, 0.3], dtype=np.float32) for _ in input]
 
 
-# Base mock for API-based embedding functions
 class BaseMockEmbedding:
     def __init__(self, **kwargs: Any) -> None:
         for key, value in kwargs.items():
             setattr(self, key, value)
 
     def __call__(self, input: Documents) -> Embeddings:
-        return MockEmbeddings.mock_embeddings(input)
+        return mock_embeddings(input)
 
 
-# Use base mock for simple API-based functions
 MockOpenAIEmbeddings = type("MockOpenAIEmbeddings", (BaseMockEmbedding,), {})
 MockCohereEmbeddings = type("MockCohereEmbeddings", (BaseMockEmbedding,), {})
 MockGooglePalmEmbeddings = type("MockGooglePalmEmbeddings", (BaseMockEmbedding,), {})
@@ -66,7 +61,6 @@ MockGoogleVertexEmbeddings = type(
 MockRoboflowEmbeddings = type("MockRoboflowEmbeddings", (BaseMockEmbedding,), {})
 
 
-# Mock for OpenCLIP - needs specific initialization structure
 class MockOpenCLIPModule:
     @staticmethod
     def create_model_and_transforms(
@@ -84,7 +78,6 @@ class MockOpenCLIPModule:
         return tokenizer
 
 
-# Mock for Text2Vec - needs specific model structure
 class MockSentenceModel:
     def __init__(self, model_name_or_path: str) -> None:
         self.model_name = model_name_or_path
@@ -97,9 +90,8 @@ class MockText2VecModule:
     SentenceModel = MockSentenceModel
 
 
-# Mock for Ollama - needs specific client structure
 class MockOllamaClient:
-    def __init__(self, host: str = "http://localhost:11434", **kwargs: Any) -> None:
+    def __init__(self, host: str = "", **kwargs: Any) -> None:
         self.host = host
 
     def embed(self, model: str, input: List[str], **kwargs: Any) -> Dict[str, Any]:
@@ -110,7 +102,6 @@ class MockOllamaModule:
     Client = MockOllamaClient
 
 
-# Mock for httpx used by HuggingFace and Jina
 class MockHttpxClient:
     def __init__(self, headers: Dict[str, str] = {}) -> None:
         self.headers = headers
@@ -127,27 +118,24 @@ class MockHttpx:
         return MockHttpxClient()
 
 
-# Mock for SentenceTransformer
 class MockSentenceTransformer:
     def __init__(self, model_name: str, device: str = "cpu", **kwargs: Any) -> None:
         self.model_name = model_name
         self.device = device
 
     def __call__(self, input: Documents) -> Embeddings:
-        return MockEmbeddings.mock_embeddings(input)
+        return mock_embeddings(input)
 
 
-# Mock for Instructor
 class MockInstructorEmbeddingFunction:
     def __init__(self, model_name: str, device: str = "cpu") -> None:
         self.model_name = model_name
         self.device = device
 
     def __call__(self, input: Documents) -> Embeddings:
-        return MockEmbeddings.mock_embeddings(input)
+        return mock_embeddings(input)
 
 
-# Mock for VoyageAI module
 class MockVoyageAIClient:
     def __init__(self, api_key: str) -> None:
         self.api_key = api_key
@@ -431,7 +419,7 @@ def test_embedding_function_config_roundtrip(
     sys.modules["cohere"] = MagicMock()
 
     # Mock the __call__ method to avoid actual API calls
-    monkeypatch.setattr(ef_class, "__call__", MockEmbeddings.mock_embeddings)
+    monkeypatch.setattr(ef_class, "__call__", mock_embeddings)
 
     # 1. Create embedding function with arguments
     ef_instance = ef_class(**test_config["args"])
@@ -485,7 +473,7 @@ def test_embedding_function_invalid_config(
             else:
                 sys.modules[module_path] = mock_obj
 
-    # Pre-mock common dependencies
+    # Pre-mock dependencies
     sys.modules["PIL"] = MagicMock()
     sys.modules["PIL.Image"] = MagicMock()
     sys.modules["torch"] = MagicMock()
@@ -493,7 +481,7 @@ def test_embedding_function_invalid_config(
     sys.modules["cohere"] = MagicMock()
 
     # Mock the __call__ method to avoid actual API calls
-    monkeypatch.setattr(ef_class, "__call__", MockEmbeddings.mock_embeddings)
+    monkeypatch.setattr(ef_class, "__call__", mock_embeddings)
 
     # Create embedding function with arguments
     ef_instance = ef_class(**test_config["args"])
