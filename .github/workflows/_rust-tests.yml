@@ -57,8 +57,11 @@ jobs:
         bench-command:
           - "--bench blockfile_writer -- --sample-size 10"
           - "--bench distance_metrics"
-          - "--bench filter --bench get --bench limit"
-          - "--bench query --bench spann"
+          - "--bench filter"
+          - "--bench get"
+          - "--bench limit"
+          - "--bench query"
+          - "--bench spann"
     runs-on: ${{ matrix.platform }}
     env:
       RUST_BACKTRACE: 1
