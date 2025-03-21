@@ -37,6 +37,7 @@ struct Inner {
     segments: HashMap<SegmentUuid, Segment>,
     tenant_last_compaction_time: HashMap<String, i64>,
     collection_to_version_file: HashMap<CollectionUuid, CollectionVersionFile>,
+    collection_to_version_file_name: HashMap<CollectionUuid, String>,
     #[derivative(Debug = "ignore")]
     storage: Option<chroma_storage::Storage>,
 }
@@ -50,6 +51,7 @@ impl TestSysDb {
                 segments: HashMap::new(),
                 tenant_last_compaction_time: HashMap::new(),
                 collection_to_version_file: HashMap::new(),
+                collection_to_version_file_name: HashMap::new(),
                 storage: None,
             })),
         }
@@ -293,11 +295,15 @@ impl TestSysDb {
             collection_id.to_string(),
             next_version
         );
+        // inner
+        //     .collections
+        //     .get_mut(&collection_id)
+        //     .unwrap()
+        //     .version_file_name = version_file_name.clone();
+
         inner
-            .collections
-            .get_mut(&collection_id)
-            .unwrap()
-            .version_file_name = version_file_name.clone();
+            .collection_to_version_file_name
+            .insert(collection_id, version_file_name.clone());
 
         // Serialize the version file to bytes and write to storage
         let version_file_bytes = version_file.encode_to_vec();
@@ -352,6 +358,15 @@ impl TestSysDb {
     pub async fn set_storage(&mut self, storage: Option<chroma_storage::Storage>) {
         let mut inner = self.inner.lock();
         inner.storage = storage;
+    }
+
+    pub fn get_version_file_name(&self, collection_id: CollectionUuid) -> String {
+        let inner = self.inner.lock();
+        inner
+            .collection_to_version_file_name
+            .get(&collection_id)
+            .unwrap()
+            .clone()
     }
 
     #[allow(clippy::too_many_arguments)]

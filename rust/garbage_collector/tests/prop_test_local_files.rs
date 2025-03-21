@@ -373,6 +373,14 @@ impl Default for GcTest {
     }
 }
 
+fn get_version_file_name(sysdb: &chroma_sysdb::SysDb, id: String) -> String {
+    let collection_id = CollectionUuid::from_str(&id).unwrap();
+    match sysdb {
+        chroma_sysdb::SysDb::Test(test_sysdb) => test_sysdb.get_version_file_name(collection_id),
+        _ => panic!("Expected TestSysDb"),
+    }
+}
+
 impl GcTest {
     // Logic:
     // 1. Get version file name from sysdb.
@@ -400,7 +408,7 @@ impl GcTest {
             None => return self,
         };
         let current_version = collection.version;
-        let _version_file_name = collection.version_file_name.clone();
+        let _version_file_name = get_version_file_name(&self.sysdb, id);
 
         // ----- Prepare to call flush compaction.  ---------
         // Use half of version_block_ids as the block ids for the new version.
@@ -535,9 +543,11 @@ impl GcTest {
             }
         };
 
+        let version_file_name = get_version_file_name(&self.sysdb, id);
+
         let orchestrator = GarbageCollectorOrchestrator::new(
             collection.collection_id,
-            collection.version_file_name.clone(),
+            version_file_name,
             0,
             sysdb,
             dispatcher_handle,
