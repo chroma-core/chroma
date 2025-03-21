@@ -1,7 +1,7 @@
 import pytest
 import os
 import sys
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from jsonschema import ValidationError
 import numpy as np
 from unittest.mock import MagicMock
@@ -15,6 +15,7 @@ from chromadb.api.types import Documents, Embeddings
 from chromadb.utils.embedding_functions import (
     known_embedding_functions,
 )
+import numpy.typing as npt
 
 # Set dummy environment variables for API keys
 os.environ["CHROMA_OPENAI_API_KEY"] = "dummy_openai_key"
@@ -37,10 +38,8 @@ class MockInstructorEmbeddingFunction:
         self.model_name = model_name
         self.device = device
 
-    def encode(
-        self: Any, texts: List[str], instruction: Optional[str] = None
-    ) -> np.ndarray[Any, np.dtype[np.float32]]:
-        return np.array([[0.1, 0.2, 0.3] for _ in range(len(texts))])
+    def __call__(self, input: Documents) -> Embeddings:
+        return [np.array([0.1, 0.2, 0.3], dtype=np.float32) for _ in input]
 
 
 # Mock SentenceTransformer class
@@ -50,13 +49,8 @@ class MockSentenceTransformer:
         self.device = device
         self.kwargs = kwargs
 
-    def encode(
-        self,
-        texts: List[str],
-        convert_to_numpy: bool = True,
-        normalize_embeddings: bool = False,
-    ) -> np.ndarray[Any, np.dtype[np.float32]]:
-        return np.array([[0.1, 0.2, 0.3] for _ in range(len(texts))])
+    def __call__(self, input: Documents) -> Embeddings:
+        return [np.array([0.1, 0.2, 0.3], dtype=np.float32) for _ in input]
 
 
 # Mock for embedding functions to avoid actual API calls
@@ -67,13 +61,278 @@ class MockEmbeddings:
         return [np.array([0.1, 0.2, 0.3], dtype=np.float32) for _ in input]
 
 
-class MockTextEmbeddingModel:
-    @staticmethod
-    def from_pretrained(model_name: str) -> "MockTextEmbeddingModel":
-        return MockTextEmbeddingModel()
+# Mock for OpenAI embeddings
+class MockOpenAIEmbeddings:
+    def __init__(
+        self, api_key: str, model_name: str = "text-embedding-ada-002", **kwargs: Any
+    ) -> None:
+        self.api_key = api_key
+        self.model_name = model_name
 
-    def get_embeddings(self, texts: List[str]) -> List[Dict[str, Any]]:
-        return [{"embeddings": [0.1, 0.2, 0.3]} for _ in texts]
+    def __call__(self, input: Documents) -> Embeddings:
+        return [np.array([0.1, 0.2, 0.3], dtype=np.float32) for _ in input]
+
+
+# Mock for Cohere embeddings
+class MockCohereEmbeddings:
+    def __init__(
+        self, api_key: str, model_name: str = "embed-english-v3.0", **kwargs: Any
+    ) -> None:
+        self.api_key = api_key
+        self.model_name = model_name
+
+    def __call__(self, input: Documents) -> Embeddings:
+        return [np.array([0.1, 0.2, 0.3], dtype=np.float32) for _ in input]
+
+
+# Mock for Google PaLM embeddings
+class MockGooglePalmEmbeddings:
+    def __init__(
+        self,
+        api_key: str,
+        model_name: str = "models/embedding-gecko-001",
+        **kwargs: Any,
+    ) -> None:
+        self.api_key = api_key
+        self.model_name = model_name
+
+    def __call__(self, input: Documents) -> Embeddings:
+        return [np.array([0.1, 0.2, 0.3], dtype=np.float32) for _ in input]
+
+
+# Mock for Google Generative AI embeddings
+class MockGoogleGenerativeAIEmbeddings:
+    def __init__(
+        self,
+        api_key: str,
+        model_name: str = "models/embedding-001",
+        task_type: str = "RETRIEVAL_DOCUMENT",
+        **kwargs: Any,
+    ) -> None:
+        self.api_key = api_key
+        self.model_name = model_name
+        self.task_type = task_type
+
+    def __call__(self, input: Documents) -> Embeddings:
+        return [np.array([0.1, 0.2, 0.3], dtype=np.float32) for _ in input]
+
+
+# Mock for Ollama embeddings
+class MockOllamaEmbeddings:
+    def __init__(
+        self,
+        url: str = "http://localhost:11434",
+        model_name: str = "llama2",
+        **kwargs: Any,
+    ) -> None:
+        self.url = url
+        self.model_name = model_name
+
+    def __call__(self, input: Documents) -> Embeddings:
+        return [np.array([0.1, 0.2, 0.3], dtype=np.float32) for _ in input]
+
+
+# Mock for Jina embeddings
+class MockJinaEmbeddings:
+    def __init__(
+        self,
+        api_key: str,
+        model_name: str = "jina-embeddings-v2-base-en",
+        **kwargs: Any,
+    ) -> None:
+        self.api_key = api_key
+        self.model_name = model_name
+
+    def __call__(self, input: Documents) -> Embeddings:
+        return [np.array([0.1, 0.2, 0.3], dtype=np.float32) for _ in input]
+
+
+# Mock for VoyageAI embeddings
+class MockVoyageAIEmbeddings:
+    def __init__(
+        self, api_key: str, model_name: str = "voyage-2", **kwargs: Any
+    ) -> None:
+        self.api_key = api_key
+        self.model_name = model_name
+
+    def __call__(self, input: Documents) -> Embeddings:
+        return [np.array([0.1, 0.2, 0.3], dtype=np.float32) for _ in input]
+
+
+# Mock for OpenCLIP embeddings
+class MockOpenCLIPEmbeddings:
+    def __init__(
+        self,
+        model_name: str = "ViT-B-32",
+        checkpoint: str = "laion2b_s34b_b79k",
+        device: str = "cpu",
+        **kwargs: Any,
+    ) -> None:
+        self.model_name = model_name
+        self.checkpoint = checkpoint
+        self.device = device
+
+    def __call__(self, input: Documents) -> Embeddings:
+        return [np.array([0.1, 0.2, 0.3], dtype=np.float32) for _ in input]
+
+
+# Mock for Text2Vec embeddings
+class MockText2VecEmbeddings:
+    def __init__(
+        self, model_name: str = "shibing624/text2vec-base-chinese", **kwargs: Any
+    ) -> None:
+        self.model_name = model_name
+
+    def __call__(self, input: Documents) -> Embeddings:
+        return [np.array([0.1, 0.2, 0.3], dtype=np.float32) for _ in input]
+
+
+# Mock for Roboflow embeddings
+class MockRoboflowEmbeddings:
+    def __init__(self, api_key: str, **kwargs: Any) -> None:
+        self.api_key = api_key
+
+    def __call__(self, input: Documents) -> Embeddings:
+        return [np.array([0.1, 0.2, 0.3], dtype=np.float32) for _ in input]
+
+
+# Mock for HuggingFace embeddings
+class MockHuggingFaceEmbeddings:
+    def __init__(
+        self,
+        api_key: str,
+        model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
+        **kwargs: Any,
+    ) -> None:
+        self.api_key = api_key
+        self.model_name = model_name
+
+    def __call__(self, input: Documents) -> Embeddings:
+        return [np.array([0.1, 0.2, 0.3], dtype=np.float32) for _ in input]
+
+
+# Mock for Google Vertex embeddings
+class MockGoogleVertexEmbeddings:
+    def __init__(
+        self, api_key: str, model_name: str = "models/embedding-001", **kwargs: Any
+    ) -> None:
+        self.api_key = api_key
+        self.model_name = model_name
+
+    def __call__(self, input: Documents) -> Embeddings:
+        return [np.array([0.1, 0.2, 0.3], dtype=np.float32) for _ in input]
+
+
+# Mock for httpx module used by HuggingFace and Jina
+class MockHttpxClient:
+    def __init__(self, headers: Dict[str, str] = {}) -> None:
+        self.headers = headers
+
+    def post(self, url: str, json: Dict[str, Any] = {}) -> Any:
+        mock_response = MagicMock()
+        mock_response.json.return_value = [[0.1, 0.2, 0.3]]
+        return mock_response
+
+
+class MockHttpx:
+    @staticmethod
+    def Client(*args: Any, **kwargs: Any) -> MockHttpxClient:
+        return MockHttpxClient()
+
+
+# Mock for ollama module
+class MockOllamaClient:
+    def __init__(self, host: str = "http://localhost:11434", **kwargs: Any) -> None:
+        self.host = host
+
+    def embed(self, model: str, input: List[str], **kwargs: Any) -> Dict[str, Any]:
+        return {"embeddings": [[0.1, 0.2, 0.3] for _ in input]}
+
+
+class MockOllamaModule:
+    Client = MockOllamaClient
+
+
+# Mock for vertexai module
+class MockVertexAI:
+    @staticmethod
+    def configure(project: str = "", location: str = "") -> None:
+        pass
+
+
+class MockEmbeddingModel:
+    def __init__(self, model_name: str) -> None:
+        self.model_name = model_name
+
+    def get_embeddings(self, texts: List[str]) -> List[List[float]]:
+        return [[0.1, 0.2, 0.3] for _ in texts]
+
+
+class MockVertexAIEmbeddings:
+    @staticmethod
+    def from_pretrained(model_name: str) -> MockEmbeddingModel:
+        return MockEmbeddingModel(model_name)
+
+
+class MockVertexAIModule:
+    Embeddings = MockVertexAIEmbeddings
+
+    def __init__(self) -> None:
+        pass
+
+
+# Mock for voyageai module
+class MockVoyageAIClient:
+    def __init__(self, api_key: str) -> None:
+        self.api_key = api_key
+
+    def embed(self, texts: List[str], model: str = "voyage-2") -> Dict[str, Any]:
+        return {"embeddings": [[0.1, 0.2, 0.3] for _ in texts]}
+
+
+class MockVoyageAIModule:
+    Client = MockVoyageAIClient
+
+
+# Mock for open_clip module
+class MockOpenCLIPModule:
+    @staticmethod
+    def create_model_and_transforms(
+        model_name: str, pretrained: str = "", device: str = "cpu", **kwargs: Any
+    ) -> Any:
+        model = MagicMock()
+        model.encode_text.return_value = np.array([[0.1, 0.2, 0.3]])
+        preprocess = MagicMock()
+        tokenizer = MagicMock()
+        return model, preprocess, tokenizer
+
+    @staticmethod
+    def get_tokenizer(model_name: str) -> Any:
+        tokenizer = MagicMock()
+        tokenizer.encode.return_value = np.array([[1, 2, 3]])
+        return tokenizer
+
+
+# Mock for roboflow module
+class MockRoboflowModule:
+    def __init__(self, api_key: str) -> None:
+        self.api_key = api_key
+
+    def embed(self, input: Any) -> List[float]:
+        return [0.1, 0.2, 0.3]
+
+
+# Mock for text2vec module
+class MockSentenceModel:
+    def __init__(self, model_name_or_path: str) -> None:
+        self.model_name = model_name_or_path
+
+    def encode(self, texts: List[str], **kwargs: Any) -> npt.NDArray[np.float32]:
+        return np.array([[0.1, 0.2, 0.3] for _ in texts])
+
+
+class MockText2VecModule:
+    SentenceModel = MockSentenceModel
 
 
 # Test configurations for each embedding function
@@ -88,6 +347,9 @@ EMBEDDING_FUNCTION_CONFIGS: Dict[str, Dict[str, Any]] = {
             "api_key_env_var": "CHROMA_OPENAI_API_KEY",
             "model_name": "text-embedding-ada-002",
         },
+        "mocks": [
+            ("openai.Embedding", MockOpenAIEmbeddings),
+        ],
     },
     "huggingface": {
         "args": {
@@ -99,6 +361,9 @@ EMBEDDING_FUNCTION_CONFIGS: Dict[str, Dict[str, Any]] = {
             "model_name": "sentence-transformers/all-MiniLM-L6-v2",
             "api_key_env_var": "CHROMA_HUGGINGFACE_API_KEY",
         },
+        "mocks": [
+            ("httpx", MockHttpx),
+        ],
     },
     "sentence_transformer": {
         "args": {
@@ -121,6 +386,9 @@ EMBEDDING_FUNCTION_CONFIGS: Dict[str, Dict[str, Any]] = {
             "api_key_env_var": "CHROMA_COHERE_API_KEY",
             "model_name": "embed-english-v3.0",
         },
+        "mocks": [
+            ("cohere.Client", MockCohereEmbeddings),
+        ],
     },
     "google_palm": {
         "args": {
@@ -168,6 +436,9 @@ EMBEDDING_FUNCTION_CONFIGS: Dict[str, Dict[str, Any]] = {
             "model_name": "llama2",
             "timeout": 60,
         },
+        "mocks": [
+            ("ollama", MockOllamaModule),
+        ],
     },
     "instructor": {
         "args": {
@@ -192,6 +463,9 @@ EMBEDDING_FUNCTION_CONFIGS: Dict[str, Dict[str, Any]] = {
             "api_key_env_var": "CHROMA_JINA_API_KEY",
             "model_name": "jina-embeddings-v2-base-en",
         },
+        "mocks": [
+            ("requests.Session", MockJinaEmbeddings),
+        ],
     },
     "voyageai": {
         "args": {
@@ -203,6 +477,9 @@ EMBEDDING_FUNCTION_CONFIGS: Dict[str, Dict[str, Any]] = {
             "api_key_env_var": "CHROMA_VOYAGEAI_API_KEY",
             "model_name": "voyage-2",
         },
+        "mocks": [
+            ("voyageai", MockVoyageAIModule),
+        ],
     },
     "onnx_mini_lm_l6_v2": {
         "args": {
@@ -226,6 +503,9 @@ EMBEDDING_FUNCTION_CONFIGS: Dict[str, Dict[str, Any]] = {
             "checkpoint": "laion2b_s34b_b79k",
             "device": "cpu",
         },
+        "mocks": [
+            ("open_clip", MockOpenCLIPModule),
+        ],
     },
     "roboflow": {
         "args": {
@@ -235,6 +515,9 @@ EMBEDDING_FUNCTION_CONFIGS: Dict[str, Dict[str, Any]] = {
         "config": {
             "api_key_env_var": "CHROMA_ROBOFLOW_API_KEY",
         },
+        "mocks": [
+            ("roboflow", MockRoboflowModule),
+        ],
     },
     "text2vec": {
         "args": {
@@ -243,6 +526,9 @@ EMBEDDING_FUNCTION_CONFIGS: Dict[str, Dict[str, Any]] = {
         "config": {
             "model_name": "shibing624/text2vec-base-chinese",
         },
+        "mocks": [
+            ("text2vec", MockText2VecModule),
+        ],
     },
 }
 
@@ -251,8 +537,10 @@ SKIP_EMBEDDING_FUNCTIONS = [
     "huggingface_server",  # Requires a running server
     "chroma_langchain",  # Requires LangChain setup
     "default",  # Special case that delegates to ONNXMiniLM_L6_V2
-    "google_vertex",  # Requires complex mocking of vertexai module
     "amazon_bedrock",  # Requires complex mocking of boto3 session
+    "google_vertex",  # Requires complex mocking of vertexai
+    "google_generative_ai",  # Requires complex mocking of google.generativeai
+    "google_palm",  # Requires complex mocking of google.generativeai
 ]
 
 
