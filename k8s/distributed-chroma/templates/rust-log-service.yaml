@@ -69,9 +69,9 @@ spec:
       {{ end }}
       {{if .Values.rustLogService.configuration}}
       volumes:
-        - name: rust-frontend-service-config
+        - name: rust-log-service-config
           configMap:
-            name: rust-frontend-service-config
+            name: rust-log-service-config
       {{ end }}
 
 ---
@@ -87,7 +87,7 @@ spec:
       port: 50051
       targetPort: 50051
   selector:
-    app: rust-frontend-service
+    app: rust-log-service
   type: ClusterIP
 
 
