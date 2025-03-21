@@ -360,7 +360,7 @@ from strategies import hashing_embedding_function
 def test_repro(caplog: pytest.LogCaptureFixture, settings: Settings) -> None:
     NUM_ITER = 100
     for i in range(NUM_ITER):
-        print(f"Running iteration {i}")
+        print(f"======= Running iteration {i} =========== ")
         state = PersistEmbeddingsStateMachine(
             settings=settings, client=chromadb.Client(settings)
         )
@@ -400,6 +400,7 @@ def test_repro(caplog: pytest.LogCaptureFixture, settings: Settings) -> None:
                 "documents": None,
             }
         )
+        # DEBUG - Expect 3k0Y to be in the index
         state.ann_accuracy()
         # recall: 1.0, missing 0 out of 1, accuracy threshold 1e-06
         state.count()
@@ -417,6 +418,7 @@ def test_repro(caplog: pytest.LogCaptureFixture, settings: Settings) -> None:
                 "documents": None,
             }
         )
+        # DEBUG - Expect 3k0Y, gcJ4z, D to be in the index
         state.ann_accuracy()
         # recall: 1.0, missing 0 out of 3, accuracy threshold 1e-06
         state.count()
@@ -469,6 +471,7 @@ def test_repro(caplog: pytest.LogCaptureFixture, settings: Settings) -> None:
                 "documents": None,
             }
         )
+        # DEBUG - Expect 3k0Y, gcJ4z, D, RJYHz, HvqDh, 4AWGd3, 3IL, EmdNP, MC1pDB to be in the index
         state.ann_accuracy()
         # recall: 1.0, missing 0 out of 9, accuracy threshold 1e-06
         state.count()
@@ -522,6 +525,7 @@ def test_repro(caplog: pytest.LogCaptureFixture, settings: Settings) -> None:
                 "documents": None,
             }
         )
+        # DEBUG - Expect 3k0Y, gcJ4z, D, RJYHz, HvqDh, 4AWGd3, 3IL, EmdNP, MC1pDB to be in the index
         state.ann_accuracy()
         # recall: 1.0, missing 0 out of 9, accuracy threshold 1e-06
         state.count()
@@ -529,6 +533,16 @@ def test_repro(caplog: pytest.LogCaptureFixture, settings: Settings) -> None:
         state.log_size_below_max()
         state.no_duplicates()
         state.delete_by_ids(ids=[embedding_ids_7, embedding_ids_0, embedding_ids_5])
+        # DEBUG - DELETES EmdNP, 3k0Y, 4AWGd3
+        # DEBUG - EXPECT gcJ4z, D, RJYHz, HvqDh, 3IL, MC1pDB to be in the index
+        ids = state.collection.get()['ids']
+        assert len(ids) == 6
+        assert "gcJ4z" in ids
+        assert "D" in ids
+        assert "RJYHz" in ids
+        assert "HvqDh" in ids
+        assert "3IL" in ids
+        assert "MC1pDB" in ids
         state.ann_accuracy()
         # recall: 1.0, missing 0 out of 6, accuracy threshold 1e-06
         state.count()
@@ -567,6 +581,7 @@ def test_repro(caplog: pytest.LogCaptureFixture, settings: Settings) -> None:
                 "documents": None,
             }
         )
+        # DEBUG - EXPECT gcJ4z, D, RJYHz, HvqDh, 3IL, MC1pDB, U, RSeiQXYKIZxI, lN3AVOf-DlC to be in the index
         state.ann_accuracy()
         # recall: 1.0, missing 0 out of 9, accuracy threshold 1e-06
         state.count()
@@ -598,6 +613,7 @@ def test_repro(caplog: pytest.LogCaptureFixture, settings: Settings) -> None:
                 "documents": None,
             }
         )
+         # DEBUG - EXPECT gcJ4z, D, RJYHz, HvqDh, 3IL, MC1pDB, U, RSeiQXYKIZxI, lN3AVOf-DlC to be in the index
         state.ann_accuracy()
         # recall: 1.0, missing 0 out of 9, accuracy threshold 1e-06
         state.count()
@@ -621,6 +637,12 @@ def test_repro(caplog: pytest.LogCaptureFixture, settings: Settings) -> None:
                 embedding_ids_6,
             ]
         )
+        # DEBUG - EXPECT gcJ4z, U, lN3AVOf-DlC to be in the index
+        ids = state.collection.get()['ids']
+        assert len(ids) == 3
+        assert "gcJ4z" in ids
+        assert "U" in ids
+        assert "lN3AVOf-DlC" in ids
         state.ann_accuracy()
         # recall: 1.0, missing 0 out of 3, accuracy threshold 1e-06
         state.count()
@@ -654,6 +676,7 @@ def test_repro(caplog: pytest.LogCaptureFixture, settings: Settings) -> None:
                 "documents": None,
             }
         )
+        # DEBUG - EXPECT gcJ4z, U, lN3AVOf-DlC, zk, 8ZRY to be in the index
         state.ann_accuracy()
         # recall: 1.0, missing 0 out of 5, accuracy threshold 1e-06
         state.count()
