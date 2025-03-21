@@ -244,6 +244,47 @@ impl From<InternalCollectionConfiguration> for CollectionConfiguration {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateVectorIndexConfiguration {
+    Hnsw(Option<UpdateHnswConfiguration>),
+    Spann(Option<InternalSpannConfiguration>),
+}
+
+impl From<UpdateHnswConfiguration> for UpdateVectorIndexConfiguration {
+    fn from(config: UpdateHnswConfiguration) -> Self {
+        UpdateVectorIndexConfiguration::Hnsw(Some(config))
+    }
+}
+
+impl From<InternalSpannConfiguration> for UpdateVectorIndexConfiguration {
+    fn from(config: InternalSpannConfiguration) -> Self {
+        UpdateVectorIndexConfiguration::Spann(Some(config))
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum UpdateCollectionConfigurationToInternalConfigurationError {
+    #[error("Multiple vector index configurations provided")]
+    MultipleVectorIndexConfigurations,
+}
+
+impl ChromaError for UpdateCollectionConfigurationToInternalConfigurationError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            Self::MultipleVectorIndexConfigurations => ErrorCodes::InvalidArgument,
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
+#[cfg_attr(feature = "pyo3", pyo3::pyclass)]
+pub struct UpdateCollectionConfiguration {
+    pub hnsw: Option<UpdateHnswConfiguration>,
+    pub spann: Option<SpannConfiguration>,
+    pub embedding_function: Option<EmbeddingFunctionConfiguration>,
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{test_segment, CollectionUuid, Metadata};
@@ -297,45 +338,4 @@ mod tests {
         // Setting from metadata is ignored since the config is not default
         assert_eq!(overridden_config.ef_construction, 2);
     }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum UpdateVectorIndexConfiguration {
-    Hnsw(Option<UpdateHnswConfiguration>),
-    Spann(Option<InternalSpannConfiguration>),
-}
-
-impl From<UpdateHnswConfiguration> for UpdateVectorIndexConfiguration {
-    fn from(config: UpdateHnswConfiguration) -> Self {
-        UpdateVectorIndexConfiguration::Hnsw(Some(config))
-    }
-}
-
-impl From<InternalSpannConfiguration> for UpdateVectorIndexConfiguration {
-    fn from(config: InternalSpannConfiguration) -> Self {
-        UpdateVectorIndexConfiguration::Spann(Some(config))
-    }
-}
-
-#[derive(Debug, Error)]
-pub enum UpdateCollectionConfigurationToInternalConfigurationError {
-    #[error("Multiple vector index configurations provided")]
-    MultipleVectorIndexConfigurations,
-}
-
-impl ChromaError for UpdateCollectionConfigurationToInternalConfigurationError {
-    fn code(&self) -> ErrorCodes {
-        match self {
-            Self::MultipleVectorIndexConfigurations => ErrorCodes::InvalidArgument,
-        }
-    }
-}
-
-#[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
-#[cfg_attr(feature = "pyo3", pyo3::pyclass)]
-pub struct UpdateCollectionConfiguration {
-    pub hnsw: Option<UpdateHnswConfiguration>,
-    pub spann: Option<SpannConfiguration>,
-    pub embedding_function: Option<EmbeddingFunctionConfiguration>,
 }
