@@ -116,7 +116,7 @@ pub struct CompactOrchestrator {
     state: ExecutionState,
     // Component Execution
     collection_id: CollectionUuid,
-    collection_logical_size: i64,
+    collection_logical_size_bytes: i64,
     // Dependencies
     log: Log,
     sysdb: SysDb,
@@ -247,7 +247,7 @@ impl CompactOrchestrator {
     pub fn new(
         compaction_job: CompactionJob,
         collection_id: CollectionUuid,
-        collection_logical_size: i64,
+        collection_logical_size_bytes: i64,
         log: Log,
         sysdb: SysDb,
         blockfile_provider: BlockfileProvider,
@@ -263,7 +263,7 @@ impl CompactOrchestrator {
             compaction_job,
             state: ExecutionState::Pending,
             collection_id,
-            collection_logical_size,
+            collection_logical_size_bytes,
             log,
             sysdb,
             blockfile_provider,
@@ -516,7 +516,7 @@ impl CompactOrchestrator {
             self.total_records_last_compaction,
             // WARN: For legacy collections the logical size is initialized to zero, so the size after compaction might be negative
             // TODO: Backfill collection logical size
-            u64::try_from(self.collection_logical_size).unwrap_or_default(),
+            u64::try_from(self.collection_logical_size_bytes).unwrap_or_default(),
             self.sysdb.clone(),
             self.log.clone(),
         );
@@ -872,7 +872,7 @@ impl Handler<TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>>
                 self.register(self.pulled_log_offset.unwrap(), ctx).await;
             }
         } else {
-            self.collection_logical_size += output.collection_logical_size_delta;
+            self.collection_logical_size_bytes += output.collection_logical_size_delta;
             self.dispatch_apply_log_to_segment_writer_tasks(output.result, ctx.receiver(), ctx)
                 .await;
         }
