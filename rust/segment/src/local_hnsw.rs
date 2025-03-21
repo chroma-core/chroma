@@ -279,7 +279,7 @@ impl LocalHnswSegmentReader {
             guard.index.len()
         );
         let get_all_ids = guard.index.get_all_ids();
-        println!("RUST get_all_ids {:?}", get_all_data);
+        println!("RUST get_all_ids {:?}", get_all_ids);
         Ok(offset_ids
             .into_iter()
             .zip(distances)
