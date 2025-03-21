@@ -8,6 +8,7 @@ use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
 use setsum::Setsum;
+use tracing::instrument::Instrument;
 
 use crate::{
     unprefixed_fragment_path, BatchManager, Error, ExponentialBackoff, Fragment, FragmentSeqNo,
@@ -24,10 +25,25 @@ pub struct EpochWriter {
     writer: Arc<OnceLogWriter>,
 }
 
+///////////////////////////////////////////// MarkDirty ////////////////////////////////////////////
+
+#[async_trait::async_trait]
+pub trait MarkDirty: Send + Sync + 'static {
+    async fn mark_dirty(&self, log_position: LogPosition) -> Result<(), Error>;
+}
+
+#[async_trait::async_trait]
+impl MarkDirty for () {
+    async fn mark_dirty(&self, _: LogPosition) -> Result<(), Error> {
+        Ok(())
+    }
+}
+
 ///////////////////////////////////////////// LogWriter ////////////////////////////////////////////
 
 pub struct LogWriter {
     writer: String,
+    mark_dirty: Arc<dyn MarkDirty>,
     inner: Mutex<Option<EpochWriter>>,
 }
 
@@ -42,14 +58,22 @@ impl LogWriter {
     }
 
     /// Open the log, possibly writing a new manifest to recover it.
-    pub async fn open(
+    pub async fn open<D: MarkDirty>(
         options: LogWriterOptions,
         storage: Arc<Storage>,
         prefix: &str,
         writer: &str,
+        mark_dirty: D,
     ) -> Result<Self, Error> {
-        let once_log_writer =
-            OnceLogWriter::open(options, storage, prefix.to_string(), writer.to_string()).await?;
+        let mark_dirty = Arc::new(mark_dirty) as _;
+        let once_log_writer = OnceLogWriter::open(
+            options,
+            storage,
+            prefix.to_string(),
+            writer.to_string(),
+            Arc::clone(&mark_dirty),
+        )
+        .await?;
         let inner = EpochWriter {
             epoch: 1,
             writer: once_log_writer,
@@ -57,6 +81,52 @@ impl LogWriter {
         let writer = writer.to_string();
         Ok(Self {
             writer,
+            mark_dirty,
+            inner: Mutex::new(Some(inner)),
+        })
+    }
+
+    /// Open or try once to initialize the log.
+    pub async fn open_or_initialize<D: MarkDirty>(
+        options: LogWriterOptions,
+        storage: Arc<Storage>,
+        prefix: &str,
+        writer: &str,
+        mark_dirty: D,
+    ) -> Result<Self, Error> {
+        let mark_dirty = Arc::new(mark_dirty) as _;
+        let once_log_writer = match OnceLogWriter::open(
+            options.clone(),
+            Arc::clone(&storage),
+            prefix.to_string(),
+            writer.to_string(),
+            Arc::clone(&mark_dirty),
+        )
+        .instrument(tracing::info_span!("open_or_initialize"))
+        .await
+        {
+            Ok(writer) => writer,
+            Err(Error::UninitializedLog) => {
+                Self::initialize(&options, &storage, prefix, writer).await?;
+                OnceLogWriter::open(
+                    options,
+                    storage,
+                    prefix.to_string(),
+                    writer.to_string(),
+                    Arc::clone(&mark_dirty),
+                )
+                .await?
+            }
+            Err(e) => return Err(e),
+        };
+        let inner = EpochWriter {
+            epoch: 1,
+            writer: once_log_writer,
+        };
+        let writer = writer.to_string();
+        Ok(Self {
+            writer,
+            mark_dirty,
             inner: Mutex::new(Some(inner)),
         })
     }
@@ -88,6 +158,7 @@ impl LogWriter {
                     epoch_writer.writer.storage.clone(),
                     epoch_writer.writer.prefix.clone(),
                     self.writer.clone(),
+                    Arc::clone(&self.mark_dirty),
                 )
                 .await?;
                 // SAFETY(rescrv):  Mutex poisoning.
@@ -139,6 +210,8 @@ struct OnceLogWriter {
     prefix: String,
     /// True iff the log is done.
     done: AtomicBool,
+    /// Mark each write dirty via this mechanism.
+    mark_dirty: Arc<dyn MarkDirty>,
     /// ManifestManager coordinates updates to the manifest.
     manifest_manager: ManifestManager,
     /// BatchManager coordinates batching writes to the log.
@@ -153,6 +226,7 @@ impl OnceLogWriter {
         storage: Arc<Storage>,
         prefix: String,
         writer: String,
+        mark_dirty: Arc<dyn MarkDirty>,
     ) -> Result<Arc<Self>, Error> {
         let done = AtomicBool::new(false);
         let batch_manager = BatchManager::new(options.throttle_fragment).ok_or(Error::Internal)?;
@@ -171,6 +245,7 @@ impl OnceLogWriter {
             storage,
             prefix,
             done,
+            mark_dirty,
             manifest_manager,
             batch_manager,
             flusher,
@@ -225,6 +300,9 @@ impl OnceLogWriter {
     }
 
     async fn append(self: &Arc<Self>, messages: Vec<Vec<u8>>) -> Result<LogPosition, Error> {
+        if messages.is_empty() {
+            return Err(Error::EmptyBatch);
+        }
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.batch_manager.push_work(messages, tx);
         if let Some((fragment_seq_no, log_position, work)) =
@@ -286,15 +364,18 @@ impl OnceLogWriter {
     ) -> Result<LogPosition, Error> {
         assert!(!messages.is_empty());
         let messages_len = messages.len();
-        let (path, setsum, num_bytes) = upload_parquet(
+        let fut1 = upload_parquet(
             &self.options,
             &self.storage,
             &self.prefix,
             fragment_seq_no,
             log_position,
             messages,
-        )
-        .await?;
+        );
+        let fut2 = self.mark_dirty.mark_dirty(log_position + messages_len);
+        let (res1, res2) = futures::future::join(fut1, fut2).await;
+        res2?;
+        let (path, setsum, num_bytes) = res1?;
         // Upload to a coalesced manifest.
         let fragment = Fragment {
             path: path.to_string(),

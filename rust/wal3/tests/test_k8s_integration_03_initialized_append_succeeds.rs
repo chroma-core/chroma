@@ -37,6 +37,7 @@ async fn test_k8s_integration_03_initialized_append_succeeds() {
         Arc::clone(&storage),
         "test_k8s_integration_03_initialized_append_succeeds",
         "test writer",
+        (),
     )
     .await
     .unwrap();

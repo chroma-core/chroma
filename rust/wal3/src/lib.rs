@@ -17,7 +17,7 @@ pub use batch_manager::BatchManager;
 pub use manifest::{Manifest, Snapshot, SnapshotPointer};
 pub use manifest_manager::ManifestManager;
 pub use reader::{Limits, LogReader};
-pub use writer::{upload_parquet, LogWriter};
+pub use writer::{upload_parquet, LogWriter, MarkDirty};
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
@@ -39,6 +39,8 @@ pub enum Error {
     LogFull,
     #[error("the log is closed")]
     LogClosed,
+    #[error("an empty batch was passed to append")]
+    EmptyBatch,
     #[error("an internal, otherwise unclassifiable error")]
     Internal,
     #[error("could not find FSN in path: {0}")]
@@ -67,6 +69,7 @@ impl chroma_error::ChromaError for Error {
             Self::LogContention => chroma_error::ErrorCodes::Aborted,
             Self::LogFull => chroma_error::ErrorCodes::Aborted,
             Self::LogClosed => chroma_error::ErrorCodes::FailedPrecondition,
+            Self::EmptyBatch => chroma_error::ErrorCodes::InvalidArgument,
             Self::Internal => chroma_error::ErrorCodes::Internal,
             Self::MissingFragmentSequenceNumber(_) => chroma_error::ErrorCodes::Internal,
             Self::CorruptManifest(_) => chroma_error::ErrorCodes::DataLoss,
