@@ -81,7 +81,12 @@ pub struct DeleteArgs {
     db_args: DbArgs,
     #[clap(index = 1, help = "The name of the DB to delete")]
     name: Option<String>,
-    #[clap(long, hide = true, default_value_t = false, help = "Delete without confirmation")]
+    #[clap(
+        long,
+        hide = true,
+        default_value_t = false,
+        help = "Delete without confirmation"
+    )]
     force: bool,
 }
 
@@ -443,9 +448,14 @@ pub fn db_command(command: DbCommand) -> Result<(), CliError> {
 mod tests {
     use crate::client::ChromaClient;
     use crate::commands::db::DbError::{DbNotFound, InvalidDbName};
-    use crate::commands::db::{create_db_already_exists_message, create_db_success_message, db_delete_success_message, get_python_connection};
+    use crate::commands::db::{
+        create_db_already_exists_message, create_db_success_message, db_delete_success_message,
+        get_python_connection,
+    };
     use crate::commands::profile::ProfileError::NoActiveProfile;
-    use crate::utils::{get_current_profile, write_config, write_profiles, AddressBook, CliConfig, Profile};
+    use crate::utils::{
+        get_current_profile, write_config, write_profiles, AddressBook, CliConfig, Profile,
+    };
     use assert_cmd::Command;
     use predicates::str::contains;
     use std::collections::HashMap;
@@ -570,10 +580,10 @@ mod tests {
     fn test_connect() {
         let _temp_dir = simple_test_setup();
         let mut cmd = Command::cargo_bin("chroma").unwrap();
-        
+
         let (_profile_name, profile) = get_current_profile().unwrap();
         let chroma_client = ChromaClient::from_profile(&profile, AddressBook::local().frontend_url);
-        let db_name = "default_database".to_string(); 
+        let db_name = "default_database".to_string();
 
         cmd.arg("db")
             .arg("connect")
@@ -583,7 +593,12 @@ mod tests {
             .arg("--dev")
             .assert()
             .success()
-            .stdout(contains(get_python_connection(chroma_client.api_url, profile.tenant_id, db_name, profile.api_key)));
+            .stdout(contains(get_python_connection(
+                chroma_client.api_url,
+                profile.tenant_id,
+                db_name,
+                profile.api_key,
+            )));
     }
 
     #[tokio::test]
@@ -592,7 +607,10 @@ mod tests {
         let db_name = "db_to_delete";
 
         let chroma_client = ChromaClient::local_default();
-        chroma_client.create_database(db_name.to_string()).await.unwrap();
+        chroma_client
+            .create_database(db_name.to_string())
+            .await
+            .unwrap();
 
         let mut dbs = chroma_client.list_databases().await.unwrap();
         let db_names = dbs
@@ -611,7 +629,7 @@ mod tests {
             .assert()
             .success()
             .stdout(contains(db_delete_success_message(db_name)));
-        
+
         dbs = chroma_client.list_databases().await.unwrap();
         let db_names = dbs
             .iter()
@@ -624,7 +642,7 @@ mod tests {
     async fn test_k8s_integration_delete_not_exists() {
         let _temp_dir = simple_test_setup();
         let db_name = "db_to_delete";
-        
+
         let mut cmd = Command::cargo_bin("chroma").unwrap();
 
         cmd.arg("db")

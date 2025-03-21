@@ -55,7 +55,7 @@ impl ChromaClient {
             None,
         )
     }
-    
+
     pub fn from_profile(profile: &Profile, api_url: String) -> Self {
         Self::new(
             api_url,
@@ -77,7 +77,7 @@ impl ChromaClient {
         R: DeserializeOwned + Default,
     {
         let url = format!("{}{}", self.api_url, route);
-        
+
         let client = Client::new();
         let mut request_builder = client.request(method, url);
 
