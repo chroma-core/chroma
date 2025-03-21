@@ -151,7 +151,6 @@ mod tests {
     use chroma_log::in_memory_log::InMemoryLog;
     use chroma_sysdb::TestSysDb;
     use chroma_types::{Collection, Segment, SegmentScope, SegmentType, SegmentUuid};
-    use serde_json::Value;
     use std::collections::HashMap;
     use std::str::FromStr;
 
@@ -159,45 +158,36 @@ mod tests {
     async fn test_register_operator() {
         let mut sysdb = SysDb::Test(TestSysDb::new());
         let log = Log::InMemory(InMemoryLog::new());
-        let collection_version = 0;
-        let collection_uuid_1 =
-            CollectionUuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
-        let tenant_1 = "tenant_1".to_string();
         let total_records_post_compaction: u64 = 5;
         let size_bytes_post_compaction: u64 = 25000;
         let last_compaction_time_secs: u64 = 1741037006;
+        let collection_version = 0;
+
+        let tenant_1 = "tenant_1".to_string();
         let collection_1 = Collection {
-            collection_id: collection_uuid_1,
             name: "collection_1".to_string(),
-            configuration_json: Value::Null,
-            metadata: None,
             dimension: Some(1),
             tenant: tenant_1.clone(),
             database: "database_1".to_string(),
-            log_position: 0,
-            version: collection_version,
             total_records_post_compaction,
             size_bytes_post_compaction,
             last_compaction_time_secs,
+            ..Default::default()
         };
+        let collection_uuid_1 = collection_1.collection_id;
 
-        let collection_uuid_2 =
-            CollectionUuid::from_str("00000000-0000-0000-0000-000000000002").unwrap();
         let tenant_2 = "tenant_2".to_string();
         let collection_2 = Collection {
-            collection_id: collection_uuid_2,
             name: "collection_2".to_string(),
-            configuration_json: Value::Null,
-            metadata: None,
             dimension: Some(1),
             tenant: tenant_2.clone(),
             database: "database_2".to_string(),
-            log_position: 0,
-            version: collection_version,
             total_records_post_compaction,
             size_bytes_post_compaction,
             last_compaction_time_secs,
+            ..Default::default()
         };
+        let collection_uuid_2 = collection_2.collection_id;
 
         match sysdb {
             SysDb::Test(ref mut sysdb) => {
