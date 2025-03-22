@@ -8,14 +8,14 @@ use chroma_error::{ChromaError, ErrorCodes, TonicError, TonicMissingFieldError};
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
 use chroma_types::chroma_proto::VersionListForCollection;
 use chroma_types::{
-    chroma_proto, CollectionAndSegments, CollectionMetadataUpdate, CountCollectionsError,
-    CreateCollectionError, CreateDatabaseError, CreateDatabaseResponse, CreateTenantError,
-    CreateTenantResponse, Database, DeleteCollectionError, DeleteDatabaseError,
-    DeleteDatabaseResponse, GetCollectionSizeError, GetCollectionWithSegmentsError,
-    GetCollectionsError, GetDatabaseError, GetDatabaseResponse, GetSegmentsError, GetTenantError,
-    GetTenantResponse, ListDatabasesError, ListDatabasesResponse, Metadata, ResetError,
-    ResetResponse, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
-    UpdateCollectionError,
+    chroma_proto, chroma_proto::CollectionVersionInfo, CollectionAndSegments,
+    CollectionMetadataUpdate, CountCollectionsError, CreateCollectionError, CreateDatabaseError,
+    CreateDatabaseResponse, CreateTenantError, CreateTenantResponse, Database,
+    DeleteCollectionError, DeleteDatabaseError, DeleteDatabaseResponse, GetCollectionSizeError,
+    GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError, GetDatabaseResponse,
+    GetSegmentsError, GetTenantError, GetTenantResponse, ListCollectionVersionsError,
+    ListDatabasesError, ListDatabasesResponse, Metadata, ResetError, ResetResponse,
+    SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid, UpdateCollectionError,
 };
 use chroma_types::{
     Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
@@ -30,6 +30,8 @@ use tonic::transport::{Channel, Endpoint};
 use tonic::Code;
 use tower::ServiceBuilder;
 use uuid::{Error, Uuid};
+
+pub const VERSION_FILE_S3_PREFIX: &str = "sysdb/version_files/";
 
 #[derive(Debug, Clone)]
 pub enum SysDb {
@@ -383,6 +385,17 @@ impl SysDb {
                 )
                 .await
             }
+        }
+    }
+
+    pub async fn list_collection_versions(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<Vec<CollectionVersionInfo>, ListCollectionVersionsError> {
+        match self {
+            SysDb::Grpc(_) => todo!(),
+            SysDb::Sqlite(_) => todo!(),
+            SysDb::Test(test) => test.list_collection_versions(collection_id).await,
         }
     }
 
