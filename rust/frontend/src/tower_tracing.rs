@@ -2,9 +2,12 @@ use axum::extract::MatchedPath;
 use axum::http::{header, Request, Response};
 use axum::Router;
 use futures::future::BoxFuture;
+use opentelemetry::trace::TraceContextExt;
 use std::time::Duration;
 use tower::Service;
 use tower_http::trace::{MakeSpan, OnResponse, TraceLayer};
+
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 #[derive(Clone)]
 struct RequestTracing;
@@ -73,13 +76,16 @@ where
         Box::pin(async move {
             let mut response: Response<Rs> = future.await?;
             if response.status().is_client_error() || response.status().is_server_error() {
-                if let Some(span_id) = tracing::Span::current().id() {
-                    let headers = response.headers_mut();
-                    let header_val =
-                        format!("{:x}", span_id.into_u64()).parse::<header::HeaderValue>();
-                    if let Ok(val) = header_val {
-                        headers.insert("chroma-trace-id", val);
-                    }
+                let trace_id = tracing::Span::current()
+                    .context()
+                    .span()
+                    .span_context()
+                    .trace_id()
+                    .to_string();
+                let headers = response.headers_mut();
+                let header_val = trace_id.parse::<header::HeaderValue>();
+                if let Ok(val) = header_val {
+                    headers.insert("chroma-trace-id", val);
                 }
             }
             Ok(response)

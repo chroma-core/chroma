@@ -1475,6 +1475,7 @@ dependencies = [
  "tower 0.4.13",
  "tower-http 0.6.2",
  "tracing",
+ "tracing-opentelemetry",
  "utoipa",
  "utoipa-axum",
  "utoipa-swagger-ui",
