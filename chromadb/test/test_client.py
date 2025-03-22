@@ -4,7 +4,6 @@ from unittest.mock import patch
 import chromadb
 from chromadb.config import Settings
 from chromadb.api import ClientAPI
-import chromadb.server.fastapi
 import pytest
 import tempfile
 import os
