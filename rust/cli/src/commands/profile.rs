@@ -14,6 +14,8 @@ pub enum ProfileError {
     ProfileNotFound(String),
     #[error("No current profile found.\nTo set a new profile use: chroma login")]
     NoActiveProfile,
+    #[error("Profile {0} already exists.\nTo delete it use: chroma profile delete {0}")]
+    ProfileAlreadyExists(String),
 }
 
 #[derive(Args, Debug)]
@@ -26,6 +28,14 @@ pub struct DeleteArgs {
         help = "Skip delete confirmation for the active profile"
     )]
     force: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct RenameArgs {
+    #[clap(index = 1, help = "The name of the profile to rename")]
+    name: String,
+    #[clap(index = 2, help = "The new name for the profile to rename")]
+    new_name: String,
 }
 
 #[derive(Args, Debug)]
@@ -42,6 +52,8 @@ pub enum ProfileCommand {
     List,
     #[clap(about = "Show the current active profile")]
     Show,
+    #[clap(about = "Rename a profile")]
+    Rename(RenameArgs),
     #[clap(about = "Set the profile to use as the active profile")]
     Use(UseArgs),
 }
@@ -96,6 +108,12 @@ fn no_current_profile_message() -> String {
 
 fn current_profile_message(profile_name: &str) -> String {
     format!("{}\n{}", "Current profile: ".blue().bold(), profile_name)
+}
+
+fn rename_success_message(old_name: &str, new_name: &str) -> String {
+    format!("Successfully renamed profile {} to {}", old_name, new_name)
+        .green()
+        .to_string()
 }
 
 fn confirm_deletion(profile_name: &str) -> Result<bool, CliError> {
@@ -163,14 +181,40 @@ fn list_profiles(profiles: Profiles, config: CliConfig) -> Result<(), CliError> 
     Ok(())
 }
 
-fn use_profile(args: UseArgs, profiles: Profiles, config: &mut CliConfig) -> Result<(), CliError> {
-    if !profiles.contains_key(&args.name) {
-        return Err(ProfileError::ProfileNotFound(args.name.clone()).into());
+fn rename(
+    args: RenameArgs,
+    profiles: &mut Profiles,
+    config: &mut CliConfig,
+) -> Result<(), CliError> {
+    let rename_profile_name = args.name;
+    let new_name = args.new_name;
+
+    if !profiles.contains_key(&rename_profile_name) {
+        return Err(ProfileError::ProfileNotFound(rename_profile_name).into());
     }
 
-    config.current_profile = args.name;
-    write_config(config)?;
-    println!("{}", current_profile_set_message(&config.current_profile));
+    if profiles.contains_key(&new_name) {
+        return Err(ProfileError::ProfileAlreadyExists(new_name).into());
+    }
+
+    let is_current = rename_profile_name.eq(&config.current_profile);
+
+    profiles.insert(
+        new_name.clone(),
+        profiles.get(&rename_profile_name).unwrap().clone(),
+    );
+    write_profiles(profiles)?;
+
+    if is_current {
+        config.current_profile = new_name.clone();
+        write_config(config)?;
+    }
+
+    println!(
+        "{}",
+        rename_success_message(&rename_profile_name, &new_name)
+    );
+
     Ok(())
 }
 
@@ -184,6 +228,17 @@ fn show(config: CliConfig) -> Result<(), CliError> {
     Ok(())
 }
 
+fn use_profile(args: UseArgs, profiles: Profiles, config: &mut CliConfig) -> Result<(), CliError> {
+    if !profiles.contains_key(&args.name) {
+        return Err(ProfileError::ProfileNotFound(args.name.clone()).into());
+    }
+
+    config.current_profile = args.name;
+    write_config(config)?;
+    println!("{}", current_profile_set_message(&config.current_profile));
+    Ok(())
+}
+
 pub fn profile_command(command: ProfileCommand) -> Result<(), CliError> {
     let mut profiles = read_profiles()?;
     let mut config = read_config()?;
@@ -191,6 +246,7 @@ pub fn profile_command(command: ProfileCommand) -> Result<(), CliError> {
     match command {
         ProfileCommand::Delete(args) => delete_profile(args, &mut profiles, &mut config),
         ProfileCommand::List => list_profiles(profiles, config),
+        ProfileCommand::Rename(args) => rename(args, &mut profiles, &mut config),
         ProfileCommand::Show => show(config),
         ProfileCommand::Use(args) => use_profile(args, profiles, &mut config),
     }
