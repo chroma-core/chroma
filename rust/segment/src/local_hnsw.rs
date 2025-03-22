@@ -354,6 +354,9 @@ impl LocalHnswSegmentReader {
                 .query(&embedding, k as usize, allowed_ids.as_slice(), &[])
                 .map_err(|_| LocalHnswSegmentReaderError::QueryError)?;
             println!("HNSW QUERY RESULT: {:?}", offset_ids);
+            if offset_ids.is_empty() {
+                println!("ITS EMPTY MAN");
+            }
             let all_ids = guard
                 .index
                 .get_all_ids()
