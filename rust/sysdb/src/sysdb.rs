@@ -1010,6 +1010,7 @@ impl GrpcSysDb {
             collection_version,
             segment_compaction_info,
             total_records_post_compaction,
+            size_bytes_post_compaction: 0,
         };
 
         let res = self.client.flush_collection_compaction(req).await;
