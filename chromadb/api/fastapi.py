@@ -7,8 +7,11 @@ import httpx
 import urllib.parse
 from overrides import override
 
+from chromadb.api.collection_configuration import (
+    CreateCollectionConfiguration,
+    create_collection_configuration_to_json_str,
+)
 from chromadb import __version__
-from chromadb.api.configuration import CollectionConfigurationInternal
 from chromadb.api.base_http_client import BaseHTTPClient
 from chromadb.types import Database, Tenant, Collection as CollectionModel
 from chromadb.api import ServerAPI
@@ -235,7 +238,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     def create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfigurationInternal] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
@@ -248,11 +251,14 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             json={
                 "name": name,
                 "metadata": metadata,
-                "configuration": configuration.to_json() if configuration else None,
+                "configuration": create_collection_configuration_to_json_str(
+                    configuration
+                )
+                if configuration
+                else None,
                 "get_or_create": get_or_create,
             },
         )
-
         model = CollectionModel.from_json(resp_json)
         return model
 
@@ -280,7 +286,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     def get_or_create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfigurationInternal] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -308,7 +314,10 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         self._make_request(
             "put",
             f"/tenants/{tenant}/databases/{database}/collections/{id}",
-            json={"new_metadata": new_metadata, "new_name": new_name},
+            json={
+                "new_metadata": new_metadata,
+                "new_name": new_name,
+            },
         )
 
     @trace_method("FastAPI.delete_collection", OpenTelemetryGranularity.OPERATION)

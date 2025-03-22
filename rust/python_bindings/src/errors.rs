@@ -53,16 +53,6 @@ impl ChromaError for WrappedPyErr {
 
 #[derive(Error, Debug)]
 #[error(transparent)]
-pub(crate) struct WrappedSerdeJsonError(#[from] pub serde_json::Error);
-
-impl ChromaError for WrappedSerdeJsonError {
-    fn code(&self) -> chroma_error::ErrorCodes {
-        chroma_error::ErrorCodes::InvalidArgument
-    }
-}
-
-#[derive(Error, Debug)]
-#[error(transparent)]
 pub(crate) struct WrappedUuidError(#[from] pub uuid::Error);
 
 impl ChromaError for WrappedUuidError {

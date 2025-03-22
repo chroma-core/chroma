@@ -666,9 +666,9 @@ mod tests {
         let created_index = provider
             .create(
                 &collection_id,
-                default_hnsw_params.m,
-                default_hnsw_params.construction_ef,
-                default_hnsw_params.search_ef,
+                default_hnsw_params.max_neighbors,
+                default_hnsw_params.ef_construction,
+                default_hnsw_params.ef_search,
                 dimensionality,
                 distance_function.clone(),
             )

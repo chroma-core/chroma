@@ -1,3 +1,4 @@
+use crate::collection_configuration::CollectionConfiguration;
 use crate::error::QueryConversionError;
 use crate::operator::GetResult;
 use crate::operator::KnnBatchResult;
@@ -8,7 +9,6 @@ use crate::validators::{
     validate_name, validate_non_empty_collection_update_metadata, validate_non_empty_metadata,
 };
 use crate::Collection;
-use crate::CollectionConfiguration;
 use crate::CollectionConfigurationToInternalConfigurationError;
 use crate::CollectionConversionError;
 use crate::CollectionUuid;
@@ -683,8 +683,12 @@ pub enum UpdateCollectionError {
     NotFound(String),
     #[error("Metadata reset unsupported")]
     MetadataResetUnsupported,
+    #[error("Could not serialize configuration")]
+    Configuration(#[from] serde_json::Error),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
+    #[error("Could not parse config: {0}")]
+    InvalidConfig(#[from] CollectionConfigurationToInternalConfigurationError),
 }
 
 impl ChromaError for UpdateCollectionError {
@@ -692,7 +696,9 @@ impl ChromaError for UpdateCollectionError {
         match self {
             UpdateCollectionError::NotFound(_) => ErrorCodes::NotFound,
             UpdateCollectionError::MetadataResetUnsupported => ErrorCodes::InvalidArgument,
+            UpdateCollectionError::Configuration(_) => ErrorCodes::Internal,
             UpdateCollectionError::Internal(err) => err.code(),
+            UpdateCollectionError::InvalidConfig(_) => ErrorCodes::InvalidArgument,
         }
     }
 }

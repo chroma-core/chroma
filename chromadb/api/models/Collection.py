@@ -233,7 +233,9 @@ class Collection(CollectionCommon["ServerAPI"]):
         )
 
     def modify(
-        self, name: Optional[str] = None, metadata: Optional[CollectionMetadata] = None
+        self,
+        name: Optional[str] = None,
+        metadata: Optional[CollectionMetadata] = None,
     ) -> None:
         """Modify the collection name or metadata
 

@@ -1,7 +1,9 @@
 from abc import abstractmethod
 from typing import Optional, Sequence, Tuple
 from uuid import UUID
-from chromadb.api.configuration import CollectionConfigurationInternal
+from chromadb.api.collection_configuration import (
+    CreateCollectionConfiguration,
+)
 from chromadb.types import (
     Collection,
     CollectionAndSegments,
@@ -101,7 +103,7 @@ class SysDB(Component):
         self,
         id: UUID,
         name: str,
-        configuration: CollectionConfigurationInternal,
+        configuration: CreateCollectionConfiguration,
         segments: Sequence[Segment],
         metadata: Optional[Metadata] = None,
         dimension: Optional[int] = None,

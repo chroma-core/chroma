@@ -16,16 +16,14 @@ use chroma_sqlite::config::SqliteDBConfig;
 use chroma_sysdb::{SqliteSysDbConfig, SysDbConfig};
 use chroma_system::System;
 use chroma_types::{
-    Collection, CollectionMetadataUpdate, CountCollectionsRequest, CountResponse,
-    CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest, Database,
+    Collection, CollectionConfiguration, CollectionMetadataUpdate, CountCollectionsRequest,
+    CountResponse, CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest, Database,
     DeleteCollectionRequest, DeleteDatabaseRequest, GetCollectionRequest, GetDatabaseRequest,
     GetResponse, GetTenantRequest, GetTenantResponse, HeartbeatError, IncludeList,
     ListCollectionsRequest, ListDatabasesRequest, Metadata, QueryResponse, UpdateCollectionRequest,
-    UpdateMetadata,
+    UpdateMetadata, WrappedSerdeJsonError,
 };
-use pyo3::{
-    exceptions::PyValueError, pyclass, pyfunction, pymethods, types::PyAnyMethods, PyObject, Python,
-};
+use pyo3::{exceptions::PyValueError, pyclass, pyfunction, pymethods, types::PyAnyMethods, Python};
 use std::time::SystemTime;
 
 const DEFAULT_DATABASE: &str = "default_database";
@@ -245,24 +243,34 @@ impl Bindings {
 
     #[allow(clippy::too_many_arguments)]
     #[pyo3(
-        signature = (name, configuration, metadata = None, get_or_create = false, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
+        signature = (name, configuration_json_str, metadata = None, get_or_create = false, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
     )]
     fn create_collection(
         &self,
         name: String,
-        #[allow(unused_variables)] configuration: Option<PyObject>,
+        configuration_json_str: Option<String>,
         metadata: Option<Metadata>,
         get_or_create: bool,
         tenant: String,
         database: String,
-        _py: Python<'_>,
     ) -> ChromaPyResult<Collection> {
+        let configuration_json = match configuration_json_str {
+            Some(configuration_json_str) => {
+                let configuration_json =
+                    serde_json::from_str::<CollectionConfiguration>(&configuration_json_str)
+                        .map_err(WrappedSerdeJsonError::SerdeJsonError)?;
+
+                Some(configuration_json)
+            }
+            None => None,
+        };
+
         let request = CreateCollectionRequest::try_new(
             tenant,
             database,
             name,
             metadata,
-            None,
+            configuration_json,
             get_or_create,
         )?;
 
