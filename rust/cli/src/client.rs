@@ -114,10 +114,7 @@ impl ChromaClient {
         let response = self
             .send_request::<(), ListDatabasesResponse>(Method::GET, &route, self.headers()?, None)
             .await
-            .map_err(|e| {
-                println!("{:?}", e);
-                ClientError::DbListFailed
-            })?;
+            .map_err(|_| ClientError::DbListFailed)?;
         Ok(response)
     }
 

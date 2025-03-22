@@ -101,7 +101,7 @@ impl AddressBook {
     }
 
     pub fn cloud() -> Self {
-        Self::new("https://api.trychroma.com".to_string())
+        Self::new("https://api.trychroma.com:8000".to_string())
     }
 }
 
