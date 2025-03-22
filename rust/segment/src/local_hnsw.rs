@@ -353,6 +353,12 @@ impl LocalHnswSegmentReader {
                 .index
                 .query(&embedding, k as usize, allowed_ids.as_slice(), &[])
                 .map_err(|_| LocalHnswSegmentReaderError::QueryError)?;
+            println!("HNSW QUERY RESULT: {:?}", offset_ids);
+            let all_ids = guard
+                .index
+                .get_all_ids()
+                .map_err(|_| LocalHnswSegmentReaderError::QueryError)?;
+            println!("HNSW ALL IDS: {:?}", all_ids);
 
             Ok(offset_ids
                 .into_iter()
