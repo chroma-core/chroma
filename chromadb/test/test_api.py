@@ -1368,6 +1368,7 @@ def test_default_embedding():
 def test_multiple_collections(client):
     NUM_ITER = 100
     for i in range(NUM_ITER):
+        print(f"=========== CURRENT ITERATION: {i} ==============")
         embeddings1 = np.random.rand(10, 512).astype(np.float32).tolist()
         embeddings2 = np.random.rand(10, 512).astype(np.float32).tolist()
         ids1 = [f"http://example.com/1/{i}" for i in range(len(embeddings1))]
