@@ -3,7 +3,10 @@ use std::{
     collections::BinaryHeap,
 };
 
-use crate::{chroma_proto, CollectionAndSegments, CollectionUuid, Metadata, ScalarEncoding, Where};
+use crate::{
+    chroma_proto, logical_size_of_metadata, CollectionAndSegments, CollectionUuid, Metadata,
+    ScalarEncoding, Where,
+};
 
 use super::error::QueryConversionError;
 
@@ -60,6 +63,12 @@ impl From<Scan> for chroma_proto::ScanOperator {
 pub struct CountResult {
     pub count: u32,
     pub pulled_log_bytes: u64,
+}
+
+impl CountResult {
+    pub fn size_bytes(&self) -> u64 {
+        size_of_val(&self.count) as u64
+    }
 }
 
 impl From<chroma_proto::CountResult> for CountResult {
@@ -363,6 +372,27 @@ pub struct ProjectionRecord {
     pub metadata: Option<Metadata>,
 }
 
+impl ProjectionRecord {
+    pub fn size_bytes(&self) -> u64 {
+        (self.id.len()
+            + self
+                .document
+                .as_ref()
+                .map(|doc| doc.len())
+                .unwrap_or_default()
+            + self
+                .embedding
+                .as_ref()
+                .map(|emb| size_of_val(&emb[..]))
+                .unwrap_or_default()
+            + self
+                .metadata
+                .as_ref()
+                .map(logical_size_of_metadata)
+                .unwrap_or_default()) as u64
+    }
+}
+
 impl Eq for ProjectionRecord {}
 
 impl TryFrom<chroma_proto::ProjectionRecord> for ProjectionRecord {
@@ -404,15 +434,25 @@ impl TryFrom<ProjectionRecord> for chroma_proto::ProjectionRecord {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProjectionOutput {
     pub records: Vec<ProjectionRecord>,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GetResult {
     pub pulled_log_bytes: u64,
     pub result: ProjectionOutput,
+}
+
+impl GetResult {
+    pub fn size_bytes(&self) -> u64 {
+        self.result
+            .records
+            .iter()
+            .map(ProjectionRecord::size_bytes)
+            .sum()
+    }
 }
 
 impl TryFrom<chroma_proto::GetResult> for GetResult {
@@ -548,9 +588,23 @@ impl TryFrom<KnnProjectionOutput> for chroma_proto::KnnResult {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct KnnBatchResult {
     pub pulled_log_bytes: u64,
     pub results: Vec<KnnProjectionOutput>,
+}
+
+impl KnnBatchResult {
+    pub fn size_bytes(&self) -> u64 {
+        self.results
+            .iter()
+            .flat_map(|res| {
+                res.records
+                    .iter()
+                    .map(|rec| rec.record.size_bytes() + size_of_val(&rec.distance) as u64)
+            })
+            .sum()
+    }
 }
 
 impl TryFrom<chroma_proto::KnnBatchResult> for KnnBatchResult {
