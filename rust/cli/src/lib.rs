@@ -2,6 +2,7 @@ mod commands;
 mod utils;
 
 use crate::commands::run::{run, RunArgs};
+use crate::commands::update::update;
 use crate::commands::vacuum::{vacuum, VacuumArgs};
 use clap::{Parser, Subcommand};
 
@@ -10,6 +11,7 @@ enum Command {
     Docs,
     Run(RunArgs),
     Support,
+    Update,
     Vacuum(VacuumArgs),
 }
 
@@ -40,6 +42,9 @@ pub fn chroma_cli(args: Vec<String>) {
             if webbrowser::open(url).is_err() {
                 eprintln!("Error: Failed to open the browser. Visit {}.", url);
             }
+        }
+        Command::Update => {
+            update();
         }
         Command::Vacuum(args) => {
             vacuum(args);

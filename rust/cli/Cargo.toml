@@ -5,9 +5,13 @@ edition = "2021"
 
 [dependencies]
 clap = { version = "4.5.28", features = ["derive"] }
-webbrowser = "1.0.3"
-tokio = { workspace = true }
 colored = "3.0.0"
+regex = "1.11.1"
+reqwest = "0.12.9"
+semver = "1.0.26"
+tokio = { workspace = true }
+webbrowser = "1.0.3"
+
 dialoguer = "0.11.0"
 indicatif.workspace = true
 sqlx = { workspace = true }
@@ -20,7 +24,6 @@ chroma-segment = { workspace = true }
 chroma-sysdb = { workspace = true }
 chroma-types = { workspace = true }
 chroma-log = { workspace = true }
-
 
 [[bin]]
 name = "chroma"
