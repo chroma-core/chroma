@@ -103,14 +103,21 @@ impl LocalSegmentManager {
         match self.hnsw_index_pool.get(&IndexUuid(segment.id.0)).await? {
             Some(hnsw_index) => Ok(LocalHnswSegmentReader::from_index(hnsw_index)),
             None => {
-                let reader = LocalHnswSegmentReader::from_segment(
+                let reader = match LocalHnswSegmentReader::from_segment(
                     collection,
                     segment,
                     dimensionality,
                     self.persist_root.clone(),
                     self.sqlite.clone(),
                 )
-                .await?;
+                .await
+                {
+                    Ok(reader) => reader,
+                    Err(e) => {
+                        println!("!!!!Error creating hnsw segment reader!!!: {:?}", e);
+                        return Err(LocalSegmentManagerError::LocalHnswSegmentReaderError(e));
+                    }
+                };
                 // Open the FDs.
                 reader.index.start().await;
                 self.hnsw_index_pool

@@ -283,6 +283,7 @@ impl LocalHnswSegmentReader {
 
         // Bail if the index is empty
         if actual_len == 0 {
+            println!("ACTUAL LEN IS 0!");
             return Ok(Vec::new());
         }
 
@@ -340,7 +341,9 @@ impl LocalHnswSegmentReader {
                             }
                         }
                     }
-                    Ok(max_heap.into_sorted_vec())
+                    let res = max_heap.into_sorted_vec();
+                    println!("BF RES: {:?}", res);
+                    Ok(res)
                 }
                 Err(_) => Err(LocalHnswSegmentReaderError::QueryError),
             }
@@ -353,15 +356,26 @@ impl LocalHnswSegmentReader {
                 .index
                 .query(&embedding, k as usize, allowed_ids.as_slice(), &[])
                 .map_err(|_| LocalHnswSegmentReaderError::QueryError)?;
+            println!("HNSW QUERY RESULT: {:?}", offset_ids);
+            if offset_ids.is_empty() {
+                println!("ITS EMPTY MAN");
+            }
+            let all_ids = guard
+                .index
+                .get_all_ids()
+                .map_err(|_| LocalHnswSegmentReaderError::QueryError)?;
+            println!("HNSW ALL IDS: {:?}", all_ids);
 
-            Ok(offset_ids
+            let res = offset_ids
                 .into_iter()
                 .zip(distances)
                 .map(|(offset_id, measure)| RecordDistance {
                     offset_id: offset_id as u32,
                     measure,
                 })
-                .collect())
+                .collect();
+            print!("HNSW RES: {:?}", res);
+            Ok(res)
         }
     }
 }

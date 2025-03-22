@@ -221,7 +221,7 @@ impl LocalExecutor {
                 )
                 .await
                 .map_err(|err| ExecutorError::Internal(Box::new(err)))?;
-
+            println!("GOT LEN RECORD DISTANCES IN EXECUTOR: {}", distances.len());
             let mut records = Vec::new();
             for RecordDistance { offset_id, measure } in distances {
                 let user_id = hnsw_reader

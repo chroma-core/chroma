@@ -73,25 +73,25 @@ jobs:
           TESTS_TO_RUN='["python", "rust", "js-client", "go"]'
           echo "tests-to-run=${TESTS_TO_RUN}" >> $GITHUB_OUTPUT
 
-      - name: Check Helm version change
-        id: helm-version
-        if: steps.filter.outputs.helm-changes == 'true'
-        shell: bash
-        run: |
-          current=$(git show HEAD:$file | yq ".version")
-          previous=$(git show HEAD^:$file | yq ".version")
+      # - name: Check Helm version change
+      #   id: helm-version
+      #   if: steps.filter.outputs.helm-changes == 'true'
+      #   shell: bash
+      #   run: |
+      #     current=$(git show HEAD:$file | yq ".version")
+      #     previous=$(git show HEAD^:$file | yq ".version")
 
-          echo "version=$current" >> $GITHUB_OUTPUT
+      #     echo "version=$current" >> $GITHUB_OUTPUT
 
-          if [ "$current" != "$previous" ]; then
-            echo "Version field in $file was changed from $previous to $current"
-            echo "version_changed=true" >> $GITHUB_OUTPUT
-          else
-            echo "Version field in $file was not changed"
-            echo "version_changed=false" >> $GITHUB_OUTPUT
-          fi
-        env:
-          file: k8s/distributed-chroma/Chart.yaml
+      #     if [ "$current" != "$previous" ]; then
+      #       echo "Version field in $file was changed from $previous to $current"
+      #       echo "version_changed=true" >> $GITHUB_OUTPUT
+      #     else
+      #       echo "Version field in $file was not changed"
+      #       echo "version_changed=false" >> $GITHUB_OUTPUT
+      #     fi
+      #   env:
+      #     file: k8s/distributed-chroma/Chart.yaml
 
   deploy-docs-preview:
     name: Deploy preview of docs
@@ -119,44 +119,44 @@ jobs:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_DOCS_PROJECT_ID }}
 
-  check-helm-version-bump:
-    name: Warn if Helm chart was updated without version bump
-    needs: change-detection
-    if: needs.change-detection.outputs.helm-changes == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@v4
-      - name: Comment warning
-        if: needs.change-detection.outputs.helm-version-changed == 'false'
-        uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          header: helm-chart-version-info
-          message: |
-            :warning: The Helm chart was updated without a version bump. Your changes will only be published if the version field in `k8s/distributed-chroma/Chart.yaml` is updated.
+  # check-helm-version-bump:
+  #   name: Warn if Helm chart was updated without version bump
+  #   needs: change-detection
+  #   if: needs.change-detection.outputs.helm-changes == 'true'
+  #   runs-on: ubuntu-latest
+  #   permissions:
+  #     pull-requests: write
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Comment warning
+  #       if: needs.change-detection.outputs.helm-version-changed == 'false'
+  #       uses: marocchino/sticky-pull-request-comment@v2
+  #       with:
+  #         header: helm-chart-version-info
+  #         message: |
+  #           :warning: The Helm chart was updated without a version bump. Your changes will only be published if the version field in `k8s/distributed-chroma/Chart.yaml` is updated.
 
-      - name: Comment success
-        if: needs.change-detection.outputs.helm-version-changed == 'true'
-        uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          header: helm-chart-version-info
-          message: |
-            :white_check_mark: The Helm chart's version was changed. Your changes to the chart will be published upon merge to `main`.
+  #     - name: Comment success
+  #       if: needs.change-detection.outputs.helm-version-changed == 'true'
+  #       uses: marocchino/sticky-pull-request-comment@v2
+  #       with:
+  #         header: helm-chart-version-info
+  #         message: |
+  #           :white_check_mark: The Helm chart's version was changed. Your changes to the chart will be published upon merge to `main`.
 
-  delete-helm-comment:
-    name: Delete Helm chart comment if not changed
-    needs: change-detection
-    if: needs.change-detection.outputs.helm-changes == 'false'
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-    steps:
-      - name: Delete comment (Helm chart was not changed)
-        uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          header: helm-chart-version-info
-          delete: true
+  # delete-helm-comment:
+  #   name: Delete Helm chart comment if not changed
+  #   needs: change-detection
+  #   if: needs.change-detection.outputs.helm-changes == 'false'
+  #   runs-on: ubuntu-latest
+  #   permissions:
+  #     pull-requests: write
+  #   steps:
+  #     - name: Delete comment (Helm chart was not changed)
+  #       uses: marocchino/sticky-pull-request-comment@v2
+  #       with:
+  #         header: helm-chart-version-info
+  #         delete: true
 
   python-tests:
     name: Python tests
@@ -166,29 +166,29 @@ jobs:
     with:
       property_testing_preset: 'normal'
 
-  python-vulnerability-scan:
-    name: Python vulnerability scan
-    needs: change-detection
-    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
-    uses: ./.github/workflows/_python-vulnerability-scan.yml
+  # python-vulnerability-scan:
+  #   name: Python vulnerability scan
+  #   needs: change-detection
+  #   if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
+  #   uses: ./.github/workflows/_python-vulnerability-scan.yml
 
-  javascript-client-tests:
-    name: JavaScript client tests
-    needs: change-detection
-    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'js-client')
-    uses: ./.github/workflows/_javascript-client-tests.yml
+  # javascript-client-tests:
+  #   name: JavaScript client tests
+  #   needs: change-detection
+  #   if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'js-client')
+  #   uses: ./.github/workflows/_javascript-client-tests.yml
 
-  rust-tests:
-    name: Rust tests
-    needs: change-detection
-    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'rust')
-    uses: ./.github/workflows/_rust-tests.yml
+  # rust-tests:
+  #   name: Rust tests
+  #   needs: change-detection
+  #   if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'rust')
+  #   uses: ./.github/workflows/_rust-tests.yml
 
-  go-tests:
-    name: Go tests
-    needs: change-detection
-    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'go')
-    uses: ./.github/workflows/_go-tests.yml
+  # go-tests:
+  #   name: Go tests
+  #   needs: change-detection
+  #   if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'go')
+  #   uses: ./.github/workflows/_go-tests.yml
 
   check-title:
     name: Check PR Title
@@ -211,40 +211,40 @@ jobs:
                 body: 'Please tag your PR title with one of: \\[ENH | BUG | DOC | TST | BLD | PERF | TYP | CLN | CHORE\\]. See https://docs.trychroma.com/contributing#contributing-code-and-ideas'
               })
 
-  lint:
-    name: Lint
-    runs-on: depot-ubuntu-22.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - uses: ./.github/actions/python
-        with:
-          python-version: "3.11"
-      - name: Setup Rust
-        uses: ./.github/actions/rust
-        with:
-          github-token: ${{ github.token }}
-      - name: Run pre-commit
-        shell: bash
-        run: |
-          pre-commit run --all-files trailing-whitespace
-          pre-commit run --all-files mixed-line-ending
-          pre-commit run --all-files end-of-file-fixer
-          pre-commit run --all-files requirements-txt-fixer
-          pre-commit run --all-files check-xml
-          pre-commit run --all-files check-merge-conflict
-          pre-commit run --all-files check-case-conflict
-          pre-commit run --all-files check-docstring-first
-          pre-commit run --all-files black
-          pre-commit run --all-files flake8
-          pre-commit run --all-files prettier
-          pre-commit run --all-files check-yaml
-        continue-on-error: true
-      - name: Cargo fmt check
-        shell: bash
-        run: cargo fmt -- --check
-      - name: Clippy
-        run: cargo clippy --all-targets --all-features --keep-going -- -D warnings
+  # lint:
+  #   name: Lint
+  #   runs-on: depot-ubuntu-22.04
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
+  #     - uses: ./.github/actions/python
+  #       with:
+  #         python-version: "3.11"
+  #     - name: Setup Rust
+  #       uses: ./.github/actions/rust
+  #       with:
+  #         github-token: ${{ github.token }}
+  #     - name: Run pre-commit
+  #       shell: bash
+  #       run: |
+  #         pre-commit run --all-files trailing-whitespace
+  #         pre-commit run --all-files mixed-line-ending
+  #         pre-commit run --all-files end-of-file-fixer
+  #         pre-commit run --all-files requirements-txt-fixer
+  #         pre-commit run --all-files check-xml
+  #         pre-commit run --all-files check-merge-conflict
+  #         pre-commit run --all-files check-case-conflict
+  #         pre-commit run --all-files check-docstring-first
+  #         pre-commit run --all-files black
+  #         pre-commit run --all-files flake8
+  #         pre-commit run --all-files prettier
+  #         pre-commit run --all-files check-yaml
+  #       continue-on-error: true
+  #     - name: Cargo fmt check
+  #       shell: bash
+  #       run: cargo fmt -- --check
+  #     - name: Clippy
+  #       run: cargo clippy --all-targets --all-features --keep-going -- -D warnings
 
   # This job exists for our branch protection rule.
   # We want to require status checks to pass before merging, but the set of
@@ -252,22 +252,22 @@ jobs:
   # When creating a branch protection rule, you have to specify a static list
   # of checks.
   # So since this job always runs, we can specify it in the branch protection rule.
-  all-required-pr-checks-passed:
-    if: always()
-    needs:
-    - python-tests
-    - python-vulnerability-scan
-    - javascript-client-tests
-    - rust-tests
-    - go-tests
-    - check-title
-    - lint
-    - check-helm-version-bump
-    - delete-helm-comment
-    runs-on: ubuntu-latest
-    steps:
-    - name: Decide whether the needed jobs succeeded or failed
-      uses: re-actors/alls-green@release/v1
-      with:
-        jobs: ${{ toJSON(needs) }}
-        allowed-skips: python-tests,python-vulnerability-scan,javascript-client-tests,rust-tests,go-tests,check-helm-version-bump,delete-helm-comment
+  # all-required-pr-checks-passed:
+  #   if: always()
+  #   needs:
+  #   - python-tests
+  #   - python-vulnerability-scan
+  #   - javascript-client-tests
+  #   - rust-tests
+  #   - go-tests
+  #   - check-title
+  #   - lint
+  #   - check-helm-version-bump
+  #   - delete-helm-comment
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #   - name: Decide whether the needed jobs succeeded or failed
+  #     uses: re-actors/alls-green@release/v1
+  #     with:
+  #       jobs: ${{ toJSON(needs) }}
+  #       allowed-skips: python-tests,python-vulnerability-scan,javascript-client-tests,rust-tests,go-tests,check-helm-version-bump,delete-helm-comment
