@@ -57,7 +57,7 @@ rayon = "1.10.0"
 validator = { version = "0.19", features = ["derive"] }
 rust-embed = { version = "8.5.0", features = ["include-exclude", "debug-embed"] }
 hnswlib = { version = "0.8.0", git = "https://github.com/chroma-core/hnswlib.git" }
-reqwest = { version = "0.12.9" }
+reqwest = { version = "0.12.9",  features = ["rustls-tls-native-roots"], default-features = false }
 random-port = "0.1.1"
 
 chroma-benchmark = { path = "rust/benchmark" }

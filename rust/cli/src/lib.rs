@@ -1,13 +1,23 @@
+mod client;
 mod commands;
 mod utils;
 
+use crate::commands::db::{db_command, DbCommand};
+use crate::commands::profile::{profile_command, ProfileCommand};
 use crate::commands::run::{run, RunArgs};
 use crate::commands::vacuum::{vacuum, VacuumArgs};
 use clap::{Parser, Subcommand};
+use colored::Colorize;
+use utils::CliError;
+use utils::UtilsError;
 
 #[derive(Subcommand, Debug)]
 enum Command {
+    #[command(subcommand)]
+    Db(DbCommand),
     Docs,
+    #[command(subcommand)]
+    Profile(ProfileCommand),
     Run(RunArgs),
     Support,
     Vacuum(VacuumArgs),
@@ -22,27 +32,36 @@ struct Cli {
     command: Command,
 }
 
+fn open_browser(url: &str) -> Result<(), CliError> {
+    let error_message = format!("Visit {}", url);
+    webbrowser::open(url).map_err(|_| UtilsError::BrowserOpenFailed(error_message))?;
+    Ok(())
+}
+
 pub fn chroma_cli(args: Vec<String>) {
     let cli = Cli::parse_from(args);
 
-    match cli.command {
+    println!();
+
+    let result = match cli.command {
+        Command::Db(db_subcommand) => db_command(db_subcommand),
         Command::Docs => {
             let url = "https://docs.trychroma.com";
-            if webbrowser::open(url).is_err() {
-                eprintln!("Error: Failed to open the browser. Visit {}.", url);
-            }
+            open_browser(url)
         }
-        Command::Run(args) => {
-            run(args);
-        }
+        Command::Profile(profile_subcommand) => profile_command(profile_subcommand),
+        Command::Run(args) => run(args),
         Command::Support => {
             let url = "https://discord.gg/MMeYNTmh3x";
-            if webbrowser::open(url).is_err() {
-                eprintln!("Error: Failed to open the browser. Visit {}.", url);
-            }
+            open_browser(url)
         }
-        Command::Vacuum(args) => {
-            vacuum(args);
-        }
+        Command::Vacuum(args) => vacuum(args),
+    };
+
+    if result.is_err() {
+        let error_message = result.err().unwrap().to_string();
+        eprintln!("{}", error_message.red());
     }
+
+    println!();
 }
