@@ -393,6 +393,8 @@ pub async fn delete(args: DeleteArgs, current_profile: Profile) -> Result<(), Cl
         Some(name) => validate_db_name(&name),
         None => get_db_name(&dbs, &delete_db_name_prompt()),
     }?;
+    
+    println!("{:?}", dbs);
 
     if !dbs.iter().any(|db| db.name == name) {
         return Err(CliError::Db(DbError::DbNotFound(name)));
