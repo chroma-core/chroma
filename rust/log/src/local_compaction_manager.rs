@@ -221,11 +221,12 @@ impl Handler<BackfillMessage> for LocalCompactionManager {
             )
             .await
             .map_err(|_| CompactionManagerError::GetHnswWriterFailed)?;
+        let len = hnsw_data_chunk.total_len();
         hnsw_writer
             .apply_log_chunk(hnsw_data_chunk)
             .await
             .map_err(|_| CompactionManagerError::HnswApplyLogsError)?;
-        println!("SUCCESFULLY WROTE: {:?}", hnsw_data_chunk.total_len());
+        println!("SUCCESFULLY WROTE: {:?}", len);
         Ok(())
     }
 }
