@@ -5,6 +5,7 @@ from uuid import UUID
 from overrides import override
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
+    UpdateCollectionConfiguration,
 )
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
 from chromadb.api.types import (
@@ -76,6 +77,7 @@ class BaseAPI(ABC):
         id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
+        new_configuration: Optional[UpdateCollectionConfiguration] = None,
     ) -> None:
         """[Internal] Modify a collection by UUID. Can update the name and/or metadata.
 
@@ -84,6 +86,8 @@ class BaseAPI(ABC):
             new_name: The new name of the collection.
                                 If None, the existing name will remain. Defaults to None.
             new_metadata: The new metadata to associate with the collection.
+                                      Defaults to None.
+            new_configuration: The new configuration to associate with the collection.
                                       Defaults to None.
         """
         pass
@@ -632,6 +636,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
+        new_configuration: Optional[UpdateCollectionConfiguration] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:

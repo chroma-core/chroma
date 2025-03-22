@@ -4,6 +4,8 @@ from overrides import overrides
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
     create_collection_configuration_to_json_str,
+    UpdateCollectionConfiguration,
+    update_collection_configuration_to_json_str,
 )
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System, logger
 from chromadb.db.system import SysDB
@@ -495,6 +497,9 @@ class GrpcSysDB(SysDB):
         name: OptionalArgument[str] = Unspecified(),
         dimension: OptionalArgument[Optional[int]] = Unspecified(),
         metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
+        configuration: OptionalArgument[
+            Optional[UpdateCollectionConfiguration]
+        ] = Unspecified(),
     ) -> None:
         try:
             write_name = None
@@ -509,12 +514,23 @@ class GrpcSysDB(SysDB):
             if metadata != Unspecified():
                 write_metadata = cast(Union[UpdateMetadata, None], metadata)
 
+            write_configuration = None
+            if configuration != Unspecified():
+                write_configuration = cast(
+                    Union[UpdateCollectionConfiguration, None], configuration
+                )
+
             request = UpdateCollectionRequest(
                 id=id.hex,
                 name=write_name,
                 dimension=write_dimension,
                 metadata=to_proto_update_metadata(write_metadata)
                 if write_metadata
+                else None,
+                configuration_json_str=update_collection_configuration_to_json_str(
+                    write_configuration
+                )
+                if write_configuration
                 else None,
             )
             if metadata is None:

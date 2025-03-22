@@ -59,6 +59,10 @@ from chromadb.api.types import (
     validate_record_set_for_embedding,
     validate_filter_set,
 )
+from chromadb.api.collection_configuration import (
+    UpdateCollectionConfiguration,
+    overwrite_collection_configuration,
+)
 
 # TODO: We should rename the types in chromadb.types to be Models where
 # appropriate. This will help to distinguish between manipulation objects
@@ -498,12 +502,21 @@ class CollectionCommon(Generic[ClientT]):
                 )
 
     def _update_model_after_modify_success(
-        self, name: Optional[str], metadata: Optional[CollectionMetadata]
+        self,
+        name: Optional[str],
+        metadata: Optional[CollectionMetadata],
+        configuration: Optional[UpdateCollectionConfiguration],
     ) -> None:
         if name:
             self._model["name"] = name
         if metadata:
             self._model["metadata"] = metadata
+        if configuration:
+            self._model.set_configuration(
+                overwrite_collection_configuration(
+                    self._model.get_configuration(), configuration
+                )
+            )
 
     def _embed_record_set(
         self, record_set: BaseRecordSet, embeddable_fields: Optional[Set[str]] = None

@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"testing"
 	"time"
@@ -743,4 +744,208 @@ func TestCatalog_ListCollectionsToGc_NilParameters(t *testing.T) {
 	// Verify mock expectations
 	mockMetaDomain.AssertExpectations(t)
 	mockCollectionDb.AssertExpectations(t)
+}
+
+func TestUpdateCollectionConfiguration(t *testing.T) {
+	// Create a new catalog instance
+	catalog := NewTableCatalog(nil, nil, nil, false)
+
+	tests := []struct {
+		name                string
+		existingConfigJson  *string
+		updateConfigJson    *string
+		collectionMetadata  []*dbmodel.CollectionMetadata
+		expectedError       bool
+		expectedHnswConfig  *model.HnswConfiguration
+		expectedSpannConfig *model.SpannConfiguration
+	}{
+		{
+			name: "Update HNSW configuration",
+			existingConfigJson: strPtr(`{
+				"vector_index": {
+					"type": "hnsw",
+					"hnsw": {
+						"space": "l2",
+						"ef_construction": 100,
+						"ef_search": 100,
+						"max_neighbors": 16,
+						"num_threads": 16,
+						"resize_factor": 1.2,
+						"batch_size": 100,
+						"sync_threshold": 1000
+					}
+				}
+			}`),
+			updateConfigJson: strPtr(`{
+				"vector_index": {
+					"type": "hnsw",
+					"hnsw": {
+						"ef_search": 20,
+						"num_threads": 4
+					}
+				}
+			}`),
+			expectedHnswConfig: &model.HnswConfiguration{
+				Space:          "l2",
+				EfConstruction: 100,
+				EfSearch:       20,
+				MaxNeighbors:   16,
+				NumThreads:     4,
+				ResizeFactor:   1.2,
+				BatchSize:      100,
+				SyncThreshold:  1000,
+			},
+		},
+		{
+			name:               "Update from legacy metadata",
+			existingConfigJson: nil,
+			collectionMetadata: []*dbmodel.CollectionMetadata{
+				{
+					Key:      strPtr("hnsw:ef"),
+					IntValue: int64Ptr(50),
+				},
+				{
+					Key:      strPtr("hnsw:num_threads"),
+					IntValue: int64Ptr(8),
+				},
+				{
+					Key:        strPtr("hnsw:resize_factor"),
+					FloatValue: float64Ptr(1.2),
+				},
+				{
+					Key:      strPtr("hnsw:batch_size"),
+					IntValue: int64Ptr(100),
+				},
+				{
+					Key:      strPtr("hnsw:sync_threshold"),
+					IntValue: int64Ptr(1000),
+				},
+			},
+			updateConfigJson: strPtr(`{
+				"vector_index": {
+					"type": "hnsw",
+					"hnsw": {
+						"ef_search": 20
+					}
+				}
+			}`),
+			expectedHnswConfig: &model.HnswConfiguration{
+				Space:          "l2",
+				EfConstruction: 100,
+				EfSearch:       20,
+				MaxNeighbors:   16,
+				NumThreads:     8,
+				ResizeFactor:   1.2,
+				BatchSize:      100,
+				SyncThreshold:  1000,
+			},
+		},
+		{
+			name: "Convert from HNSW to SPANN",
+			existingConfigJson: strPtr(`{
+				"vector_index": {
+					"type": "hnsw",
+					"hnsw": {
+						"space": "l2",
+						"ef_construction": 100,
+						"ef_search": 100,
+						"max_neighbors": 16,
+						"num_threads": 16,
+						"resize_factor": 1.2,
+						"batch_size": 100,
+						"sync_threshold": 1000
+					}
+				}
+			}`),
+			updateConfigJson: strPtr(`{
+				"vector_index": {
+					"type": "spann",
+					"spann": {
+						"spann_config": {
+							"search_nprobe": 10,
+							"write_nprobe": 5,
+							"space": "l2",
+							"construction_ef": 100,
+							"search_ef": 50,
+							"m": 16
+						}
+					}
+				}
+			}`),
+			expectedSpannConfig: &model.SpannConfiguration{
+				SearchNprobe:   10,
+				WriteNprobe:    5,
+				Space:          "l2",
+				ConstructionEf: 100,
+				SearchEf:       50,
+				M:              16,
+			},
+		},
+		{
+			name: "Invalid update configuration JSON",
+			existingConfigJson: strPtr(`{
+				"vector_index": {
+					"type": "hnsw",
+					"hnsw": {
+						"space": "l2",
+						"ef_construction": 100,
+						"ef_search": 100,
+						"max_neighbors": 16,
+						"num_threads": 16,
+						"resize_factor": 1.2,
+						"batch_size": 100,
+						"sync_threshold": 1000
+					}
+				}
+			}`),
+			updateConfigJson: strPtr(`{invalid json`),
+			expectedError:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := catalog.updateCollectionConfiguration(
+				tt.existingConfigJson,
+				tt.updateConfigJson,
+				tt.collectionMetadata,
+			)
+
+			if tt.expectedError {
+				assert.Error(t, err)
+				return
+			}
+
+			assert.NoError(t, err)
+			assert.NotNil(t, result)
+
+			// Parse the result to verify the configuration
+			var config model.InternalCollectionConfiguration
+			err = json.Unmarshal([]byte(*result), &config)
+			assert.NoError(t, err)
+
+			if tt.expectedHnswConfig != nil {
+				assert.Equal(t, "hnsw", config.VectorIndex.Type)
+				assert.Equal(t, tt.expectedHnswConfig, config.VectorIndex.Hnsw)
+			}
+
+			if tt.expectedSpannConfig != nil {
+				assert.Equal(t, "spann", config.VectorIndex.Type)
+				assert.Equal(t, tt.expectedSpannConfig, config.VectorIndex.Spann)
+			}
+		})
+	}
+}
+
+// Helper functions
+func strPtr(s string) *string {
+	return &s
+}
+
+func int64Ptr(i int64) *int64 {
+	return &i
+}
+
+func float64Ptr(f float64) *float64 {
+	return &f
 }

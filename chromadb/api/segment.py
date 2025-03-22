@@ -2,6 +2,7 @@ from tenacity import retry, stop_after_attempt, retry_if_exception, wait_fixed
 from chromadb.api import ServerAPI
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
+    UpdateCollectionConfiguration,
     default_create_collection_configuration,
     load_collection_configuration_from_create_collection_configuration,
 )
@@ -360,6 +361,7 @@ class SegmentAPI(ServerAPI):
         id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
+        new_configuration: Optional[UpdateCollectionConfiguration] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
@@ -382,12 +384,29 @@ class SegmentAPI(ServerAPI):
 
         # TODO eventually we'll want to use OptionalArgument and Unspecified in the
         # signature of `_modify` but not changing the API right now.
-        if new_name and new_metadata:
+        if new_name and new_metadata and new_configuration:
+            self._sysdb.update_collection(
+                id,
+                name=new_name,
+                metadata=new_metadata,
+                configuration=new_configuration,
+            )
+        elif new_name and new_metadata:
             self._sysdb.update_collection(id, name=new_name, metadata=new_metadata)
+        elif new_name and new_configuration:
+            self._sysdb.update_collection(
+                id, name=new_name, configuration=new_configuration
+            )
+        elif new_metadata and new_configuration:
+            self._sysdb.update_collection(
+                id, metadata=new_metadata, configuration=new_configuration
+            )
         elif new_name:
             self._sysdb.update_collection(id, name=new_name)
         elif new_metadata:
             self._sysdb.update_collection(id, metadata=new_metadata)
+        elif new_configuration:
+            self._sysdb.update_collection(id, configuration=new_configuration)
 
     @trace_method("SegmentAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
     @override

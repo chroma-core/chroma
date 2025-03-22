@@ -111,6 +111,7 @@ class Bindings:
         id: str,
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
+        new_configuration_json_str: Optional[str] = None,
     ) -> None: ...
     def delete_collection(
         self,

@@ -15,7 +15,7 @@ use chroma_types::{
     GetCollectionsError, GetDatabaseError, GetDatabaseResponse, GetSegmentsError, GetTenantError,
     GetTenantResponse, InternalCollectionConfiguration, ListDatabasesError, ListDatabasesResponse,
     Metadata, ResetError, ResetResponse, SegmentFlushInfo, SegmentFlushInfoConversionError,
-    SegmentUuid, UpdateCollectionError,
+    SegmentUuid, UpdateCollectionConfiguration, UpdateCollectionError,
 };
 use chroma_types::{
     Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
@@ -265,15 +265,16 @@ impl SysDb {
         name: Option<String>,
         metadata: Option<CollectionMetadataUpdate>,
         dimension: Option<u32>,
+        configuration: Option<UpdateCollectionConfiguration>,
     ) -> Result<(), UpdateCollectionError> {
         match self {
             SysDb::Grpc(grpc) => {
-                grpc.update_collection(collection_id, name, metadata, dimension)
+                grpc.update_collection(collection_id, name, metadata, dimension, configuration)
                     .await
             }
             SysDb::Sqlite(sqlite) => {
                 sqlite
-                    .update_collection(collection_id, name, metadata, dimension)
+                    .update_collection(collection_id, name, metadata, dimension, configuration)
                     .await
             }
             SysDb::Test(_) => {
@@ -805,10 +806,26 @@ impl GrpcSysDb {
         name: Option<String>,
         metadata: Option<CollectionMetadataUpdate>,
         dimension: Option<u32>,
+        configuration: Option<UpdateCollectionConfiguration>,
     ) -> Result<(), UpdateCollectionError> {
+        let mut configuration_json_str = None;
+        if let Some(configuration) = configuration {
+            let collections = self
+                .get_collections(Some(collection_id), None, None, None, None, 0)
+                .await;
+            let collections = collections.unwrap();
+            let collection = collections.into_iter().next().unwrap();
+            let mut existing_configuration = collection.config;
+            existing_configuration.update(&configuration);
+            configuration_json_str = Some(
+                serde_json::to_string(&existing_configuration)
+                    .map_err(UpdateCollectionError::Configuration)?,
+            );
+        }
+
         let req = chroma_proto::UpdateCollectionRequest {
             id: collection_id.0.to_string(),
-            name,
+            name: name.clone(),
             metadata_update: metadata.map(|metadata| match metadata {
                 CollectionMetadataUpdate::UpdateMetadata(metadata) => {
                     chroma_proto::update_collection_request::MetadataUpdate::Metadata(
@@ -820,6 +837,7 @@ impl GrpcSysDb {
                 }
             }),
             dimension: dimension.map(|dim| dim as i32),
+            configuration_json_str: configuration_json_str.clone(),
         };
 
         self.client.update_collection(req).await.map_err(|e| {
