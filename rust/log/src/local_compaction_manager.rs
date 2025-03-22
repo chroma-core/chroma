@@ -225,6 +225,7 @@ impl Handler<BackfillMessage> for LocalCompactionManager {
             .apply_log_chunk(hnsw_data_chunk)
             .await
             .map_err(|_| CompactionManagerError::HnswApplyLogsError)?;
+        println!("SUCCESFULLY WROTE: {:?}", hnsw_data_chunk.total_len());
         Ok(())
     }
 }
