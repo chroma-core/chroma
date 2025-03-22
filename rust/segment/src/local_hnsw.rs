@@ -283,6 +283,7 @@ impl LocalHnswSegmentReader {
 
         // Bail if the index is empty
         if actual_len == 0 {
+            println!("ACTUAL LEN IS 0!");
             return Ok(Vec::new());
         }
 
