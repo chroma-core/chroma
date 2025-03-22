@@ -346,7 +346,9 @@ impl SqliteLog {
 
         if let Some(handle) = self.compactor_handle.get() {
             let backfill_message = BackfillMessage { collection_id };
-            handle.request(backfill_message, None).await??;
+            let res = handle.request(backfill_message, None).await;
+            println!("COMPACTION RESULT: {:?}", res);
+            res??;
             let purge_log_msg = PurgeLogsMessage { collection_id };
             handle.clone().request(purge_log_msg, None).await??;
         }
