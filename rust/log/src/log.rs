@@ -15,6 +15,7 @@ pub struct CollectionRecord {
     pub first_record_time: i64,
     pub offset: i64,
     pub collection_version: i32,
+    pub collection_logical_size_bytes: u64,
 }
 
 #[derive(Clone, Debug)]
