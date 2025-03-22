@@ -304,7 +304,7 @@ impl Component for CompactionManager {
         self.compaction_manager_queue_size
     }
 
-    async fn start(&mut self, ctx: &ComponentContext<Self>) -> () {
+    async fn on_start(&mut self, ctx: &ComponentContext<Self>) -> () {
         tracing::info!("Starting CompactionManager");
         ctx.scheduler.schedule(
             ScheduledCompactionMessage {},
