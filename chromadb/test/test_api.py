@@ -1386,7 +1386,9 @@ def test_multiple_collections(client):
         assert coll2.count() == len(embeddings2)
 
         results1 = coll1.query(query_embeddings=embeddings1[0], n_results=1)
+        print(f"Results 1: {results1}")
         results2 = coll2.query(query_embeddings=embeddings2[0], n_results=1)
+        print(f"Results 2: {results2}")
 
         assert results1["ids"][0][0] == ids1[0]
         assert results2["ids"][0][0] == ids2[0]
