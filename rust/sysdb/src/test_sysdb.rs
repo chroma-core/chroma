@@ -40,6 +40,7 @@ struct Inner {
     collection_to_version_file_name: HashMap<CollectionUuid, String>,
     #[derivative(Debug = "ignore")]
     storage: Option<chroma_storage::Storage>,
+    mock_time: u64,
 }
 
 impl TestSysDb {
@@ -53,8 +54,14 @@ impl TestSysDb {
                 collection_to_version_file: HashMap::new(),
                 collection_to_version_file_name: HashMap::new(),
                 storage: None,
+                mock_time: 0,
             })),
         }
+    }
+
+    pub fn set_mock_time(&mut self, mock_time: u64) {
+        let mut inner = self.inner.lock();
+        inner.mock_time = mock_time;
     }
 
     pub fn add_collection(&mut self, collection: Collection) {
@@ -252,7 +259,11 @@ impl TestSysDb {
                 let mut version_history = CollectionVersionHistory::default();
                 let mut version_info = CollectionVersionInfo::default();
                 version_info.version = 0;
-                version_info.created_at_secs = chrono::Utc::now().timestamp();
+                if inner.mock_time > 0 {
+                    version_info.created_at_secs = inner.mock_time as i64;
+                } else {
+                    version_info.created_at_secs = chrono::Utc::now().timestamp();
+                }
                 version_info.version_change_reason = VersionChangeReason::DataCompaction as i32;
                 version_history.versions = vec![version_info];
                 new_file.version_history = Some(version_history);
@@ -271,7 +282,11 @@ impl TestSysDb {
         // Create new version info with segment file paths
         let mut version_info = CollectionVersionInfo::default();
         version_info.version = next_version;
-        version_info.created_at_secs = chrono::Utc::now().timestamp();
+        if inner.mock_time > 0 {
+            version_info.created_at_secs = inner.mock_time as i64;
+        } else {
+            version_info.created_at_secs = chrono::Utc::now().timestamp();
+        }
         version_info.version_change_reason = VersionChangeReason::DataCompaction as i32;
 
         let flush_compaction_info: FlushSegmentCompactionInfo = (&segment_flush_info[0])
@@ -286,7 +301,7 @@ impl TestSysDb {
         version_history.versions.push(version_info);
         version_file.version_history = Some(version_history);
 
-        tracing::info!("version_file: {:?}", version_file);
+        // tracing::info!("version_file: {:?}", version_file);
 
         // Update the version file name.
         let version_file_name = format!(
@@ -355,7 +370,7 @@ impl TestSysDb {
     }
 
     // For testing purposes, set the storage for the sysdb.
-    pub async fn set_storage(&mut self, storage: Option<chroma_storage::Storage>) {
+    pub fn set_storage(&mut self, storage: Option<chroma_storage::Storage>) {
         let mut inner = self.inner.lock();
         inner.storage = storage;
     }
@@ -438,8 +453,8 @@ impl TestSysDb {
     ) -> Result<(), String> {
         // For testing success case, return Ok when versions are not empty
         if !versions.is_empty() && !versions[0].versions.is_empty() {
-            // Simulate error case when version is 1
-            if versions[0].versions.contains(&1) {
+            // Simulate error case when version is 0
+            if versions[0].versions.contains(&0) {
                 return Err("Failed to mark version for deletion".to_string());
             }
             Ok(())

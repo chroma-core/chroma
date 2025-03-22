@@ -87,7 +87,11 @@ use prost::Message;
 pub struct GarbageCollectorOrchestrator {
     collection_id: CollectionUuid,
     version_file_path: String,
+    // TODO(rohitcp): Remove this parameter.
     cutoff_time_hours: u32,
+    // Absolute cutoff time in seconds.
+    // Any version created before this time will be deleted unless retained by the min_versions_to_keep parameter.
+    cutoff_time_secs: u64,
     sysdb_client: SysDb,
     dispatcher: ComponentHandle<Dispatcher>,
     storage: Storage,
@@ -97,6 +101,7 @@ pub struct GarbageCollectorOrchestrator {
     pending_epoch_id: Option<i64>,
     hnsw_prefixes_for_deletion: Vec<String>,
     num_versions_deleted: u32,
+    deletion_list: Vec<String>,
 }
 
 impl Debug for GarbageCollectorOrchestrator {
@@ -118,6 +123,7 @@ impl GarbageCollectorOrchestrator {
     pub fn new(
         collection_id: CollectionUuid,
         version_file_path: String,
+        cutoff_time_secs: u64,
         cutoff_time_hours: u32,
         sysdb_client: SysDb,
         dispatcher: ComponentHandle<Dispatcher>,
@@ -127,6 +133,7 @@ impl GarbageCollectorOrchestrator {
             collection_id,
             version_file_path,
             cutoff_time_hours,
+            cutoff_time_secs,
             sysdb_client,
             dispatcher,
             storage,
@@ -136,6 +143,7 @@ impl GarbageCollectorOrchestrator {
             pending_epoch_id: None,
             hnsw_prefixes_for_deletion: Vec::new(),
             num_versions_deleted: 0,
+            deletion_list: Vec::new(),
         }
     }
 }
@@ -284,6 +292,7 @@ impl Handler<TaskResult<FetchVersionFileOutput, FetchVersionFileError>>
             ComputeVersionsToDeleteInput {
                 version_file,
                 cutoff_time,
+                cutoff_time_secs: self.cutoff_time_secs,
                 min_versions_to_keep: 2,
             },
             ctx.receiver(),
@@ -515,10 +524,13 @@ impl Handler<TaskResult<DeleteUnusedFilesOutput, DeleteUnusedFilesError>>
                 epoch_id,
                 sysdb_client: self.sysdb_client.clone(),
                 versions_to_delete,
-                unused_s3_files: output.deleted_files,
+                unused_s3_files: output.deleted_files.clone(),
             },
             ctx.receiver(),
         );
+
+        // Update the deletion list so that GarbageCollectorOrchestrator can use it in the final stage.
+        self.deletion_list = output.deleted_files.clone().into_iter().collect();
 
         if let Err(e) = self.dispatcher().send(delete_versions_task, None).await {
             self.terminate_with_result(Err(GarbageCollectorError::Channel(e)), ctx);
@@ -548,7 +560,7 @@ impl Handler<TaskResult<DeleteVersionsAtSysDbOutput, DeleteVersionsAtSysDbError>
             collection_id: self.collection_id,
             version_file_path: self.version_file_path.clone(),
             num_versions_deleted: self.num_versions_deleted,
-            deletion_list: Vec::new(),
+            deletion_list: self.deletion_list.clone(),
         };
 
         self.terminate_with_result(Ok(response), ctx);

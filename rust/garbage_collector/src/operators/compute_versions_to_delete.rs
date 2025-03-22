@@ -12,6 +12,8 @@ pub struct ComputeVersionsToDeleteOperator {}
 pub struct ComputeVersionsToDeleteInput {
     pub version_file: CollectionVersionFile,
     pub cutoff_time: DateTime<Utc>,
+    // Absolute cutoff time in seconds.
+    pub cutoff_time_secs: u64,
     pub min_versions_to_keep: u32,
 }
 
@@ -80,6 +82,16 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
             let mut unique_versions_seen = 0;
             let mut last_version = None;
 
+            // Print/Trace each version and its creation time.
+            tracing::debug!("======[GC {} ]=======", collection_info.collection_id);
+            for version in version_history.versions.iter() {
+                tracing::info!(
+                    "[GC]Version: {}, created at: {}",
+                    version.version,
+                    version.created_at_secs
+                );
+            }
+
             // First pass: find the oldest version that must be kept
             for version in version_history.versions.iter().rev() {
                 if last_version != Some(version.version) {
@@ -92,11 +104,18 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
                 }
             }
 
+            tracing::info!(
+                "Oldest version to keep: {}, min versions to keep: {}, cutoff time: {}",
+                oldest_version_to_keep,
+                input.min_versions_to_keep,
+                input.cutoff_time_secs
+            );
+
             // Second pass: mark for deletion if older than oldest_version_to_keep AND before cutoff
             for version in version_history.versions.iter_mut() {
                 if version.version != 0
                     && version.version < oldest_version_to_keep
-                    && version.created_at_secs < input.cutoff_time.timestamp()
+                    && version.created_at_secs < input.cutoff_time_secs as i64
                 {
                     tracing::info!(
                         "Marking version {} for deletion (created at {})",
@@ -112,6 +131,7 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
         }
 
         tracing::info!("Marked {} versions for deletion", marked_versions.len());
+        tracing::debug!("======[GC]=======");
 
         let versions_to_delete = VersionListForCollection {
             tenant_id: collection_info.tenant_id.clone(),

@@ -20,6 +20,7 @@ use crate::{
 #[allow(dead_code)]
 pub(crate) struct GarbageCollector {
     gc_interval_mins: u64,
+    cutoff_time_secs: u64,
     cutoff_time_hours: u32,
     max_collections_to_gc: u32,
     disabled_collections: HashSet<CollectionUuid>,
@@ -38,6 +39,7 @@ impl Debug for GarbageCollector {
 impl GarbageCollector {
     pub fn new(
         gc_interval_mins: u64,
+        cutoff_time_secs: u64,
         cutoff_time_hours: u32,
         max_collections_to_gc: u32,
         disabled_collections: HashSet<CollectionUuid>,
@@ -46,6 +48,7 @@ impl GarbageCollector {
     ) -> Self {
         Self {
             gc_interval_mins,
+            cutoff_time_secs,
             cutoff_time_hours,
             max_collections_to_gc,
             disabled_collections,
@@ -127,6 +130,7 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
                     let orchestrator = GarbageCollectorOrchestrator::new(
                         collection.id,
                         collection.version_file_path,
+                        self.cutoff_time_secs,
                         self.cutoff_time_hours,
                         self.sysdb_client.clone(),
                         dispatcher,
@@ -190,8 +194,15 @@ impl Configurable<GarbageCollectorConfig> for GarbageCollector {
             disabled_collections.insert(collection_id);
         }
 
+        let cutoff_time_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            - (config.cutoff_time_hours as u64 * 3600);
+
         Ok(GarbageCollector::new(
             config.gc_interval_mins as u64,
+            cutoff_time_secs,
             config.cutoff_time_hours,
             config.max_collections_to_gc,
             disabled_collections,

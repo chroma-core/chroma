@@ -1,3 +1,38 @@
+// Property Tests for Garbage Collection service.
+// RefState and SUT based implementation using TestSysDb and LocalStorage.
+//
+// SUT uses TestSysDb and LocalStorage.
+// Main transitions are:
+// 1. Create a new collection.
+// 2. Add a new version to a collection.
+// 3. Cleanup versions from a collection.
+//
+// For AddVersion,
+// SUT creates a new version file and adds the segment block ids to it.
+// SparseIndices are created on LocalStorage to mimic compaction of new data.
+// While SparseIndex files are created on disk, there is no creation of actual Block files on disk.
+// A mapping of collection to segment to block ids is maintained in RefState.
+// This allows each AddVersion to work off the previous version's segment to block id mapping.
+// RefState is updated with the new version's segment to block id mapping.
+// So, RefState does not use TestSysDb or LocalStorage.
+//
+// For CleanupVersions,
+// SUT runs the actual Garbage Collection orchestrator.
+// RefState does its independent computation of versions to delete, and the block ids to delete.
+//
+// Note on Time manipulation -
+// Using mock of Tokio time can create issues which are hard to debug due to
+// implementation of the mock when runtime has no jobs to do.
+// Time is maintained as a u64 monotonic counter.
+// Each time a transition happens, this counter (RefState::highest_registered_time) is increased by 1.
+// This allows a very deterministic run (& re-run) of the state machine.
+// All transitions that need time, use this counter, whose starting value it 100.
+// Eg:
+//  A collection is created at t=100.
+//  New Version is added at t=101
+//  Another Version is added at t=102
+//  CleanUp versions can be called at t=103, with a cutoff of 1 seconds.
+
 use chroma_blockstore::test_utils::sparse_index_test_utils::create_test_sparse_index;
 use chroma_storage::local::LocalStorage;
 use chroma_storage::Storage;
@@ -18,55 +53,77 @@ use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use std::sync::Arc;
 use uuid::Uuid;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use chroma_types::Segment;
+use chroma_types::SegmentType;
+use chroma_types::SegmentScope;
 
-#[derive(Clone, Debug)] // Add Arbitrary derive
+// SegmentBlockIdInfo is used to keep track of the segment block ids for a version.
+// A vector of SegmentBlockIdInfo is enough to get all block ids associated with a version.
+#[derive(Clone, Debug)]
+struct SegmentBlockIdInfo {
+    segment_id: SegmentUuid,
+    block_ids: Vec<Uuid>,
+    segment_type: SegmentType,
+}
+
+// Transitions for the State Machine.
+#[derive(Clone, Debug)]
 enum Transition {
     // Create a new collection.
     CreateCollection {
         id: String,
         creation_time_secs: u64,
+        segments: Vec<Segment>,
     },
     // Add version to a specific collection.
     // id is the name of the collection.
     AddVersion {
         id: String,
-        version_block_ids: Vec<Uuid>,
+        segment_block_ids: Vec<SegmentBlockIdInfo>,
         to_remove_block_ids: Vec<Uuid>,
         creation_time_secs: u64,
     },
     // Cleanup versions from a specific collection.
     CleanupVersions {
         id: String,
-        cutoff_window_secs: u64,
+        cutoff_time: u64,
     },
 }
 
+type VersionToSegmentBlockIdsMap = HashMap<u64, Vec<SegmentBlockIdInfo>>;
 type VersionToFilesMap = HashMap<u64, Vec<Uuid>>;
 type VersionToCreationTimeMap = HashMap<u64, u64>;
 
 #[derive(Clone, Debug)]
 struct RefState {
     // Keep track of collections.
+    // Used in pre-conditions to ensure AddVersion is only called on existing collections.
     collections: HashSet<String>,
-    // Keep track of version files for each collection.
-    coll_to_files_map: HashMap<String, VersionToFilesMap>,
     // Keep track of creation time for each version.
     coll_to_creation_time_map: HashMap<String, VersionToCreationTimeMap>,
+    // Keep track of the segment and corresponding block ids for each version.
+    // i.e. collection_uuid -> version -> Vec<SegmentBlockIdInfo>
+    coll_to_segment_block_ids_map: HashMap<String, VersionToSegmentBlockIdsMap>,
     // Keep track of dropped block ids for each version.
+    // This info can be used to compute the block ids to delete.
+    // Using this info minimizes the change of making a mistake in cleanup computation.
     coll_to_dropped_block_ids_map: HashMap<String, VersionToFilesMap>,
     // Min versions to keep for all collections.
     min_versions_to_keep: u64,
     // Keep track of the highest registered time for all collections.
-    highest_registered_time: u64,
+    // Helps to mock the time.
+    highest_registered_time: u64,  // TODO: Suffix with _secs to make it consistent with cutoff_secs.
     // Keep track of the files that were deleted in the last cleanup.
     last_cleanup_files: Vec<String>,
 }
 
 impl RefState {
+    // TODO(rohitcp): Remove this if not needed.
     fn _new(min_versions_to_keep: u64) -> Self {
         Self {
             collections: HashSet::new(),
-            coll_to_files_map: HashMap::new(),
+            coll_to_segment_block_ids_map: HashMap::new(),
             coll_to_creation_time_map: HashMap::new(),
             coll_to_dropped_block_ids_map: HashMap::new(),
             min_versions_to_keep,
@@ -75,12 +132,14 @@ impl RefState {
         }
     }
 
-    pub fn get_block_ids_for_version(&self, collection_id: String, version: u64) -> Vec<Uuid> {
-        self.coll_to_files_map
+    // Gets the block ids for a version. Uses to create mock block ids for next version.
+    // Keep track of this enables the next version to re-use block ids and mimic actual prod behavior.
+    pub fn get_segment_block_ids_for_version(&self, collection_id: String, version: u64) -> Vec<SegmentBlockIdInfo> {
+        self.coll_to_segment_block_ids_map
             .get(&collection_id)
             .and_then(|versions| versions.get(&version))
             .cloned()
-            .unwrap_or_default()  // Return empty Vec if collection or version doesn't exist
+            .unwrap_or_default()
     }
 
     pub fn get_current_version(&self, collection_id: String) -> u64 {
@@ -97,7 +156,7 @@ impl RefState {
         id: String,
         version: u64,
         creation_time_secs: u64,
-        block_ids: Vec<Uuid>,
+        segment_block_ids: Vec<SegmentBlockIdInfo>,
         dropped_block_ids: Vec<Uuid>,
     ) -> Self {
         // Only proceed if collection exists
@@ -106,11 +165,13 @@ impl RefState {
         }
 
         // Initialize maps for new collections if they don't exist
-        self.coll_to_files_map.entry(id.clone()).or_default();
         self.coll_to_creation_time_map
             .entry(id.clone())
             .or_default();
         self.coll_to_dropped_block_ids_map
+            .entry(id.clone())
+            .or_default();
+        self.coll_to_segment_block_ids_map
             .entry(id.clone())
             .or_default();
 
@@ -119,10 +180,6 @@ impl RefState {
         self.highest_registered_time = creation_time_secs;
 
         // Update the mappings
-        self.coll_to_files_map
-            .get_mut(&id)
-            .unwrap()
-            .insert(version, block_ids);
         self.coll_to_creation_time_map
             .get_mut(&id)
             .unwrap()
@@ -131,95 +188,127 @@ impl RefState {
             .get_mut(&id)
             .unwrap()
             .insert(version, dropped_block_ids);
+        self.coll_to_segment_block_ids_map
+            .get_mut(&id)
+            .unwrap()
+            .insert(version, segment_block_ids);
 
         self
     }
 
-    fn create_collection(mut self, id: String) -> Self {
-        if self.collections.contains(&id) {
-            tracing::debug!("RSM: create_collection: Collection already exists: {}", id);
-            return self;
-        }
+    fn create_collection(mut self, id: String, segments: Vec<Segment>, creation_time_secs: u64) -> Self {
+        assert!(!self.collections.contains(&id), "RSM: create_collection: collection already exists: {}", id);
+
         self.collections.insert(id.clone());
         // Initialize empty maps for the new collection
-        self.coll_to_files_map.insert(id.clone(), HashMap::new());
-        self.coll_to_creation_time_map
-            .insert(id.clone(), HashMap::new());
         self.coll_to_dropped_block_ids_map
             .insert(id.clone(), HashMap::new());
+        
+        // Put the segment block ids for the collection.
+        // AddVersion calls will need to use this to find the segment block ids for the collection.
+        self.coll_to_segment_block_ids_map
+            .insert(id.clone(), HashMap::new());
+        let segment_block_ids = segments.iter().map(|s| SegmentBlockIdInfo {
+            segment_id: s.id,
+            block_ids: vec![],
+            segment_type: s.r#type,
+        }).collect();
+        self.coll_to_segment_block_ids_map.get_mut(&id).unwrap().insert(0, segment_block_ids);
+
+        // Insert the initial version to creation time mapping.
+        // This is used to find current version for the collection, and the creation time for the initial version.
+        let mut initial_version_to_creation_time = HashMap::new();
+        initial_version_to_creation_time.insert(0, creation_time_secs);
+        self.coll_to_creation_time_map
+            .insert(id.clone(), initial_version_to_creation_time);
         self
     }
 
-    fn cleanup_versions(mut self, collection_id: String, cutoff_window_secs: u64) -> Self {
-        let cutoff_time = self.highest_registered_time - cutoff_window_secs;
-        // We need to maintain atlest a min number of versions for the collection.
-        // So the versions to check are all versions >= oldest_version_to_keep.
-        // If min_versions_to_keep is 3, then oldest_version_to_keep is found by sorting the versions and picking the 3rd largest one.
-        let oldest_version_to_keep = self
+    fn cleanup_versions(mut self, collection_id: String, cutoff_time: u64) -> Self {
+        assert!(self.collections.contains(&collection_id), "RSM: cleanup_versions: collection does not exist: {}", collection_id);
+
+        // First get all versions present for the collection
+        let versions_present: Vec<u64> = self
             .coll_to_creation_time_map
             .get(&collection_id)
             .unwrap()
             .iter()
             .sorted_by_key(|(version, _)| *version)
             .rev()
-            .nth(self.min_versions_to_keep as usize)
+            .map(|(version, _)| *version)
+            .collect();
+
+
+        // Then get the oldest version to keep
+        let oldest_version_to_keep = versions_present
+            .get(self.min_versions_to_keep as usize - 1)  // -1 since its 0-indexed.
             .unwrap();
 
-        let versions_to_delete = self
+        let mut versions_to_delete = self
             .coll_to_creation_time_map
             .get(&collection_id)
             .unwrap()
             .iter()
             .filter(|(version, creation_time)| {
-                **creation_time < cutoff_time && version < &oldest_version_to_keep.0
+                **creation_time < cutoff_time && version < &oldest_version_to_keep
             })
             .map(|(version, _)| *version)
             .collect::<Vec<_>>();
+        versions_to_delete.sort();
 
-        // Get all versions sorted in ascending order
-        let mut all_versions = self
-            .coll_to_files_map
-            .get(&collection_id)
-            .unwrap()
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>();
-        all_versions.sort();
+        tracing::info!(line = line!(), "RefState: cleanup_versions:  versions to creation time: {:?}", self.coll_to_creation_time_map);
+        tracing::info!(
+            line = line!(),
+            "RSM: cleanup_versions: cutoff_time: {:?}, versions_present: {:?}, oldest_to_keep: {:?}, to_delete: {:?}   ", 
+            cutoff_time,
+            versions_present,
+            oldest_version_to_keep,
+            versions_to_delete
+        );
 
-        // For each version to delete, identify files that can be safely removed
-        let mut files_to_delete = HashSet::new();
+        // Method 1: Using segment block IDs
+        let mut files_to_delete_method1 = HashSet::new();
         for version in versions_to_delete.clone() {
-            let next_version = version + 1;
-            // Get files for current version and next version
-            let current_files = &self.coll_to_files_map[&collection_id][&version];
-            let next_files = &self.coll_to_files_map[&collection_id][&next_version];
+            let next_version = version + 1;  // Since the min_versions_to_keep is always > 1, we can be sure next_version exists in the hashamp.
+            let current_segments = &self.coll_to_segment_block_ids_map[&collection_id][&version];
+            let next_segments = &self.coll_to_segment_block_ids_map[&collection_id][&next_version];
 
-            // Files that can be deleted are those in current_files that aren't in next_files
-            for file in current_files {
-                if !next_files.contains(file) {
-                    files_to_delete.insert(file.clone());
+            for current_segment in current_segments {
+                if let Some(next_segment) = next_segments.iter().find(|s| s.segment_id == current_segment.segment_id) {
+                    for block_id in &current_segment.block_ids {
+                        // If the block id is not present in the next version, add it to the files to delete.
+                        if !next_segment.block_ids.contains(block_id) {
+                            files_to_delete_method1.insert(block_id.clone());
+                        }
+                    }
+                } else {
+                    assert!(false, "RSM: cleanup_versions: segment not found in next version: {:?}", current_segment.segment_id);
                 }
             }
         }
 
-        // Remove the version entries from our maps
-        for version in versions_to_delete {
-            self.coll_to_files_map
-                .get_mut(&collection_id)
-                .unwrap()
-                .remove(&version);
-            self.coll_to_creation_time_map
-                .get_mut(&collection_id)
-                .unwrap()
-                .remove(&version);
+        // Method 2: Using dropped block IDs map
+        let mut files_to_delete_method2 = HashSet::new();
+        for version in versions_to_delete.clone() {
+            let next_version = version + 1;
+            if let Some(dropped_blocks) = self.coll_to_dropped_block_ids_map[&collection_id].get(&next_version) {
+                files_to_delete_method2.extend(dropped_blocks.iter().cloned());
+            }
         }
 
-        // Convert the files to strings.
-        let files_to_delete: Vec<String> = files_to_delete
-            .into_iter()
-            .map(|file| format!("block/{}", file))
+        // Verify both methods give the same result
+        assert_eq!(
+            files_to_delete_method1, 
+            files_to_delete_method2,
+            "RSM: cleanup_versions: different results from two methods. Method1: {:?}, Method2: {:?}",
+            files_to_delete_method1,
+            files_to_delete_method2
+        );
+
+        // Update last_cleanup_files with the files to delete (can use either method since they're equal)
+        self.last_cleanup_files = files_to_delete_method1.iter()
+            .map(|uuid| uuid.to_string())
             .collect();
-        self.last_cleanup_files = files_to_delete;
 
         self
     }
@@ -232,9 +321,9 @@ impl ReferenceStateMachine for RefState {
     fn init_state() -> BoxedStrategy<Self> {
         Just(Self {
             collections: HashSet::new(),
-            coll_to_files_map: HashMap::new(),
             coll_to_creation_time_map: HashMap::new(),
             coll_to_dropped_block_ids_map: HashMap::new(),
+            coll_to_segment_block_ids_map: HashMap::new(),
             min_versions_to_keep: 3,
             highest_registered_time: 100,
             last_cleanup_files: Vec::new(),
@@ -247,6 +336,10 @@ impl ReferenceStateMachine for RefState {
         let existing_collection_ids: Vec<String> = 
             state.collections.iter().cloned().collect();
         let state_clone = state.clone();
+        // Create a random cutoff window between 1 and 10.
+        let cutoff_window_secs = 3;
+        // Compute the cutoff time.
+        let cutoff_time = state_clone.highest_registered_time - cutoff_window_secs;
 
         if existing_collection_ids.is_empty() {
             // If no collections exist, only generate CreateCollection transitions
@@ -254,8 +347,9 @@ impl ReferenceStateMachine for RefState {
                 .prop_map(move |id| {
                     let next_time = state_clone.highest_registered_time + 1;
                     Transition::CreateCollection {
-                        id,
+                        id: id.clone(),
                         creation_time_secs: next_time,
+                        segments: generate_segments_for_collection(CollectionUuid::from_str(&id.clone()).unwrap()),
                     }
                 })
                 .boxed()
@@ -267,27 +361,33 @@ impl ReferenceStateMachine for RefState {
                     .prop_map(move |id| {
                         let next_time = state_clone.highest_registered_time + 1;
                         Transition::CreateCollection {
-                            id,
+                            id: id.clone(),
                             creation_time_secs: next_time,
+                            segments: generate_segments_for_collection(CollectionUuid::from_str(&id.clone()).unwrap()),
                         }
                     }),
                 4 => prop::sample::select(existing_collection_ids.clone()).prop_map(move |id| {
-                    let (block_ids_new_version, block_ids_dropped) =
-                        blocks_ids_for_next_version(state_clone.get_block_ids_for_version(
-                            id.clone(),
-                            state_clone.get_current_version(id.clone()),
-                        ));
+                    let segment_block_ids = state_clone.get_segment_block_ids_for_version(
+                        id.clone(),
+                        state_clone.get_current_version(id.clone()),
+                    );
+                    // tracing::info!(
+                    //     line = line!(),
+                    //     "RSM: transitions: segment_block_ids for existing collection: {:?}", 
+                    //     segment_block_ids
+                    // );
+                    let (segment_block_ids_new_version, dropped_block_ids) = segment_block_ids_for_next_version(segment_block_ids);
                     Transition::AddVersion {
                         id: id.clone(),
-                        version_block_ids: block_ids_new_version,
-                        to_remove_block_ids: block_ids_dropped,
+                        to_remove_block_ids: dropped_block_ids,
                         creation_time_secs: state_clone.highest_registered_time + 1,
+                        segment_block_ids: segment_block_ids_new_version,
                     }
                 }),
                 2 => prop::sample::select(existing_collection_ids).prop_map(move |id| {
                     Transition::CleanupVersions {
                         id: id.clone(),
-                        cutoff_window_secs: 100,
+                        cutoff_time: cutoff_time,
                     }
                 }),
             ]
@@ -299,16 +399,16 @@ impl ReferenceStateMachine for RefState {
         match transition {
             Transition::AddVersion {
                 id,
-                version_block_ids: _,
                 to_remove_block_ids: _,
                 creation_time_secs: _,
+                segment_block_ids: _,
             } => state.collections.contains(id),
             Transition::CleanupVersions {
                 id,
-                cutoff_window_secs,
+                cutoff_time,
             } => {
                 state.collections.contains(id) && 
-                *cutoff_window_secs <= state.highest_registered_time &&
+                *cutoff_time <= state.highest_registered_time &&
                 // Check if we have enough versions to perform cleanup
                 state.coll_to_creation_time_map
                     .get(id)
@@ -317,38 +417,48 @@ impl ReferenceStateMachine for RefState {
             },
             Transition::CreateCollection {
                 id,
+                segments: _,
                 creation_time_secs: _,
             } => !state.collections.contains(id),
         }
     }
 
     fn apply(state: Self::State, transition: &Self::Transition) -> Self {
+        // tracing::info!(
+        //     line = line!(),
+        //     "Applying transition: {:?} to RefState", 
+        //     transition
+        // );
         match transition {
             Transition::AddVersion {
                 id,
-                version_block_ids,
                 to_remove_block_ids,
                 creation_time_secs,
+                segment_block_ids,
             } => state.clone().add_version(
                 id.clone(),
                 state.clone().get_current_version(id.clone()) + 1,
                 *creation_time_secs,
-                version_block_ids.clone(),
+                segment_block_ids.clone(),
                 to_remove_block_ids.clone(),
             ),
             Transition::CleanupVersions {
                 id,
-                cutoff_window_secs,
+                cutoff_time,
             } => state
                 .clone()
-                .cleanup_versions(id.clone(), *cutoff_window_secs),
+                .cleanup_versions(id.clone(), *cutoff_time),
             Transition::CreateCollection {
                 id,
-                creation_time_secs: _,
-            } => state.clone().create_collection(id.clone()),
+                segments,
+                creation_time_secs,
+            } => state.clone().create_collection(id.clone(), segments.clone(), *creation_time_secs),
         }
     }
 }
+
+// Add this at the top level of the file
+static INVARIANT_CHECK_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 struct GcTest {
     storage: Storage,
@@ -360,10 +470,21 @@ impl Default for GcTest {
     fn default() -> Self {
         // Create local storage for testing
         let tmp_dir = tempfile::tempdir().unwrap();
-        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let storage_dir = tmp_dir.path().to_str().unwrap();
+        tracing::info!(
+            line = line!(),
+            "GcTest: storage_dir: {:?}", 
+            storage_dir
+        );
+        let storage = Storage::Local(LocalStorage::new(storage_dir));
 
         // Create test sysdb instance
-        let sysdb = chroma_sysdb::SysDb::Test(TestSysDb::new());
+        let mut sysdb = chroma_sysdb::SysDb::Test(TestSysDb::new());
+        
+        // Set storage using block_on since set_storage is async
+        if let chroma_sysdb::SysDb::Test(test_sysdb) = &mut sysdb {
+            test_sysdb.set_storage(Some(storage.clone()));
+        }
 
         Self {
             storage,
@@ -376,8 +497,10 @@ impl Default for GcTest {
 fn get_version_file_name(sysdb: &chroma_sysdb::SysDb, id: String) -> String {
     let collection_id = CollectionUuid::from_str(&id).unwrap();
     match sysdb {
-        chroma_sysdb::SysDb::Test(test_sysdb) => test_sysdb.get_version_file_name(collection_id),
-        _ => panic!("Expected TestSysDb"),
+        chroma_sysdb::SysDb::Test(test_sysdb) => {
+            test_sysdb.get_version_file_name(collection_id)
+        }
+        _ => panic!("get_version_file_name only supported for TestSysDb"),
     }
 }
 
@@ -391,9 +514,14 @@ impl GcTest {
         mut self,
         id: String,
         _version: u64,
-        _creation_time_secs: u64,
-        version_block_ids: Vec<Uuid>,
+        creation_time_secs: u64,
+        segment_block_ids: Vec<SegmentBlockIdInfo>,
     ) -> Self {
+        // Set the mock time before calling flush_compaction
+        if let chroma_sysdb::SysDb::Test(test_sysdb) = &mut self.sysdb {
+            test_sysdb.set_mock_time(creation_time_secs);
+        }
+
         // 1. Get version file name and current version from sysdb
         let collection_id = CollectionUuid::from_str(&id).unwrap();
         let collections =
@@ -408,24 +536,22 @@ impl GcTest {
             None => return self,
         };
         let current_version = collection.version;
-        let _version_file_name = get_version_file_name(&self.sysdb, id);
 
         // ----- Prepare to call flush compaction.  ---------
-        // Use half of version_block_ids as the block ids for the new version.
-        let block_ids: Vec<Uuid> = version_block_ids
-            .iter()
-            .take(version_block_ids.len() / 2)
-            .cloned()
-            .collect();
+        // Create the new record segment.
+        let record_segment_info = segment_block_ids.iter()
+            .find(|sbi| sbi.segment_type == SegmentType::BlockfileRecord)
+            .unwrap()
+            .clone();
         // Create sparse index for record segment
         let sparse_index_id = block_on(create_test_sparse_index(
             &self.storage,
-            block_ids.clone(),
+            record_segment_info.block_ids.clone(),
             Some("test_si_".to_string()),
         ))
         .unwrap();
         // Create segment info for this version
-        let record_segment_id = SegmentUuid::new();
+        let record_segment_id = record_segment_info.segment_id;
         let mut file_paths = HashMap::new();
         file_paths.insert(
             "rec_blockfile_1".to_string(),
@@ -439,20 +565,18 @@ impl GcTest {
         };
 
         // Create sparse index for metadata segment
-        // Use the remaining half of version_block_ids as the block ids for the metadata segment.
-        let block_ids: Vec<Uuid> = version_block_ids
-            .iter()
-            .skip(version_block_ids.len() / 2)
-            .cloned()
-            .collect();
+        let metadata_segment_info = segment_block_ids.iter()
+            .find(|sbi| sbi.segment_type == SegmentType::BlockfileMetadata)
+            .unwrap()
+            .clone();
         let sparse_index_id = block_on(create_test_sparse_index(
             &self.storage,
-            block_ids.clone(),
+            metadata_segment_info.block_ids.clone(),
             Some("test_si_".to_string()),
         ))
         .unwrap();
         // Create segment info for this version
-        let metadata_segment_id = SegmentUuid::new();
+        let metadata_segment_id = metadata_segment_info.segment_id;
         let mut file_paths = HashMap::new();
         file_paths.insert(
             "metadata_blockfile_1".to_string(),
@@ -505,14 +629,28 @@ impl GcTest {
         self
     }
 
-    fn create_collection(self, _id: String, _creation_time_secs: u64) -> Self {
-        // Currently, TestSysDb does not have create collection, and creates it
-        // when a version is added.
-        // TODO(rohitcp): Call SysDb create collection.
+    fn create_collection(mut self, id: String, segments: Vec<Segment>, creation_time_secs: u64) -> Self {
+        // Set the mock time before creating collection
+        if let chroma_sysdb::SysDb::Test(test_sysdb) = &mut self.sysdb {
+            test_sysdb.set_mock_time(creation_time_secs);
+        }
+
+        let collection_id = CollectionUuid::from_str(&id).unwrap();
+        let result = block_on(self.sysdb.create_collection(
+            "tenant".to_string(),
+            "database".to_string(),
+            collection_id,
+            "collection".to_string(),
+            segments,
+            None,
+            None,
+            false,
+        ));
+        assert!(result.is_ok(), "Failed to create collection: {:?}", result.err());
         self
     }
 
-    async fn cleanup_versions_async(mut self, id: String, _cutoff_window_secs: u64) -> Self {
+    async fn cleanup_versions_async(mut self, id: String, cutoff_time: u64) -> Self {
         let mut sysdb = self.sysdb.clone();
         let storage = self.storage.clone();
 
@@ -538,16 +676,16 @@ impl GcTest {
         let collection = match collections.first() {
             Some(c) => c,
             None => {
-                tracing::warn!("Collection not found during cleanup: {}", id);
+                assert!(false, "Collection not found during cleanup: {}. Check preconditions logic.", id);
                 return self;
             }
         };
 
         let version_file_name = get_version_file_name(&self.sysdb, id);
-
         let orchestrator = GarbageCollectorOrchestrator::new(
             collection.collection_id,
             version_file_name,
+            cutoff_time,
             0,
             sysdb,
             dispatcher_handle,
@@ -558,18 +696,31 @@ impl GcTest {
             Ok(response) => {
                 tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
                 self.last_cleanup_files = response.deletion_list.clone();
+                tracing::info!(
+                    line = line!(),
+                    "GcTest: cleanup_versions: last_cleanup_files: {:?}", 
+                    self.last_cleanup_files
+                );
             }
             Err(e) => {
-                tracing::error!("Error during garbage collection: {:?}", e);
+                tracing::error!(
+                    line = line!(),
+                    "Error during garbage collection: {:?}", 
+                    e
+                );
             }
         }
 
         self
     }
 
-    fn cleanup_versions(self, id: String, cutoff_window_secs: u64) -> Self {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(self.cleanup_versions_async(id, cutoff_window_secs))
+    fn cleanup_versions(self, id: String, cutoff_time: u64) -> Self {
+        let result = tokio::task::block_in_place(|| {
+            // Get the current runtime handle.
+            let handle = tokio::runtime::Handle::current();
+            handle.block_on(self.cleanup_versions_async(id, cutoff_time))
+        });
+        result
     }
 }
 
@@ -580,6 +731,10 @@ impl StateMachineTest for GcTest {
     fn init_test(
         _ref_state: &<Self::Reference as ReferenceStateMachine>::State,
     ) -> Self::SystemUnderTest {
+        tracing::info!(
+            line = line!(),
+            "Initializing new test instance"
+        );
         Self::default()
     }
 
@@ -588,26 +743,32 @@ impl StateMachineTest for GcTest {
         ref_state: &<Self::Reference as ReferenceStateMachine>::State,
         transition: <Self::Reference as ReferenceStateMachine>::Transition,
     ) -> Self::SystemUnderTest {
+        tracing::info!(
+            line = line!(),
+            "Applying transition: {:?} to SUT", 
+            transition
+        );
         let state = match transition {
             Transition::AddVersion {
                 id,
-                version_block_ids,
                 to_remove_block_ids: _,
                 creation_time_secs,
+                segment_block_ids,
             } => state.add_version(
                 id.clone(),
                 ref_state.get_current_version(id.clone()) + 1,
                 creation_time_secs,
-                version_block_ids.clone(),
+                segment_block_ids.clone(),
             ),
             Transition::CreateCollection {
                 id,
+                segments,
                 creation_time_secs,
-            } => state.create_collection(id, creation_time_secs),
+            } => state.create_collection(id, segments, creation_time_secs),
             Transition::CleanupVersions {
                 id,
-                cutoff_window_secs,
-            } => state.cleanup_versions(id, cutoff_window_secs),
+                cutoff_time,
+            } => state.cleanup_versions(id, cutoff_time),
         };
         state
     }
@@ -616,9 +777,70 @@ impl StateMachineTest for GcTest {
         state: &Self::SystemUnderTest,
         ref_state: &<Self::Reference as ReferenceStateMachine>::State,
     ) {
-        // Check that the last cleanup files are same as the files in the ref state.
-        assert_eq!(state.last_cleanup_files, ref_state.last_cleanup_files);
+        INVARIANT_CHECK_COUNT.fetch_add(1, Ordering::SeqCst);
+        tracing::info!(
+            line = line!(),
+            "Checking invariants (count: {})",
+            INVARIANT_CHECK_COUNT.load(Ordering::SeqCst)
+        );
+
+        // Remove the block/ prefix and sort
+        let mut state_last_cleanup_files: Vec<String> = state.last_cleanup_files.iter()
+            .map(|file| file.replace("block/", ""))
+            .collect();
+        state_last_cleanup_files.sort();
+
+        // Sort reference state files
+        let mut ref_last_cleanup_files = ref_state.last_cleanup_files.clone();
+        ref_last_cleanup_files.sort();
+
+        assert_eq!(
+            state_last_cleanup_files, 
+            ref_last_cleanup_files,
+            "Cleanup files mismatch after sorting - SUT: {:?}, Reference: {:?}",
+            state_last_cleanup_files,
+            ref_last_cleanup_files
+        );
     }
+}
+
+fn generate_segments_for_collection(collection_id: CollectionUuid) -> Vec<Segment> {
+    let record_segment = Segment {
+        id: SegmentUuid::new(),
+        r#type: SegmentType::BlockfileRecord,
+        scope: SegmentScope::RECORD,
+        collection: collection_id,
+        metadata: None,
+        file_path: HashMap::new(),
+    };
+    let metadata_segment = Segment {
+        id: SegmentUuid::new(),
+        r#type: SegmentType::BlockfileMetadata,
+        scope: SegmentScope::METADATA,
+        collection: collection_id,
+        metadata: None,
+        file_path: HashMap::new(),
+    };
+
+    vec![record_segment, metadata_segment]
+}
+
+fn segment_block_ids_for_next_version(existing_segment_block_ids: Vec<SegmentBlockIdInfo>) -> (Vec<SegmentBlockIdInfo>, Vec<Uuid>) {
+    let mut new_segment_block_ids = Vec::new();
+    let mut dropped_block_ids = Vec::new();
+    for segment in existing_segment_block_ids {
+        let block_ids = segment.block_ids.clone();
+        let (new_block_ids, dropped_ids) = blocks_ids_for_next_version(block_ids);
+        new_segment_block_ids.push(SegmentBlockIdInfo {
+            segment_id: segment.segment_id,
+            block_ids: new_block_ids,
+            segment_type: segment.segment_type,
+        });
+        // Add dropped block ids to the list of dropped block ids
+        dropped_block_ids.extend(dropped_ids);
+    }
+
+    (new_segment_block_ids, dropped_block_ids)
 }
 
 fn blocks_ids_for_next_version(block_ids: Vec<Uuid>) -> (Vec<Uuid>, Vec<Uuid>) {
@@ -628,6 +850,11 @@ fn blocks_ids_for_next_version(block_ids: Vec<Uuid>) -> (Vec<Uuid>, Vec<Uuid>) {
     if block_ids.is_empty() {
         let num_new_blocks = rng.gen_range(1..=10);
         let new_block_ids: Vec<Uuid> = (0..num_new_blocks).map(|_| Uuid::new_v4()).collect();
+        // tracing::info!(
+        //     line = line!(),
+        //     "RSM: new blocks_ids_for_next_version: new_block_ids: {:?}", 
+        //     new_block_ids
+        // );
         return (new_block_ids, Vec::new());
     }
 
@@ -648,28 +875,6 @@ fn blocks_ids_for_next_version(block_ids: Vec<Uuid>) -> (Vec<Uuid>, Vec<Uuid>) {
     (kept_block_ids, dropped_block_ids)
 }
 
-fn _randomly_generate_block_ids_for_next_version(block_ids: Vec<Uuid>) -> Vec<Uuid> {
-    let mut rng = rand::thread_rng();
-
-    // Keep a random percentage (between 30% and 90%) of old block IDs
-    let keep_percentage = rng.gen_range(30..=90) as f64 / 100.0;
-    let num_to_keep = (block_ids.len() as f64 * keep_percentage).ceil() as usize;
-
-    // Randomly select block IDs to keep
-    let mut kept_block_ids: Vec<Uuid> = block_ids
-        .choose_multiple(&mut rng, num_to_keep)
-        .cloned()
-        .collect();
-
-    // Generate between 0 and 10 new block IDs
-    let num_new_blocks = rng.gen_range(0..=10);
-    let new_block_ids: Vec<Uuid> = (0..num_new_blocks).map(|_| Uuid::new_v4()).collect();
-
-    // Combine kept and new block IDs
-    kept_block_ids.extend(new_block_ids);
-    kept_block_ids
-}
-
 prop_state_machine! {
     #![proptest_config(ProptestConfig::with_cases(20))]
     // #[test]
@@ -681,7 +886,15 @@ prop_state_machine! {
     );
 }
 
-#[test]
-fn run_gc_test_ext() {
+#[tokio::test(flavor = "multi_thread")]
+async fn run_gc_test_ext() {
+    // Initialize tracing
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .try_init();
+
+    INVARIANT_CHECK_COUNT.store(0, Ordering::SeqCst);
     run_gc_test();
+    let checks = INVARIANT_CHECK_COUNT.load(Ordering::SeqCst);
+    assert!(checks > 0, "check_invariants was never called! Count: {}", checks);
 }
