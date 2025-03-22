@@ -98,7 +98,7 @@ impl<O: Orchestrator> Component for O {
         self.queue_size()
     }
 
-    async fn start(&mut self, ctx: &ComponentContext<Self>) {
+    async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
         for task in self.initial_tasks(ctx) {
             if !self.send(task, ctx).await {
                 break;

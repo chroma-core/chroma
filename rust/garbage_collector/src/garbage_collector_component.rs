@@ -75,7 +75,7 @@ impl Component for GarbageCollector {
         1000
     }
 
-    async fn start(&mut self, ctx: &ComponentContext<Self>) {
+    async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
         ctx.scheduler.schedule(
             GarbageCollectMessage {},
             Duration::from_secs(self.gc_interval_mins * 60),

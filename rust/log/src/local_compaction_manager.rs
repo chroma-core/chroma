@@ -65,7 +65,7 @@ impl Component for LocalCompactionManager {
         1000
     }
 
-    async fn start(&mut self, _: &ComponentContext<Self>) -> () {}
+    async fn on_start(&mut self, _: &ComponentContext<Self>) -> () {}
 }
 
 impl Debug for LocalCompactionManager {
