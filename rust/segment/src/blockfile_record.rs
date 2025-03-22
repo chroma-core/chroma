@@ -7,7 +7,7 @@ use chroma_blockstore::{
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::fulltext::types::FullTextIndexError;
 use chroma_types::{DataRecord, MaterializedLogOperation, Segment, SegmentType, SegmentUuid};
-use futures::{Stream, StreamExt, TryStreamExt};
+use futures::{Stream, StreamExt};
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
 use std::ops::RangeBounds;
@@ -863,15 +863,6 @@ impl RecordSegmentReader<'_> {
         self.user_id_to_id
             .load_blocks_for_keys(&prefixes, &keys)
             .await
-    }
-
-    pub async fn get_total_logical_size_bytes(&self) -> Result<u64, Box<dyn ChromaError>> {
-        self.id_to_data
-            .get_range_stream(""..="", ..)
-            .map(|res| res.map(|(_, d)| d.get_size() as u64))
-            .try_collect::<Vec<_>>()
-            .await
-            .map(|sizes| sizes.iter().sum())
     }
 }
 
