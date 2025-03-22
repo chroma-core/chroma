@@ -29,8 +29,9 @@ const ScrollableContent: React.FC<{
 
     if (!scrollRef.current) return;
 
-    // @ts-expect-error - ignore
-    const userPath = pathname.slice(1).split("/");
+    const userPath = pathname?.slice(1).split("/");
+    if (!userPath) return;
+
     const section = userPath[0];
 
     const storedScrollPosition = sessionStorage.getItem(

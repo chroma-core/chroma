@@ -75,6 +75,7 @@ impl HnswIndexConfig {
 pub struct HnswIndex {
     index: hnswlib::HnswIndex,
     pub id: IndexUuid,
+    pub distance_function: DistanceFunction,
 }
 
 #[derive(Error, Debug)]
@@ -162,7 +163,11 @@ impl Index<HnswIndexConfig> for HnswIndex {
                     persist_path: config.persist_path.as_ref().map(|s| s.as_str().into()),
                 })
                 .map_err(|e| WrappedHnswInitError::Other(e).boxed())?;
-                Ok(HnswIndex { index, id })
+                Ok(HnswIndex {
+                    index,
+                    id,
+                    distance_function: index_config.distance_function.clone(),
+                })
             }
         }
     }
@@ -226,7 +231,11 @@ impl PersistentIndex<HnswIndexConfig> for HnswIndex {
         })
         .map_err(|e| WrappedHnswInitError::Other(e).boxed())?;
 
-        Ok(HnswIndex { index, id })
+        Ok(HnswIndex {
+            index,
+            id,
+            distance_function: index_config.distance_function.clone(),
+        })
     }
 }
 
