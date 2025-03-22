@@ -287,7 +287,7 @@ mod tests {
             .arg(profile_name)
             .assert()
             .success()
-            .stdout(contains(
+            .stderr(contains(
                 ProfileError::ProfileNotFound(profile_name.to_string()).to_string(),
             ));
     }
@@ -371,7 +371,7 @@ mod tests {
             .arg(profile_name)
             .assert()
             .success()
-            .stdout(contains(
+            .stderr(contains(
                 ProfileError::ProfileNotFound(profile_name.to_string()).to_string(),
             ));
     }

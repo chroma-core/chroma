@@ -394,8 +394,6 @@ pub async fn delete(args: DeleteArgs, current_profile: Profile) -> Result<(), Cl
         None => get_db_name(&dbs, &delete_db_name_prompt()),
     }?;
     
-    println!("{:?}", dbs);
-
     if !dbs.iter().any(|db| db.name == name) {
         return Err(CliError::Db(DbError::DbNotFound(name)));
     }
@@ -561,7 +559,7 @@ mod tests {
             .arg("--dev")
             .assert()
             .success()
-            .stdout(contains(InvalidDbName.to_string()));
+            .stderr(contains(InvalidDbName.to_string()));
     }
 
     #[test]
@@ -575,7 +573,7 @@ mod tests {
             .arg("--dev")
             .assert()
             .success()
-            .stdout(contains(NoActiveProfile.to_string()));
+            .stderr(contains(NoActiveProfile.to_string()));
     }
 
     #[test]
@@ -643,7 +641,7 @@ mod tests {
     #[tokio::test]
     async fn test_k8s_integration_delete_not_exists() {
         let _temp_dir = simple_test_setup();
-        let db_name = "db_to_delete";
+        let db_name = "does_not_exist";
 
         let mut cmd = Command::cargo_bin("chroma").unwrap();
 
@@ -653,6 +651,6 @@ mod tests {
             .arg("--dev")
             .assert()
             .success()
-            .stdout(contains(DbNotFound(db_name.to_string()).to_string()));
+            .stderr(contains(DbNotFound(db_name.to_string()).to_string()));
     }
 }

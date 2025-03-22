@@ -38,7 +38,7 @@ pub enum CliError {
     Profile(#[from] ProfileError),
     #[error("{0}")]
     Run(#[from] RunError),
-    #[error("Failed to vacuum Chroma: {0}")]
+    #[error("Failed to vacuum Chroma")]
     Vacuum(#[from] VacuumError),
     #[error("{0}")]
     Client(#[from] ClientError),

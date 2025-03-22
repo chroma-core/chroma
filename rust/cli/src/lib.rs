@@ -60,7 +60,7 @@ pub fn chroma_cli(args: Vec<String>) {
 
     if result.is_err() {
         let error_message = result.err().unwrap().to_string();
-        println!("{}", error_message.red());
+        eprintln!("{}", error_message.red());
     }
 
     println!();
