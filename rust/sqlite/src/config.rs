@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{path::Path, time::Duration};
 
 use crate::db::{SqliteCreationError, SqliteDb};
 use async_trait::async_trait;
@@ -103,7 +103,8 @@ impl Configurable<SqliteDBConfig, SqliteCreationError> for SqliteDb {
             // is a no-op in a transaction. In order to be able to run our migrations
             // we turn it off
             .pragma("foreign_keys", "OFF")
-            .pragma("case_sensitive_like", "ON");
+            .pragma("case_sensitive_like", "ON")
+            .busy_timeout(Duration::from_secs(1000));
         let conn = if let Some(url) = &config.url {
             let path = Path::new(url);
             if let Some(parent) = path.parent() {
