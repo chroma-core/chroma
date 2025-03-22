@@ -161,7 +161,10 @@ impl Handler<BackfillMessage> for LocalCompactionManager {
             }
             Err(LocalSegmentManagerError::LocalHnswSegmentReaderError(
                 LocalHnswSegmentReaderError::UninitializedSegment,
-            )) => 0,
+            )) => {
+                println!("COMPACTION MANAGER: HNSW segment uninitialized");
+                0
+            }
             Err(e) => return Err(CompactionManagerError::HnswReaderConstructionError(e)),
         };
         // Get the logs from log service beyond this offset to backfill.
