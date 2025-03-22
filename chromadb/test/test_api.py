@@ -1366,27 +1366,29 @@ def test_default_embedding():
 
 
 def test_multiple_collections(client):
-    embeddings1 = np.random.rand(10, 512).astype(np.float32).tolist()
-    embeddings2 = np.random.rand(10, 512).astype(np.float32).tolist()
-    ids1 = [f"http://example.com/1/{i}" for i in range(len(embeddings1))]
-    ids2 = [f"http://example.com/2/{i}" for i in range(len(embeddings2))]
+    NUM_ITER = 100
+    for i in range(NUM_ITER):
+        embeddings1 = np.random.rand(10, 512).astype(np.float32).tolist()
+        embeddings2 = np.random.rand(10, 512).astype(np.float32).tolist()
+        ids1 = [f"http://example.com/1/{i}" for i in range(len(embeddings1))]
+        ids2 = [f"http://example.com/2/{i}" for i in range(len(embeddings2))]
 
-    client.reset()
-    coll1 = client.create_collection("coll1")
-    coll1.add(embeddings=embeddings1, ids=ids1)
+        client.reset()
+        coll1 = client.create_collection("coll1")
+        coll1.add(embeddings=embeddings1, ids=ids1)
 
-    coll2 = client.create_collection("coll2")
-    coll2.add(embeddings=embeddings2, ids=ids2)
+        coll2 = client.create_collection("coll2")
+        coll2.add(embeddings=embeddings2, ids=ids2)
 
-    assert len(client.list_collections()) == 2
-    assert coll1.count() == len(embeddings1)
-    assert coll2.count() == len(embeddings2)
+        assert len(client.list_collections()) == 2
+        assert coll1.count() == len(embeddings1)
+        assert coll2.count() == len(embeddings2)
 
-    results1 = coll1.query(query_embeddings=embeddings1[0], n_results=1)
-    results2 = coll2.query(query_embeddings=embeddings2[0], n_results=1)
+        results1 = coll1.query(query_embeddings=embeddings1[0], n_results=1)
+        results2 = coll2.query(query_embeddings=embeddings2[0], n_results=1)
 
-    assert results1["ids"][0][0] == ids1[0]
-    assert results2["ids"][0][0] == ids2[0]
+        assert results1["ids"][0][0] == ids1[0]
+        assert results2["ids"][0][0] == ids2[0]
 
 
 def test_update_query(client):
