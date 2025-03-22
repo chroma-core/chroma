@@ -196,3 +196,4 @@ const sidebarConfig: AppSection[] = [
 ];
 
 export default sidebarConfig;
+

@@ -30,6 +30,7 @@ use chromadb::ChromaClient;
 use guacamole::combinators::*;
 use guacamole::{FromGuacamole, Guacamole};
 use siphasher::sip::SipHasher24;
+use std::collections::HashSet;
 use tracing::Instrument;
 
 use crate::words::MANY_WORDS;
@@ -145,7 +146,7 @@ impl FromGuacamole<ClusterOptions> for Cluster {
         let mut embedding = [0u8; EMBEDDING_BYTES];
         guac.generate(&mut embedding);
         let center = embedding;
-        let num_adjacent = range_to(co.max_adjacent)(guac);
+        let num_adjacent = range_to(co.max_adjacent)(guac) + 1;
         let mut bits_to_flip = vec![];
         while bits_to_flip.len() < num_adjacent as usize {
             let bit_to_flip: u16 = any(guac);
@@ -264,11 +265,16 @@ impl SyntheticDataSet {
         let mut ids = vec![];
         let mut embeddings = vec![];
         let mut docs = vec![];
+        let mut seen: HashSet<String> = HashSet::default();
         for _ in 0..uq.batch_size {
             let cluster = self.cluster_by_skew(skew, guac);
             let num_this_cluster = (cluster.docs.len() as f64 * uq.associativity).ceil() as usize;
             for _ in 0..num_this_cluster {
                 let doc_idx = (any::<u32>(guac) as u64 * cluster.docs.len() as u64) >> 32;
+                if seen.contains(&cluster.docs[doc_idx as usize].id()) {
+                    continue;
+                }
+                seen.insert(cluster.docs[doc_idx as usize].id());
                 ids.push(cluster.docs[doc_idx as usize].id());
                 embeddings.push(cluster.docs[doc_idx as usize].embedding());
                 docs.push(cluster.docs[doc_idx as usize].content.clone());

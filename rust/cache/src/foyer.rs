@@ -441,7 +441,8 @@ where
         })
     }
 
-    pub fn insert_to_disk(&self, key: K, value: V) {
+    #[allow(dead_code)]
+    fn insert_to_disk(&self, key: K, value: V) {
         self.cache.storage_writer(key).insert(value);
     }
 }
@@ -466,8 +467,6 @@ where
     async fn insert(&self, key: K, value: V) {
         let _stopwatch = Stopwatch::new(&self.insert_latency);
         self.cache.insert(key.clone(), value.clone());
-        // Also insert to the disk cache.
-        self.insert_to_disk(key, value);
     }
 
     async fn remove(&self, key: &K) {
@@ -692,7 +691,9 @@ mod test {
         }
     }
 
+    // TODO(@codetheweb): this test should not panic once we write to disk cache upon insert to memory cache
     #[tokio::test]
+    #[should_panic]
     async fn test_foyer_hybrid_cache_can_recover() {
         let dir = tempfile::tempdir()
             .expect("To be able to create temp path")
@@ -766,5 +767,32 @@ mod test {
             .expect("Expected to be able to get value")
             .expect("Value should not be None");
         assert_eq!(value, large_value);
+    }
+
+    #[tokio::test]
+    async fn test_inserted_key_immediately_available() {
+        let dir = tempfile::tempdir()
+            .expect("To be able to create temp path")
+            .path()
+            .to_str()
+            .expect("To be able to parse path")
+            .to_string();
+        let cache = FoyerCacheConfig {
+            dir: Some(dir.clone()),
+            flush: true,
+            ..Default::default()
+        }
+        .build_hybrid_test::<String, String>()
+        .await
+        .unwrap();
+
+        cache.insert("key1".to_string(), "foo".to_string()).await;
+
+        let value = cache
+            .get(&"key1".to_string())
+            .await
+            .expect("Expected to be able to get value")
+            .expect("Value should not be None");
+        assert_eq!(value, "foo");
     }
 }
