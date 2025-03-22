@@ -203,7 +203,9 @@ pub fn vacuum(args: VacuumArgs) {
     println!("{}", "\nChroma Vacuum\n".underline().bold());
 
     let mut config = FrontendServerConfig::single_node_default();
-    let persistent_path = args.path.unwrap_or(config.persist_path);
+    let persistent_path = args
+        .path
+        .unwrap_or(config.persist_path.unwrap_or("./chroma".to_string()));
 
     if !Path::new(&persistent_path).exists() {
         println!(

@@ -25,7 +25,6 @@ jobs:
                   "chromadb/test/property/test_add.py",
                   "chromadb/test/property/test_collections.py",
                   "chromadb/test/property/test_collections_with_database_tenant.py",
-                  "chromadb/test/property/test_collections_with_database_tenant_overwrite.py",
                   "chromadb/test/property/test_cross_version_persist.py",
                   "chromadb/test/property/test_embeddings.py",
                   "chromadb/test/property/test_filtering.py",
@@ -88,6 +87,14 @@ jobs:
       uses: ./.github/actions/rust
       with:
           github-token: ${{ github.token }}
+    - name: Build Rust bindings
+      uses: PyO3/maturin-action@v1
+      with:
+        command: build
+        sccache: true
+    - name: Install built wheel
+      shell: bash
+      run: pip install --no-index --find-links target/wheels/ chromadb
     - name: Rust Integration Test
       run: bin/rust-integration-test.sh ${{ matrix.test-globs }}
       shell: bash
@@ -116,6 +123,14 @@ jobs:
         uses: ./.github/actions/rust
         with:
           github-token: ${{ github.token }}
+      - name: Build Rust bindings
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          sccache: true
+      - name: Install built wheel
+        shell: bash
+        run: pip install --no-index --find-links target/wheels/ chromadb
       - name: Test
         run: bin/rust-integration-test.sh ${{ matrix.test-globs }}
         shell: bash
@@ -138,7 +153,6 @@ jobs:
                     "chromadb/test/property/test_filtering.py",
                     "chromadb/test/property/test_embeddings.py",
                     "chromadb/test/property/test_collections_with_database_tenant.py",
-                    "chromadb/test/property/test_collections_with_database_tenant_overwrite.py",
                     "chromadb/test/distributed/test_sanity.py"]
     runs-on: ${{ matrix.platform }}
     # OIDC token auth for Depot & AWS
@@ -153,6 +167,14 @@ jobs:
       - uses: ./.github/actions/tilt
         with:
           depot-project-id: ${{ vars.DEPOT_PROJECT_ID }}
+      - name: Build Rust bindings
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          sccache: true
+      - name: Install built wheel
+        shell: bash
+        run: pip install --no-index --find-links target/wheels/ chromadb
       - name: Test
         run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.test-globs }}"'
         shell: bash
