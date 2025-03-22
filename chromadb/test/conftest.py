@@ -675,7 +675,7 @@ def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
     if "CHROMA_CLUSTER_TEST_ONLY" in os.environ:
         fixtures = [basic_http_client]
     if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ:
-        fixtures = [rust_ephemeral_fixture, rust_persistent_fixture]
+        fixtures = [rust_persistent_fixture]
     return fixtures
 
 
