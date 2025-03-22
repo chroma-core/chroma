@@ -7,6 +7,7 @@ use setsum::Setsum;
 
 mod backoff;
 mod batch_manager;
+mod cursors;
 mod manifest;
 mod manifest_manager;
 mod reader;
@@ -14,6 +15,7 @@ mod writer;
 
 pub use backoff::ExponentialBackoff;
 pub use batch_manager::BatchManager;
+pub use cursors::{Cursor, CursorStore};
 pub use manifest::{Manifest, Snapshot, SnapshotPointer};
 pub use manifest_manager::ManifestManager;
 pub use reader::{Limits, LogReader};
@@ -317,6 +319,23 @@ pub struct LogReaderOptions {
     /// Default throttling options for manifest.
     #[serde(default)]
     pub throttle: ThrottleOptions,
+}
+
+//////////////////////////////////////// CursorStoreOptions ////////////////////////////////////////
+
+/// CursorStoreOptions control the behavior of the cursor store.
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct CursorStoreOptions {
+    /// Number of concurrent cursor operations per cursor store.
+    #[serde(default = "CursorStoreOptions::default_concurrency")]
+    pub concurrency: usize,
+}
+
+impl CursorStoreOptions {
+    /// Default concurrency for cursor store operations.
+    fn default_concurrency() -> usize {
+        10
+    }
 }
 
 /////////////////////////////////////////// FragmentSeqNo //////////////////////////////////////////
