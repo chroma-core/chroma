@@ -340,7 +340,9 @@ impl LocalHnswSegmentReader {
                             }
                         }
                     }
-                    Ok(max_heap.into_sorted_vec())
+                    let res = max_heap.into_sorted_vec();
+                    println!("BF RES: {:?}", res);
+                    Ok(res)
                 }
                 Err(_) => Err(LocalHnswSegmentReaderError::QueryError),
             }
@@ -363,14 +365,16 @@ impl LocalHnswSegmentReader {
                 .map_err(|_| LocalHnswSegmentReaderError::QueryError)?;
             println!("HNSW ALL IDS: {:?}", all_ids);
 
-            Ok(offset_ids
+            let res = offset_ids
                 .into_iter()
                 .zip(distances)
                 .map(|(offset_id, measure)| RecordDistance {
                     offset_id: offset_id as u32,
                     measure,
                 })
-                .collect())
+                .collect();
+            print!("HNSW RES: {:?}", res);
+            Ok(res)
         }
     }
 }
