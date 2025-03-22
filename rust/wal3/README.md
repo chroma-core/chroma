@@ -96,6 +96,7 @@ The Manifest is a JSON file that contains the following fields:
     - start:  The lowest log position in the fragment.  Note that this embeds time and space.
     - limit:  The lowest log position after the fragment.  Note that this embeds time and space.
     - setsum:  The setsum of the log fragment.
+- writer:  A plain-text string for debugging which process wrote the manifest.
 
 Invariants of the manifest:
 
@@ -115,21 +116,22 @@ institute rate limiting per prefix.  For example, given the following log files 
 we will group fragments in groups of 5000 and the manifest will be in a separate prefix.
 
 The following shows numbers every 5000.  I'd zero-pad to 16 hex digits for the sequence number and
-bucket fragments in groups of 4096 so the bits align and look pretty in the seqno prefix.
+bucket fragments in groups of 4096 so the bits align and look pretty in the bucket prefix.
 
 ```text
-wal3/SeqNo=    0/0000000000000000.parquet
-wal3/SeqNo=    0/0000000000000001.parquet
-wal3/SeqNo=    0/0000000000000002.parquet
+wal3/log/Bucket=    0/FragmentSeqNo=00000.parquet
+wal3/log/Bucket=    0/FragmentSeqNo=00001.parquet
+wal3/log/Bucket=    0/FragmentSeqNo=00002.parquet
 ...
-wal3/SeqNo=    0/0000000000004999.parquet
-wal3/SeqNo= 5000/0000000000005000.parquet
+wal3/log/Bucket=    0/FragmentSeqNo=04999.parquet
+wal3/log/Bucket= 5000/FragmentSeqNo=05000.parquet
 ...
-wal3/SeqNo=10000/0000000000010000.parquet
+wal3/log/Bucket=10000/FragmentSeqNo=10000.parquet
 ...
-wal3/SeqNo=15000/0000000000015000.parquet
+wal3/log/Bucket=15000/FragmentSeqNo=15000.parquet
 ...
-wal3/Manifest/MANIFEST.json
+wal3/manifest/MANIFEST.json
+wal3/snapshot/SNAPSHOT.XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 ```
 
 ## Writer Arch Diagram
