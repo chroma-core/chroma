@@ -1,17 +1,12 @@
 mod commands;
 mod utils;
+mod types;
 
-use crate::commands::run::{run, RunArgs};
-use crate::commands::vacuum::{vacuum, VacuumArgs};
+use crate::commands::run::run;
+use crate::commands::vacuum::vacuum;
 use clap::{Parser, Subcommand};
-
-#[derive(Subcommand, Debug)]
-enum Command {
-    Docs,
-    Run(RunArgs),
-    Support,
-    Vacuum(VacuumArgs),
-}
+use crate::commands::browser::BrowserCommandHandler;
+use crate::types::Command;
 
 #[derive(Parser, Debug)]
 #[command(name = "chroma")]
@@ -24,7 +19,7 @@ struct Cli {
 
 pub fn chroma_cli(args: Vec<String>) {
     let cli = Cli::parse_from(args);
-
+    
     match cli.command {
         Command::Docs => {
             let url = "https://docs.trychroma.com";

@@ -1398,6 +1398,7 @@ dependencies = [
  "dialoguer",
  "indicatif",
  "sqlx",
+ "thiserror 1.0.69",
  "tokio",
  "webbrowser",
 ]
