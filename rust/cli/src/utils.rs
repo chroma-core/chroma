@@ -123,3 +123,15 @@ impl AsyncCliWriter for TestCliWriter {
         Ok(())
     }
 }
+
+trait InputProvider {
+    fn get_user_input(&self) -> Result<String, UtilsError>;
+}
+
+struct CliInput;
+
+impl InputProvider for CliInput {
+    fn get_user_input(&self) -> Result<String, UtilsError> {
+        
+    }
+}

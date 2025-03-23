@@ -6,6 +6,7 @@ use clap::{Parser, Subcommand};
 use thiserror::Error;
 use crate::commands::browser::{BrowserCommandHandler, BrowserError, DISCORD_URL, DOCS_URL};
 use crate::commands::run::{RunArgs, RunCommandHandler, RunError};
+use crate::commands::vacuum::VacuumError;
 use crate::utils::UtilsError;
 
 #[derive(Subcommand, Debug)]
@@ -24,6 +25,8 @@ pub enum CliError {
     Run(#[from] RunError),
     #[error("{0}")]
     Utils(#[from] UtilsError),
+    #[error("{0}")]
+    Vacuum(#[from] VacuumError),
 }
 
 #[async_trait::async_trait]

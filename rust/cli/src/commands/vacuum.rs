@@ -21,13 +21,61 @@ use std::error::Error;
 use std::path::Path;
 use std::str::FromStr;
 use std::{fs, io};
+use std::io::{StdoutLock, Write};
+use thiserror::Error;
+use crate::{CliError, Handler};
 
 #[derive(Parser, Debug)]
 pub struct VacuumArgs {
-    #[clap(long)]
+    #[clap(long, help = "The path of your Chroma DB")]
     path: Option<String>,
-    #[clap(long, default_value_t = false)]
+    #[clap(long, default_value_t = false, help = "Skip vacuum confirmation")]
     force: bool,
+}
+
+#[derive(Debug, Error)]
+pub enum VacuumError {
+    #[error("Path {0} does not exist")]
+    PathDoesNotExist(String),
+    #[error("Failed to get size of of your Chroma directory")]
+    DirSizeFailed,
+    #[error("Not a Chroma path: {0}")]
+    NotAChromaPath(String),
+    #[error("Cannot find Sqlite config for Chroma")]
+    SqliteConfigNotFound,
+    #[error("Failed to vacuum Chroma")]
+    VacuumFailed,
+}
+
+fn start_message() -> String {
+    format!("{}\n", "Chroma Vacuum".underline().bold())
+}
+
+
+
+pub struct VacuumCommandHandler<W: Write> {
+    args: VacuumArgs,
+    writer: W
+}
+
+impl<W: Write> VacuumCommandHandler<W> {
+    pub fn new(args: VacuumArgs, writer: W) -> Self {
+        VacuumCommandHandler { args, writer }
+    }
+}
+
+impl VacuumCommandHandler<StdoutLock<'_>> {
+    pub fn default(args: VacuumArgs) -> Self {
+        let stdout = io::stdout();
+        VacuumCommandHandler::new(args, stdout.lock())
+    }
+}
+
+#[async_trait::async_trait]
+impl<W: Write + Send> Handler for VacuumCommandHandler<W> {
+    async fn run(&mut self) -> Result<(), CliError> {
+        Ok(())
+    }
 }
 
 fn sizeof_fmt(num: u64, suffix: Option<&str>) -> String {
@@ -43,7 +91,7 @@ fn sizeof_fmt(num: u64, suffix: Option<&str>) -> String {
     format!("{:.1}Yi{}", n, suffix)
 }
 
-fn get_dir_size(path: &Path) -> io::Result<u64> {
+fn get_dir_size(path: &Path) -> Result<u64, io::Error> {
     let mut total_size = 0;
     for entry in fs::read_dir(path)? {
         let entry = entry?;
@@ -95,11 +143,7 @@ async fn trigger_vector_segments_max_seq_id_migration(
         };
 
         segment_manager
-            .get_hnsw_writer(
-                &collection.collection,
-                &collection.vector_segment,
-                dim as usize,
-            )
+            .get_hnsw_writer(&collection.collection, &collection.vector_segment, dim as usize)
             .await?;
     }
 
@@ -196,7 +240,7 @@ pub async fn vacuum_chroma(config: FrontendConfig) -> Result<(), Box<dyn Error>>
     Ok(())
 }
 
-pub fn vacuum(args: VacuumArgs) {
+pub fn vacuum(args: VacuumArgs) -> Result<(), CliError> {
     // Vacuum the database. This may result in a small increase in performance.
     // If you recently upgraded Chroma from a version below 0.5.6 to 0.5.6 or above, you should run this command once to greatly reduce the size of your database and enable continuous database pruning. In most other cases, vacuuming will save very little disk space.
     // The execution time of this command scales with the size of your database. It blocks both reads and writes to the database while it is running.
@@ -206,21 +250,13 @@ pub fn vacuum(args: VacuumArgs) {
     let persistent_path = args.path.unwrap_or(config.persist_path);
 
     if !Path::new(&persistent_path).exists() {
-        println!(
-            "{}",
-            format!("Path does not exist: {}", &persistent_path).red()
-        );
-        return;
+        return Err(VacuumError::PathDoesNotExist(persistent_path).into());
     }
 
     let sqlite_url = format!("{}/{}", &persistent_path, &config.sqlite_filename);
 
     if !Path::new(sqlite_url.as_str()).exists() {
-        println!(
-            "{}",
-            format!("Not a Chroma path: {}", &persistent_path).red()
-        );
-        return;
+        return Err(VacuumError::NotAChromaPath(sqlite_url).into());
     }
 
     let proceed = match args.force {
@@ -243,42 +279,26 @@ pub fn vacuum(args: VacuumArgs) {
 
     if !proceed {
         println!("{}", "Vacuum cancelled\n".red());
-        return;
+        return Ok(());
     }
 
-    let initial_size = match get_dir_size(Path::new(&persistent_path)) {
-        Ok(size) => size,
-        Err(_e) => {
-            println!("{}", "Failed to get Chroma directory size\n".red());
-            return;
-        }
-    };
+    let initial_size =
+        get_dir_size(Path::new(&persistent_path)).map_err(|_| VacuumError::DirSizeFailed)?;
 
     match config.frontend.sqlitedb.as_mut() {
         Some(sqlite_config) => {
             sqlite_config.url = Some(sqlite_url);
         }
-        None => {
-            eprintln!("Cannot find Sqlite config for Chroma");
-            return;
-        }
+        None => return Err(VacuumError::SqliteConfigNotFound.into()),
     };
 
     let runtime = tokio::runtime::Runtime::new().expect("Failed to start Chroma");
-    let vacuum_result = runtime.block_on(vacuum_chroma(config.frontend));
+    runtime
+        .block_on(vacuum_chroma(config.frontend))
+        .map_err(|_| VacuumError::VacuumFailed)?;
 
-    if let Err(_e) = vacuum_result {
-        eprintln!("Failed to vacuum Chroma");
-        return;
-    }
-
-    let post_vacuum_size = match get_dir_size(Path::new(&persistent_path)) {
-        Ok(size) => size,
-        Err(_e) => {
-            println!("Failed to get Chroma directory size after vacuum");
-            return;
-        }
-    };
+    let post_vacuum_size =
+        get_dir_size(Path::new(&persistent_path)).map_err(|_| VacuumError::DirSizeFailed)?;
 
     let size_diff = initial_size - post_vacuum_size;
 
@@ -290,5 +310,6 @@ pub fn vacuum(args: VacuumArgs) {
             .to_string()
             .green()
     );
-    println!();
+    
+    Ok(())
 }

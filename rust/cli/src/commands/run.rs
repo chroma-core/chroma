@@ -1,4 +1,4 @@
-use crate::utils::{AsyncCliWriter, AsyncStdOut, UtilsError, LOGO};
+use crate::utils::{AsyncCliWriter, AsyncStdOut, LOGO};
 use chroma_frontend::config::FrontendServerConfig;
 use chroma_frontend::frontend_service_entrypoint_with_config;
 use clap::Parser;
@@ -132,13 +132,15 @@ impl<W: AsyncCliWriter + Send> Handler for RunCommandHandler<W> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
     use crate::client::ChromaClient;
     use crate::commands::run::{run_message, RunArgs, RunCommandHandler};
     use crate::Handler;
     use crate::utils::TestCliWriter;
 
     #[tokio::test]
-    async fn test_run_spawn_server() {
+    async fn test_run() {
         use tokio::time::{sleep, Duration};
 
         let port = 8001;
@@ -150,14 +152,15 @@ mod tests {
         };
 
         let writer = TestCliWriter::new();
-        
-        let mut run_handler = RunCommandHandler::new(run_args, writer);
-        
+        let run_handler = Arc::new(Mutex::new(RunCommandHandler::new(run_args, writer)));
+
+        let run_handler_for_server = run_handler.clone();
         let server_handle = tokio::spawn(async move {
-            run_handler.run().await.unwrap();
+            let mut handler = run_handler_for_server.lock().await;
+            handler.run().await.unwrap();
         });
         
-        sleep(Duration::from_secs(1)).await;
+        sleep(Duration::from_millis(500)).await;
         
         let url = format!("http://localhost:{}", port);
         let chroma_client = ChromaClient::new(
@@ -169,8 +172,10 @@ mod tests {
         let response = chroma_client.heartbeat().await.unwrap();
         
         assert!(response > 0);
-        
         server_handle.abort();
+        
+        let handler = run_handler.lock().await;
+        let message = run_message(&handler.get_config_from_args().unwrap());
+        assert!(handler.writer.output().contains(message.as_str()));
     }
-
 }
