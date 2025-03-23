@@ -810,7 +810,7 @@ async fn count_collections(
 #[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
 pub struct CreateCollectionPayload {
     pub name: String,
-    pub configuration_json_str: Option<String>,
+    pub configuration: Option<CollectionConfiguration>,
     pub metadata: Option<Metadata>,
     #[serde(default)]
     pub get_or_create: bool,
