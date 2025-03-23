@@ -28,6 +28,19 @@ class HNSWConfiguration(TypedDict, total=False):
     resize_factor: float
 
 
+def default_hnsw_configuration() -> HNSWConfiguration:
+    return HNSWConfiguration(
+        space=Space.L2,
+        ef_construction=100,
+        max_neighbors=16,
+        ef_search=100,
+        num_threads=cpu_count(),
+        batch_size=100,
+        sync_threshold=1000,
+        resize_factor=1.2,
+    )
+
+
 def json_to_hnsw_configuration(json_map: Dict[str, Any]) -> HNSWConfiguration:
     config: HNSWConfiguration = {}
     if "space" in json_map:
@@ -56,6 +69,13 @@ def json_to_hnsw_configuration(json_map: Dict[str, Any]) -> HNSWConfiguration:
 class CollectionConfiguration(TypedDict, total=False):
     hnsw: Optional[HNSWConfiguration]
     embedding_function: Optional[EmbeddingFunction[Embeddable]]
+
+
+def default_collection_configuration() -> CollectionConfiguration:
+    return CollectionConfiguration(
+        hnsw=default_hnsw_configuration(),
+        embedding_function=DefaultEmbeddingFunction(),  # type: ignore
+    )
 
 
 def load_collection_configuration_from_json_str(

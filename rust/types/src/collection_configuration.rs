@@ -235,7 +235,7 @@ impl From<InternalCollectionConfiguration> for CollectionConfiguration {
                 VectorIndexConfiguration::Hnsw(config) => Some(config),
                 _ => None,
             },
-            spann: match value.vector_index.clone() {
+            spann: match value.vector_index {
                 VectorIndexConfiguration::Spann(config) => Some(config.into()),
                 _ => None,
             },

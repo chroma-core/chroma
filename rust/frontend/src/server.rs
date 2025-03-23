@@ -18,7 +18,7 @@ use chroma_types::{
     ListCollectionsRequest, ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse,
     Metadata, QueryRequest, QueryResponse, UpdateCollectionConfiguration,
     UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateMetadata,
-    UpsertCollectionRecordsResponse, WrappedSerdeJsonError,
+    UpsertCollectionRecordsResponse,
 };
 use mdac::{Rule, Scorecard, ScorecardTicket};
 use opentelemetry::global;
@@ -810,7 +810,7 @@ async fn count_collections(
 #[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
 pub struct CreateCollectionPayload {
     pub name: String,
-    pub configuration_json_str: Option<String>,
+    pub configuration: Option<CollectionConfiguration>,
     pub metadata: Option<Metadata>,
     #[serde(default)]
     pub get_or_create: bool,
@@ -865,19 +865,8 @@ async fn create_collection(
         format!("tenant:{}", tenant).as_str(),
     ]);
 
-    let configuration_json = match payload.configuration_json_str {
-        Some(configuration_json_str) => {
-            let configuration_json =
-                serde_json::from_str::<CollectionConfiguration>(&configuration_json_str)
-                    .map_err(WrappedSerdeJsonError::SerdeJsonError)?;
-
-            Some(configuration_json)
-        }
-        None => None,
-    };
-
-    if let Some(configuration_json) = configuration_json.as_ref() {
-        if configuration_json.spann.is_some() {
+    if let Some(configuration) = payload.configuration.as_ref() {
+        if configuration.spann.is_some() {
             return Err(ValidationError::SpannNotImplemented)?;
         }
     }
@@ -887,7 +876,7 @@ async fn create_collection(
         database,
         payload.name,
         payload.metadata,
-        configuration_json,
+        payload.configuration,
         payload.get_or_create,
     )?;
     let collection = server.frontend.create_collection(request).await?;
@@ -942,7 +931,7 @@ async fn get_collection(
 pub struct UpdateCollectionPayload {
     pub new_name: Option<String>,
     pub new_metadata: Option<UpdateMetadata>,
-    pub new_configuration_json_str: Option<String>,
+    pub new_configuration: Option<UpdateCollectionConfiguration>,
 }
 
 /// Updates an existing collection's name or metadata.
@@ -1002,24 +991,13 @@ async fn update_collection(
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
 
-    let configuration_json = match payload.new_configuration_json_str {
-        Some(configuration_json_str) => {
-            let configuration_json =
-                serde_json::from_str::<UpdateCollectionConfiguration>(&configuration_json_str)
-                    .map_err(WrappedSerdeJsonError::SerdeJsonError)?;
-
-            Some(configuration_json)
-        }
-        None => None,
-    };
-
     let request = chroma_types::UpdateCollectionRequest::try_new(
         collection_id,
         payload.new_name,
         payload
             .new_metadata
             .map(CollectionMetadataUpdate::UpdateMetadata),
-        configuration_json,
+        payload.new_configuration,
     )?;
 
     server.frontend.update_collection(request).await?;

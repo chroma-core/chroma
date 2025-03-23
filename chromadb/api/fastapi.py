@@ -10,8 +10,8 @@ from overrides import override
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
     UpdateCollectionConfiguration,
-    create_collection_configuration_to_json_str,
-    update_collection_configuration_to_json_str,
+    update_collection_configuration_to_json,
+    create_collection_configuration_to_json,
 )
 from chromadb import __version__
 from chromadb.api.base_http_client import BaseHTTPClient
@@ -253,9 +253,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             json={
                 "name": name,
                 "metadata": metadata,
-                "configuration": create_collection_configuration_to_json_str(
-                    configuration
-                )
+                "configuration": create_collection_configuration_to_json(configuration)
                 if configuration
                 else None,
                 "get_or_create": get_or_create,
@@ -320,7 +318,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             json={
                 "new_metadata": new_metadata,
                 "new_name": new_name,
-                "new_configuration": update_collection_configuration_to_json_str(
+                "new_configuration": update_collection_configuration_to_json(
                     new_configuration
                 )
                 if new_configuration
