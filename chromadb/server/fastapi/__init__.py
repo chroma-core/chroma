@@ -24,7 +24,7 @@ from fastapi import HTTPException, status
 from functools import wraps
 
 from chromadb.api.collection_configuration import (
-    load_create_collection_configuration_from_json_str,
+    load_create_collection_configuration_from_json,
     default_create_collection_configuration,
     create_collection_configuration_from_legacy_collection_metadata,
 )
@@ -795,7 +795,7 @@ class FastAPI(Server):
                 else:
                     configuration = default_create_collection_configuration()
             else:
-                configuration = load_create_collection_configuration_from_json_str(
+                configuration = load_create_collection_configuration_from_json(
                     create.configuration
                 )
 
@@ -1716,7 +1716,7 @@ class FastAPI(Server):
             configuration = (
                 default_create_collection_configuration()
                 if not create.configuration
-                else load_create_collection_configuration_from_json_str(
+                else load_create_collection_configuration_from_json(
                     create.configuration
                 )
             )
