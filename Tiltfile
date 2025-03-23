@@ -39,7 +39,7 @@ else:
 if config.tilt_subcommand == "ci":
   custom_build(
     'rust-log-service',
-    'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF  -f ./rust/log/Dockerfile . --load',
+    'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF  -f ./rust/log-service/Dockerfile . --load',
     ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
   )
 else:
@@ -47,7 +47,7 @@ else:
     'rust-log-service',
     '.',
     only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
-    dockerfile='./rust/log/Dockerfile',
+    dockerfile='./rust/log-service/Dockerfile',
   )
 
 if config.tilt_subcommand == "ci":
