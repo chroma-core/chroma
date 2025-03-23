@@ -16,10 +16,14 @@ chroma-log = { workspace = true }
 colored = "3.0.0"
 dialoguer = "0.11.0"
 indicatif.workspace = true
+reqwest = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true}
 sqlx = { workspace = true }
 tokio = { workspace = true }
 thiserror = { workspace = true }
 webbrowser = "1.0.3"
+async-trait = "0.1.83"
 
 [[bin]]
 name = "chroma"
