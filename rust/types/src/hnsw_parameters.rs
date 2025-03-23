@@ -291,7 +291,6 @@ impl ChromaError for DistributedSpannParametersFromSegmentError {
 #[derive(Clone, Debug, Serialize, Deserialize, Validate, PartialEq)]
 pub struct SpannConfiguration {
     #[serde(rename = "spann:search_nprobe", default = "default_search_nprobe")]
-    #[validate(range(min = 32))]
     pub search_nprobe: u32,
     #[serde(
         rename = "spann:search_rng_factor",
@@ -307,7 +306,6 @@ pub struct SpannConfiguration {
         rename = "spann:search_split_threshold",
         default = "default_write_nprobe"
     )]
-    #[validate(range(min = 8))]
     pub write_nprobe: u32,
     #[serde(
         rename = "spann:write_rng_factor",
@@ -323,13 +321,11 @@ pub struct SpannConfiguration {
         rename = "spann:write_split_threshold",
         default = "default_split_threshold"
     )]
-    #[validate(range(min = 50))]
     pub split_threshold: u32,
     #[serde(
         rename = "spann:num_samples_kmeans",
         default = "default_num_samples_kmeans"
     )]
-    #[validate(range(min = 500))]
     pub num_samples_kmeans: usize,
     #[serde(rename = "spann:initial_lambda", default = "default_initial_lambda")]
     pub initial_lambda: f32,
