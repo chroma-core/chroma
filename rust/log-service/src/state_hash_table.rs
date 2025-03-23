@@ -3,7 +3,7 @@
 //! ```
 //! use std::sync::atomic::{AtomicBool, Ordering};
 //! use std::sync::Arc;
-//! use chroma_log::state_hash_table::{Handle, Key, StateHashTable, Value};
+//! use chroma_log_service::state_hash_table::{Handle, Key, StateHashTable, Value};
 //!
 //! #[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash)]
 //! struct SampleKey {
