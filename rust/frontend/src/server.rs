@@ -18,7 +18,6 @@ use chroma_types::{
     ListCollectionsRequest, ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse,
     Metadata, QueryRequest, QueryResponse, UpdateCollectionRecordsResponse,
     UpdateCollectionResponse, UpdateMetadata, UpsertCollectionRecordsResponse,
-    WrappedSerdeJsonError,
 };
 use mdac::{Rule, Scorecard, ScorecardTicket};
 use opentelemetry::global;
