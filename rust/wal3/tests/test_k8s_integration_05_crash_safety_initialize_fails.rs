@@ -32,7 +32,10 @@ async fn test_k8s_integration_05_crash_safety_initialize_fails() {
     )
     .await
     .unwrap();
-    assert_eq!(path, "log/Bucket=0/FragmentSeqNo=1.parquet");
+    assert_eq!(
+        path,
+        "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000001.parquet"
+    );
     let fragment1 = FragmentCondition {
         path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000001.parquet".to_string(),
         seq_no: FragmentSeqNo(1),
