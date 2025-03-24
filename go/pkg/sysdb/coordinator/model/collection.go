@@ -65,7 +65,6 @@ type FlushCollectionCompaction struct {
 	CurrentCollectionVersion   int32
 	FlushSegmentCompactions    []*FlushSegmentCompaction
 	TotalRecordsPostCompaction uint64
-	SizeBytesPostCompaction    uint64
 }
 
 type FlushCollectionInfo struct {
