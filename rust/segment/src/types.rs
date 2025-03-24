@@ -1,8 +1,8 @@
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
-    logical_size_of_metadata, Chunk, DataRecord, DeletedMetadata, LogRecord,
-    MaterializedLogOperation, Metadata, MetadataDelta, MetadataValue, MetadataValueConversionError,
-    Operation, SegmentUuid, UpdateMetadata, UpdateMetadataValue,
+    Chunk, DataRecord, DeletedMetadata, LogRecord, MaterializedLogOperation, Metadata,
+    MetadataDelta, MetadataValue, MetadataValueConversionError, Operation, SegmentUuid,
+    UpdateMetadata, UpdateMetadataValue,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicU32;
@@ -439,38 +439,6 @@ impl<'log_data, 'segment_data: 'log_data> HydratedMaterializedLogRecord<'log_dat
             }
         }
         metadata_delta
-    }
-
-    pub fn compute_logical_size_delta_bytes(&self) -> i64 {
-        let old_size = self
-            .get_data_record()
-            .map(|rec| {
-                rec.id.len()
-                    + size_of_val(rec.embedding)
-                    + rec
-                        .metadata
-                        .as_ref()
-                        .map(logical_size_of_metadata)
-                        .unwrap_or_default()
-                    + rec.document.map(|doc| doc.len()).unwrap_or_default()
-            })
-            .unwrap_or_default() as i64;
-        let merged_metadata = self.merged_metadata();
-        let new_size = match self.get_operation() {
-            MaterializedLogOperation::AddNew
-            | MaterializedLogOperation::OverwriteExisting
-            | MaterializedLogOperation::UpdateExisting => {
-                (self.get_user_id().len()
-                    + size_of_val(self.merged_embeddings_ref())
-                    + logical_size_of_metadata(&merged_metadata)
-                    + self
-                        .merged_document_ref()
-                        .map(|doc| doc.len())
-                        .unwrap_or_default()) as i64
-            }
-            _ => 0,
-        };
-        new_size - old_size
     }
 }
 

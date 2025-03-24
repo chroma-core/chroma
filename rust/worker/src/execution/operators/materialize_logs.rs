@@ -60,17 +60,11 @@ impl MaterializeLogInput {
     }
 }
 
-#[derive(Debug)]
-pub struct MaterializeLogOutput {
-    pub result: MaterializeLogsResult,
-    pub collection_logical_size_delta: i64,
-}
-
 #[async_trait]
-impl Operator<MaterializeLogInput, MaterializeLogOutput> for MaterializeLogOperator {
+impl Operator<MaterializeLogInput, MaterializeLogsResult> for MaterializeLogOperator {
     type Error = MaterializeLogOperatorError;
 
-    async fn run(&self, input: &MaterializeLogInput) -> Result<MaterializeLogOutput, Self::Error> {
+    async fn run(&self, input: &MaterializeLogInput) -> Result<MaterializeLogsResult, Self::Error> {
         tracing::debug!("Materializing {} log entries", input.logs.total_len());
 
         let record_segment_reader =
@@ -91,25 +85,12 @@ impl Operator<MaterializeLogInput, MaterializeLogOutput> for MaterializeLogOpera
                 }
             };
 
-        let result = materialize_logs(
+        materialize_logs(
             &record_segment_reader,
             input.logs.clone(),
             Some(input.offset_id.clone()),
         )
         .map_err(MaterializeLogOperatorError::LogMaterializationFailed)
-        .await?;
-
-        let mut collection_logical_size_delta = 0;
-        for record in &result {
-            collection_logical_size_delta += record
-                .hydrate(record_segment_reader.as_ref())
-                .await?
-                .compute_logical_size_delta_bytes();
-        }
-
-        Ok(MaterializeLogOutput {
-            result,
-            collection_logical_size_delta,
-        })
+        .await
     }
 }
