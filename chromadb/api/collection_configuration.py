@@ -41,31 +41,6 @@ def default_hnsw_configuration() -> HNSWConfiguration:
     )
 
 
-def json_to_hnsw_configuration(json_map: Dict[str, Any]) -> HNSWConfiguration:
-    config: HNSWConfiguration = {}
-    if "space" in json_map:
-        space_value = json_map["space"]
-        if isinstance(space_value, str):
-            config["space"] = Space(space_value)
-        else:
-            config["space"] = space_value
-    if "ef_construction" in json_map:
-        config["ef_construction"] = json_map["ef_construction"]
-    if "max_neighbors" in json_map:
-        config["max_neighbors"] = json_map["max_neighbors"]
-    if "ef_search" in json_map:
-        config["ef_search"] = json_map["ef_search"]
-    if "num_threads" in json_map:
-        config["num_threads"] = json_map["num_threads"]
-    if "batch_size" in json_map:
-        config["batch_size"] = json_map["batch_size"]
-    if "sync_threshold" in json_map:
-        config["sync_threshold"] = json_map["sync_threshold"]
-    if "resize_factor" in json_map:
-        config["resize_factor"] = json_map["resize_factor"]
-    return config
-
-
 class CollectionConfiguration(TypedDict, total=False):
     hnsw: Optional[HNSWConfiguration]
     embedding_function: Optional[EmbeddingFunction[Embeddable]]
@@ -85,14 +60,13 @@ def load_collection_configuration_from_json_str(
     return load_collection_configuration_from_json(json_map)
 
 
+# TODO: make warnings prettier and add link to migration docs
 def load_collection_configuration_from_json(
     json_map: Dict[str, Any]
 ) -> CollectionConfiguration:
     if json_map.get("hnsw") is None:
         if json_map.get("embedding_function") is None:
-            return CollectionConfiguration(
-                hnsw=default_create_hnsw_configuration(),
-            )
+            return CollectionConfiguration()
         else:
             ef_config = json_map["embedding_function"]
             if ef_config["type"] == "legacy":
@@ -113,7 +87,7 @@ def load_collection_configuration_from_json(
     else:
         if json_map.get("embedding_function") is None:
             return CollectionConfiguration(
-                hnsw=json_to_hnsw_configuration(json_map["hnsw"])
+                hnsw=cast(HNSWConfiguration, json_map["hnsw"])
             )
         else:
             ef_config = json_map["embedding_function"]
@@ -124,7 +98,7 @@ def load_collection_configuration_from_json(
                     stacklevel=2,
                 )
                 return CollectionConfiguration(
-                    hnsw=json_to_hnsw_configuration(json_map["hnsw"])
+                    hnsw=cast(HNSWConfiguration, json_map["hnsw"])
                 )
             else:
                 ef = cast(
@@ -132,7 +106,7 @@ def load_collection_configuration_from_json(
                     known_embedding_functions[ef_config["name"]],
                 )
                 return CollectionConfiguration(
-                    hnsw=json_to_hnsw_configuration(json_map["hnsw"]),
+                    hnsw=cast(HNSWConfiguration, json_map["hnsw"]),
                     embedding_function=ef.build_from_config(ef_config["config"]),
                 )
 
@@ -155,8 +129,6 @@ def collection_configuration_to_json(config: CollectionConfiguration) -> Dict[st
         except ValueError:
             ef = None
 
-    if hnsw_config is None:
-        hnsw_config = default_create_hnsw_configuration()
     if ef is None:
         ef = cast(EmbeddingFunction[Embeddable], DefaultEmbeddingFunction())
 
@@ -184,8 +156,6 @@ def collection_configuration_to_json(config: CollectionConfiguration) -> Dict[st
         )
         ef = None
         ef_config = {"type": "legacy"}
-
-    hnsw_config = populate_create_hnsw_defaults(hnsw_config, ef)
 
     validate_create_hnsw_config(hnsw_config, ef)
 
@@ -250,6 +220,13 @@ def create_collection_configuration_from_legacy_collection_metadata(
     metadata: CollectionMetadata,
 ) -> CreateCollectionConfiguration:
     """Create a CreateCollectionConfiguration from legacy collection metadata"""
+    return create_collection_configuration_from_legacy_metadata_dict(metadata)
+
+
+def create_collection_configuration_from_legacy_metadata_dict(
+    metadata: Dict[str, Any],
+) -> CreateCollectionConfiguration:
+    """Create a CreateCollectionConfiguration from legacy collection metadata"""
     old_to_new = {
         "hnsw:space": "space",
         "hnsw:ef_construction": "ef_construction",
@@ -293,7 +270,6 @@ def create_collection_configuration_from_legacy_metadata(
 
     if existing_create_collection_configuration.get("hnsw") is None:
         hnsw_config = json_to_create_hnsw_configuration(json_map)
-        hnsw_config = populate_create_hnsw_defaults(hnsw_config)
         validate_create_hnsw_config(hnsw_config)
         return CreateCollectionConfiguration(hnsw=hnsw_config)
 
@@ -302,19 +278,11 @@ def create_collection_configuration_from_legacy_metadata(
         hnsw_config = json_to_create_hnsw_configuration(json_map)
     else:
         hnsw_config = existing_hnsw_config
-    hnsw_config = populate_create_hnsw_defaults(hnsw_config)
     validate_create_hnsw_config(hnsw_config)
 
     existing_create_collection_configuration["hnsw"] = hnsw_config
 
     return existing_create_collection_configuration
-
-
-def default_create_collection_configuration() -> CreateCollectionConfiguration:
-    return CreateCollectionConfiguration(
-        hnsw=default_create_hnsw_configuration(),
-        embedding_function=DefaultEmbeddingFunction(),  # type: ignore
-    )
 
 
 def legacy_create_collection_configuration_path(
@@ -340,6 +308,7 @@ def load_create_collection_configuration_from_json_str(
     return load_create_collection_configuration_from_json(json_map)
 
 
+# TODO: make warnings prettier and add link to migration docs
 def load_create_collection_configuration_from_json(
     json_map: Dict[str, Any]
 ) -> CreateCollectionConfiguration:
@@ -399,12 +368,11 @@ def create_collection_configuration_to_json_str(
     )
 
 
+# TODO: make warnings prettier and add link to migration docs
 def create_collection_configuration_to_json(
     config: CreateCollectionConfiguration,
 ) -> Dict[str, Any]:
     """Convert a CreateCollection configuration to a JSON-serializable dict"""
-    if config.get("hnsw") is None:
-        config["hnsw"] = default_create_hnsw_configuration()
     if config.get("embedding_function") is None:
         config["embedding_function"] = cast(
             EmbeddingFunction[Embeddable], DefaultEmbeddingFunction()
@@ -439,28 +407,12 @@ def create_collection_configuration_to_json(
         ef = None
         ef_config = {"type": "legacy"}
 
-    hnsw_config = populate_create_hnsw_defaults(hnsw_config, ef)
-
     validate_create_hnsw_config(hnsw_config, ef)
 
     return {
         "hnsw": hnsw_config,
         "embedding_function": ef_config,
     }
-
-
-def default_create_hnsw_configuration() -> CreateHNSWConfiguration:
-    """Create a default CreateHNSW configuration"""
-    return CreateHNSWConfiguration(
-        space=Space.L2,
-        ef_construction=100,
-        max_neighbors=16,
-        ef_search=100,
-        num_threads=cpu_count(),
-        batch_size=100,
-        sync_threshold=1000,
-        resize_factor=1.2,
-    )
 
 
 def populate_create_hnsw_defaults(
@@ -490,6 +442,8 @@ def validate_create_hnsw_config(
     config: CreateHNSWConfiguration, ef: Optional[EmbeddingFunction[Embeddable]] = None
 ) -> None:
     """Validate a CreateHNSW configuration"""
+    if config is None:
+        return
     if "batch_size" in config and "sync_threshold" in config:
         if config["batch_size"] > config["sync_threshold"]:
             raise ValueError("batch_size must be less than or equal to sync_threshold")
@@ -669,6 +623,7 @@ def load_update_collection_configuration_from_json_str(
     return load_update_collection_configuration_from_json(json_map)
 
 
+# TODO: make warnings prettier and add link to migration docs
 def load_update_collection_configuration_from_json(
     json_map: Dict[str, Any]
 ) -> UpdateCollectionConfiguration:
@@ -742,6 +697,7 @@ def overwrite_hnsw_configuration(
     return cast(HNSWConfiguration, result)
 
 
+# TODO: make warnings prettier and add link to migration docs
 def overwrite_embedding_function(
     existing_embedding_function: EmbeddingFunction[Embeddable],
     update_embedding_function: EmbeddingFunction[Embeddable],

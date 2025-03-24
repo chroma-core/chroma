@@ -12,6 +12,7 @@ from chromadb.api.collection_configuration import (
     UpdateCollectionConfiguration,
     update_collection_configuration_to_json,
     create_collection_configuration_to_json,
+    create_collection_configuration_from_legacy_metadata_dict,
 )
 from chromadb import __version__
 from chromadb.api.base_http_client import BaseHTTPClient
@@ -260,6 +261,14 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             },
         )
         model = CollectionModel.from_json(resp_json)
+        if (
+            configuration is None or configuration.get("hnsw") is None
+        ) and model.metadata is not None:
+            model.configuration_json = create_collection_configuration_to_json(
+                create_collection_configuration_from_legacy_metadata_dict(
+                    model.metadata
+                )
+            )
         return model
 
     @trace_method("FastAPI.get_collection", OpenTelemetryGranularity.OPERATION)

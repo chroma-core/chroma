@@ -866,7 +866,7 @@ async fn create_collection(
     ]);
 
     if let Some(configuration) = payload.configuration.as_ref() {
-        if configuration.spann.is_some() {
+        if configuration.spann.is_some() && !server.config.enable_span_indexing {
             return Err(ValidationError::SpannNotImplemented)?;
         }
     }

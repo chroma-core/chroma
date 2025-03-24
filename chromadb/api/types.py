@@ -59,7 +59,7 @@ Embedding = Vector
 Embeddings = List[Embedding]
 
 
-class Space(Enum):
+class Space(str, Enum):
     COSINE = "cosine"
     L2 = "l2"
     IP = "ip"
@@ -479,6 +479,7 @@ class IndexMetadata(TypedDict):
     time_created: float
 
 
+# TODO: make warnings prettier and add link to migration docs
 @runtime_checkable
 class EmbeddingFunction(Protocol[D]):
     """

@@ -26,6 +26,14 @@ class LegacyEmbeddingFunction(EmbeddingFunction[Embeddable]):
     def __call__(self, input: Embeddable) -> Embeddings:
         return cast(Embeddings, np.array([[1.0, 2.0]], dtype=np.float32))
 
+
+class LegacyEmbeddingFunctionWithName(EmbeddingFunction[Embeddable]):
+    def __init__(self) -> None:
+        pass
+
+    def __call__(self, input: Embeddable) -> Embeddings:
+        return cast(Embeddings, np.array([[1.0, 2.0]], dtype=np.float32))
+
     @staticmethod
     def name() -> str:
         return "legacy_ef"
@@ -69,11 +77,42 @@ def test_legacy_embedding_function(client: ClientAPI) -> None:
         ef_config = config.get("embedding_function", {})  # type: ignore
         if isinstance(ef_config, dict):
             assert ef_config.get("type") == "legacy"
+    else:
+        assert False, f"config: {config}"
 
     # Get with same legacy function
     coll2 = client.get_collection(
         name="test_legacy",
         embedding_function=LegacyEmbeddingFunction(),
+    )
+
+    # Add and query should work
+    coll2.add(ids=["1"], documents=["test"])
+    results = coll2.query(query_texts=["test"], n_results=1)
+    assert len(results["ids"]) == 1
+
+
+def test_legacy_embedding_function_with_name(client: ClientAPI) -> None:
+    """Test creating and getting collections with legacy embedding functions"""
+    client.reset()
+
+    # Create with legacy embedding function
+    coll = client.create_collection(
+        name="test_legacy",
+        embedding_function=LegacyEmbeddingFunctionWithName(),
+    )
+
+    # Verify the configuration marks it as legacy
+    config = load_collection_configuration_from_json(coll._model.configuration_json)
+    if config and isinstance(config, dict):
+        ef_config = config.get("embedding_function", {})  # type: ignore
+        if isinstance(ef_config, dict):
+            assert ef_config.get("type") == "legacy"
+
+    # Get with same legacy function
+    coll2 = client.get_collection(
+        name="test_legacy",
+        embedding_function=LegacyEmbeddingFunctionWithName(),
     )
 
     # Add and query should work

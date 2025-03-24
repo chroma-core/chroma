@@ -26,8 +26,8 @@ from functools import wraps
 from chromadb.api.collection_configuration import (
     load_update_collection_configuration_from_json,
     load_create_collection_configuration_from_json,
-    default_create_collection_configuration,
     create_collection_configuration_from_legacy_collection_metadata,
+    CreateCollectionConfiguration,
 )
 from pydantic import BaseModel
 from chromadb import __version__ as chromadb_version
@@ -793,8 +793,6 @@ class FastAPI(Server):
                             create.metadata
                         )
                     )
-                else:
-                    configuration = default_create_collection_configuration()
             else:
                 configuration = load_create_collection_configuration_from_json(
                     create.configuration
@@ -1723,7 +1721,7 @@ class FastAPI(Server):
         ) -> CollectionModel:
             create = validate_model(CreateCollection, orjson.loads(raw_body))
             configuration = (
-                default_create_collection_configuration()
+                CreateCollectionConfiguration()
                 if not create.configuration
                 else load_create_collection_configuration_from_json(
                     create.configuration
