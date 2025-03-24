@@ -287,10 +287,9 @@ func (s *Server) UpdateCollection(ctx context.Context, req *coordinatorpb.Update
 	}
 
 	updateCollection := &model.UpdateCollection{
-		ID:                      parsedCollectionID,
-		Name:                    req.Name,
-		Dimension:               req.Dimension,
-		NewConfigurationJsonStr: req.ConfigurationJsonStr,
+		ID:        parsedCollectionID,
+		Name:      req.Name,
+		Dimension: req.Dimension,
 	}
 
 	resetMetadata := req.GetResetMetadata()
