@@ -1,4 +1,7 @@
-use crate::utils::{AsyncCliWriter, AsyncStdOut, LOGO};
+use crate::UtilsError;
+use std::io;
+use std::io::{Stdout, Write};
+use crate::utils::LOGO;
 use chroma_frontend::config::FrontendServerConfig;
 use chroma_frontend::frontend_service_entrypoint_with_config;
 use clap::Parser;
@@ -6,7 +9,7 @@ use colored::Colorize;
 use std::net::TcpListener;
 use std::sync::Arc;
 use thiserror::Error;
-use crate::{CliError, Handler};
+use crate::{cli_writeln, CliError, Handler};
 
 #[derive(Parser, Debug)]
 pub struct RunArgs {
@@ -68,12 +71,12 @@ fn validate_host(address: &String, port: u16) -> bool {
     TcpListener::bind(&socket).is_ok()
 }
 
-pub struct RunCommandHandler<W: AsyncCliWriter> {
+pub struct RunCommandHandler<W: Write> {
     run_args: RunArgs,
     writer: W,
 }
 
-impl<W: AsyncCliWriter> RunCommandHandler<W> {
+impl<W: Write> RunCommandHandler<W> {
     pub fn new(run_args: RunArgs, writer: W) -> Self {
         RunCommandHandler { run_args, writer }
     }
@@ -113,18 +116,18 @@ impl<W: AsyncCliWriter> RunCommandHandler<W> {
     }
 }
 
-impl RunCommandHandler<AsyncStdOut> {
+impl RunCommandHandler<Stdout> {
     pub fn default(run_args: RunArgs) -> Self {
-        let stdout = AsyncStdOut::new();
+        let stdout = io::stdout();
         RunCommandHandler::new(run_args, stdout)
     }
 }
 
 #[async_trait::async_trait]
-impl<W: AsyncCliWriter + Send> Handler for RunCommandHandler<W> {
+impl<W: Write + Send> Handler for RunCommandHandler<W> {
     async fn run(&mut self) -> Result<(), CliError> {
         let config = self.get_config_from_args()?;
-        self.writer.write_all(run_message(&config).as_bytes()).await?;
+        cli_writeln!(self.writer, "{}", run_message(&config))?;
         frontend_service_entrypoint_with_config(Arc::new(()), Arc::new(()), &config).await;
         Ok(())
     }
@@ -137,21 +140,21 @@ mod tests {
     use crate::client::ChromaClient;
     use crate::commands::run::{run_message, RunArgs, RunCommandHandler};
     use crate::Handler;
-    use crate::utils::TestCliWriter;
 
     #[tokio::test]
     async fn test_run() {
         use tokio::time::{sleep, Duration};
 
         let port = 8001;
+        let path = "test_data".to_string();
         let run_args = RunArgs {
             config_path: None,
-            path: Some("test_data".to_string()),
+            path: Some(path.clone()),
             port: Some(port),
             host: None,
         };
 
-        let writer = TestCliWriter::new();
+        let writer = Vec::new();
         let run_handler = Arc::new(Mutex::new(RunCommandHandler::new(run_args, writer)));
 
         let run_handler_for_server = run_handler.clone();
@@ -176,6 +179,9 @@ mod tests {
         
         let handler = run_handler.lock().await;
         let message = run_message(&handler.get_config_from_args().unwrap());
-        assert!(handler.writer.output().contains(message.as_str()));
+        let output = String::from_utf8(handler.writer.clone()).unwrap();
+        assert!(output.contains(message.as_str()));
+        assert!(output.contains(port.to_string().as_str()));
+        assert!(output.contains(path.as_str()));
     }
 }

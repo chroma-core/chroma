@@ -9,17 +9,22 @@ use chroma_types::HeartbeatResponse;
 #[derive(Debug, Error)]
 pub enum ClientError {
     #[error("Invalid Chroma API key {0}")]
+    #[allow(dead_code)]
     InvalidAPIKey(String),
     #[error("Heartbeat request failed")]
+    #[allow(dead_code)]
     HeartbeatFailed,
 }
 
 #[derive(Default, Debug, Clone)]
 pub struct ChromaClient {
+    #[allow(dead_code)]
     pub api_url: String,
+    #[allow(dead_code)]
     pub tenant_id: String,
     #[allow(dead_code)]
     pub database: Option<String>,
+    #[allow(dead_code)]
     pub api_key: Option<String>,
 }
 
@@ -27,6 +32,7 @@ pub struct ChromaClient {
 struct EmptyResponse {}
 
 impl ChromaClient {
+    #[allow(dead_code)]
     pub fn new(
         api_url: String,
         tenant_id: String,
@@ -41,6 +47,7 @@ impl ChromaClient {
         }
     }
 
+    #[allow(dead_code)]
     pub fn local_default() -> Self {
         Self::new(
             "http://localhost:8000".to_string(),
@@ -49,7 +56,8 @@ impl ChromaClient {
             None,
         )
     }
-    
+
+    #[allow(dead_code)]
     pub async fn send_request<T, R>(
         &self,
         method: Method,
@@ -80,6 +88,7 @@ impl ChromaClient {
         Ok(parsed_response)
     }
 
+    #[allow(dead_code)]
     fn headers(&self) -> Result<Option<HeaderMap>, ClientError> {
         match self.api_key {
             Some(ref api_key) => {
@@ -94,15 +103,15 @@ impl ChromaClient {
             None => Ok(None),
         }
     }
-
     
+    #[allow(dead_code)]
     pub async fn heartbeat(&self) -> Result<u128, ClientError> {
         let route = "/api/v2/heartbeat";
         let response = self.send_request::<(), HeartbeatResponse>(
             Method::GET, route, 
             self.headers()?, 
             None
-        ).await.map_err(|e| ClientError::HeartbeatFailed)?;
+        ).await.map_err(|_| ClientError::HeartbeatFailed)?;
         Ok(response.nanosecond_heartbeat)
     }
 

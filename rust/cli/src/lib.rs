@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 use thiserror::Error;
 use crate::commands::browser::{BrowserCommandHandler, BrowserError, DISCORD_URL, DOCS_URL};
 use crate::commands::run::{RunArgs, RunCommandHandler, RunError};
-use crate::commands::vacuum::VacuumError;
+use crate::commands::vacuum::{VacuumArgs, VacuumCommandHandler, VacuumError};
 use crate::utils::UtilsError;
 
 #[derive(Subcommand, Debug)]
@@ -14,7 +14,7 @@ pub enum Command {
     Docs,
     Run(RunArgs),
     Support,
-    // Vacuum(VacuumArgs),
+    Vacuum(VacuumArgs),
 }
 
 #[derive(Debug, Error)]
@@ -50,6 +50,7 @@ pub fn chroma_cli(args: Vec<String>) {
         Command::Docs => Box::new(BrowserCommandHandler::new(DOCS_URL)),
         Command::Run(args) => Box::new(RunCommandHandler::default(args)),
         Command::Support => Box::new(BrowserCommandHandler::new(DISCORD_URL)),
+        Command::Vacuum(args) => Box::new(VacuumCommandHandler::default(args)),
     };
 
     let runtime = tokio::runtime::Runtime::new().map_err(|_| RunError::ServerStartFailed).unwrap();
