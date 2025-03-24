@@ -4,7 +4,6 @@ from chromadb.api.types import (
     EmbeddingFunction,
     Embeddable,
     Space,
-    Metadata,
     CollectionMetadata,
     UpdateMetadata,
 )
@@ -112,7 +111,7 @@ def load_collection_configuration_from_json(
 
 
 def collection_configuration_to_json_str(config: CollectionConfiguration) -> str:
-    return json.dumps(collection_configuration_to_json(config), cls=ChromaJSONEncoder)
+    return json.dumps(collection_configuration_to_json(config))
 
 
 def collection_configuration_to_json(config: CollectionConfiguration) -> Dict[str, Any]:
@@ -229,9 +228,9 @@ def create_collection_configuration_from_legacy_metadata_dict(
     """Create a CreateCollectionConfiguration from legacy collection metadata"""
     old_to_new = {
         "hnsw:space": "space",
-        "hnsw:ef_construction": "ef_construction",
+        "hnsw:construction_ef": "ef_construction",
         "hnsw:M": "max_neighbors",
-        "hnsw:ef_search": "ef_search",
+        "hnsw:search_ef": "ef_search",
         "hnsw:num_threads": "num_threads",
         "hnsw:batch_size": "batch_size",
         "hnsw:sync_threshold": "sync_threshold",
@@ -246,43 +245,6 @@ def create_collection_configuration_from_legacy_metadata_dict(
     validate_create_hnsw_config(hnsw_config)
 
     return CreateCollectionConfiguration(hnsw=hnsw_config)
-
-
-def create_collection_configuration_from_legacy_metadata(
-    existing_create_collection_configuration: CreateCollectionConfiguration,
-    metadata: Metadata,
-) -> CreateCollectionConfiguration:
-    """Create a CreateCollectionConfiguration from legacy parameters"""
-    old_to_new = {
-        "hnsw:space": "space",
-        "hnsw:ef_construction": "ef_construction",
-        "hnsw:M": "max_neighbors",
-        "hnsw:ef_search": "ef_search",
-        "hnsw:num_threads": "num_threads",
-        "hnsw:batch_size": "batch_size",
-        "hnsw:sync_threshold": "sync_threshold",
-        "hnsw:resize_factor": "resize_factor",
-    }
-    json_map = {}
-    for name, value in metadata.items():
-        if name in old_to_new:
-            json_map[old_to_new[name]] = value
-
-    if existing_create_collection_configuration.get("hnsw") is None:
-        hnsw_config = json_to_create_hnsw_configuration(json_map)
-        validate_create_hnsw_config(hnsw_config)
-        return CreateCollectionConfiguration(hnsw=hnsw_config)
-
-    existing_hnsw_config = existing_create_collection_configuration.get("hnsw")
-    if existing_hnsw_config is None:
-        hnsw_config = json_to_create_hnsw_configuration(json_map)
-    else:
-        hnsw_config = existing_hnsw_config
-    validate_create_hnsw_config(hnsw_config)
-
-    existing_create_collection_configuration["hnsw"] = hnsw_config
-
-    return existing_create_collection_configuration
 
 
 def legacy_create_collection_configuration_path(
@@ -363,9 +325,7 @@ def create_collection_configuration_to_json_str(
     config: CreateCollectionConfiguration,
 ) -> str:
     """Convert a CreateCollection configuration to a JSON-serializable string"""
-    return json.dumps(
-        create_collection_configuration_to_json(config), cls=ChromaJSONEncoder
-    )
+    return json.dumps(create_collection_configuration_to_json(config))
 
 
 # TODO: make warnings prettier and add link to migration docs
@@ -579,7 +539,7 @@ def update_collection_configuration_to_json_str(
 ) -> str:
     """Convert an UpdateCollectionConfiguration to a JSON-serializable string"""
     json_dict = update_collection_configuration_to_json(config)
-    return json.dumps(json_dict, cls=ChromaJSONEncoder)
+    return json.dumps(json_dict)
 
 
 def update_collection_configuration_to_json(
@@ -762,12 +722,3 @@ class InvalidConfigurationError(ValueError):
     """Represents an error that occurs when a configuration is invalid."""
 
     pass
-
-
-class ChromaJSONEncoder(json.JSONEncoder):
-    def default(self, obj: Any) -> Any:
-        if isinstance(obj, Space):
-            return obj.to_json()
-        if obj is NotImplemented:
-            return None
-        return super().default(obj)

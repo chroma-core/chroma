@@ -37,7 +37,6 @@ from chromadb.api.collection_configuration import (
     UpdateCollectionConfiguration,
     create_collection_configuration_to_json_str,
     load_collection_configuration_from_json_str,
-    create_collection_configuration_from_legacy_metadata,
     CollectionConfiguration,
     load_collection_configuration_from_create_collection_configuration,
     collection_configuration_to_json_str,
@@ -307,11 +306,6 @@ class SqlSysDB(SqlDB, SysDB):
                 )
             else:
                 raise UniqueConstraintError(f"Collection {name} already exists")
-
-        if metadata:
-            configuration = create_collection_configuration_from_legacy_metadata(
-                configuration, metadata
-            )
 
         collection = Collection(
             id=id,
@@ -940,17 +934,10 @@ class SqlSysDB(SqlDB, SysDB):
 
         # This is a legacy case where we don't have configuration stored in the database
         # This is non-destructive, we don't delete or overwrite any keys in the metadata
-        from chromadb.segment.impl.vector.hnsw_params import PersistentHnswParams
 
         collections_t = Table("collections")
 
-        # Get any existing HNSW params from the metadata (works regardless whether metadata has persistent params)
-        hnsw_metadata_params = PersistentHnswParams.extract(metadata or {})
-
-        create_collection_config = create_collection_configuration_from_legacy_metadata(
-            existing_create_collection_configuration=CreateCollectionConfiguration(),
-            metadata=hnsw_metadata_params,
-        )
+        create_collection_config = CreateCollectionConfiguration()
         # Write the configuration into the database
         configuration_json_str = create_collection_configuration_to_json_str(
             create_collection_config

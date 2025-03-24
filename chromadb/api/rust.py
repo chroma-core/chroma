@@ -218,12 +218,9 @@ class RustBindingsAPI(ServerAPI):
         else:
             configuration_json_str = None
 
-        print(f"configuration_json_str: {configuration_json_str}")
-        print(f"metadata: {metadata}")
         collection = self.bindings.create_collection(
             name, configuration_json_str, metadata, get_or_create, tenant, database
         )
-        print(f"after create_collection: {collection.configuration}")
 
         collection_model = CollectionModel(
             id=collection.id,
