@@ -33,6 +33,9 @@
 //  Another Version is added at t=102
 //  CleanUp versions can be called at t=103, with a cutoff of 1 seconds.
 
+// TODO(rohitcp):
+// Min versions to keep is 2. Make this configurable, and randomize it per collection.
+
 use chroma_blockstore::test_utils::sparse_index_test_utils::create_test_sparse_index;
 use chroma_storage::local::LocalStorage;
 use chroma_storage::Storage;
@@ -116,6 +119,7 @@ struct RefState {
     highest_registered_time: u64,  // TODO: Suffix with _secs to make it consistent with cutoff_secs.
     // Keep track of the files that were deleted in the last cleanup.
     last_cleanup_files: Vec<String>,
+    last_cleanup_collection_id: String,
 }
 
 impl RefState {
@@ -129,6 +133,7 @@ impl RefState {
             min_versions_to_keep,
             highest_registered_time: 100,
             last_cleanup_files: Vec::new(),
+            last_cleanup_collection_id: String::new(),
         }
     }
 
@@ -227,6 +232,9 @@ impl RefState {
     fn cleanup_versions(mut self, collection_id: String, cutoff_time: u64) -> Self {
         assert!(self.collections.contains(&collection_id), "RSM: cleanup_versions: collection does not exist: {}", collection_id);
 
+        // For debugging purposes, keep track of the collection id for which cleanup is being done.
+        self.last_cleanup_collection_id = collection_id.clone();
+
         // First get all versions present for the collection
         let versions_present: Vec<u64> = self
             .coll_to_creation_time_map
@@ -250,7 +258,7 @@ impl RefState {
             .unwrap()
             .iter()
             .filter(|(version, creation_time)| {
-                **creation_time < cutoff_time && version < &oldest_version_to_keep
+                **creation_time < cutoff_time && version < &oldest_version_to_keep && **version > 0
             })
             .map(|(version, _)| *version)
             .collect::<Vec<_>>();
@@ -310,6 +318,19 @@ impl RefState {
             .map(|uuid| uuid.to_string())
             .collect();
 
+        // Print the entire version to segment block id mapping for the collection.
+        tracing::info!(
+            line = line!(),
+            "************\nRSM: cleanup_versions: version to segment block id mapping for collection: {:?}\n************", 
+            self.coll_to_segment_block_ids_map[&collection_id]
+        );
+        // Print the files to delete.
+        tracing::info!(
+            line = line!(),
+            "************\nRSM: cleanup_versions: files to delete for collection: {:?}\n************", 
+            self.last_cleanup_files
+        );
+            
         self
     }
 }
@@ -324,9 +345,10 @@ impl ReferenceStateMachine for RefState {
             coll_to_creation_time_map: HashMap::new(),
             coll_to_dropped_block_ids_map: HashMap::new(),
             coll_to_segment_block_ids_map: HashMap::new(),
-            min_versions_to_keep: 3,
+            min_versions_to_keep: 2,
             highest_registered_time: 100,
             last_cleanup_files: Vec::new(),
+            last_cleanup_collection_id: String::new(),
         })
         .boxed()
     }
@@ -692,6 +714,7 @@ impl GcTest {
             storage,
         );
 
+        self.last_cleanup_files = Vec::new();
         match orchestrator.run(system).await {
             Ok(response) => {
                 tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
@@ -710,6 +733,13 @@ impl GcTest {
                 );
             }
         }
+
+        // Print the files to delete.
+        tracing::info!(
+            line = line!(),
+            "==========\nGcTest: cleanup_versions: last_cleanup_files: {:?}\n==========", 
+            self.last_cleanup_files
+        );
 
         self
     }
@@ -797,7 +827,8 @@ impl StateMachineTest for GcTest {
         assert_eq!(
             state_last_cleanup_files, 
             ref_last_cleanup_files,
-            "Cleanup files mismatch after sorting - SUT: {:?}, Reference: {:?}",
+            "Cleanup files mismatch for collection: {:?} after sorting - SUT: {:?}, Reference: {:?}",
+            ref_state.last_cleanup_collection_id,
             state_last_cleanup_files,
             ref_last_cleanup_files
         );
