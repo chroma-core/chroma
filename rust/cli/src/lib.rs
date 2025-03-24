@@ -1,6 +1,6 @@
-mod client;
 mod commands;
 mod utils;
+mod clients;
 
 use crate::commands::db::{db_command, DbCommand};
 use crate::commands::profile::{profile_command, ProfileCommand};

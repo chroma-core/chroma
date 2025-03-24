@@ -1,7 +1,4 @@
-use crate::client::ChromaClient;
-use crate::utils::{
-    copy_to_clipboard, get_address_book, get_current_profile, CliError, Profile, UtilsError,
-};
+use crate::utils::{copy_to_clipboard, get_address_book, get_current_profile, validate_name, CliError, Profile, UtilsError};
 use chroma_types::Database;
 use clap::{Args, Subcommand, ValueEnum};
 use colored::Colorize;
@@ -11,6 +8,7 @@ use std::fmt;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use thiserror::Error;
+use crate::clients::chroma_client::{get_chroma_client, ChromaClient};
 
 const LIST_DB_SELECTION_LIMIT: usize = 5;
 
@@ -18,10 +16,8 @@ const LIST_DB_SELECTION_LIMIT: usize = 5;
 pub enum DbError {
     #[error("")]
     NoDBs,
-    #[error("Database name cannot be empty")]
-    EmptyDbName,
-    #[error("Database name must contain only alphanumeric characters, hyphens, or underscores")]
-    InvalidDbName,
+    #[error("Database {0}")]
+    InvalidDbName(#[from] UtilsError),
     #[error("DB {0} not found")]
     DbNotFound(String),
     #[error("Failed to get runtime for DB commands")]
@@ -245,35 +241,16 @@ fn get_js_connection(url: String, tenant_id: String, db_name: String, api_key: S
     )
 }
 
+fn validate_db_name(db_name: String) -> Result<String, CliError> {
+    Ok(validate_name(db_name).map_err(DbError::InvalidDbName)?)
+}
+
 fn prompt_db_name(prompt: &str) -> Result<String, CliError> {
     println!("{}", prompt.blue().bold());
     let input = Input::with_theme(&ColorfulTheme::default())
         .interact_text()
         .map_err(|_| UtilsError::UserInputFailed)?;
     Ok(input)
-}
-
-fn validate_db_name(db_name: &str) -> Result<String, CliError> {
-    if db_name.is_empty() {
-        return Err(CliError::Db(DbError::EmptyDbName));
-    }
-
-    if !db_name
-        .chars()
-        .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
-    {
-        return Err(CliError::Db(DbError::InvalidDbName));
-    }
-
-    Ok(db_name.to_string())
-}
-
-fn get_chroma_client(profile: Option<&Profile>, dev: bool) -> ChromaClient {
-    let address_book = get_address_book(dev);
-    match profile {
-        Some(profile) => ChromaClient::from_profile(profile, address_book.frontend_url),
-        None => ChromaClient::local_default(),
-    }
 }
 
 fn select_db(dbs: &[Database]) -> Result<String, CliError> {
@@ -299,7 +276,7 @@ fn get_db_name(dbs: &[Database], prompt: &str) -> Result<String, CliError> {
         _ => prompt_db_name(prompt),
     }?;
 
-    validate_db_name(name.as_str())
+    Ok(validate_db_name(name)?)
 }
 
 fn select_language() -> Result<Language, CliError> {
@@ -335,7 +312,7 @@ pub async fn connect(args: ConnectArgs, current_profile: Profile) -> Result<(), 
     let dbs = chroma_client.list_databases().await?;
 
     let name = match args.name {
-        Some(name) => validate_db_name(&name),
+        Some(name) => validate_db_name(name),
         None => get_db_name(&dbs, &connect_db_name_prompt()),
     }?;
 
@@ -369,7 +346,7 @@ pub async fn create(args: CreateArgs, current_profile: Profile) -> Result<(), Cl
         Some(name) => name,
         None => prompt_db_name(&create_db_name_prompt())?,
     };
-    name = validate_db_name(&name)?;
+    name = validate_db_name(name)?;
 
     if dbs.iter().any(|db| db.name == name) {
         println!("{}", create_db_already_exists_message(&name));
@@ -390,7 +367,7 @@ pub async fn delete(args: DeleteArgs, current_profile: Profile) -> Result<(), Cl
     let dbs = chroma_client.list_databases().await?;
 
     let name = match args.name {
-        Some(name) => validate_db_name(&name),
+        Some(name) => validate_db_name(name),
         None => get_db_name(&dbs, &delete_db_name_prompt()),
     }?;
 
@@ -446,8 +423,7 @@ pub fn db_command(command: DbCommand) -> Result<(), CliError> {
 
 #[cfg(test)]
 mod tests {
-    use crate::client::ChromaClient;
-    use crate::commands::db::DbError::{DbNotFound, InvalidDbName};
+    use crate::commands::db::DbError::{DbNotFound};
     use crate::commands::db::{
         create_db_already_exists_message, create_db_success_message, db_delete_success_message,
         get_python_connection,
@@ -461,6 +437,7 @@ mod tests {
     use std::collections::HashMap;
     use std::env;
     use tempfile::TempDir;
+    use crate::clients::chroma_client::ChromaClient;
 
     fn simple_test_setup() -> TempDir {
         let temp_home = tempfile::tempdir().expect("Failed to create temp home dir");
@@ -559,7 +536,7 @@ mod tests {
             .arg("--dev")
             .assert()
             .success()
-            .stderr(contains(InvalidDbName.to_string()));
+            .stderr(contains("name cannot be empty"));
     }
 
     #[test]

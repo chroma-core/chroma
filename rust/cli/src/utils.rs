@@ -1,4 +1,3 @@
-use crate::client::ClientError;
 use crate::commands::db::DbError;
 use crate::commands::profile::ProfileError;
 use crate::commands::run::RunError;
@@ -11,6 +10,9 @@ use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
 use thiserror::Error;
+use regex::Regex;
+use crate::clients::chroma_client::ChromaClientError;
+use crate::commands::login::LoginError;
 
 pub const LOGO: &str = "
                 \x1b[38;5;069m(((((((((    \x1b[38;5;203m(((((\x1b[38;5;220m####
@@ -41,9 +43,11 @@ pub enum CliError {
     #[error("Failed to vacuum Chroma")]
     Vacuum(#[from] VacuumError),
     #[error("{0}")]
-    Client(#[from] ClientError),
+    ChromaClient(#[from] ChromaClientError),
     #[error("{0}")]
     Db(#[from] DbError),
+    #[error("{0}")]
+    Login(#[from] LoginError)
 }
 
 #[derive(Debug, Error)]
@@ -74,6 +78,10 @@ pub enum UtilsError {
     BrowserOpenFailed(String),
     #[error("Failed to copy to clipboard")]
     CopyToClipboardFailed,
+    #[error("name cannot be empty and must only contain alphanumerics, underscores, or hyphens")]
+    InvalidName, 
+    #[error("name validation failed")]
+    NameValidationFailed
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -90,14 +98,19 @@ pub struct CliConfig {
 #[derive(Debug, Deserialize)]
 pub struct AddressBook {
     pub frontend_url: String,
+    pub dashboard_api_url: String,
+    pub dashboard_frontend_url: String,
 }
 
 impl AddressBook {
-    pub fn new(frontend_url: String) -> Self {
-        AddressBook { frontend_url }
+    pub fn new(frontend_url: String, dashboard_api_url: String, dashboard_frontend_url: String) -> Self {
+        AddressBook { frontend_url, dashboard_api_url, dashboard_frontend_url }
     }
     pub fn local() -> Self {
-        Self::new("http://localhost:8000".to_string())
+        Self::new(
+            "http://localhost:8000".to_string(),
+            
+        )
     }
 
     pub fn cloud() -> Self {
@@ -224,4 +237,18 @@ pub fn copy_to_clipboard(copy_string: &str) -> Result<(), CliError> {
         .map_err(|_| UtilsError::CopyToClipboardFailed)?;
     println!("\n{}", "Copied to clipboard!".blue().bold());
     Ok(())
+}
+
+pub fn validate_name(name: String) -> Result<String, UtilsError> {
+    if name.is_empty() {
+        return Err(UtilsError::InvalidName);
+    }
+    
+    let re = Regex::new(r"^[a-zA-Z0-9_-]+$").map_err(|e| e.to_string()).map_err(|_| UtilsError::NameValidationFailed)?;
+    if !re.is_match(&name) {
+        return Err(UtilsError::InvalidName)
+    }
+    
+    Ok(name)
+    
 }

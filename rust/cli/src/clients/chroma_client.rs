@@ -1,15 +1,14 @@
-use crate::utils::Profile;
+use crate::utils::{get_address_book, Profile};
 use chroma_frontend::server::CreateDatabasePayload;
-use chroma_types::{Database, ListDatabasesResponse};
+use chroma_types::{Database, GetUserIdentityResponse, ListDatabasesResponse};
 use reqwest::header::{HeaderMap, HeaderValue};
-use reqwest::{Client, Method};
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
-use std::error::Error;
+use reqwest::Method;
+use serde::Deserialize;
 use thiserror::Error;
+use crate::clients::utils::send_request;
 
 #[derive(Debug, Error)]
-pub enum ClientError {
+pub enum ChromaClientError {
     #[error("Invalid Chroma API key {0}")]
     InvalidAPIKey(String),
     #[error("Failed to create database {0}")]
@@ -18,6 +17,8 @@ pub enum ClientError {
     DbDeleteFailed(String),
     #[error("Failed to list databases")]
     DbListFailed,
+    #[error("Failed to get tenant ID")]
+    TenantIdNotFound,
 }
 
 #[derive(Default, Debug, Clone)]
@@ -64,44 +65,15 @@ impl ChromaClient {
             Some(profile.api_key.clone()),
         )
     }
-
-    pub async fn send_request<T, R>(
-        &self,
-        method: Method,
-        route: &str,
-        headers: Option<HeaderMap>,
-        body: Option<&T>,
-    ) -> Result<R, Box<dyn Error>>
-    where
-        T: Serialize,
-        R: DeserializeOwned + Default,
-    {
-        let url = format!("{}{}", self.api_url, route);
-
-        let client = Client::new();
-        let mut request_builder = client.request(method, url);
-
-        if let Some(headers) = headers {
-            request_builder = request_builder.headers(headers);
-        }
-
-        if let Some(b) = body {
-            request_builder = request_builder.json(b);
-        }
-
-        let response = request_builder.send().await?.error_for_status()?;
-        let parsed_response = response.json::<R>().await?;
-        Ok(parsed_response)
-    }
-
-    fn headers(&self) -> Result<Option<HeaderMap>, ClientError> {
+    
+    fn headers(&self) -> Result<Option<HeaderMap>, ChromaClientError> {
         match self.api_key {
             Some(ref api_key) => {
                 let mut headers = HeaderMap::new();
                 headers.insert(
                     "X-Chroma-Token",
                     HeaderValue::from_str(api_key)
-                        .map_err(|_| ClientError::InvalidAPIKey(api_key.to_string()))?,
+                        .map_err(|_| ChromaClientError::InvalidAPIKey(api_key.to_string()))?,
                 );
                 Ok(Some(headers))
             }
@@ -109,35 +81,51 @@ impl ChromaClient {
         }
     }
 
-    pub async fn list_databases(&self) -> Result<Vec<Database>, ClientError> {
+    pub async fn list_databases(&self) -> Result<Vec<Database>, ChromaClientError> {
         let route = format!("/api/v2/tenants/{}/databases", self.tenant_id);
-        let response = self
-            .send_request::<(), ListDatabasesResponse>(Method::GET, &route, self.headers()?, None)
+        let response = send_request::<(), ListDatabasesResponse>(
+            &self.api_url, Method::GET, &route, self.headers()?, None
+        )
             .await
-            .map_err(|_| ClientError::DbListFailed)?;
+            .map_err(|_| ChromaClientError::DbListFailed)?;
         Ok(response)
     }
 
-    pub async fn create_database(&self, name: String) -> Result<(), ClientError> {
+    pub async fn create_database(&self, name: String) -> Result<(), ChromaClientError> {
         let route = format!("/api/v2/tenants/{}/databases", self.tenant_id);
-        let _response = self
-            .send_request::<CreateDatabasePayload, EmptyResponse>(
-                Method::POST,
+        let _response = send_request::<CreateDatabasePayload, EmptyResponse>(
+            &self.api_url,    
+            Method::POST,
                 &route,
                 self.headers()?,
                 Some(&CreateDatabasePayload { name: name.clone() }),
             )
             .await
-            .map_err(|_| ClientError::DbCreateFailed(name));
+            .map_err(|_| ChromaClientError::DbCreateFailed(name));
         Ok(())
     }
 
-    pub async fn delete_database(&self, name: String) -> Result<(), ClientError> {
+    pub async fn delete_database(&self, name: String) -> Result<(), ChromaClientError> {
         let route = format!("/api/v2/tenants/{}/databases/{}", self.tenant_id, name);
-        let _response = self
-            .send_request::<(), EmptyResponse>(Method::DELETE, &route, self.headers()?, None)
+        let _response = send_request::<(), EmptyResponse>(&self.api_url, Method::DELETE, &route, self.headers()?, None)
             .await
-            .map_err(|_| ClientError::DbDeleteFailed(name));
+            .map_err(|_| ChromaClientError::DbDeleteFailed(name));
         Ok(())
+    }
+    
+    pub async fn get_tenant_id(&self) -> Result<String, ChromaClientError> {
+        let route = "/api/v2/auth/identity";
+        let response = send_request::<(), GetUserIdentityResponse>(
+            &self.api_url, Method::GET, route, self.headers()?, None
+        ).await.map_err(|_| ChromaClientError::TenantIdNotFound)?;
+        Ok(response.tenant)
+    }
+}
+
+pub fn get_chroma_client(profile: Option<&Profile>, dev: bool) -> ChromaClient {
+    let address_book = get_address_book(dev);
+    match profile {
+        Some(profile) => ChromaClient::from_profile(profile, address_book.frontend_url),
+        None => ChromaClient::local_default(),
     }
 }

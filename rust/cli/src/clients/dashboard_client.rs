@@ -1,0 +1,72 @@
+use reqwest::header::{HeaderMap, HeaderValue, COOKIE};
+use reqwest::Method;
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+use crate::clients::utils::send_request;
+use crate::utils::{get_address_book, Profile};
+
+#[derive(Debug, Error)]
+pub enum DashboardClientError {
+    #[error("Failed to parse session cookies")]
+    CookiesParseFailed,
+    #[error("Failed to fetch API key for tenant {0}")]
+    ApiKeyFetchFailed(String),
+    #[error("Failed to fetch teams")]
+    TeamFetchFailed(String),
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Team {
+    pub uuid: String,
+    pub name: String,
+    pub slug: String,
+}
+
+#[derive(Serialize, Debug)]
+struct CreateApiKeyRequest {
+    name: String
+}
+
+#[derive(Deserialize, Debug, Default)]
+struct CreateApiKeyResponse {
+    key: String
+}
+
+#[derive(Default, Debug, Clone)]
+pub struct DashboardClient {
+    api_url: String,
+}
+
+impl DashboardClient {
+    pub fn new(api_url: String) -> Self {
+        DashboardClient { api_url }
+    }
+
+    fn headers(&self, session_cookies: &str) -> Result<Option<HeaderMap>, DashboardClientError> {
+        let mut headers = HeaderMap::new();
+        headers.insert(COOKIE, HeaderValue::from_str(&session_cookies).map_err(|_| DashboardClientError::CookiesParseFailed)?);
+        Ok(Some(headers))
+    }
+    
+    pub async fn get_api_key(&self, team_slug: &str, session_cookies: &str) -> Result<String, DashboardClientError> {
+        let route = format!("/api/v1/teams/{}/api_keys", team_slug);
+        let payload = CreateApiKeyRequest { name: team_slug.to_string() };
+        let response = send_request::<CreateApiKeyRequest, CreateApiKeyResponse>(
+            &self.api_url, Method::POST, &route, self.headers(session_cookies)?, Some(&payload)
+        ).await.map_err(|_| DashboardClientError::ApiKeyFetchFailed(team_slug.to_string()))?;
+        Ok(response.key)
+    }
+    
+    pub async fn get_teams(&self, session_cookies: &str) -> Result<Vec<Team>, DashboardClientError> {
+        let route = "/api/v1/teams";
+        let response = send_request::<(), Vec<Team>>(
+            &self.api_url, Method::GET, route, self.headers(session_cookies)?, None
+        ).await.map_err(|_| DashboardClientError::TeamFetchFailed(session_cookies.to_string()))?;
+        Ok(response)
+    }
+}
+
+pub fn get_dashboard_client(profile: Option<&Profile>, dev: bool) -> DashboardClient {
+    let address_book = get_address_book(dev);
+    
+}

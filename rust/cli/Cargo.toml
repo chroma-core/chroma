@@ -18,17 +18,19 @@ colored = "3.0.0"
 dialoguer = "0.11.0"
 dirs = "6.0.0"
 indicatif.workspace = true
+rand = { workspace = true }
+regex = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true}
+strum = "0.27.1"
+strum_macros = "0.27.1"
 sqlx = { workspace = true }
 thiserror = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true }
 toml = "0.8.20"
 webbrowser = "1.0.3"
-strum = "0.27.1"
-strum_macros = "0.27.1"
 
 [dev-dependencies]
 assert_cmd = "2.0.16"
