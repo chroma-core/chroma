@@ -124,9 +124,9 @@ pub struct ChecklistResponse {
     pub max_batch_size: u32,
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, Deserialize, Default, ToSchema, Debug)]
 pub struct HeartbeatResponse {
-    #[serde(rename(serialize = "nanosecond heartbeat"))]
+    #[serde(rename(serialize = "nanosecond heartbeat", deserialize = "nanosecond heartbeat"))]
     pub nanosecond_heartbeat: u128,
 }
 
