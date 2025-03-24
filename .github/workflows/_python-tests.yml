@@ -55,6 +55,8 @@ jobs:
         run: pip install --no-index --find-links target/wheels/ chromadb
       - name: Configure pytest to upload results to Datadog
         uses: datadog/test-visibility-github-action@v2
+        # This action currently fails on Windows (https://github.com/DataDog/test-visibility-github-action/issues/36)
+        if: ${{ !contains(matrix.platform, 'windows') }}
         with:
           languages: python
           api_key: ${{ secrets.DD_API_KEY }}
@@ -99,6 +101,8 @@ jobs:
           github-token: ${{ github.token }}
     - name: Configure pytest to upload results to Datadog
       uses: datadog/test-visibility-github-action@v2
+      # This action currently fails on Windows (https://github.com/DataDog/test-visibility-github-action/issues/36)
+      if: ${{ !contains(matrix.platform, 'windows') }}
       with:
         languages: python
         api_key: ${{ secrets.DD_API_KEY }}
@@ -134,6 +138,8 @@ jobs:
           github-token: ${{ github.token }}
       - name: Configure pytest to upload results to Datadog
         uses: datadog/test-visibility-github-action@v2
+        # This action currently fails on Windows (https://github.com/DataDog/test-visibility-github-action/issues/36)
+        if: ${{ !contains(matrix.platform, 'windows') }}
         with:
           languages: python
           api_key: ${{ secrets.DD_API_KEY }}
@@ -241,6 +247,8 @@ jobs:
         run: pip install --no-index --find-links target/wheels/ chromadb
       - name: Configure pytest to upload results to Datadog
         uses: datadog/test-visibility-github-action@v2
+        # This action currently fails on Windows (https://github.com/DataDog/test-visibility-github-action/issues/36)
+        if: ${{ !contains(matrix.platform, 'windows') }}
         with:
           languages: python
           api_key: ${{ secrets.DD_API_KEY }}
@@ -284,6 +292,8 @@ jobs:
       run: pip install --no-index --find-links target/wheels/ chromadb
     - name: Configure pytest to upload results to Datadog
       uses: datadog/test-visibility-github-action@v2
+      # This action currently fails on Windows (https://github.com/DataDog/test-visibility-github-action/issues/36)
+      if: ${{ !contains(matrix.platform, 'windows') }}
       with:
         languages: python
         api_key: ${{ secrets.DD_API_KEY }}
