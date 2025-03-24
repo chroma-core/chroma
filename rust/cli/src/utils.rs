@@ -3,6 +3,8 @@ use std::task::{Context, Poll};
 use thiserror::Error;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 use std::io::Error as IoError;
+use dialoguer::Input;
+use dialoguer::theme::ColorfulTheme;
 
 pub const LOGO: &str = "
                 \x1b[38;5;069m(((((((((    \x1b[38;5;203m(((((\x1b[38;5;220m####
@@ -22,6 +24,8 @@ pub const LOGO: &str = "
 pub enum UtilsError {
     #[error("Failed to write output to console")]
     ConsoleWriteFailed,
+    #[error("Failed to get input from the user")]
+    UserInputFailed
 }
 
 #[async_trait::async_trait]
@@ -124,14 +128,30 @@ impl AsyncCliWriter for TestCliWriter {
     }
 }
 
-trait InputProvider {
+#[macro_export]
+macro_rules! cli_writeln {
+    ($writer:expr, $($arg:tt)*) => {
+        writeln!($writer, $($arg)*)
+            .map_err(|_| UtilsError::ConsoleWriteFailed)
+    }
+}
+
+pub trait InputProvider {
     fn get_user_input(&self) -> Result<String, UtilsError>;
 }
 
-struct CliInput;
+pub struct CliInput;
+
+impl CliInput {
+    pub fn new() -> Self {
+        Self
+    }
+}
 
 impl InputProvider for CliInput {
     fn get_user_input(&self) -> Result<String, UtilsError> {
-        
+        Input::with_theme(&ColorfulTheme::default())
+            .interact_text()
+            .map_err(|_| UtilsError::UserInputFailed)
     }
 }

@@ -23,7 +23,8 @@ use std::str::FromStr;
 use std::{fs, io};
 use std::io::{StdoutLock, Write};
 use thiserror::Error;
-use crate::{CliError, Handler};
+use crate::{cli_writeln, CliError, Handler};
+use crate::utils::{CliInput, InputProvider, UtilsError};
 
 #[derive(Parser, Debug)]
 pub struct VacuumArgs {
@@ -51,29 +52,79 @@ fn start_message() -> String {
     format!("{}\n", "Chroma Vacuum".underline().bold())
 }
 
-
-
-pub struct VacuumCommandHandler<W: Write> {
-    args: VacuumArgs,
-    writer: W
+fn vacuum_confirm_message() -> String {
+    format!("{}\n{}", "Are you sure you want to vacuum the database?".bold().blue(), "This will block both reads and writes to the database and may take a while. We recommend shutting down the server before running this command. Continue? (Y/n)")
 }
 
-impl<W: Write> VacuumCommandHandler<W> {
-    pub fn new(args: VacuumArgs, writer: W) -> Self {
-        VacuumCommandHandler { args, writer }
+fn vacuum_cancel_message() -> String {
+    format!("{}", "\nVacuum cancelled\n".yellow())
+}
+
+pub struct VacuumCommandHandler<W: Write, I: InputProvider> {
+    args: VacuumArgs,
+    writer: W,
+    input_provider: I
+}
+
+impl<W: Write, I: InputProvider> VacuumCommandHandler<W, I> {
+    pub fn new(args: VacuumArgs, writer: W, input_provider: I) -> Self {
+        VacuumCommandHandler { args, writer, input_provider }
     }
 }
 
-impl VacuumCommandHandler<StdoutLock<'_>> {
+impl VacuumCommandHandler<StdoutLock<'_>, CliInput> {
     pub fn default(args: VacuumArgs) -> Self {
         let stdout = io::stdout();
-        VacuumCommandHandler::new(args, stdout.lock())
+        let input_provider = CliInput::new();
+        VacuumCommandHandler::new(args, stdout.lock(), input_provider)
     }
 }
 
 #[async_trait::async_trait]
-impl<W: Write + Send> Handler for VacuumCommandHandler<W> {
+impl<W: Write + Send, I: InputProvider + Send> Handler for VacuumCommandHandler<W, I> {
     async fn run(&mut self) -> Result<(), CliError> {
+        // Vacuum the database. This may result in a small increase in performance.
+        // If you recently upgraded Chroma from a version below 0.5.6 to 0.5.6 or above, you should run this command once to greatly reduce the size of your database and enable continuous database pruning. In most other cases, vacuuming will save very little disk space.
+        // The execution time of this command scales with the size of your database. It blocks both reads and writes to the database while it is running.
+        cli_writeln!(self.writer, "{}", start_message())?;
+
+        let mut config = FrontendServerConfig::single_node_default();
+        let persistent_path = self.args.path.clone().unwrap_or(config.persist_path);
+
+        if !Path::new(&persistent_path).exists() {
+            return Err(VacuumError::PathDoesNotExist(persistent_path).into());
+        }
+
+        let sqlite_url = format!("{}/{}", &persistent_path, &config.sqlite_filename);
+
+        if !Path::new(sqlite_url.as_str()).exists() {
+            return Err(VacuumError::NotAChromaPath(sqlite_url).into());
+        }
+
+        let proceed = match self.args.force {
+            true => true,
+            false => {
+                cli_writeln!(self.writer, "{}", vacuum_confirm_message())?;
+                let confirm = self.input_provider.get_user_input()?;
+                confirm.to_lowercase().eq("y")
+            }
+        };
+
+        if !proceed {
+            cli_writeln!(self.writer, "{}", vacuum_cancel_message())?;
+            return Ok(());
+        }
+
+        let initial_size =
+            get_dir_size(Path::new(&persistent_path)).map_err(|_| VacuumError::DirSizeFailed)?;
+
+        match config.frontend.sqlitedb.as_mut() {
+            Some(sqlite_config) => {
+                sqlite_config.url = Some(sqlite_url);
+            }
+            None => return Err(VacuumError::SqliteConfigNotFound.into()),
+        };
+        
         Ok(())
     }
 }
@@ -241,57 +292,7 @@ pub async fn vacuum_chroma(config: FrontendConfig) -> Result<(), Box<dyn Error>>
 }
 
 pub fn vacuum(args: VacuumArgs) -> Result<(), CliError> {
-    // Vacuum the database. This may result in a small increase in performance.
-    // If you recently upgraded Chroma from a version below 0.5.6 to 0.5.6 or above, you should run this command once to greatly reduce the size of your database and enable continuous database pruning. In most other cases, vacuuming will save very little disk space.
-    // The execution time of this command scales with the size of your database. It blocks both reads and writes to the database while it is running.
-    println!("{}", "\nChroma Vacuum\n".underline().bold());
-
-    let mut config = FrontendServerConfig::single_node_default();
-    let persistent_path = args.path.unwrap_or(config.persist_path);
-
-    if !Path::new(&persistent_path).exists() {
-        return Err(VacuumError::PathDoesNotExist(persistent_path).into());
-    }
-
-    let sqlite_url = format!("{}/{}", &persistent_path, &config.sqlite_filename);
-
-    if !Path::new(sqlite_url.as_str()).exists() {
-        return Err(VacuumError::NotAChromaPath(sqlite_url).into());
-    }
-
-    let proceed = match args.force {
-        true => true,
-        false => {
-            println!(
-                "{}",
-                "Are you sure you want to vacuum the database?"
-                    .bold()
-                    .blue()
-            );
-            Confirm::new()
-                .with_prompt("This will block both reads and writes to the database and may take a while. We recommend shutting down the server before running this command. Continue?")
-                .interact()
-                .unwrap_or(false)
-        }
-    };
-
-    println!();
-
-    if !proceed {
-        println!("{}", "Vacuum cancelled\n".red());
-        return Ok(());
-    }
-
-    let initial_size =
-        get_dir_size(Path::new(&persistent_path)).map_err(|_| VacuumError::DirSizeFailed)?;
-
-    match config.frontend.sqlitedb.as_mut() {
-        Some(sqlite_config) => {
-            sqlite_config.url = Some(sqlite_url);
-        }
-        None => return Err(VacuumError::SqliteConfigNotFound.into()),
-    };
-
+    
     let runtime = tokio::runtime::Runtime::new().expect("Failed to start Chroma");
     runtime
         .block_on(vacuum_chroma(config.frontend))
