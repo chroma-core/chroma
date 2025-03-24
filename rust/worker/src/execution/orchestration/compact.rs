@@ -17,6 +17,7 @@ use crate::execution::operators::flush_segment_writer::FlushSegmentWriterOutput;
 use crate::execution::operators::materialize_logs::MaterializeLogInput;
 use crate::execution::operators::materialize_logs::MaterializeLogOperator;
 use crate::execution::operators::materialize_logs::MaterializeLogOperatorError;
+use crate::execution::operators::materialize_logs::MaterializeLogOutput;
 use crate::execution::operators::partition::PartitionError;
 use crate::execution::operators::partition::PartitionInput;
 use crate::execution::operators::partition::PartitionOperator;
@@ -115,6 +116,7 @@ pub struct CompactOrchestrator {
     state: ExecutionState,
     // Component Execution
     collection_id: CollectionUuid,
+    collection_logical_size_bytes: i64,
     // Dependencies
     log: Log,
     sysdb: SysDb,
@@ -245,6 +247,7 @@ impl CompactOrchestrator {
     pub fn new(
         compaction_job: CompactionJob,
         collection_id: CollectionUuid,
+        collection_logical_size_bytes: i64,
         log: Log,
         sysdb: SysDb,
         blockfile_provider: BlockfileProvider,
@@ -260,6 +263,7 @@ impl CompactOrchestrator {
             compaction_job,
             state: ExecutionState::Pending,
             collection_id,
+            collection_logical_size_bytes,
             log,
             sysdb,
             blockfile_provider,
@@ -312,7 +316,7 @@ impl CompactOrchestrator {
         &mut self,
         partitions: Vec<Chunk<LogRecord>>,
         self_address: Box<
-            dyn ReceiverForMessage<TaskResult<MaterializeLogsResult, MaterializeLogOperatorError>>,
+            dyn ReceiverForMessage<TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>>,
         >,
         ctx: &ComponentContext<CompactOrchestrator>,
     ) {
@@ -510,6 +514,9 @@ impl CompactOrchestrator {
             self.compaction_job.collection_version,
             self.flush_results.clone().into(),
             self.total_records_last_compaction,
+            // WARN: For legacy collections the logical size is initialized to zero, so the size after compaction might be negative
+            // TODO: Backfill collection logical size
+            u64::try_from(self.collection_logical_size_bytes).unwrap_or_default(),
             self.sysdb.clone(),
             self.log.clone(),
         );
@@ -835,22 +842,22 @@ impl Handler<TaskResult<PartitionOutput, PartitionError>> for CompactOrchestrato
 }
 
 #[async_trait]
-impl Handler<TaskResult<MaterializeLogsResult, MaterializeLogOperatorError>>
+impl Handler<TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>>
     for CompactOrchestrator
 {
     type Result = ();
 
     async fn handle(
         &mut self,
-        message: TaskResult<MaterializeLogsResult, MaterializeLogOperatorError>,
+        message: TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>,
         ctx: &ComponentContext<CompactOrchestrator>,
     ) {
-        let materialized_result = match self.ok_or_terminate(message.into_inner(), ctx) {
-            Some(result) => result,
+        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+            Some(res) => res,
             None => return,
         };
 
-        if materialized_result.is_empty() {
+        if output.result.is_empty() {
             // We check the number of remaining materialization tasks to prevent a race condition
             if self.num_uncompleted_materialization_tasks == 1
                 && self.num_uncompleted_tasks_by_segment.is_empty()
@@ -859,12 +866,9 @@ impl Handler<TaskResult<MaterializeLogsResult, MaterializeLogOperatorError>>
                 self.register(self.pulled_log_offset.unwrap(), ctx).await;
             }
         } else {
-            self.dispatch_apply_log_to_segment_writer_tasks(
-                materialized_result,
-                ctx.receiver(),
-                ctx,
-            )
-            .await;
+            self.collection_logical_size_bytes += output.collection_logical_size_delta;
+            self.dispatch_apply_log_to_segment_writer_tasks(output.result, ctx.receiver(), ctx)
+                .await;
         }
 
         self.num_uncompleted_materialization_tasks -= 1;

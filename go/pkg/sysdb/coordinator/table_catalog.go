@@ -1074,7 +1074,7 @@ func (tc *Catalog) FlushCollectionCompaction(ctx context.Context, flushCollectio
 		}
 
 		// update collection log position and version
-		collectionVersion, err := tc.metaDomain.CollectionDb(txCtx).UpdateLogPositionVersionAndTotalRecords(flushCollectionCompaction.ID.String(), flushCollectionCompaction.LogPosition, flushCollectionCompaction.CurrentCollectionVersion, flushCollectionCompaction.TotalRecordsPostCompaction)
+		collectionVersion, err := tc.metaDomain.CollectionDb(txCtx).UpdateLogPositionVersionTotalRecordsAndLogicalSize(flushCollectionCompaction.ID.String(), flushCollectionCompaction.LogPosition, flushCollectionCompaction.CurrentCollectionVersion, flushCollectionCompaction.TotalRecordsPostCompaction, flushCollectionCompaction.SizeBytesPostCompaction)
 		if err != nil {
 			return err
 		}
