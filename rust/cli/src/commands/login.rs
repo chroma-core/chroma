@@ -1,6 +1,7 @@
 use std::error::Error;
 use std::io::{Read, Write};
 use std::net::TcpListener;
+use std::time::Duration;
 use clap::Parser;
 use colored::Colorize;
 use dialoguer::{Input, Select};
@@ -42,8 +43,12 @@ fn team_selection_prompt() -> String {
     "Which team would you like to log in with?".blue().bold().to_string()
 }
 
-fn profile_name_input_prompt() -> String {
-    "Input a profile name".blue().bold().to_string()
+fn profile_name_input_prompt(profile_name: &str) -> String {
+    format!(
+        "{} {}\nPress Return to override it, or input a new profile name",
+        "You already have a profile with team name".yellow().bold(),
+        profile_name.yellow().bold()
+    )
 }
 
 fn waiting_for_cli_host_message() -> String {
@@ -70,12 +75,6 @@ fn set_profile_message(profile_name: &str) -> String {
 }
 
 fn next_steps_message() -> String {
-    println!("\nTry this next:");
-    println!("  Create a database");
-    println!("    {}", "chroma db create <db_name>".yellow());
-
-    println!("\nFor a full list of commands:");
-    println!("  {}\n", "chroma --help".yellow());
     format!(
         "Try this next:\n   Create a database\n    {}\n\nFor a full list of commands:\n   {}",
         "chroma db create <db_name>".yellow(),
@@ -122,29 +121,37 @@ fn filter_team(team_id: &str, teams: Vec<Team>) -> Result<Team, LoginError> {
         .ok_or_else(|| LoginError::TeamNotFound(team_id.to_string()))
 }
 
-fn select_profile(team: &Team, profiles: &Profiles) -> Result<String, CliError> {
+fn get_profile_from_team(team: &Team, profiles: &Profiles) -> Result<String, CliError> {
     let team_name = match team.name.as_str() {
         "default" => "default",
         _ => team.slug.as_str(),
     };
+    
+    if !profiles.contains_key(team_name) {
+        return Ok(team_name.to_string());
+    }
 
-    let suggestion = match profiles.contains_key(team_name) {
-        true => format!("{} (override)", team_name),
-        false => team.slug.clone(),
-    };
-
-    println!("{}", profile_name_input_prompt());
-    let profile = Input::with_theme(&ColorfulTheme::default())
-        .default(suggestion)
+    println!("{}", profile_name_input_prompt(team_name));
+    let profile_name: String = Input::with_theme(&ColorfulTheme::default())
+        .allow_empty(true)
+        .report(false)
         .interact_text().map_err(|_| UtilsError::UserInputFailed)?;
-    println!();
-
-    Ok(profile.replace(" (override)", ""))
+    
+    match profile_name.as_str() { 
+        "" => {
+            println!("{} {}\n", "Overriding profile".green(), team_name.green());
+            Ok(team_name.to_string())
+        },
+        _ => {
+            println!("{}\n", profile_name.green());
+            Ok(profile_name)
+        },
+    }
 }
 
-fn browser_auth(api_url: &str, frontend_url: &str) -> Result<String, Box<dyn Error>> {
+fn browser_auth(frontend_url: &str) -> Result<String, Box<dyn Error>> {
     let port = find_random_available_port(8050, 9000, 100)?;
-    let login_url = format!("{}/login?{}=http://localhost:{}", api_url, CLI_QUERY_PARAMETER, port);
+    let login_url = format!("{}/login?{}=http://localhost:{}", frontend_url, CLI_QUERY_PARAMETER, port);
 
     webbrowser::open(&login_url)?;
     println!("{}", waiting_for_cli_host_message());
@@ -153,6 +160,8 @@ fn browser_auth(api_url: &str, frontend_url: &str) -> Result<String, Box<dyn Err
     let listener = TcpListener::bind(&cli_host)?;
 
     let (mut stream, _) = listener.accept()?;
+    stream.set_read_timeout(Some(Duration::from_secs(120)))?;
+    
     let mut buffer = [0; 1024];
     let _ = stream.read(&mut buffer)?;
     let request = String::from_utf8_lossy(&buffer[..]);
@@ -175,7 +184,7 @@ fn browser_auth(api_url: &str, frontend_url: &str) -> Result<String, Box<dyn Err
 
 pub async fn browser_login(args: LoginArgs) -> Result<(), CliError> {
     let dashboard_client = get_dashboard_client(args.dev);
-    let session_cookies = browser_auth(&dashboard_client.api_url, &dashboard_client.frontend_url).map_err(|_| LoginError::BrowserAuthFailed)?;
+    let session_cookies = browser_auth(&dashboard_client.frontend_url).map_err(|_| LoginError::BrowserAuthFailed)?;
     let teams = dashboard_client.get_teams(&session_cookies).await?;
     
     let (api_key, team) = match args.api_key { 
@@ -198,7 +207,7 @@ pub async fn browser_login(args: LoginArgs) -> Result<(), CliError> {
     let mut profile_name = match args.profile { 
         Some(name) => name,
         None => {
-            select_profile(&team, &profiles)?
+            get_profile_from_team(&team, &profiles)?
         }
     };
     profile_name = validate_profile_name(profile_name)?;
@@ -233,4 +242,3 @@ pub fn login(args: LoginArgs) -> Result<(), CliError> {
     })?;
     Ok(())
 }
-

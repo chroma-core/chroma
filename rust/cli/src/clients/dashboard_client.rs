@@ -8,11 +8,11 @@ use crate::utils::get_address_book;
 #[derive(Debug, Error)]
 pub enum DashboardClientError {
     #[error("Failed to parse session cookies")]
-    CookiesParseFailed,
+    CookiesParse,
     #[error("Failed to fetch API key for tenant {0}")]
-    ApiKeyFetchFailed(String),
+    ApiKeyFetch(String),
     #[error("Failed to fetch teams")]
-    TeamFetchFailed(String),
+    TeamFetch(String),
 }
 
 #[derive(Deserialize, Debug)]
@@ -45,7 +45,7 @@ impl DashboardClient {
 
     fn headers(&self, session_cookies: &str) -> Result<Option<HeaderMap>, DashboardClientError> {
         let mut headers = HeaderMap::new();
-        headers.insert(COOKIE, HeaderValue::from_str(&session_cookies).map_err(|_| DashboardClientError::CookiesParseFailed)?);
+        headers.insert(COOKIE, HeaderValue::from_str(&session_cookies).map_err(|_| DashboardClientError::CookiesParse)?);
         Ok(Some(headers))
     }
     
@@ -54,7 +54,7 @@ impl DashboardClient {
         let payload = CreateApiKeyRequest { name: team_slug.to_string() };
         let response = send_request::<CreateApiKeyRequest, CreateApiKeyResponse>(
             &self.api_url, Method::POST, &route, self.headers(session_cookies)?, Some(&payload)
-        ).await.map_err(|_| DashboardClientError::ApiKeyFetchFailed(team_slug.to_string()))?;
+        ).await.map_err(|_| DashboardClientError::ApiKeyFetch(team_slug.to_string()))?;
         Ok(response.key)
     }
     
@@ -62,12 +62,12 @@ impl DashboardClient {
         let route = "/api/v1/teams";
         let response = send_request::<(), Vec<Team>>(
             &self.api_url, Method::GET, route, self.headers(session_cookies)?, None
-        ).await.map_err(|_| DashboardClientError::TeamFetchFailed(session_cookies.to_string()))?;
+        ).await.map_err(|_| DashboardClientError::TeamFetch(session_cookies.to_string()))?;
         Ok(response)
     }
 }
 
 pub fn get_dashboard_client(dev: bool) -> DashboardClient {
     let address_book = get_address_book(dev);
-    DashboardClient::new(address_book.dashboard_api_url.clone(), address_book.dashboard_api_url)
+    DashboardClient::new(address_book.dashboard_api_url, address_book.dashboard_frontend_url)
 }

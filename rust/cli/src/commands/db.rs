@@ -1,4 +1,4 @@
-use crate::utils::{copy_to_clipboard, get_address_book, get_current_profile, validate_name, CliError, Profile, UtilsError};
+use crate::utils::{copy_to_clipboard, get_current_profile, validate_name, CliError, Profile, UtilsError};
 use chroma_types::Database;
 use clap::{Args, Subcommand, ValueEnum};
 use colored::Colorize;
@@ -8,7 +8,7 @@ use std::fmt;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use thiserror::Error;
-use crate::clients::chroma_client::{get_chroma_client, ChromaClient};
+use crate::clients::chroma_client::{get_chroma_client};
 
 const LIST_DB_SELECTION_LIMIT: usize = 5;
 
