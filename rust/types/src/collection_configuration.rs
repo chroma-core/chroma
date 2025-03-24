@@ -29,6 +29,35 @@ pub enum VectorIndexConfiguration {
     Spann(InternalSpannConfiguration),
 }
 
+<<<<<<< Updated upstream
+=======
+impl VectorIndexConfiguration {
+    pub fn update(
+        &mut self,
+        vector_index: &VectorIndexConfiguration,
+    ) -> Result<(), HnswParametersFromSegmentError> {
+        match (self, vector_index) {
+            (VectorIndexConfiguration::Hnsw(hnsw), VectorIndexConfiguration::Hnsw(hnsw_new)) => {
+                *hnsw = hnsw_new.clone();
+                Ok(())
+            }
+            (
+                VectorIndexConfiguration::Spann(spann),
+                VectorIndexConfiguration::Spann(spann_new),
+            ) => {
+                *spann = spann_new.clone();
+                Ok(())
+            }
+            (VectorIndexConfiguration::Hnsw(_), VectorIndexConfiguration::Spann(_)) => {
+                return Err(HnswParametersFromSegmentError::IncompatibleVectorIndexTypes);
+            }
+            (VectorIndexConfiguration::Spann(_), VectorIndexConfiguration::Hnsw(_)) => {
+                return Err(HnswParametersFromSegmentError::IncompatibleVectorIndexTypes);
+            }
+        }
+    }
+}
+>>>>>>> Stashed changes
 impl From<HnswConfiguration> for VectorIndexConfiguration {
     fn from(config: HnswConfiguration) -> Self {
         VectorIndexConfiguration::Hnsw(config)
