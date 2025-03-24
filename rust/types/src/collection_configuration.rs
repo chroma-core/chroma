@@ -55,12 +55,11 @@ pub struct InternalCollectionConfiguration {
 impl InternalCollectionConfiguration {
     pub fn from_legacy_metadata(
         metadata: Metadata,
-        embedding_function: Option<EmbeddingFunctionConfiguration>,
     ) -> Result<Self, HnswParametersFromSegmentError> {
         let hnsw = HnswConfiguration::from_legacy_segment_metadata(&Some(metadata))?;
         Ok(Self {
             vector_index: VectorIndexConfiguration::Hnsw(hnsw),
-            embedding_function,
+            embedding_function: None,
         })
     }
 
