@@ -222,6 +222,7 @@ def create_collection_configuration_from_legacy_collection_metadata(
     """Create a CreateCollectionConfiguration from legacy collection metadata"""
     return create_collection_configuration_from_legacy_metadata_dict(metadata)
 
+
 def create_collection_configuration_from_legacy_metadata_dict(
     metadata: Dict[str, Any],
 ) -> CreateCollectionConfiguration:
@@ -412,7 +413,8 @@ def create_collection_configuration_to_json(
         "hnsw": hnsw_config,
         "embedding_function": ef_config,
     }
-    
+
+
 def populate_create_hnsw_defaults(
     config: CreateHNSWConfiguration, ef: Optional[EmbeddingFunction[Embeddable]] = None
 ) -> CreateHNSWConfiguration:
@@ -434,6 +436,7 @@ def populate_create_hnsw_defaults(
     if config.get("resize_factor") is None:
         config["resize_factor"] = 1.2
     return config
+
 
 def validate_create_hnsw_config(
     config: CreateHNSWConfiguration, ef: Optional[EmbeddingFunction[Embeddable]] = None
