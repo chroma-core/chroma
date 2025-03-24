@@ -7,7 +7,6 @@ from chromadb.api import AdminAPI, ClientAPI, ServerAPI
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
     load_collection_configuration_from_json,
-    create_collection_configuration_from_legacy_collection_metadata,
 )
 from chromadb.api.shared_system_client import SharedSystemClient
 from chromadb.api.types import (
@@ -150,12 +149,6 @@ class Client(SharedSystemClient, ClientAPI):
     ) -> Collection:
         if configuration is None:
             configuration = {}
-            if metadata is not None:
-                configuration = (
-                    create_collection_configuration_from_legacy_collection_metadata(
-                        metadata
-                    )
-                )
             if embedding_function is not None:
                 configuration["embedding_function"] = embedding_function
         model = self._server.create_collection(
@@ -166,6 +159,7 @@ class Client(SharedSystemClient, ClientAPI):
             get_or_create=get_or_create,
             configuration=configuration,
         )
+        print(f"configuration_json: {model.configuration_json}")
         return Collection(
             client=self._server,
             model=model,

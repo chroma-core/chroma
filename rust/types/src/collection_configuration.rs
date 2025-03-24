@@ -55,11 +55,12 @@ pub struct InternalCollectionConfiguration {
 impl InternalCollectionConfiguration {
     pub fn from_legacy_metadata(
         metadata: Metadata,
+        embedding_function: Option<EmbeddingFunctionConfiguration>,
     ) -> Result<Self, HnswParametersFromSegmentError> {
         let hnsw = HnswConfiguration::from_legacy_segment_metadata(&Some(metadata))?;
         Ok(Self {
             vector_index: VectorIndexConfiguration::Hnsw(hnsw),
-            embedding_function: None,
+            embedding_function,
         })
     }
 
@@ -81,9 +82,15 @@ impl InternalCollectionConfiguration {
         &self,
         segment: &Segment,
     ) -> Result<Option<HnswConfiguration>, HnswParametersFromSegmentError> {
+        return self.get_hnsw_config_from_legacy_metadata(&segment.metadata);
+    }
+
+    pub fn get_hnsw_config_from_legacy_metadata(
+        &self,
+        metadata: &Option<Metadata>,
+    ) -> Result<Option<HnswConfiguration>, HnswParametersFromSegmentError> {
         if let Some(config) = self.get_hnsw_config() {
-            let config_from_metadata =
-                HnswConfiguration::from_legacy_segment_metadata(&segment.metadata)?;
+            let config_from_metadata = HnswConfiguration::from_legacy_segment_metadata(metadata)?;
 
             if config == HnswConfiguration::default() && config != config_from_metadata {
                 return Ok(Some(config_from_metadata));

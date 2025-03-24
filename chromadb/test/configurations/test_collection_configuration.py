@@ -75,6 +75,8 @@ def test_legacy_embedding_function(client: ClientAPI) -> None:
         ef_config = config.get("embedding_function", {})  # type: ignore
         if isinstance(ef_config, dict):
             assert ef_config.get("type") == "legacy"
+    else:
+        assert False, f"config: {config}"
 
     # Get with same legacy function
     coll2 = client.get_collection(

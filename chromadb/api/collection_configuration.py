@@ -66,9 +66,7 @@ def load_collection_configuration_from_json(
 ) -> CollectionConfiguration:
     if json_map.get("hnsw") is None:
         if json_map.get("embedding_function") is None:
-            return CollectionConfiguration(
-                hnsw=default_create_hnsw_configuration(),
-            )
+            return CollectionConfiguration()
         else:
             ef_config = json_map["embedding_function"]
             if ef_config["type"] == "legacy":
@@ -131,8 +129,6 @@ def collection_configuration_to_json(config: CollectionConfiguration) -> Dict[st
         except ValueError:
             ef = None
 
-    if hnsw_config is None:
-        hnsw_config = default_create_hnsw_configuration()
     if ef is None:
         ef = cast(EmbeddingFunction[Embeddable], DefaultEmbeddingFunction())
 
@@ -160,8 +156,6 @@ def collection_configuration_to_json(config: CollectionConfiguration) -> Dict[st
         )
         ef = None
         ef_config = {"type": "legacy"}
-
-    hnsw_config = populate_create_hnsw_defaults(hnsw_config, ef)
 
     validate_create_hnsw_config(hnsw_config, ef)
 
@@ -226,6 +220,12 @@ def create_collection_configuration_from_legacy_collection_metadata(
     metadata: CollectionMetadata,
 ) -> CreateCollectionConfiguration:
     """Create a CreateCollectionConfiguration from legacy collection metadata"""
+    return create_collection_configuration_from_legacy_metadata_dict(metadata)
+
+def create_collection_configuration_from_legacy_metadata_dict(
+    metadata: Dict[str, Any],
+) -> CreateCollectionConfiguration:
+    """Create a CreateCollectionConfiguration from legacy collection metadata"""
     old_to_new = {
         "hnsw:space": "space",
         "hnsw:ef_construction": "ef_construction",
@@ -269,7 +269,6 @@ def create_collection_configuration_from_legacy_metadata(
 
     if existing_create_collection_configuration.get("hnsw") is None:
         hnsw_config = json_to_create_hnsw_configuration(json_map)
-        hnsw_config = populate_create_hnsw_defaults(hnsw_config)
         validate_create_hnsw_config(hnsw_config)
         return CreateCollectionConfiguration(hnsw=hnsw_config)
 
@@ -278,19 +277,11 @@ def create_collection_configuration_from_legacy_metadata(
         hnsw_config = json_to_create_hnsw_configuration(json_map)
     else:
         hnsw_config = existing_hnsw_config
-    hnsw_config = populate_create_hnsw_defaults(hnsw_config)
     validate_create_hnsw_config(hnsw_config)
 
     existing_create_collection_configuration["hnsw"] = hnsw_config
 
     return existing_create_collection_configuration
-
-
-def default_create_collection_configuration() -> CreateCollectionConfiguration:
-    return CreateCollectionConfiguration(
-        hnsw=default_create_hnsw_configuration(),
-        embedding_function=DefaultEmbeddingFunction(),  # type: ignore
-    )
 
 
 def legacy_create_collection_configuration_path(
@@ -381,8 +372,6 @@ def create_collection_configuration_to_json(
     config: CreateCollectionConfiguration,
 ) -> Dict[str, Any]:
     """Convert a CreateCollection configuration to a JSON-serializable dict"""
-    if config.get("hnsw") is None:
-        config["hnsw"] = default_create_hnsw_configuration()
     if config.get("embedding_function") is None:
         config["embedding_function"] = cast(
             EmbeddingFunction[Embeddable], DefaultEmbeddingFunction()
@@ -417,30 +406,13 @@ def create_collection_configuration_to_json(
         ef = None
         ef_config = {"type": "legacy"}
 
-    hnsw_config = populate_create_hnsw_defaults(hnsw_config, ef)
-
     validate_create_hnsw_config(hnsw_config, ef)
 
     return {
         "hnsw": hnsw_config,
         "embedding_function": ef_config,
     }
-
-
-def default_create_hnsw_configuration() -> CreateHNSWConfiguration:
-    """Create a default CreateHNSW configuration"""
-    return CreateHNSWConfiguration(
-        space=Space.L2,
-        ef_construction=100,
-        max_neighbors=16,
-        ef_search=100,
-        num_threads=cpu_count(),
-        batch_size=100,
-        sync_threshold=1000,
-        resize_factor=1.2,
-    )
-
-
+    
 def populate_create_hnsw_defaults(
     config: CreateHNSWConfiguration, ef: Optional[EmbeddingFunction[Embeddable]] = None
 ) -> CreateHNSWConfiguration:
@@ -463,11 +435,12 @@ def populate_create_hnsw_defaults(
         config["resize_factor"] = 1.2
     return config
 
-
 def validate_create_hnsw_config(
     config: CreateHNSWConfiguration, ef: Optional[EmbeddingFunction[Embeddable]] = None
 ) -> None:
     """Validate a CreateHNSW configuration"""
+    if config is None:
+        return
     if "batch_size" in config and "sync_threshold" in config:
         if config["batch_size"] > config["sync_threshold"]:
             raise ValueError("batch_size must be less than or equal to sync_threshold")
