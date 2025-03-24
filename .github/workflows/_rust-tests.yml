@@ -22,7 +22,15 @@ jobs:
       - name: Build CLI
         run: cargo build --bin chroma
       - name: Test
-        run: cargo nextest run --no-capture
+        run: cargo nextest run --no-capture --profile ci
+      - name: Upload test results
+        uses: datadog/junit-upload-github-action@v1
+        with:
+            api_key: ${{ secrets.DD_API_KEY }}
+            site: ${{ vars.DD_SITE }}
+            service: chroma
+            files: target/nextest/ci/junit.xml
+            logs: true
 
   test-integration:
     strategy:
@@ -49,7 +57,12 @@ jobs:
       - name: Build CLI
         run: cargo build --bin chroma
       - name: Run tests
-        run: cargo nextest run --profile k8s_integration
+        run: cargo nextest run --profile ci_k8s_integration
+      - name: Upload test results
+        run: datadog-ci junit upload target/nextest/ci/junit.xml
+        env:
+          DD_API_KEY: ${{secrets.DD_API_KEY}}
+          DD_SITE: ${{ vars.DD_SITE }}
       - name: Save service logs to artifact
         if: always()
         uses: ./.github/actions/export-tilt-logs
