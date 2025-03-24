@@ -39,9 +39,9 @@ impl ManifestCondition {
             assert_eq!(self.snapshots.len(), manifest.snapshots.len());
             for (expected, actual) in self.snapshots.iter().zip(manifest.snapshots.iter()) {
                 assert_eq!(expected.depth, actual.depth);
-                // TODO(rescrv):
-                // Check the content of the snapshot.
-                // Not done because all tests put the snapshot post-condition in postcondition checks.
+                expected
+                    .assert(storage, prefix, &actual.path_to_snapshot)
+                    .await;
             }
             assert_eq!(self.fragments.len(), manifest.fragments.len());
             for (expected, actual) in self.fragments.iter().zip(manifest.fragments.iter()) {
@@ -62,7 +62,6 @@ impl ManifestCondition {
 
 #[derive(Clone, Debug)]
 pub struct SnapshotCondition {
-    pub path: String,
     pub depth: u8,
     pub writer: String,
     pub snapshots: Vec<SnapshotCondition>,
@@ -70,9 +69,9 @@ pub struct SnapshotCondition {
 }
 
 impl SnapshotCondition {
-    pub async fn assert(&self, storage: &Storage, prefix: &str) {
+    pub async fn assert(&self, storage: &Storage, prefix: &str, path: &str) {
         let json = storage
-            .get(&format!("{prefix}/{}", self.path))
+            .get(&format!("{prefix}/{}", path))
             .await
             .expect("post condition expects snapshot to exist");
         let snapshot = serde_json::from_slice::<Snapshot>(&json)
@@ -166,8 +165,11 @@ pub async fn assert_conditions(storage: &Storage, prefix: &str, postconditions: 
             Condition::Manifest(postcondition) => {
                 postcondition.assert(storage, prefix).await;
             }
-            Condition::Snapshot(postcondition) => {
-                postcondition.assert(storage, prefix).await;
+            Condition::Snapshot(_) => {
+                // TODO(rescrv):  Figure out some way to fix the setsum so we can address snapshots
+                // by setsum.  Otherwise addressing them by path is difficult to do in test.
+                // If this is problematic, reference a snapshotcondition within a manifest and
+                // it'll get tested there.
             }
             Condition::Fragment(postcondition) => {
                 postcondition.assert(storage, prefix).await;

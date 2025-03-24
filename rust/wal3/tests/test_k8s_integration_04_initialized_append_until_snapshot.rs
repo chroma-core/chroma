@@ -38,7 +38,7 @@ async fn test_k8s_integration_04_initialized_append_until_snapshot() {
     .await;
     let mut options = LogWriterOptions::default();
     options.snapshot_manifest.fragment_rollover_threshold = 1;
-    options.snapshot_manifest.snapshot_rollover_threshold = 1;
+    options.snapshot_manifest.snapshot_rollover_threshold = 2;
     let log = LogWriter::open(
         options,
         Arc::clone(&storage),
@@ -86,7 +86,6 @@ async fn test_k8s_integration_04_initialized_append_until_snapshot() {
             acc_bytes: 2374,
             writer: "test writer".to_string(),
             snapshots: vec![SnapshotCondition {
-                path: "snapshot/SNAPSHOT".to_string(),
                 depth: 1,
                 writer: "test writer".to_string(),
                 snapshots: vec![],
@@ -117,14 +116,21 @@ async fn test_k8s_integration_04_initialized_append_until_snapshot() {
         Condition::Manifest(ManifestCondition {
             acc_bytes: 3561,
             writer: "test writer".to_string(),
-            snapshots: vec![SnapshotCondition {
-                path: "snapshot/SNAPSHOT".to_string(),
-                depth: 1,
-                writer: "test writer".to_string(),
-                snapshots: vec![],
-                fragments: vec![fragment1.clone()],
-            }],
-            fragments: vec![fragment2.clone(), fragment3.clone()],
+            snapshots: vec![
+                SnapshotCondition {
+                    depth: 1,
+                    writer: "test writer".to_string(),
+                    snapshots: vec![],
+                    fragments: vec![fragment1.clone()],
+                },
+                SnapshotCondition {
+                    depth: 1,
+                    writer: "test writer".to_string(),
+                    snapshots: vec![],
+                    fragments: vec![fragment2.clone()],
+                },
+            ],
+            fragments: vec![fragment3.clone()],
         }),
         Condition::Fragment(fragment1.clone()),
         Condition::Fragment(fragment2.clone()),
