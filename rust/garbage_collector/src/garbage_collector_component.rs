@@ -76,6 +76,16 @@ impl Component for GarbageCollector {
     }
 
     async fn start(&mut self, ctx: &ComponentContext<Self>) {
+        tracing::info!("Starting garbage collector component");
+
+        // Run initial garbage collection immediately
+        self.handle(GarbageCollectMessage {}, ctx).await;
+
+        // Schedule subsequent garbage collections
+        tracing::info!(
+            "Scheduling periodic garbage collection every {} minutes",
+            self.gc_interval_mins
+        );
         ctx.scheduler.schedule(
             GarbageCollectMessage {},
             Duration::from_secs(self.gc_interval_mins * 60),
@@ -98,11 +108,13 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
         _ctx: &ComponentContext<Self>,
     ) -> Self::Result {
         // Get all collections to gc and create gc orchestrator for each.
+        tracing::info!("Getting collections to gc");
         let collections_to_gc = self
             .sysdb_client
             .get_collections_to_gc()
             .await
             .expect("Failed to get collections to gc");
+        tracing::info!("Got {} collections to gc", collections_to_gc.len());
         let mut jobs = FuturesUnordered::new();
         for collection in collections_to_gc {
             if self.disabled_collections.contains(&collection.id) {
@@ -112,6 +124,7 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
                 );
                 continue;
             }
+            tracing::info!("Creating gc orchestrator for collection: {}", collection.id);
             let dispatcher = match self.dispatcher {
                 Some(ref dispatcher) => dispatcher.clone(),
                 None => {
