@@ -3,7 +3,7 @@ use reqwest::Method;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use crate::clients::utils::send_request;
-use crate::utils::{get_address_book, Profile};
+use crate::utils::get_address_book;
 
 #[derive(Debug, Error)]
 pub enum DashboardClientError {
@@ -34,12 +34,13 @@ struct CreateApiKeyResponse {
 
 #[derive(Default, Debug, Clone)]
 pub struct DashboardClient {
-    api_url: String,
+    pub api_url: String,
+    pub frontend_url: String,
 }
 
 impl DashboardClient {
-    pub fn new(api_url: String) -> Self {
-        DashboardClient { api_url }
+    pub fn new(api_url: String, frontend_url: String) -> Self {
+        DashboardClient { api_url, frontend_url }
     }
 
     fn headers(&self, session_cookies: &str) -> Result<Option<HeaderMap>, DashboardClientError> {
@@ -66,7 +67,7 @@ impl DashboardClient {
     }
 }
 
-pub fn get_dashboard_client(profile: Option<&Profile>, dev: bool) -> DashboardClient {
+pub fn get_dashboard_client(dev: bool) -> DashboardClient {
     let address_book = get_address_book(dev);
-    
+    DashboardClient::new(address_book.dashboard_api_url.clone(), address_book.dashboard_api_url)
 }

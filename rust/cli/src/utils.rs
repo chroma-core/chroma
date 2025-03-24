@@ -12,6 +12,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 use regex::Regex;
 use crate::clients::chroma_client::ChromaClientError;
+use crate::clients::dashboard_client::DashboardClientError;
 use crate::commands::login::LoginError;
 
 pub const LOGO: &str = "
@@ -28,8 +29,8 @@ pub const LOGO: &str = "
                 \x1b[38;5;069m(((((\x1b[38;5;203m((((    \x1b[38;5;220m#########\x1b[0m
 ";
 
-const CHROMA_DIR: &str = ".chroma";
-const CREDENTIALS_FILE: &str = "credentials";
+pub const CHROMA_DIR: &str = ".chroma";
+pub const CREDENTIALS_FILE: &str = "credentials";
 const CONFIG_FILE: &str = "config.json";
 
 #[derive(Debug, Error)]
@@ -47,7 +48,9 @@ pub enum CliError {
     #[error("{0}")]
     Db(#[from] DbError),
     #[error("{0}")]
-    Login(#[from] LoginError)
+    Login(#[from] LoginError),
+    #[error("{0}")]
+    DashboardClient(#[from] DashboardClientError),
 }
 
 #[derive(Debug, Error)]
@@ -90,6 +93,12 @@ pub struct Profile {
     pub tenant_id: String,
 }
 
+impl Profile {
+    pub fn new(api_key: String, tenant_id: String) -> Self {
+        Self { api_key, tenant_id }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CliConfig {
     pub current_profile: String,
@@ -109,12 +118,17 @@ impl AddressBook {
     pub fn local() -> Self {
         Self::new(
             "http://localhost:8000".to_string(),
-            
+            "http://localhost:8002".to_string(),
+            "http://localhost:3001".to_string()
         )
     }
 
     pub fn cloud() -> Self {
-        Self::new("https://api.trychroma.com:8000".to_string())
+        Self::new(
+            "https://api.trychroma.com:8000".to_string(),
+            "https://backend.trychroma.com".to_string(),
+            "https://trychroma.com".to_string()
+        )
     }
 }
 

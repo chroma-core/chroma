@@ -7,8 +7,10 @@ use dialoguer::{Input, Select};
 use dialoguer::theme::ColorfulTheme;
 use rand::Rng;
 use thiserror::Error;
-use crate::clients::dashboard_client::Team;
-use crate::utils::{validate_name, CliError, Profiles, UtilsError};
+use crate::clients::chroma_client::get_chroma_client;
+use crate::clients::dashboard_client::{get_dashboard_client, Team};
+use crate::commands::db::DbError;
+use crate::utils::{read_config, read_profiles, validate_name, write_config, write_profiles, CliError, Profile, Profiles, UtilsError, CHROMA_DIR, CREDENTIALS_FILE};
 
 const CLI_QUERY_PARAMETER: &str = "cli_redirect";
 
@@ -48,14 +50,47 @@ fn waiting_for_cli_host_message() -> String {
     "\nWaiting for browser authentication...\n(Ctrl-C to quit)\n".to_string()
 }
 
+fn login_success_message(team_name: &str, profile_name: &str) -> String {
+    format!(
+        "{} {}\nCredentials saved to ~/{}/{} under the profile {}\n", 
+        "Login successful for team".green().bold(),
+        team_name.green().bold(),
+        CHROMA_DIR,
+        CREDENTIALS_FILE,
+        profile_name
+    )
+}
+
+fn set_profile_message(profile_name: &str) -> String {
+    format!(
+        "To set this profile as the current profile: {} {}",
+        "chroma profile use".yellow(),
+        profile_name.yellow(),
+    )
+}
+
+fn next_steps_message() -> String {
+    println!("\nTry this next:");
+    println!("  Create a database");
+    println!("    {}", "chroma db create <db_name>".yellow());
+
+    println!("\nFor a full list of commands:");
+    println!("  {}\n", "chroma --help".yellow());
+    format!(
+        "Try this next:\n   Create a database\n    {}\n\nFor a full list of commands:\n   {}",
+        "chroma db create <db_name>".yellow(),
+        "chroma --help".yellow()
+    )
+}
+
 fn validate_profile_name(profile_name: String) -> Result<String, CliError> {
     Ok(validate_name(profile_name).map_err(LoginError::InvalidProfileName)?)
 }
 
-fn select_team(teams: &[Team]) -> Result<&Team, CliError> {
+fn select_team(teams: Vec<Team>) -> Result<Team, CliError> {
     match teams.len() {
         0 => Err(LoginError::NoTeamsFound.into()),
-        1 => Ok(teams.iter().next().unwrap()),
+        1 => Ok(teams.into_iter().next().unwrap()),
         _ => {
             let team_names: Vec<String> = teams.iter().map(|team| team.name.clone()).collect();
             println!("{}", team_selection_prompt());
@@ -84,10 +119,10 @@ fn find_random_available_port(start: u16, end: u16, attempts: u32) -> Result<u16
 fn filter_team(team_id: &str, teams: Vec<Team>) -> Result<Team, LoginError> {
     teams.into_iter()
         .find(|team| team.uuid.eq(team_id))
-        .ok_or_else(|| LoginError::TeamNotFound(team_id.to_string()).into())
+        .ok_or_else(|| LoginError::TeamNotFound(team_id.to_string()))
 }
 
-fn select_profile(team: &Team, profiles: &Profiles) -> Result<String, Box<dyn Error>> {
+fn select_profile(team: &Team, profiles: &Profiles) -> Result<String, CliError> {
     let team_name = match team.name.as_str() {
         "default" => "default",
         _ => team.slug.as_str(),
@@ -101,13 +136,13 @@ fn select_profile(team: &Team, profiles: &Profiles) -> Result<String, Box<dyn Er
     println!("{}", profile_name_input_prompt());
     let profile = Input::with_theme(&ColorfulTheme::default())
         .default(suggestion)
-        .interact_text()?;
+        .interact_text().map_err(|_| UtilsError::UserInputFailed)?;
     println!();
 
     Ok(profile.replace(" (override)", ""))
 }
 
-fn browser_login(api_url: &str, frontend_url: &str) -> Result<String, Box<dyn Error>> {
+fn browser_auth(api_url: &str, frontend_url: &str) -> Result<String, Box<dyn Error>> {
     let port = find_random_available_port(8050, 9000, 100)?;
     let login_url = format!("{}/login?{}=http://localhost:{}", api_url, CLI_QUERY_PARAMETER, port);
 
@@ -138,132 +173,64 @@ fn browser_login(api_url: &str, frontend_url: &str) -> Result<String, Box<dyn Er
     Ok(cookies.to_string())
 }
 
-pub fn login(args: LoginArgs) -> Result<(), CliError> {
-    let env_config = load_cli_env_config(args.dev);
-    let session_cookies = match browser_login(env_config.dashboard_url, args.redirect_port) {
-        Ok(cookies) => cookies,
-        Err(e) => {
-            let message = format!("Failed to authenticate user: {}", e);
-            eprintln!("{}\n", message.red());
-            return;
-        }
-    };
-
-    let teams = match get_teams(env_config.dashboard_api_url, &session_cookies) {
-        Ok(teams) => teams,
-        Err(e) => {
-            let message = format!("Failed to fetch teams for user: {}", e);
-            eprintln!("{}\n", message.red());
-            return;
-        }
-    };
-
-    let (api_key, team) = match args.api_key {
+pub async fn browser_login(args: LoginArgs) -> Result<(), CliError> {
+    let dashboard_client = get_dashboard_client(args.dev);
+    let session_cookies = browser_auth(&dashboard_client.api_url, &dashboard_client.frontend_url).map_err(|_| LoginError::BrowserAuthFailed)?;
+    let teams = dashboard_client.get_teams(&session_cookies).await?;
+    
+    let (api_key, team) = match args.api_key { 
         Some(api_key) => {
-            let team_id = match get_tenant_id(env_config.frontend_url, api_key.as_str()) {
-                Ok(id) => id,
-                Err(_) => {
-                    eprintln!("{}\n", "Failed to find team ID for API key".red());
-                    return;
-                }
-            };
-            let team = match filter_team(team_id.as_str(), teams) {
-                Ok(team) => team,
-                Err(_) => {
-                    eprintln!("{}\n", "Failed to find team ID for API key".red());
-                    return;
-                }
-            };
+            let chroma_client = get_chroma_client(
+                Some(&Profile::new(api_key.clone(), "default".to_string())), args.dev
+            );
+            let team_id = chroma_client.get_tenant_id().await?;
+            let team = filter_team(&team_id, teams)?;
             (api_key, team)
         },
         None => {
-            let team = match select_team(teams) {
-                Ok(team) => team,
-                Err(_) => {
-                    eprintln!("{}\n", "Failed to find teams for user".red());
-                    return;
-                }
-            };
-            let api_key = match get_api_key(env_config.dashboard_api_url, &team.slug, &session_cookies) {
-                Ok(api_key) => api_key,
-                Err(_) => {
-                    eprintln!("{}\n", "Failed to generate API key for user".red());
-                    return;
-                }
-            };
+            let team = select_team(teams)?;
+            let api_key = dashboard_client.get_api_key(&team.slug, &session_cookies).await?;
             (api_key, team)
         }
     };
-
-    let mut profiles = match get_profiles() {
-        Ok(profiles) => profiles,
-        Err(_) => {
-            eprintln!("{}\n", "Failed to load Chroma credentials file".red());
-            return;
-        }
-    };
-
-    let profile_name = match args.profile {
-        Some(profile) => profile,
+    
+    let mut profiles = read_profiles()?;
+    let mut profile_name = match args.profile { 
+        Some(name) => name,
         None => {
-            match select_profile(&team, &profiles) {
-                Ok(profile) => profile,
-                Err(_) => {
-                    eprintln!("{}\n", "Failed to get profile name".red());
-                    return;
-                }
-            }
+            select_profile(&team, &profiles)?
         }
     };
-
-    if validate_profile(&profile_name).is_err() {
-        eprintln!("{}\n", "Profile name is not valid".red());
-        return;
-    }
-
-    let profile = Profile { name: profile_name.clone(), api_key, team_id: team.uuid.clone() };
+    profile_name = validate_profile_name(profile_name)?;
+    let profile = Profile::new(api_key, team.uuid);
+    
     let set_current = profiles.is_empty();
-    profiles.insert(profile_name.clone(), profile.clone());
+    profiles.insert(profile_name.clone(), profile);
+    write_profiles(&profiles)?;
 
-    match write_credentials(&profiles) {
-        Ok(_) => {},
-        Err(_) => {
-            eprintln!("{}\n", "Failed to write credentials with new profile".red());
-            return;
-        }
-    }
-
+    let mut config = read_config()?;
+    
     if set_current {
-        let config = CliConfig { current_profile: profile.name };
-        match write_config(&config) {
-            Ok(_) => {},
-            Err(_) => {
-                eprintln!("{}\n", "Failed to write config file".red());
-                return;
-            }
-        }
+        config.current_profile = profile_name.clone();
+        write_config(&config)?;
     }
-
-    println!("{}", format!("Login successful for team {}!", team.name).green().bold());
-    println!("Credentials saved to ~/.chroma/credentials under the profile {}", profile_name.clone());
-
-    let cli_config = match read_config() {
-        Ok(c) => c,
-        Err(_) => {
-            eprintln!("{}\n", "Failed to read config file".red());
-            return;
-        }
-    };
-    if cli_config.current_profile != profile_name {
-        let command = format!("chroma profile use {}", profile_name);
-        println!("\nTo set this profile as the current profile: {}", command.yellow());
+    
+    println!("{}", login_success_message(&team.name, &profile_name));
+    
+    if !config.current_profile.eq(&profile_name) {
+        println!("{}", set_profile_message(&profile_name));
     }
+    
+    println!("{}", next_steps_message());
+    
+    Ok(())
+}
 
-    println!("\nTry this next:");
-    println!("  Create a database");
-    println!("    {}", "chroma db create <db_name>".yellow());
-
-    println!("\nFor a full list of commands:");
-    println!("  {}\n", "chroma --help".yellow());
+pub fn login(args: LoginArgs) -> Result<(), CliError> {
+    let runtime = tokio::runtime::Runtime::new().map_err(|_| DbError::RuntimeError)?;
+    runtime.block_on(async {
+       browser_login(args).await
+    })?;
+    Ok(())
 }
 
