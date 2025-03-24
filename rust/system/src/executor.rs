@@ -55,7 +55,7 @@ where
         mut channel: tokio::sync::mpsc::Receiver<WrappedMessage<C>>,
     ) {
         self.handler
-            .start(&ComponentContext {
+            .on_start(&ComponentContext {
                 system: self.inner.system.clone(),
                 sender: self.inner.sender.clone(),
                 cancellation_token: self.inner.cancellation_token.clone(),
@@ -67,8 +67,8 @@ where
             select! {
                 _ = self.inner.cancellation_token.cancelled() => {
                     if let Err(err) = timeout(
-                        self.handler.graceful_shutdown_timeout(),
-                        self.handler.graceful_shutdown(),
+                        self.handler.on_stop_timeout(),
+                        self.handler.on_stop(),
                     )
                     .await
                     {
