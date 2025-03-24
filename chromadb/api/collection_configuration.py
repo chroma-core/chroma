@@ -111,7 +111,7 @@ def load_collection_configuration_from_json(
 
 
 def collection_configuration_to_json_str(config: CollectionConfiguration) -> str:
-    return json.dumps(collection_configuration_to_json(config), cls=ChromaJSONEncoder)
+    return json.dumps(collection_configuration_to_json(config))
 
 
 def collection_configuration_to_json(config: CollectionConfiguration) -> Dict[str, Any]:
@@ -325,9 +325,7 @@ def create_collection_configuration_to_json_str(
     config: CreateCollectionConfiguration,
 ) -> str:
     """Convert a CreateCollection configuration to a JSON-serializable string"""
-    return json.dumps(
-        create_collection_configuration_to_json(config), cls=ChromaJSONEncoder
-    )
+    return json.dumps(create_collection_configuration_to_json(config))
 
 
 # TODO: make warnings prettier and add link to migration docs
@@ -541,7 +539,7 @@ def update_collection_configuration_to_json_str(
 ) -> str:
     """Convert an UpdateCollectionConfiguration to a JSON-serializable string"""
     json_dict = update_collection_configuration_to_json(config)
-    return json.dumps(json_dict, cls=ChromaJSONEncoder)
+    return json.dumps(json_dict)
 
 
 def update_collection_configuration_to_json(
@@ -724,12 +722,3 @@ class InvalidConfigurationError(ValueError):
     """Represents an error that occurs when a configuration is invalid."""
 
     pass
-
-
-class ChromaJSONEncoder(json.JSONEncoder):
-    def default(self, obj: Any) -> Any:
-        if isinstance(obj, Space):
-            return obj.to_json()
-        if obj is NotImplemented:
-            return None
-        return super().default(obj)
