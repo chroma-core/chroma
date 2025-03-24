@@ -41,31 +41,6 @@ def default_hnsw_configuration() -> HNSWConfiguration:
     )
 
 
-def json_to_hnsw_configuration(json_map: Dict[str, Any]) -> HNSWConfiguration:
-    config: HNSWConfiguration = {}
-    if "space" in json_map:
-        space_value = json_map["space"]
-        if isinstance(space_value, str):
-            config["space"] = Space(space_value)
-        else:
-            config["space"] = space_value
-    if "ef_construction" in json_map:
-        config["ef_construction"] = json_map["ef_construction"]
-    if "max_neighbors" in json_map:
-        config["max_neighbors"] = json_map["max_neighbors"]
-    if "ef_search" in json_map:
-        config["ef_search"] = json_map["ef_search"]
-    if "num_threads" in json_map:
-        config["num_threads"] = json_map["num_threads"]
-    if "batch_size" in json_map:
-        config["batch_size"] = json_map["batch_size"]
-    if "sync_threshold" in json_map:
-        config["sync_threshold"] = json_map["sync_threshold"]
-    if "resize_factor" in json_map:
-        config["resize_factor"] = json_map["resize_factor"]
-    return config
-
-
 class CollectionConfiguration(TypedDict, total=False):
     hnsw: Optional[HNSWConfiguration]
     embedding_function: Optional[EmbeddingFunction[Embeddable]]
@@ -85,6 +60,7 @@ def load_collection_configuration_from_json_str(
     return load_collection_configuration_from_json(json_map)
 
 
+# TODO: make warnings prettier and add link to migration docs
 def load_collection_configuration_from_json(
     json_map: Dict[str, Any]
 ) -> CollectionConfiguration:
@@ -113,7 +89,7 @@ def load_collection_configuration_from_json(
     else:
         if json_map.get("embedding_function") is None:
             return CollectionConfiguration(
-                hnsw=json_to_hnsw_configuration(json_map["hnsw"])
+                hnsw=cast(HNSWConfiguration, json_map["hnsw"])
             )
         else:
             ef_config = json_map["embedding_function"]
@@ -124,7 +100,7 @@ def load_collection_configuration_from_json(
                     stacklevel=2,
                 )
                 return CollectionConfiguration(
-                    hnsw=json_to_hnsw_configuration(json_map["hnsw"])
+                    hnsw=cast(HNSWConfiguration, json_map["hnsw"])
                 )
             else:
                 ef = cast(
@@ -132,7 +108,7 @@ def load_collection_configuration_from_json(
                     known_embedding_functions[ef_config["name"]],
                 )
                 return CollectionConfiguration(
-                    hnsw=json_to_hnsw_configuration(json_map["hnsw"]),
+                    hnsw=cast(HNSWConfiguration, json_map["hnsw"]),
                     embedding_function=ef.build_from_config(ef_config["config"]),
                 )
 
@@ -340,6 +316,7 @@ def load_create_collection_configuration_from_json_str(
     return load_create_collection_configuration_from_json(json_map)
 
 
+# TODO: make warnings prettier and add link to migration docs
 def load_create_collection_configuration_from_json(
     json_map: Dict[str, Any]
 ) -> CreateCollectionConfiguration:
@@ -399,6 +376,7 @@ def create_collection_configuration_to_json_str(
     )
 
 
+# TODO: make warnings prettier and add link to migration docs
 def create_collection_configuration_to_json(
     config: CreateCollectionConfiguration,
 ) -> Dict[str, Any]:
@@ -669,6 +647,7 @@ def load_update_collection_configuration_from_json_str(
     return load_update_collection_configuration_from_json(json_map)
 
 
+# TODO: make warnings prettier and add link to migration docs
 def load_update_collection_configuration_from_json(
     json_map: Dict[str, Any]
 ) -> UpdateCollectionConfiguration:
@@ -742,6 +721,7 @@ def overwrite_hnsw_configuration(
     return cast(HNSWConfiguration, result)
 
 
+# TODO: make warnings prettier and add link to migration docs
 def overwrite_embedding_function(
     existing_embedding_function: EmbeddingFunction[Embeddable],
     update_embedding_function: EmbeddingFunction[Embeddable],
