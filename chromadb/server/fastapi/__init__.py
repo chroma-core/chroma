@@ -793,6 +793,8 @@ class FastAPI(Server):
                             create.metadata
                         )
                     )
+                else:
+                    configuration = None
             else:
                 configuration = load_create_collection_configuration_from_json(
                     create.configuration

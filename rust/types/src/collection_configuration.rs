@@ -105,7 +105,7 @@ impl InternalCollectionConfiguration {
         &self,
         segment: &Segment,
     ) -> Result<Option<HnswConfiguration>, HnswParametersFromSegmentError> {
-        return self.get_hnsw_config_from_legacy_metadata(&segment.metadata);
+        self.get_hnsw_config_from_legacy_metadata(&segment.metadata)
     }
 
     pub fn get_hnsw_config_from_legacy_metadata(
