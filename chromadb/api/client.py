@@ -160,7 +160,6 @@ class Client(SharedSystemClient, ClientAPI):
             get_or_create=get_or_create,
             configuration=configuration,
         )
-        print(f"configuration_json: {model.configuration_json}")
         return Collection(
             client=self._server,
             model=model,
