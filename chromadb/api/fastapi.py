@@ -261,6 +261,8 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             },
         )
         model = CollectionModel.from_json(resp_json)
+
+        # TODO: Remove this once server response contains configuration
         if (
             configuration is None or configuration.get("hnsw") is None
         ) and model.metadata is not None:

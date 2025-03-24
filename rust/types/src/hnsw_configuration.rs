@@ -12,6 +12,8 @@ pub enum HnswParametersFromSegmentError {
     InvalidMetadata(#[from] serde_json::Error),
     #[error("Invalid parameters: {0}")]
     InvalidParameters(#[from] validator::ValidationErrors),
+    #[error("Incompatible vector index types")]
+    IncompatibleVectorIndexTypes,
 }
 
 impl ChromaError for HnswParametersFromSegmentError {
@@ -19,6 +21,9 @@ impl ChromaError for HnswParametersFromSegmentError {
         match self {
             HnswParametersFromSegmentError::InvalidMetadata(_) => ErrorCodes::InvalidArgument,
             HnswParametersFromSegmentError::InvalidParameters(_) => ErrorCodes::InvalidArgument,
+            HnswParametersFromSegmentError::IncompatibleVectorIndexTypes => {
+                ErrorCodes::InvalidArgument
+            }
         }
     }
 }

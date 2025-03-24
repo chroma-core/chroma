@@ -203,8 +203,7 @@ impl SysDb {
             None => metadata
                 .clone()
                 .map(|m| {
-                    InternalCollectionConfiguration::from_legacy_metadata(m, None)
-                        .map_err(|e| e.boxed())
+                    InternalCollectionConfiguration::from_legacy_metadata(m).map_err(|e| e.boxed())
                 })
                 .transpose()?
                 .unwrap_or(InternalCollectionConfiguration::default_hnsw()),
