@@ -289,19 +289,29 @@ impl TestSysDb {
         }
         version_info.version_change_reason = VersionChangeReason::DataCompaction as i32;
 
-        let flush_compaction_info: FlushSegmentCompactionInfo = (&segment_flush_info[0])
-            .try_into()
-            .expect("Failed to convert SegmentFlushInfo");
-
         let mut segment_info = CollectionSegmentInfo::default();
-        segment_info.segment_compaction_info = vec![flush_compaction_info];
+        let mut flush_compaction_infos = Vec::new();
+
+        // Iterate through all segment flush infos
+        for segment_flush_info in segment_flush_info.iter() {
+            let flush_compaction_info: FlushSegmentCompactionInfo = segment_flush_info
+                .try_into()
+                .expect("Failed to convert SegmentFlushInfo");
+            flush_compaction_infos.push(flush_compaction_info);
+        }
+
+        segment_info.segment_compaction_info = flush_compaction_infos;
         version_info.segment_info = Some(segment_info);
 
         // Add new version to history
         version_history.versions.push(version_info);
         version_file.version_history = Some(version_history);
 
-        // tracing::info!("version_file: {:?}", version_file);
+        tracing::debug!(
+            line = line!(),
+            "^^^^^^^\nversion_file: {:?}\n^^^^^^^",
+            version_file
+        );
 
         // Update the version file name.
         let version_file_name = format!(
@@ -310,11 +320,6 @@ impl TestSysDb {
             collection_id.to_string(),
             next_version
         );
-        // inner
-        //     .collections
-        //     .get_mut(&collection_id)
-        //     .unwrap()
-        //     .version_file_name = version_file_name.clone();
 
         inner
             .collection_to_version_file_name
@@ -395,6 +400,13 @@ impl TestSysDb {
         total_records_post_compaction: u64,
         size_bytes_post_compaction: u64,
     ) -> Result<FlushCompactionResponse, FlushCompactionError> {
+        // Print the segment flush info
+        tracing::debug!(
+            line = line!(),
+            "|^^^^^^^\nsegment_flush_info: {:?}\n^^^^^^^",
+            segment_flush_info
+        );
+
         let new_collection_version: i32;
         let mut last_compaction_time: i64;
         {

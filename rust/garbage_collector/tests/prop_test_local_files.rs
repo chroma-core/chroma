@@ -569,7 +569,7 @@ impl GcTest {
         let sparse_index_id = block_on(create_test_sparse_index(
             &self.storage,
             record_segment_info.block_ids.clone(),
-            Some("test_si_".to_string()),
+            Some("test_si_rec_".to_string()),
         ))
         .unwrap();
         // Create segment info for this version
@@ -591,24 +591,24 @@ impl GcTest {
             .find(|sbi| sbi.segment_type == SegmentType::BlockfileMetadata)
             .unwrap()
             .clone();
-        let sparse_index_id = block_on(create_test_sparse_index(
+        let sparse_index_id_metadata = block_on(create_test_sparse_index(
             &self.storage,
             metadata_segment_info.block_ids.clone(),
-            Some("test_si_".to_string()),
+            Some("test_si_meta_".to_string()),
         ))
         .unwrap();
         // Create segment info for this version
         let metadata_segment_id = metadata_segment_info.segment_id;
-        let mut file_paths = HashMap::new();
-        file_paths.insert(
+        let mut file_paths_metadata = HashMap::new();
+        file_paths_metadata.insert(
             "metadata_blockfile_1".to_string(),
             FilePaths {
-                paths: vec![sparse_index_id.to_string()],
+                paths: vec![sparse_index_id_metadata.to_string()],
             },
         );
         let metadata_segment_info = FlushSegmentCompactionInfo {
             segment_id: metadata_segment_id.to_string(),
-            file_paths,
+            file_paths: file_paths_metadata,
         };
 
         let record_segment_id = SegmentUuid::from_str(&record_segment_info.segment_id).unwrap();
