@@ -11,6 +11,8 @@ from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
     create_collection_configuration_to_json,
     create_collection_configuration_from_legacy_metadata_dict,
+    populate_create_hnsw_defaults,
+    validate_create_hnsw_config,
 )
 from chromadb import __version__
 from chromadb.api.base_http_client import BaseHTTPClient
@@ -261,13 +263,22 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         model = CollectionModel.from_json(resp_json)
 
         # TODO: Remove this once server response contains configuration
-        if (
-            configuration is None or configuration.get("hnsw") is None
-        ) and model.metadata is not None:
-            model.configuration_json = create_collection_configuration_to_json(
-                create_collection_configuration_from_legacy_metadata_dict(
-                    model.metadata
+        if configuration is None or configuration.get("hnsw") is None:
+            if model.metadata is not None:
+                model.configuration_json = create_collection_configuration_to_json(
+                    create_collection_configuration_from_legacy_metadata_dict(
+                        model.metadata
+                    )
                 )
+        else:
+            # At this point we know configuration is not None and has hnsw
+            assert configuration is not None  # Help type checker
+            hnsw_config = configuration.get("hnsw")
+            assert hnsw_config is not None  # Help type checker
+            populate_create_hnsw_defaults(hnsw_config)
+            validate_create_hnsw_config(hnsw_config)
+            model.configuration_json = create_collection_configuration_to_json(
+                configuration
             )
         return model
 

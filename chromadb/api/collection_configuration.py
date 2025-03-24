@@ -499,7 +499,7 @@ def update_collection_configuration_from_legacy_collection_metadata(
 ) -> UpdateCollectionConfiguration:
     """Create an UpdateCollectionConfiguration from legacy collection metadata"""
     old_to_new = {
-        "hnsw:ef_search": "ef_search",
+        "hnsw:search_ef": "ef_search",
         "hnsw:num_threads": "num_threads",
         "hnsw:batch_size": "batch_size",
         "hnsw:sync_threshold": "sync_threshold",
@@ -519,7 +519,7 @@ def update_collection_configuration_from_legacy_update_metadata(
 ) -> UpdateCollectionConfiguration:
     """Create an UpdateCollectionConfiguration from legacy update metadata"""
     old_to_new = {
-        "hnsw:ef_search": "ef_search",
+        "hnsw:search_ef": "ef_search",
         "hnsw:num_threads": "num_threads",
         "hnsw:batch_size": "batch_size",
         "hnsw:sync_threshold": "sync_threshold",
