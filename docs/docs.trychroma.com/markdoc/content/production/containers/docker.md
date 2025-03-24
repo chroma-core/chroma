@@ -71,7 +71,7 @@ To use a custom config file, mount it into the container at `/config.yaml` like 
 
 ```terminal
 echo "allow_reset: true" > config.yaml # the server will now allow clients to reset its state
-docker run -v ./chroma-data:/data -v ./config.yaml:/config.yaml -p 8000:8000 chroma-core/chroma
+docker run -v ./chroma-data:/data -v ./config.yaml:/config.yaml -p 8000:8000 chromadb/chroma
 ```
 
 ## Observability with Docker
@@ -131,7 +131,7 @@ services:
     networks:
       - internal
   server:
-    image: chroma-core/chroma
+    image: chromadb/chroma
     volumes:
       - chroma_data:/data
     ports:
