@@ -206,6 +206,7 @@ impl TestSysDb {
         Ok(tenants)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn flush_compaction(
         &mut self,
         tenant_id: String,
@@ -214,6 +215,7 @@ impl TestSysDb {
         collection_version: i32,
         segment_flush_info: Arc<[SegmentFlushInfo]>,
         total_records_post_compaction: u64,
+        size_bytes_post_compaction: u64,
     ) -> Result<FlushCompactionResponse, FlushCompactionError> {
         let mut inner = self.inner.lock();
         let collection = inner.collections.get(&collection_id);
@@ -226,6 +228,7 @@ impl TestSysDb {
         let new_collection_version = collection_version + 1;
         collection.version = new_collection_version;
         collection.total_records_post_compaction = total_records_post_compaction;
+        collection.size_bytes_post_compaction = size_bytes_post_compaction;
         inner
             .collections
             .insert(collection.collection_id, collection);

@@ -346,6 +346,21 @@ Metadata
 pub type Metadata = HashMap<String, MetadataValue>;
 pub type DeletedMetadata = HashSet<String>;
 
+pub fn logical_size_of_metadata(metadata: &Metadata) -> usize {
+    metadata
+        .iter()
+        .map(|(k, v)| {
+            k.len()
+                + match v {
+                    MetadataValue::Bool(b) => size_of_val(b),
+                    MetadataValue::Int(i) => size_of_val(i),
+                    MetadataValue::Float(f) => size_of_val(f),
+                    MetadataValue::Str(s) => s.len(),
+                }
+        })
+        .sum()
+}
+
 pub fn get_metadata_value_as<'a, T>(
     metadata: &'a Metadata,
     key: &str,
