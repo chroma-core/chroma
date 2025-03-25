@@ -22,7 +22,7 @@ pub struct EmbeddingFunctionNewConfiguration {
     pub config: serde_json::Value,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum VectorIndexConfiguration {
     Hnsw(HnswConfiguration),
@@ -68,7 +68,7 @@ fn default_vector_index_config() -> VectorIndexConfiguration {
     VectorIndexConfiguration::Hnsw(HnswConfiguration::default())
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct InternalCollectionConfiguration {
     #[serde(default = "default_vector_index_config")]
     pub vector_index: VectorIndexConfiguration,
