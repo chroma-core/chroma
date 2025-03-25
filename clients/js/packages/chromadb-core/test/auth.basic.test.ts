@@ -51,5 +51,7 @@ describe("auth basic", () => {
     await basicAuthClient.createCollection({ name: "test" });
     collections = await basicAuthClient.listCollections();
     expect(collections.length).toBe(1);
+    const collectionCount = await basicAuthClient.countCollections();
+    expect(collectionCount).toBe(1);
   });
 });
