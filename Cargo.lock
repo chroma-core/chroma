@@ -1442,6 +1442,7 @@ dependencies = [
  "dirs 6.0.0",
  "indicatif",
  "predicates",
+ "rand 0.8.5",
  "reqwest 0.12.9",
  "serde",
  "serde_json",
