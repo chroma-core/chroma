@@ -1518,6 +1518,9 @@ impl SpannIndexWriter {
             let (non_deleted_heads, _) = hnsw_read_guard
                 .get_all_ids()
                 .map_err(|_| SpannIndexWriterError::HnswIndexSearchError)?;
+            clean_hnsw_write_guard
+                .resize(non_deleted_heads.len())
+                .map_err(|_| SpannIndexWriterError::HnswIndexResizeError)?;
             for head in non_deleted_heads {
                 let head_embedding = hnsw_read_guard
                     .get(head)
