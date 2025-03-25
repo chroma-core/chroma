@@ -222,7 +222,7 @@ def test_configuration_updates(client: ClientAPI) -> None:
     # Create initial collection
     initial_hnsw: CreateHNSWConfiguration = {
         "ef_search": 10,
-        "num_threads": 2,
+        "num_threads": 1,
         "space": Space.COSINE,  # Required field
     }
     coll = client.create_collection(
@@ -233,7 +233,7 @@ def test_configuration_updates(client: ClientAPI) -> None:
     # Update configuration
     update_hnsw: UpdateHNSWConfiguration = {
         "ef_search": 20,
-        "num_threads": 4,
+        "num_threads": 2,
     }
     update_config: UpdateCollectionConfiguration = {
         "hnsw": update_hnsw,
