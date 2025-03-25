@@ -248,7 +248,7 @@ def test_configuration_updates(client: ClientAPI) -> None:
         hnsw_config = loaded_config.get("hnsw", {})
         if isinstance(hnsw_config, dict):
             assert hnsw_config.get("ef_search") == 20
-            assert hnsw_config.get("num_threads") == 4
+            assert hnsw_config.get("num_threads") == 2
 
 
 def test_configuration_persistence(sqlite_persistent: System) -> None:
