@@ -1495,6 +1495,16 @@ impl SpannIndexWriter {
     }
 
     pub async fn garbage_collect_heads(&mut self) -> Result<(), SpannIndexWriterError> {
+        let (len_with_deleted, len_without_deleted) = {
+            let hnsw_read_guard = self.hnsw_index.inner.read();
+            (hnsw_read_guard.len_with_deleted(), hnsw_read_guard.len())
+        };
+        if (len_with_deleted as f32) < (1.1 * (len_without_deleted as f32)) {
+            tracing::info!(
+                "No need to garbage collect heads since delete count is within threshold"
+            );
+            return Ok(());
+        }
         tracing::info!("Garbage collecting all the heads");
         // Create a new hnsw index and add elements to it.
         let clean_hnsw = self
@@ -1522,6 +1532,7 @@ impl SpannIndexWriter {
                 .resize(non_deleted_heads.len())
                 .map_err(|_| SpannIndexWriterError::HnswIndexResizeError)?;
             for head in non_deleted_heads {
+                tracing::debug!("Adding head {} to clean hnsw index", head);
                 let head_embedding = hnsw_read_guard
                     .get(head)
                     .map_err(|_| SpannIndexWriterError::HnswIndexSearchError)?
