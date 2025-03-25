@@ -1,5 +1,6 @@
 use std::{collections::HashSet, fmt::Debug, fmt::Formatter, str::FromStr, time::Duration};
 
+use crate::types::CleanupMode;
 use async_trait::async_trait;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
@@ -28,6 +29,7 @@ pub(crate) struct GarbageCollector {
     storage: Storage,
     dispatcher: Option<ComponentHandle<Dispatcher>>,
     system: Option<chroma_system::System>,
+    cleanup_mode: CleanupMode,
 }
 
 impl Debug for GarbageCollector {
@@ -45,6 +47,7 @@ impl GarbageCollector {
         disabled_collections: HashSet<CollectionUuid>,
         sysdb_client: SysDb,
         storage: Storage,
+        cleanup_mode: CleanupMode,
     ) -> Self {
         Self {
             gc_interval_mins,
@@ -56,6 +59,7 @@ impl GarbageCollector {
             storage,
             dispatcher: None,
             system: None,
+            cleanup_mode,
         }
     }
 
@@ -135,6 +139,7 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
                         self.sysdb_client.clone(),
                         dispatcher,
                         self.storage.clone(),
+                        self.cleanup_mode,
                     );
 
                     jobs.push(
@@ -208,6 +213,7 @@ impl Configurable<GarbageCollectorConfig> for GarbageCollector {
             disabled_collections,
             sysdb_client,
             storage,
+            CleanupMode::ListOnly,
         ))
     }
 }

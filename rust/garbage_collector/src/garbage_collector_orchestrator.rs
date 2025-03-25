@@ -97,6 +97,7 @@ pub struct GarbageCollectorOrchestrator {
     pending_epoch_id: Option<i64>,
     num_versions_deleted: u32,
     deletion_list: Vec<String>,
+    cleanup_mode: CleanupMode,
 }
 
 impl Debug for GarbageCollectorOrchestrator {
@@ -123,6 +124,7 @@ impl GarbageCollectorOrchestrator {
         sysdb_client: SysDb,
         dispatcher: ComponentHandle<Dispatcher>,
         storage: Storage,
+        cleanup_mode: CleanupMode,
     ) -> Self {
         Self {
             collection_id,
@@ -132,6 +134,7 @@ impl GarbageCollectorOrchestrator {
             sysdb_client,
             dispatcher,
             storage,
+            cleanup_mode,
             result_channel: None,
             pending_version_file: None,
             pending_versions_to_delete: None,
@@ -412,10 +415,9 @@ impl Handler<TaskResult<ComputeUnusedFilesOutput, ComputeUnusedFilesError>>
         };
 
         let delete_task = wrap(
-            // TODO(rohit): The CleanupMode needs to be changed based on the config.
             Box::new(DeleteUnusedFilesOperator::new(
                 self.storage.clone(),
-                CleanupMode::Rename,
+                self.cleanup_mode,
                 self.collection_id.to_string(),
             )),
             DeleteUnusedFilesInput {

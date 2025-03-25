@@ -60,6 +60,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use chroma_types::Segment;
 use chroma_types::SegmentType;
 use chroma_types::SegmentScope;
+use garbage_collector_library::types::CleanupMode;
 
 // SegmentBlockIdInfo is used to keep track of the segment block ids for a version.
 // A vector of SegmentBlockIdInfo is enough to get all block ids associated with a version.
@@ -714,6 +715,7 @@ impl GcTest {
             sysdb,
             dispatcher_handle,
             storage,
+            CleanupMode::ListOnly,
         );
 
         self.last_cleanup_files = Vec::new();

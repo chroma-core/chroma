@@ -198,6 +198,7 @@ mod tests {
         let input = ComputeVersionsToDeleteInput {
             version_file,
             cutoff_time: now - Duration::hours(20),
+            cutoff_time_secs: (now - Duration::hours(20)).timestamp() as u64,
             min_versions_to_keep: 2,
         };
 
