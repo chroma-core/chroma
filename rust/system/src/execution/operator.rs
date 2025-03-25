@@ -327,7 +327,7 @@ mod tests {
             1000
         }
 
-        async fn start(&mut self, ctx: &ComponentContext<Self>) {
+        async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
             let task = wrap(Box::new(MockOperator {}), (), ctx.receiver());
             self.dispatcher.send(task, None).await.unwrap();
         }

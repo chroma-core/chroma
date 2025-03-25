@@ -350,10 +350,17 @@ impl SqliteSysDb {
         dimension: Option<u32>,
         configuration: Option<UpdateCollectionConfiguration>,
     ) -> Result<(), UpdateCollectionError> {
+        let mut tx = self
+            .db
+            .get_conn()
+            .begin()
+            .await
+            .map_err(|e| UpdateCollectionError::Internal(e.into()))?;
+
         let mut configuration_json_str = None;
         if let Some(configuration) = configuration {
             let collections = self
-                .get_collections(Some(collection_id), None, None, None, None, 0)
+                .get_collections_with_conn(&mut *tx, Some(collection_id), None, None, None, None, 0)
                 .await;
             let collections = collections.unwrap();
             let collection = collections.into_iter().next().unwrap();
@@ -364,13 +371,6 @@ impl SqliteSysDb {
                     .map_err(UpdateCollectionError::Configuration)?,
             );
         }
-
-        let mut tx = self
-            .db
-            .get_conn()
-            .begin()
-            .await
-            .map_err(|e| UpdateCollectionError::Internal(e.into()))?;
 
         if name.is_some() || dimension.is_some() {
             let mut query = sea_query::Query::update();

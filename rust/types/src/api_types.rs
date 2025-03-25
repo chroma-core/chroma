@@ -282,7 +282,7 @@ impl ChromaError for CreateDatabaseError {
     }
 }
 
-#[derive(Serialize, Debug, ToSchema)]
+#[derive(Serialize, Deserialize, Debug, ToSchema)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct Database {
     pub id: Uuid,
@@ -770,6 +770,23 @@ impl ChromaError for GetCollectionSizeError {
         match self {
             GetCollectionSizeError::Internal(err) => err.code(),
             GetCollectionSizeError::NotFound(_) => ErrorCodes::NotFound,
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum ListCollectionVersionsError {
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+    #[error("Collection [{0}] does not exists")]
+    NotFound(String),
+}
+
+impl ChromaError for ListCollectionVersionsError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            ListCollectionVersionsError::Internal(err) => err.code(),
+            ListCollectionVersionsError::NotFound(_) => ErrorCodes::NotFound,
         }
     }
 }

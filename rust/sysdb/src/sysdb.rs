@@ -8,14 +8,15 @@ use chroma_error::{ChromaError, ErrorCodes, TonicError, TonicMissingFieldError};
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
 use chroma_types::chroma_proto::VersionListForCollection;
 use chroma_types::{
-    chroma_proto, CollectionAndSegments, CollectionMetadataUpdate, CountCollectionsError,
-    CreateCollectionError, CreateDatabaseError, CreateDatabaseResponse, CreateTenantError,
-    CreateTenantResponse, Database, DeleteCollectionError, DeleteDatabaseError,
-    DeleteDatabaseResponse, GetCollectionSizeError, GetCollectionWithSegmentsError,
-    GetCollectionsError, GetDatabaseError, GetDatabaseResponse, GetSegmentsError, GetTenantError,
-    GetTenantResponse, InternalCollectionConfiguration, ListDatabasesError, ListDatabasesResponse,
-    Metadata, ResetError, ResetResponse, SegmentFlushInfo, SegmentFlushInfoConversionError,
-    SegmentUuid, UpdateCollectionConfiguration, UpdateCollectionError, VectorIndexConfiguration,
+    chroma_proto, chroma_proto::CollectionVersionInfo, CollectionAndSegments,
+    CollectionMetadataUpdate, CountCollectionsError, CreateCollectionError, CreateDatabaseError,
+    CreateDatabaseResponse, CreateTenantError, CreateTenantResponse, Database,
+    DeleteCollectionError, DeleteDatabaseError, DeleteDatabaseResponse, GetCollectionSizeError,
+    GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError, GetDatabaseResponse,
+    GetSegmentsError, GetTenantError, GetTenantResponse, InternalCollectionConfiguration,
+    ListCollectionVersionsError, ListDatabasesError, ListDatabasesResponse, Metadata, ResetError,
+    ResetResponse, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
+    UpdateCollectionConfiguration, UpdateCollectionError, VectorIndexConfiguration,
 };
 use chroma_types::{
     Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
@@ -30,6 +31,8 @@ use tonic::transport::{Channel, Endpoint};
 use tonic::Code;
 use tower::ServiceBuilder;
 use uuid::{Error, Uuid};
+
+pub const VERSION_FILE_S3_PREFIX: &str = "sysdb/version_files/";
 
 #[derive(Debug, Clone)]
 pub enum SysDb {
@@ -362,6 +365,7 @@ impl SysDb {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn flush_compaction(
         &mut self,
         tenant_id: String,
@@ -370,6 +374,7 @@ impl SysDb {
         collection_version: i32,
         segment_flush_info: Arc<[SegmentFlushInfo]>,
         total_records_post_compaction: u64,
+        size_bytes_post_compaction: u64,
     ) -> Result<FlushCompactionResponse, FlushCompactionError> {
         match self {
             SysDb::Grpc(grpc) => {
@@ -380,6 +385,7 @@ impl SysDb {
                     collection_version,
                     segment_flush_info,
                     total_records_post_compaction,
+                    size_bytes_post_compaction,
                 )
                 .await
             }
@@ -392,9 +398,21 @@ impl SysDb {
                     collection_version,
                     segment_flush_info,
                     total_records_post_compaction,
+                    size_bytes_post_compaction,
                 )
                 .await
             }
+        }
+    }
+
+    pub async fn list_collection_versions(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<Vec<CollectionVersionInfo>, ListCollectionVersionsError> {
+        match self {
+            SysDb::Grpc(_) => todo!(),
+            SysDb::Sqlite(_) => todo!(),
+            SysDb::Test(test) => test.list_collection_versions(collection_id).await,
         }
     }
 
@@ -997,6 +1015,7 @@ impl GrpcSysDb {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn flush_compaction(
         &mut self,
         tenant_id: String,
@@ -1005,6 +1024,7 @@ impl GrpcSysDb {
         collection_version: i32,
         segment_flush_info: Arc<[SegmentFlushInfo]>,
         total_records_post_compaction: u64,
+        size_bytes_post_compaction: u64,
     ) -> Result<FlushCompactionResponse, FlushCompactionError> {
         let segment_compaction_info =
             segment_flush_info
@@ -1029,6 +1049,7 @@ impl GrpcSysDb {
             collection_version,
             segment_compaction_info,
             total_records_post_compaction,
+            size_bytes_post_compaction,
         };
 
         let res = self.client.flush_collection_compaction(req).await;
