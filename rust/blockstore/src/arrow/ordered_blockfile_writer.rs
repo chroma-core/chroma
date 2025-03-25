@@ -396,12 +396,12 @@ mod tests {
         let id = writer.id();
 
         let prefix_1 = "key";
-        let key1 = "zzzz";
+        let key1 = "aaaa";
         let value1 = vec![1, 2, 3];
         writer.set(prefix_1, key1, value1.clone()).await.unwrap();
 
         let prefix_2 = "key";
-        let key2 = "aaaa";
+        let key2 = "zzzz";
         let value2 = vec![4, 5, 6];
         writer.set(prefix_2, key2, value2).await.unwrap();
 

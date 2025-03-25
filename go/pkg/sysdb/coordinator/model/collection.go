@@ -17,6 +17,15 @@ type Collection struct {
 	Version                    int32
 	UpdatedAt                  types.Timestamp
 	TotalRecordsPostCompaction uint64
+	SizeBytesPostCompaction    uint64 // Note: This represents the size of the records off the log
+	LastCompactionTimeSecs     uint64
+}
+
+type CollectionToGc struct {
+	ID              types.UniqueID
+	Name            string
+	VersionFilePath string
+	LatestVersion   int64
 }
 
 type CreateCollection struct {
@@ -56,6 +65,7 @@ type FlushCollectionCompaction struct {
 	CurrentCollectionVersion   int32
 	FlushSegmentCompactions    []*FlushSegmentCompaction
 	TotalRecordsPostCompaction uint64
+	SizeBytesPostCompaction    uint64
 }
 
 type FlushCollectionInfo struct {

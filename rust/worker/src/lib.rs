@@ -1,21 +1,21 @@
-mod assignment;
 mod compactor;
-mod memberlist;
 mod server;
-mod tracing;
 mod utils;
 
+use chroma_config::registry::Registry;
 use chroma_config::Configurable;
-use memberlist::MemberlistProvider;
-
+use chroma_memberlist::memberlist_provider::{
+    CustomResourceMemberlistProvider, MemberlistProvider,
+};
+use clap::Parser;
+use compactor::compaction_client::CompactionClient;
+use compactor::compaction_server::CompactionServer;
 use tokio::select;
 use tokio::signal::unix::{signal, SignalKind};
 
 // Required for benchmark
 pub mod config;
 pub mod execution;
-pub mod log;
-pub mod segment;
 
 const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
 
@@ -27,22 +27,21 @@ pub async fn query_service_entrypoint() {
     };
 
     let config = config.query_service;
+    let registry = Registry::new();
 
-    crate::tracing::opentelemetry_config::init_otel_tracing(
-        &config.service_name,
-        &config.otel_endpoint,
-    );
+    chroma_tracing::init_otel_tracing(&config.service_name, &config.otel_endpoint);
 
     let system = chroma_system::System::new();
-    let dispatcher = match chroma_system::Dispatcher::try_from_config(&config.dispatcher).await {
-        Ok(dispatcher) => dispatcher,
-        Err(err) => {
-            println!("Failed to create dispatcher component: {:?}", err);
-            return;
-        }
-    };
+    let dispatcher =
+        match chroma_system::Dispatcher::try_from_config(&config.dispatcher, &registry).await {
+            Ok(dispatcher) => dispatcher,
+            Err(err) => {
+                println!("Failed to create dispatcher component: {:?}", err);
+                return;
+            }
+        };
     let mut dispatcher_handle = system.start_component(dispatcher);
-    let mut worker_server = match server::WorkerServer::try_from_config(&config).await {
+    let mut worker_server = match server::WorkerServer::try_from_config(&config, &registry).await {
         Ok(worker_server) => worker_server,
         Err(err) => {
             println!("Failed to create worker server component: {:?}", err);
@@ -87,16 +86,15 @@ pub async fn compaction_service_entrypoint() {
     };
 
     let config = config.compaction_service;
+    let registry = Registry::new();
 
-    crate::tracing::opentelemetry_config::init_otel_tracing(
-        &config.service_name,
-        &config.otel_endpoint,
-    );
+    chroma_tracing::init_otel_tracing(&config.service_name, &config.otel_endpoint);
 
     let system = chroma_system::System::new();
 
-    let mut memberlist = match memberlist::CustomResourceMemberlistProvider::try_from_config(
+    let mut memberlist = match CustomResourceMemberlistProvider::try_from_config(
         &config.memberlist_provider,
+        &registry,
     )
     .await
     {
@@ -107,16 +105,17 @@ pub async fn compaction_service_entrypoint() {
         }
     };
 
-    let dispatcher = match chroma_system::Dispatcher::try_from_config(&config.dispatcher).await {
-        Ok(dispatcher) => dispatcher,
-        Err(err) => {
-            println!("Failed to create dispatcher component: {:?}", err);
-            return;
-        }
-    };
+    let dispatcher =
+        match chroma_system::Dispatcher::try_from_config(&config.dispatcher, &registry).await {
+            Ok(dispatcher) => dispatcher,
+            Err(err) => {
+                println!("Failed to create dispatcher component: {:?}", err);
+                return;
+            }
+        };
     let mut dispatcher_handle = system.start_component(dispatcher);
     let mut compaction_manager =
-        match crate::compactor::CompactionManager::try_from_config(&config).await {
+        match crate::compactor::CompactionManager::try_from_config(&config, &registry).await {
             Ok(compaction_manager) => compaction_manager,
             Err(err) => {
                 println!("Failed to create compaction manager component: {:?}", err);
@@ -130,6 +129,15 @@ pub async fn compaction_service_entrypoint() {
     memberlist.subscribe(compaction_manager_handle.receiver());
 
     let mut memberlist_handle = system.start_component(memberlist);
+
+    let compaction_server = CompactionServer {
+        manager: compaction_manager_handle.clone(),
+        port: config.my_port,
+    };
+
+    let server_join_handle = tokio::spawn(async move {
+        let _ = compaction_server.run().await;
+    });
 
     let mut sigterm = match signal(SignalKind::terminate()) {
         Ok(sigterm) => sigterm,
@@ -151,7 +159,15 @@ pub async fn compaction_service_entrypoint() {
             let _ = compaction_manager_handle.join().await;
             system.stop().await;
             system.join().await;
+            let _ = server_join_handle.await;
         },
     };
     println!("Server stopped");
+}
+
+pub async fn compaction_client_entrypoint() {
+    let client = CompactionClient::parse();
+    if let Err(e) = client.run().await {
+        eprintln!("{e}");
+    }
 }

@@ -15,7 +15,7 @@ from chromadb.segment import VectorReader
 from chromadb.segment.impl.manager.local import LocalSegmentManager
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
-from strategies import hashing_embedding_function
+from chromadb.test.property.strategies import hashing_embedding_function
 from chromadb.test.property.test_embeddings import (
     EmbeddingStateMachineStates,
     trace,
@@ -30,25 +30,37 @@ from hypothesis.stateful import (
 )
 import os
 import shutil
-import tempfile
 from chromadb.api.client import Client as ClientCreator
 from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
 import numpy as np
 
 CreatePersistAPI = Callable[[], ServerAPI]
 
-configurations = [
-    Settings(
-        chroma_api_impl="chromadb.api.segment.SegmentAPI",
-        chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
-        chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
-        chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
-        chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
-        allow_reset=True,
-        is_persistent=True,
-        persist_directory=tempfile.mkdtemp(),
-    ),
-]
+configurations = (
+    [
+        Settings(
+            chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
+            chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
+            allow_reset=True,
+            is_persistent=True,
+        )
+    ]
+    if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ
+    else [
+        Settings(
+            chroma_api_impl="chromadb.api.segment.SegmentAPI",
+            chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
+            allow_reset=True,
+            is_persistent=True,
+        ),
+    ]
+)
 
 
 @pytest.fixture(scope="module", params=configurations)
@@ -453,7 +465,7 @@ def test_batch_size_less_than_sync_with_duplicate_adds_results_in_skipped_seq_id
     state = PersistEmbeddingsStateMachine(settings=settings, client=client)
     state.initialize(
         collection=strategies.Collection(
-            name="JqzMs4pPm14c\n",
+            name="JqzMs4pPm14c",
             metadata={
                 "hnsw:construction_ef": 128,
                 "hnsw:search_ef": 128,
@@ -461,7 +473,7 @@ def test_batch_size_less_than_sync_with_duplicate_adds_results_in_skipped_seq_id
                 "hnsw:sync_threshold": 9,
                 "hnsw:batch_size": 7,
             },
-            embedding_function=hashing_embedding_function(dim=92, dtype=np.float64),
+            embedding_function=hashing_embedding_function(dim=92, dtype=np.float64),  # type: ignore[arg-type]
             id=UUID("45c5c816-0a90-4293-8d01-4325ff860040"),
             dimension=92,
             dtype=np.float64,

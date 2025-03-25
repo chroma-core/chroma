@@ -10,12 +10,16 @@ from chromadb.api import AdminAPI, AsyncClientAPI, ClientAPI
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
     CollectionMetadata,
+    UpdateMetadata,
     Documents,
     EmbeddingFunction,
     Embeddings,
+    URI,
+    URIs,
     IDs,
     Include,
     Metadata,
+    Metadatas,
     Where,
     QueryResult,
     GetResult,
@@ -27,14 +31,18 @@ from chromadb.api.types import (
 __all__ = [
     "Collection",
     "Metadata",
+    "Metadatas",
     "Where",
     "WhereDocument",
     "Documents",
     "IDs",
+    "URI",
+    "URIs",
     "Embeddings",
     "EmbeddingFunction",
     "Include",
     "CollectionMetadata",
+    "UpdateMetadata",
     "UpdateCollectionMetadata",
     "QueryResult",
     "GetResult",
@@ -45,7 +53,8 @@ logger = logging.getLogger(__name__)
 
 __settings = Settings()
 
-__version__ = "0.6.3"
+__version__ = "1.0.0"
+
 
 # Workaround to deal with Colab's old sqlite3 version
 def is_in_colab() -> bool:
@@ -144,6 +153,35 @@ def PersistentClient(
         settings = Settings()
     settings.persist_directory = path
     settings.is_persistent = True
+
+    # Make sure paramaters are the correct types -- users can pass anything.
+    tenant = str(tenant)
+    database = str(database)
+
+    return ClientCreator(tenant=tenant, database=database, settings=settings)
+
+
+def RustClient(
+    path: Optional[str] = None,
+    settings: Optional[Settings] = None,
+    tenant: str = DEFAULT_TENANT,
+    database: str = DEFAULT_DATABASE,
+) -> ClientAPI:
+    """
+    Creates an ephemeral or persistance instance of Chroma that saves to disk.
+    This is useful for testing and development, but not recommended for production use.
+
+    Args:
+        path: An optional directory to save Chroma's data to. The client is ephemeral if a None value is provided. Defaults to None.
+        tenant: The tenant to use for this client. Defaults to the default tenant.
+        database: The database to use for this client. Defaults to the default database.
+    """
+    if settings is None:
+        settings = Settings()
+
+    settings.chroma_api_impl = "chromadb.api.rust.RustBindingsAPI"
+    settings.is_persistent = path is not None
+    settings.persist_directory = path or ""
 
     # Make sure paramaters are the correct types -- users can pass anything.
     tenant = str(tenant)

@@ -4,7 +4,9 @@ use super::config::HnswProviderConfig;
 use super::{HnswIndex, HnswIndexConfig, Index, IndexConfig, IndexUuid};
 
 use async_trait::async_trait;
+use chroma_cache::AysncPartitionedMutex;
 use chroma_cache::{Cache, Weighted};
+use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_distance::DistanceFunction;
 use chroma_error::ChromaError;
@@ -14,6 +16,7 @@ use chroma_types::CollectionUuid;
 use parking_lot::RwLock;
 use std::fmt::Debug;
 use std::path::Path;
+use std::time::Instant;
 use std::{path::PathBuf, sync::Arc};
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
@@ -29,8 +32,6 @@ const FILES: [&str; 4] = [
     "length.bin",
     "link_lists.bin",
 ];
-
-const STAGED_FILE_PATH: &str = "staged_files";
 
 type CacheKey = CollectionUuid;
 
@@ -52,7 +53,7 @@ pub struct HnswIndexProvider {
     cache: Arc<dyn Cache<CollectionUuid, HnswIndexRef>>,
     pub temporary_storage_path: PathBuf,
     storage: Storage,
-    write_mutex: Arc<tokio::sync::Mutex<()>>,
+    pub write_mutex: AysncPartitionedMutex<IndexUuid>,
     #[allow(dead_code)]
     purger: Option<Arc<tokio::task::JoinHandle<()>>>,
 }
@@ -74,6 +75,7 @@ impl Debug for HnswIndexProvider {
 impl Configurable<(HnswProviderConfig, Storage)> for HnswIndexProvider {
     async fn try_from_config(
         config: &(HnswProviderConfig, Storage),
+        _registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let (hnsw_config, storage) = config;
         // TODO(rescrv):  Long-term we should migrate this to the component API.
@@ -85,6 +87,7 @@ impl Configurable<(HnswProviderConfig, Storage)> for HnswIndexProvider {
             storage.clone(),
             PathBuf::from(&hnsw_config.hnsw_temporary_path),
             cache,
+            hnsw_config.permitted_parallelism,
             rx,
         ))
     }
@@ -111,26 +114,42 @@ impl HnswIndexProvider {
         storage: Storage,
         storage_path: PathBuf,
         cache: Box<dyn Cache<CollectionUuid, HnswIndexRef>>,
+        permitted_parallelism: u32,
         mut evicted: tokio::sync::mpsc::UnboundedReceiver<(CollectionUuid, HnswIndexRef)>,
     ) -> Self {
         let cache: Arc<dyn Cache<CollectionUuid, HnswIndexRef>> = cache.into();
         let temporary_storage_path = storage_path.to_path_buf();
-        let purger = Some(Arc::new(tokio::task::spawn(async move {
-            while let Some((_, index_ref)) = evicted.recv().await {
+        let task = async move {
+            while let Some((collection_id, index_ref)) = evicted.recv().await {
                 let index_id = {
                     let index = index_ref.inner.read();
                     index.id
                 };
                 let weight = index_ref.weight();
-                tracing::info!("Purging index: {} with weight: {}", index_id, weight);
+                tracing::info!(
+                    "[Cache Eviction] Purging index: {} for collection {} with weight: {} at ts {}",
+                    index_id,
+                    collection_id,
+                    weight,
+                    Instant::now().elapsed().as_nanos()
+                );
                 let _ = Self::purge_one_id(&temporary_storage_path, index_id).await;
             }
-        })));
+        };
+        let purger = Some(Arc::new(tokio::task::spawn(task.instrument(
+            tracing::info_span!(
+                "HnswIndex Cache Eviction Purger",
+                tag = "hnsw_cache_eviction_purger"
+            ),
+        ))));
         Self {
             cache,
             storage,
             temporary_storage_path: storage_path,
-            write_mutex: Arc::new(tokio::sync::Mutex::new(())),
+            write_mutex: AysncPartitionedMutex::with_parallelism(
+                permitted_parallelism as usize,
+                (),
+            ),
             purger,
         }
     }
@@ -150,6 +169,7 @@ impl HnswIndexProvider {
         }
     }
 
+    // TODO(rohitcp): Use HNSW_INDEX_S3_PREFIX.
     fn format_key(&self, id: &IndexUuid, file: &str) -> String {
         format!("hnsw/{}/{}", id, file)
     }
@@ -161,6 +181,11 @@ impl HnswIndexProvider {
         dimensionality: i32,
         distance_function: DistanceFunction,
     ) -> Result<HnswIndexRef, Box<HnswIndexProviderForkError>> {
+        // We take a lock here to synchronize concurrent forks of the same index.
+        // Otherwise, we could end up with a corrupted index since the filesystem
+        // operations are not guaranteed to be atomic.
+        // The lock is a partitioned mutex to allow for higher concurrency across collections.
+        let _guard = self.write_mutex.lock(source_id).await;
         let new_id = IndexUuid(Uuid::new_v4());
         let new_storage_path = self.temporary_storage_path.join(new_id.to_string());
         // This is ok to be called from multiple threads concurrently. See
@@ -193,14 +218,6 @@ impl HnswIndexProvider {
             }
         };
 
-        // See the comment in open() for why we lock the write mutex here.
-        let _guard = self
-            .write_mutex
-            .lock()
-            .instrument(
-                tracing::trace_span!(parent: Span::current(), "Mutex acquire for hnsw load"),
-            )
-            .await;
         // Check if the entry is in the cache, if it is, we assume
         // another thread has loaded the index and we return it.
         match self.get(&new_id, cache_key).await {
@@ -224,89 +241,31 @@ impl HnswIndexProvider {
         file_path: &Path,
         buf: Arc<Vec<u8>>,
     ) -> Result<(), Box<HnswIndexProviderFileError>> {
-        let path_prefix = match file_path.parent() {
-            Some(path) => path,
-            None => {
-                return Err(Box::new(HnswIndexProviderFileError::InvalidFilePath));
-            }
-        };
-        let path_suffix = match file_path.file_name() {
-            Some(path) => path,
-            None => {
-                return Err(Box::new(HnswIndexProviderFileError::InvalidFilePath));
-            }
-        };
+        let file_handle = tokio::fs::File::create(&file_path).await;
 
-        let random_dir = path_prefix
-            .join(Path::new(STAGED_FILE_PATH))
-            .join(uuid::Uuid::new_v4().to_string());
-
-        // This is ok to be called from multiple threads concurrently. See
-        // the documentation of tokio::fs::create_dir_all to see why.
-        match self.create_dir_all(&random_dir).await {
-            Ok(_) => {}
-            Err(e) => {
-                return Err(e);
-            }
-        }
-
-        let random_file_path = random_dir.join(path_suffix);
-
-        // First write to a random file path and then rename to the actual file path.
-        // this defends against potentially concurrent writes to the same file. But still
-        // allows concurrent writes to different files.
-        let file_handle = tokio::fs::File::create(&random_file_path).await;
         let mut file_handle = match file_handle {
             Ok(file) => file,
             Err(e) => {
-                tracing::error!("Failed to create temporary file: {}", e);
+                tracing::error!("Failed to create file: {}", e);
                 return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
             }
         };
+
         let res = file_handle.write_all(&buf).await;
         match res {
             Ok(_) => {}
             Err(e) => {
-                tracing::error!("Failed to copy temporary file: {}", e);
+                tracing::error!("Failed to copy file: {}", e);
                 return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
             }
         }
         match file_handle.flush().await {
-            Ok(_) => {}
+            Ok(_) => Ok(()),
             Err(e) => {
                 tracing::error!("Failed to flush temporary file: {}", e);
                 return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
             }
         }
-
-        async fn remove_temporary_files(
-            path: &Path,
-        ) -> Result<(), Box<HnswIndexProviderFileError>> {
-            // Remove the random directory.
-            match tokio::fs::remove_dir_all(path).await {
-                Ok(_) => Ok(()),
-                Err(e) => {
-                    tracing::error!("Failed to remove temporary directory: {}", e);
-                    Err(Box::new(HnswIndexProviderFileError::IOError(e)))
-                }
-            }
-        }
-
-        // Synchronize concurrent writes to the same file.
-        let _guard = self.write_mutex.lock().instrument(tracing::trace_span!(parent: Span::current(), "Mutex acquire for actual write to local disk")).await;
-        // Do nothing if the file exists, we assume the concurrent writer wrote the same data.
-        // This is a safe assumption because the data is immutable from our perspective.
-        if !file_path.exists() {
-            match tokio::fs::rename(&random_file_path, file_path).await {
-                Ok(_) => {}
-                Err(e) => {
-                    tracing::error!("Failed to rename file: {}", e);
-                    return Err(Box::new(HnswIndexProviderFileError::IOError(e)));
-                }
-            }
-        }
-        // Remove the random file path.
-        remove_temporary_files(&random_dir).await
     }
 
     #[instrument]
@@ -332,7 +291,7 @@ impl HnswIndexProvider {
                         }
                         Err(e) => {
                             tracing::error!("Failed to load hnsw index file from storage: {}", e);
-                            return Err(Box::new(HnswIndexProviderFileError::StorageGetError(e)));
+                            return Err(Box::new(HnswIndexProviderFileError::StorageError(e)));
                         }
                     };
                     tracing::info!(
@@ -349,6 +308,8 @@ impl HnswIndexProvider {
         Ok(())
     }
 
+    // There is no synchronization here. Assumes the caller synchronizes concurrent open()
+    // for the same index uuid.
     pub async fn open(
         &self,
         id: &IndexUuid,
@@ -358,7 +319,6 @@ impl HnswIndexProvider {
     ) -> Result<HnswIndexRef, Box<HnswIndexProviderOpenError>> {
         let index_storage_path = self.temporary_storage_path.join(id.to_string());
 
-        // Create directories should be thread safe.
         match self.create_dir_all(&index_storage_path).await {
             Ok(_) => {}
             Err(e) => {
@@ -376,7 +336,6 @@ impl HnswIndexProvider {
             }
         }
 
-        // Thread safe.
         let index_config = IndexConfig::new(dimensionality, distance_function);
 
         let index_storage_path_str = match index_storage_path.to_str() {
@@ -388,15 +347,6 @@ impl HnswIndexProvider {
             }
         };
 
-        // We choose to lock the write mutex here because we want to check if a concurrent writer has already loaded the index
-        // and then load it. This is not great if we want concurrent loads, but we can optimize this later.
-        let _guard = self
-            .write_mutex
-            .lock()
-            .instrument(
-                tracing::trace_span!(parent: Span::current(), "Mutex acquire for hnsw load"),
-            )
-            .await;
         // Check if the entry is in the cache, if it is, we assume
         // another thread has loaded the index and we return it.
         match self.get(id, cache_key).await {
@@ -434,6 +384,11 @@ impl HnswIndexProvider {
         distance_function: DistanceFunction,
     ) -> Result<HnswIndexRef, Box<HnswIndexProviderCreateError>> {
         let id = IndexUuid(Uuid::new_v4());
+        // We take a lock here to synchronize concurrent creates of the same index.
+        // Otherwise, we could end up with a corrupted index since the filesystem
+        // operations are not guaranteed to be atomic.
+        // The lock is a partitioned mutex to allow for higher concurrency across collections.
+        let _guard = self.write_mutex.lock(&id).await;
         let index_storage_path = self.temporary_storage_path.join(id.to_string());
 
         match self.create_dir_all(&index_storage_path).await {
@@ -445,19 +400,22 @@ impl HnswIndexProvider {
 
         let index_config = IndexConfig::new(dimensionality, distance_function);
 
-        let hnsw_config =
-            match HnswIndexConfig::new(m, ef_construction, ef_search, &index_storage_path) {
-                Ok(hnsw_config) => hnsw_config,
-                Err(e) => {
-                    return Err(Box::new(HnswIndexProviderCreateError::HnswConfigError(*e)));
-                }
-            };
+        let hnsw_config = match HnswIndexConfig::new_persistent(
+            m,
+            ef_construction,
+            ef_search,
+            &index_storage_path,
+        ) {
+            Ok(hnsw_config) => hnsw_config,
+            Err(e) => {
+                return Err(Box::new(HnswIndexProviderCreateError::HnswConfigError(*e)));
+            }
+        };
 
         // HnswIndex init is not thread safe. We should not call it from multiple threads
         let index = HnswIndex::init(&index_config, Some(&hnsw_config), id)
             .map_err(|e| Box::new(HnswIndexProviderCreateError::IndexInitError(e)))?;
 
-        let _guard = self.write_mutex.lock().await;
         match self.get(&id, cache_key).await {
             Some(index) => Ok(index.clone()),
             None => {
@@ -513,9 +471,20 @@ impl HnswIndexProvider {
                 .flatten()
                 .map(|r| r.inner.read().id)
             else {
+                tracing::info!(
+                    "[End of compaction purging] No index found for collection: {} at ts {}",
+                    collection_uuid,
+                    Instant::now().elapsed().as_nanos()
+                );
                 continue;
             };
-            match self.remove_temporary_files(&index_id).await {
+            tracing::info!(
+                "[End of compaction purging] Purging index: {} for collection {} at ts {}",
+                index_id,
+                collection_uuid,
+                Instant::now().elapsed().as_nanos()
+            );
+            match Self::purge_one_id(&self.temporary_storage_path, index_id).await {
                 Ok(_) => {}
                 Err(e) => {
                     tracing::error!("Failed to remove temporary files for {index_id}: {e}");
@@ -526,14 +495,34 @@ impl HnswIndexProvider {
 
     pub async fn purge_one_id(path: &Path, id: IndexUuid) -> tokio::io::Result<()> {
         let index_storage_path = path.join(id.to_string());
-        tracing::info!("Purging index: {}", index_storage_path.to_str().unwrap());
-        tokio::fs::remove_dir_all(index_storage_path).await?;
-        Ok(())
-    }
-
-    async fn remove_temporary_files(&self, id: &IndexUuid) -> tokio::io::Result<()> {
-        let index_storage_path = self.temporary_storage_path.join(id.to_string());
-        tokio::fs::remove_dir_all(index_storage_path).await
+        tracing::info!(
+            "Purging HNSW index ID: {}, path: {}, ts: {}",
+            id,
+            index_storage_path.to_str().unwrap(),
+            Instant::now().elapsed().as_nanos()
+        );
+        match tokio::fs::remove_dir_all(&index_storage_path).await {
+            Ok(_) => Ok(()),
+            Err(e) => match e.kind() {
+                std::io::ErrorKind::NotFound => {
+                    tracing::warn!(
+                        "HNSW index ID: {} not found at path: {}",
+                        id,
+                        index_storage_path.to_str().unwrap()
+                    );
+                    Ok(())
+                }
+                _ => {
+                    tracing::error!(
+                        "Failed to remove HNSW index ID: {} at path: {}. Error: {}",
+                        id,
+                        index_storage_path.to_str().unwrap(),
+                        e
+                    );
+                    Err(e)
+                }
+            },
+        }
     }
 
     async fn create_dir_all(&self, path: &PathBuf) -> Result<(), Box<HnswIndexProviderFileError>> {
@@ -627,7 +616,7 @@ pub enum HnswIndexProviderFlushError {
     #[error("HNSW Save Error")]
     HnswSaveError(#[from] Box<dyn ChromaError>),
     #[error("Storage Put Error")]
-    StoragePutError(#[from] chroma_storage::PutError),
+    StoragePutError(#[from] chroma_storage::StorageError),
 }
 
 impl ChromaError for HnswIndexProviderFlushError {
@@ -642,23 +631,20 @@ impl ChromaError for HnswIndexProviderFlushError {
 
 #[derive(Error, Debug)]
 pub enum HnswIndexProviderFileError {
-    #[error("IO Error")]
+    #[error("IO Error: {0}")]
     IOError(#[from] std::io::Error),
-    #[error("Storage Get Error")]
-    StorageGetError(#[from] chroma_storage::GetError),
-    #[error("Storage Put Error")]
-    StoragePutError(#[from] chroma_storage::PutError),
+    #[error("Storage Error: {0}")]
+    StorageError(#[from] chroma_storage::StorageError),
     #[error("Must provide full path to file")]
     InvalidFilePath,
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{DEFAULT_HNSW_EF_CONSTRUCTION, DEFAULT_HNSW_EF_SEARCH, DEFAULT_HNSW_M};
-
     use super::*;
     use chroma_cache::new_non_persistent_cache_for_test;
     use chroma_storage::local::LocalStorage;
+    use chroma_types::HnswConfiguration;
 
     #[tokio::test]
     async fn test_fork() {
@@ -671,17 +657,18 @@ mod tests {
         let storage = Storage::Local(LocalStorage::new(storage_dir.to_str().unwrap()));
         let cache = new_non_persistent_cache_for_test();
         let (_tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        let provider = HnswIndexProvider::new(storage, hnsw_tmp_path, cache, rx);
+        let provider = HnswIndexProvider::new(storage, hnsw_tmp_path, cache, 16, rx);
         let collection_id = CollectionUuid(Uuid::new_v4());
 
         let dimensionality = 128;
         let distance_function = DistanceFunction::Euclidean;
+        let default_hnsw_params = HnswConfiguration::default();
         let created_index = provider
             .create(
                 &collection_id,
-                DEFAULT_HNSW_M,
-                DEFAULT_HNSW_EF_CONSTRUCTION,
-                DEFAULT_HNSW_EF_SEARCH,
+                default_hnsw_params.max_neighbors,
+                default_hnsw_params.ef_construction,
+                default_hnsw_params.ef_search,
                 dimensionality,
                 distance_function.clone(),
             )

@@ -1,26 +1,38 @@
-use std::{collections::HashSet, str::FromStr, time::Duration};
+use std::{collections::HashSet, fmt::Debug, fmt::Formatter, str::FromStr, time::Duration};
 
 use async_trait::async_trait;
-use chroma_config::Configurable;
+use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
+use chroma_storage::Storage;
 use chroma_sysdb::{SysDb, SysDbConfig};
-use chroma_system::{Component, ComponentContext, ComponentHandle, Dispatcher, Handler};
+use chroma_system::{
+    Component, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
+};
 use chroma_types::CollectionUuid;
-use tracing::span;
+use futures::{stream::FuturesUnordered, StreamExt};
+use tracing::{span, Instrument, Span};
 use uuid::Uuid;
 
-use crate::config::GarbageCollectorConfig;
+use crate::{
+    config::GarbageCollectorConfig, garbage_collector_orchestrator::GarbageCollectorOrchestrator,
+};
 
-#[derive(Debug)]
 #[allow(dead_code)]
 pub(crate) struct GarbageCollector {
     gc_interval_mins: u64,
     cutoff_time_hours: u32,
     max_collections_to_gc: u32,
     disabled_collections: HashSet<CollectionUuid>,
-    sysdb_client: Box<SysDb>,
+    sysdb_client: SysDb,
+    storage: Storage,
     dispatcher: Option<ComponentHandle<Dispatcher>>,
     system: Option<chroma_system::System>,
+}
+
+impl Debug for GarbageCollector {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GarbageCollector").finish()
+    }
 }
 
 impl GarbageCollector {
@@ -29,7 +41,8 @@ impl GarbageCollector {
         cutoff_time_hours: u32,
         max_collections_to_gc: u32,
         disabled_collections: HashSet<CollectionUuid>,
-        sysdb_client: Box<SysDb>,
+        sysdb_client: SysDb,
+        storage: Storage,
     ) -> Self {
         Self {
             gc_interval_mins,
@@ -37,6 +50,7 @@ impl GarbageCollector {
             max_collections_to_gc,
             disabled_collections,
             sysdb_client,
+            storage,
             dispatcher: None,
             system: None,
         }
@@ -61,12 +75,12 @@ impl Component for GarbageCollector {
         1000
     }
 
-    async fn start(&mut self, ctx: &ComponentContext<Self>) {
+    async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
         ctx.scheduler.schedule(
             GarbageCollectMessage {},
             Duration::from_secs(self.gc_interval_mins * 60),
             ctx,
-            || Some(span!(parent: None, tracing::Level::INFO, "Scheduled compaction")),
+            || Some(span!(parent: None, tracing::Level::INFO, "Scheduled garbage collection")),
         );
     }
 }
@@ -83,8 +97,73 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
         _message: GarbageCollectMessage,
         _ctx: &ComponentContext<Self>,
     ) -> Self::Result {
-        // TODO(Sanket): Implement the garbage collection logic.
-        todo!()
+        // Get all collections to gc and create gc orchestrator for each.
+        let collections_to_gc = self
+            .sysdb_client
+            .get_collections_to_gc()
+            .await
+            .expect("Failed to get collections to gc");
+        let mut jobs = FuturesUnordered::new();
+        for collection in collections_to_gc {
+            if self.disabled_collections.contains(&collection.id) {
+                tracing::warn!(
+                    "Skipping garbage collection for disabled collection: {}",
+                    collection.id
+                );
+                continue;
+            }
+            let dispatcher = match self.dispatcher {
+                Some(ref dispatcher) => dispatcher.clone(),
+                None => {
+                    // TODO(Sanket): Error handling.
+                    panic!("No dispatcher found");
+                }
+            };
+            let instrumented_span =
+                span!(parent: None, tracing::Level::INFO, "GC job", collection_id = ?collection.id);
+            instrumented_span.follows_from(Span::current());
+            match self.system {
+                Some(ref system) => {
+                    let orchestrator = GarbageCollectorOrchestrator::new(
+                        collection.id,
+                        collection.version_file_path,
+                        self.cutoff_time_hours,
+                        self.sysdb_client.clone(),
+                        dispatcher,
+                        self.storage.clone(),
+                    );
+
+                    jobs.push(
+                        orchestrator
+                            .run(system.clone())
+                            .instrument(instrumented_span),
+                    );
+                }
+                None => {
+                    panic!("No system found");
+                }
+            };
+        }
+        tracing::info!("GC {} jobs", jobs.len());
+        let mut num_completed_jobs = 0;
+        let mut num_failed_jobs = 0;
+        while let Some(job) = jobs.next().await {
+            match job {
+                Ok(result) => {
+                    tracing::info!("GC completed: {:?}", result);
+                    num_completed_jobs += 1;
+                }
+                Err(e) => {
+                    tracing::info!("Compaction failed: {:?}", e);
+                    num_failed_jobs += 1;
+                }
+            }
+        }
+        tracing::info!(
+            "Completed {} jobs, failed {} jobs",
+            num_completed_jobs,
+            num_failed_jobs
+        )
     }
 }
 
@@ -92,9 +171,11 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
 impl Configurable<GarbageCollectorConfig> for GarbageCollector {
     async fn try_from_config(
         config: &GarbageCollectorConfig,
+        registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let sysdb_config = SysDbConfig::Grpc(config.sysdb_config.clone());
-        let sysdb_client = chroma_sysdb::from_config(&sysdb_config).await?;
+        let sysdb_client = SysDb::try_from_config(&sysdb_config, registry).await?;
+        let storage = Storage::try_from_config(&config.storage_config, registry).await?;
 
         let mut disabled_collections = HashSet::new();
         for collection_id_str in config.disallow_collections.iter() {
@@ -115,6 +196,7 @@ impl Configurable<GarbageCollectorConfig> for GarbageCollector {
             config.max_collections_to_gc,
             disabled_collections,
             sysdb_client,
+            storage,
         ))
     }
 }

@@ -158,7 +158,7 @@ def collection_name(draw: st.DrawFn) -> str:
     _ipv4_address_re = re.compile(r"^([0-9]{1,3}\.){3}[0-9]{1,3}$")
     _two_periods_re = re.compile(r"\.\.")
 
-    name: str = draw(st.from_regex(_collection_name_re))
+    name: str = draw(st.from_regex(_collection_name_re)).strip()
     hypothesis.assume(not _ipv4_address_re.match(name))
     hypothesis.assume(not _two_periods_re.search(name))
 
@@ -177,14 +177,17 @@ def create_embeddings(
     count: int,
     dtype: npt.DTypeLike,
 ) -> types.Embeddings:
-    embeddings: types.Embeddings = (
-        np.random.uniform(
-            low=-1.0,
-            high=1.0,
-            size=(count, dim),
-        )
-        .astype(dtype)
-        .tolist()
+    embeddings: types.Embeddings = cast(
+        types.Embeddings,
+        (
+            np.random.uniform(
+                low=-1.0,
+                high=1.0,
+                size=(count, dim),
+            )
+            .astype(dtype)
+            .tolist()
+        ),
     )
 
     return embeddings
@@ -548,14 +551,19 @@ def where_clause(draw: st.DrawFn, collection: Collection) -> types.Where:
     key = draw(st.sampled_from(known_keys))
     value = collection.known_metadata_keys[key]
 
-    # This is hacky, but the distributed system does not support $in or $in so we
-    # need to avoid generating these operators for now in that case.
-    # TODO: Remove this once the distributed system supports $in and $nin
-    legal_ops: List[Optional[str]]
-    legal_ops = [None, "$eq", "$ne", "$in", "$nin"]
+    legal_ops: List[Optional[str]] = [None]
 
-    if not isinstance(value, str) and not isinstance(value, bool):
+    if isinstance(value, bool):
+        legal_ops.extend(["$eq", "$ne", "$in", "$nin"])
+    elif isinstance(value, float):
         legal_ops.extend(["$gt", "$lt", "$lte", "$gte"])
+    elif isinstance(value, int):
+        legal_ops.extend(["$gt", "$lt", "$lte", "$gte", "$eq", "$ne", "$in", "$nin"])
+    elif isinstance(value, str):
+        legal_ops.extend(["$eq", "$ne", "$in", "$nin"])
+    else:
+        assert False, f"Unsupported type: {type(value)}"
+
     if isinstance(value, float):
         # Add or subtract a small number to avoid floating point rounding errors
         value = value + draw(st.sampled_from([1e-6, -1e-6]))

@@ -1,8 +1,9 @@
 package dao
 
 import (
-	"database/sql"
 	"errors"
+	"sort"
+	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -29,7 +30,7 @@ func (s *collectionDb) DeleteAll() error {
 func (s *collectionDb) GetCollectionEntry(collectionID *string, databaseName *string) (*dbmodel.Collection, error) {
 	var collections []*dbmodel.Collection
 	query := s.db.Table("collections").
-		Select("collections.id, collections.name, collections.database_id, collections.is_deleted, databases.name, databases.tenant_id").
+		Select("collections.id, collections.name, collections.database_id, collections.is_deleted, databases.name, databases.tenant_id, collections.version, collections.version_file_name").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
 		Where("collections.id = ?", collectionID)
 
@@ -51,10 +52,67 @@ func (s *collectionDb) GetCollections(id *string, name *string, tenantID string,
 	return s.getCollections(id, name, tenantID, databaseName, limit, offset, false)
 }
 
+func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64) ([]*dbmodel.CollectionToGc, error) {
+	var collections []*dbmodel.CollectionToGc
+	// Use the read replica for this so as to not overwhelm the writer.
+	query := s.read_db.Table("collections").
+		Select("id, name, version, version_file_name, oldest_version_ts, num_versions").
+		Where("version > 0")
+
+	// Apply cutoff time filter only if provided
+	if cutoffTimeSecs != nil {
+		cutoffTime := time.Unix(int64(*cutoffTimeSecs), 0)
+		query = query.Where("oldest_version_ts < ?", cutoffTime)
+	}
+
+	query = query.Order("num_versions DESC")
+
+	// Apply limit only if provided
+	if limit != nil {
+		query = query.Limit(int(*limit))
+	}
+
+	err := query.Find(&collections).Error
+	if err != nil {
+		return nil, err
+	}
+	log.Debug("collections to gc", zap.Any("collections", collections))
+	return collections, nil
+}
+
 func (s *collectionDb) getCollections(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32, is_deleted bool) (collectionWithMetdata []*dbmodel.CollectionAndMetadata, err error) {
-	var collections []*dbmodel.Collection
+	type Result struct {
+		// Collection fields
+		CollectionId               string     `gorm:"column:collection_id"`
+		CollectionName             *string    `gorm:"column:collection_name"`
+		ConfigurationJsonStr       *string    `gorm:"column:configuration_json_str"`
+		Dimension                  *int32     `gorm:"column:dimension"`
+		DatabaseID                 string     `gorm:"column:database_id"`
+		CollectionTs               *int64     `gorm:"column:collection_ts"`
+		IsDeleted                  bool       `gorm:"column:is_deleted"`
+		CollectionCreatedAt        *time.Time `gorm:"column:collection_created_at"`
+		CollectionUpdatedAt        *time.Time `gorm:"column:collection_updated_at"`
+		LogPosition                int64      `gorm:"column:log_position"`
+		Version                    int32      `gorm:"column:version"`
+		VersionFileName            string     `gorm:"column:version_file_name"`
+		TotalRecordsPostCompaction uint64     `gorm:"column:total_records_post_compaction"`
+		SizeBytesPostCompaction    uint64     `gorm:"column:size_bytes_post_compaction"`
+		LastCompactionTimeSecs     uint64     `gorm:"column:last_compaction_time_secs"`
+		DatabaseName               string     `gorm:"column:database_name"`
+		TenantID                   string     `gorm:"column:tenant_id"`
+		// Metadata fields
+		Key               *string    `gorm:"column:key"`
+		StrValue          *string    `gorm:"column:str_value"`
+		IntValue          *int64     `gorm:"column:int_value"`
+		FloatValue        *float64   `gorm:"column:float_value"`
+		BoolValue         *bool      `gorm:"column:bool_value"`
+		MetadataTs        *int64     `gorm:"column:metadata_ts"`
+		MetadataCreatedAt *time.Time `gorm:"column:metadata_created_at"`
+		MetadataUpdatedAt *time.Time `gorm:"column:metadata_updated_at"`
+	}
+
 	query := s.db.Table("collections").
-		Select("collections.id, collections.log_position, collections.version, collections.name, collections.configuration_json_str, collections.dimension, collections.database_id, collections.is_deleted, collections.total_records_post_compaction, databases.name, databases.tenant_id").
+		Select("collections.id as collection_id, collections.name as collection_name, collections.configuration_json_str, collections.dimension, collections.database_id, collections.ts as collection_ts, collections.is_deleted, collections.created_at as collection_created_at, collections.updated_at as collection_updated_at, collections.log_position, collections.version, collections.version_file_name, collections.total_records_post_compaction, collections.size_bytes_post_compaction, collections.last_compaction_time_secs, databases.name as database_name, databases.tenant_id as tenant_id").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
 		Order("collections.created_at ASC")
 
@@ -79,68 +137,135 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 		query = query.Offset(int(*offset))
 
 	}
-	rows, err := query.Rows()
+	var results []Result
+	err = s.db.Table("(?) as ci", query).
+		Select(`
+            ci.*,
+            cm.key,
+            cm.str_value,
+            cm.int_value,
+            cm.float_value,
+            cm.bool_value,
+            cm.ts as metadata_ts,
+            cm.created_at as metadata_created_at,
+            cm.updated_at as metadata_updated_at
+        `).
+		Joins("LEFT JOIN collection_metadata cm ON cm.collection_id = ci.collection_id").
+		Scan(&results).Error
+
 	if err != nil {
 		return nil, err
 	}
-	collectionWithMetdata = make([]*dbmodel.CollectionAndMetadata, 0, len(collections))
-	for rows.Next() {
-		var (
-			collectionID                   string
-			logPosition                    int64
-			version                        int32
-			collectionName                 string
-			collectionConfigurationJsonStr string
-			collectionDimension            sql.NullInt32
-			collectionDatabaseID           string
-			collectionIsDeleted            bool
-			collectionCreatedAt            sql.NullTime
-			databaseName                   string
-			databaseTenantID               string
-			totalRecordsPostCompaction     uint64
-		)
 
-		err := rows.Scan(&collectionID, &logPosition, &version, &collectionName, &collectionConfigurationJsonStr, &collectionDimension, &collectionDatabaseID, &collectionIsDeleted, &totalRecordsPostCompaction, &databaseName, &databaseTenantID)
-		if err != nil {
-			log.Error("scan collection failed", zap.Error(err))
-			return nil, err
+	var collectionsMap = make(map[string]*dbmodel.CollectionAndMetadata)
+
+	for _, r := range results {
+		collection, exists := collectionsMap[r.CollectionId]
+		if !exists {
+			// Create new collection
+			var col = &dbmodel.Collection{
+				ID:                         r.CollectionId,
+				Name:                       r.CollectionName,
+				ConfigurationJsonStr:       r.ConfigurationJsonStr,
+				Dimension:                  r.Dimension,
+				DatabaseID:                 r.DatabaseID,
+				IsDeleted:                  r.IsDeleted,
+				LogPosition:                r.LogPosition,
+				Version:                    r.Version,
+				VersionFileName:            r.VersionFileName,
+				TotalRecordsPostCompaction: r.TotalRecordsPostCompaction,
+				SizeBytesPostCompaction:    r.SizeBytesPostCompaction,
+				LastCompactionTimeSecs:     r.LastCompactionTimeSecs,
+			}
+			if r.CollectionTs != nil {
+				col.Ts = *r.CollectionTs
+			} else {
+				col.Ts = 0
+			}
+
+			if r.CollectionCreatedAt != nil {
+				col.CreatedAt = *r.CollectionCreatedAt
+			} else {
+				// Current time as default.
+				col.CreatedAt = time.Now()
+			}
+
+			if r.CollectionUpdatedAt != nil {
+				col.UpdatedAt = *r.CollectionUpdatedAt
+			} else {
+				// Current time as default.
+				col.UpdatedAt = time.Now()
+			}
+
+			collection = &dbmodel.CollectionAndMetadata{
+				Collection:         col,
+				TenantID:           r.TenantID,
+				DatabaseName:       r.DatabaseName,
+				CollectionMetadata: make([]*dbmodel.CollectionMetadata, 0),
+			}
+			collectionsMap[r.CollectionId] = collection
 		}
 
-		collection := &dbmodel.Collection{
-			ID:                         collectionID,
-			Name:                       &collectionName,
-			ConfigurationJsonStr:       &collectionConfigurationJsonStr,
-			DatabaseID:                 collectionDatabaseID,
-			LogPosition:                logPosition,
-			Version:                    version,
-			IsDeleted:                  collectionIsDeleted,
-			TotalRecordsPostCompaction: totalRecordsPostCompaction,
-		}
-		if collectionDimension.Valid {
-			collection.Dimension = &collectionDimension.Int32
-		}
-		if collectionCreatedAt.Valid {
-			collection.CreatedAt = collectionCreatedAt.Time
-		}
+		// Populate metadata if it exists.
+		var metadata = &dbmodel.CollectionMetadata{}
+		if r.Key != nil {
+			metadata.Key = r.Key
+			metadata.StrValue = r.StrValue
+			metadata.IntValue = r.IntValue
+			metadata.FloatValue = r.FloatValue
+			metadata.BoolValue = r.BoolValue
+			if r.MetadataTs != nil {
+				metadata.Ts = *r.MetadataTs
+			} else {
+				metadata.Ts = 0
+			}
+			if r.MetadataCreatedAt != nil {
+				metadata.CreatedAt = *r.MetadataCreatedAt
+			} else {
+				// current time
+				metadata.CreatedAt = time.Now()
+			}
 
-		collectionWithMetdata = append(collectionWithMetdata, &dbmodel.CollectionAndMetadata{
-			Collection:   collection,
-			TenantID:     databaseTenantID,
-			DatabaseName: databaseName,
-		})
+			if r.MetadataUpdatedAt != nil {
+				metadata.UpdatedAt = *r.MetadataUpdatedAt
+			} else {
+				// current time
+				metadata.UpdatedAt = time.Now()
+			}
+			collection.CollectionMetadata = append(collection.CollectionMetadata, metadata)
+		}
 	}
-	rows.Close()
-	for _, collection := range collectionWithMetdata {
-		var metadata []*dbmodel.CollectionMetadata
-		err = s.db.Where("collection_id = ?", collection.Collection.ID).Find(&metadata).Error
-		if err != nil {
-			log.Error("get collection metadata failed", zap.Error(err))
-			return nil, err
-		}
-		collection.CollectionMetadata = metadata
+
+	var collections = make([]*dbmodel.CollectionAndMetadata, 0, len(collectionsMap))
+	for _, c := range collectionsMap {
+		collections = append(collections, c)
 	}
 
-	return
+	// Sort the result by created time.
+	sort.Slice(collections, func(i, j int) bool {
+		return collections[i].Collection.CreatedAt.Before(collections[j].Collection.CreatedAt)
+	})
+
+	return collections, nil
+}
+
+func (s *collectionDb) CountCollections(tenantID string, databaseName *string) (uint64, error) {
+	var count int64
+	query := s.db.Table("collections").
+		Joins("INNER JOIN databases ON collections.database_id = databases.id").
+		Where("databases.tenant_id = ? AND collections.is_deleted = ?", tenantID, false)
+
+	if databaseName != nil {
+		query = query.Where("databases.name = ?", databaseName)
+	}
+
+	result := query.Count(&count)
+
+	if result.Error != nil {
+		return 0, result.Error
+	}
+
+	return uint64(count), nil
 }
 
 func (s *collectionDb) GetCollectionSize(id string) (uint64, error) {
@@ -235,7 +360,35 @@ func (s *collectionDb) Update(in *dbmodel.Collection) error {
 	return nil
 }
 
-func (s *collectionDb) UpdateLogPositionVersionAndTotalRecords(collectionID string, logPosition int64, currentCollectionVersion int32, totalRecordsPostCompaction uint64) (int32, error) {
+func (s *collectionDb) UpdateLogPositionAndVersionInfo(
+	collectionID string,
+	logPosition int64,
+	currentCollectionVersion int32,
+	currentVersionFileName string,
+	newCollectionVersion int32,
+	newVersionFileName string,
+) (int64, error) {
+	// TODO(rohitcp): Investigate if we need to hold the lock using "UPDATE"
+	// strength, or if we can use "SELECT FOR UPDATE" or some other less
+	// expensive locking mechanism. Taking the lock as a caution for now.
+	result := s.db.Model(&dbmodel.Collection{}).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ? AND version = ? AND version_file_name = ?",
+			collectionID,
+			currentCollectionVersion,
+			currentVersionFileName).
+		Updates(map[string]interface{}{
+			"log_position":      logPosition,
+			"version":           newCollectionVersion,
+			"version_file_name": newVersionFileName,
+		})
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return result.RowsAffected, nil
+}
+
+func (s *collectionDb) UpdateLogPositionVersionTotalRecordsAndLogicalSize(collectionID string, logPosition int64, currentCollectionVersion int32, totalRecordsPostCompaction uint64, sizeBytesPostCompaction uint64) (int32, error) {
 	log.Info("update log position, version, and total records post compaction", zap.String("collectionID", collectionID), zap.Int64("logPosition", logPosition), zap.Int32("currentCollectionVersion", currentCollectionVersion), zap.Uint64("totalRecords", totalRecordsPostCompaction))
 	var collection dbmodel.Collection
 	// We use select for update to ensure no lost update happens even for isolation level read committed or below
@@ -256,9 +409,32 @@ func (s *collectionDb) UpdateLogPositionVersionAndTotalRecords(collectionID stri
 	}
 
 	version := currentCollectionVersion + 1
-	err = s.db.Model(&dbmodel.Collection{}).Where("id = ?", collectionID).Updates(map[string]interface{}{"log_position": logPosition, "version": version, "total_records_post_compaction": totalRecordsPostCompaction}).Error
+	err = s.db.Model(&dbmodel.Collection{}).Where("id = ?", collectionID).Updates(map[string]interface{}{"log_position": logPosition, "version": version, "total_records_post_compaction": totalRecordsPostCompaction, "size_bytes_post_compaction": sizeBytesPostCompaction}).Error
 	if err != nil {
 		return 0, err
 	}
 	return version, nil
+}
+
+func (s *collectionDb) UpdateVersionRelatedFields(collectionID, existingVersionFileName, newVersionFileName string, oldestVersionTs *time.Time, numActiveVersions *int) (int64, error) {
+	// Create updates map with required version_file_name
+	updates := map[string]interface{}{
+		"version_file_name": newVersionFileName,
+	}
+
+	// Only add optional fields if they are not nil
+	if oldestVersionTs != nil {
+		updates["oldest_version_ts"] = oldestVersionTs
+	}
+	if numActiveVersions != nil {
+		updates["num_versions"] = numActiveVersions
+	}
+
+	result := s.db.Model(&dbmodel.Collection{}).
+		Where("id = ? AND version_file_name = ?", collectionID, existingVersionFileName).
+		Updates(updates)
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return result.RowsAffected, nil
 }

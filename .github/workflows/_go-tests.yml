@@ -37,12 +37,18 @@ jobs:
 
   cluster-test:
     runs-on: "depot-ubuntu-22.04-16"
+    # OIDC token auth for Depot & AWS
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Setup
         uses: ./.github/actions/go
       - uses: ./.github/actions/tilt
+        with:
+          depot-project-id: ${{ vars.DEPOT_PROJECT_ID }}
       - run: bin/cluster-test.sh bash -c 'cd go && go test -timeout 30s -run ^TestNodeWatcher$ github.com/chroma-core/chroma/go/pkg/memberlist_manager'
       - name: Save service logs to artifact
         if: always()

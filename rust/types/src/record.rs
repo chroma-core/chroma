@@ -3,7 +3,7 @@ use super::{
     ScalarEncodingConversionError, UpdateMetadata, UpdateMetadataValue,
     UpdateMetadataValueConversionError,
 };
-use crate::chroma_proto;
+use crate::{chroma_proto, CHROMA_DOCUMENT_KEY};
 use chroma_error::{ChromaError, ErrorCodes};
 use thiserror::Error;
 
@@ -20,10 +20,42 @@ pub struct OperationRecord {
     pub operation: Operation,
 }
 
+impl OperationRecord {
+    pub fn size_byte(&self) -> u64 {
+        let mut size_byte = 0;
+        size_byte += self.id.len();
+        if let Some(emb) = &self.embedding {
+            size_byte += size_of::<f32>() * emb.len();
+        }
+        if let Some(meta) = &self.metadata {
+            size_byte += meta.iter().fold(0, |acc, (k, v)| {
+                acc + k.len()
+                    + match v {
+                        UpdateMetadataValue::Bool(b) => size_of_val(b),
+                        UpdateMetadataValue::Int(i) => size_of_val(i),
+                        UpdateMetadataValue::Float(f) => size_of_val(f),
+                        UpdateMetadataValue::Str(s) => s.len(),
+                        UpdateMetadataValue::None => 0,
+                    }
+            });
+        }
+        if let Some(doc) = &self.document {
+            size_byte += doc.len();
+        }
+        size_byte as u64
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct LogRecord {
     pub log_offset: i64,
     pub record: OperationRecord,
+}
+
+impl LogRecord {
+    pub fn size_byte(&self) -> u64 {
+        size_of_val(&self.log_offset) as u64 + self.record.size_byte()
+    }
 }
 
 #[derive(Error, Debug)]
@@ -50,6 +82,35 @@ impl_base_convert_error!(RecordConversionError, {
     RecordConversionError::VectorConversionError(inner) => inner.code(),
 });
 
+impl TryFrom<OperationRecord> for chroma_proto::OperationRecord {
+    type Error = RecordConversionError;
+
+    fn try_from(operation_record: OperationRecord) -> Result<Self, Self::Error> {
+        let vector = match operation_record.embedding {
+            Some(embedding) => {
+                let len = embedding.len();
+                let encoding = operation_record.encoding.unwrap_or(ScalarEncoding::FLOAT32);
+                Some((embedding, encoding, len))
+            }
+            None => None,
+        };
+
+        let metadata = operation_record.metadata.map(|metadata| metadata.into());
+
+        let proto_vector = match vector {
+            Some(vector) => Some(vector.try_into()?),
+            None => None,
+        };
+
+        Ok(chroma_proto::OperationRecord {
+            id: operation_record.id,
+            vector: proto_vector,
+            metadata,
+            operation: operation_record.operation as i32,
+        })
+    }
+}
+
 impl TryFrom<chroma_proto::OperationRecord> for OperationRecord {
     type Error = RecordConversionError;
 
@@ -73,7 +134,7 @@ impl TryFrom<chroma_proto::OperationRecord> for OperationRecord {
         let (metadata, document) = match operation_record_proto.metadata {
             Some(proto_metadata) => match UpdateMetadata::try_from(proto_metadata) {
                 Ok(mut metadata) => {
-                    let document = metadata.remove("chroma:document");
+                    let document = metadata.remove(CHROMA_DOCUMENT_KEY);
                     match document {
                         Some(UpdateMetadataValue::Str(document)) => {
                             (Some(metadata), Some(document))
@@ -268,7 +329,7 @@ impl From<MetadataEmbeddingRecord> for chroma_proto::MetadataEmbeddingRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{chroma_proto, UpdateMetadataValue};
+    use crate::{chroma_proto, UpdateMetadataValue, CHROMA_DOCUMENT_KEY};
     use std::collections::HashMap;
     use uuid::Uuid;
 
@@ -293,7 +354,7 @@ mod tests {
 
         // Insert a chroma:document field
         metadata.metadata.insert(
-            "chroma:document".to_string(),
+            CHROMA_DOCUMENT_KEY.to_string(),
             chroma_proto::UpdateMetadataValue {
                 value: Some(chroma_proto::update_metadata_value::Value::StringValue(
                     "document_contents".to_string(),
@@ -332,7 +393,7 @@ mod tests {
         assert_eq!(converted_operation_record.operation, Operation::Add);
 
         // Ensure metadata no longer has the document field
-        assert_eq!(metadata.get("chroma:document"), None);
+        assert_eq!(metadata.get(CHROMA_DOCUMENT_KEY), None);
     }
 
     #[test]

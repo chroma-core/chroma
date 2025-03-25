@@ -1,5 +1,6 @@
+use chroma_log::CollectionRecord;
+
 use crate::compactor::types::CompactionJob;
-use crate::log::log::CollectionRecord;
 
 pub(crate) trait SchedulerPolicy: Send + Sync + SchedulerPolicyClone {
     fn determine(&self, collections: Vec<CollectionRecord>, number_jobs: i32)
@@ -48,6 +49,7 @@ impl SchedulerPolicy for LasCompactionTimeSchedulerPolicy {
                 tenant_id: collection.tenant_id.clone(),
                 offset: collection.offset,
                 collection_version: collection.collection_version,
+                collection_logical_size_bytes: collection.collection_logical_size_bytes,
             });
         }
         tasks
@@ -75,6 +77,7 @@ mod tests {
                 first_record_time: 1,
                 offset: 0,
                 collection_version: 0,
+                collection_logical_size_bytes: 100,
             },
             CollectionRecord {
                 collection_id: collection_uuid_2,
@@ -83,6 +86,7 @@ mod tests {
                 first_record_time: 0,
                 offset: 0,
                 collection_version: 0,
+                collection_logical_size_bytes: 100,
             },
         ];
         let jobs = scheduler_policy.determine(collections.clone(), 1);

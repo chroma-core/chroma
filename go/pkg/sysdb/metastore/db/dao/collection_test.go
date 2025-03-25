@@ -47,7 +47,8 @@ func (suite *CollectionDbTestSuite) TearDownSuite() {
 
 func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 	collectionName := "test_collection_get_collections"
-	collectionID, err := CreateTestCollection(suite.db, collectionName, 128, suite.databaseId)
+	dim := int32(128)
+	collectionID, err := CreateTestCollection(suite.db, collectionName, dim, suite.databaseId)
 	suite.NoError(err)
 
 	testKey := "test"
@@ -78,9 +79,20 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 	suite.Equal(metadata.Key, collections[0].CollectionMetadata[0].Key)
 	suite.Equal(metadata.StrValue, collections[0].CollectionMetadata[0].StrValue)
 	suite.Equal(uint64(100), collections[0].Collection.TotalRecordsPostCompaction)
+	suite.Equal(uint64(500000), collections[0].Collection.SizeBytesPostCompaction)
+	suite.Equal(uint64(1741037006), collections[0].Collection.LastCompactionTimeSecs)
+	suite.Equal(collections[0].DatabaseName, suite.databaseName)
+	suite.Equal(collections[0].TenantID, suite.tenantName)
+	suite.Equal(collections[0].Collection.Dimension, &dim)
+	defaultConfig := "{\"a\": \"param\", \"b\": \"param2\", \"3\": true}"
+	suite.Equal(collections[0].Collection.ConfigurationJsonStr, &defaultConfig)
+	suite.Equal(collections[0].Collection.DatabaseID, suite.databaseId)
+	suite.Equal(collections[0].Collection.LogPosition, int64(0))
+	suite.Equal(collections[0].Collection.Version, int32(0))
+	suite.Equal(collections[0].Collection.IsDeleted, false)
 
 	// Test when filtering by ID
-	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, nil, nil)
+	collections, err = suite.collectionDb.GetCollections(&collectionID, nil, "", "", nil, nil)
 	suite.NoError(err)
 	suite.Len(collections, 1)
 	suite.Equal(collectionID, collections[0].Collection.ID)
@@ -91,14 +103,17 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 	suite.Len(collections, 1)
 	suite.Equal(collectionID, collections[0].Collection.ID)
 
-	// Test limit and offset
 	collectionID2, err := CreateTestCollection(suite.db, "test_collection_get_collections2", 128, suite.databaseId)
 	suite.NoError(err)
 
+	// Test order by. Collections are ordered by create time so collectionID2 should be second
 	allCollections, err := suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
 	suite.Len(allCollections, 2)
+	suite.Equal(collectionID, allCollections[0].Collection.ID)
+	suite.Equal(collectionID2, allCollections[1].Collection.ID)
 
+	// Test limit and offset
 	limit := int32(1)
 	offset := int32(1)
 	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, &limit, nil)
@@ -116,14 +131,48 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 	suite.NoError(err)
 	suite.Equal(len(collections), 0)
 
+	// Create another database for the same tenant.
+	databaseName := "test_collection_database_2"
+	DbId, err := CreateTestDatabase(suite.db, suite.tenantName, databaseName)
+	suite.NoError(err)
+
+	// Create two collections in the new database.
+	collectionID3, err := CreateTestCollection(suite.db, "test_collection_get_collections3", 128, DbId)
+	suite.NoError(err)
+
+	collectionID4, err := CreateTestCollection(suite.db, "test_collection_get_collections4", 128, DbId)
+	suite.NoError(err)
+
+	// Test count collections
+	// Count collections in the first database
+	count, err := suite.collectionDb.CountCollections(suite.tenantName, &suite.databaseName)
+	suite.NoError(err)
+	suite.Equal(uint64(2), count)
+
+	// Count collections in the second database
+	count, err = suite.collectionDb.CountCollections(suite.tenantName, &databaseName)
+	suite.NoError(err)
+	suite.Equal(uint64(2), count)
+
+	// Count collections by tenant
+	count, err = suite.collectionDb.CountCollections(suite.tenantName, nil)
+	suite.NoError(err)
+	suite.Equal(uint64(4), count)
+
 	// clean up
 	err = CleanUpTestCollection(suite.db, collectionID)
 	suite.NoError(err)
 	err = CleanUpTestCollection(suite.db, collectionID2)
 	suite.NoError(err)
+	err = CleanUpTestCollection(suite.db, collectionID3)
+	suite.NoError(err)
+	err = CleanUpTestCollection(suite.db, collectionID4)
+	suite.NoError(err)
+	err = CleanUpTestDatabase(suite.db, suite.tenantName, databaseName)
+	suite.NoError(err)
 }
 
-func (suite *CollectionDbTestSuite) TestCollectionDb_UpdateLogPositionVersionAndTotalRecords() {
+func (suite *CollectionDbTestSuite) TestCollectionDb_UpdateLogPositionVersionTotalRecordsAndLogicalSize() {
 	collectionName := "test_collection_get_collections"
 	collectionID, _ := CreateTestCollection(suite.db, collectionName, 128, suite.databaseId)
 	// verify default values
@@ -134,7 +183,7 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_UpdateLogPositionVersionAnd
 	suite.Equal(int32(0), collections[0].Collection.Version)
 
 	// update log position and version
-	version, err := suite.collectionDb.UpdateLogPositionVersionAndTotalRecords(collectionID, int64(10), 0, uint64(100))
+	version, err := suite.collectionDb.UpdateLogPositionVersionTotalRecordsAndLogicalSize(collectionID, int64(10), 0, uint64(100), uint64(1000))
 	suite.NoError(err)
 	suite.Equal(int32(1), version)
 	collections, _ = suite.collectionDb.GetCollections(&collectionID, nil, "", "", nil, nil)
@@ -142,15 +191,16 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_UpdateLogPositionVersionAnd
 	suite.Equal(int64(10), collections[0].Collection.LogPosition)
 	suite.Equal(int32(1), collections[0].Collection.Version)
 	suite.Equal(uint64(100), collections[0].Collection.TotalRecordsPostCompaction)
+	suite.Equal(uint64(1000), collections[0].Collection.SizeBytesPostCompaction)
 
 	// invalid log position
-	_, err = suite.collectionDb.UpdateLogPositionVersionAndTotalRecords(collectionID, int64(5), 0, uint64(100))
+	_, err = suite.collectionDb.UpdateLogPositionVersionTotalRecordsAndLogicalSize(collectionID, int64(5), 0, uint64(100), uint64(1000))
 	suite.Error(err, "collection log position Stale")
 
 	// invalid version
-	_, err = suite.collectionDb.UpdateLogPositionVersionAndTotalRecords(collectionID, int64(20), 0, uint64(100))
+	_, err = suite.collectionDb.UpdateLogPositionVersionTotalRecordsAndLogicalSize(collectionID, int64(20), 0, uint64(100), uint64(1000))
 	suite.Error(err, "collection version invalid")
-	_, err = suite.collectionDb.UpdateLogPositionVersionAndTotalRecords(collectionID, int64(20), 3, uint64(100))
+	_, err = suite.collectionDb.UpdateLogPositionVersionTotalRecordsAndLogicalSize(collectionID, int64(20), 3, uint64(100), uint64(1000))
 	suite.Error(err, "collection version invalid")
 
 	//clean up

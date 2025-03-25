@@ -24,6 +24,7 @@ func (v CollectionMetadata) TableName() string {
 
 //go:generate mockery --name=ICollectionMetadataDb
 type ICollectionMetadataDb interface {
+	// GetForCollection(collectionID string) ([]*CollectionMetadata, error)
 	DeleteByCollectionID(collectionID string) (int, error)
 	Insert(in []*CollectionMetadata) error
 	DeleteAll() error

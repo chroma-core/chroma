@@ -2,8 +2,8 @@ import pytest
 from chromadb.api.client import AdminClient, Client
 from chromadb.config import System
 from chromadb.db.impl.sqlite import SqliteDB
-from chromadb.errors import InvalidCollectionException, NotFoundError
-from chromadb.test.conftest import NOT_CLUSTER_ONLY, ClientFactories
+from chromadb.errors import NotFoundError
+from chromadb.test.conftest import ClientFactories
 
 
 def test_deletes_database(client_factories: ClientFactories) -> None:
@@ -22,10 +22,10 @@ def test_deletes_database(client_factories: ClientFactories) -> None:
     with pytest.raises(NotFoundError):
         admin_client.get_database("test_delete_database")
 
-    with pytest.raises(InvalidCollectionException):
+    with pytest.raises(NotFoundError):
         client.get_collection("foo")
 
-    with pytest.raises(InvalidCollectionException):
+    with pytest.raises(NotFoundError):
         collection.upsert(["foo"], [0.0, 0.0, 0.0])
 
 
@@ -48,7 +48,7 @@ def test_does_not_affect_other_databases(client_factories: ClientFactories) -> N
 
     assert second_client.get_collection("test").id == second_collection.id
 
-    with pytest.raises(InvalidCollectionException):
+    with pytest.raises(NotFoundError):
         first_client.get_collection("test")
 
 
@@ -63,7 +63,7 @@ def test_collection_was_removed(sqlite_persistent: System) -> None:
 
     admin_client.delete_database("test_delete_database")
 
-    with pytest.raises(InvalidCollectionException):
+    with pytest.raises(NotFoundError):
         client.get_collection("foo")
 
     # Check table

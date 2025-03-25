@@ -1,8 +1,8 @@
-use chroma_system::Operator;
-use crate::segment::ChromaSegmentFlusher;
 use async_trait::async_trait;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
+use chroma_segment::types::ChromaSegmentFlusher;
+use chroma_system::Operator;
 use chroma_types::SegmentFlushInfo;
 use parking_lot::Mutex;
 use thiserror::Error;

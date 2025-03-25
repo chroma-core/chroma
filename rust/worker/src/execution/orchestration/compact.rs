@@ -17,30 +17,35 @@ use crate::execution::operators::flush_segment_writer::FlushSegmentWriterOutput;
 use crate::execution::operators::materialize_logs::MaterializeLogInput;
 use crate::execution::operators::materialize_logs::MaterializeLogOperator;
 use crate::execution::operators::materialize_logs::MaterializeLogOperatorError;
+use crate::execution::operators::materialize_logs::MaterializeLogOutput;
 use crate::execution::operators::partition::PartitionError;
 use crate::execution::operators::partition::PartitionInput;
 use crate::execution::operators::partition::PartitionOperator;
 use crate::execution::operators::partition::PartitionOutput;
+use crate::execution::operators::prefetch_segment::PrefetchSegmentError;
+use crate::execution::operators::prefetch_segment::PrefetchSegmentInput;
+use crate::execution::operators::prefetch_segment::PrefetchSegmentOperator;
+use crate::execution::operators::prefetch_segment::PrefetchSegmentOutput;
 use crate::execution::operators::register::RegisterError;
 use crate::execution::operators::register::RegisterInput;
 use crate::execution::operators::register::RegisterOperator;
 use crate::execution::operators::register::RegisterOutput;
-use crate::log::log::Log;
-use crate::segment::distributed_hnsw_segment::DistributedHNSWSegmentWriter;
-use crate::segment::metadata_segment::MetadataSegmentWriter;
-use crate::segment::record_segment::RecordSegmentReader;
-use crate::segment::record_segment::RecordSegmentReaderCreationError;
-use crate::segment::record_segment::RecordSegmentWriter;
-use crate::segment::ChromaSegmentFlusher;
-use crate::segment::ChromaSegmentWriter;
-use crate::segment::MaterializeLogsResult;
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use chroma_index::hnsw_provider::HnswIndexProvider;
-use chroma_sysdb::GetCollectionsError;
-use chroma_sysdb::GetSegmentsError;
+use chroma_log::Log;
+use chroma_segment::blockfile_metadata::MetadataSegmentWriter;
+use chroma_segment::blockfile_record::RecordSegmentReader;
+use chroma_segment::blockfile_record::RecordSegmentReaderCreationError;
+use chroma_segment::blockfile_record::RecordSegmentWriter;
+use chroma_segment::distributed_hnsw::DistributedHNSWSegmentWriter;
+use chroma_segment::spann_provider::SpannProvider;
+use chroma_segment::types::ChromaSegmentFlusher;
+use chroma_segment::types::ChromaSegmentWriter;
+use chroma_segment::types::MaterializeLogsResult;
+use chroma_segment::types::VectorSegmentWriter;
 use chroma_sysdb::SysDb;
 use chroma_system::wrap;
 use chroma_system::ChannelError;
@@ -55,6 +60,9 @@ use chroma_system::TaskError;
 use chroma_system::TaskMessage;
 use chroma_system::TaskResult;
 use chroma_types::Chunk;
+use chroma_types::GetCollectionsError;
+use chroma_types::GetSegmentsError;
+use chroma_types::SegmentScope;
 use chroma_types::SegmentUuid;
 use chroma_types::{CollectionUuid, LogRecord, Segment, SegmentFlushInfo, SegmentType};
 use core::panic;
@@ -98,7 +106,7 @@ enum ExecutionState {
 pub(crate) struct CompactWriters {
     pub(crate) metadata: MetadataSegmentWriter<'static>,
     pub(crate) record: RecordSegmentWriter,
-    pub(crate) vector: Box<DistributedHNSWSegmentWriter>,
+    pub(crate) vector: VectorSegmentWriter,
 }
 
 #[derive(Debug)]
@@ -108,11 +116,13 @@ pub struct CompactOrchestrator {
     state: ExecutionState,
     // Component Execution
     collection_id: CollectionUuid,
+    collection_logical_size_bytes: i64,
     // Dependencies
-    log: Box<Log>,
-    sysdb: Box<SysDb>,
+    log: Log,
+    sysdb: SysDb,
     blockfile_provider: BlockfileProvider,
     hnsw_index_provider: HnswIndexProvider,
+    spann_provider: SpannProvider,
     // State we hold across the execution
     pulled_log_offset: Option<i64>,
     // Dispatcher
@@ -145,8 +155,10 @@ pub enum GetSegmentWritersError {
     RecordSegmentWriterError,
     #[error("Error creating Metadata Segment Writer")]
     MetadataSegmentWriterError,
-    #[error("Error creating HNSW Segment Writer")]
-    HnswSegmentWriterError,
+    #[error("Error creating Vector Segment Writer")]
+    VectorSegmentWriterError,
+    #[error("Error creating Vector Segment Writer. Unknown Vector Segment Type")]
+    UnknownVectorSegmentType,
     #[error("Collection not found")]
     CollectionNotFound,
     #[error("Error getting collection")]
@@ -173,6 +185,8 @@ pub enum CompactionError {
     MaterializeLogs(#[from] MaterializeLogOperatorError),
     #[error("Apply logs to segment writer error: {0}")]
     ApplyLogToSegmentWriter(#[from] ApplyLogToSegmentWriterOperatorError),
+    #[error("Prefetch segment error: {0}")]
+    PrefetchSegment(#[from] PrefetchSegmentError),
     #[error("Commit segment writer error: {0}")]
     CommitSegmentWriter(#[from] CommitSegmentWriterOperatorError),
     #[error("Flush segment writer error: {0}")]
@@ -191,6 +205,8 @@ pub enum CompactionError {
     Generic(#[from] Box<dyn ChromaError>),
     #[error("Invariant violation: {}", .0)]
     InvariantViolation(&'static str),
+    #[error("Operation aborted because resources exhausted")]
+    Aborted,
 }
 
 impl<E> From<TaskError<E>> for CompactionError
@@ -201,13 +217,18 @@ where
         match value {
             TaskError::Panic(e) => CompactionError::Panic(e),
             TaskError::TaskFailed(e) => e.into(),
+            TaskError::Aborted => CompactionError::Aborted,
         }
     }
 }
 
 impl ChromaError for CompactionError {
     fn code(&self) -> ErrorCodes {
-        ErrorCodes::Internal
+        if matches!(self, CompactionError::Aborted) {
+            ErrorCodes::ResourceExhausted
+        } else {
+            ErrorCodes::Internal
+        }
     }
 }
 
@@ -226,10 +247,12 @@ impl CompactOrchestrator {
     pub fn new(
         compaction_job: CompactionJob,
         collection_id: CollectionUuid,
-        log: Box<Log>,
-        sysdb: Box<SysDb>,
+        collection_logical_size_bytes: i64,
+        log: Log,
+        sysdb: SysDb,
         blockfile_provider: BlockfileProvider,
         hnsw_index_provider: HnswIndexProvider,
+        spann_provider: SpannProvider,
         dispatcher: ComponentHandle<Dispatcher>,
         result_channel: Option<Sender<Result<CompactionResponse, CompactionError>>>,
         max_compaction_size: usize,
@@ -240,10 +263,12 @@ impl CompactOrchestrator {
             compaction_job,
             state: ExecutionState::Pending,
             collection_id,
+            collection_logical_size_bytes,
             log,
             sysdb,
             blockfile_provider,
             hnsw_index_provider,
+            spann_provider,
             pulled_log_offset: None,
             dispatcher,
             num_uncompleted_materialization_tasks: 0,
@@ -267,17 +292,31 @@ impl CompactOrchestrator {
         self.state = ExecutionState::Partition;
         let operator = PartitionOperator::new();
         tracing::info!("Sending N Records: {:?}", records.len());
-        println!("Sending N Records: {:?}", records.len());
         let input = PartitionInput::new(records, self.max_partition_size);
         let task = wrap(operator, input, ctx.receiver());
         self.send(task, ctx).await;
+
+        let segments = self.get_all_segments().await.unwrap();
+        for segment in segments {
+            if segment.r#type == SegmentType::BlockfileMetadata
+                || segment.r#type == SegmentType::BlockfileRecord
+            {
+                let prefetch_task = wrap(
+                    Box::new(PrefetchSegmentOperator::new()),
+                    PrefetchSegmentInput::new(segment, self.blockfile_provider.clone()),
+                    ctx.receiver(),
+                );
+
+                self.send(prefetch_task, ctx).await;
+            }
+        }
     }
 
     async fn materialize_log(
         &mut self,
         partitions: Vec<Chunk<LogRecord>>,
         self_address: Box<
-            dyn ReceiverForMessage<TaskResult<MaterializeLogsResult, MaterializeLogOperatorError>>,
+            dyn ReceiverForMessage<TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>>,
         >,
         ctx: &ComponentContext<CompactOrchestrator>,
     ) {
@@ -412,13 +451,13 @@ impl CompactOrchestrator {
 
         {
             self.num_uncompleted_tasks_by_segment
-                .entry(writers.vector.id)
+                .entry(writers.vector.get_id())
                 .and_modify(|v| {
                     *v += 1;
                 })
                 .or_insert(1);
 
-            let writer = ChromaSegmentWriter::DistributedHNSWSegment(writers.vector);
+            let writer = ChromaSegmentWriter::VectorSegment(writers.vector);
             let span = self.get_segment_writer_span(&writer);
             let operator = ApplyLogToSegmentWriterOperator::new();
             let input =
@@ -475,6 +514,9 @@ impl CompactOrchestrator {
             self.compaction_job.collection_version,
             self.flush_results.clone().into(),
             self.total_records_last_compaction,
+            // WARN: For legacy collections the logical size is initialized to zero, so the size after compaction might be negative
+            // TODO: Backfill collection logical size
+            u64::try_from(self.collection_logical_size_bytes).unwrap_or_default(),
             self.sysdb.clone(),
             self.log.clone(),
         );
@@ -515,18 +557,35 @@ impl CompactOrchestrator {
         }
     }
 
+    async fn get_segment_from_scope(
+        &mut self,
+        segment_scope: SegmentScope,
+    ) -> Result<Segment, GetSegmentWritersError> {
+        let segments = self.get_all_segments().await?;
+        let segment = segments
+            .iter()
+            .find(|segment| segment.scope == segment_scope)
+            .cloned();
+
+        tracing::debug!("Found {:?} segment: {:?}", segment_scope, segment);
+
+        match segment {
+            Some(segment) => Ok(segment),
+            None => Err(GetSegmentWritersError::NoSegmentsFound),
+        }
+    }
+
     async fn get_segment_writers(&mut self) -> Result<CompactWriters, GetSegmentWritersError> {
         // Care should be taken to use the same writers across the compaction process
         // Since the segment writers are stateful, we should not create new writers for each partition
         // Nor should we create new writers across different tasks
 
         let blockfile_provider = self.blockfile_provider.clone();
-        let hnsw_provider = self.hnsw_index_provider.clone();
         let mut sysdb = self.sysdb.clone();
 
         let record_segment = self.get_segment(SegmentType::BlockfileRecord).await?;
         let mt_segment = self.get_segment(SegmentType::BlockfileMetadata).await?;
-        let hnsw_segment = self.get_segment(SegmentType::HnswDistributed).await?;
+        let vector_segment = self.get_segment_from_scope(SegmentScope::VECTOR).await?;
 
         let borrowed_writers = self
             .writers
@@ -559,47 +618,68 @@ impl CompactOrchestrator {
 
                 tracing::debug!("Metadata Segment Writer created");
 
-                // Create a hnsw segment writer
                 let collection_res = sysdb
-                    .get_collections(Some(self.collection_id), None, None, None)
-                    .await;
+                    .get_collections(Some(self.collection_id), None, None, None, None, 0)
+                    .await
+                    .map_err(GetSegmentWritersError::GetCollectionError)?;
 
-                let collection_res = match collection_res {
-                    Ok(collections) => {
-                        if collections.is_empty() {
-                            return Err(GetSegmentWritersError::CollectionNotFound);
-                        }
-                        collections
-                    }
-                    Err(e) => {
-                        return Err(GetSegmentWritersError::GetCollectionError(e));
+                let collection = collection_res
+                    .first()
+                    .ok_or_else(|| GetSegmentWritersError::CollectionNotFound)?;
+
+                let dim = match collection.dimension {
+                    Some(dim) => dim,
+                    None => {
+                        tracing::error!(
+                            "Error creating vector segment writer. Collection dim missing"
+                        );
+                        return Err(GetSegmentWritersError::CollectionMissingDimension);
                     }
                 };
-                let collection = &collection_res[0];
 
-                if let Some(dimension) = collection.dimension {
+                if vector_segment.r#type == SegmentType::HnswDistributed {
+                    // Create a hnsw segment writer
                     let hnsw_segment_writer = match DistributedHNSWSegmentWriter::from_segment(
-                        &hnsw_segment,
-                        dimension as usize,
-                        hnsw_provider,
+                        collection,
+                        &vector_segment,
+                        dim as usize,
+                        self.hnsw_index_provider.clone(),
                     )
                     .await
                     {
                         Ok(writer) => writer,
                         Err(e) => {
                             tracing::error!("Error creating HNSW segment writer: {:?}", e);
-                            return Err(GetSegmentWritersError::HnswSegmentWriterError);
+                            return Err(GetSegmentWritersError::VectorSegmentWriterError);
+                        }
+                    };
+                    Ok(CompactWriters {
+                        metadata: mt_segment_writer,
+                        record: record_segment_writer,
+                        vector: VectorSegmentWriter::Hnsw(hnsw_segment_writer),
+                    })
+                } else if vector_segment.r#type == SegmentType::Spann {
+                    let spann_writer = match self
+                        .spann_provider
+                        .write(collection, &vector_segment, dim as usize)
+                        .await
+                    {
+                        Ok(writer) => writer,
+                        Err(e) => {
+                            tracing::error!("Error creating Spann segment writer: {:?}", e);
+                            return Err(GetSegmentWritersError::VectorSegmentWriterError);
                         }
                     };
 
-                    return Ok(CompactWriters {
+                    Ok(CompactWriters {
                         metadata: mt_segment_writer,
                         record: record_segment_writer,
-                        vector: hnsw_segment_writer,
-                    });
+                        vector: VectorSegmentWriter::Spann(spann_writer),
+                    })
+                } else {
+                    tracing::error!("Error creating vector segment writer. Unknown segment type");
+                    Err(GetSegmentWritersError::UnknownVectorSegmentType)
                 }
-
-                Err(GetSegmentWritersError::CollectionMissingDimension)
             })
             .await?;
 
@@ -620,8 +700,8 @@ impl CompactOrchestrator {
             return Ok(ChromaSegmentWriter::RecordSegment(writers.record));
         }
 
-        if writers.vector.id == segment_id {
-            return Ok(ChromaSegmentWriter::DistributedHNSWSegment(writers.vector));
+        if writers.vector.get_id() == segment_id {
+            return Ok(ChromaSegmentWriter::VectorSegment(writers.vector));
         }
 
         Err(GetSegmentWritersError::NoSegmentsFound)
@@ -705,7 +785,10 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
     ) {
         let records = match self.ok_or_terminate(message.into_inner(), ctx) {
             Some(recs) => recs,
-            None => todo!(),
+            None => {
+                tracing::info!("cancelled fetch log task");
+                return;
+            }
         };
         tracing::info!("Pulled Records: {:?}", records.len());
         let final_record_pulled = records.get(records.len() - 1);
@@ -721,6 +804,22 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
                 );
                 panic!("No records pulled by compaction, this is a system invariant violation");
             }
+        }
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<PrefetchSegmentOutput, PrefetchSegmentError>> for CompactOrchestrator {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<PrefetchSegmentOutput, PrefetchSegmentError>,
+        ctx: &ComponentContext<CompactOrchestrator>,
+    ) {
+        match self.ok_or_terminate(message.into_inner(), ctx) {
+            Some(_) => (),
+            None => return,
         }
     }
 }
@@ -743,22 +842,22 @@ impl Handler<TaskResult<PartitionOutput, PartitionError>> for CompactOrchestrato
 }
 
 #[async_trait]
-impl Handler<TaskResult<MaterializeLogsResult, MaterializeLogOperatorError>>
+impl Handler<TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>>
     for CompactOrchestrator
 {
     type Result = ();
 
     async fn handle(
         &mut self,
-        message: TaskResult<MaterializeLogsResult, MaterializeLogOperatorError>,
+        message: TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>,
         ctx: &ComponentContext<CompactOrchestrator>,
     ) {
-        let materialized_result = match self.ok_or_terminate(message.into_inner(), ctx) {
-            Some(result) => result,
+        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+            Some(res) => res,
             None => return,
         };
 
-        if materialized_result.is_empty() {
+        if output.result.is_empty() {
             // We check the number of remaining materialization tasks to prevent a race condition
             if self.num_uncompleted_materialization_tasks == 1
                 && self.num_uncompleted_tasks_by_segment.is_empty()
@@ -767,12 +866,9 @@ impl Handler<TaskResult<MaterializeLogsResult, MaterializeLogOperatorError>>
                 self.register(self.pulled_log_offset.unwrap(), ctx).await;
             }
         } else {
-            self.dispatch_apply_log_to_segment_writer_tasks(
-                materialized_result,
-                ctx.receiver(),
-                ctx,
-            )
-            .await;
+            self.collection_logical_size_bytes += output.collection_logical_size_delta;
+            self.dispatch_apply_log_to_segment_writer_tasks(output.result, ctx.receiver(), ctx)
+                .await;
         }
 
         self.num_uncompleted_materialization_tasks -= 1;

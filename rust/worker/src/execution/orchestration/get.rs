@@ -1,7 +1,10 @@
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_system::{wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator, PanicError, TaskError, TaskMessage, TaskResult};
+use chroma_system::{
+    wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
+    PanicError, TaskError, TaskMessage, TaskResult,
+};
 use chroma_types::CollectionAndSegments;
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
@@ -30,6 +33,8 @@ pub enum GetError {
     Projection(#[from] ProjectionError),
     #[error("Error receiving final result: {0}")]
     Result(#[from] RecvError),
+    #[error("Operation aborted because resources exhausted")]
+    Aborted,
 }
 
 impl ChromaError for GetError {
@@ -42,6 +47,7 @@ impl ChromaError for GetError {
             GetError::Panic(_) => ErrorCodes::Aborted,
             GetError::Projection(e) => e.code(),
             GetError::Result(_) => ErrorCodes::Internal,
+            GetError::Aborted => ErrorCodes::ResourceExhausted,
         }
     }
 }
@@ -54,11 +60,12 @@ where
         match value {
             TaskError::Panic(e) => e.into(),
             TaskError::TaskFailed(e) => e.into(),
+            TaskError::Aborted => GetError::Aborted,
         }
     }
 }
 
-type GetOutput = ProjectionOutput;
+type GetOutput = (ProjectionOutput, u64);
 
 type GetResult = Result<GetOutput, GetError>;
 
@@ -313,6 +320,19 @@ impl Handler<TaskResult<ProjectionOutput, ProjectionError>> for GetOrchestrator 
         message: TaskResult<ProjectionOutput, ProjectionError>,
         ctx: &ComponentContext<Self>,
     ) {
-        self.terminate_with_result(message.into_inner().map_err(|e| e.into()), ctx);
+        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+            Some(output) => output,
+            None => return,
+        };
+
+        let fetch_log_size_bytes = self
+            .fetched_logs
+            .as_ref()
+            .expect("FetchLogOperator should have finished already")
+            .iter()
+            .map(|(l, _)| l.size_byte())
+            .sum();
+
+        self.terminate_with_result(Ok((output, fetch_log_size_bytes)), ctx);
     }
 }

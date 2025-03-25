@@ -1,7 +1,9 @@
 from abc import abstractmethod
 from typing import Optional, Sequence, Tuple
 from uuid import UUID
-from chromadb.api.configuration import CollectionConfigurationInternal
+from chromadb.api.collection_configuration import (
+    CreateCollectionConfiguration,
+)
 from chromadb.types import (
     Collection,
     CollectionAndSegments,
@@ -101,7 +103,7 @@ class SysDB(Component):
         self,
         id: UUID,
         name: str,
-        configuration: CollectionConfigurationInternal,
+        configuration: CreateCollectionConfiguration,
         segments: Sequence[Segment],
         metadata: Optional[Metadata] = None,
         dimension: Optional[int] = None,
@@ -142,6 +144,15 @@ class SysDB(Component):
         offset: Optional[int] = None,
     ) -> Sequence[Collection]:
         """Find collections by id or name. If name is provided, tenant and database must also be provided."""
+        pass
+
+    @abstractmethod
+    def count_collections(
+        self,
+        tenant: str = DEFAULT_TENANT,
+        database: Optional[str] = None,
+    ) -> int:
+        """Gets the number of collections for the (tenant, database) combination."""
         pass
 
     @abstractmethod

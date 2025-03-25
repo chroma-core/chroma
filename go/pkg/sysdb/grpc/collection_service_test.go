@@ -41,14 +41,16 @@ func (suite *CollectionServiceTestSuite) SetupSuite() {
 	suite.db, suite.read_db = dbcore.ConfigDatabaseForTesting()
 	s, err := NewWithGrpcProvider(Config{
 		SystemCatalogProvider: "database",
-		Testing:               true}, grpcutils.Default)
+		Testing:               true,
+		BlockStoreProvider:    "none",
+	}, grpcutils.Default)
 	if err != nil {
 		suite.T().Fatalf("error creating server: %v", err)
 	}
 	suite.s = s
 	txnImpl := dbcore.NewTxImpl()
 	metaDomain := dao.NewMetaDomain()
-	suite.catalog = coordinator.NewTableCatalog(txnImpl, metaDomain)
+	suite.catalog = coordinator.NewTableCatalog(txnImpl, metaDomain, nil, false)
 	suite.tenantName = "tenant_" + suite.T().Name()
 	suite.databaseName = "database_" + suite.T().Name()
 	DbId, err := dao.CreateTestTenantAndDatabase(suite.db, suite.tenantName, suite.databaseName)
@@ -319,6 +321,17 @@ func (suite *CollectionServiceTestSuite) TestCreateCollection() {
 	// Clean up
 	err = dao.CleanUpTestCollection(suite.db, collectionID.String())
 	suite.NoError(err)
+
+	// Create a collection on a database that does not exist.
+	_, err = suite.s.CreateCollection(context.Background(), &coordinatorpb.CreateCollectionRequest{
+		Id:       types.UniqueID(uuid.New()).String(),
+		Name:     "test_collection",
+		Database: "non_existent_database",
+		Tenant:   suite.tenantName,
+	})
+	suite.Error(err)
+	// Check that err is NOT_FOUND
+	suite.Equal(status.Error(codes.Code(code.Code_NOT_FOUND), common.ErrDatabaseNotFound.Error()), err)
 }
 
 func (suite *CollectionServiceTestSuite) TestServer_FlushCollectionCompaction() {

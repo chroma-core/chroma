@@ -1,7 +1,10 @@
 from typing import List, Optional, Sequence, Tuple, Union, cast
 from uuid import UUID
 from overrides import overrides
-from chromadb.api.configuration import CollectionConfigurationInternal
+from chromadb.api.collection_configuration import (
+    CreateCollectionConfiguration,
+    create_collection_configuration_to_json_str,
+)
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System, logger
 from chromadb.db.system import SysDB
 from chromadb.errors import NotFoundError, UniqueConstraintError, InternalError
@@ -17,6 +20,8 @@ from chromadb.proto.coordinator_pb2 import (
     CreateDatabaseRequest,
     CreateSegmentRequest,
     CreateTenantRequest,
+    CountCollectionsRequest,
+    CountCollectionsResponse,
     DeleteCollectionRequest,
     DeleteDatabaseRequest,
     DeleteSegmentRequest,
@@ -37,8 +42,6 @@ from chromadb.proto.coordinator_pb2_grpc import SysDBStub
 from chromadb.proto.utils import RetryOnRpcErrorClientInterceptor
 from chromadb.telemetry.opentelemetry.grpc import OtelInterceptor
 from chromadb.telemetry.opentelemetry import (
-    add_attributes_to_current_span,
-    OpenTelemetryClient,
     OpenTelemetryGranularity,
     trace_method,
 )
@@ -309,7 +312,7 @@ class GrpcSysDB(SysDB):
         self,
         id: UUID,
         name: str,
-        configuration: CollectionConfigurationInternal,
+        configuration: CreateCollectionConfiguration,
         segments: Sequence[Segment],
         metadata: Optional[Metadata] = None,
         dimension: Optional[int] = None,
@@ -321,7 +324,9 @@ class GrpcSysDB(SysDB):
             request = CreateCollectionRequest(
                 id=id.hex,
                 name=name,
-                configuration_json_str=configuration.to_json_str(),
+                configuration_json_str=create_collection_configuration_to_json_str(
+                    configuration
+                ),
                 metadata=to_proto_update_metadata(metadata) if metadata else None,
                 dimension=dimension,
                 get_or_create=get_or_create,
@@ -419,6 +424,32 @@ class GrpcSysDB(SysDB):
             logger.error(
                 f"Failed to get collections with id {id}, name {name}, tenant {tenant}, database {database} due to error: {e}"
             )
+            raise InternalError()
+
+    @overrides
+    def count_collections(
+        self,
+        tenant: str = DEFAULT_TENANT,
+        database: Optional[str] = None,
+    ) -> int:
+        try:
+            if database is None or database == "":
+                request = CountCollectionsRequest(tenant=tenant)
+                response: CountCollectionsResponse = self._sys_db_stub.CountCollections(
+                    request
+                )
+                return response.count
+            else:
+                request = CountCollectionsRequest(
+                    tenant=tenant,
+                    database=database,
+                )
+                response: CountCollectionsResponse = self._sys_db_stub.CountCollections(
+                    request
+                )
+                return response.count
+        except grpc.RpcError as e:
+            logger.error(f"Failed to count collections due to error: {e}")
             raise InternalError()
 
     @overrides

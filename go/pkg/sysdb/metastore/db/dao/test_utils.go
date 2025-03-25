@@ -46,6 +46,25 @@ func CreateTestTenantAndDatabase(db *gorm.DB, tenant string, database string) (s
 	return databaseId, nil
 }
 
+func CreateTestDatabase(db *gorm.DB, tenant string, database string) (string, error) {
+	log.Info("create test database", zap.String("tenant", tenant), zap.String("database", database))
+	databaseDb := &databaseDb{
+		db: db,
+	}
+
+	databaseId := types.NewUniqueID().String()
+	err := databaseDb.Insert(&dbmodel.Database{
+		ID:       databaseId,
+		Name:     database,
+		TenantID: tenant,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	return databaseId, nil
+}
+
 func CleanUpTestDatabase(db *gorm.DB, tenantName string, databaseName string) error {
 	log.Info("clean up test database", zap.String("tenantName", tenantName), zap.String("databaseName", databaseName))
 	// clean up collections
@@ -125,6 +144,8 @@ func CreateTestCollection(db *gorm.DB, collectionName string, dimension int32, d
 		DatabaseID:                 databaseID,
 		CreatedAt:                  time.Now(),
 		TotalRecordsPostCompaction: uint64(100),
+		SizeBytesPostCompaction:    uint64(500000),
+		LastCompactionTimeSecs:     uint64(1741037006),
 	})
 	if err != nil {
 		return "", err

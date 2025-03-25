@@ -124,8 +124,8 @@ class Settings(BaseSettings):  # type: ignore
 
     environment: str = ""
 
-    # Can be "chromadb.api.segment.SegmentAPI" or "chromadb.api.fastapi.FastAPI"
-    chroma_api_impl: str = "chromadb.api.segment.SegmentAPI"
+    # Can be "chromadb.api.segment.SegmentAPI" or "chromadb.api.fastapi.FastAPI" or "chromadb.api.rust.RustBindingsAPI"
+    chroma_api_impl: str = "chromadb.api.rust.RustBindingsAPI"
 
     @validator("chroma_server_nofile", pre=True, always=True, allow_reuse=True)
     def empty_str_to_none(cls, v: str) -> Optional[str]:

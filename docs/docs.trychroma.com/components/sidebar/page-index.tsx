@@ -13,15 +13,20 @@ const PageIndex: React.FC<{
   path: string;
   pages: { id: string; name: string }[];
   name?: string;
-}> = ({ path, pages, name }) => {
+  index: number;
+}> = ({ path, pages, name, index }) => {
+  const className = index === 0 ? "" : "border-t-2 pt-6 dark:border-t-gray-700";
+
   return (
-    <div className="select-none cursor-pointer">
+    <div className="select-none cursor-default">
       {name && (
+        <div className={className}>
         <p
-          className={`${playfairDisplay.className} mb-2 tracking-wide cursor-default`}
+          className={`font-semibold text-black dark:text-white mb-2 cursor-default text-sm pl-2`}
         >
           {name}
         </p>
+        </div>
       )}
       <div className="flex flex-col">
         {pages.map((page) => (

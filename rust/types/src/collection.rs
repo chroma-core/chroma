@@ -1,11 +1,32 @@
 use super::{Metadata, MetadataValueConversionError};
-use crate::{chroma_proto, ConversionError, Segment};
+use crate::{
+    chroma_proto, test_segment, CollectionConfiguration, InternalCollectionConfiguration, Segment,
+    SegmentScope,
+};
 use chroma_error::{ChromaError, ErrorCodes};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use utoipa::ToSchema;
 use uuid::Uuid;
 
+#[cfg(feature = "pyo3")]
+use pyo3::types::PyAnyMethods;
+
 /// CollectionUuid is a wrapper around Uuid to provide a type for the collection id.
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Default,
+    Deserialize,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Hash,
+    Serialize,
+    ToSchema,
+)]
 pub struct CollectionUuid(pub Uuid);
 
 impl CollectionUuid {
@@ -15,12 +36,12 @@ impl CollectionUuid {
 }
 
 impl std::str::FromStr for CollectionUuid {
-    type Err = CollectionConversionError;
+    type Err = uuid::Error;
 
-    fn from_str(s: &str) -> Result<Self, CollectionConversionError> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match Uuid::parse_str(s) {
             Ok(uuid) => Ok(CollectionUuid(uuid)),
-            Err(_) => Err(CollectionConversionError::InvalidUuid),
+            Err(err) => Err(err),
         }
     }
 }
@@ -31,21 +52,128 @@ impl std::fmt::Display for CollectionUuid {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+const CONFIGURATION_JSON_STR: &str = r#"{"hnsw_configuration": {"space": "l2", "ef_construction": 100, "ef_search": 100, "num_threads": 16, "M": 16, "resize_factor": 1.2, "batch_size": 100, "sync_threshold": 1000, "_type": "HNSWConfigurationInternal"}, "_type": "CollectionConfigurationInternal"}"#;
+
+fn emit_legacy_config_json_str<S: serde::Serializer>(_: &(), s: S) -> Result<S::Ok, S::Error> {
+    serde_json::from_str::<serde_json::Value>(CONFIGURATION_JSON_STR)
+        .unwrap()
+        .serialize(s)
+        .map_err(serde::ser::Error::custom)
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
+#[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct Collection {
+    #[serde(rename(serialize = "id"))]
     pub collection_id: CollectionUuid,
     pub name: String,
+    #[serde(skip_serializing)]
+    pub config: InternalCollectionConfiguration,
     pub metadata: Option<Metadata>,
     pub dimension: Option<i32>,
     pub tenant: String,
     pub database: String,
     pub log_position: i64,
     pub version: i32,
+    #[serde(skip)]
     pub total_records_post_compaction: u64,
+    #[serde(skip)]
+    pub size_bytes_post_compaction: u64,
+    #[serde(skip)]
+    pub last_compaction_time_secs: u64,
+    #[serde(
+        serialize_with = "emit_legacy_config_json_str",
+        rename = "configuration_json"
+    )]
+    pub legacy_configuration_json: (),
+}
+
+impl Default for Collection {
+    fn default() -> Self {
+        Self {
+            collection_id: CollectionUuid::new(),
+            name: "".to_string(),
+            config: InternalCollectionConfiguration::default_hnsw(),
+            legacy_configuration_json: (),
+            metadata: None,
+            dimension: None,
+            tenant: "".to_string(),
+            database: "".to_string(),
+            log_position: 0,
+            version: 0,
+            total_records_post_compaction: 0,
+            size_bytes_post_compaction: 0,
+            last_compaction_time_secs: 0,
+        }
+    }
+}
+
+#[cfg(feature = "pyo3")]
+#[pyo3::pymethods]
+impl Collection {
+    #[getter]
+    fn id<'py>(&self, py: pyo3::Python<'py>) -> pyo3::PyResult<pyo3::Bound<'py, pyo3::PyAny>> {
+        let res = pyo3::prelude::PyModule::import(py, "uuid")?
+            .getattr("UUID")?
+            .call1((self.collection_id.to_string(),))?;
+        Ok(res)
+    }
+
+    #[getter]
+    fn configuration<'py>(
+        &self,
+        py: pyo3::Python<'py>,
+    ) -> pyo3::PyResult<pyo3::Bound<'py, pyo3::PyAny>> {
+        let config: CollectionConfiguration = self.config.clone().into();
+        let config_json_str = serde_json::to_string(&config).unwrap();
+        let res = pyo3::prelude::PyModule::import(py, "json")?
+            .getattr("loads")?
+            .call1((config_json_str,))?;
+        Ok(res)
+    }
+
+    #[getter]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    #[getter]
+    pub fn metadata(&self) -> Option<Metadata> {
+        self.metadata.clone()
+    }
+
+    #[getter]
+    pub fn dimension(&self) -> Option<i32> {
+        self.dimension
+    }
+
+    #[getter]
+    pub fn tenant(&self) -> &str {
+        &self.tenant
+    }
+
+    #[getter]
+    pub fn database(&self) -> &str {
+        &self.database
+    }
+}
+
+impl Collection {
+    pub fn test_collection(dim: i32) -> Self {
+        Collection {
+            name: "test_collection".to_string(),
+            dimension: Some(dim),
+            tenant: "default_tenant".to_string(),
+            database: "default_database".to_string(),
+            ..Default::default()
+        }
+    }
 }
 
 #[derive(Error, Debug)]
 pub enum CollectionConversionError {
+    #[error("Invalid config: {0}")]
+    InvalidConfig(#[from] serde_json::Error),
     #[error("Invalid UUID")]
     InvalidUuid,
     #[error(transparent)]
@@ -55,6 +183,7 @@ pub enum CollectionConversionError {
 impl ChromaError for CollectionConversionError {
     fn code(&self) -> ErrorCodes {
         match self {
+            CollectionConversionError::InvalidConfig(_) => ErrorCodes::InvalidArgument,
             CollectionConversionError::InvalidUuid => ErrorCodes::InvalidArgument,
             CollectionConversionError::MetadataValueConversionError(e) => e.code(),
         }
@@ -80,6 +209,7 @@ impl TryFrom<chroma_proto::Collection> for Collection {
         Ok(Collection {
             collection_id,
             name: proto_collection.name,
+            config: serde_json::from_str(&proto_collection.configuration_json_str)?,
             metadata: collection_metadata,
             dimension: proto_collection.dimension,
             tenant: proto_collection.tenant,
@@ -87,6 +217,44 @@ impl TryFrom<chroma_proto::Collection> for Collection {
             log_position: proto_collection.log_position,
             version: proto_collection.version,
             total_records_post_compaction: proto_collection.total_records_post_compaction,
+            size_bytes_post_compaction: proto_collection.size_bytes_post_compaction,
+            last_compaction_time_secs: proto_collection.last_compaction_time_secs,
+            legacy_configuration_json: (),
+        })
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum CollectionToProtoError {
+    #[error("Could not serialize config: {0}")]
+    ConfigSerialization(#[from] serde_json::Error),
+}
+
+impl ChromaError for CollectionToProtoError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            CollectionToProtoError::ConfigSerialization(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
+impl TryFrom<Collection> for chroma_proto::Collection {
+    type Error = CollectionToProtoError;
+
+    fn try_from(value: Collection) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: value.collection_id.0.to_string(),
+            name: value.name,
+            configuration_json_str: serde_json::to_string(&value.config)?,
+            metadata: value.metadata.map(Into::into),
+            dimension: value.dimension,
+            tenant: value.tenant,
+            database: value.database,
+            log_position: value.log_position,
+            version: value.version,
+            total_records_post_compaction: value.total_records_post_compaction,
+            size_bytes_post_compaction: value.size_bytes_post_compaction,
+            last_compaction_time_secs: value.last_compaction_time_secs,
         })
     }
 }
@@ -99,32 +267,16 @@ pub struct CollectionAndSegments {
     pub vector_segment: Segment,
 }
 
-impl TryFrom<chroma_proto::ScanOperator> for CollectionAndSegments {
-    type Error = ConversionError;
-
-    fn try_from(value: chroma_proto::ScanOperator) -> Result<Self, ConversionError> {
-        Ok(Self {
-            collection: value
-                .collection
-                .ok_or(ConversionError::DecodeError)?
-                .try_into()
-                .map_err(|_| ConversionError::DecodeError)?,
-            metadata_segment: value
-                .metadata
-                .ok_or(ConversionError::DecodeError)?
-                .try_into()
-                .map_err(|_| ConversionError::DecodeError)?,
-            record_segment: value
-                .record
-                .ok_or(ConversionError::DecodeError)?
-                .try_into()
-                .map_err(|_| ConversionError::DecodeError)?,
-            vector_segment: value
-                .knn
-                .ok_or(ConversionError::DecodeError)?
-                .try_into()
-                .map_err(|_| ConversionError::DecodeError)?,
-        })
+impl CollectionAndSegments {
+    pub fn test(dim: i32) -> Self {
+        let collection = Collection::test_collection(dim);
+        let collection_uuid = collection.collection_id;
+        Self {
+            collection,
+            metadata_segment: test_segment(collection_uuid, SegmentScope::METADATA),
+            record_segment: test_segment(collection_uuid, SegmentScope::RECORD),
+            vector_segment: test_segment(collection_uuid, SegmentScope::VECTOR),
+        }
     }
 }
 
@@ -146,6 +298,8 @@ mod test {
             log_position: 0,
             version: 0,
             total_records_post_compaction: 0,
+            size_bytes_post_compaction: 0,
+            last_compaction_time_secs: 0,
         };
         let converted_collection: Collection = proto_collection.try_into().unwrap();
         assert_eq!(

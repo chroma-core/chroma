@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dao"
+	s3metastore "github.com/chroma-core/chroma/go/pkg/sysdb/metastore/s3"
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/suite"
 	"gorm.io/gorm"
@@ -34,11 +35,35 @@ type APIsTestSuite struct {
 	databaseId        string
 	sampleCollections []*model.Collection
 	coordinator       *Coordinator
+	s3MetaStore       *s3metastore.S3MetaStore
+	minioContainer    *s3metastore.MinioContainer
 }
 
 func (suite *APIsTestSuite) SetupSuite() {
 	log.Info("setup suite")
 	suite.db, suite.read_db = dbcore.ConfigDatabaseForTesting()
+
+	ctx := context.Background()
+	// Add timeout context
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
+	s3MetaStore, minioContainer, err := s3metastore.NewS3MetaStoreWithContainer(
+		ctx,
+		"chroma-storage",
+		"sysdb",
+	)
+	suite.NoError(err)
+	suite.s3MetaStore = s3MetaStore
+	suite.minioContainer = minioContainer
+}
+
+func (suite *APIsTestSuite) TearDownSuite() {
+	if suite.minioContainer != nil {
+		ctx := context.Background()
+		err := suite.minioContainer.Terminate(ctx)
+		suite.NoError(err)
+	}
 }
 
 func (suite *APIsTestSuite) SetupTest() {
@@ -54,7 +79,7 @@ func (suite *APIsTestSuite) SetupTest() {
 		collection.Name = "collection_" + suite.T().Name() + strconv.Itoa(index)
 	}
 	ctx := context.Background()
-	c, err := NewCoordinator(ctx, SoftDelete)
+	c, err := NewCoordinator(ctx, SoftDelete, suite.s3MetaStore, false)
 	if err != nil {
 		suite.T().Fatalf("error creating coordinator: %v", err)
 	}
@@ -85,7 +110,7 @@ func (suite *APIsTestSuite) TearDownTest() {
 func testCollection(t *rapid.T) {
 	dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
-	c, err := NewCoordinator(ctx, HardDelete)
+	c, err := NewCoordinator(ctx, HardDelete, nil, false)
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
 	}
@@ -138,7 +163,7 @@ func testCollection(t *rapid.T) {
 func testSegment(t *rapid.T) {
 	dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
-	c, err := NewCoordinator(ctx, HardDelete)
+	c, err := NewCoordinator(ctx, HardDelete, nil, false)
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
 	}
@@ -337,6 +362,18 @@ func (suite *APIsTestSuite) TestCreateCollectionAndSegments() {
 	collections, err := suite.coordinator.GetCollections(ctx, newCollection.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
 	suite.Empty(collections)
+
+	// Create a collection on a database that does not exist.
+	_, _, err = suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
+		ID:           types.NewUniqueID(),
+		Name:         "test_collection_and_segments",
+		TenantID:     suite.tenantName,
+		DatabaseName: "non_existent_database",
+	})
+	suite.Error(err)
+	// Check the error code is ErrDatabaseNotFound
+	suite.Equal(common.ErrDatabaseNotFound, err)
+	suite.Assertions.Contains(err.Error(), "database not found")
 }
 
 // TestCreateGetDeleteCollections tests the create, get and delete collection APIs.
@@ -492,6 +529,62 @@ func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 	segments, err = suite.coordinator.GetSegments(ctx, segment.ID, nil, nil, createCollection.ID)
 	suite.NoError(err)
 	suite.Empty(segments)
+
+	// Check for forward and backward compatibility with soft and hard delete.
+	// 1. Create a collection with soft delete enabled.
+	// 2. Delete the collection (i.e. it will be marked as is_deleted)
+	// 3. Disable soft delete.
+	// 4. Query for the deleted collection. It should not be found.
+	// 5. Enable soft delete.
+	// 6. Query for the deleted collection. It should be found.
+
+	suite.coordinator.deleteMode = SoftDelete
+	collectionId := types.NewUniqueID()
+	suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
+		ID:           collectionId,
+		Name:         "test_coll_fwd_bkwd_compat",
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	})
+	suite.coordinator.DeleteCollection(ctx, &model.DeleteCollection{
+		ID:           collectionId,
+		DatabaseName: suite.databaseName,
+		TenantID:     suite.tenantName,
+	})
+	collection, err := suite.coordinator.GetCollections(ctx, collectionId, nil, suite.tenantName, suite.databaseName, nil, nil)
+	suite.NoError(err)
+	// Check that the collection is deleted
+	suite.Empty(collection)
+	// Toggle the mode.
+	suite.coordinator.deleteMode = HardDelete
+	collection, err = suite.coordinator.GetCollections(ctx, collectionId, nil, suite.tenantName, suite.databaseName, nil, nil)
+	suite.NoError(err)
+	// Check that the collection is still deleted
+	suite.Empty(collection)
+	// Create a collection and delete while being in HardDelete mode.
+	anotherCollectionId := types.NewUniqueID()
+	suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
+		ID:           anotherCollectionId,
+		Name:         "test_coll_fwd_bkwd_compat",
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	})
+	suite.coordinator.DeleteCollection(ctx, &model.DeleteCollection{
+		ID:           anotherCollectionId,
+		DatabaseName: suite.databaseName,
+		TenantID:     suite.tenantName,
+	})
+
+	// Toggle the mode.
+	suite.coordinator.deleteMode = SoftDelete
+	collection, err = suite.coordinator.GetCollections(ctx, collectionId, nil, suite.tenantName, suite.databaseName, nil, nil)
+	suite.NoError(err)
+	// Check that the collection is still deleted
+	suite.Empty(collection)
+	collection, err = suite.coordinator.GetCollections(ctx, anotherCollectionId, nil, suite.tenantName, suite.databaseName, nil, nil)
+	suite.NoError(err)
+	// Check that another collection is still deleted
+	suite.Empty(collection)
 }
 
 func (suite *APIsTestSuite) TestCollectionSize() {
@@ -1206,6 +1299,58 @@ func (suite *APIsTestSuite) TestSoftAndHardDeleteCollection() {
 	suite.Equal(id, softDeletedResults[0].ID.String())
 	renamedCollectionNamePrefix := fmt.Sprintf("deleted_%s_", testCollection.Name)
 	suite.Contains(softDeletedResults[0].Name, renamedCollectionNamePrefix)
+}
+
+func (suite *APIsTestSuite) TestCollectionVersioningWithMinio() {
+	ctx := context.Background()
+
+	collectionID := types.NewUniqueID()
+	// Create a new collection
+	newCollection := &model.CreateCollection{
+		ID:           collectionID,
+		Name:         "test_collection_versioning",
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	}
+
+	segments := []*model.CreateSegment{
+		{
+			ID:           types.NewUniqueID(),
+			Type:         "test_type_a",
+			Scope:        "VECTOR",
+			CollectionID: collectionID,
+		},
+	}
+
+	// Create collection
+	createdCollection, created, err := suite.coordinator.CreateCollectionAndSegments(ctx, newCollection, segments)
+	suite.NoError(err)
+	suite.True(created)
+	suite.Equal(newCollection.ID, createdCollection.ID)
+	suite.Equal(newCollection.Name, createdCollection.Name)
+
+	// Do a flush collection compaction
+	flushInfo, err := suite.coordinator.FlushCollectionCompaction(ctx, &model.FlushCollectionCompaction{
+		ID:                       newCollection.ID,
+		TenantID:                 newCollection.TenantID,
+		LogPosition:              0,
+		CurrentCollectionVersion: 0,
+		FlushSegmentCompactions: []*model.FlushSegmentCompaction{
+			{
+				ID:        types.NewUniqueID(),
+				FilePaths: map[string][]string{"file_1": {"path_1"}},
+			},
+		},
+	})
+	suite.NoError(err)
+	suite.NotNil(flushInfo)
+
+	// TODO(rohitcp): Add these tests back once version file is enabled.
+	// Verify version file exists in S3
+	// versionFilePathPrefix := suite.s3MetaStore.GetVersionFilePath(newCollection.TenantID, newCollection.ID.String(), "")
+	// exists, err := suite.s3MetaStore.HasObjectWithPrefix(ctx, versionFilePathPrefix)
+	// suite.NoError(err)
+	// suite.True(exists, "Version file should exist in S3")
 }
 
 func TestAPIsTestSuite(t *testing.T) {

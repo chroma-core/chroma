@@ -19,7 +19,6 @@ from chromadb.api.types import (
     ID,
     OneOrMany,
     WhereDocument,
-    IncludeEnum,
 )
 
 import logging
@@ -142,7 +141,6 @@ class Collection(CollectionCommon["ServerAPI"]):
             tenant=self.tenant,
             database=self.database,
         )
-
         return self._transform_get_response(
             response=get_results, include=get_request["include"]
         )
@@ -235,7 +233,9 @@ class Collection(CollectionCommon["ServerAPI"]):
         )
 
     def modify(
-        self, name: Optional[str] = None, metadata: Optional[CollectionMetadata] = None
+        self,
+        name: Optional[str] = None,
+        metadata: Optional[CollectionMetadata] = None,
     ) -> None:
         """Modify the collection name or metadata
 
@@ -407,7 +407,7 @@ class CollectionName(str):
 
     """
 
-    def __getattr__(self, item):
+    def __getattr__(self, item):  # type: ignore
         collection_attributes_and_methods = [
             member
             for member, _ in inspect.getmembers(Collection)

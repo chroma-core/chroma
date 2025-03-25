@@ -1,5 +1,5 @@
 from chromadb.utils import embedding_functions
-from chromadb.api.types import EmbeddingFunction
+from chromadb.utils.embedding_functions import EmbeddingFunction
 
 
 def test_get_builtins_holds() -> None:
@@ -31,6 +31,7 @@ def test_get_builtins_holds() -> None:
         "SentenceTransformerEmbeddingFunction",
         "Text2VecEmbeddingFunction",
         "ChromaLangchainEmbeddingFunction",
+        "DefaultEmbeddingFunction",
     }
 
     assert expected_builtins == embedding_functions.get_builtins()

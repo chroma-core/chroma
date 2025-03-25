@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 
 use chroma_system::Operator;
+use thiserror::Error;
 
 use super::knn::RecordDistance;
 
@@ -35,7 +36,9 @@ pub struct KnnMergeOutput {
     pub record_distances: Vec<RecordDistance>,
 }
 
-pub type KnnMergeError = ();
+#[derive(Error, Debug)]
+#[error("Knn merge error (unreachable)")]
+pub struct KnnMergeError;
 
 #[async_trait]
 impl Operator<KnnMergeInput, KnnMergeOutput> for KnnMergeOperator {

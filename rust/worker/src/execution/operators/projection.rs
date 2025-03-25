@@ -1,13 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::segment::{
-    materialize_logs,
-    record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
-    LogMaterializerError,
-};
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_segment::{
+    blockfile_record::{RecordSegmentReader, RecordSegmentReaderCreationError},
+    types::{materialize_logs, LogMaterializerError},
+};
 use chroma_system::Operator;
 use chroma_types::{Chunk, LogRecord, Metadata, Segment};
 use thiserror::Error;
@@ -176,12 +175,11 @@ impl Operator<ProjectionInput, ProjectionOutput> for ProjectionOperator {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        execution::operators::projection::ProjectionOperator,
-        log::test::{int_as_id, upsert_generator, LogGenerator},
-        segment::test::TestSegment,
-    };
+    use chroma_log::test::{int_as_id, upsert_generator, LoadFromGenerator, LogGenerator};
+    use chroma_segment::test::TestDistributedSegment;
     use chroma_system::Operator;
+
+    use crate::execution::operators::projection::ProjectionOperator;
 
     use super::ProjectionInput;
 
@@ -193,7 +191,7 @@ mod tests {
     /// - Log: Upsert [81..=120]
     /// - Compacted: Upsert [1..=100]
     async fn setup_projection_input(offset_ids: Vec<u32>) -> ProjectionInput {
-        let mut test_segment = TestSegment::default();
+        let mut test_segment = TestDistributedSegment::default();
         test_segment
             .populate_with_generator(100, upsert_generator)
             .await;

@@ -2,7 +2,8 @@
 mod load;
 
 use chroma_benchmark::benchmark::{bench_run, tokio_multi_thread};
-use chroma_config::Configurable;
+use chroma_config::{registry::Registry, Configurable};
+use chroma_segment::test::TestDistributedSegment;
 use chroma_system::{ComponentHandle, Dispatcher, Orchestrator, System};
 use criterion::{criterion_group, criterion_main, Criterion};
 use load::{
@@ -10,12 +11,10 @@ use load::{
     always_true_filter_for_modulo_metadata, empty_fetch_log, offset_limit, sift1m_segments,
     trivial_filter, trivial_limit, trivial_projection,
 };
-use worker::{
-    config::RootConfig, execution::orchestration::get::GetOrchestrator, segment::test::TestSegment,
-};
+use worker::{config::RootConfig, execution::orchestration::get::GetOrchestrator};
 
 fn trivial_get(
-    test_segments: TestSegment,
+    test_segments: TestDistributedSegment,
     dispatcher_handle: ComponentHandle<Dispatcher>,
 ) -> GetOrchestrator {
     let blockfile_provider = test_segments.blockfile_provider.clone();
@@ -33,7 +32,7 @@ fn trivial_get(
 }
 
 fn get_false_filter(
-    test_segments: TestSegment,
+    test_segments: TestDistributedSegment,
     dispatcher_handle: ComponentHandle<Dispatcher>,
 ) -> GetOrchestrator {
     let blockfile_provider = test_segments.blockfile_provider.clone();
@@ -51,7 +50,7 @@ fn get_false_filter(
 }
 
 fn get_true_filter(
-    test_segments: TestSegment,
+    test_segments: TestDistributedSegment,
     dispatcher_handle: ComponentHandle<Dispatcher>,
 ) -> GetOrchestrator {
     let blockfile_provider = test_segments.blockfile_provider.clone();
@@ -69,7 +68,7 @@ fn get_true_filter(
 }
 
 fn get_true_filter_limit(
-    test_segments: TestSegment,
+    test_segments: TestDistributedSegment,
     dispatcher_handle: ComponentHandle<Dispatcher>,
 ) -> GetOrchestrator {
     let blockfile_provider = test_segments.blockfile_provider.clone();
@@ -87,7 +86,7 @@ fn get_true_filter_limit(
 }
 
 fn get_true_filter_limit_projection(
-    test_segments: TestSegment,
+    test_segments: TestDistributedSegment,
     dispatcher_handle: ComponentHandle<Dispatcher>,
 ) -> GetOrchestrator {
     let blockfile_provider = test_segments.blockfile_provider.clone();
@@ -112,6 +111,7 @@ async fn bench_routine(input: (System, GetOrchestrator, Vec<String>)) {
         .expect("Orchestrator should not fail");
     assert_eq!(
         output
+            .0
             .records
             .into_iter()
             .map(|record| record.id)
@@ -126,9 +126,11 @@ fn bench_get(criterion: &mut Criterion) {
 
     let config = RootConfig::default();
     let system = System::default();
+    let registry = Registry::new();
     let dispatcher = runtime
         .block_on(Dispatcher::try_from_config(
             &config.query_service.dispatcher,
+            &registry,
         ))
         .expect("Should be able to initialize dispatcher");
     let dispatcher_handle = runtime.block_on(async { system.start_component(dispatcher) });

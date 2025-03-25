@@ -5,7 +5,6 @@ use chroma_error::ChromaError;
 use chroma_system::Operator;
 use chroma_types::Segment;
 use thiserror::Error;
-use tracing::trace;
 
 use super::{
     fetch_log::FetchLogOutput,
@@ -81,7 +80,7 @@ impl Operator<KnnProjectionInput, KnnProjectionOutput> for KnnProjectionOperator
         &self,
         input: &KnnProjectionInput,
     ) -> Result<KnnProjectionOutput, KnnProjectionError> {
-        trace!("[{}]: {:?}", self.get_name(), input);
+        tracing::debug!("[{}]: {:?}", self.get_name(), input);
 
         let projection_input = ProjectionInput {
             logs: input.logs.clone(),
@@ -120,15 +119,13 @@ impl Operator<KnnProjectionInput, KnnProjectionOutput> for KnnProjectionOperator
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        execution::operators::{
-            knn::RecordDistance, knn_projection::KnnProjectionOperator,
-            projection::ProjectionOperator,
-        },
-        log::test::{int_as_id, upsert_generator, LogGenerator},
-        segment::test::TestSegment,
-    };
+    use chroma_log::test::{int_as_id, upsert_generator, LoadFromGenerator, LogGenerator};
+    use chroma_segment::test::TestDistributedSegment;
     use chroma_system::Operator;
+
+    use crate::execution::operators::{
+        knn::RecordDistance, knn_projection::KnnProjectionOperator, projection::ProjectionOperator,
+    };
 
     use super::KnnProjectionInput;
 
@@ -142,7 +139,7 @@ mod tests {
     async fn setup_knn_projection_input(
         record_distances: Vec<RecordDistance>,
     ) -> KnnProjectionInput {
-        let mut test_segment = TestSegment::default();
+        let mut test_segment = TestDistributedSegment::default();
         test_segment
             .populate_with_generator(100, upsert_generator)
             .await;

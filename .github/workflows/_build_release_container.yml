@@ -1,0 +1,77 @@
+name: Build and publish container image to Docker and GitHub Container Registry
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish'
+        required: true
+        type: string
+      tag_as_latest:
+        description: 'Tag as latest'
+        required: false
+        default: false
+        type: boolean
+
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Tag to publish'
+        required: true
+        type: string
+      tag_as_latest:
+        description: 'Tag as latest'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write
+  packages: write
+
+env:
+  GHCR_IMAGE_NAME: "ghcr.io/chroma-core/chroma"
+  DOCKERHUB_IMAGE_NAME: "chromadb/chroma"
+  PLATFORMS: linux/amd64,linux/arm64 #linux/riscv64, linux/arm/v7
+
+jobs:
+  build:
+    name: Build and publish container image
+    runs-on: depot-ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Docker
+        uses: ./.github/actions/docker
+        with:
+          ghcr-username: ${{ github.actor }}
+          ghcr-password: ${{ secrets.GITHUB_TOKEN }}
+          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Set up Depot CLI
+        uses: depot/setup-action@v1
+      - name: Compute tags
+        shell: bash
+        id: compute_tags
+        run: |
+          tags="${{ env.GHCR_IMAGE_NAME }}:${{ inputs.tag }},${{ env.DOCKERHUB_IMAGE_NAME }}:${{ inputs.tag }}"
+          if [ "${{ inputs.tag_as_latest }}" = "true" ]; then
+            tags="${tags},${{ env.GHCR_IMAGE_NAME }}:latest,${{ env.DOCKERHUB_IMAGE_NAME }}:latest"
+          fi
+
+          echo "tags=${tags}" >> $GITHUB_OUTPUT
+
+      - name: Build and push image
+        uses: depot/build-push-action@v1
+        with:
+          context: .
+          file: rust/cli/Dockerfile
+          platforms: ${{ env.PLATFORMS }}
+          push: true
+          build-args: |
+            RELEASE_MODE=1
+          tags: ${{ steps.compute_tags.outputs.tags }}
+          project: ${{ vars.DEPOT_PROJECT_ID }}

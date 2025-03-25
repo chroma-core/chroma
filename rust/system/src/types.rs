@@ -1,9 +1,10 @@
 use super::{scheduler::Scheduler, ChannelError, RequestError, WrappedMessage};
 use async_trait::async_trait;
+use chroma_config::registry::Injectable;
 use core::panic;
 use futures::Stream;
 use parking_lot::Mutex;
-use std::{fmt::Debug, sync::Arc};
+use std::{fmt::Debug, sync::Arc, time::Duration};
 use tokio::task::JoinError;
 
 use super::{system::System, ReceiverForMessage};
@@ -43,7 +44,11 @@ pub trait Component: Send + Sized + Debug + 'static {
     fn runtime() -> ComponentRuntime {
         ComponentRuntime::Inherit
     }
-    async fn start(&mut self, _ctx: &ComponentContext<Self>) -> () {}
+    async fn on_start(&mut self, _ctx: &ComponentContext<Self>) -> () {}
+    async fn on_stop(&mut self) {}
+    fn on_stop_timeout(&self) -> Duration {
+        Duration::from_secs(6)
+    }
     fn on_handler_panic(&mut self, panic: Box<dyn core::any::Any + Send>) {
         // Default behavior is to log and then resume the panic
         tracing::error!("Handler panicked: {:?}", panic);
@@ -187,6 +192,9 @@ pub struct ComponentHandle<C: Component + Debug> {
     sender: ComponentSender<C>,
 }
 
+// Blanket implementation for all components of the Injectable trait
+impl<C> Injectable for ComponentHandle<C> where C: Component {}
+
 // Implemented manually because of https://github.com/rust-lang/rust/issues/26925.
 impl<C: Component> Clone for ComponentHandle<C> {
     fn clone(&self) -> Self {
@@ -256,8 +264,7 @@ impl<C: Component> ComponentHandle<C> {
         self.sender.wrap_and_send(message, tracing_context).await
     }
 
-    #[allow(dead_code)]
-    pub(crate) async fn request<M>(
+    pub async fn request<M>(
         &self,
         message: M,
         tracing_context: Option<tracing::Span>,
@@ -346,7 +353,7 @@ mod tests {
             self.queue_size
         }
 
-        async fn start(&mut self, ctx: &ComponentContext<TestComponent>) -> () {
+        async fn on_start(&mut self, ctx: &ComponentContext<TestComponent>) -> () {
             let test_stream = stream::iter(vec![1, 2, 3]);
             self.register_stream(test_stream, ctx);
         }

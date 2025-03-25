@@ -6,7 +6,13 @@ pub(crate) struct CompactionJob {
     pub(crate) tenant_id: String,
     pub(crate) offset: i64,
     pub(crate) collection_version: i32,
+    pub(crate) collection_logical_size_bytes: u64,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ScheduleMessage {}
+pub struct ScheduledCompactionMessage {}
+
+#[derive(Clone, Debug)]
+pub struct OneOffCompactionMessage {
+    pub collection_ids: Vec<CollectionUuid>,
+}

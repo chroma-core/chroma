@@ -1,14 +1,13 @@
 use std::collections::BinaryHeap;
 
-use crate::segment::{
-    materialize_logs,
-    record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
-    LogMaterializerError,
-};
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::ChromaError;
+use chroma_segment::{
+    blockfile_record::{RecordSegmentReader, RecordSegmentReaderCreationError},
+    types::{materialize_logs, LogMaterializerError},
+};
 use chroma_system::Operator;
 use chroma_types::{MaterializedLogOperation, Segment, SignedRoaringBitmap};
 use thiserror::Error;
@@ -128,14 +127,14 @@ impl Operator<KnnLogInput, KnnLogOutput> for KnnOperator {
 #[cfg(test)]
 mod tests {
     use chroma_distance::{normalize, DistanceFunction};
+    use chroma_log::test::{
+        random_embedding, upsert_generator, LogGenerator, TEST_EMBEDDING_DIMENSION,
+    };
+    use chroma_segment::test::TestDistributedSegment;
     use chroma_system::Operator;
     use chroma_types::SignedRoaringBitmap;
 
-    use crate::{
-        execution::operators::knn::KnnOperator,
-        log::test::{random_embedding, upsert_generator, LogGenerator, TEST_EMBEDDING_DIMENSION},
-        segment::test::TestSegment,
-    };
+    use crate::execution::operators::knn::KnnOperator;
 
     use super::KnnLogInput;
 
@@ -145,7 +144,7 @@ mod tests {
         metric: DistanceFunction,
         log_offset_ids: SignedRoaringBitmap,
     ) -> KnnLogInput {
-        let test_segment = TestSegment::default();
+        let test_segment = TestDistributedSegment::default();
         KnnLogInput {
             logs: upsert_generator.generate_chunk(1..=100),
             blockfile_provider: test_segment.blockfile_provider,

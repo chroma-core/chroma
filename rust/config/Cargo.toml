@@ -7,5 +7,12 @@ edition = "2021"
 path = "src/lib.rs"
 
 [dependencies]
+murmur3 = "0.5.2"
+
 async-trait = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+parking_lot = { workspace = true }
+figment = { workspace = true }
+
 chroma-error = { workspace = true }

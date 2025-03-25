@@ -17,8 +17,8 @@ export interface AppSection {
   pages?: AppPage[];
   generatePages?: boolean;
   subsections?: AppSection[];
-  comingSoon?: boolean;
-  override?: string;
+  tag?: string;
+  disable?: boolean;
 }
 
 export const getAllPages = (sidebarConfig: AppSection[], sectionId: string) => {

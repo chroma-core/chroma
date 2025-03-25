@@ -45,10 +45,11 @@ func init() {
 	Cmd.Flags().StringVar(&conf.DBConfig.SslMode, "ssl-mode", "disable", "SSL mode for database connection")
 
 	// Soft deletes
-	Cmd.Flags().BoolVar(&conf.SoftDeleteEnabled, "soft-delete-enabled", false, "Enable soft deletes")
-	Cmd.Flags().DurationVar(&conf.SoftDeleteCleanupInterval, "soft-delete-cleanup-interval", 1*time.Minute, "Soft delete cleanup interval")
+	Cmd.Flags().BoolVar(&conf.SoftDeleteEnabled, "soft-delete-enabled", true, "Enable soft deletes")
+	Cmd.Flags().DurationVar(&conf.SoftDeleteCleanupInterval, "soft-delete-cleanup-interval", 30*time.Second, "Soft delete cleanup interval")
 	Cmd.Flags().DurationVar(&conf.SoftDeleteMaxAge, "soft-delete-max-age", 72*time.Hour, "Soft delete max age")
-	Cmd.Flags().UintVar(&conf.SoftDeleteCleanupBatchSize, "soft-delete-cleanup-batch-size", 10, "Soft delete cleanup batch size")
+	Cmd.Flags().UintVar(&conf.SoftDeleteCleanupBatchSize, "soft-delete-cleanup-batch-size", 100, "Soft delete cleanup batch size")
+	// With above values, the soft delete cleaner can remove around 1000 collections in 5 minutes.
 
 	// Memberlist
 	Cmd.Flags().StringVar(&conf.KubernetesNamespace, "kubernetes-namespace", "chroma", "Kubernetes namespace")
@@ -63,6 +64,11 @@ func init() {
 	// Compaction service Memberlist
 	Cmd.Flags().StringVar(&conf.CompactionServiceMemberlistName, "compaction-memberlist-name", "compaction-service-memberlist", "Compaction memberlist name")
 	Cmd.Flags().StringVar(&conf.CompactionServicePodLabel, "compaction-pod-label", "compaction-service", "Compaction pod label")
+
+	// Block store provider
+	Cmd.Flags().StringVar(&conf.BlockStoreProvider, "block-store-provider", "minio", "Block store provider")
+	// Version file
+	Cmd.Flags().BoolVar(&conf.VersionFileEnabled, "version-file-enabled", false, "Enable version file")
 }
 
 func exec(*cobra.Command, []string) {

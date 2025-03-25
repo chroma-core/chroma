@@ -26,6 +26,7 @@ pub fn test_hnsw_index_provider() -> HnswIndexProvider {
             .expect("Should be able to create a temporary directory")
             .into_path(),
         new_non_persistent_cache_for_test(),
+        16,
         rx,
     )
 }
