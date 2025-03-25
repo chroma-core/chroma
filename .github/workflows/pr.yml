@@ -163,6 +163,7 @@ jobs:
     needs: change-detection
     if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
     uses: ./.github/workflows/_python-tests.yml
+    secrets: inherit
     with:
       property_testing_preset: 'normal'
 
@@ -183,6 +184,7 @@ jobs:
     needs: change-detection
     if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'rust')
     uses: ./.github/workflows/_rust-tests.yml
+    secrets: inherit
 
   go-tests:
     name: Go tests
