@@ -324,11 +324,10 @@ impl Debug for SpannSegmentFlusher {
 impl SpannSegmentFlusher {
     pub async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
         tracing::info!("Flushing spann segment flusher {}", self.id);
-        let index_flusher_res = self
-            .index_flusher
-            .flush()
-            .await
-            .map_err(|_| SpannSegmentWriterError::SpannSegmentWriterFlushError);
+        let index_flusher_res = self.index_flusher.flush().await.map_err(|e| {
+            tracing::error!("Error flushing spann segment flusher {}", e);
+            SpannSegmentWriterError::SpannSegmentWriterFlushError
+        });
         match index_flusher_res {
             Err(e) => Err(Box::new(e)),
             Ok(index_ids) => {

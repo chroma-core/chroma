@@ -1723,19 +1723,28 @@ impl SpannIndexFlusher {
         self.pl_flusher
             .flush::<u32, &SpannPostingList<'_>>()
             .await
-            .map_err(|_| SpannIndexWriterError::PostingListFlushError)?;
+            .map_err(|e| {
+                tracing::error!("Error flushing posting list: {}", e);
+                SpannIndexWriterError::PostingListFlushError
+            })?;
         self.versions_map_flusher
             .flush::<u32, u32>()
             .await
-            .map_err(|_| SpannIndexWriterError::VersionsMapFlushError)?;
+            .map_err(|e| {
+                tracing::error!("Error flushing versions map: {}", e);
+                SpannIndexWriterError::VersionsMapFlushError
+            })?;
         self.max_head_id_flusher
             .flush::<&str, u32>()
             .await
-            .map_err(|_| SpannIndexWriterError::MaxHeadIdFlushError)?;
-        self.hnsw_flusher
-            .flush(&self.hnsw_id)
-            .await
-            .map_err(|_| SpannIndexWriterError::HnswIndexFlushError)?;
+            .map_err(|e| {
+                tracing::error!("Error flushing max head id: {}", e);
+                SpannIndexWriterError::MaxHeadIdFlushError
+            })?;
+        self.hnsw_flusher.flush(&self.hnsw_id).await.map_err(|e| {
+            tracing::error!("Error flushing hnsw index: {}", e);
+            SpannIndexWriterError::HnswIndexFlushError
+        })?;
         Ok(res)
     }
 }
