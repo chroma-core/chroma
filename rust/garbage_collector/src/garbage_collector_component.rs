@@ -38,6 +38,7 @@ impl Debug for GarbageCollector {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 impl GarbageCollector {
     pub fn new(
         gc_interval_mins: u64,

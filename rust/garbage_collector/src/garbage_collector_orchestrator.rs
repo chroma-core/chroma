@@ -115,6 +115,7 @@ pub struct GarbageCollectorResponse {
     pub deletion_list: Vec<String>,
 }
 
+#[allow(clippy::too_many_arguments)]
 impl GarbageCollectorOrchestrator {
     pub fn new(
         collection_id: CollectionUuid,
