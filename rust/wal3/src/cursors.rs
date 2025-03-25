@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use chroma_storage::{ETag, PutOptions, Storage};
@@ -7,12 +8,20 @@ use crate::{CursorStoreOptions, Error, LogPosition};
 //////////////////////////////////////////// CursorName ////////////////////////////////////////////
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
-pub struct CursorName(String);
+pub struct CursorName<'a>(Cow<'a, str>);
 
-impl CursorName {
+impl CursorName<'_> {
+    /// # Safety
+    ///
+    /// The caller must ensure that the name is a valid cursor name.  This means a non-empty
+    /// alphanumeric string with underscores.
+    pub const unsafe fn from_string_unchecked(name: &str) -> CursorName {
+        CursorName(Cow::Borrowed(name))
+    }
+
     pub fn new(name: &str) -> Option<Self> {
-        if !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-            Some(Self(name.to_string()))
+        if Self::validate(name) {
+            Some(Self(name.to_string().into()))
         } else {
             None
         }
@@ -26,6 +35,14 @@ impl CursorName {
         let cursor_name = path.strip_prefix("cursor/")?.strip_suffix(".json")?;
         CursorName::new(cursor_name)
     }
+
+    pub fn is_valid(&self) -> bool {
+        Self::validate(&self.0)
+    }
+
+    fn validate(name: &str) -> bool {
+        !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    }
 }
 
 ////////////////////////////////////////////// Witness /////////////////////////////////////////////
@@ -33,13 +50,19 @@ impl CursorName {
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct Witness(ETag, pub Cursor);
 
+impl Witness {
+    pub fn cursor(&self) -> &Cursor {
+        &self.1
+    }
+}
+
 ////////////////////////////////////////////// Cursor //////////////////////////////////////////////
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct Cursor {
-    position: LogPosition,
-    epoch_us: u64,
-    writer: String,
+    pub position: LogPosition,
+    pub epoch_us: u64,
+    pub writer: String,
 }
 
 //////////////////////////////////////////// CursorStore ///////////////////////////////////////////
@@ -67,7 +90,7 @@ impl CursorStore {
         }
     }
 
-    pub async fn load(&self, name: CursorName) -> Result<Witness, Error> {
+    pub async fn load<'a>(&self, name: &CursorName<'a>) -> Result<Witness, Error> {
         // SAFETY(rescrv):  Semaphore poisoning.
         let _permit = self.semaphore.acquire().await.unwrap();
         let path = format!("{}/{}", self.prefix, name.path());
@@ -84,26 +107,26 @@ impl CursorStore {
         Ok(Witness(e_tag, cursor))
     }
 
-    pub async fn init(&self, name: CursorName, cursor: Cursor) -> Result<Witness, Error> {
+    pub async fn init<'a>(&self, name: &CursorName<'a>, cursor: Cursor) -> Result<Witness, Error> {
         // Semaphore taken by put.
         let options = PutOptions::if_not_exists();
         self.put(name, cursor, options).await
     }
 
-    pub async fn save(
+    pub async fn save<'a>(
         &self,
-        name: CursorName,
-        cursor: Cursor,
-        witness: Witness,
+        name: &CursorName<'a>,
+        cursor: &Cursor,
+        witness: &Witness,
     ) -> Result<Witness, Error> {
         // Semaphore taken by put.
         let options = PutOptions::if_matches(&witness.0);
-        self.put(name, cursor, options).await
+        self.put(name, cursor.clone(), options).await
     }
 
-    async fn put(
+    async fn put<'a>(
         &self,
-        name: CursorName,
+        name: &CursorName<'a>,
         mut cursor: Cursor,
         options: PutOptions,
     ) -> Result<Witness, Error> {
