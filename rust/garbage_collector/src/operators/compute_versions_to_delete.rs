@@ -82,16 +82,6 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
             let mut unique_versions_seen = 0;
             let mut last_version = None;
 
-            // Print/Trace each version and its creation time.
-            tracing::debug!("======[GC {} ]=======", collection_info.collection_id);
-            for version in version_history.versions.iter() {
-                tracing::info!(
-                    "[GC]Version: {}, created at: {}",
-                    version.version,
-                    version.created_at_secs
-                );
-            }
-
             // First pass: find the oldest version that must be kept
             for version in version_history.versions.iter().rev() {
                 if last_version != Some(version.version) {
@@ -104,7 +94,7 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
                 }
             }
 
-            tracing::info!(
+            tracing::debug!(
                 "Oldest version to keep: {}, min versions to keep: {}, cutoff time: {}",
                 oldest_version_to_keep,
                 input.min_versions_to_keep,
@@ -117,7 +107,7 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
                     && version.version < oldest_version_to_keep
                     && version.created_at_secs < input.cutoff_time_secs as i64
                 {
-                    tracing::info!(
+                    tracing::debug!(
                         "Marking version {} for deletion (created at {})",
                         version.version,
                         version.created_at_secs
@@ -130,9 +120,6 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
             tracing::warn!("No version history found in version file");
         }
 
-        tracing::info!("Marked {} versions for deletion", marked_versions.len());
-        tracing::debug!("======[GC]=======");
-
         let versions_to_delete = VersionListForCollection {
             tenant_id: collection_info.tenant_id.clone(),
             database_id: collection_info.database_id.clone(),
@@ -140,11 +127,13 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
             versions: marked_versions,
         };
 
-        tracing::debug!(
-            "Computed versions to delete: {:?}, oldest version to keep: {}",
+        tracing::info!(
+            "For collection: {}, Computed versions to delete: {:?}, oldest version to keep: {}",
+            collection_info.collection_id,
             versions_to_delete,
             oldest_version_to_keep
         );
+
         Ok(ComputeVersionsToDeleteOutput {
             version_file,
             versions_to_delete,

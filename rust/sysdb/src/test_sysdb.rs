@@ -307,11 +307,7 @@ impl TestSysDb {
         version_history.versions.push(version_info);
         version_file.version_history = Some(version_history);
 
-        tracing::debug!(
-            line = line!(),
-            "^^^^^^^\nversion_file: {:?}\n^^^^^^^",
-            version_file
-        );
+        tracing::debug!(line = line!(), "version_file: \n{:#?}", version_file);
 
         // Update the version file name.
         let version_file_name = format!(
@@ -401,12 +397,6 @@ impl TestSysDb {
         size_bytes_post_compaction: u64,
     ) -> Result<FlushCompactionResponse, FlushCompactionError> {
         // Print the segment flush info
-        tracing::debug!(
-            line = line!(),
-            "|^^^^^^^\nsegment_flush_info: {:?}\n^^^^^^^",
-            segment_flush_info
-        );
-
         let new_collection_version: i32;
         let mut last_compaction_time: i64;
         {

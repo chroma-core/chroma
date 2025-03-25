@@ -735,7 +735,7 @@ impl GcTest {
         }
 
         // Print the files to delete.
-        tracing::info!(
+        tracing::debug!(
             line = line!(),
             "==========\nGcTest: cleanup_versions: last_cleanup_files: {:?}\n==========", 
             self.last_cleanup_files
@@ -773,7 +773,7 @@ impl StateMachineTest for GcTest {
         ref_state: &<Self::Reference as ReferenceStateMachine>::State,
         transition: <Self::Reference as ReferenceStateMachine>::Transition,
     ) -> Self::SystemUnderTest {
-        tracing::info!(
+        tracing::debug!(
             line = line!(),
             "Applying transition: {:?} to SUT", 
             transition
@@ -808,7 +808,7 @@ impl StateMachineTest for GcTest {
         ref_state: &<Self::Reference as ReferenceStateMachine>::State,
     ) {
         INVARIANT_CHECK_COUNT.fetch_add(1, Ordering::SeqCst);
-        tracing::info!(
+        tracing::debug!(
             line = line!(),
             "Checking invariants (count: {})",
             INVARIANT_CHECK_COUNT.load(Ordering::SeqCst)
