@@ -1,7 +1,8 @@
 #!/usr/bin/env sh
+set -e
 
-# curl -s http://localhost:8000/openapi.json | jq > openapi.json
-curl -s http://localhost:8000/openapi.json | python -c "import sys, json; print(json.dumps(json.load(sys.stdin), indent=2))" > openapi.json
+# Fetch and transform the OpenAPI schema
+curl -s http://localhost:8000/openapi.json | python3 transform_openapi.py > openapi.json
 
 if [[ "$OSTYPE" == "darwin"* ]]; then
   # macOS
