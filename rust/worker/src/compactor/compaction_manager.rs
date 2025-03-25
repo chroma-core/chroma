@@ -127,6 +127,7 @@ impl CompactionManager {
                 let orchestrator = CompactOrchestrator::new(
                     compaction_job.clone(),
                     compaction_job.collection_id,
+                    compaction_job.collection_logical_size_bytes as i64,
                     self.log.clone(),
                     self.sysdb.clone(),
                     self.blockfile_provider.clone(),
@@ -304,7 +305,7 @@ impl Component for CompactionManager {
         self.compaction_manager_queue_size
     }
 
-    async fn start(&mut self, ctx: &ComponentContext<Self>) -> () {
+    async fn on_start(&mut self, ctx: &ComponentContext<Self>) -> () {
         tracing::info!("Starting CompactionManager");
         ctx.scheduler.schedule(
             ScheduledCompactionMessage {},

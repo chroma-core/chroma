@@ -7,7 +7,7 @@ use chroma_blockstore::{
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::fulltext::types::FullTextIndexError;
 use chroma_types::{DataRecord, MaterializedLogOperation, Segment, SegmentType, SegmentUuid};
-use futures::{Stream, StreamExt};
+use futures::{Stream, StreamExt, TryStreamExt};
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
 use std::ops::RangeBounds;
@@ -853,16 +853,25 @@ impl RecordSegmentReader<'_> {
     }
 
     pub async fn prefetch_id_to_data(&self, keys: &[u32]) {
-        let prefixes = vec![""; keys.len()];
-        self.id_to_data.load_blocks_for_keys(&prefixes, keys).await
+        self.id_to_data
+            .load_blocks_for_keys(keys.iter().map(|k| ("".to_string(), *k)))
+            .await
     }
 
     #[allow(dead_code)]
     pub(crate) async fn prefetch_user_id_to_id(&self, keys: Vec<&str>) {
-        let prefixes = vec![""; keys.len()];
         self.user_id_to_id
-            .load_blocks_for_keys(&prefixes, &keys)
+            .load_blocks_for_keys(keys.iter().map(|k| ("".to_string(), *k)))
             .await
+    }
+
+    pub async fn get_total_logical_size_bytes(&self) -> Result<u64, Box<dyn ChromaError>> {
+        self.id_to_data
+            .get_range_stream(""..="", ..)
+            .map(|res| res.map(|(_, d)| d.get_size() as u64))
+            .try_collect::<Vec<_>>()
+            .await
+            .map(|sizes| sizes.iter().sum())
     }
 }
 

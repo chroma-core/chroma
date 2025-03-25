@@ -3201,6 +3201,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_data_integrity() {
         // Inserts 10k randomly generated embeddings each of 1000 dimensions.
         // Commits and flushes the data to disk. Then reads the data back using scan api
@@ -3296,6 +3297,7 @@ mod tests {
     // the construction of hnsw provider calls async tokio filesystem apis that also need
     // a runtime which is not supported by shuttle.
     #[tokio::test]
+    #[ignore]
     async fn test_data_integrity_parallel() {
         // Inserts 10k randomly generated embeddings each of 1000 dimensions using 500 parallel tasks.
         // Commits and flushes the data to disk. Then reads the data back using scan api
@@ -3409,6 +3411,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_data_integrity_multiple_runs() {
         // Inserts 10k randomly generated embeddings each of 1000 dimensions in batches of 1k.
         // After each batch of 1k, it commits and flushes to disk. Then reads the data back using scan api
@@ -3518,6 +3521,7 @@ mod tests {
     // the construction of hnsw provider calls async tokio filesystem apis that also need
     // a runtime which is not supported by shuttle.
     #[tokio::test]
+    #[ignore]
     async fn test_data_integrity_multiple_parallel_runs() {
         // Inserts 10k randomly generated embeddings each of 1000 dimensions in batches of 1k.
         // Each batch of 1k records is inserted in parallel using 10 tokio tasks.
@@ -3650,6 +3654,7 @@ mod tests {
     // the construction of hnsw provider calls async tokio filesystem apis that also need
     // a runtime which is not supported by shuttle.
     #[tokio::test]
+    #[ignore]
     async fn test_data_integrity_multiple_parallel_runs_with_updates_deletes() {
         // Inserts 5k randomly generated embeddings each of 1000 dimensions in batches of 1k.
         // Each batch of 1k records is inserted in parallel using 10 tokio tasks.

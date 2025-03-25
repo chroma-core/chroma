@@ -362,6 +362,7 @@ impl SysDb {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn flush_compaction(
         &mut self,
         tenant_id: String,
@@ -370,6 +371,7 @@ impl SysDb {
         collection_version: i32,
         segment_flush_info: Arc<[SegmentFlushInfo]>,
         total_records_post_compaction: u64,
+        size_bytes_post_compaction: u64,
     ) -> Result<FlushCompactionResponse, FlushCompactionError> {
         match self {
             SysDb::Grpc(grpc) => {
@@ -380,6 +382,7 @@ impl SysDb {
                     collection_version,
                     segment_flush_info,
                     total_records_post_compaction,
+                    size_bytes_post_compaction,
                 )
                 .await
             }
@@ -392,6 +395,7 @@ impl SysDb {
                     collection_version,
                     segment_flush_info,
                     total_records_post_compaction,
+                    size_bytes_post_compaction,
                 )
                 .await
             }
@@ -1007,6 +1011,7 @@ impl GrpcSysDb {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn flush_compaction(
         &mut self,
         tenant_id: String,
@@ -1015,6 +1020,7 @@ impl GrpcSysDb {
         collection_version: i32,
         segment_flush_info: Arc<[SegmentFlushInfo]>,
         total_records_post_compaction: u64,
+        size_bytes_post_compaction: u64,
     ) -> Result<FlushCompactionResponse, FlushCompactionError> {
         let segment_compaction_info =
             segment_flush_info
@@ -1039,6 +1045,7 @@ impl GrpcSysDb {
             collection_version,
             segment_compaction_info,
             total_records_post_compaction,
+            size_bytes_post_compaction,
         };
 
         let res = self.client.flush_collection_compaction(req).await;

@@ -19,8 +19,19 @@ jobs:
         uses: ./.github/actions/rust
         with:
           github-token: ${{ github.token }}
+      - name: Build CLI
+        run: cargo build --bin chroma
       - name: Test
-        run: cargo nextest run --no-capture
+        run: cargo nextest run --no-capture --profile ci
+      - name: Upload test results
+        uses: datadog/junit-upload-github-action@v1
+        with:
+            api_key: ${{ secrets.DD_API_KEY }}
+            site: ${{ vars.DD_SITE }}
+            service: chroma
+            files: target/nextest/ci/junit.xml
+            logs: true
+
   test-integration:
     strategy:
       matrix:
@@ -43,8 +54,18 @@ jobs:
         uses: ./.github/actions/tilt
         with:
           depot-project-id: ${{ vars.DEPOT_PROJECT_ID }}
+      - name: Build CLI
+        run: cargo build --bin chroma
       - name: Run tests
-        run: cargo nextest run --profile k8s_integration
+        run: cargo nextest run --profile ci_k8s_integration
+      - name: Upload test results
+        uses: datadog/junit-upload-github-action@v1
+        with:
+            api_key: ${{ secrets.DD_API_KEY }}
+            site: ${{ vars.DD_SITE }}
+            service: chroma
+            files: target/nextest/ci/junit.xml
+            logs: true
       - name: Save service logs to artifact
         if: always()
         uses: ./.github/actions/export-tilt-logs

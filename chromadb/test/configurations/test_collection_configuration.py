@@ -223,7 +223,7 @@ def test_configuration_updates(client: ClientAPI) -> None:
     initial_hnsw: CreateHNSWConfiguration = {
         "ef_search": 10,
         "num_threads": 1,
-        "space": Space.COSINE,  # Required field
+        "space": Space.COSINE,
     }
     coll = client.create_collection(
         name="test_updates",
@@ -299,3 +299,27 @@ def test_configuration_persistence(sqlite_persistent: System) -> None:
             assert ef_config.get("config", {}).get("dim") == 5
 
     system2.stop()
+
+
+def test_configuration_result_format(client: ClientAPI) -> None:
+    """Test updating collection configurations"""
+    client.reset()
+
+    # Create initial collection
+    initial_hnsw: CreateHNSWConfiguration = {
+        "ef_search": 10,
+        "num_threads": 2,
+        "space": Space.COSINE,  # Required field
+    }
+    coll = client.create_collection(
+        name="test_updates",
+        configuration={"hnsw": initial_hnsw},
+    )
+
+    print(coll._model.configuration_json)
+    assert coll._model.configuration_json is not None
+    hnsw_config = coll._model.configuration_json.get("hnsw")
+    assert hnsw_config is not None
+    assert hnsw_config.get("ef_search") == 10
+    assert hnsw_config.get("num_threads") == 2
+    assert hnsw_config.get("space") == Space.COSINE
