@@ -91,7 +91,7 @@ queryService:
     tag: 'latest'
   env:
   cache:
-    hostPath: '/local/cache/chroma'
+    hostPath: '/local/cache/chroma-query-service'
     mountPath: '/cache/'
   replicaCount: 2
 
@@ -101,7 +101,7 @@ compactionService:
     tag: 'latest'
   env:
   cache:
-    hostPath: '/local/cache/chroma'
+    hostPath: '/local/cache/chroma-compaction-service'
     mountPath: '/cache/'
   replicaCount: 1
 
