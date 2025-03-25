@@ -816,17 +816,7 @@ impl GrpcSysDb {
     ) -> Result<(), UpdateCollectionError> {
         let mut configuration_json_str = None;
         if let Some(configuration) = configuration {
-            let collections = self
-                .get_collections(Some(collection_id), None, None, None, None, 0)
-                .await;
-            let collections = collections.unwrap();
-            let collection = collections.into_iter().next().unwrap();
-            let mut existing_configuration = collection.config;
-            existing_configuration.update(&configuration);
-            configuration_json_str = Some(
-                serde_json::to_string(&existing_configuration)
-                    .map_err(UpdateCollectionError::Configuration)?,
-            );
+            configuration_json_str = Some(serde_json::to_string(&configuration).unwrap());
         }
 
         let req = chroma_proto::UpdateCollectionRequest {
