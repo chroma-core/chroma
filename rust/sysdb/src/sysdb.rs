@@ -816,7 +816,7 @@ impl GrpcSysDb {
         name: Option<String>,
         metadata: Option<CollectionMetadataUpdate>,
         dimension: Option<u32>,
-        configuration: Option<UpdateCollectionConfiguration>,
+        _configuration: Option<UpdateCollectionConfiguration>,
     ) -> Result<(), UpdateCollectionError> {
         let req = chroma_proto::UpdateCollectionRequest {
             id: collection_id.0.to_string(),
@@ -832,23 +832,6 @@ impl GrpcSysDb {
                 }
             }),
             dimension: dimension.map(|dim| dim as i32),
-            configuration_json_str: {
-                if let Some(configuration) = configuration {
-                    let collections = self
-                        .get_collections(Some(collection_id), None, None, None, None, 0)
-                        .await;
-                    let collections = collections.unwrap();
-                    let collection = collections.into_iter().next().unwrap();
-                    let mut existing_configuration = collection.config;
-                    existing_configuration.update(&configuration);
-                    Some(
-                        serde_json::to_string(&existing_configuration)
-                            .map_err(UpdateCollectionError::Configuration)?,
-                    )
-                } else {
-                    None
-                }
-            },
         };
 
         self.client.update_collection(req).await.map_err(|e| {
