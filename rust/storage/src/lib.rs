@@ -1,8 +1,6 @@
 use std::sync::Arc;
 
 use self::config::StorageConfig;
-use self::s3::S3GetError;
-use admissioncontrolleds3::AdmissionControlledS3StorageError;
 use async_trait::async_trait;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
@@ -17,79 +15,172 @@ use local::LocalStorage;
 use tempfile::TempDir;
 use thiserror::Error;
 
-#[derive(Clone)]
-pub enum Storage {
-    ObjectStore(object_store::ObjectStore),
-    S3(s3::S3Storage),
-    Local(local::LocalStorage),
-    AdmissionControlledS3(admissioncontrolleds3::AdmissionControlledS3Storage),
+pub use s3::s3_client_for_test_with_new_bucket;
+
+/// A StorageError captures all kinds of errors that can come from storage.
+//
+// This was borrowed from Apache Arrow's ObjectStore crate.
+// Copyer:  Robert Escriva
+// Commit:  5508978a3c5c4eb65ef6410e097887a8adaba38a
+//
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+//
+// Converted from Snafu to thiserror.
+
+#[derive(Clone, Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum StorageError {
+    /// A fallback error type when no variant matches
+    #[error("Generic error: {source}")]
+    Generic {
+        /// The wrapped error
+        source: Arc<dyn std::error::Error + Send + Sync + 'static>,
+    },
+
+    /// A generic message.
+    #[error("Error message: {message}")]
+    Message {
+        /// The message
+        message: String,
+    },
+
+    /// Error when the object is not found at given location
+    #[error("Object at location {path} not found: {source}")]
+    NotFound {
+        /// The path to file
+        path: String,
+        /// The wrapped error
+        source: Arc<dyn std::error::Error + Send + Sync + 'static>,
+    },
+
+    /// Error for invalid path
+    #[error("Encountered object with invalid path: {source}")]
+    InvalidPath {
+        /// The wrapped error
+        source: PathError,
+    },
+
+    /// Error when `tokio::spawn` failed
+    #[error("Error joining spawned task.")]
+    JoinError,
+
+    /// Error when the attempted operation is not supported
+    #[error("Operation not supported: {source}")]
+    NotSupported {
+        /// The wrapped error
+        source: Arc<dyn std::error::Error + Send + Sync + 'static>,
+    },
+
+    /// Error when the object already exists
+    #[error("Object at location {path} already exists: {source}")]
+    AlreadyExists {
+        /// The path to the
+        path: String,
+        /// The wrapped error
+        source: Arc<dyn std::error::Error + Send + Sync + 'static>,
+    },
+
+    /// Error when the required conditions failed for the operation
+    #[error("Request precondition failure for path {path}: {source}")]
+    Precondition {
+        /// The path to the file
+        path: String,
+        /// The wrapped error
+        source: Arc<dyn std::error::Error + Send + Sync + 'static>,
+    },
+
+    /// Error when the object at the location isn't modified
+    #[error("Object at location {path} not modified: {source}")]
+    NotModified {
+        /// The path to the file
+        path: String,
+        /// The wrapped error
+        source: Arc<dyn std::error::Error + Send + Sync + 'static>,
+    },
+
+    /// Error when an operation is not implemented
+    #[error("Operation not yet implemented.")]
+    NotImplemented,
+
+    /// Error when the used credentials don't have enough permission
+    /// to perform the requested operation
+    #[error("The operation lacked the necessary privileges to complete for path {path}: {source}")]
+    PermissionDenied {
+        /// The path to the file
+        path: String,
+        /// The wrapped error
+        source: Arc<dyn std::error::Error + Send + Sync + 'static>,
+    },
+
+    /// Error when the used credentials lack valid authentication
+    #[error("The operation lacked valid authentication credentials for path {path}: {source}")]
+    Unauthenticated {
+        /// The path to the file
+        path: String,
+        /// The wrapped error
+        source: Arc<dyn std::error::Error + Send + Sync + 'static>,
+    },
+
+    /// Error when a configuration key is invalid for the store used
+    #[error("Configuration key: '{key}' is not valid for store '{store}'.")]
+    UnknownConfigurationKey {
+        /// The object store used
+        store: &'static str,
+        /// The configuration key used
+        key: String,
+    },
 }
 
-#[derive(Error, Debug, Clone)]
-pub enum GetError {
-    #[error("No such key: {0}")]
-    NoSuchKey(String),
-    #[error("ObjectStore error: {0}")]
-    ObjectStoreError(Arc<::object_store::Error>),
-    #[error("S3 error: {0}")]
-    S3Error(#[from] S3GetError),
-    #[error("Local storage error: {0}")]
-    LocalError(String),
-}
-
-impl ChromaError for GetError {
+impl ChromaError for StorageError {
     fn code(&self) -> ErrorCodes {
         match self {
-            GetError::NoSuchKey(_) => ErrorCodes::NotFound,
-            GetError::ObjectStoreError(_) => ErrorCodes::Internal,
-            GetError::S3Error(_) => ErrorCodes::Internal,
-            GetError::LocalError(_) => ErrorCodes::Internal,
+            StorageError::Generic { .. } => ErrorCodes::Internal,
+            StorageError::Message { .. } => ErrorCodes::Internal,
+            StorageError::NotFound { .. } => ErrorCodes::NotFound,
+            StorageError::InvalidPath { .. } => ErrorCodes::InvalidArgument,
+            StorageError::JoinError => ErrorCodes::Internal,
+            StorageError::NotSupported { .. } => ErrorCodes::Unimplemented,
+            StorageError::AlreadyExists { .. } => ErrorCodes::AlreadyExists,
+            StorageError::Precondition { .. } => ErrorCodes::FailedPrecondition,
+            StorageError::NotModified { .. } => ErrorCodes::FailedPrecondition,
+            StorageError::NotImplemented => ErrorCodes::Unimplemented,
+            StorageError::PermissionDenied { .. } => ErrorCodes::PermissionDenied,
+            StorageError::Unauthenticated { .. } => ErrorCodes::Unauthenticated,
+            StorageError::UnknownConfigurationKey { .. } => ErrorCodes::InvalidArgument,
         }
     }
 }
 
-impl From<::object_store::Error> for GetError {
-    fn from(e: ::object_store::Error) -> Self {
-        match e {
-            ::object_store::Error::NotFound { path, source: _ } => {
-                GetError::NoSuchKey(path.to_string())
-            }
-            _ => GetError::ObjectStoreError(Arc::new(e)),
-        }
-    }
+/// Error returned by [`Path::parse`]
+#[derive(Clone, Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum PathError {
+    /// Error when a path contains non-unicode characters
+    #[error("Path \"{path}\" contained non-unicode characters: {source}")]
+    NonUnicode {
+        /// The source path
+        path: String,
+        /// The underlying `UTF8Error`
+        source: std::str::Utf8Error,
+    },
 }
 
-#[derive(Error, Debug)]
-pub enum PutError {
-    #[error("ObjectStore error: {0}")]
-    ObjectStoreError(Arc<::object_store::Error>),
-    #[error("S3 error: {0}")]
-    S3Error(#[from] s3::S3PutError),
-    #[error("Local storage error: {0}")]
-    LocalError(String),
-}
-
-impl ChromaError for PutError {
-    fn code(&self) -> ErrorCodes {
-        match self {
-            PutError::ObjectStoreError(_) => ErrorCodes::Internal,
-            PutError::S3Error(_) => ErrorCodes::Internal,
-            PutError::LocalError(_) => ErrorCodes::Internal,
-        }
-    }
-}
-
-impl From<std::io::Error> for PutError {
-    fn from(e: std::io::Error) -> Self {
-        Self::LocalError(e.to_string())
-    }
-}
-
-impl From<::object_store::Error> for PutError {
-    fn from(e: ::object_store::Error) -> Self {
-        Self::ObjectStoreError(Arc::new(e))
-    }
-}
+// END BORROWED CODE
 
 #[derive(Error, Debug)]
 pub enum StorageConfigError {
@@ -97,6 +188,14 @@ pub enum StorageConfigError {
     InvalidStorageConfig,
     #[error("Failed to create bucket: {0}")]
     FailedToCreateBucket(String),
+}
+
+#[derive(Clone)]
+pub enum Storage {
+    ObjectStore(object_store::ObjectStore),
+    S3(s3::S3Storage),
+    Local(local::LocalStorage),
+    AdmissionControlledS3(admissioncontrolleds3::AdmissionControlledS3Storage),
 }
 
 impl ChromaError for StorageConfigError {
@@ -108,173 +207,89 @@ impl ChromaError for StorageConfigError {
     }
 }
 
-#[derive(Error, Debug)]
-pub enum RenameError {
-    #[error("ObjectStore error: {0}")]
-    ObjectStoreError(Arc<::object_store::Error>),
-    #[error("S3 error: {0}")]
-    S3Error(#[from] s3::S3PutError),
-    #[error("Local storage error: {0}")]
-    LocalError(String),
-}
-
-impl ChromaError for RenameError {
-    fn code(&self) -> ErrorCodes {
-        match self {
-            RenameError::ObjectStoreError(_) => ErrorCodes::Internal,
-            RenameError::S3Error(_) => ErrorCodes::Internal,
-            RenameError::LocalError(_) => ErrorCodes::Internal,
-        }
-    }
-}
-
-impl From<::object_store::Error> for RenameError {
-    fn from(e: ::object_store::Error) -> Self {
-        Self::ObjectStoreError(Arc::new(e))
-    }
-}
-
 impl Storage {
-    pub async fn get(&self, key: &str) -> Result<Arc<Vec<u8>>, GetError> {
+    pub async fn get(&self, key: &str) -> Result<Arc<Vec<u8>>, StorageError> {
         match self {
-            Storage::ObjectStore(object_store) => object_store.get(key).await,
-            Storage::S3(s3) => {
-                let res = s3.get(key).await;
-                match res {
-                    Ok(res) => Ok(res),
-                    Err(e) => match e {
-                        S3GetError::NoSuchKey(_) => Err(GetError::NoSuchKey(key.to_string())),
-                        _ => Err(GetError::S3Error(e)),
-                    },
-                }
-            }
-            Storage::Local(local) => {
-                let res = local.get(key).await;
-                match res {
-                    Ok(res) => Ok(res),
-                    Err(e) => Err(GetError::LocalError(e)),
-                }
-            }
+            Storage::ObjectStore(object_store) => Ok(object_store.get(key).await?),
+            Storage::S3(s3) => s3.get(key).await,
+            Storage::Local(local) => local.get(key).await,
             Storage::AdmissionControlledS3(admission_controlled_storage) => {
-                let res = admission_controlled_storage.get(key.to_string()).await;
-                match res {
-                    Ok(res) => Ok(res),
-                    Err(e) => match e {
-                        AdmissionControlledS3StorageError::S3GetError(e) => match e {
-                            S3GetError::NoSuchKey(_) => Err(GetError::NoSuchKey(key.to_string())),
-                            _ => Err(GetError::S3Error(e)),
-                        },
-                    },
-                }
+                admission_controlled_storage.get(key).await
             }
         }
     }
 
-    pub async fn get_parallel(&self, key: &str) -> Result<Arc<Vec<u8>>, GetError> {
+    pub async fn get_with_e_tag(
+        &self,
+        key: &str,
+    ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
+        match self {
+            Storage::ObjectStore(object_store) => object_store.get_with_e_tag(key).await,
+            Storage::S3(s3) => s3.get_with_e_tag(key).await,
+            Storage::Local(local) => local.get_with_e_tag(key).await,
+            Storage::AdmissionControlledS3(admission_controlled_storage) => {
+                admission_controlled_storage.get_with_e_tag(key).await
+            }
+        }
+    }
+
+    pub async fn get_parallel(&self, key: &str) -> Result<Arc<Vec<u8>>, StorageError> {
         match self {
             Storage::ObjectStore(object_store) => object_store.get_parallel(key).await,
-            Storage::S3(s3) => {
-                let res = s3.get_parallel(key).await;
-                match res {
-                    Ok(res) => Ok(res),
-                    Err(e) => match e {
-                        S3GetError::NoSuchKey(_) => Err(GetError::NoSuchKey(key.to_string())),
-                        _ => Err(GetError::S3Error(e)),
-                    },
-                }
-            }
-            Storage::Local(local) => {
-                let res = local.get(key).await;
-                match res {
-                    Ok(res) => Ok(res),
-                    Err(e) => Err(GetError::LocalError(e)),
-                }
-            }
+            Storage::S3(s3) => s3.get_parallel(key).await.map(|res| res.0),
+            Storage::Local(local) => local.get(key).await,
             Storage::AdmissionControlledS3(admission_controlled_storage) => {
-                let res = admission_controlled_storage
+                admission_controlled_storage
                     .get_parallel(key.to_string())
-                    .await;
-                match res {
-                    Ok(res) => Ok(res),
-                    Err(e) => match e {
-                        AdmissionControlledS3StorageError::S3GetError(e) => match e {
-                            S3GetError::NoSuchKey(_) => Err(GetError::NoSuchKey(key.to_string())),
-                            _ => Err(GetError::S3Error(e)),
-                        },
-                    },
-                }
+                    .await
             }
         }
     }
 
-    pub async fn put_file(&self, key: &str, path: &str) -> Result<(), PutError> {
+    pub async fn put_file(&self, key: &str, path: &str) -> Result<Option<ETag>, StorageError> {
         match self {
             Storage::ObjectStore(object_store) => object_store.put_file(key, path).await,
-            Storage::S3(s3) => s3.put_file(key, path).await.map_err(PutError::S3Error),
-            Storage::Local(local) => local
-                .put_file(key, path)
-                .await
-                .map_err(PutError::LocalError),
-            Storage::AdmissionControlledS3(as3) => {
-                as3.put_file(key, path).await.map_err(PutError::S3Error)
-            }
+            Storage::S3(s3) => s3.put_file(key, path).await,
+            Storage::Local(local) => local.put_file(key, path).await,
+            Storage::AdmissionControlledS3(as3) => as3.put_file(key, path).await,
         }
     }
 
-    pub async fn put_bytes(&self, key: &str, bytes: Vec<u8>) -> Result<(), PutError> {
+    pub async fn put_bytes(
+        &self,
+        key: &str,
+        bytes: Vec<u8>,
+        options: PutOptions,
+    ) -> Result<Option<ETag>, StorageError> {
         match self {
-            Storage::ObjectStore(object_store) => object_store.put_bytes(key, bytes).await,
-            Storage::S3(s3) => s3.put_bytes(key, bytes).await.map_err(PutError::S3Error),
-            Storage::Local(local) => local
-                .put_bytes(key, &bytes)
-                .await
-                .map_err(PutError::LocalError),
-            Storage::AdmissionControlledS3(as3) => {
-                as3.put_bytes(key, bytes).await.map_err(PutError::S3Error)
-            }
+            Storage::ObjectStore(object_store) => object_store.put_bytes(key, bytes, options).await,
+            Storage::S3(s3) => s3.put_bytes(key, bytes, options).await,
+            Storage::Local(local) => local.put_bytes(key, &bytes, options).await,
+            Storage::AdmissionControlledS3(as3) => as3.put_bytes(key, bytes, options).await,
         }
     }
 
-    pub async fn delete(&self, key: &str) -> Result<(), PutError> {
+    pub async fn delete(&self, key: &str) -> Result<(), StorageError> {
         match self {
             Storage::ObjectStore(object_store) => object_store.delete(key).await,
-            Storage::S3(s3) => s3.delete(key).await.map_err(PutError::S3Error),
-            Storage::Local(local) => local.delete(key).await.map_err(PutError::LocalError),
-            Storage::AdmissionControlledS3(_) => {
-                unimplemented!("delete not implemented for AdmissionControlledS3")
-            }
+            Storage::S3(s3) => s3.delete(key).await,
+            Storage::Local(local) => local.delete(key).await,
+            Storage::AdmissionControlledS3(_) => Err(StorageError::NotImplemented),
         }
     }
 
-    pub async fn rename(&self, src_key: &str, dst_key: &str) -> Result<(), RenameError> {
+    pub async fn rename(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
         match self {
-            Storage::ObjectStore(object_store) => object_store
-                .rename(src_key, dst_key)
-                .await
-                .map_err(|e| match e {
-                    PutError::ObjectStoreError(e) => RenameError::ObjectStoreError(e),
-                    PutError::S3Error(e) => RenameError::S3Error(e),
-                    PutError::LocalError(e) => RenameError::LocalError(e),
-                }),
-            Storage::S3(s3) => s3
-                .rename(src_key, dst_key)
-                .await
-                .map_err(RenameError::S3Error),
-            Storage::Local(local) => local
-                .rename(src_key, dst_key)
-                .await
-                .map_err(RenameError::LocalError),
-            Storage::AdmissionControlledS3(_) => {
-                unimplemented!("rename not implemented for AdmissionControlledS3")
-            }
+            Storage::ObjectStore(object_store) => object_store.rename(src_key, dst_key).await,
+            Storage::S3(s3) => s3.rename(src_key, dst_key).await,
+            Storage::Local(local) => local.rename(src_key, dst_key).await,
+            Storage::AdmissionControlledS3(_) => Err(StorageError::NotImplemented),
         }
     }
 
-    pub async fn list_prefix(&self, prefix: &str) -> Result<Vec<String>, GetError> {
+    pub async fn list_prefix(&self, prefix: &str) -> Result<Vec<String>, StorageError> {
         match self {
-            Storage::Local(_) => {
-                unimplemented!("list_prefix not implemented for LocalStorage")
-            }
+            Storage::Local(local) => local.list_prefix(prefix).await,
             Storage::S3(_) => {
                 unimplemented!("list_prefix not implemented for S3")
             }
@@ -320,4 +335,57 @@ pub fn test_storage() -> Storage {
             .to_str()
             .expect("Should be able to convert temporary directory path to string"),
     ))
+}
+
+#[derive(Debug, Default, Eq, PartialEq)]
+pub struct PutOptions {
+    if_not_exists: bool,
+    if_match: Option<ETag>,
+}
+
+#[derive(Error, Debug)]
+pub enum PutOptionsCreateError {
+    #[error("If not exists and if match cannot both be used")]
+    IfNotExistsAndIfMatchEnabled,
+}
+
+impl PutOptions {
+    pub fn if_not_exists() -> Self {
+        // SAFETY(rescrv):  This is always safe because of a unit test.
+        Self::new(true, None).unwrap()
+    }
+
+    pub fn if_matches(e_tag: &ETag) -> Self {
+        // SAFETY(rescrv):  This is always safe because of a unit test.
+        Self::new(false, Some(e_tag.clone())).unwrap()
+    }
+
+    pub fn new(
+        if_not_exists: bool,
+        if_match: Option<ETag>,
+    ) -> Result<PutOptions, PutOptionsCreateError> {
+        if if_not_exists && if_match.is_some() {
+            return Err(PutOptionsCreateError::IfNotExistsAndIfMatchEnabled);
+        }
+        Ok(PutOptions {
+            if_not_exists,
+            if_match,
+        })
+    }
+}
+
+#[derive(Clone, Eq, PartialEq, Debug, serde::Deserialize, serde::Serialize)]
+pub struct ETag(pub String);
+
+/////////////////////////////////////////////// tests //////////////////////////////////////////////
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn put_options_ctors() {
+        let _x = PutOptions::if_not_exists();
+        let _x = PutOptions::if_matches(&ETag("123".to_string()));
+    }
 }

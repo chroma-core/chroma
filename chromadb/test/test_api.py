@@ -18,6 +18,8 @@ from datetime import datetime, timedelta
 from chromadb.utils.embedding_functions import (
     DefaultEmbeddingFunction,
 )
+from typing import Any
+from chromadb.errors import InvalidArgumentError
 
 persist_dir = tempfile.mkdtemp()
 
@@ -104,6 +106,18 @@ def test_persist_index_loading_embedding_function(api_fixture, request):
         def __call__(self, input):
             return [np.array([1, 2, 3]) for _ in range(len(input))]
 
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+
+        def name(self) -> str:
+            return "test"
+
+        def build_from_config(self, config: dict[str, Any]) -> None:
+            pass
+
+        def get_config(self) -> dict[str, Any]:
+            return {}
+
     client = request.getfixturevalue("local_persist_api")
     client.reset()
     collection = client.create_collection("test", embedding_function=TestEF())
@@ -132,6 +146,18 @@ def test_persist_index_get_or_create_embedding_function(api_fixture, request):
     class TestEF(EmbeddingFunction[Document]):
         def __call__(self, input):
             return [np.array([1, 2, 3]) for _ in range(len(input))]
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+
+        def name(self) -> str:
+            return "test"
+
+        def build_from_config(self, config: dict[str, Any]) -> None:
+            pass
+
+        def get_config(self) -> dict[str, Any]:
+            return {}
 
     api = request.getfixturevalue("local_persist_api")
     api.reset()
@@ -1251,13 +1277,7 @@ def test_index_params(client):
 def test_invalid_index_params(client):
     client.reset()
 
-    with pytest.raises(Exception):
-        collection = client.create_collection(
-            name="test_index_params", metadata={"hnsw:foobar": "blarg"}
-        )
-        collection.add(**records)
-
-    with pytest.raises(Exception):
+    with pytest.raises(InvalidArgumentError):
         collection = client.create_collection(
             name="test_index_params", metadata={"hnsw:space": "foobar"}
         )

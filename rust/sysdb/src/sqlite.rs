@@ -11,9 +11,9 @@ use chroma_types::{
     CreateCollectionError, CreateCollectionResponse, CreateDatabaseError, CreateDatabaseResponse,
     CreateTenantError, CreateTenantResponse, Database, DeleteCollectionError, DeleteDatabaseError,
     DeleteDatabaseResponse, GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError,
-    GetSegmentsError, GetTenantError, GetTenantResponse, ListDatabasesError, Metadata,
-    MetadataValue, ResetError, ResetResponse, Segment, SegmentScope, SegmentType, SegmentUuid,
-    UpdateCollectionError,
+    GetSegmentsError, GetTenantError, GetTenantResponse, InternalCollectionConfiguration,
+    ListDatabasesError, Metadata, MetadataValue, ResetError, ResetResponse, Segment, SegmentScope,
+    SegmentType, SegmentUuid, UpdateCollectionError,
 };
 use futures::TryStreamExt;
 use sea_query_binder::SqlxBinder;
@@ -237,7 +237,7 @@ impl SqliteSysDb {
         collection_id: CollectionUuid,
         name: String,
         segments: Vec<Segment>,
-        configuration_json: serde_json::Value,
+        configuration: InternalCollectionConfiguration,
         metadata: Option<Metadata>,
         dimension: Option<i32>,
         get_or_create: bool,
@@ -298,10 +298,7 @@ impl SqliteSysDb {
         )
         .bind(collection_id.to_string())
         .bind(&name)
-        .bind(
-            serde_json::to_string(&configuration_json)
-                .map_err(CreateCollectionError::Configuration)?,
-        )
+        .bind(serde_json::to_string(&configuration).map_err(CreateCollectionError::Configuration)?)
         .bind(dimension)
         .bind(database_id)
         .execute(&mut *tx)
@@ -333,12 +330,15 @@ impl SqliteSysDb {
             name,
             tenant,
             database,
-            configuration_json,
+            config: configuration,
             metadata,
             dimension,
             log_position: 0,
             total_records_post_compaction: 0,
             version: 0,
+            size_bytes_post_compaction: 0,
+            last_compaction_time_secs: 0,
+            legacy_configuration_json: (),
         })
     }
 
@@ -666,19 +666,21 @@ impl SqliteSysDb {
                 let metadata = self.metadata_from_rows(rows.iter());
                 let first_row = rows.first().unwrap();
 
-                let configuration_json = match first_row.get::<Option<&str>, _>(2) {
-                    Some(json_str) => match serde_json::from_str::<serde_json::Value>(json_str)
-                        .map_err(GetCollectionsError::Configuration)
-                    {
-                        Ok(configuration_json) => configuration_json,
-                        Err(e) => return Some(Err(e)),
-                    },
-                    None => serde_json::Value::Object(Default::default()),
+                let configuration = match first_row.get::<Option<&str>, _>(2) {
+                    Some(json_str) => {
+                        match serde_json::from_str::<InternalCollectionConfiguration>(json_str)
+                            .map_err(GetCollectionsError::Configuration)
+                        {
+                            Ok(configuration) => configuration,
+                            Err(e) => return Some(Err(e)),
+                        }
+                    }
+                    None => InternalCollectionConfiguration::default_hnsw(),
                 };
 
                 Some(Ok(Collection {
                     collection_id,
-                    configuration_json,
+                    config: configuration,
                     metadata,
                     total_records_post_compaction: 0,
                     version: 0,
@@ -687,6 +689,9 @@ impl SqliteSysDb {
                     name: first_row.get(1),
                     tenant: first_row.get(4),
                     database: first_row.get(5),
+                    size_bytes_post_compaction: 0,
+                    last_compaction_time_secs: 0,
+                    legacy_configuration_json: (),
                 }))
             })
             .collect::<Result<Vec<_>, GetCollectionsError>>()?;
@@ -1092,7 +1097,7 @@ mod tests {
                 collection_id,
                 "test_collection".to_string(),
                 segments.clone(),
-                serde_json::Value::Null,
+                InternalCollectionConfiguration::default_hnsw(),
                 Some(collection_metadata.clone()),
                 None,
                 false,
@@ -1132,7 +1137,7 @@ mod tests {
                 collection_id,
                 "test_collection".to_string(),
                 segments.clone(),
-                serde_json::Value::Null,
+                InternalCollectionConfiguration::default_hnsw(),
                 None,
                 None,
                 false,
@@ -1149,7 +1154,7 @@ mod tests {
                 collection_id,
                 "test_collection".to_string(),
                 segments,
-                serde_json::Value::Null,
+                InternalCollectionConfiguration::default_hnsw(),
                 None,
                 None,
                 false,
@@ -1179,7 +1184,7 @@ mod tests {
                 collection_id,
                 "test_collection".to_string(),
                 segments.clone(),
-                serde_json::Value::Null,
+                InternalCollectionConfiguration::default_hnsw(),
                 None,
                 None,
                 false,
@@ -1196,7 +1201,7 @@ mod tests {
                 CollectionUuid::new(),
                 "test_collection".to_string(),
                 vec![],
-                serde_json::Value::Null,
+                InternalCollectionConfiguration::default_hnsw(),
                 None,
                 None,
                 true,
@@ -1219,7 +1224,7 @@ mod tests {
                 collection_id,
                 "test_collection".to_string(),
                 vec![],
-                serde_json::Value::Null,
+                InternalCollectionConfiguration::default_hnsw(),
                 None,
                 None,
                 false,
@@ -1271,7 +1276,7 @@ mod tests {
                 collection_id,
                 "test_collection".to_string(),
                 vec![],
-                serde_json::Value::Null,
+                InternalCollectionConfiguration::default_hnsw(),
                 None,
                 None,
                 false,
@@ -1349,7 +1354,7 @@ mod tests {
                 collection_id,
                 "test_collection".to_string(),
                 segments.clone(),
-                serde_json::Value::Null,
+                InternalCollectionConfiguration::default_hnsw(),
                 Some(collection_metadata.clone()),
                 None,
                 false,
@@ -1399,7 +1404,7 @@ mod tests {
                 collection_id,
                 "test_collection".to_string(),
                 segments.clone(),
-                serde_json::Value::Null,
+                InternalCollectionConfiguration::default_hnsw(),
                 Some(collection_metadata.clone()),
                 None,
                 false,
@@ -1414,5 +1419,50 @@ mod tests {
         assert_eq!(segments.len(), 1);
         let fetched_segment = fetched_segments.first().unwrap();
         assert_eq!(*fetched_segment, segments[0]);
+    }
+
+    #[tokio::test]
+    async fn test_get_collection_with_old_config() {
+        let db = get_new_sqlite_db().await;
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
+
+        let collection_id = CollectionUuid::new();
+        sysdb
+            .create_collection(
+                "default_tenant".to_string(),
+                "default_database".to_string(),
+                collection_id,
+                "test_collection".to_string(),
+                vec![],
+                InternalCollectionConfiguration::default_hnsw(),
+                None,
+                None,
+                false,
+            )
+            .await
+            .unwrap();
+
+        // Set to legacy config shape
+        sqlx::query(
+            r#"
+            UPDATE collections
+            SET config_json_str = $1
+        "#,
+        )
+        .bind(r#"{"hnsw_configuration": {"space": "l2", "ef_construction": 100, "ef_search": 100, "num_threads": 16, "M": 16, "resize_factor": 1.2, "batch_size": 100, "sync_threshold": 1000, "_type": "HNSWConfigurationInternal"}, "_type": "CollectionConfigurationInternal"}"#)
+        .execute(sysdb.db.get_conn())
+        .await
+        .unwrap();
+
+        // Fetching the collection should not error and the config should be the default
+        let collections = sysdb
+            .get_collections(Some(collection_id), None, None, None, None, 0)
+            .await
+            .unwrap();
+        let collection = collections.first().unwrap();
+        assert_eq!(
+            collection.config,
+            InternalCollectionConfiguration::default_hnsw()
+        );
     }
 }

@@ -3,6 +3,10 @@ name = "chroma-log"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "log_service"
+path = "src/bin/log.rs"
+
 [dependencies]
 async-trait = { workspace = true }
 # Used by tracing
@@ -11,6 +15,7 @@ rand = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 tonic = { workspace = true }
+tonic-health = { workspace = true }
 tracing = { workspace = true }
 # Used by tracing
 tracing-opentelemetry = { workspace = true }
@@ -31,6 +36,9 @@ chroma-system = { workspace = true }
 chroma-sysdb = { workspace = true }
 chroma-types = { workspace = true }
 chroma-sqlite = { workspace = true }
+
+[features]
+server = []
 
 [dev-dependencies]
 tempfile = { workspace = true }

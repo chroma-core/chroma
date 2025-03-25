@@ -111,6 +111,9 @@ func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.Create
 		if err == common.ErrCollectionUniqueConstraintViolation {
 			return res, grpcutils.BuildAlreadyExistsGrpcError(err.Error())
 		}
+		if err == common.ErrDatabaseNotFound {
+			return res, grpcutils.BuildNotFoundGrpcError(err.Error())
+		}
 		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	res.Collection = convertCollectionToProto(collection)
@@ -380,6 +383,7 @@ func (s *Server) FlushCollectionCompaction(ctx context.Context, req *coordinator
 		CurrentCollectionVersion:   req.CollectionVersion,
 		FlushSegmentCompactions:    segmentCompactionInfo,
 		TotalRecordsPostCompaction: req.TotalRecordsPostCompaction,
+		SizeBytesPostCompaction:    req.SizeBytesPostCompaction,
 	}
 	flushCollectionInfo, err := s.coordinator.FlushCollectionCompaction(ctx, FlushCollectionCompaction)
 	if err != nil {
@@ -396,7 +400,7 @@ func (s *Server) FlushCollectionCompaction(ctx context.Context, req *coordinator
 
 func (s *Server) ListCollectionsToGc(ctx context.Context, req *coordinatorpb.ListCollectionsToGcRequest) (*coordinatorpb.ListCollectionsToGcResponse, error) {
 	// Dumb implementation that just returns ALL the collections for now.
-	collectionsToGc, err := s.coordinator.ListCollectionsToGc(ctx)
+	collectionsToGc, err := s.coordinator.ListCollectionsToGc(ctx, req.CutoffTimeSecs, req.Limit)
 	if err != nil {
 		log.Error("ListCollectionsToGc failed", zap.Error(err))
 		return nil, grpcutils.BuildInternalGrpcError(err.Error())

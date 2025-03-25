@@ -45,6 +45,9 @@ spec:
         - name: compaction-service
           image: "{{ .Values.compactionService.image.repository }}:{{ .Values.compactionService.image.tag }}"
           imagePullPolicy: IfNotPresent
+          readinessProbe:
+            grpc:
+              port: 50051
           volumeMounts:
             {{if .Values.compactionService.configuration}}
             - name: compaction-service-config

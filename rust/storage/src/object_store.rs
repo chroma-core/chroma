@@ -8,7 +8,66 @@ use object_store::{GetOptions, GetRange, ObjectStore as ObjectStoreTrait, PutOpt
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::sync::Mutex;
 
-use super::{GetError, PutError, StorageConfigError};
+use super::{ETag, PathError, StorageConfigError, StorageError};
+
+impl From<object_store::Error> for StorageError {
+    fn from(err: object_store::Error) -> Self {
+        match err {
+            object_store::Error::Generic { store: _, source } => StorageError::Generic {
+                source: source.into(),
+            },
+            object_store::Error::NotFound { path, source } => StorageError::NotFound {
+                path,
+                source: source.into(),
+            },
+            object_store::Error::InvalidPath { source } => match source {
+                object_store::path::Error::NonUnicode { path, source } => {
+                    StorageError::InvalidPath {
+                        source: PathError::NonUnicode { path, source },
+                    }
+                }
+                _ => StorageError::Generic {
+                    source: Arc::new(source),
+                },
+            },
+            object_store::Error::JoinError { source: _ } => StorageError::JoinError,
+            object_store::Error::NotSupported { source } => StorageError::NotSupported {
+                source: source.into(),
+            },
+            object_store::Error::AlreadyExists { path, source } => StorageError::AlreadyExists {
+                path,
+                source: source.into(),
+            },
+            object_store::Error::Precondition { path, source } => StorageError::Precondition {
+                path,
+                source: source.into(),
+            },
+            object_store::Error::NotModified { path, source } => StorageError::NotModified {
+                path,
+                source: source.into(),
+            },
+            object_store::Error::NotImplemented => StorageError::NotImplemented,
+            object_store::Error::PermissionDenied { path, source } => {
+                StorageError::PermissionDenied {
+                    path,
+                    source: source.into(),
+                }
+            }
+            object_store::Error::Unauthenticated { path, source } => {
+                StorageError::Unauthenticated {
+                    path,
+                    source: source.into(),
+                }
+            }
+            object_store::Error::UnknownConfigurationKey { store, key } => {
+                StorageError::UnknownConfigurationKey { store, key }
+            }
+            err => StorageError::Generic {
+                source: Arc::new(err),
+            },
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct ObjectStore {
@@ -75,7 +134,7 @@ impl ObjectStore {
         }
     }
 
-    pub async fn get(&self, key: &str) -> Result<Arc<Vec<u8>>, GetError> {
+    pub async fn get(&self, key: &str) -> Result<Arc<Vec<u8>>, StorageError> {
         // tracing::info!("ObjectStore::get called with key: {}", key);
         Ok(self
             .object_store
@@ -87,7 +146,14 @@ impl ObjectStore {
             .into())
     }
 
-    pub async fn get_parallel(&self, key: &str) -> Result<Arc<Vec<u8>>, GetError> {
+    pub async fn get_with_e_tag(
+        &self,
+        _: &str,
+    ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
+        Err(StorageError::NotImplemented)
+    }
+
+    pub async fn get_parallel(&self, key: &str) -> Result<Arc<Vec<u8>>, StorageError> {
         let meta = self.object_store.head(&Path::from(key)).await?;
         let file_size = meta.size;
         let mut pieces = vec![];
@@ -121,10 +187,15 @@ impl ObjectStore {
         Ok(Arc::new(output_buffer))
     }
 
-    pub async fn put_file(&self, key: &str, path: &str) -> Result<(), PutError> {
+    pub async fn put_file(&self, key: &str, path: &str) -> Result<Option<ETag>, StorageError> {
         let multipart = self.object_store.put_multipart(&Path::from(key)).await?;
         let multipart = Arc::new(Mutex::new(multipart));
-        let file_size = tokio::fs::metadata(path).await?.len();
+        let file_size = tokio::fs::metadata(path)
+            .await
+            .map_err(|err| StorageError::Generic {
+                source: Arc::new(err),
+            })?
+            .len();
         let path = path.to_string();
         async fn read_from_part_of_file(
             path: &str,
@@ -153,7 +224,9 @@ impl ObjectStore {
                     {
                         Ok(bytes) => bytes,
                         Err(e) => {
-                            return Err::<(), PutError>(e.into());
+                            return Err(StorageError::Generic {
+                                source: Arc::new(e),
+                            })
                         }
                     };
                 let mut multipart = multipart.lock().await;
@@ -163,19 +236,35 @@ impl ObjectStore {
         }
         futures::future::try_join_all(pieces).await?;
         let mut multipart = multipart.lock().await;
-        multipart.complete().await?;
-        Ok(())
+        let result = multipart.complete().await?;
+        Ok(result.e_tag.map(ETag))
     }
 
-    pub async fn put_bytes(&self, key: &str, bytes: Vec<u8>) -> Result<(), PutError> {
+    pub async fn put_bytes(
+        &self,
+        key: &str,
+        bytes: Vec<u8>,
+        options: crate::PutOptions,
+    ) -> Result<Option<ETag>, StorageError> {
+        let mut object_store_put_options = PutOptions::default();
+        if options.if_not_exists {
+            object_store_put_options.mode = object_store::PutMode::Create;
+        }
+        if let Some(etag) = options.if_match.as_ref() {
+            object_store_put_options.mode =
+                object_store::PutMode::Update(object_store::UpdateVersion {
+                    e_tag: Some(etag.0.clone()),
+                    version: None,
+                });
+        }
         // tracing::warn!("put_bytes key: {}, path: {:?}", key, Path::from(key));
         self.object_store
-            .put_opts(&Path::from(key), bytes.into(), PutOptions::default())
+            .put_opts(&Path::from(key), bytes.into(), object_store_put_options)
             .await?;
-        Ok(())
+        Ok(None)
     }
 
-    pub async fn delete(&self, key: &str) -> Result<(), PutError> {
+    pub async fn delete(&self, key: &str) -> Result<(), StorageError> {
         tracing::info!(key = %key, "Deleting object");
 
         match self.object_store.delete(&Path::from(key)).await {
@@ -190,7 +279,7 @@ impl ObjectStore {
         }
     }
 
-    pub async fn rename(&self, src_key: &str, dst_key: &str) -> Result<(), PutError> {
+    pub async fn rename(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
         tracing::info!(src = %src_key, dst = %dst_key, "Renaming object");
 
         // Copy the object
@@ -220,7 +309,7 @@ impl ObjectStore {
         }
     }
 
-    pub async fn list_prefix(&self, prefix: &str) -> Result<Vec<String>, GetError> {
+    pub async fn list_prefix(&self, prefix: &str) -> Result<Vec<String>, StorageError> {
         let mut files = Vec::new();
         let mut stream = self.object_store.list(Some(&Path::from(prefix)));
 
@@ -261,7 +350,10 @@ mod tests {
         let object_store = get_object_store();
         let key = "test";
         let bytes = b"test data".to_vec();
-        object_store.put_bytes(key, bytes.clone()).await.unwrap();
+        object_store
+            .put_bytes(key, bytes.clone(), crate::PutOptions::default())
+            .await
+            .unwrap();
         let result = object_store.get(key).await.unwrap();
         assert_eq!(result, bytes.into());
     }
@@ -276,7 +368,10 @@ mod tests {
             .cycle()
             .take(1024 * 1024 * 50)
             .collect::<Vec<_>>();
-        object_store.put_bytes(key, bytes.clone()).await.unwrap();
+        object_store
+            .put_bytes(key, bytes.clone(), crate::PutOptions::default())
+            .await
+            .unwrap();
         let result = object_store.get(key).await.unwrap();
         assert_eq!(result, bytes.into());
     }

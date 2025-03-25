@@ -1,14 +1,18 @@
+use crate::collection_configuration::CollectionConfiguration;
 use crate::error::QueryConversionError;
 use crate::operator::GetResult;
 use crate::operator::KnnBatchResult;
 use crate::operator::KnnProjectionRecord;
 use crate::operator::ProjectionRecord;
+use crate::plan::PlanToProtoError;
 use crate::validators::{
     validate_name, validate_non_empty_collection_update_metadata, validate_non_empty_metadata,
 };
 use crate::Collection;
+use crate::CollectionConfigurationToInternalConfigurationError;
 use crate::CollectionConversionError;
 use crate::CollectionUuid;
+use crate::DistributedSpannParametersFromSegmentError;
 use crate::HnswParametersFromSegmentError;
 use crate::Metadata;
 use crate::SegmentConversionError;
@@ -20,7 +24,6 @@ use chroma_error::ChromaValidationError;
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json::Value;
 use std::time::SystemTimeError;
 use thiserror::Error;
 use tonic::Status;
@@ -93,6 +96,7 @@ impl ChromaError for GetCollectionWithSegmentsError {
     }
 }
 
+#[derive(Serialize, ToSchema)]
 pub struct ResetResponse {}
 
 #[derive(Debug, Error)]
@@ -187,7 +191,7 @@ impl ChromaError for CreateTenantError {
 }
 
 #[non_exhaustive]
-#[derive(Validate)]
+#[derive(Validate, Serialize, ToSchema)]
 pub struct GetTenantRequest {
     pub name: String,
 }
@@ -204,6 +208,15 @@ impl GetTenantRequest {
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct GetTenantResponse {
     pub name: String,
+}
+
+#[cfg(feature = "pyo3")]
+#[pyo3::pymethods]
+impl GetTenantResponse {
+    #[getter]
+    pub fn name(&self) -> &String {
+        &self.name
+    }
 }
 
 #[derive(Debug, Error)]
@@ -224,7 +237,7 @@ impl ChromaError for GetTenantError {
 }
 
 #[non_exhaustive]
-#[derive(Validate)]
+#[derive(Validate, Serialize, ToSchema)]
 pub struct CreateDatabaseRequest {
     pub database_id: Uuid,
     pub tenant_id: String,
@@ -248,7 +261,7 @@ impl CreateDatabaseRequest {
     }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(ToSchema, Serialize)]
 pub struct CreateDatabaseResponse {}
 
 #[derive(Error, Debug)]
@@ -268,7 +281,7 @@ impl ChromaError for CreateDatabaseError {
     }
 }
 
-#[derive(Serialize, Debug, ToSchema)]
+#[derive(Serialize, Deserialize, Debug, ToSchema)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct Database {
     pub id: Uuid,
@@ -299,7 +312,7 @@ impl Database {
 }
 
 #[non_exhaustive]
-#[derive(Validate)]
+#[derive(Validate, Serialize, ToSchema)]
 pub struct ListDatabasesRequest {
     pub tenant_id: String,
     pub limit: Option<u32>,
@@ -342,7 +355,7 @@ impl ChromaError for ListDatabasesError {
 }
 
 #[non_exhaustive]
-#[derive(Validate)]
+#[derive(Validate, ToSchema, Serialize)]
 pub struct GetDatabaseRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -385,7 +398,7 @@ impl ChromaError for GetDatabaseError {
 }
 
 #[non_exhaustive]
-#[derive(Validate)]
+#[derive(Validate, Serialize, ToSchema)]
 pub struct DeleteDatabaseRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -429,7 +442,7 @@ impl ChromaError for DeleteDatabaseError {
 }
 
 #[non_exhaustive]
-#[derive(Validate, Debug)]
+#[derive(Validate, Debug, Serialize, ToSchema)]
 pub struct ListCollectionsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -458,7 +471,7 @@ impl ListCollectionsRequest {
 pub type ListCollectionsResponse = Vec<Collection>;
 
 #[non_exhaustive]
-#[derive(Validate)]
+#[derive(Validate, Serialize, ToSchema)]
 pub struct CountCollectionsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -481,7 +494,7 @@ impl CountCollectionsRequest {
 pub type CountCollectionsResponse = u32;
 
 #[non_exhaustive]
-#[derive(Validate)]
+#[derive(Validate, Serialize, ToSchema)]
 pub struct GetCollectionRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -524,7 +537,7 @@ impl ChromaError for GetCollectionError {
 }
 
 #[non_exhaustive]
-#[derive(Clone, Validate)]
+#[derive(Clone, Validate, Serialize, ToSchema)]
 pub struct CreateCollectionRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -532,7 +545,7 @@ pub struct CreateCollectionRequest {
     pub name: String,
     #[validate(custom(function = "validate_non_empty_metadata"))]
     pub metadata: Option<Metadata>,
-    pub configuration_json: Option<Value>,
+    pub configuration: Option<CollectionConfiguration>,
     pub get_or_create: bool,
 }
 
@@ -542,7 +555,7 @@ impl CreateCollectionRequest {
         database_name: String,
         name: String,
         metadata: Option<Metadata>,
-        configuration_json: Option<Value>,
+        configuration: Option<CollectionConfiguration>,
         get_or_create: bool,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
@@ -550,7 +563,7 @@ impl CreateCollectionRequest {
             database_name,
             name,
             metadata,
-            configuration_json,
+            configuration,
             get_or_create,
         };
         request.validate().map_err(ChromaValidationError::from)?;
@@ -564,6 +577,10 @@ pub type CreateCollectionResponse = Collection;
 pub enum CreateCollectionError {
     #[error("Invalid HNSW parameters: {0}")]
     InvalidHnswParameters(#[from] HnswParametersFromSegmentError),
+    #[error("Could not parse config: {0}")]
+    InvalidConfig(#[from] CollectionConfigurationToInternalConfigurationError),
+    #[error("Invalid Spann parameters: {0}")]
+    InvalidSpannParameters(#[from] DistributedSpannParametersFromSegmentError),
     #[error("Collection [{0}] already exists")]
     AlreadyExists(String),
     #[error("Database [{0}] does not exist")]
@@ -580,6 +597,8 @@ impl ChromaError for CreateCollectionError {
     fn code(&self) -> ErrorCodes {
         match self {
             CreateCollectionError::InvalidHnswParameters(_) => ErrorCodes::InvalidArgument,
+            CreateCollectionError::InvalidConfig(_) => ErrorCodes::InvalidArgument,
+            CreateCollectionError::InvalidSpannParameters(_) => ErrorCodes::InvalidArgument,
             CreateCollectionError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
             CreateCollectionError::DatabaseNotFound(_) => ErrorCodes::InvalidArgument,
             CreateCollectionError::Get(err) => err.code(),
@@ -623,14 +642,14 @@ impl ChromaError for GetCollectionsError {
     }
 }
 
-#[derive(Clone, Deserialize, Serialize, Debug)]
+#[derive(Clone, Deserialize, Serialize, Debug, ToSchema)]
 pub enum CollectionMetadataUpdate {
     ResetMetadata,
     UpdateMetadata(UpdateMetadata),
 }
 
 #[non_exhaustive]
-#[derive(Clone, Validate, Debug)]
+#[derive(Clone, Validate, Debug, Serialize, ToSchema)]
 pub struct UpdateCollectionRequest {
     pub collection_id: CollectionUuid,
     #[validate(custom(function = "validate_name"))]
@@ -664,8 +683,12 @@ pub enum UpdateCollectionError {
     NotFound(String),
     #[error("Metadata reset unsupported")]
     MetadataResetUnsupported,
+    #[error("Could not serialize configuration")]
+    Configuration(#[from] serde_json::Error),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
+    #[error("Could not parse config: {0}")]
+    InvalidConfig(#[from] CollectionConfigurationToInternalConfigurationError),
 }
 
 impl ChromaError for UpdateCollectionError {
@@ -673,13 +696,15 @@ impl ChromaError for UpdateCollectionError {
         match self {
             UpdateCollectionError::NotFound(_) => ErrorCodes::NotFound,
             UpdateCollectionError::MetadataResetUnsupported => ErrorCodes::InvalidArgument,
+            UpdateCollectionError::Configuration(_) => ErrorCodes::Internal,
             UpdateCollectionError::Internal(err) => err.code(),
+            UpdateCollectionError::InvalidConfig(_) => ErrorCodes::InvalidArgument,
         }
     }
 }
 
 #[non_exhaustive]
-#[derive(Clone, Validate)]
+#[derive(Clone, Validate, Serialize, ToSchema)]
 pub struct DeleteCollectionRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -702,7 +727,7 @@ impl DeleteCollectionRequest {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct DeleteCollectionResponse {}
 
 #[derive(Error, Debug)]
@@ -754,7 +779,7 @@ pub const CHROMA_URI_KEY: &str = "chroma:uri";
 ////////////////////////// AddCollectionRecords //////////////////////////
 
 #[non_exhaustive]
-#[derive(Debug, Validate)]
+#[derive(Debug, Validate, Serialize, ToSchema)]
 pub struct AddCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -816,7 +841,7 @@ impl ChromaError for AddCollectionRecordsError {
 ////////////////////////// UpdateCollectionRecords //////////////////////////
 
 #[non_exhaustive]
-#[derive(Validate)]
+#[derive(Validate, Serialize, ToSchema)]
 pub struct UpdateCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -875,7 +900,7 @@ impl ChromaError for UpdateCollectionRecordsError {
 ////////////////////////// UpsertCollectionRecords //////////////////////////
 
 #[non_exhaustive]
-#[derive(Validate)]
+#[derive(Validate, Serialize, ToSchema)]
 pub struct UpsertCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -934,7 +959,7 @@ impl ChromaError for UpsertCollectionRecordsError {
 ////////////////////////// DeleteCollectionRecords //////////////////////////
 
 #[non_exhaustive]
-#[derive(Clone, Validate, ToSchema)]
+#[derive(Clone, Validate, Serialize, ToSchema)]
 pub struct DeleteCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -1098,7 +1123,7 @@ pub type CountResponse = u32;
 ////////////////////////// Get //////////////////////////
 
 #[non_exhaustive]
-#[derive(Clone, Validate)]
+#[derive(Clone, Validate, Serialize, ToSchema)]
 pub struct GetRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -1179,7 +1204,7 @@ impl GetResponse {
 }
 
 impl From<(GetResult, IncludeList)> for GetResponse {
-    fn from((result_vec, IncludeList(include_vec)): (GetResult, IncludeList)) -> Self {
+    fn from((result, IncludeList(include_vec)): (GetResult, IncludeList)) -> Self {
         let mut res = Self {
             ids: Vec::new(),
             embeddings: include_vec
@@ -1199,7 +1224,7 @@ impl From<(GetResult, IncludeList)> for GetResponse {
             document,
             embedding,
             mut metadata,
-        } in result_vec.records
+        } in result.result.records
         {
             res.ids.push(id);
             if let (Some(emb), Some(embeddings)) = (embedding, res.embeddings.as_mut()) {
@@ -1237,7 +1262,7 @@ impl From<(GetResult, IncludeList)> for GetResponse {
 ////////////////////////// Query //////////////////////////
 
 #[non_exhaustive]
-#[derive(Clone, Validate)]
+#[derive(Clone, Validate, Serialize, ToSchema)]
 pub struct QueryRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -1276,16 +1301,16 @@ impl QueryRequest {
     }
 }
 
-#[derive(Clone, Deserialize, Serialize, ToSchema)]
+#[derive(Clone, Deserialize, Serialize, ToSchema, Debug)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct QueryResponse {
-    ids: Vec<Vec<String>>,
-    embeddings: Option<Vec<Vec<Option<Vec<f32>>>>>,
-    documents: Option<Vec<Vec<Option<String>>>>,
-    uris: Option<Vec<Vec<Option<String>>>>,
-    metadatas: Option<Vec<Vec<Option<Metadata>>>>,
-    distances: Option<Vec<Vec<Option<f32>>>>,
-    include: Vec<Include>,
+    pub ids: Vec<Vec<String>>,
+    pub embeddings: Option<Vec<Vec<Option<Vec<f32>>>>>,
+    pub documents: Option<Vec<Vec<Option<String>>>>,
+    pub uris: Option<Vec<Vec<Option<String>>>>,
+    pub metadatas: Option<Vec<Vec<Option<Metadata>>>>,
+    pub distances: Option<Vec<Vec<Option<f32>>>>,
+    pub include: Vec<Include>,
 }
 
 #[cfg(feature = "pyo3")]
@@ -1323,7 +1348,7 @@ impl QueryResponse {
 }
 
 impl From<(KnnBatchResult, IncludeList)> for QueryResponse {
-    fn from((result_vec, IncludeList(include_vec)): (KnnBatchResult, IncludeList)) -> Self {
+    fn from((result, IncludeList(include_vec)): (KnnBatchResult, IncludeList)) -> Self {
         let mut res = Self {
             ids: Vec::new(),
             embeddings: include_vec
@@ -1341,7 +1366,7 @@ impl From<(KnnBatchResult, IncludeList)> for QueryResponse {
                 .then_some(Vec::new()),
             include: include_vec,
         };
-        for query_result in result_vec {
+        for query_result in result.results {
             let mut ids = Vec::new();
             let mut embeddings = Vec::new();
             let mut documents = Vec::new();
@@ -1422,7 +1447,7 @@ impl ChromaError for QueryError {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct HealthCheckResponse {
     pub is_executor_ready: bool,
 }
@@ -1443,12 +1468,16 @@ pub enum ExecutorError {
     AssignmentError(#[from] AssignmentError),
     #[error("Error converting: {0}")]
     Conversion(#[from] QueryConversionError),
+    #[error("Error converting plan to proto: {0}")]
+    PlanToProto(#[from] PlanToProtoError),
     #[error("Memberlist is empty")]
     EmptyMemberlist,
     #[error(transparent)]
     Grpc(#[from] Status),
     #[error("Inconsistent data")]
     InconsistentData,
+    #[error("Collection is missing HNSW configuration")]
+    CollectionMissingHnswConfiguration,
     #[error("Internal error: {0}")]
     Internal(Box<dyn ChromaError>),
     #[error("No client found for node: {0}")]
@@ -1462,9 +1491,11 @@ impl ChromaError for ExecutorError {
         match self {
             ExecutorError::AssignmentError(_) => ErrorCodes::Internal,
             ExecutorError::Conversion(_) => ErrorCodes::InvalidArgument,
+            ExecutorError::PlanToProto(_) => ErrorCodes::Internal,
             ExecutorError::EmptyMemberlist => ErrorCodes::Internal,
             ExecutorError::Grpc(e) => e.code().into(),
             ExecutorError::InconsistentData => ErrorCodes::Internal,
+            ExecutorError::CollectionMissingHnswConfiguration => ErrorCodes::Internal,
             ExecutorError::Internal(e) => e.code(),
             ExecutorError::NoClientFound(_) => ErrorCodes::Internal,
             ExecutorError::BackfillError => ErrorCodes::Internal,

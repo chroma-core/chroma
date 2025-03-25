@@ -7,7 +7,12 @@ import httpx
 import urllib.parse
 from overrides import override
 
-from chromadb.api.configuration import CollectionConfigurationInternal
+from chromadb.api.collection_configuration import (
+    CreateCollectionConfiguration,
+    create_collection_configuration_to_json,
+    create_collection_configuration_from_legacy_metadata_dict,
+)
+from chromadb import __version__
 from chromadb.api.base_http_client import BaseHTTPClient
 from chromadb.types import Database, Tenant, Collection as CollectionModel
 from chromadb.api import ServerAPI
@@ -64,6 +69,11 @@ class FastAPI(BaseHTTPClient, ServerAPI):
 
         self._header = system.settings.chroma_server_headers or {}
         self._header["Content-Type"] = "application/json"
+        self._header["User-Agent"] = (
+            "Chroma Python Client v"
+            + __version__
+            + " (https://github.com/chroma-core/chroma)"
+        )
 
         if self._settings.chroma_server_ssl_verify is not None:
             self._session = httpx.Client(verify=self._settings.chroma_server_ssl_verify)
@@ -229,7 +239,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     def create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfigurationInternal] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
@@ -242,12 +252,28 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             json={
                 "name": name,
                 "metadata": metadata,
-                "configuration": configuration.to_json() if configuration else None,
+                "configuration": create_collection_configuration_to_json(configuration)
+                if configuration
+                else None,
                 "get_or_create": get_or_create,
             },
         )
-
         model = CollectionModel.from_json(resp_json)
+
+        # TODO: Remove this once server response contains configuration
+        if configuration is None or configuration.get("hnsw") is None:
+            if model.metadata is not None:
+                model.configuration_json = create_collection_configuration_to_json(
+                    create_collection_configuration_from_legacy_metadata_dict(
+                        model.metadata
+                    )
+                )
+        else:
+            # At this point we know configuration is not None and has hnsw
+            assert configuration is not None  # Help type checker
+            model.configuration_json = create_collection_configuration_to_json(
+                configuration
+            )
         return model
 
     @trace_method("FastAPI.get_collection", OpenTelemetryGranularity.OPERATION)
@@ -274,7 +300,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     def get_or_create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfigurationInternal] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -302,7 +328,10 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         self._make_request(
             "put",
             f"/tenants/{tenant}/databases/{database}/collections/{id}",
-            json={"new_metadata": new_metadata, "new_name": new_name},
+            json={
+                "new_metadata": new_metadata,
+                "new_name": new_name,
+            },
         )
 
     @trace_method("FastAPI.delete_collection", OpenTelemetryGranularity.OPERATION)

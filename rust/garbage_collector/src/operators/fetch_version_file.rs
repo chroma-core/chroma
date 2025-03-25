@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_storage::{GetError, Storage};
+use chroma_storage::{Storage, StorageError};
 use chroma_system::{Operator, OperatorType};
 use thiserror::Error;
 
@@ -53,7 +53,7 @@ impl FetchVersionFileOutput {
 #[derive(Error, Debug)]
 pub enum FetchVersionFileError {
     #[error("Error fetching version file: {0}")]
-    StorageError(#[from] GetError),
+    StorageError(#[from] StorageError),
     #[error("Error parsing version file")]
     ParseError,
     #[error("Invalid storage configuration: {0}")]
@@ -119,6 +119,7 @@ mod tests {
     use chroma_storage::config::{
         ObjectStoreBucketConfig, ObjectStoreConfig, ObjectStoreType, StorageConfig,
     };
+    use chroma_storage::PutOptions;
     use tracing_subscriber;
 
     async fn setup_test_storage() -> Storage {
@@ -156,7 +157,7 @@ mod tests {
 
         // Add more detailed error handling for the put operation
         match storage
-            .put_bytes(test_file_path, test_content.clone())
+            .put_bytes(test_file_path, test_content.clone(), PutOptions::default())
             .await
         {
             Ok(_) => tracing::info!("Successfully wrote test file"),

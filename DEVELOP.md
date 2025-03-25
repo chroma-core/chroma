@@ -17,6 +17,9 @@ pip install -r requirements_dev.txt
 pre-commit install # install the precommit hooks
 ```
 
+Install protobuf:
+for MacOS `brew install protobuf`
+
 You can also install `chromadb` the `pypi` package locally and in editable mode with `pip install -e .`.
 
 ## Running Chroma
@@ -54,6 +57,7 @@ We use tilt for providing local dev setup. Tilt is an open source project
 - Docker
 - Local Kubernetes cluster (Recommended: [OrbStack](https://orbstack.dev/) for mac, [Kind](https://kind.sigs.k8s.io/) for linux)
 - [Tilt](https://docs.tilt.dev/)
+- [Helm](https://helm.sh)
 
 For starting the distributed Chroma in the workspace, use `tilt up`. It will create all the required resources and build the necessary Docker image in the current kubectl context.
 Once done, it will expose Chroma on port 8000. You can also visit the Tilt dashboard UI at http://localhost:10350/. To clean and remove all the resources created by Tilt, use `tilt down`.
@@ -65,6 +69,8 @@ Unit tests are in the `/chromadb/test` directory.
 To run unit tests using your current environment, run `pytest`.
 
 ## Manual Build
+
+To manually build the rust codebase and bindings for type safety, run `maturin dev`.
 
 To manually build a distribution, run `python -m build`.
 

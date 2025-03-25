@@ -135,9 +135,10 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
             versions: marked_versions,
         };
 
-        println!(
-            "versions to delete: {:?}, oldest version to keep: {}",
-            versions_to_delete, oldest_version_to_keep
+        tracing::debug!(
+            "Computed versions to delete: {:?}, oldest version to keep: {}",
+            versions_to_delete,
+            oldest_version_to_keep
         );
         Ok(ComputeVersionsToDeleteOutput {
             version_file,

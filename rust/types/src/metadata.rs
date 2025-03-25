@@ -121,15 +121,7 @@ MetadataValue
 ===========================================
 */
 
-#[derive(
-    Clone,
-    Debug,
-    Deserialize,
-    PartialEq,
-    PartialOrd,
-    Serialize,
-    ToSchema,
-)]
+#[derive(Clone, Debug, Deserialize, PartialEq, PartialOrd, Serialize, ToSchema)]
 #[cfg_attr(feature = "pyo3", derive(FromPyObject, IntoPyObject))]
 #[serde(untagged)]
 pub enum MetadataValue {
@@ -354,6 +346,21 @@ Metadata
 pub type Metadata = HashMap<String, MetadataValue>;
 pub type DeletedMetadata = HashSet<String>;
 
+pub fn logical_size_of_metadata(metadata: &Metadata) -> usize {
+    metadata
+        .iter()
+        .map(|(k, v)| {
+            k.len()
+                + match v {
+                    MetadataValue::Bool(b) => size_of_val(b),
+                    MetadataValue::Int(i) => size_of_val(i),
+                    MetadataValue::Float(f) => size_of_val(f),
+                    MetadataValue::Str(s) => s.len(),
+                }
+        })
+        .sum()
+}
+
 pub fn get_metadata_value_as<'a, T>(
     metadata: &'a Metadata,
     key: &str,
@@ -479,18 +486,38 @@ impl Where {
         })
     }
 
-    pub fn complexity(&self) -> u32 {
-        // TODO: Properly estimate filter complexity
+    pub fn fts_query_length(&self) -> u64 {
         match self {
             Where::Composite(composite_expression) => composite_expression
                 .children
                 .iter()
-                .map(Where::complexity)
+                .map(Where::fts_query_length)
                 .sum(),
+            // The query length is defined to be the number of trigram tokens
             Where::Document(document_expression) => {
-                document_expression.text.len().max(5) as u32 - 3
+                document_expression.text.len().max(3) as u64 - 2
             }
-            Where::Metadata(_metadata_expression) => 1,
+            Where::Metadata(_) => 0,
+        }
+    }
+
+    pub fn metadata_predicate_count(&self) -> u64 {
+        match self {
+            Where::Composite(composite_expression) => composite_expression
+                .children
+                .iter()
+                .map(Where::metadata_predicate_count)
+                .sum(),
+            Where::Document(_) => 0,
+            Where::Metadata(metadata_expression) => match &metadata_expression.comparison {
+                MetadataComparison::Primitive(_, _) => 1,
+                MetadataComparison::Set(_, metadata_set_value) => match metadata_set_value {
+                    MetadataSetValue::Bool(items) => items.len() as u64,
+                    MetadataSetValue::Int(items) => items.len() as u64,
+                    MetadataSetValue::Float(items) => items.len() as u64,
+                    MetadataSetValue::Str(items) => items.len() as u64,
+                },
+            },
         }
     }
 }

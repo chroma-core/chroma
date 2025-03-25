@@ -5,8 +5,8 @@ namespace: 'chroma'
 
 frontendService:
   image:
-    repository: 'local'
-    tag: 'frontend-service'
+    repository: 'frontend-service'
+    tag: 'latest'
 
   # Sometimes users (and us) want to pass values directly as flags. Sometimes, these are
   # populated from secrets or configMaps. So we let consumers fill these directly.
@@ -29,8 +29,6 @@ frontendService:
   logServiceHost: 'value: "logservice.chroma"'
   logServicePort: 'value: "50051"'
   otherEnvConfig: |
-    - name: CHROMA_ALLOW_RESET
-      value: "true"
     - name: CHROMA_OTEL_COLLECTION_ENDPOINT
       value: "http://jaeger:4317"
     - name: CHROMA_OTEL_GRANULARITY
@@ -40,8 +38,8 @@ frontendService:
 
 rustFrontendService:
   image:
-    repository: 'local'
-    tag: 'rust-frontend-service'
+    repository: 'rust-frontend-service'
+    tag: 'latest'
   replicaCount: 1
   resources:
     limits:
@@ -53,8 +51,8 @@ rustFrontendService:
 
 sysdb:
   image:
-    repository: 'local'
-    tag: 'sysdb'
+    repository: 'sysdb'
+    tag: 'latest'
   replicaCount: 1
   env:
   - name: OPTL_TRACING_ENDPOINT
@@ -71,8 +69,8 @@ sysdb:
 
 logService:
   image:
-    repository: 'local'
-    tag: 'logservice'
+    repository: 'logservice'
+    tag: 'latest'
   env:
   - name: OPTL_TRACING_ENDPOINT
     value: 'value: "otel-collector:4317"'
@@ -81,10 +79,16 @@ logService:
   flags:
   replicaCount: 1
 
+
+rustLogService:
+  image:
+    repository: 'rust-log-service'
+    tag: 'latest'
+
 queryService:
   image:
-    repository: 'local'
-    tag: 'query-service'
+    repository: 'query-service'
+    tag: 'latest'
   env:
   cache:
     hostPath: '/local/cache/chroma'
@@ -93,8 +97,8 @@ queryService:
 
 compactionService:
   image:
-    repository: 'local'
-    tag: 'compaction-service'
+    repository: 'compaction-service'
+    tag: 'latest'
   env:
   cache:
     hostPath: '/local/cache/chroma'
@@ -103,8 +107,8 @@ compactionService:
 
 sysdbMigration:
   image:
-    repository: 'local'
-    tag: 'sysdb-migration'
+    repository: 'sysdb-migration'
+    tag: 'latest'
   username: chroma
   password: chroma
   netloc: postgres
@@ -114,8 +118,8 @@ sysdbMigration:
 
 logServiceMigration:
   image:
-    repository: 'local'
-    tag: 'logservice-migration'
+    repository: 'logservice-migration'
+    tag: 'latest'
   env:
   - name: CHROMA_DB_LOG_URL
     value: 'value: "postgresql://chroma:chroma@postgres.chroma.svc.cluster.local:5432/log?sslmode=disable"'

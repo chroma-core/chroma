@@ -4,7 +4,7 @@ use chroma_config::registry::Injectable;
 use core::panic;
 use futures::Stream;
 use parking_lot::Mutex;
-use std::{fmt::Debug, sync::Arc};
+use std::{fmt::Debug, sync::Arc, time::Duration};
 use tokio::task::JoinError;
 
 use super::{system::System, ReceiverForMessage};
@@ -44,7 +44,11 @@ pub trait Component: Send + Sized + Debug + 'static {
     fn runtime() -> ComponentRuntime {
         ComponentRuntime::Inherit
     }
-    async fn start(&mut self, _ctx: &ComponentContext<Self>) -> () {}
+    async fn on_start(&mut self, _ctx: &ComponentContext<Self>) -> () {}
+    async fn on_stop(&mut self) {}
+    fn on_stop_timeout(&self) -> Duration {
+        Duration::from_secs(6)
+    }
     fn on_handler_panic(&mut self, panic: Box<dyn core::any::Any + Send>) {
         // Default behavior is to log and then resume the panic
         tracing::error!("Handler panicked: {:?}", panic);
@@ -349,7 +353,7 @@ mod tests {
             self.queue_size
         }
 
-        async fn start(&mut self, ctx: &ComponentContext<TestComponent>) -> () {
+        async fn on_start(&mut self, ctx: &ComponentContext<TestComponent>) -> () {
             let test_stream = stream::iter(vec![1, 2, 3]);
             self.register_stream(test_stream, ctx);
         }

@@ -7,11 +7,6 @@ on:
     branches:
       - main
 
-env:
-  GHCR_IMAGE_NAME: "ghcr.io/chroma-core/chroma"
-  DOCKERHUB_IMAGE_NAME: "chromadb/chroma"
-  PLATFORMS: linux/amd64,linux/arm64 #linux/riscv64, linux/arm/v7
-
 jobs:
   check-tag:
     runs-on: ubuntu-latest
@@ -49,6 +44,7 @@ jobs:
 
   python-tests:
     uses: ./.github/workflows/_python-tests.yml
+    secrets: inherit
     with:
       python_versions: '["3.9", "3.10", "3.11", "3.12"]'
       property_testing_preset: 'normal'
@@ -60,6 +56,7 @@ jobs:
   rust-tests:
     name: Rust tests
     uses: ./.github/workflows/_rust-tests.yml
+    secrets: inherit
 
   go-tests:
     name: Go tests
@@ -67,11 +64,6 @@ jobs:
 
   release-docker:
     name: Publish to DockerHub and GHCR
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-      packages: write
     needs:
       - check-tag
       - get-version
@@ -79,38 +71,11 @@ jobs:
       - javascript-client-tests
       - rust-tests
       - go-tests
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Set up Docker
-        uses: ./.github/actions/docker
-        with:
-          ghcr-username: ${{ github.actor }}
-          ghcr-password: ${{ secrets.GITHUB_TOKEN }}
-          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
-          dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Set up Depot CLI
-        uses: depot/setup-action@v1
-      - name: Build and push prerelease Docker image
-        if: ${{ needs.check-tag.outputs.tag_matches != 'true' }}
-        uses: depot/build-push-action@v1
-        with:
-          context: .
-          platforms: ${{ env.PLATFORMS }}
-          push: true
-          tags: "${{ env.GHCR_IMAGE_NAME }}:${{ needs.get-version.outputs.version}},${{ env.DOCKERHUB_IMAGE_NAME }}:${{ needs.get-version.outputs.version }}"
-          project: ${{ vars.DEPOT_PROJECT_ID }}
-      - name: Build and push release Docker image
-        if: ${{ needs.check-tag.outputs.tag_matches == 'true' }}
-        uses: depot/build-push-action@v1
-        with:
-          context: .
-          platforms: ${{ env.PLATFORMS }}
-          push: true
-          tags: "${{ env.GHCR_IMAGE_NAME }}:${{ needs.get-version.outputs.version }},${{ env.DOCKERHUB_IMAGE_NAME }}:${{ needs.get-version.outputs.version }},${{ env.GHCR_IMAGE_NAME }}:latest,${{ env.DOCKERHUB_IMAGE_NAME }}:latest"
-          project: ${{ vars.DEPOT_PROJECT_ID }}
+    uses: ./.github/workflows/_build_release_container.yml
+    secrets: inherit
+    with:
+      tag: ${{ needs.get-version.outputs.version }}
+      tag_as_latest: ${{ needs.check-tag.outputs.tag_matches == 'true' }}
 
   release-pypi:
     name: Publish to PyPI
@@ -198,7 +163,7 @@ jobs:
             PIP Package: `chroma-${{needs.get-version.outputs.version}}.tar.gz`
             Github Container Registry Image: `${{ env.GHCR_IMAGE_NAME }}:${{ needs.get-version.outputs.version }}`
             DockerHub Image: `${{ env.DOCKERHUB_IMAGE_NAME }}:${{ needs.get-version.outputs.version }}`
-          artifacts: "dist/chromadb-${{needs.get-version.outputs.version}}.tar.gz"
+          artifacts: "dist/*"
           prerelease: false
           makeLatest: true
           generateReleaseNotes: true
@@ -222,7 +187,7 @@ jobs:
             PIP Package: `chroma-${{needs.get-version.outputs.version}}.tar.gz`
             Github Container Registry Image: `${{ env.GHCR_IMAGE_NAME }}:${{ needs.get-version.outputs.version }}`
             DockerHub Image: `${{ env.DOCKERHUB_IMAGE_NAME }}:${{ needs.get-version.outputs.version }}`
-          artifacts: "dist/chromadb-${{needs.get-version.outputs.version}}.tar.gz"
+          artifacts: "dist/*"
           allowUpdates: true
           removeArtifacts: true
           prerelease: true

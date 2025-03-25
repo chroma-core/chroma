@@ -201,7 +201,7 @@ pub async fn client_for_url(url: String) -> ChromaClient {
         ChromaClient::new(ChromaClientOptions {
             url: Some(url),
             auth: ChromaAuthMethod::None,
-            database: "hf-tiny-stories".to_string(),
+            database: "default_database".to_string(),
         })
         .await
         .unwrap()
@@ -428,7 +428,7 @@ impl WhereMixin {
                     Skew::Uniform => WORDS[uniform(0, WORDS.len() as u64)(guac) as usize],
                     Skew::Zipf { theta } => {
                         let z = ZIPF_CACHE.from_theta(WORDS.len() as u64, *theta);
-                        WORDS[z.next(guac) as usize]
+                        WORDS[z.next(guac) as usize % WORDS.len()]
                     }
                 };
                 serde_json::json!({"$contains": word.to_string()})
@@ -760,7 +760,7 @@ impl Workload {
                             batch_size: 100,
                             // Associativity is the ratio of documents in a cluster to documents
                             // written by the workload.  It is ignored for load.
-                            associativity: 0.0,
+                            associativity: 1.0,
                         },
                         &mut state.guac,
                     )

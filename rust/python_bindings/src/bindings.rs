@@ -1,5 +1,6 @@
-use crate::errors::{ChromaPyResult, WrappedPyErr, WrappedSerdeJsonError, WrappedUuidError};
+use crate::errors::{ChromaPyResult, WrappedPyErr, WrappedUuidError};
 use chroma_cache::FoyerCacheConfig;
+use chroma_cli::chroma_cli;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_frontend::{
     executor::config::{ExecutorConfig, LocalExecutorConfig},
@@ -15,15 +16,14 @@ use chroma_sqlite::config::SqliteDBConfig;
 use chroma_sysdb::{SqliteSysDbConfig, SysDbConfig};
 use chroma_system::System;
 use chroma_types::{
-    Collection, CollectionMetadataUpdate, CountCollectionsRequest, CountResponse,
-    CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest, Database,
+    Collection, CollectionConfiguration, CollectionMetadataUpdate, CountCollectionsRequest,
+    CountResponse, CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest, Database,
     DeleteCollectionRequest, DeleteDatabaseRequest, GetCollectionRequest, GetDatabaseRequest,
     GetResponse, GetTenantRequest, GetTenantResponse, HeartbeatError, IncludeList,
     ListCollectionsRequest, ListDatabasesRequest, Metadata, QueryResponse, UpdateCollectionRequest,
-    UpdateMetadata,
+    UpdateMetadata, WrappedSerdeJsonError,
 };
-use mdac::CircuitBreakerConfig;
-use pyo3::{exceptions::PyValueError, pyclass, pymethods, types::PyAnyMethods, PyObject, Python};
+use pyo3::{exceptions::PyValueError, pyclass, pyfunction, pymethods, types::PyAnyMethods, Python};
 use std::time::SystemTime;
 
 const DEFAULT_DATABASE: &str = "default_database";
@@ -49,6 +49,20 @@ impl PythonBindingsConfig {
     }
 }
 
+#[pyfunction]
+#[pyo3(signature = (py_args=None))]
+#[allow(dead_code)]
+pub fn cli(py_args: Option<Vec<String>>) -> ChromaPyResult<()> {
+    let args = py_args.unwrap_or_else(|| std::env::args().collect());
+    let args = if args.is_empty() {
+        vec!["chroma".to_string()]
+    } else {
+        args
+    };
+    chroma_cli(args);
+    Ok(())
+}
+
 //////////////////////// PyMethods Implementation ////////////////////////
 #[pymethods]
 impl Bindings {
@@ -60,7 +74,6 @@ impl Bindings {
         hnsw_cache_size: usize,
         persist_path: Option<String>,
     ) -> ChromaPyResult<Self> {
-        // TODO: runtime config
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let _guard = runtime.enter();
         let system = System::new();
@@ -103,19 +116,9 @@ impl Bindings {
             segment_manager: Some(segment_manager_config),
             sqlitedb: Some(sqlite_db_config),
             sysdb: sysdb_config,
-            // TODO: Move circuit breaker config to the server config, it has nothing
-            // to do with the frontend, only to do with the server
-            circuit_breaker: CircuitBreakerConfig::default(),
             collections_with_segments_provider: collection_cache_config,
-            // TODO: The following fields should be removed from FrontendConfig and into
-            // the server config. They have nothing to do with the frontend.
-            service_name: "chroma".to_string(),
-            otel_endpoint: "http://localhost:4317".to_string(),
             log: log_config,
             executor: executor_config,
-            scorecard_enabled: false,
-            // TODO: scorecard should be removed from the frontend config and moved to the server config
-            scorecard: vec![],
         };
 
         let frontend = runtime.block_on(async {
@@ -126,7 +129,6 @@ impl Bindings {
     }
 
     /// Returns the current eopch time in ns
-    /// TODO(hammadb): This should proxy to ServerAPI
     #[allow(dead_code)]
     fn heartbeat(&self) -> ChromaPyResult<u128> {
         let duration_since_epoch = std::time::SystemTime::now()
@@ -139,11 +141,6 @@ impl Bindings {
     fn get_max_batch_size(&self) -> u32 {
         self.frontend.clone().get_max_batch_size()
     }
-
-    // TODO(hammadb): Determine our pattern for optional arguments in python
-    // options include using Option or passing defaults from python
-    // or using pyargs annotations such as
-    // #[pyargs(limit = "None", offset = "None")]
 
     ////////////////////////////// Admin API //////////////////////////////
 
@@ -246,30 +243,24 @@ impl Bindings {
 
     #[allow(clippy::too_many_arguments)]
     #[pyo3(
-        signature = (name, configuration, metadata = None, get_or_create = false, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
+        signature = (name, configuration_json_str, metadata = None, get_or_create = false, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
     )]
     fn create_collection(
         &self,
         name: String,
-        configuration: Option<PyObject>,
+        configuration_json_str: Option<String>,
         metadata: Option<Metadata>,
         get_or_create: bool,
         tenant: String,
         database: String,
-        py: Python<'_>,
     ) -> ChromaPyResult<Collection> {
-        let configuration_json = match configuration {
-            Some(configuration) => {
-                let configuration_json_str = configuration
-                    .call_method0(py, "to_json_str")
-                    .map_err(WrappedPyErr)?
-                    .extract::<String>(py)
-                    .map_err(WrappedPyErr)?;
+        let configuration_json = match configuration_json_str {
+            Some(configuration_json_str) => {
+                let configuration_json =
+                    serde_json::from_str::<CollectionConfiguration>(&configuration_json_str)
+                        .map_err(WrappedSerdeJsonError::SerdeJsonError)?;
 
-                Some(
-                    serde_json::from_str::<serde_json::Value>(&configuration_json_str)
-                        .map_err(WrappedSerdeJsonError)?,
-                )
+                Some(configuration_json)
             }
             None => None,
         };
@@ -361,7 +352,6 @@ impl Bindings {
         tenant: String,
         database: String,
     ) -> ChromaPyResult<bool> {
-        // TODO: Create proper error type for this
         if self.get_max_batch_size() < ids.len() as u32 {
             return Err(WrappedPyErr::from(PyValueError::new_err(format!(
                 "Batch size of {} is greater than max batch size of {}",
@@ -407,7 +397,6 @@ impl Bindings {
         tenant: String,
         database: String,
     ) -> ChromaPyResult<bool> {
-        // TODO: Create proper error type for this
         if self.get_max_batch_size() < ids.len() as u32 {
             return Err(WrappedPyErr::from(PyValueError::new_err(format!(
                 "Batch size of {} is greater than max batch size of {}",
@@ -455,7 +444,6 @@ impl Bindings {
         tenant: String,
         database: String,
     ) -> ChromaPyResult<bool> {
-        // TODO: Create proper error type for this
         if self.get_max_batch_size() < ids.len() as u32 {
             return Err(WrappedPyErr::from(PyValueError::new_err(format!(
                 "Batch size of {} is greater than max batch size of {}",
@@ -500,7 +488,6 @@ impl Bindings {
         tenant: String,
         database: String,
     ) -> ChromaPyResult<()> {
-        // TODO: Rethink the error handling strategy
         let r#where = chroma_types::RawWhereFields::from_json_str(
             r#where.as_deref(),
             where_document.as_deref(),
@@ -562,8 +549,8 @@ impl Bindings {
         include: Vec<String>,
         tenant: String,
         database: String,
+        py: Python<'_>,
     ) -> ChromaPyResult<GetResponse> {
-        // TODO: Rethink the error handling strategy
         let r#where = chroma_types::RawWhereFields::from_json_str(
             r#where.as_deref(),
             where_document.as_deref(),
@@ -588,9 +575,10 @@ impl Bindings {
         )?;
 
         let mut frontend_clone = self.frontend.clone();
-        let result = self
-            .runtime
-            .block_on(async { frontend_clone.get(request).await })?;
+        let result = py.allow_threads(move || {
+            self.runtime
+                .block_on(async { frontend_clone.get(request).await })
+        })?;
         Ok(result)
     }
 
@@ -608,9 +596,8 @@ impl Bindings {
         include: Vec<String>,
         tenant: String,
         database: String,
+        py: Python<'_>,
     ) -> ChromaPyResult<QueryResponse> {
-        // let query_embeddings = py_embeddings_to_vec_f32(query_embeddings).map_err(WrappedPyErr)?;
-
         let r#where = chroma_types::RawWhereFields::from_json_str(
             r#where.as_deref(),
             where_document.as_deref(),
@@ -635,9 +622,10 @@ impl Bindings {
         )?;
 
         let mut frontend_clone = self.frontend.clone();
-        let response = self
-            .runtime
-            .block_on(async { frontend_clone.query(request).await })?;
+        let response = py.allow_threads(move || {
+            self.runtime
+                .block_on(async { frontend_clone.query(request).await })
+        })?;
         Ok(response)
     }
 

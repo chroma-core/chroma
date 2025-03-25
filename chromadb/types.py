@@ -1,26 +1,38 @@
 from abc import ABC, abstractmethod
-from typing import Any, Optional, Union, Sequence, Dict, Mapping, List, Generic
+from typing import Any, Optional, Union, Sequence, Dict, Mapping, Generic
 
 from typing_extensions import Self
 
 from overrides import override
-from typing_extensions import Literal, TypedDict, TypeVar
+from typing_extensions import TypedDict, TypeVar
 from uuid import UUID
 from enum import Enum
 from pydantic import BaseModel
 
-import numpy as np
-from numpy.typing import NDArray
-
 from chromadb.api.configuration import (
-    CollectionConfigurationInternal,
     ConfigurationInternal,
 )
 from chromadb.serde import BaseModelJSONSerializable
+from chromadb.api.collection_configuration import (
+    CollectionConfiguration,
+    collection_configuration_to_json,
+    load_collection_configuration_from_json,
+)
 
-
-Metadata = Mapping[str, Union[str, int, float, bool]]
-UpdateMetadata = Mapping[str, Union[int, float, str, bool, None]]
+from chromadb.base_types import (
+    Metadata,
+    UpdateMetadata,
+    Vector,
+    PyVector,
+    LiteralValue,
+    LogicalOperator,
+    WhereOperator,
+    OperatorExpression,
+    Where,
+    WhereDocumentOperator,
+    WhereDocument,
+    InclusionExclusionOperator,
+)
 
 # Namespaced Names are mechanically just strings, but we use this type to indicate that
 # the intent is for the value to be globally unique and semantically meaningful.
@@ -55,7 +67,6 @@ class Configurable(Generic[C], ABC):
 
 class Collection(
     BaseModel,
-    Configurable[CollectionConfigurationInternal],
     BaseModelJSONSerializable["Collection"],
 ):
     """A model of a collection used for transport, serialization, and storage"""
@@ -78,7 +89,7 @@ class Collection(
         self,
         id: UUID,
         name: str,
-        configuration: CollectionConfigurationInternal,
+        configuration: CollectionConfiguration,
         metadata: Optional[Metadata],
         dimension: Optional[int],
         tenant: str,
@@ -90,7 +101,7 @@ class Collection(
             id=id,
             name=name,
             metadata=metadata,
-            configuration_json=configuration.to_json(),
+            configuration_json=collection_configuration_to_json(configuration),
             dimension=dimension,
             tenant=tenant,
             database=database,
@@ -130,13 +141,13 @@ class Collection(
                 return False
         return True
 
-    def get_configuration(self) -> CollectionConfigurationInternal:
+    def get_configuration(self) -> CollectionConfiguration:
         """Returns the configuration of the collection"""
-        return CollectionConfigurationInternal.from_json(self.configuration_json)
+        return load_collection_configuration_from_json(self.configuration_json)
 
-    def set_configuration(self, configuration: CollectionConfigurationInternal) -> None:
+    def set_configuration(self, configuration: CollectionConfiguration) -> None:
         """Sets the configuration of the collection"""
-        self.configuration_json = configuration.to_json()
+        self.configuration_json = collection_configuration_to_json(configuration)
 
     def get_model_fields(self) -> Dict[Any, Any]:
         """Used for backward compatibility with Pydantic 1.x"""
@@ -149,15 +160,19 @@ class Collection(
     @override
     def from_json(cls, json_map: Dict[str, Any]) -> Self:
         """Deserializes a Collection object from JSON"""
-        # Copy the JSON map so we can modify it
-        params_map = json_map.copy()
-
-        # Get the CollectionConfiguration from the JSON map, and remove it from the map
-        configuration = CollectionConfigurationInternal.from_json(
-            params_map.pop("configuration_json", None)
+        return cls(
+            id=json_map["id"],
+            name=json_map["name"],
+            configuration=load_collection_configuration_from_json(
+                json_map.get("configuration_json", None)
+            ),
+            metadata=json_map.get("metadata", None),
+            dimension=json_map.get("dimension", None),
+            tenant=json_map["tenant"],
+            database=json_map["database"],
+            version=json_map.get("version", 0),
+            log_position=json_map.get("log_position", 0),
         )
-
-        return cls(configuration=configuration, **params_map)
 
 
 class Database(TypedDict):
@@ -178,9 +193,11 @@ class Segment(TypedDict):
     metadata: Optional[Metadata]
     file_paths: Mapping[str, Sequence[str]]
 
+
 class CollectionAndSegments(TypedDict):
     collection: Collection
     segments: Sequence[Segment]
+
 
 # SeqID can be one of three types of value in our current and future plans:
 # 1. A Pulsar MessageID encoded as a 192-bit integer - This is no longer used as we removed pulsar
@@ -198,10 +215,6 @@ class Operation(Enum):
     UPDATE = "UPDATE"
     UPSERT = "UPSERT"
     DELETE = "DELETE"
-
-
-PyVector = Union[Sequence[float], Sequence[int]]
-Vector = NDArray[Union[np.int32, np.float32]]  # TODO: Specify that the vector is 1D
 
 
 class VectorEmbeddingRecord(TypedDict):
@@ -266,33 +279,6 @@ class VectorQueryResult(TypedDict):
     embedding: Optional[Vector]
 
 
-# Metadata Query Grammar
-LiteralValue = Union[str, int, float, bool]
-LogicalOperator = Union[Literal["$and"], Literal["$or"]]
-WhereOperator = Union[
-    Literal["$gt"],
-    Literal["$gte"],
-    Literal["$lt"],
-    Literal["$lte"],
-    Literal["$ne"],
-    Literal["$eq"],
-]
-InclusionExclusionOperator = Union[Literal["$in"], Literal["$nin"]]
-OperatorExpression = Union[
-    Dict[Union[WhereOperator, LogicalOperator], LiteralValue],
-    Dict[InclusionExclusionOperator, List[LiteralValue]],
-]
-
-Where = Dict[
-    Union[str, LogicalOperator], Union[LiteralValue, OperatorExpression, List["Where"]]
-]
-
-WhereDocumentOperator = Union[
-    Literal["$contains"], Literal["$not_contains"], LogicalOperator
-]
-WhereDocument = Dict[WhereDocumentOperator, Union[str, List["WhereDocument"]]]
-
-
 class Unspecified:
     """A sentinel value used to indicate that a value should not be updated"""
 
@@ -307,3 +293,19 @@ class Unspecified:
 
 T = TypeVar("T")
 OptionalArgument = Union[T, Unspecified]
+
+
+__all__ = [
+    "Metadata",
+    "UpdateMetadata",
+    "Vector",
+    "PyVector",
+    "LiteralValue",
+    "LogicalOperator",
+    "WhereOperator",
+    "OperatorExpression",
+    "Where",
+    "WhereDocumentOperator",
+    "WhereDocument",
+    "InclusionExclusionOperator",
+]

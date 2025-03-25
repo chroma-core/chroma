@@ -3,7 +3,7 @@ use super::{
     WrappedMessage,
 };
 use std::sync::Arc;
-use tokio::select;
+use tokio::{select, time::timeout};
 use tracing::{trace_span, Instrument, Span};
 
 struct Inner<C>
@@ -55,16 +55,25 @@ where
         mut channel: tokio::sync::mpsc::Receiver<WrappedMessage<C>>,
     ) {
         self.handler
-            .start(&ComponentContext {
+            .on_start(&ComponentContext {
                 system: self.inner.system.clone(),
                 sender: self.inner.sender.clone(),
                 cancellation_token: self.inner.cancellation_token.clone(),
                 scheduler: self.inner.scheduler.clone(),
             })
             .await;
+
         loop {
             select! {
                 _ = self.inner.cancellation_token.cancelled() => {
+                    if let Err(err) = timeout(
+                        self.handler.on_stop_timeout(),
+                        self.handler.on_stop(),
+                    )
+                    .await
+                    {
+                        tracing::error!("Unable to gracefully shutdown {:?}: {err}", self.handler);
+                    }
                     break;
                 }
                 message = channel.recv() => {

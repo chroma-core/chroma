@@ -90,6 +90,7 @@ impl TestDistributedSegment {
             .expect("Should be able to flush record.");
 
         let vector_writer = DistributedHNSWSegmentWriter::from_segment(
+            &self.collection,
             &self.vector_segment,
             self.collection
                 .dimension
@@ -235,7 +236,10 @@ impl TestReferenceSegment {
             .record
             .get(&plan.scan.collection_and_segments.metadata_segment.id)
             .ok_or(TestReferenceSegmentError::NotFound)?;
-        Ok(coll.len() as u32)
+        Ok(CountResult {
+            count: coll.len() as u32,
+            pulled_log_bytes: 0,
+        })
     }
 
     pub fn get(&self, plan: Get) -> Result<GetResult, TestReferenceSegmentError> {
@@ -261,29 +265,32 @@ impl TestReferenceSegment {
 
         records.sort_by_key(|(oid, _)| *oid);
 
-        Ok(ProjectionOutput {
-            records: records
-                .into_iter()
-                .skip(plan.limit.skip as usize)
-                .take(plan.limit.fetch.unwrap_or(u32::MAX) as usize)
-                .map(|(_, mut rec)| {
-                    let Projection {
-                        document,
-                        embedding,
-                        metadata,
-                    } = plan.proj;
-                    if !document {
-                        rec.document = None;
-                    }
-                    if !embedding {
-                        rec.embedding = None;
-                    }
-                    if !metadata || rec.metadata.as_ref().is_some_and(|meta| meta.is_empty()) {
-                        rec.metadata = None;
-                    }
-                    rec
-                })
-                .collect(),
+        Ok(GetResult {
+            pulled_log_bytes: 0,
+            result: ProjectionOutput {
+                records: records
+                    .into_iter()
+                    .skip(plan.limit.skip as usize)
+                    .take(plan.limit.fetch.unwrap_or(u32::MAX) as usize)
+                    .map(|(_, mut rec)| {
+                        let Projection {
+                            document,
+                            embedding,
+                            metadata,
+                        } = plan.proj;
+                        if !document {
+                            rec.document = None;
+                        }
+                        if !embedding {
+                            rec.embedding = None;
+                        }
+                        if !metadata || rec.metadata.as_ref().is_some_and(|meta| meta.is_empty()) {
+                            rec.metadata = None;
+                        }
+                        rec
+                    })
+                    .collect(),
+            },
         })
     }
 }

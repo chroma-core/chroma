@@ -163,7 +163,7 @@ impl Dispatcher {
             Some((task, span)) => match request.reply_to.send(task, Some(span)).await {
                 Ok(_) => {}
                 Err(e) => {
-                    println!("Error sending task to worker: {:?}", e);
+                    tracing::error!("Error sending task to worker: {:?}", e);
                 }
             },
             None => {
@@ -213,7 +213,7 @@ impl Component for Dispatcher {
         self.config.dispatcher_queue_size
     }
 
-    async fn start(&mut self, ctx: &ComponentContext<Self>) {
+    async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
         self.spawn_workers(&mut ctx.system.clone(), ctx.receiver());
     }
 }
@@ -344,7 +344,7 @@ mod tests {
             1000
         }
 
-        async fn start(&mut self, ctx: &ComponentContext<Self>) {
+        async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
             // dispatch a new task every DISPATCH_FREQUENCY_MS for DISPATCH_COUNT times
             let duration = std::time::Duration::from_millis(DISPATCH_FREQUENCY_MS);
             ctx.scheduler
@@ -407,7 +407,7 @@ mod tests {
             1000
         }
 
-        async fn start(&mut self, ctx: &ComponentContext<Self>) {
+        async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
             // dispatch a new task every DISPATCH_FREQUENCY_MS for DISPATCH_COUNT times
             let duration = std::time::Duration::from_millis(DISPATCH_FREQUENCY_MS);
             ctx.scheduler

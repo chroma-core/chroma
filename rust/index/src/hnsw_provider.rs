@@ -16,10 +16,11 @@ use chroma_types::CollectionUuid;
 use parking_lot::RwLock;
 use std::fmt::Debug;
 use std::path::Path;
+use std::time::Instant;
 use std::{path::PathBuf, sync::Arc};
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
-use tracing::{instrument, Span};
+use tracing::{instrument, Instrument, Span};
 use uuid::Uuid;
 
 // These are the files hnswlib writes to disk. This is strong coupling, but we need to know
@@ -118,17 +119,29 @@ impl HnswIndexProvider {
     ) -> Self {
         let cache: Arc<dyn Cache<CollectionUuid, HnswIndexRef>> = cache.into();
         let temporary_storage_path = storage_path.to_path_buf();
-        let purger = Some(Arc::new(tokio::task::spawn(async move {
-            while let Some((_, index_ref)) = evicted.recv().await {
+        let task = async move {
+            while let Some((collection_id, index_ref)) = evicted.recv().await {
                 let index_id = {
                     let index = index_ref.inner.read();
                     index.id
                 };
                 let weight = index_ref.weight();
-                tracing::info!("Purging index: {} with weight: {}", index_id, weight);
+                tracing::info!(
+                    "[Cache Eviction] Purging index: {} for collection {} with weight: {} at ts {}",
+                    index_id,
+                    collection_id,
+                    weight,
+                    Instant::now().elapsed().as_nanos()
+                );
                 let _ = Self::purge_one_id(&temporary_storage_path, index_id).await;
             }
-        })));
+        };
+        let purger = Some(Arc::new(tokio::task::spawn(task.instrument(
+            tracing::info_span!(
+                "HnswIndex Cache Eviction Purger",
+                tag = "hnsw_cache_eviction_purger"
+            ),
+        ))));
         Self {
             cache,
             storage,
@@ -156,6 +169,7 @@ impl HnswIndexProvider {
         }
     }
 
+    // TODO(rohitcp): Use HNSW_INDEX_S3_PREFIX.
     fn format_key(&self, id: &IndexUuid, file: &str) -> String {
         format!("hnsw/{}/{}", id, file)
     }
@@ -277,7 +291,7 @@ impl HnswIndexProvider {
                         }
                         Err(e) => {
                             tracing::error!("Failed to load hnsw index file from storage: {}", e);
-                            return Err(Box::new(HnswIndexProviderFileError::StorageGetError(e)));
+                            return Err(Box::new(HnswIndexProviderFileError::StorageError(e)));
                         }
                     };
                     tracing::info!(
@@ -457,9 +471,20 @@ impl HnswIndexProvider {
                 .flatten()
                 .map(|r| r.inner.read().id)
             else {
+                tracing::info!(
+                    "[End of compaction purging] No index found for collection: {} at ts {}",
+                    collection_uuid,
+                    Instant::now().elapsed().as_nanos()
+                );
                 continue;
             };
-            match self.remove_temporary_files(&index_id).await {
+            tracing::info!(
+                "[End of compaction purging] Purging index: {} for collection {} at ts {}",
+                index_id,
+                collection_uuid,
+                Instant::now().elapsed().as_nanos()
+            );
+            match Self::purge_one_id(&self.temporary_storage_path, index_id).await {
                 Ok(_) => {}
                 Err(e) => {
                     tracing::error!("Failed to remove temporary files for {index_id}: {e}");
@@ -470,14 +495,34 @@ impl HnswIndexProvider {
 
     pub async fn purge_one_id(path: &Path, id: IndexUuid) -> tokio::io::Result<()> {
         let index_storage_path = path.join(id.to_string());
-        tracing::info!("Purging index: {}", index_storage_path.to_str().unwrap());
-        tokio::fs::remove_dir_all(index_storage_path).await?;
-        Ok(())
-    }
-
-    async fn remove_temporary_files(&self, id: &IndexUuid) -> tokio::io::Result<()> {
-        let index_storage_path = self.temporary_storage_path.join(id.to_string());
-        tokio::fs::remove_dir_all(index_storage_path).await
+        tracing::info!(
+            "Purging HNSW index ID: {}, path: {}, ts: {}",
+            id,
+            index_storage_path.to_str().unwrap(),
+            Instant::now().elapsed().as_nanos()
+        );
+        match tokio::fs::remove_dir_all(&index_storage_path).await {
+            Ok(_) => Ok(()),
+            Err(e) => match e.kind() {
+                std::io::ErrorKind::NotFound => {
+                    tracing::warn!(
+                        "HNSW index ID: {} not found at path: {}",
+                        id,
+                        index_storage_path.to_str().unwrap()
+                    );
+                    Ok(())
+                }
+                _ => {
+                    tracing::error!(
+                        "Failed to remove HNSW index ID: {} at path: {}. Error: {}",
+                        id,
+                        index_storage_path.to_str().unwrap(),
+                        e
+                    );
+                    Err(e)
+                }
+            },
+        }
     }
 
     async fn create_dir_all(&self, path: &PathBuf) -> Result<(), Box<HnswIndexProviderFileError>> {
@@ -571,7 +616,7 @@ pub enum HnswIndexProviderFlushError {
     #[error("HNSW Save Error")]
     HnswSaveError(#[from] Box<dyn ChromaError>),
     #[error("Storage Put Error")]
-    StoragePutError(#[from] chroma_storage::PutError),
+    StoragePutError(#[from] chroma_storage::StorageError),
 }
 
 impl ChromaError for HnswIndexProviderFlushError {
@@ -586,12 +631,10 @@ impl ChromaError for HnswIndexProviderFlushError {
 
 #[derive(Error, Debug)]
 pub enum HnswIndexProviderFileError {
-    #[error("IO Error")]
+    #[error("IO Error: {0}")]
     IOError(#[from] std::io::Error),
-    #[error("Storage Get Error")]
-    StorageGetError(#[from] chroma_storage::GetError),
-    #[error("Storage Put Error")]
-    StoragePutError(#[from] chroma_storage::PutError),
+    #[error("Storage Error: {0}")]
+    StorageError(#[from] chroma_storage::StorageError),
     #[error("Must provide full path to file")]
     InvalidFilePath,
 }
@@ -601,7 +644,7 @@ mod tests {
     use super::*;
     use chroma_cache::new_non_persistent_cache_for_test;
     use chroma_storage::local::LocalStorage;
-    use chroma_types::DistributedHnswParameters;
+    use chroma_types::HnswConfiguration;
 
     #[tokio::test]
     async fn test_fork() {
@@ -619,13 +662,13 @@ mod tests {
 
         let dimensionality = 128;
         let distance_function = DistanceFunction::Euclidean;
-        let default_hnsw_params = DistributedHnswParameters::default();
+        let default_hnsw_params = HnswConfiguration::default();
         let created_index = provider
             .create(
                 &collection_id,
-                default_hnsw_params.m,
-                default_hnsw_params.construction_ef,
-                default_hnsw_params.search_ef,
+                default_hnsw_params.max_neighbors,
+                default_hnsw_params.ef_construction,
+                default_hnsw_params.ef_search,
                 dimensionality,
                 distance_function.clone(),
             )

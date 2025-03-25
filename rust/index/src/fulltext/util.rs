@@ -80,8 +80,8 @@ impl TokenInstance {
     #[inline(always)]
     pub fn encode(token: &str, offset_id: u32, position: Option<u32>) -> Self {
         TokenInstance(
-            (pack_trigram(token) as u128) << 64
-                | (offset_id as u128) << 32
+            ((pack_trigram(token) as u128) << 64)
+                | ((offset_id as u128) << 32)
                 | (position.map(|o| o | (1 << 31)).unwrap_or(0) as u128),
         )
     }

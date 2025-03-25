@@ -1,13 +1,19 @@
-use std::{collections::HashMap, path::Path, sync::Arc};
+use std::{
+    collections::{BinaryHeap, HashMap},
+    io::Write,
+    path::Path,
+    sync::Arc,
+};
 
 use chroma_cache::Weighted;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::{HnswIndex, HnswIndexConfig, Index, IndexConfig, PersistentIndex};
 use chroma_sqlite::{db::SqliteDb, table::MaxSeqId};
 use chroma_types::{
-    operator::RecordDistance, Chunk, HnswParametersFromSegmentError, LogRecord, Operation, Segment,
-    SegmentUuid, SingleNodeHnswParameters,
+    operator::RecordDistance, Chunk, Collection, HnswParametersFromSegmentError, LogRecord,
+    Operation, OperationRecord, Segment, SegmentUuid,
 };
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use sea_query::{Expr, OnConflict, Query, SqliteQueryBuilder};
 use sea_query_binder::SqlxBinder;
 use serde::{Deserialize, Serialize};
@@ -34,6 +40,8 @@ pub enum LocalHnswSegmentReaderError {
     HnswIndexLoadError,
     #[error("Nothing found on disk")]
     UninitializedSegment,
+    #[error("Collection is missing HNSW configuration")]
+    MissingHnswConfiguration,
     #[error("Could not parse HNSW configuration: {0}")]
     InvalidHnswConfiguration(#[from] HnswParametersFromSegmentError),
     #[error("Error serializing path to string")]
@@ -55,6 +63,7 @@ impl ChromaError for LocalHnswSegmentReaderError {
             LocalHnswSegmentReaderError::PickleFileDeserializeError(_) => ErrorCodes::Internal,
             LocalHnswSegmentReaderError::HnswIndexLoadError => ErrorCodes::Internal,
             LocalHnswSegmentReaderError::UninitializedSegment => ErrorCodes::Internal,
+            LocalHnswSegmentReaderError::MissingHnswConfiguration => ErrorCodes::Internal,
             LocalHnswSegmentReaderError::InvalidHnswConfiguration(err) => err.code(),
             LocalHnswSegmentReaderError::PersistPathError => ErrorCodes::Internal,
             LocalHnswSegmentReaderError::IdNotFound => ErrorCodes::Internal,
@@ -65,17 +74,42 @@ impl ChromaError for LocalHnswSegmentReaderError {
     }
 }
 
+async fn get_current_seq_id(
+    segment: &Segment,
+    sql_db: &SqliteDb,
+) -> Result<u64, sqlx::error::Error> {
+    let (query, values) = Query::select()
+        .column(MaxSeqId::SeqId)
+        .from(MaxSeqId::Table)
+        .and_where(Expr::col(MaxSeqId::SegmentId).eq(segment.id.to_string()))
+        .build_sqlx(SqliteQueryBuilder);
+    let row = sqlx::query_with(&query, values)
+        .fetch_optional(sql_db.get_conn())
+        .await?;
+    let seq_id = row
+        .map(|row| row.try_get::<u64, _>(0))
+        .transpose()?
+        .unwrap_or_default();
+    Ok(seq_id)
+}
+
 impl LocalHnswSegmentReader {
     pub fn from_index(hnsw_index: LocalHnswIndex) -> Self {
         Self { index: hnsw_index }
     }
 
     pub async fn from_segment(
+        collection: &Collection,
         segment: &Segment,
         dimensionality: usize,
         persist_root: Option<String>,
         sql_db: SqliteDb,
     ) -> Result<Self, LocalHnswSegmentReaderError> {
+        let hnsw_configuration = collection
+            .config
+            .get_hnsw_config_with_legacy_fallback(segment)?
+            .ok_or(LocalHnswSegmentReaderError::MissingHnswConfiguration)?;
+
         match persist_root {
             Some(path_str) => {
                 let path = Path::new(&path_str);
@@ -97,10 +131,9 @@ impl LocalHnswSegmentReader {
                     let id_map: IdMap = serde_pickle::from_reader(file, DeOptions::new())?;
                     if !id_map.id_to_label.is_empty() {
                         // Load hnsw index.
-                        let hnsw_configuration = SingleNodeHnswParameters::try_from(segment)?;
                         let index_config = IndexConfig::new(
                             dimensionality as i32,
-                            hnsw_configuration.space.into(),
+                            hnsw_configuration.space.clone().into(),
                         );
                         let index = HnswIndex::load(
                             index_folder_str,
@@ -108,6 +141,9 @@ impl LocalHnswSegmentReader {
                             chroma_index::IndexUuid(segment.id.0),
                         )
                         .map_err(|_| LocalHnswSegmentReaderError::HnswIndexLoadError)?;
+
+                        let current_seq_id = get_current_seq_id(segment, &sql_db).await?;
+
                         // TODO(Sanket): Set allow reset appropriately.
                         return Ok(Self {
                             index: LocalHnswIndex {
@@ -117,6 +153,7 @@ impl LocalHnswSegmentReader {
                                     index_init: true,
                                     allow_reset: false,
                                     num_elements_since_last_persist: 0,
+                                    last_seen_seq_id: current_seq_id,
                                     sync_threshold: hnsw_configuration.sync_threshold,
                                     persist_path: Some(index_folder_str.to_string()),
                                     sqlite: sql_db,
@@ -132,13 +169,14 @@ impl LocalHnswSegmentReader {
                 Err(LocalHnswSegmentReaderError::UninitializedSegment)
             }
             None => {
-                let hnsw_configuration = SingleNodeHnswParameters::try_from(segment)?;
-                let index_config =
-                    IndexConfig::new(dimensionality as i32, hnsw_configuration.space.into());
+                let index_config = IndexConfig::new(
+                    dimensionality as i32,
+                    hnsw_configuration.space.clone().into(),
+                );
                 let hnsw_config = HnswIndexConfig::new_ephemeral(
-                    hnsw_configuration.m,
-                    hnsw_configuration.construction_ef,
-                    hnsw_configuration.search_ef,
+                    hnsw_configuration.max_neighbors,
+                    hnsw_configuration.ef_construction,
+                    hnsw_configuration.ef_search,
                 );
 
                 // TODO(Sanket): HnswIndex init is not thread safe. We should not call it from multiple threads
@@ -157,6 +195,7 @@ impl LocalHnswSegmentReader {
                             index_init: true,
                             allow_reset: false,
                             num_elements_since_last_persist: 0,
+                            last_seen_seq_id: 0,
                             sync_threshold: hnsw_configuration.sync_threshold,
                             persist_path: None,
                             sqlite: sql_db,
@@ -239,22 +278,91 @@ impl LocalHnswSegmentReader {
         k: u32,
     ) -> Result<Vec<RecordDistance>, LocalHnswSegmentReaderError> {
         let guard = self.index.inner.read().await;
-        let allowed_ids = allowed_offset_ids
-            .iter()
-            .map(|oid| *oid as usize)
-            .collect::<Vec<_>>();
-        let (offset_ids, distances) = guard
-            .index
-            .query(&embedding, k as usize, allowed_ids.as_slice(), &[])
-            .map_err(|_| LocalHnswSegmentReaderError::QueryError)?;
-        Ok(offset_ids
-            .into_iter()
-            .zip(distances)
-            .map(|(offset_id, measure)| RecordDistance {
-                offset_id: offset_id as u32,
-                measure,
-            })
-            .collect())
+        let len_with_deleted = guard.index.len_with_deleted();
+        let actual_len = guard.index.len();
+
+        // Bail if the index is empty
+        if actual_len == 0 {
+            return Ok(Vec::new());
+        }
+
+        let delete_percentage = (len_with_deleted - actual_len) as f32 / len_with_deleted as f32;
+
+        // If the index is small and the delete percentage is high, its quite likely that the index is
+        // degraded, so we brute force the search
+        // Otherwise search the index normally
+        if delete_percentage > 0.2 && actual_len < 100 {
+            match guard.index.get_all_ids() {
+                Ok((valid_ids, _deleted_ids)) => {
+                    let mut max_heap = BinaryHeap::new();
+                    let allowed_ids_as_set = allowed_offset_ids
+                        .iter()
+                        .collect::<std::collections::HashSet<_>>();
+                    for curr_id in valid_ids.iter() {
+                        if !allowed_ids_as_set.is_empty()
+                            && !allowed_ids_as_set.contains(&(*curr_id as u32))
+                        {
+                            continue;
+                        }
+                        let curr_embedding = guard.index.get(*curr_id);
+                        match curr_embedding {
+                            Ok(Some(curr_embedding)) => {
+                                let curr_embedding = match guard.index.distance_function {
+                                    chroma_distance::DistanceFunction::Cosine => {
+                                        chroma_distance::normalize(&curr_embedding)
+                                    }
+                                    _ => curr_embedding,
+                                };
+                                let curr_distance = guard
+                                    .index
+                                    .distance_function
+                                    .distance(curr_embedding.as_slice(), embedding.as_slice());
+                                if max_heap.len() < k as usize {
+                                    max_heap.push(RecordDistance {
+                                        offset_id: *curr_id as u32,
+                                        measure: curr_distance,
+                                    });
+                                } else {
+                                    // SAFETY(hammadb): We are sure that the heap has at least one element
+                                    // because we insert until we have k elements.
+                                    let top = max_heap.peek().unwrap();
+                                    if top.measure < curr_distance {
+                                        max_heap.pop();
+                                        max_heap.push(RecordDistance {
+                                            offset_id: *curr_id as u32,
+                                            measure: curr_distance,
+                                        });
+                                    }
+                                }
+                            }
+                            _ => {
+                                return Err(LocalHnswSegmentReaderError::QueryError);
+                            }
+                        }
+                    }
+                    Ok(max_heap.into_sorted_vec())
+                }
+                Err(_) => Err(LocalHnswSegmentReaderError::QueryError),
+            }
+        } else {
+            let allowed_ids = allowed_offset_ids
+                .iter()
+                .map(|oid| *oid as usize)
+                .collect::<Vec<_>>();
+            let (offset_ids, distances) = guard
+                .index
+                .query(&embedding, k as usize, allowed_ids.as_slice(), &[])
+                .map_err(|_| LocalHnswSegmentReaderError::QueryError)?;
+
+            Ok(offset_ids
+                .into_iter()
+                .zip(distances)
+                .map(|(offset_id, measure)| RecordDistance {
+                    offset_id: offset_id as u32,
+                    measure,
+                })
+                .collect())
+        }
     }
 }
 
@@ -278,6 +386,7 @@ pub struct Inner {
     index_init: bool,
     allow_reset: bool,
     num_elements_since_last_persist: u64,
+    last_seen_seq_id: u64,
     sync_threshold: usize,
     persist_path: Option<String>,
     sqlite: SqliteDb,
@@ -320,6 +429,8 @@ pub enum LocalHnswSegmentWriterError {
     HnswIndexLoadError,
     #[error("Nothing found on disk")]
     UninitializedSegment,
+    #[error("Collection is missing HNSW configuration")]
+    MissingHnswConfiguration,
     #[error("Could not parse HNSW configuration: {0}")]
     InvalidHnswConfiguration(#[from] HnswParametersFromSegmentError),
     #[error("Error creating hnsw index")]
@@ -350,6 +461,7 @@ impl ChromaError for LocalHnswSegmentWriterError {
             LocalHnswSegmentWriterError::PickleFileDeserializeError(_) => ErrorCodes::Internal,
             LocalHnswSegmentWriterError::HnswIndexLoadError => ErrorCodes::Internal,
             LocalHnswSegmentWriterError::UninitializedSegment => ErrorCodes::Internal,
+            LocalHnswSegmentWriterError::MissingHnswConfiguration => ErrorCodes::Internal,
             LocalHnswSegmentWriterError::InvalidHnswConfiguration(err) => err.code(),
             LocalHnswSegmentWriterError::HnswIndexInitError => ErrorCodes::Internal,
             LocalHnswSegmentWriterError::HnswIndexPersistError => ErrorCodes::Internal,
@@ -370,12 +482,17 @@ impl LocalHnswSegmentWriter {
     }
 
     pub async fn from_segment(
+        collection: &Collection,
         segment: &Segment,
         dimensionality: usize,
         persist_root: Option<String>,
         sql_db: SqliteDb,
     ) -> Result<Self, LocalHnswSegmentWriterError> {
-        let hnsw_configuration = SingleNodeHnswParameters::try_from(segment)?;
+        let hnsw_configuration = collection
+            .config
+            .get_hnsw_config_with_legacy_fallback(segment)?
+            .ok_or(LocalHnswSegmentWriterError::MissingHnswConfiguration)?;
+
         match persist_root {
             Some(path_str) => {
                 let path = Path::new(&path_str);
@@ -416,7 +533,7 @@ impl LocalHnswSegmentWriter {
                         // Load hnsw index.
                         let index_config = IndexConfig::new(
                             dimensionality as i32,
-                            hnsw_configuration.space.into(),
+                            hnsw_configuration.space.clone().into(),
                         );
                         let index = HnswIndex::load(
                             index_folder_str,
@@ -424,6 +541,9 @@ impl LocalHnswSegmentWriter {
                             chroma_index::IndexUuid(segment.id.0),
                         )
                         .map_err(|_| LocalHnswSegmentWriterError::HnswIndexLoadError)?;
+
+                        let current_seq_id = get_current_seq_id(segment, &sql_db).await?;
+
                         // TODO(Sanket): Set allow reset appropriately.
                         return Ok(Self {
                             index: LocalHnswIndex {
@@ -433,6 +553,7 @@ impl LocalHnswSegmentWriter {
                                     index_init: true,
                                     allow_reset: false,
                                     num_elements_since_last_persist: 0,
+                                    last_seen_seq_id: current_seq_id,
                                     sync_threshold: hnsw_configuration.sync_threshold,
                                     persist_path: Some(index_folder_str.to_string()),
                                     sqlite: sql_db,
@@ -442,12 +563,14 @@ impl LocalHnswSegmentWriter {
                     }
                 }
                 // Initialize index.
-                let index_config =
-                    IndexConfig::new(dimensionality as i32, hnsw_configuration.space.into());
+                let index_config = IndexConfig::new(
+                    dimensionality as i32,
+                    hnsw_configuration.space.clone().into(),
+                );
                 let hnsw_config = HnswIndexConfig::new_persistent(
-                    hnsw_configuration.m,
-                    hnsw_configuration.construction_ef,
-                    hnsw_configuration.search_ef,
+                    hnsw_configuration.max_neighbors,
+                    hnsw_configuration.ef_construction,
+                    hnsw_configuration.ef_search,
                     &index_folder,
                 )?;
 
@@ -467,6 +590,7 @@ impl LocalHnswSegmentWriter {
                             index_init: true,
                             allow_reset: false,
                             num_elements_since_last_persist: 0,
+                            last_seen_seq_id: 0,
                             sync_threshold: hnsw_configuration.sync_threshold,
                             persist_path: Some(index_folder_str.to_string()),
                             sqlite: sql_db,
@@ -475,12 +599,14 @@ impl LocalHnswSegmentWriter {
                 })
             }
             None => {
-                let index_config =
-                    IndexConfig::new(dimensionality as i32, hnsw_configuration.space.into());
+                let index_config = IndexConfig::new(
+                    dimensionality as i32,
+                    hnsw_configuration.space.clone().into(),
+                );
                 let hnsw_config = HnswIndexConfig::new_ephemeral(
-                    hnsw_configuration.m,
-                    hnsw_configuration.construction_ef,
-                    hnsw_configuration.search_ef,
+                    hnsw_configuration.max_neighbors,
+                    hnsw_configuration.ef_construction,
+                    hnsw_configuration.ef_search,
                 );
 
                 // TODO(Sanket): HnswIndex init is not thread safe. We should not call it from multiple threads
@@ -498,6 +624,7 @@ impl LocalHnswSegmentWriter {
                             index_init: true,
                             allow_reset: false,
                             num_elements_since_last_persist: 0,
+                            last_seen_seq_id: 0,
                             sync_threshold: hnsw_configuration.sync_threshold,
                             persist_path: None,
                             sqlite: sql_db,
@@ -520,7 +647,14 @@ impl LocalHnswSegmentWriter {
             return Ok(next_label);
         }
         let mut max_seq_id = u64::MIN;
+        // In order to insert into hnsw index in parallel, we need to collect all the embeddings
+        let mut hnsw_batch: HashMap<u32, Vec<(u32, &OperationRecord)>> =
+            HashMap::with_capacity(log_chunk.len());
         for (log, _) in log_chunk.iter() {
+            if log.log_offset <= guard.last_seen_seq_id as i64 {
+                continue;
+            }
+
             guard.num_elements_since_last_persist += 1;
             max_seq_id = max_seq_id.max(log.log_offset as u64);
             match log.record.operation {
@@ -528,7 +662,7 @@ impl LocalHnswSegmentWriter {
                     // only update if the id is not already present
                     if !guard.id_map.id_to_label.contains_key(&log.record.id) {
                         match &log.record.embedding {
-                            Some(embedding) => {
+                            Some(_embedding) => {
                                 guard
                                     .id_map
                                     .id_to_label
@@ -537,17 +671,15 @@ impl LocalHnswSegmentWriter {
                                     .id_map
                                     .label_to_id
                                     .insert(next_label, log.record.id.clone());
-                                let index_len = guard.index.len_with_deleted();
-                                let index_capacity = guard.index.capacity();
-                                if index_len + 1 > index_capacity {
-                                    guard.index.resize(index_capacity * 2).map_err(|_| {
-                                        LocalHnswSegmentWriterError::HnswIndexResizeError
-                                    })?;
-                                }
-                                guard
-                                    .index
-                                    .add(next_label as usize, embedding.as_slice())
-                                    .map_err(|_| LocalHnswSegmentWriterError::HnwsIndexAddError)?;
+                                let records_for_label = match hnsw_batch.get_mut(&next_label) {
+                                    Some(records) => records,
+                                    None => {
+                                        hnsw_batch.insert(next_label, Vec::new());
+                                        // SAFETY: We just inserted the key. We have exclusive access to the map.
+                                        hnsw_batch.get_mut(&next_label).unwrap()
+                                    }
+                                };
+                                records_for_label.push((next_label, &log.record));
                                 next_label += 1;
                             }
                             None => {
@@ -558,18 +690,16 @@ impl LocalHnswSegmentWriter {
                 }
                 Operation::Update => {
                     if let Some(label) = guard.id_map.id_to_label.get(&log.record.id).cloned() {
-                        if let Some(embedding) = &log.record.embedding {
-                            let index_len = guard.index.len_with_deleted();
-                            let index_capacity = guard.index.capacity();
-                            if index_len + 1 > index_capacity {
-                                guard.index.resize(index_capacity * 2).map_err(|_| {
-                                    LocalHnswSegmentWriterError::HnswIndexResizeError
-                                })?;
-                            }
-                            guard
-                                .index
-                                .add(label as usize, embedding.as_slice())
-                                .map_err(|_| LocalHnswSegmentWriterError::HnwsIndexAddError)?;
+                        if let Some(_embedding) = &log.record.embedding {
+                            let records_for_label = match hnsw_batch.get_mut(&label) {
+                                Some(records) => records,
+                                None => {
+                                    hnsw_batch.insert(label, Vec::new());
+                                    // SAFETY: We just inserted the key. We have exclusive access to the map.
+                                    hnsw_batch.get_mut(&label).unwrap()
+                                }
+                            };
+                            records_for_label.push((label, &log.record));
                         }
                     }
                 }
@@ -577,10 +707,15 @@ impl LocalHnswSegmentWriter {
                     if let Some(label) = guard.id_map.id_to_label.get(&log.record.id).cloned() {
                         guard.id_map.id_to_label.remove(&log.record.id);
                         guard.id_map.label_to_id.remove(&label);
-                        guard
-                            .index
-                            .delete(label as usize)
-                            .map_err(|_| LocalHnswSegmentWriterError::HnswIndexDeleteError)?;
+                        let records_for_label = match hnsw_batch.get_mut(&label) {
+                            Some(records) => records,
+                            None => {
+                                hnsw_batch.insert(label, Vec::new());
+                                // SAFETY: We just inserted the key. We have exclusive access to the map.
+                                hnsw_batch.get_mut(&label).unwrap()
+                            }
+                        };
+                        records_for_label.push((label, &log.record));
                     }
                 }
                 Operation::Upsert => {
@@ -593,7 +728,7 @@ impl LocalHnswSegmentWriter {
                         }
                     };
                     match &log.record.embedding {
-                        Some(embedding) => {
+                        Some(_embedding) => {
                             guard
                                 .id_map
                                 .id_to_label
@@ -602,17 +737,15 @@ impl LocalHnswSegmentWriter {
                                 .id_map
                                 .label_to_id
                                 .insert(label, log.record.id.clone());
-                            let index_len = guard.index.len_with_deleted();
-                            let index_capacity = guard.index.capacity();
-                            if index_len + 1 > index_capacity {
-                                guard.index.resize(index_capacity * 2).map_err(|_| {
-                                    LocalHnswSegmentWriterError::HnswIndexResizeError
-                                })?;
-                            }
-                            guard
-                                .index
-                                .add(label as usize, embedding.as_slice())
-                                .map_err(|_| LocalHnswSegmentWriterError::HnwsIndexAddError)?;
+                            let records_for_label = match hnsw_batch.get_mut(&label) {
+                                Some(records) => records,
+                                None => {
+                                    hnsw_batch.insert(label, Vec::new());
+                                    // SAFETY: We just inserted the key. We have exclusive access to the map.
+                                    hnsw_batch.get_mut(&label).unwrap()
+                                }
+                            };
+                            records_for_label.push((label, &log.record));
                             if update_label {
                                 next_label += 1;
                             }
@@ -624,6 +757,49 @@ impl LocalHnswSegmentWriter {
                 }
             }
         }
+
+        // Add to hnsw index in parallel using rayon.
+        // Resize the index if needed
+        let index_len = guard.index.len_with_deleted();
+        let index_capacity = guard.index.capacity();
+        if index_len + hnsw_batch.len() >= index_capacity {
+            let needed_capacity = (index_len + hnsw_batch.len()).next_power_of_two();
+            guard
+                .index
+                .resize(needed_capacity)
+                .map_err(|_| LocalHnswSegmentWriterError::HnswIndexResizeError)?;
+        }
+        let index_for_pool = &guard.index;
+
+        hnsw_batch
+            .into_par_iter()
+            .map(|(_, records)| {
+                for (label, log_record) in records {
+                    match log_record.operation {
+                        Operation::Add | Operation::Upsert | Operation::Update => {
+                            let embedding = log_record.embedding.as_ref().expect(
+                                "Add, update or upsert should have an embedding at this point",
+                            );
+                            match index_for_pool.add(label as usize, embedding) {
+                                Ok(_) => {}
+                                Err(_e) => {
+                                    return Err(LocalHnswSegmentWriterError::HnwsIndexAddError);
+                                }
+                            }
+                        }
+                        Operation::Delete => match index_for_pool.delete(label as usize) {
+                            Ok(_) => {}
+                            Err(_e) => {
+                                return Err(LocalHnswSegmentWriterError::HnswIndexDeleteError);
+                            }
+                        },
+                    }
+                }
+                Ok(())
+            })
+            .find_any(|result| result.is_err())
+            .unwrap_or(Ok(()))?;
+
         guard.id_map.total_elements_added = next_label - 1;
         if guard.num_elements_since_last_persist >= guard.sync_threshold as u64 {
             guard = persist(guard).await?;
@@ -642,6 +818,8 @@ impl LocalHnswSegmentWriter {
             guard.num_elements_since_last_persist = 0;
         }
 
+        guard.last_seen_seq_id = max_seq_id;
+
         Ok(next_label)
     }
 }
@@ -657,11 +835,12 @@ async fn persist(
             .map_err(|_| LocalHnswSegmentWriterError::HnswIndexPersistError)?;
         // Persist id map.
         let metadata_file_path = Path::new(path).join(METADATA_FILE);
-        let mut file = tokio::fs::File::create(metadata_file_path)
-            .await?
-            .into_std()
-            .await;
-        serde_pickle::to_writer(&mut file, &guard.id_map, SerOptions::new())?;
+
+        let mut file = std::fs::File::create(metadata_file_path)?;
+        // Using serde_pickle results in lots of small writes
+        let mut buffered_file = std::io::BufWriter::new(&mut file);
+        serde_pickle::to_writer(&mut buffered_file, &guard.id_map, SerOptions::new())?;
+        buffered_file.flush()?;
     }
     Ok(guard)
 }

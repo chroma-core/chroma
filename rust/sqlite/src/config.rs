@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{path::Path, time::Duration};
 
 use crate::db::{SqliteCreationError, SqliteDb};
 use async_trait::async_trait;
@@ -6,7 +6,6 @@ use chroma_config::{
     registry::{Injectable, Registry},
     Configurable,
 };
-use chroma_error::ChromaError;
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use tokio::fs::create_dir_all;
@@ -14,21 +13,42 @@ use tokio::fs::create_dir_all;
 #[cfg(feature = "pyo3")]
 use pyo3::{pyclass, pymethods};
 
-#[derive(Serialize, Deserialize, Clone)]
+fn default_hash_type() -> MigrationHash {
+    MigrationHash::MD5
+}
+
+fn default_migration_mode() -> MigrationMode {
+    MigrationMode::Apply
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct SqliteDBConfig {
+    #[serde(default = "default_hash_type")]
     pub hash_type: MigrationHash,
+    #[serde(default = "default_migration_mode")]
     pub migration_mode: MigrationMode,
     // The SQLite database URL
     // If unspecified, then the database is in memory only
     pub url: Option<String>,
 }
 
+impl Default for SqliteDBConfig {
+    fn default() -> Self {
+        SqliteDBConfig {
+            hash_type: default_hash_type(),
+            migration_mode: default_migration_mode(),
+            url: None,
+        }
+    }
+}
+
 /// Migration mode for the database
 /// - Apply: Apply the migrations
 /// - Validate: Validate the applied migrations and ensure none are unappliued
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 #[cfg_attr(feature = "pyo3", pyclass(eq, eq_int))]
+#[serde(rename_all = "lowercase")]
 pub enum MigrationMode {
     Apply,
     Validate,
@@ -39,6 +59,7 @@ pub enum MigrationMode {
 /// - MD5: Use MD5 hash
 #[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "pyo3", pyclass(eq, eq_int))]
+#[serde(rename_all = "lowercase")]
 pub enum MigrationHash {
     SHA256,
     MD5,
@@ -69,11 +90,11 @@ impl SqliteDBConfig {
 impl Injectable for SqliteDb {}
 
 #[async_trait]
-impl Configurable<SqliteDBConfig> for SqliteDb {
+impl Configurable<SqliteDBConfig, SqliteCreationError> for SqliteDb {
     async fn try_from_config(
         config: &SqliteDBConfig,
         registry: &Registry,
-    ) -> Result<Self, Box<dyn ChromaError>> {
+    ) -> Result<Self, SqliteCreationError> {
         // TODO: copy all other pragmas from python and add basic tests
         let conn_options = SqliteConnectOptions::new()
             // Due to a bug in the python code, foreign_keys is turned off
@@ -82,24 +103,21 @@ impl Configurable<SqliteDBConfig> for SqliteDb {
             // is a no-op in a transaction. In order to be able to run our migrations
             // we turn it off
             .pragma("foreign_keys", "OFF")
-            .pragma("case_sensitive_like", "ON");
+            .pragma("case_sensitive_like", "ON")
+            .busy_timeout(Duration::from_secs(1000));
         let conn = if let Some(url) = &config.url {
             let path = Path::new(url);
             if let Some(parent) = path.parent() {
-                create_dir_all(parent)
-                    .await
-                    .map_err(|err| SqliteCreationError::PathError(err).boxed())?;
+                create_dir_all(parent).await?;
             }
             SqlitePoolOptions::new()
                 .connect_with(conn_options.filename(path).create_if_missing(true))
-                .await
-                .map_err(|err| SqliteCreationError::SqlxError(err).boxed())?
+                .await?
         } else {
             SqlitePoolOptions::new()
                 .max_connections(1)
                 .connect_with(conn_options.in_memory(true).shared_cache(true))
-                .await
-                .map_err(|err| SqliteCreationError::SqlxError(err).boxed())?
+                .await?
         };
 
         let db = SqliteDb::new(conn, config.hash_type);
@@ -107,15 +125,9 @@ impl Configurable<SqliteDBConfig> for SqliteDb {
         db.initialize_migrations_table().await?;
         match config.migration_mode {
             MigrationMode::Apply => {
-                db.apply_all_migration()
-                    .await
-                    .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+                db.apply_all_migration().await?;
             }
-            MigrationMode::Validate => {
-                db.validate_all_migrations()
-                    .await
-                    .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
-            }
+            MigrationMode::Validate => db.validate_all_migrations().await?,
         }
 
         registry.register(db.clone());

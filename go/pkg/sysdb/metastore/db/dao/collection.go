@@ -52,15 +52,31 @@ func (s *collectionDb) GetCollections(id *string, name *string, tenantID string,
 	return s.getCollections(id, name, tenantID, databaseName, limit, offset, false)
 }
 
-func (s *collectionDb) ListCollectionsToGc() ([]*dbmodel.CollectionToGc, error) {
+func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64) ([]*dbmodel.CollectionToGc, error) {
 	var collections []*dbmodel.CollectionToGc
 	// Use the read replica for this so as to not overwhelm the writer.
-	// Skip collections that have not been compacted even once.
-	err := s.read_db.Table("collections").Select("id, name, version, version_file_name").Find(&collections).Where("version > 0").Error
+	query := s.read_db.Table("collections").
+		Select("id, name, version, version_file_name, oldest_version_ts, num_versions").
+		Where("version > 0")
+
+	// Apply cutoff time filter only if provided
+	if cutoffTimeSecs != nil {
+		cutoffTime := time.Unix(int64(*cutoffTimeSecs), 0)
+		query = query.Where("oldest_version_ts < ?", cutoffTime)
+	}
+
+	query = query.Order("num_versions DESC")
+
+	// Apply limit only if provided
+	if limit != nil {
+		query = query.Limit(int(*limit))
+	}
+
+	err := query.Find(&collections).Error
 	if err != nil {
 		return nil, err
 	}
-	log.Info("collections to gc", zap.Any("collections", collections))
+	log.Debug("collections to gc", zap.Any("collections", collections))
 	return collections, nil
 }
 
@@ -80,6 +96,8 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 		Version                    int32      `gorm:"column:version"`
 		VersionFileName            string     `gorm:"column:version_file_name"`
 		TotalRecordsPostCompaction uint64     `gorm:"column:total_records_post_compaction"`
+		SizeBytesPostCompaction    uint64     `gorm:"column:size_bytes_post_compaction"`
+		LastCompactionTimeSecs     uint64     `gorm:"column:last_compaction_time_secs"`
 		DatabaseName               string     `gorm:"column:database_name"`
 		TenantID                   string     `gorm:"column:tenant_id"`
 		// Metadata fields
@@ -94,7 +112,7 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 	}
 
 	query := s.db.Table("collections").
-		Select("collections.id as collection_id, collections.name as collection_name, collections.configuration_json_str, collections.dimension, collections.database_id, collections.ts as collection_ts, collections.is_deleted, collections.created_at as collection_created_at, collections.updated_at as collection_updated_at, collections.log_position, collections.version, collections.version_file_name, collections.total_records_post_compaction, databases.name as database_name, databases.tenant_id as tenant_id").
+		Select("collections.id as collection_id, collections.name as collection_name, collections.configuration_json_str, collections.dimension, collections.database_id, collections.ts as collection_ts, collections.is_deleted, collections.created_at as collection_created_at, collections.updated_at as collection_updated_at, collections.log_position, collections.version, collections.version_file_name, collections.total_records_post_compaction, collections.size_bytes_post_compaction, collections.last_compaction_time_secs, databases.name as database_name, databases.tenant_id as tenant_id").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
 		Order("collections.created_at ASC")
 
@@ -156,6 +174,8 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 				Version:                    r.Version,
 				VersionFileName:            r.VersionFileName,
 				TotalRecordsPostCompaction: r.TotalRecordsPostCompaction,
+				SizeBytesPostCompaction:    r.SizeBytesPostCompaction,
+				LastCompactionTimeSecs:     r.LastCompactionTimeSecs,
 			}
 			if r.CollectionTs != nil {
 				col.Ts = *r.CollectionTs
@@ -233,7 +253,7 @@ func (s *collectionDb) CountCollections(tenantID string, databaseName *string) (
 	var count int64
 	query := s.db.Table("collections").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
-		Where("databases.tenant_id = ?", tenantID)
+		Where("databases.tenant_id = ? AND collections.is_deleted = ?", tenantID, false)
 
 	if databaseName != nil {
 		query = query.Where("databases.name = ?", databaseName)
@@ -368,7 +388,7 @@ func (s *collectionDb) UpdateLogPositionAndVersionInfo(
 	return result.RowsAffected, nil
 }
 
-func (s *collectionDb) UpdateLogPositionVersionAndTotalRecords(collectionID string, logPosition int64, currentCollectionVersion int32, totalRecordsPostCompaction uint64) (int32, error) {
+func (s *collectionDb) UpdateLogPositionVersionTotalRecordsAndLogicalSize(collectionID string, logPosition int64, currentCollectionVersion int32, totalRecordsPostCompaction uint64, sizeBytesPostCompaction uint64) (int32, error) {
 	log.Info("update log position, version, and total records post compaction", zap.String("collectionID", collectionID), zap.Int64("logPosition", logPosition), zap.Int32("currentCollectionVersion", currentCollectionVersion), zap.Uint64("totalRecords", totalRecordsPostCompaction))
 	var collection dbmodel.Collection
 	// We use select for update to ensure no lost update happens even for isolation level read committed or below
@@ -389,15 +409,30 @@ func (s *collectionDb) UpdateLogPositionVersionAndTotalRecords(collectionID stri
 	}
 
 	version := currentCollectionVersion + 1
-	err = s.db.Model(&dbmodel.Collection{}).Where("id = ?", collectionID).Updates(map[string]interface{}{"log_position": logPosition, "version": version, "total_records_post_compaction": totalRecordsPostCompaction}).Error
+	err = s.db.Model(&dbmodel.Collection{}).Where("id = ?", collectionID).Updates(map[string]interface{}{"log_position": logPosition, "version": version, "total_records_post_compaction": totalRecordsPostCompaction, "size_bytes_post_compaction": sizeBytesPostCompaction}).Error
 	if err != nil {
 		return 0, err
 	}
 	return version, nil
 }
 
-func (s *collectionDb) UpdateVersionFileName(collectionID, existingVersionFileName, newVersionFileName string) (int64, error) {
-	result := s.db.Model(&dbmodel.Collection{}).Where("id = ? AND version_file_name = ?", collectionID, existingVersionFileName).Updates(map[string]interface{}{"version_file_name": newVersionFileName})
+func (s *collectionDb) UpdateVersionRelatedFields(collectionID, existingVersionFileName, newVersionFileName string, oldestVersionTs *time.Time, numActiveVersions *int) (int64, error) {
+	// Create updates map with required version_file_name
+	updates := map[string]interface{}{
+		"version_file_name": newVersionFileName,
+	}
+
+	// Only add optional fields if they are not nil
+	if oldestVersionTs != nil {
+		updates["oldest_version_ts"] = oldestVersionTs
+	}
+	if numActiveVersions != nil {
+		updates["num_versions"] = numActiveVersions
+	}
+
+	result := s.db.Model(&dbmodel.Collection{}).
+		Where("id = ? AND version_file_name = ?", collectionID, existingVersionFileName).
+		Updates(updates)
 	if result.Error != nil {
 		return 0, result.Error
 	}

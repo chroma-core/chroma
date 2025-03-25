@@ -362,6 +362,18 @@ func (suite *APIsTestSuite) TestCreateCollectionAndSegments() {
 	collections, err := suite.coordinator.GetCollections(ctx, newCollection.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
 	suite.Empty(collections)
+
+	// Create a collection on a database that does not exist.
+	_, _, err = suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
+		ID:           types.NewUniqueID(),
+		Name:         "test_collection_and_segments",
+		TenantID:     suite.tenantName,
+		DatabaseName: "non_existent_database",
+	})
+	suite.Error(err)
+	// Check the error code is ErrDatabaseNotFound
+	suite.Equal(common.ErrDatabaseNotFound, err)
+	suite.Assertions.Contains(err.Error(), "database not found")
 }
 
 // TestCreateGetDeleteCollections tests the create, get and delete collection APIs.
@@ -517,6 +529,62 @@ func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 	segments, err = suite.coordinator.GetSegments(ctx, segment.ID, nil, nil, createCollection.ID)
 	suite.NoError(err)
 	suite.Empty(segments)
+
+	// Check for forward and backward compatibility with soft and hard delete.
+	// 1. Create a collection with soft delete enabled.
+	// 2. Delete the collection (i.e. it will be marked as is_deleted)
+	// 3. Disable soft delete.
+	// 4. Query for the deleted collection. It should not be found.
+	// 5. Enable soft delete.
+	// 6. Query for the deleted collection. It should be found.
+
+	suite.coordinator.deleteMode = SoftDelete
+	collectionId := types.NewUniqueID()
+	suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
+		ID:           collectionId,
+		Name:         "test_coll_fwd_bkwd_compat",
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	})
+	suite.coordinator.DeleteCollection(ctx, &model.DeleteCollection{
+		ID:           collectionId,
+		DatabaseName: suite.databaseName,
+		TenantID:     suite.tenantName,
+	})
+	collection, err := suite.coordinator.GetCollections(ctx, collectionId, nil, suite.tenantName, suite.databaseName, nil, nil)
+	suite.NoError(err)
+	// Check that the collection is deleted
+	suite.Empty(collection)
+	// Toggle the mode.
+	suite.coordinator.deleteMode = HardDelete
+	collection, err = suite.coordinator.GetCollections(ctx, collectionId, nil, suite.tenantName, suite.databaseName, nil, nil)
+	suite.NoError(err)
+	// Check that the collection is still deleted
+	suite.Empty(collection)
+	// Create a collection and delete while being in HardDelete mode.
+	anotherCollectionId := types.NewUniqueID()
+	suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
+		ID:           anotherCollectionId,
+		Name:         "test_coll_fwd_bkwd_compat",
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	})
+	suite.coordinator.DeleteCollection(ctx, &model.DeleteCollection{
+		ID:           anotherCollectionId,
+		DatabaseName: suite.databaseName,
+		TenantID:     suite.tenantName,
+	})
+
+	// Toggle the mode.
+	suite.coordinator.deleteMode = SoftDelete
+	collection, err = suite.coordinator.GetCollections(ctx, collectionId, nil, suite.tenantName, suite.databaseName, nil, nil)
+	suite.NoError(err)
+	// Check that the collection is still deleted
+	suite.Empty(collection)
+	collection, err = suite.coordinator.GetCollections(ctx, anotherCollectionId, nil, suite.tenantName, suite.databaseName, nil, nil)
+	suite.NoError(err)
+	// Check that another collection is still deleted
+	suite.Empty(collection)
 }
 
 func (suite *APIsTestSuite) TestCollectionSize() {

@@ -15,6 +15,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_log::Log;
 use chroma_memberlist::memberlist_provider::Memberlist;
+use chroma_segment::spann_provider::SpannProvider;
 use chroma_storage::Storage;
 use chroma_sysdb::SysDb;
 use chroma_system::Dispatcher;
@@ -29,6 +30,7 @@ use std::fmt::Formatter;
 use std::str::FromStr;
 use std::time::Duration;
 use thiserror::Error;
+use tokio::sync::oneshot;
 use tracing::instrument;
 use tracing::span;
 use tracing::Instrument;
@@ -45,6 +47,7 @@ pub(crate) struct CompactionManager {
     storage: Storage,
     blockfile_provider: BlockfileProvider,
     hnsw_index_provider: HnswIndexProvider,
+    spann_provider: SpannProvider,
     // Dispatcher
     dispatcher: Option<ComponentHandle<Dispatcher>>,
     // Config
@@ -54,6 +57,7 @@ pub(crate) struct CompactionManager {
     min_compaction_size: usize,
     max_compaction_size: usize,
     max_partition_size: usize,
+    on_next_memberlist_signal: Option<oneshot::Sender<()>>,
 }
 
 #[derive(Error, Debug)]
@@ -79,6 +83,7 @@ impl CompactionManager {
         storage: Storage,
         blockfile_provider: BlockfileProvider,
         hnsw_index_provider: HnswIndexProvider,
+        spann_provider: SpannProvider,
         compaction_manager_queue_size: usize,
         compaction_interval: Duration,
         min_compaction_size: usize,
@@ -93,12 +98,14 @@ impl CompactionManager {
             storage,
             blockfile_provider,
             hnsw_index_provider,
+            spann_provider,
             dispatcher: None,
             compaction_manager_queue_size,
             compaction_interval,
             min_compaction_size,
             max_compaction_size,
             max_partition_size,
+            on_next_memberlist_signal: None,
         }
     }
 
@@ -120,10 +127,12 @@ impl CompactionManager {
                 let orchestrator = CompactOrchestrator::new(
                     compaction_job.clone(),
                     compaction_job.collection_id,
+                    compaction_job.collection_logical_size_bytes as i64,
                     self.log.clone(),
                     self.sysdb.clone(),
                     self.blockfile_provider.clone(),
                     self.hnsw_index_provider.clone(),
+                    self.spann_provider.clone(),
                     dispatcher,
                     None,
                     self.max_compaction_size,
@@ -258,6 +267,16 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
         )
         .await?;
 
+        let spann_provider = SpannProvider::try_from_config(
+            &(
+                hnsw_index_provider.clone(),
+                blockfile_provider.clone(),
+                config.spann_provider.clone(),
+            ),
+            registry,
+        )
+        .await?;
+
         Ok(CompactionManager::new(
             scheduler,
             log,
@@ -265,6 +284,7 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
             storage.clone(),
             blockfile_provider,
             hnsw_index_provider,
+            spann_provider,
             compaction_manager_queue_size,
             Duration::from_secs(compaction_interval_sec),
             min_compaction_size,
@@ -285,7 +305,7 @@ impl Component for CompactionManager {
         self.compaction_manager_queue_size
     }
 
-    async fn start(&mut self, ctx: &ComponentContext<Self>) -> () {
+    async fn on_start(&mut self, ctx: &ComponentContext<Self>) -> () {
         tracing::info!("Starting CompactionManager");
         ctx.scheduler.schedule(
             ScheduledCompactionMessage {},
@@ -349,6 +369,42 @@ impl Handler<Memberlist> for CompactionManager {
 
     async fn handle(&mut self, message: Memberlist, _ctx: &ComponentContext<CompactionManager>) {
         self.scheduler.set_memberlist(message);
+        if let Some(on_next_memberlist_update) = self.on_next_memberlist_signal.take() {
+            if let Err(e) = on_next_memberlist_update.send(()) {
+                tracing::error!("Failed to send on_next_memberlist_update: {:?}", e);
+            }
+        }
+    }
+}
+
+pub struct RegisterOnReadySignal {
+    pub on_ready_tx: oneshot::Sender<()>,
+}
+
+impl Debug for RegisterOnReadySignal {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OnReadySubscriber").finish()
+    }
+}
+
+#[async_trait]
+impl Handler<RegisterOnReadySignal> for CompactionManager {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: RegisterOnReadySignal,
+        _ctx: &ComponentContext<CompactionManager>,
+    ) {
+        if self.scheduler.has_memberlist() {
+            if let Some(on_next_memberlist_signal) = self.on_next_memberlist_signal.take() {
+                if let Err(e) = on_next_memberlist_signal.send(()) {
+                    tracing::error!("Failed to send on_next_memberlist_update: {:?}", e);
+                }
+            }
+        } else {
+            self.on_next_memberlist_signal = Some(message.on_ready_tx);
+        }
     }
 }
 
@@ -358,6 +414,8 @@ mod tests {
     use chroma_blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES;
     use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
     use chroma_config::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
+    use chroma_index::config::{HnswGarbageCollectionConfig, PlGarbageCollectionConfig};
+    use chroma_index::spann::types::GarbageCollectionContext;
     use chroma_log::in_memory_log::{InMemoryLog, InternalLogRecord};
     use chroma_memberlist::memberlist_provider::Member;
     use chroma_storage::local::LocalStorage;
@@ -365,10 +423,8 @@ mod tests {
     use chroma_system::{Dispatcher, DispatcherConfig};
     use chroma_types::SegmentUuid;
     use chroma_types::{Collection, LogRecord, Operation, OperationRecord, Segment};
-    use serde_json::Value;
     use std::collections::HashMap;
     use std::path::PathBuf;
-    use std::str::FromStr;
 
     #[tokio::test]
     async fn test_compaction_manager() {
@@ -380,8 +436,18 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmpdir.path().to_str().unwrap()));
 
-        let collection_uuid_1 =
-            CollectionUuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
+        let tenant_1 = "tenant_1".to_string();
+        let collection_1 = Collection {
+            name: "collection_1".to_string(),
+            dimension: Some(1),
+            tenant: tenant_1.clone(),
+            database: "database_1".to_string(),
+            log_position: -1,
+            ..Default::default()
+        };
+
+        let collection_uuid_1 = collection_1.collection_id;
+
         in_memory_log.add_log(
             collection_uuid_1,
             InternalLogRecord {
@@ -402,8 +468,17 @@ mod tests {
             },
         );
 
-        let collection_uuid_2 =
-            CollectionUuid::from_str("00000000-0000-0000-0000-000000000002").unwrap();
+        let tenant_2 = "tenant_2".to_string();
+        let collection_2 = Collection {
+            name: "collection_2".to_string(),
+            dimension: Some(1),
+            tenant: tenant_2.clone(),
+            database: "database_2".to_string(),
+            log_position: -1,
+            ..Default::default()
+        };
+
+        let collection_uuid_2 = collection_2.collection_id;
         in_memory_log.add_log(
             collection_uuid_2,
             InternalLogRecord {
@@ -425,34 +500,6 @@ mod tests {
         );
 
         let mut sysdb = SysDb::Test(TestSysDb::new());
-
-        let tenant_1 = "tenant_1".to_string();
-        let collection_1 = Collection {
-            collection_id: collection_uuid_1,
-            name: "collection_1".to_string(),
-            configuration_json: Value::Null,
-            metadata: None,
-            dimension: Some(1),
-            tenant: tenant_1.clone(),
-            database: "database_1".to_string(),
-            log_position: -1,
-            version: 0,
-            total_records_post_compaction: 0,
-        };
-
-        let tenant_2 = "tenant_2".to_string();
-        let collection_2 = Collection {
-            collection_id: collection_uuid_2,
-            name: "collection_2".to_string(),
-            configuration_json: Value::Null,
-            metadata: None,
-            dimension: Some(1),
-            tenant: tenant_2.clone(),
-            database: "database_2".to_string(),
-            log_position: -1,
-            version: 0,
-            total_records_post_compaction: 0,
-        };
         match sysdb {
             SysDb::Test(ref mut sysdb) => {
                 sysdb.add_collection(collection_1);
@@ -564,24 +611,41 @@ mod tests {
         let sparse_index_cache = new_cache_for_test();
         let hnsw_cache = new_non_persistent_cache_for_test();
         let (_, rx) = tokio::sync::mpsc::unbounded_channel();
+        let gc_context = GarbageCollectionContext::try_from_config(
+            &(
+                PlGarbageCollectionConfig::default(),
+                HnswGarbageCollectionConfig::default(),
+            ),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
+        let blockfile_provider = BlockfileProvider::new_arrow(
+            storage.clone(),
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
+        let hnsw_provider = HnswIndexProvider::new(
+            storage.clone(),
+            PathBuf::from(tmpdir.path().to_str().unwrap()),
+            hnsw_cache,
+            16,
+            rx,
+        );
+        let spann_provider = SpannProvider {
+            hnsw_provider: hnsw_provider.clone(),
+            blockfile_provider: blockfile_provider.clone(),
+            garbage_collection_context: Some(gc_context),
+        };
         let mut manager = CompactionManager::new(
             scheduler,
             log,
             sysdb,
             storage.clone(),
-            BlockfileProvider::new_arrow(
-                storage.clone(),
-                TEST_MAX_BLOCK_SIZE_BYTES,
-                block_cache,
-                sparse_index_cache,
-            ),
-            HnswIndexProvider::new(
-                storage,
-                PathBuf::from(tmpdir.path().to_str().unwrap()),
-                hnsw_cache,
-                16,
-                rx,
-            ),
+            blockfile_provider,
+            hnsw_provider,
+            spann_provider,
             compaction_manager_queue_size,
             compaction_interval,
             min_compaction_size,

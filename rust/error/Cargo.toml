@@ -11,8 +11,10 @@ tonic = { workspace = true, optional = true }
 sqlx = { workspace = true, optional = true }
 validator = { workspace = true, optional = true }
 thiserror = { workspace = true }
+http = { workspace = true, optional = true }
 
 [features]
 tonic = ["dep:tonic"]
 sqlx = ["dep:sqlx"]
 validator = ["dep:validator"]
+http = ["dep:http"]

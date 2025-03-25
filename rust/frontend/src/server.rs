@@ -1,23 +1,23 @@
 use axum::{
     extract::{DefaultBodyLimit, Path, Query, State},
-    http::header::HeaderMap,
-    http::StatusCode,
+    http::{header::HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router, ServiceExt,
 };
+use chroma_system::System;
 use chroma_types::RawWhereFields;
 use chroma_types::{
-    AddCollectionRecordsResponse, ChecklistResponse, Collection, CollectionMetadataUpdate,
-    CollectionUuid, CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
-    CreateCollectionRequest, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest,
-    CreateTenantResponse, DeleteCollectionRecordsResponse, DeleteDatabaseRequest,
-    DeleteDatabaseResponse, GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse,
-    GetRequest, GetResponse, GetTenantRequest, GetTenantResponse, GetUserIdentityResponse,
-    HeartbeatResponse, IncludeList, ListCollectionsRequest, ListCollectionsResponse,
-    ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
-    UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateMetadata,
-    UpsertCollectionRecordsResponse,
+    AddCollectionRecordsResponse, ChecklistResponse, Collection, CollectionConfiguration,
+    CollectionMetadataUpdate, CollectionUuid, CountCollectionsRequest, CountCollectionsResponse,
+    CountRequest, CountResponse, CreateCollectionRequest, CreateDatabaseRequest,
+    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
+    DeleteCollectionRecordsResponse, DeleteDatabaseRequest, DeleteDatabaseResponse,
+    GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
+    GetTenantRequest, GetTenantResponse, GetUserIdentityResponse, HeartbeatResponse, IncludeList,
+    ListCollectionsRequest, ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse,
+    Metadata, QueryRequest, QueryResponse, UpdateCollectionRecordsResponse,
+    UpdateCollectionResponse, UpdateMetadata, UpsertCollectionRecordsResponse,
 };
 use mdac::{Rule, Scorecard, ScorecardTicket};
 use opentelemetry::global;
@@ -29,6 +29,8 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
+use tokio::{select, signal};
+use tower_http::cors::CorsLayer;
 use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityScheme};
 use utoipa::ToSchema;
 use utoipa::{Modify, OpenApi};
@@ -39,11 +41,12 @@ use uuid::Uuid;
 use crate::{
     ac::AdmissionControlledService,
     auth::{AuthenticateAndAuthorize, AuthzAction, AuthzResource},
+    config::FrontendServerConfig,
     frontend::Frontend,
     quota::{Action, QuotaEnforcer, QuotaPayload},
+    server_middleware::{always_json_errors_middleware, default_json_content_type_middleware},
     tower_tracing::add_tracing_middleware,
     types::errors::{ErrorResponse, ServerError, ValidationError},
-    FrontendConfig,
 };
 
 struct ScorecardGuard {
@@ -57,6 +60,17 @@ impl Drop for ScorecardGuard {
             self.scorecard.untrack(ticket);
         }
     }
+}
+
+async fn graceful_shutdown(system: System) {
+    select! {
+        // Kubernetes will send SIGTERM to stop the pod gracefully
+        // TODO: add more signal handling
+        _ = signal::ctrl_c() => {
+            system.stop().await;
+            system.join().await;
+        },
+    };
 }
 
 pub struct Metrics {
@@ -119,22 +133,24 @@ impl Metrics {
 
 #[derive(Clone)]
 pub(crate) struct FrontendServer {
-    config: FrontendConfig,
+    config: FrontendServerConfig,
     frontend: Frontend,
     scorecard_enabled: Arc<AtomicBool>,
     scorecard: Arc<Scorecard<'static>>,
     metrics: Arc<Metrics>,
     auth: Arc<dyn AuthenticateAndAuthorize>,
     quota_enforcer: Arc<dyn QuotaEnforcer>,
+    system: System,
 }
 
 impl FrontendServer {
     pub fn new(
-        config: FrontendConfig,
+        config: FrontendServerConfig,
         frontend: Frontend,
         rules: Vec<Rule>,
         auth: Arc<dyn AuthenticateAndAuthorize>,
         quota_enforcer: Arc<dyn QuotaEnforcer>,
+        system: System,
     ) -> FrontendServer {
         // NOTE(rescrv):  Assume statically no more than 128 threads because we won't deploy on
         // hardware with that many threads anytime soon for frontends, if ever.
@@ -150,12 +166,21 @@ impl FrontendServer {
             metrics,
             auth,
             quota_enforcer,
+            system,
         }
     }
 
-    #[allow(dead_code)]
-    pub async fn run(server: FrontendServer) {
-        let circuit_breaker_config = server.config.circuit_breaker.clone();
+    pub async fn run(self) {
+        let system = self.system.clone();
+
+        let FrontendServerConfig {
+            port,
+            listen_address,
+            max_payload_size_bytes,
+            circuit_breaker,
+            cors_allow_origins,
+            ..
+        } = self.config.clone();
 
         let (docs_router, docs_api) =
             OpenApiRouter::with_openapi(ApiDoc::openapi()).split_for_parts();
@@ -232,20 +257,43 @@ impl FrontendServer {
                 post(collection_query),
             )
             .merge(docs_router)
-            .with_state(server)
-            .layer(DefaultBodyLimit::max(6000000 * 8)); // TODO: add to server configuration
-        let app = add_tracing_middleware(app);
+            .with_state(self)
+            .layer(DefaultBodyLimit::max(max_payload_size_bytes))
+            .layer(axum::middleware::from_fn(
+                default_json_content_type_middleware,
+            ))
+            .layer(axum::middleware::from_fn(always_json_errors_middleware));
 
-        // TODO: configuration for this
+        let mut app = add_tracing_middleware(app);
+
+        if let Some(cors_allow_origins) = cors_allow_origins {
+            let origins = cors_allow_origins
+                .into_iter()
+                .map(|origin| origin.parse().unwrap())
+                .collect::<Vec<_>>();
+
+            let cors = CorsLayer::new()
+                .allow_origin(origins)
+                .allow_headers(tower_http::cors::Any)
+                .allow_methods(tower_http::cors::Any);
+            app = app.layer(cors);
+        }
+
         // TODO: tracing
-        let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
-        if circuit_breaker_config.enabled() {
-            let service = AdmissionControlledService::new(circuit_breaker_config, app);
+        let addr = format!("{}:{}", listen_address, port);
+        println!("Listening on {addr}");
+        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+        if circuit_breaker.enabled() {
+            let service = AdmissionControlledService::new(circuit_breaker, app);
             axum::serve(listener, service.into_make_service())
+                .with_graceful_shutdown(graceful_shutdown(system))
                 .await
                 .unwrap();
         } else {
-            axum::serve(listener, app).await.unwrap();
+            axum::serve(listener, app)
+                .with_graceful_shutdown(graceful_shutdown(system))
+                .await
+                .unwrap();
         };
     }
 
@@ -377,7 +425,7 @@ async fn version(State(server): State<FrontendServer>) -> Json<String> {
     server.metrics.version.add(1, &[]);
     // TODO: Decide on how to handle versioning across python / rust frontend
     // for now return a hardcoded version
-    Json("0.7.0".to_string())
+    Json("1.0.0".to_string())
 }
 
 /// Retrieves the current user's identity, tenant, and databases.
@@ -444,8 +492,8 @@ async fn create_tenant(
     ),
     responses(
         (status = 200, description = "Tenant found", body = GetTenantResponse),
-        (status = 404, description = "Tenant not found", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Tenant not found", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
     )
 )]
@@ -472,8 +520,8 @@ async fn get_tenant(
 }
 
 #[derive(Deserialize, Serialize, ToSchema, Debug)]
-struct CreateDatabasePayload {
-    name: String,
+pub struct CreateDatabasePayload {
+    pub name: String,
 }
 
 /// Creates a new database for a given tenant.
@@ -761,8 +809,9 @@ async fn count_collections(
 #[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
 pub struct CreateCollectionPayload {
     pub name: String,
-    pub configuration: Option<serde_json::Value>,
+    pub configuration: Option<CollectionConfiguration>,
     pub metadata: Option<Metadata>,
+    #[serde(default)]
     pub get_or_create: bool,
 }
 
@@ -814,6 +863,13 @@ async fn create_collection(
         "op:create_collection",
         format!("tenant:{}", tenant).as_str(),
     ]);
+
+    if let Some(configuration) = payload.configuration.as_ref() {
+        if configuration.spann.is_some() && !server.config.enable_span_indexing {
+            return Err(ValidationError::SpannNotImplemented)?;
+        }
+    }
+
     let request = CreateCollectionRequest::try_new(
         tenant,
         database,
@@ -833,8 +889,8 @@ async fn create_collection(
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}",
     responses(
         (status = 200, description = "Collection found", body = Collection),
-        (status = 404, description = "Collection not found", body = ErrorResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Collection not found", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
     params(
@@ -1017,7 +1073,7 @@ async fn collection_add(
     Path((tenant, database, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
     Json(payload): Json<AddCollectionRecordsPayload>,
-) -> Result<Json<AddCollectionRecordsResponse>, ServerError> {
+) -> Result<(StatusCode, Json<AddCollectionRecordsResponse>), ServerError> {
     server.metrics.collection_add.add(1, &[]);
     server
         .authenticate_and_authorize(
@@ -1071,7 +1127,7 @@ async fn collection_add(
 
     let res = server.frontend.add(request).await?;
 
-    Ok(Json(res))
+    Ok((StatusCode::CREATED, Json(res)))
 }
 
 #[derive(Deserialize, Debug, Clone, ToSchema, Serialize)]
@@ -1622,3 +1678,127 @@ impl Modify for ChromaTokenSecurityAddon {
     modifiers(&ChromaTokenSecurityAddon)
 )]
 struct ApiDoc;
+
+#[cfg(test)]
+mod tests {
+    use crate::{config::FrontendServerConfig, frontend::Frontend, FrontendServer};
+    use chroma_config::{registry::Registry, Configurable};
+    use chroma_system::System;
+    use std::sync::Arc;
+
+    async fn test_server() -> u16 {
+        let registry = Registry::new();
+        let system = System::new();
+
+        let port = random_port::PortPicker::new().random(true).pick().unwrap();
+
+        let mut config = FrontendServerConfig::single_node_default();
+        config.port = port;
+
+        let frontend = Frontend::try_from_config(&(config.clone().frontend, system), &registry)
+            .await
+            .unwrap();
+        let app = FrontendServer::new(
+            config,
+            frontend,
+            vec![],
+            Arc::new(()),
+            Arc::new(()),
+            System::new(),
+        );
+        tokio::task::spawn(async move {
+            app.run().await;
+        });
+
+        port
+    }
+
+    #[tokio::test]
+    async fn test_cors() {
+        let registry = Registry::new();
+        let system = System::new();
+
+        let port = random_port::PortPicker::new().pick().unwrap();
+
+        let mut config = FrontendServerConfig::single_node_default();
+        config.port = port;
+        config.cors_allow_origins = Some(vec!["http://localhost:3000".to_string()]);
+
+        let frontend = Frontend::try_from_config(&(config.clone().frontend, system), &registry)
+            .await
+            .unwrap();
+        let app = FrontendServer::new(
+            config,
+            frontend,
+            vec![],
+            Arc::new(()),
+            Arc::new(()),
+            System::new(),
+        );
+        tokio::task::spawn(async move {
+            app.run().await;
+        });
+
+        let client = reqwest::Client::new();
+        let res = client
+            .request(
+                reqwest::Method::OPTIONS,
+                format!("http://localhost:{}/api/v2/heartbeat", port),
+            )
+            .header("Origin", "http://localhost:3000")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+
+        let allow_origin = res.headers().get("Access-Control-Allow-Origin");
+        assert_eq!(allow_origin.unwrap(), "http://localhost:3000");
+
+        let allow_methods = res.headers().get("Access-Control-Allow-Methods");
+        assert_eq!(allow_methods.unwrap(), "*");
+
+        let allow_headers = res.headers().get("Access-Control-Allow-Headers");
+        assert_eq!(allow_headers.unwrap(), "*");
+    }
+
+    #[tokio::test]
+    async fn test_defaults_to_json_content_type() {
+        let port = test_server().await;
+
+        // We don't send a content-type header
+        let client = reqwest::Client::new();
+        let res = client
+            .post(format!("http://localhost:{}/api/v2/tenants", port))
+            .body(serde_json::to_string(&serde_json::json!({ "name": "test" })).unwrap())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+    }
+
+    #[tokio::test]
+    async fn test_plaintext_error_conversion() {
+        // By default, axum returns plaintext errors for some errors. This asserts that there's middleware to ensure all errors are returned as JSON.
+        let port = test_server().await;
+
+        let client = reqwest::Client::new();
+        let res = client
+            .post(format!("http://localhost:{}/api/v2/tenants", port))
+            .header("content-type", "application/json")
+            .body("{") // invalid JSON
+            .send()
+            .await
+            .unwrap();
+
+        // Should have returned JSON
+        assert_eq!(
+            res.headers().get("content-type").unwrap(),
+            "application/json"
+        );
+        let response_json = res.json::<serde_json::Value>().await.unwrap();
+        assert_eq!(
+            response_json["error"],
+            serde_json::Value::String("InvalidArgumentError".to_string())
+        );
+    }
+}

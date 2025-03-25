@@ -13,7 +13,7 @@ use chroma_memberlist::{
 use chroma_system::System;
 use chroma_types::{
     chroma_proto::query_executor_client::QueryExecutorClient,
-    operator::{from_proto_knn_batch_result, CountResult, GetResult, KnnBatchResult},
+    operator::{CountResult, GetResult, KnnBatchResult},
     plan::{Count, Get, Knn},
     CollectionUuid, ExecutorError,
 };
@@ -55,6 +55,7 @@ impl Configurable<(config::DistributedExecutorConfig, System)> for DistributedEx
             config.connections_per_node,
             config.connect_timeout_ms,
             config.request_timeout_ms,
+            config.max_query_service_response_size_bytes,
         );
         let client_manager_handle = system.start_component(client_manager);
 
@@ -85,16 +86,16 @@ impl DistributedExecutor {
     ///////////////////////// Plan Operations /////////////////////////
     pub async fn count(&mut self, plan: Count) -> Result<CountResult, ExecutorError> {
         let clients = self.clients(plan.scan.collection_and_segments.collection.collection_id)?;
+        let plan: chroma_types::chroma_proto::CountPlan = plan.clone().try_into()?;
         let res = (|| async {
             choose_client(clients.as_slice())?
-                .count(Request::new(plan.clone().into()))
+                .count(Request::new(plan.clone()))
                 .await
         })
         .retry(self.backoff)
         .when(is_retryable_error)
-        .await?
-        .into_inner();
-        Ok(res.count)
+        .await?;
+        Ok(res.into_inner().into())
     }
 
     pub async fn get(&mut self, plan: Get) -> Result<GetResult, ExecutorError> {
@@ -109,6 +110,7 @@ impl DistributedExecutor {
         .await?;
         Ok(res.into_inner().try_into()?)
     }
+
     pub async fn knn(&mut self, plan: Knn) -> Result<KnnBatchResult, ExecutorError> {
         let clients = self.clients(plan.scan.collection_and_segments.collection.collection_id)?;
         let res = (|| async {
@@ -119,7 +121,7 @@ impl DistributedExecutor {
         .retry(self.backoff)
         .when(is_retryable_error)
         .await?;
-        Ok(from_proto_knn_batch_result(res.into_inner())?)
+        Ok(res.into_inner().try_into()?)
     }
 
     pub async fn is_ready(&self) -> bool {

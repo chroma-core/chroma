@@ -58,7 +58,7 @@ where
     }
 }
 
-type CountOutput = usize;
+type CountOutput = (u32, u64);
 type CountResult = Result<CountOutput, CountError>;
 
 #[derive(Debug)]
@@ -74,8 +74,11 @@ pub struct CountOrchestrator {
     // Fetch logs
     fetch_log: FetchLogOperator,
 
+    // Fetched log size
+    fetch_log_bytes: Option<u64>,
+
     // Result channel
-    result_channel: Option<Sender<Result<usize, CountError>>>,
+    result_channel: Option<Sender<CountResult>>,
 }
 
 impl CountOrchestrator {
@@ -92,6 +95,7 @@ impl CountOrchestrator {
             collection_and_segments,
             queue,
             fetch_log,
+            fetch_log_bytes: None,
             result_channel: None,
         }
     }
@@ -138,6 +142,8 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CountOrchestrator {
             Some(output) => output,
             None => return,
         };
+        self.fetch_log_bytes
+            .replace(output.iter().map(|(l, _)| l.size_byte()).sum());
         let task = wrap(
             CountRecordsOperator::new(),
             CountRecordsInput::new(
@@ -161,10 +167,13 @@ impl Handler<TaskResult<CountRecordsOutput, CountRecordsError>> for CountOrchest
         ctx: &ComponentContext<Self>,
     ) {
         self.terminate_with_result(
-            message
-                .into_inner()
-                .map_err(|e| e.into())
-                .map(|output| output.count),
+            message.into_inner().map_err(|e| e.into()).map(|output| {
+                (
+                    output.count as u32,
+                    self.fetch_log_bytes
+                        .expect("FetchLogOperator should have finished already"),
+                )
+            }),
             ctx,
         );
     }

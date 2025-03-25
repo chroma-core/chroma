@@ -18,6 +18,67 @@ We will aim to provide:
 
 ## Migration Log
 
+### v1.0.0
+
+In this release, we've rewritten much of Chroma in Rust. Performance has significantly improved across the board.
+
+**Breaking changes**
+
+Chroma no longer provides built-in authentication implementations.
+
+**Chroma in-process changes**
+
+This section is applicable to you if you use Chroma via
+
+```python
+import chromadb
+
+client = chromadb.Client()
+# or
+client = chromadb.EphemeralClient()
+# or
+client = chromadb.PersistentClient()
+```
+
+The new Rust implementation ignores these settings:
+
+- `chroma_server_nofile`
+- `chroma_server_thread_pool_size`
+- `chroma_memory_limit_bytes`
+- `chroma_segment_cache_policy`
+
+**Chroma CLI changes**
+
+This section is applicable to you if you run a Chroma server using the CLI (`chroma run`).
+
+Settings that you may have previously provided to the server using environment variables, like `CHROMA_SERVER_CORS_ALLOW_ORIGINS` or `CHROMA_OTEL_COLLECTION_ENDPOINT`, are now provided using a configuration file. For example:
+
+```terminal
+chroma run --config ./config.yaml
+```
+
+Check out a full sample configuration file [here](https://github.com/chroma-core/chroma/blob/main/rust/frontend/sample_configs/single_node_full.yaml).
+
+
+**Chroma in Docker changes**
+
+This section is applicable to you if you run Chroma using a Docker container.
+
+Settings that you previously provided to the container using environment variables, like `CHROMA_SERVER_CORS_ALLOW_ORIGINS` or `CHROMA_OTEL_COLLECTION_ENDPOINT`, are now provided to the container using a configuration file. See the [Docker documentation](../production/containers/docker#configuration) for more information.
+
+The default data location in the container has changed from `/chroma/chroma` to `/data`. For example, if you previously started the container with:
+
+```terminal
+docker run -p 8000:8000 -v ./chroma:/chroma/chroma chroma-core/chroma
+```
+
+you should now start it with:
+
+```terminal
+docker run -p 8000:8000 -v ./chroma:/data chroma-core/chroma
+```
+
+
 ### v0.6.0
 
 Previously, `list_collections` returned a list of `Collection` objects. This could lead to some errors if any of your collections were created with a custom embedding function (i.e. not the default). So moving forward, `list_collections` will only return collections names.

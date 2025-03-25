@@ -139,7 +139,7 @@ impl Scheduler {
             match join_handle.await {
                 Ok(_) => {}
                 Err(e) => {
-                    println!("Error: {:?}", e);
+                    tracing::error!("Error joining scheduler task: {:?}", e);
                 }
             }
         }
@@ -204,7 +204,7 @@ mod tests {
             self.queue_size
         }
 
-        async fn start(&mut self, ctx: &ComponentContext<TestComponent>) -> () {
+        async fn on_start(&mut self, ctx: &ComponentContext<TestComponent>) -> () {
             let duration = Duration::from_millis(100);
             ctx.scheduler
                 .schedule(ScheduleMessage {}, duration, ctx, || None);

@@ -1,7 +1,6 @@
 from typing import List, Optional, Sequence
 from uuid import UUID
 from chromadb import CollectionMetadata, Embeddings, IDs
-from chromadb.api.configuration import CollectionConfigurationInternal
 from chromadb.api.types import (
     CollectionMetadata,
     Documents,
@@ -38,6 +37,9 @@ class QueryResponse:
     metadatas: Optional[List[Metadatas]]
     distances: Optional[List[List[float]]]
     include: Include
+
+class GetTenantResponse:
+    name: str
 
 # SqliteDBConfig types
 class MigrationMode(Enum):
@@ -78,7 +80,7 @@ class Bindings:
         tenant: str = DEFAULT_TENANT,
     ) -> Sequence[DatabaseFromBindings]: ...
     def create_tenant(self, name: str) -> None: ...
-    def get_tenant(self, name: str) -> Tenant: ...
+    def get_tenant(self, name: str) -> GetTenantResponse: ...
     def count_collections(
         self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
     ) -> int: ...
@@ -92,7 +94,7 @@ class Bindings:
     def create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfigurationInternal] = None,
+        configuration_json_str: Optional[str] = None,
         metadata: Optional[CollectionMetadata] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
