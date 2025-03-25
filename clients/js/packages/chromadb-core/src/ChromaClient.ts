@@ -318,8 +318,8 @@ export class ChromaClient {
     const response = (await this.api.listCollectionsV2(
       this.tenant,
       this.database,
-      limit !== undefined ? limit : undefined,
-      offset !== undefined ? offset : undefined,
+      limit,
+      offset,
       this.api.options,
     )) as { name: string; tenant: string; database: string }[];
 
@@ -355,13 +355,10 @@ export class ChromaClient {
     const results = (await this.api.listCollectionsV2(
       this.tenant,
       this.database,
-      limit !== undefined ? limit : undefined,
-      offset !== undefined ? offset : undefined,
+      limit,
+      offset,
       this.api.options,
     )) as { name: string; id: string; metadata?: CollectionMetadata }[];
-
-    // Debug logging
-    console.log("listCollectionsAndMetadata API response:", JSON.stringify(results));
 
     return results ?? [];
   }

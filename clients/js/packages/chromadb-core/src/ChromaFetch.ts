@@ -84,16 +84,8 @@ export const chromaFetch: FetchAPI = async (
           );
       }
 
-      // Try to get the response body for debugging purposes
-      let responseBodyText = "";
-      try {
-        responseBodyText = await resp.clone().text();
-      } catch (e) {
-        responseBodyText = "Could not read response body";
-      }
-
       throw new Error(
-        `Failed to fetch ${input} with status ${resp.status}: ${resp.statusText}\nResponse body: ${responseBodyText}`,
+        `Failed to fetch ${input} with status ${resp.status}: ${resp.statusText}`,
       );
     }
 
