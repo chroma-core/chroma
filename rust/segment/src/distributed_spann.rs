@@ -635,7 +635,6 @@ mod test {
                 vector_index: chroma_types::VectorIndexConfiguration::Spann(params),
                 embedding_function: None,
             },
-            legacy_configuration_json: (),
             metadata: None,
             dimension: None,
             tenant: "test".to_string(),
