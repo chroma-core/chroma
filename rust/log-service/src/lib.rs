@@ -719,9 +719,23 @@ impl LogService for LogServer {
 
     async fn update_collection_log_offset(
         &self,
-        _: Request<UpdateCollectionLogOffsetRequest>,
+        req: Request<UpdateCollectionLogOffsetRequest>,
     ) -> Result<Response<UpdateCollectionLogOffsetResponse>, Status> {
-        // TODO(rescrv):  Log this offset to the dirty log.
+        let req = req.into_inner();
+        let collection_id = Uuid::parse_str(&req.collection_id)
+            .map(CollectionUuid)
+            .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+        let dirty_marker = DirtyMarker::MarkCollected {
+            collection_id,
+            log_position: LogPosition::from_offset(req.log_offset as u64),
+        };
+        let dirty_marker = serde_json::to_string(&dirty_marker)
+            .map(Vec::from)
+            .map_err(|err| Status::unavailable(err.to_string()))?;
+        self.dirty_log
+            .append(dirty_marker)
+            .await
+            .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
         Ok(Response::new(UpdateCollectionLogOffsetResponse {}))
     }
 }
