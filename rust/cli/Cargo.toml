@@ -30,6 +30,7 @@ tempfile = { workspace = true }
 tokio = { workspace = true }
 toml = "0.8.20"
 webbrowser = "1.0.3"
+regex = "1.11.1"
 
 
 [dev-dependencies]

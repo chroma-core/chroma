@@ -1,15 +1,20 @@
+use crate::client::get_chroma_client;
+use crate::commands::db::DbError;
+use crate::dashboard_client::{get_dashboard_client, Team};
+use crate::utils::{
+    read_config, read_profiles, validate_uri, write_config, write_profiles, CliError, Profile,
+    Profiles, UtilsError, CHROMA_DIR, CREDENTIALS_FILE,
+};
+use clap::Parser;
+use colored::Colorize;
+use dialoguer::theme::ColorfulTheme;
+use dialoguer::{Input, Select};
+use rand::Rng;
 use std::error::Error;
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::time::Duration;
-use clap::Parser;
-use colored::Colorize;
-use dialoguer::{Input, Select};
-use dialoguer::theme::ColorfulTheme;
-use rand::Rng;
 use thiserror::Error;
-use crate::commands::db::DbError;
-use crate::utils::{read_config, read_profiles, validate_name, write_config, write_profiles, CliError, Profile, Profiles, UtilsError, CHROMA_DIR, CREDENTIALS_FILE};
 
 const CLI_QUERY_PARAMETER: &str = "cli_redirect";
 
@@ -38,7 +43,10 @@ pub enum LoginError {
 }
 
 fn team_selection_prompt() -> String {
-    "Which team would you like to log in with?".blue().bold().to_string()
+    "Which team would you like to log in with?"
+        .blue()
+        .bold()
+        .to_string()
 }
 
 fn profile_name_input_prompt(profile_name: &str) -> String {
@@ -80,8 +88,8 @@ fn next_steps_message() -> String {
     )
 }
 
-fn validate_profile_name(profile_name: String) -> Result<String, CliError> {
-    Ok(validate_name(profile_name).map_err(LoginError::InvalidProfileName)?)
+fn validate_profile_name(profile_name: String) -> Result<String, LoginError> {
+    Ok(validate_uri(profile_name).map_err(|e| LoginError::InvalidProfileName(e))?)
 }
 
 fn select_team(teams: Vec<Team>) -> Result<Team, CliError> {
@@ -94,7 +102,8 @@ fn select_team(teams: Vec<Team>) -> Result<Team, CliError> {
             let selection = Select::with_theme(&ColorfulTheme::default())
                 .items(&team_names)
                 .default(0)
-                .interact().map_err(|_| UtilsError::UserInputFailed)?;
+                .interact()
+                .map_err(|_| UtilsError::UserInputFailed)?;
             let selected = teams.into_iter().nth(selection).unwrap();
             println!("{}\n", selected.name.green());
             Ok(selected)
@@ -107,14 +116,15 @@ fn find_random_available_port(start: u16, end: u16, attempts: u32) -> Result<u16
     for _ in 0..attempts {
         let port = rng.gen_range(start..=end);
         if TcpListener::bind(("127.0.0.1", port)).is_ok() {
-            return Ok(port)
+            return Ok(port);
         }
     }
     Err(LoginError::ServerStartFailed.into())
 }
 
 fn filter_team(team_id: &str, teams: Vec<Team>) -> Result<Team, LoginError> {
-    teams.into_iter()
+    teams
+        .into_iter()
         .find(|team| team.uuid.eq(team_id))
         .ok_or_else(|| LoginError::TeamNotFound(team_id.to_string()))
 }
@@ -133,23 +143,27 @@ fn get_profile_from_team(team: &Team, profiles: &Profiles) -> Result<String, Cli
     let profile_name: String = Input::with_theme(&ColorfulTheme::default())
         .allow_empty(true)
         .report(false)
-        .interact_text().map_err(|_| UtilsError::UserInputFailed)?;
+        .interact_text()
+        .map_err(|_| UtilsError::UserInputFailed)?;
 
     match profile_name.as_str() {
         "" => {
             println!("{} {}\n", "Overriding profile".green(), team_name.green());
             Ok(team_name.to_string())
-        },
+        }
         _ => {
             println!("{}\n", profile_name.green());
             Ok(profile_name)
-        },
+        }
     }
 }
 
 fn browser_auth(frontend_url: &str) -> Result<String, Box<dyn Error>> {
     let port = find_random_available_port(8050, 9000, 100)?;
-    let login_url = format!("{}/login?{}=http://localhost:{}", frontend_url, CLI_QUERY_PARAMETER, port);
+    let login_url = format!(
+        "{}/login?{}=http://localhost:{}",
+        frontend_url, CLI_QUERY_PARAMETER, port
+    );
 
     webbrowser::open(&login_url)?;
     println!("{}", waiting_for_cli_host_message());
@@ -182,21 +196,25 @@ fn browser_auth(frontend_url: &str) -> Result<String, Box<dyn Error>> {
 
 pub async fn browser_login(args: LoginArgs) -> Result<(), CliError> {
     let dashboard_client = get_dashboard_client(args.dev);
-    let session_cookies = browser_auth(&dashboard_client.frontend_url).map_err(|_| LoginError::BrowserAuthFailed)?;
+    let session_cookies =
+        browser_auth(&dashboard_client.frontend_url).map_err(|_| LoginError::BrowserAuthFailed)?;
     let teams = dashboard_client.get_teams(&session_cookies).await?;
 
     let (api_key, team) = match args.api_key {
         Some(api_key) => {
             let chroma_client = get_chroma_client(
-                Some(&Profile::new(api_key.clone(), "default".to_string())), args.dev
+                Some(&Profile::new(api_key.clone(), "default".to_string())),
+                args.dev,
             );
             let team_id = chroma_client.get_tenant_id().await?;
             let team = filter_team(&team_id, teams)?;
             (api_key, team)
-        },
+        }
         None => {
             let team = select_team(teams)?;
-            let api_key = dashboard_client.get_api_key(&team.slug, &session_cookies).await?;
+            let api_key = dashboard_client
+                .get_api_key(&team.slug, &session_cookies)
+                .await?;
             (api_key, team)
         }
     };
@@ -204,9 +222,7 @@ pub async fn browser_login(args: LoginArgs) -> Result<(), CliError> {
     let mut profiles = read_profiles()?;
     let mut profile_name = match args.profile {
         Some(name) => name,
-        None => {
-            get_profile_from_team(&team, &profiles)?
-        }
+        None => get_profile_from_team(&team, &profiles)?,
     };
     profile_name = validate_profile_name(profile_name)?;
     let profile = Profile::new(api_key, team.uuid);
@@ -235,8 +251,6 @@ pub async fn browser_login(args: LoginArgs) -> Result<(), CliError> {
 
 pub fn login(args: LoginArgs) -> Result<(), CliError> {
     let runtime = tokio::runtime::Runtime::new().map_err(|_| DbError::RuntimeError)?;
-    runtime.block_on(async {
-        browser_login(args).await
-    })?;
+    runtime.block_on(async { browser_login(args).await })?;
     Ok(())
 }
