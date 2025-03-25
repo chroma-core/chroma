@@ -252,19 +252,23 @@ impl TestSysDb {
             None => {
                 // Initialize new CollectionVersionFile with version 0
                 let mut new_file = CollectionVersionFile::default();
-                let mut collection_info = CollectionInfoImmutable::default();
-                collection_info.collection_id = collection_id.to_string();
+                let collection_info = CollectionInfoImmutable {
+                    collection_id: collection_id.to_string(),
+                    ..Default::default()
+                };
                 new_file.collection_info_immutable = Some(collection_info);
 
                 let mut version_history = CollectionVersionHistory::default();
-                let mut version_info = CollectionVersionInfo::default();
-                version_info.version = 0;
-                if inner.mock_time > 0 {
-                    version_info.created_at_secs = inner.mock_time as i64;
-                } else {
-                    version_info.created_at_secs = chrono::Utc::now().timestamp();
-                }
-                version_info.version_change_reason = VersionChangeReason::DataCompaction as i32;
+                let version_info = CollectionVersionInfo {
+                    version: 0,
+                    created_at_secs: if inner.mock_time > 0 {
+                        inner.mock_time as i64
+                    } else {
+                        chrono::Utc::now().timestamp()
+                    },
+                    version_change_reason: VersionChangeReason::DataCompaction as i32,
+                    ..Default::default()
+                };
                 version_history.versions = vec![version_info];
                 new_file.version_history = Some(version_history);
                 new_file
@@ -280,14 +284,16 @@ impl TestSysDb {
             .unwrap_or(0);
 
         // Create new version info with segment file paths
-        let mut version_info = CollectionVersionInfo::default();
-        version_info.version = next_version;
-        if inner.mock_time > 0 {
-            version_info.created_at_secs = inner.mock_time as i64;
-        } else {
-            version_info.created_at_secs = chrono::Utc::now().timestamp();
-        }
-        version_info.version_change_reason = VersionChangeReason::DataCompaction as i32;
+        let mut version_info = CollectionVersionInfo {
+            version: next_version,
+            created_at_secs: if inner.mock_time > 0 {
+                inner.mock_time as i64
+            } else {
+                chrono::Utc::now().timestamp()
+            },
+            version_change_reason: VersionChangeReason::DataCompaction as i32,
+            ..Default::default()
+        };
 
         let mut segment_info = CollectionSegmentInfo::default();
         let mut flush_compaction_infos = Vec::new();
@@ -312,9 +318,7 @@ impl TestSysDb {
         // Update the version file name.
         let version_file_name = format!(
             "{}{}/{}",
-            VERSION_FILE_S3_PREFIX,
-            collection_id.to_string(),
-            next_version
+            VERSION_FILE_S3_PREFIX, collection_id, next_version
         );
 
         inner
