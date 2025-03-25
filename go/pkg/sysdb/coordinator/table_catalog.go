@@ -322,7 +322,6 @@ func (tc *Catalog) createCollectionImpl(txCtx context.Context, createCollection 
 	}
 	result := convertCollectionToModel(collectionList)[0]
 	return result, true, nil
-
 }
 
 func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model.CreateCollection, ts types.Timestamp) (*model.Collection, bool, error) {

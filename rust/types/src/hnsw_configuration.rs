@@ -150,3 +150,17 @@ impl HnswConfiguration {
         }
     }
 }
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, Validate, ToSchema)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "pyo3", pyo3::pyclass)]
+pub struct UpdateHnswConfiguration {
+    pub ef_search: Option<usize>,
+    pub max_neighbors: Option<usize>,
+    pub num_threads: Option<usize>,
+    pub resize_factor: Option<f64>,
+    #[validate(range(min = 2))]
+    pub sync_threshold: Option<usize>,
+    #[validate(range(min = 2))]
+    pub batch_size: Option<usize>,
+}

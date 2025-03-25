@@ -34,10 +34,14 @@ from chromadb.types import (
 )
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
+    UpdateCollectionConfiguration,
     create_collection_configuration_to_json_str,
     load_collection_configuration_from_json_str,
     CollectionConfiguration,
     load_collection_configuration_from_create_collection_configuration,
+    collection_configuration_to_json_str,
+    overwrite_collection_configuration,
+    update_collection_configuration_from_legacy_update_metadata,
 )
 
 logger = logging.getLogger(__name__)
@@ -706,6 +710,9 @@ class SqlSysDB(SqlDB, SysDB):
         name: OptionalArgument[str] = Unspecified(),
         dimension: OptionalArgument[Optional[int]] = Unspecified(),
         metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
+        configuration: OptionalArgument[
+            Optional[UpdateCollectionConfiguration]
+        ] = Unspecified(),
     ) -> None:
         add_attributes_to_current_span(
             {
@@ -760,6 +767,53 @@ class SqlSysDB(SqlDB, SysDB):
                         metadata,
                         set(metadata.keys()),
                     )
+
+            if configuration != Unspecified():
+                update_configuration = cast(
+                    UpdateCollectionConfiguration, configuration
+                )
+                self._update_config_json_str(cur, update_configuration, id)
+            else:
+                if metadata != Unspecified():
+                    metadata = cast(UpdateMetadata, metadata)
+                    if metadata is not None:
+                        update_configuration = (
+                            update_collection_configuration_from_legacy_update_metadata(
+                                metadata
+                            )
+                        )
+                        self._update_config_json_str(cur, update_configuration, id)
+
+    def _update_config_json_str(
+        self, cur: Cursor, update_configuration: UpdateCollectionConfiguration, id: UUID
+    ) -> None:
+        collections_t = Table("collections")
+        q = (
+            self.querybuilder()
+            .from_(collections_t)
+            .select(collections_t.config_json_str)
+            .where(collections_t.id == ParameterValue(self.uuid_to_db(id)))
+        )
+        sql, params = get_sql(q, self.parameter_format())
+        row = cur.execute(sql, params).fetchone()
+        if not row:
+            raise NotFoundError(f"Collection {id} not found")
+        config_json_str = row[0]
+        existing_config = load_collection_configuration_from_json_str(config_json_str)
+        new_config = overwrite_collection_configuration(
+            existing_config, update_configuration
+        )
+        q = (
+            self.querybuilder()
+            .update(collections_t)
+            .set(
+                collections_t.config_json_str,
+                ParameterValue(collection_configuration_to_json_str(new_config)),
+            )
+            .where(collections_t.id == ParameterValue(self.uuid_to_db(id)))
+        )
+        sql, params = get_sql(q, self.parameter_format())
+        cur.execute(sql, params)
 
     @trace_method("SqlSysDB._metadata_from_rows", OpenTelemetryGranularity.ALL)
     def _metadata_from_rows(
