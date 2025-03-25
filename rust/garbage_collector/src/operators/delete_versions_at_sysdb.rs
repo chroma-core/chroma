@@ -205,11 +205,10 @@ mod tests {
         let sysdb = SysDb::Test(TestSysDb::new());
 
         // Create a version file with actual version history
-        let mut version_file = CollectionVersionFile::default();
-        version_file.version_history = Some(chroma_proto::CollectionVersionHistory {
-            versions: vec![],
+        let version_file = CollectionVersionFile {
+            version_history: Some(chroma_proto::CollectionVersionHistory { versions: vec![] }),
             ..Default::default()
-        });
+        };
 
         let versions_to_delete = VersionListForCollection {
             collection_id: "test_collection".to_string(),
@@ -264,6 +263,155 @@ mod tests {
         let result = operator.run(&input).await;
 
         assert!(result.is_ok());
+        let output = result.unwrap();
+        assert_eq!(output.version_file, version_file);
+        assert_eq!(output.versions_to_delete, versions_to_delete);
+    }
+
+    #[tokio::test]
+    async fn test_delete_version_files() {
+        let tmp_dir = TempDir::new().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+
+        // Create test files in the temporary directory
+        let test_files = vec!["version_1", "version_2"];
+        for file in &test_files {
+            std::fs::write(tmp_dir.path().join(file), "test content").unwrap();
+        }
+
+        // Create version file with history
+        let version_file = CollectionVersionFile {
+            version_history: Some(chroma_proto::CollectionVersionHistory {
+                versions: vec![
+                    chroma_proto::CollectionVersionInfo {
+                        version: 1,
+                        version_file_name: "version_1".to_string(),
+                        ..Default::default()
+                    },
+                    chroma_proto::CollectionVersionInfo {
+                        version: 2,
+                        version_file_name: "version_2".to_string(),
+                        ..Default::default()
+                    },
+                    chroma_proto::CollectionVersionInfo {
+                        version: 3,
+                        version_file_name: "".to_string(), // Empty file name to test filtering
+                        ..Default::default()
+                    },
+                ],
+            }),
+            ..Default::default()
+        };
+
+        let operator = DeleteVersionsAtSysDbOperator {
+            storage: storage.clone(),
+        };
+
+        // Test deleting specific versions
+        operator
+            .delete_version_files(&version_file, &[1, 2, 3])
+            .await;
+
+        // Verify files were deleted
+        for file in &test_files {
+            assert!(
+                !tmp_dir.path().join(file).exists(),
+                "File {} should be deleted",
+                file
+            );
+        }
+
+        // Test with non-existent files (should not panic)
+        operator
+            .delete_version_files(&version_file, &[1, 2, 3])
+            .await;
+    }
+
+    #[tokio::test]
+    async fn test_delete_version_files_no_history() {
+        let tmp_dir = TempDir::new().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+
+        // Create version file without history
+        let version_file = CollectionVersionFile {
+            version_history: None,
+            ..Default::default()
+        };
+
+        let operator = DeleteVersionsAtSysDbOperator {
+            storage: storage.clone(),
+        };
+
+        // Should return early without error
+        operator
+            .delete_version_files(&version_file, &[1, 2, 3])
+            .await;
+    }
+
+    #[tokio::test]
+    async fn test_operator_deletes_version_files() {
+        let tmp_dir = TempDir::new().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let sysdb = SysDb::Test(TestSysDb::new());
+
+        // Create test files in the temporary directory
+        let test_files = vec!["version_1", "version_2"];
+        for file in &test_files {
+            std::fs::write(tmp_dir.path().join(file), "test content").unwrap();
+        }
+
+        // Create version file with history
+        let version_file = CollectionVersionFile {
+            version_history: Some(chroma_proto::CollectionVersionHistory {
+                versions: vec![
+                    chroma_proto::CollectionVersionInfo {
+                        version: 1,
+                        version_file_name: "version_1".to_string(),
+                        ..Default::default()
+                    },
+                    chroma_proto::CollectionVersionInfo {
+                        version: 2,
+                        version_file_name: "version_2".to_string(),
+                        ..Default::default()
+                    },
+                ],
+            }),
+            ..Default::default()
+        };
+
+        let versions_to_delete = VersionListForCollection {
+            collection_id: "test_collection".to_string(),
+            database_id: "default".to_string(),
+            tenant_id: "default".to_string(),
+            versions: vec![1, 2],
+        };
+
+        let input = DeleteVersionsAtSysDbInput {
+            version_file: version_file.clone(),
+            versions_to_delete: versions_to_delete.clone(),
+            sysdb_client: sysdb,
+            epoch_id: 123,
+            unused_s3_files: HashSet::new(),
+        };
+
+        let operator = DeleteVersionsAtSysDbOperator {
+            storage: storage.clone(),
+        };
+
+        // Run the operator
+        let result = operator.run(&input).await;
+        assert!(result.is_ok());
+
+        // Verify files were deleted
+        for file in &test_files {
+            assert!(
+                !tmp_dir.path().join(file).exists(),
+                "File {} should have been deleted by the operator",
+                file
+            );
+        }
+
+        // Verify the output matches our expectations
         let output = result.unwrap();
         assert_eq!(output.version_file, version_file);
         assert_eq!(output.versions_to_delete, versions_to_delete);
