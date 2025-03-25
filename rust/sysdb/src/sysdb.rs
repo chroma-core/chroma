@@ -15,7 +15,7 @@ use chroma_types::{
     GetCollectionsError, GetDatabaseError, GetDatabaseResponse, GetSegmentsError, GetTenantError,
     GetTenantResponse, InternalCollectionConfiguration, ListDatabasesError, ListDatabasesResponse,
     Metadata, ResetError, ResetResponse, SegmentFlushInfo, SegmentFlushInfoConversionError,
-    SegmentUuid, UpdateCollectionError,
+    SegmentUuid, UpdateCollectionError, VectorIndexConfiguration,
 };
 use chroma_types::{
     Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
@@ -193,7 +193,13 @@ impl SysDb {
         get_or_create: bool,
     ) -> Result<Collection, CreateCollectionError> {
         let configuration = match configuration {
-            Some(config) => config,
+            Some(mut config) => {
+                let hnsw_params = config.get_hnsw_config_from_legacy_metadata(&metadata)?;
+                if let Some(hnsw_params) = hnsw_params {
+                    config.vector_index = VectorIndexConfiguration::Hnsw(hnsw_params);
+                }
+                config
+            }
             None => metadata
                 .clone()
                 .map(|m| {

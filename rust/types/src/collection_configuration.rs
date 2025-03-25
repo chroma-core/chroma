@@ -2,12 +2,22 @@ use crate::{
     HnswConfiguration, HnswParametersFromSegmentError, InternalSpannConfiguration, Metadata,
     Segment, SpannConfiguration,
 };
+use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use utoipa::ToSchema;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
-pub struct EmbeddingFunctionConfiguration {
+#[serde(tag = "type")]
+pub enum EmbeddingFunctionConfiguration {
+    #[serde(rename = "legacy")]
+    Legacy,
+    #[serde(rename = "known")]
+    Known(EmbeddingFunctionNewConfiguration),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct EmbeddingFunctionNewConfiguration {
     pub name: String,
     pub config: serde_json::Value,
 }
@@ -71,9 +81,15 @@ impl InternalCollectionConfiguration {
         &self,
         segment: &Segment,
     ) -> Result<Option<HnswConfiguration>, HnswParametersFromSegmentError> {
+        self.get_hnsw_config_from_legacy_metadata(&segment.metadata)
+    }
+
+    pub fn get_hnsw_config_from_legacy_metadata(
+        &self,
+        metadata: &Option<Metadata>,
+    ) -> Result<Option<HnswConfiguration>, HnswParametersFromSegmentError> {
         if let Some(config) = self.get_hnsw_config() {
-            let config_from_metadata =
-                HnswConfiguration::from_legacy_segment_metadata(&segment.metadata)?;
+            let config_from_metadata = HnswConfiguration::from_legacy_segment_metadata(metadata)?;
 
             if config == HnswConfiguration::default() && config != config_from_metadata {
                 return Ok(Some(config_from_metadata));
@@ -106,7 +122,16 @@ pub enum CollectionConfigurationToInternalConfigurationError {
     MultipleVectorIndexConfigurations,
 }
 
+impl ChromaError for CollectionConfigurationToInternalConfigurationError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            Self::MultipleVectorIndexConfigurations => ErrorCodes::InvalidArgument,
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
+#[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct CollectionConfiguration {
     pub hnsw: Option<HnswConfiguration>,
     pub spann: Option<SpannConfiguration>,
@@ -138,6 +163,22 @@ impl TryFrom<CollectionConfiguration> for InternalCollectionConfiguration {
     }
 }
 
+impl From<InternalCollectionConfiguration> for CollectionConfiguration {
+    fn from(value: InternalCollectionConfiguration) -> Self {
+        Self {
+            hnsw: match value.vector_index.clone() {
+                VectorIndexConfiguration::Hnsw(config) => Some(config),
+                _ => None,
+            },
+            spann: match value.vector_index {
+                VectorIndexConfiguration::Spann(config) => Some(config.into()),
+                _ => None,
+            },
+            embedding_function: value.embedding_function,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{test_segment, CollectionUuid, Metadata};
@@ -161,7 +202,7 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        assert_eq!(overridden_config.construction_ef, 1);
+        assert_eq!(overridden_config.ef_construction, 1);
     }
 
     #[test]
@@ -177,7 +218,7 @@ mod tests {
 
         let config = InternalCollectionConfiguration {
             vector_index: VectorIndexConfiguration::Hnsw(HnswConfiguration {
-                construction_ef: 2,
+                ef_construction: 2,
                 ..Default::default()
             }),
             embedding_function: None,
@@ -189,6 +230,6 @@ mod tests {
             .unwrap();
 
         // Setting from metadata is ignored since the config is not default
-        assert_eq!(overridden_config.construction_ef, 2);
+        assert_eq!(overridden_config.ef_construction, 2);
     }
 }

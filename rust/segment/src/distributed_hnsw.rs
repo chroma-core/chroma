@@ -159,9 +159,9 @@ impl DistributedHNSWSegmentWriter {
             let index = match hnsw_index_provider
                 .create(
                     &segment.collection,
-                    hnsw_configuration.m,
-                    hnsw_configuration.construction_ef,
-                    hnsw_configuration.search_ef,
+                    hnsw_configuration.max_neighbors,
+                    hnsw_configuration.ef_construction,
+                    hnsw_configuration.ef_search,
                     dimensionality as i32,
                     hnsw_configuration.space.clone().into(),
                 )
@@ -399,9 +399,9 @@ pub mod test {
 
         let hnsw_configuration = HnswConfiguration::default();
         let config = HnswIndexConfig::new_persistent(
-            hnsw_configuration.m,
-            hnsw_configuration.construction_ef,
-            hnsw_configuration.search_ef,
+            hnsw_configuration.max_neighbors,
+            hnsw_configuration.ef_construction,
+            hnsw_configuration.ef_search,
             &persist_path,
         )
         .expect("Error creating hnsw index config");
@@ -409,9 +409,9 @@ pub mod test {
         let default_hnsw_params = HnswConfiguration::default();
 
         assert_eq!(config.max_elements, DEFAULT_MAX_ELEMENTS);
-        assert_eq!(config.m, default_hnsw_params.m);
-        assert_eq!(config.ef_construction, default_hnsw_params.construction_ef);
-        assert_eq!(config.ef_search, default_hnsw_params.search_ef);
+        assert_eq!(config.m, default_hnsw_params.max_neighbors);
+        assert_eq!(config.ef_construction, default_hnsw_params.ef_construction);
+        assert_eq!(config.ef_search, default_hnsw_params.ef_search);
         assert_eq!(config.random_seed, 0);
         assert_eq!(
             config.persist_path,
@@ -422,7 +422,7 @@ pub mod test {
         let collection = Collection {
             config: InternalCollectionConfiguration {
                 vector_index: chroma_types::VectorIndexConfiguration::Hnsw(HnswConfiguration {
-                    m: 10,
+                    max_neighbors: 10,
                     ..Default::default()
                 }),
                 embedding_function: None,
@@ -445,17 +445,17 @@ pub mod test {
             .unwrap()
             .unwrap();
         let config = HnswIndexConfig::new_persistent(
-            hnsw_params.m,
-            hnsw_params.construction_ef,
-            hnsw_params.search_ef,
+            hnsw_params.max_neighbors,
+            hnsw_params.ef_construction,
+            hnsw_params.ef_search,
             &persist_path,
         )
         .expect("Error creating hnsw index config");
 
         assert_eq!(config.max_elements, DEFAULT_MAX_ELEMENTS);
         assert_eq!(config.m, 10);
-        assert_eq!(config.ef_construction, default_hnsw_params.construction_ef);
-        assert_eq!(config.ef_search, default_hnsw_params.search_ef);
+        assert_eq!(config.ef_construction, default_hnsw_params.ef_construction);
+        assert_eq!(config.ef_search, default_hnsw_params.ef_search);
         assert_eq!(config.random_seed, 0);
         assert_eq!(
             config.persist_path,

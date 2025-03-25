@@ -1,5 +1,8 @@
 use super::{Metadata, MetadataValueConversionError};
-use crate::{chroma_proto, test_segment, InternalCollectionConfiguration, Segment, SegmentScope};
+use crate::{
+    chroma_proto, test_segment, CollectionConfiguration, InternalCollectionConfiguration, Segment,
+    SegmentScope,
+};
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -121,10 +124,11 @@ impl Collection {
         &self,
         py: pyo3::Python<'py>,
     ) -> pyo3::PyResult<pyo3::Bound<'py, pyo3::PyAny>> {
-        let res = pyo3::prelude::PyModule::import(py, "chromadb.api")?
-            .getattr("CollectionConfigurationInternal")?
-            .getattr("from_json_str")?
-            .call1((CONFIGURATION_JSON_STR,))?;
+        let config: CollectionConfiguration = self.config.clone().into();
+        let config_json_str = serde_json::to_string(&config).unwrap();
+        let res = pyo3::prelude::PyModule::import(py, "json")?
+            .getattr("loads")?
+            .call1((config_json_str,))?;
         Ok(res)
     }
 

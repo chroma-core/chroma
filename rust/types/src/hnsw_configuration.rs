@@ -12,6 +12,8 @@ pub enum HnswParametersFromSegmentError {
     InvalidMetadata(#[from] serde_json::Error),
     #[error("Invalid parameters: {0}")]
     InvalidParameters(#[from] validator::ValidationErrors),
+    #[error("Incompatible vector index types")]
+    IncompatibleVectorIndexTypes,
 }
 
 impl ChromaError for HnswParametersFromSegmentError {
@@ -19,6 +21,9 @@ impl ChromaError for HnswParametersFromSegmentError {
         match self {
             HnswParametersFromSegmentError::InvalidMetadata(_) => ErrorCodes::InvalidArgument,
             HnswParametersFromSegmentError::InvalidParameters(_) => ErrorCodes::InvalidArgument,
+            HnswParametersFromSegmentError::IncompatibleVectorIndexTypes => {
+                ErrorCodes::InvalidArgument
+            }
         }
     }
 }
@@ -66,15 +71,16 @@ fn default_batch_size() -> usize {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Validate, ToSchema)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct HnswConfiguration {
     #[serde(default)]
     pub space: HnswSpace,
     #[serde(default = "default_construction_ef")]
-    pub construction_ef: usize,
+    pub ef_construction: usize,
     #[serde(default = "default_search_ef")]
-    pub search_ef: usize,
+    pub ef_search: usize,
     #[serde(default = "default_m")]
-    pub m: usize,
+    pub max_neighbors: usize,
     #[serde(default = "default_num_threads")]
     pub num_threads: usize,
     #[serde(default = "default_resize_factor")]
@@ -129,9 +135,9 @@ impl HnswConfiguration {
             let parsed = serde_json::from_str::<LegacyMetadataLocalHnswParameters>(&metadata_str)?;
             let params = HnswConfiguration {
                 space: parsed.space,
-                construction_ef: parsed.construction_ef,
-                search_ef: parsed.search_ef,
-                m: parsed.m,
+                ef_construction: parsed.construction_ef,
+                ef_search: parsed.search_ef,
+                max_neighbors: parsed.m,
                 num_threads: parsed.num_threads,
                 resize_factor: parsed.resize_factor,
                 sync_threshold: parsed.sync_threshold,

@@ -5,7 +5,7 @@ from typing_extensions import TypedDict, Protocol, runtime_checkable
 from enum import Enum
 from pydantic import Field
 import chromadb.errors as errors
-from chromadb.types import (
+from chromadb.base_types import (
     Metadata,
     UpdateMetadata,
     Vector,
@@ -24,7 +24,13 @@ from abc import abstractmethod
 
 
 # Re-export types from chromadb.types
-__all__ = ["Metadata", "Where", "WhereDocument", "UpdateCollectionMetadata"]
+__all__ = [
+    "Metadata",
+    "Where",
+    "WhereDocument",
+    "UpdateCollectionMetadata",
+    "UpdateMetadata",
+]
 META_KEY_CHROMA_DOCUMENT = "chroma:document"
 T = TypeVar("T")
 OneOrMany = Union[T, List[T]]
@@ -53,10 +59,23 @@ Embedding = Vector
 Embeddings = List[Embedding]
 
 
-class Space(Enum):
+class Space(str, Enum):
     COSINE = "cosine"
     L2 = "l2"
-    IP = "IP"
+    IP = "ip"
+
+    def __str__(self) -> str:
+        return self.value
+
+    def to_json(self) -> str:
+        return self.value
+
+    @classmethod
+    def from_json(cls, value: str) -> "Space":
+        return cls(value)
+
+    def __repr__(self) -> str:
+        return f"Space.{self.name}"
 
 
 def normalize_embeddings(
@@ -460,6 +479,7 @@ class IndexMetadata(TypedDict):
     time_created: float
 
 
+# TODO: make warnings prettier and add link to migration docs
 @runtime_checkable
 class EmbeddingFunction(Protocol[D]):
     """

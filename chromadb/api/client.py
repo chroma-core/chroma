@@ -4,7 +4,10 @@ from uuid import UUID
 from overrides import override
 import httpx
 from chromadb.api import AdminAPI, ClientAPI, ServerAPI
-from chromadb.api.configuration import CollectionConfiguration
+from chromadb.api.collection_configuration import (
+    CreateCollectionConfiguration,
+    load_collection_configuration_from_json,
+)
 from chromadb.api.shared_system_client import SharedSystemClient
 from chromadb.api.types import (
     CollectionMetadata,
@@ -136,7 +139,7 @@ class Client(SharedSystemClient, ClientAPI):
     def create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfiguration] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
@@ -144,6 +147,10 @@ class Client(SharedSystemClient, ClientAPI):
         data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
     ) -> Collection:
+        if configuration is None:
+            configuration = {}
+            if embedding_function is not None:
+                configuration["embedding_function"] = embedding_function
         model = self._server.create_collection(
             name=name,
             metadata=metadata,
@@ -173,6 +180,15 @@ class Client(SharedSystemClient, ClientAPI):
             tenant=self.tenant,
             database=self.database,
         )
+        configuration = load_collection_configuration_from_json(
+            model.configuration_json
+        )
+        # Only use the configuration's embedding_function if the user didn't provide one
+        if (
+            embedding_function is None
+            and configuration.get("embedding_function") is not None
+        ):
+            embedding_function = configuration.get("embedding_function")
         return Collection(
             client=self._server,
             model=model,
@@ -184,7 +200,7 @@ class Client(SharedSystemClient, ClientAPI):
     def get_or_create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfiguration] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]

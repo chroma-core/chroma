@@ -864,8 +864,8 @@ async fn create_collection(
         format!("tenant:{}", tenant).as_str(),
     ]);
 
-    if let Some(config) = payload.configuration.as_ref() {
-        if config.spann.is_some() && !server.config.enable_span_indexing {
+    if let Some(configuration) = payload.configuration.as_ref() {
+        if configuration.spann.is_some() && !server.config.enable_span_indexing {
             return Err(ValidationError::SpannNotImplemented)?;
         }
     }
