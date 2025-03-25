@@ -12,6 +12,8 @@ pub struct ComputeVersionsToDeleteOperator {}
 pub struct ComputeVersionsToDeleteInput {
     pub version_file: CollectionVersionFile,
     pub cutoff_time: DateTime<Utc>,
+    // Absolute cutoff time in seconds.
+    pub cutoff_time_secs: u64,
     pub min_versions_to_keep: u32,
 }
 
@@ -52,8 +54,6 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
         &self,
         input: &ComputeVersionsToDeleteInput,
     ) -> Result<ComputeVersionsToDeleteOutput, ComputeVersionsToDeleteError> {
-        tracing::info!("Starting compute versions to delete");
-
         let mut version_file = input.version_file.clone();
         let collection_info = version_file
             .collection_info_immutable
@@ -63,37 +63,30 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
                 ComputeVersionsToDeleteError::ComputeError("Missing collection info".to_string())
             })?;
 
-        tracing::info!(
+        tracing::debug!(
             tenant = %collection_info.tenant_id,
             database = %collection_info.database_id,
             collection = %collection_info.collection_id,
-            "Processing collection"
+            "Processing collection to compute versions to delete"
         );
 
         let mut marked_versions = Vec::new();
         let mut oldest_version_to_keep = 0;
 
         if let Some(ref mut version_history) = version_file.version_history {
-            tracing::info!(
+            tracing::debug!(
                 "Processing {} versions in history",
                 version_history.versions.len()
             );
 
             let mut unique_versions_seen = 0;
             let mut last_version = None;
-            let mut oldest_version_min_criteria = None;
 
             // First pass: find the oldest version that must be kept
             for version in version_history.versions.iter().rev() {
                 if last_version != Some(version.version) {
                     unique_versions_seen += 1;
-                    oldest_version_min_criteria = Some(version.version);
                     oldest_version_to_keep = version.version;
-                    tracing::debug!(
-                        version = version.version,
-                        unique_versions = unique_versions_seen,
-                        "Processing version"
-                    );
                     if unique_versions_seen == input.min_versions_to_keep {
                         break;
                     }
@@ -101,19 +94,20 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
                 }
             }
 
-            tracing::info!(
-                oldest_version = ?oldest_version_min_criteria,
-                min_versions = input.min_versions_to_keep,
-                "Found oldest version to keep"
+            tracing::debug!(
+                "Oldest version to keep: {}, min versions to keep: {}, cutoff time: {}",
+                oldest_version_to_keep,
+                input.min_versions_to_keep,
+                input.cutoff_time_secs
             );
 
-            // Second pass: mark for deletion if older than oldest_kept AND before cutoff
+            // Second pass: mark for deletion if older than oldest_version_to_keep AND before cutoff
             for version in version_history.versions.iter_mut() {
                 if version.version != 0
-                    && version.version < oldest_version_min_criteria.unwrap_or(i64::MAX)
-                    && version.created_at_secs < input.cutoff_time.timestamp()
+                    && version.version < oldest_version_to_keep
+                    && version.created_at_secs < input.cutoff_time_secs as i64
                 {
-                    tracing::info!(
+                    tracing::debug!(
                         "Marking version {} for deletion (created at {})",
                         version.version,
                         version.created_at_secs
@@ -126,8 +120,6 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
             tracing::warn!("No version history found in version file");
         }
 
-        tracing::info!("Marked {} versions for deletion", marked_versions.len());
-
         let versions_to_delete = VersionListForCollection {
             tenant_id: collection_info.tenant_id.clone(),
             database_id: collection_info.database_id.clone(),
@@ -135,11 +127,13 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
             versions: marked_versions,
         };
 
-        tracing::debug!(
-            "Computed versions to delete: {:?}, oldest version to keep: {}",
+        tracing::info!(
+            "For collection: {}, Computed versions to delete: {:?}, oldest version to keep: {}",
+            collection_info.collection_id,
             versions_to_delete,
             oldest_version_to_keep
         );
+
         Ok(ComputeVersionsToDeleteOutput {
             version_file,
             versions_to_delete,
@@ -160,7 +154,6 @@ mod tests {
     #[tokio::test]
     async fn test_compute_versions_to_delete() {
         let now = Utc::now();
-        let operator = ComputeVersionsToDeleteOperator {};
 
         let version_history = CollectionVersionHistory {
             versions: vec![
@@ -205,16 +198,20 @@ mod tests {
         let input = ComputeVersionsToDeleteInput {
             version_file,
             cutoff_time: now - Duration::hours(20),
+            cutoff_time_secs: (now - Duration::hours(20)).timestamp() as u64,
             min_versions_to_keep: 2,
         };
 
-        let result = operator.run(&input).await.unwrap();
+        let result = ComputeVersionsToDeleteOperator {}
+            .run(&input)
+            .await
+            .unwrap();
 
-        // Verify the results
+        // Verify the results.
         let versions = &result.version_file.version_history.unwrap().versions;
         assert!(versions[0].marked_for_deletion);
         assert!(versions[1].marked_for_deletion);
-        assert!(!versions[2].marked_for_deletion); // Version 2 should be kept
-        assert!(!versions[3].marked_for_deletion); // Version 3 should be kept
+        assert!(!versions[2].marked_for_deletion); // Version 2 should be kept.
+        assert!(!versions[3].marked_for_deletion); // Version 3 should be kept.
     }
 }
