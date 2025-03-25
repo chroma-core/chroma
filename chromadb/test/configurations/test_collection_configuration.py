@@ -241,9 +241,7 @@ def test_configuration_updates(client: ClientAPI) -> None:
     coll.modify(configuration=update_config)
 
     # Verify updates
-    loaded_config = load_collection_configuration_from_json(
-        coll._model.configuration_json
-    )
+    loaded_config = coll.configuration_json
     if loaded_config and isinstance(loaded_config, dict):
         hnsw_config = loaded_config.get("hnsw", {})
         if isinstance(hnsw_config, dict):
