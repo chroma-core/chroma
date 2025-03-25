@@ -354,6 +354,7 @@ where
         let builder = HybridCacheBuilder::<K, V>::new()
             .with_metrics_registry(otel_0_27_metrics)
             .with_tracing_options(tracing_options.clone())
+            .with_policy(foyer::HybridCachePolicy::WriteOnInsertion)
             .memory(config.mem)
             .with_shards(config.shards);
 
@@ -466,7 +467,7 @@ where
 
     async fn insert(&self, key: K, value: V) {
         let _stopwatch = Stopwatch::new(&self.insert_latency);
-        self.cache.insert(key.clone(), value.clone());
+        self.cache.insert(key, value);
     }
 
     async fn remove(&self, key: &K) {
@@ -691,9 +692,7 @@ mod test {
         }
     }
 
-    // TODO(@codetheweb): this test should not panic once we write to disk cache upon insert to memory cache
     #[tokio::test]
-    #[should_panic]
     async fn test_foyer_hybrid_cache_can_recover() {
         let dir = tempfile::tempdir()
             .expect("To be able to create temp path")
@@ -710,6 +709,9 @@ mod test {
         .unwrap();
 
         cache.insert("key1".to_string(), "value1".to_string()).await;
+
+        // Wait for flush to disk
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         drop(cache);
 
         // Test that we can recover the cache from disk.
