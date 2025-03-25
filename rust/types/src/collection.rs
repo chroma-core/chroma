@@ -67,7 +67,6 @@ pub struct Collection {
     #[serde(rename(serialize = "id"))]
     pub collection_id: CollectionUuid,
     pub name: String,
-    #[serde(skip_serializing)]
     pub config: InternalCollectionConfiguration,
     pub metadata: Option<Metadata>,
     pub dimension: Option<i32>,
