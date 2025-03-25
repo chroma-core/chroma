@@ -316,12 +316,11 @@ impl RefState {
                     for block_id in &current_segment.block_ids {
                         // If the block id is not present in the next version, add it to the files to delete.
                         if !next_segment.block_ids.contains(block_id) {
-                            files_to_delete_method1.insert(block_id.clone());
+                            files_to_delete_method1.insert(*block_id);
                         }
                     }
                 } else {
-                    assert!(
-                        false,
+                    panic!(
                         "RSM: cleanup_versions: segment not found in next version: {:?}",
                         current_segment.segment_id
                     );
@@ -447,7 +446,7 @@ impl ReferenceStateMachine for RefState {
                 2 => prop::sample::select(existing_collection_ids).prop_map(move |id| {
                     Transition::CleanupVersions {
                         id: id.clone(),
-                        cutoff_time: cutoff_time,
+                        cutoff_time,
                     }
                 }),
             ]
@@ -739,12 +738,10 @@ impl GcTest {
         let collection = match collections.first() {
             Some(c) => c,
             None => {
-                assert!(
-                    false,
+                panic!(
                     "Collection not found during cleanup: {}. Check preconditions logic.",
                     id
                 );
-                return self;
             }
         };
 
@@ -787,12 +784,11 @@ impl GcTest {
     }
 
     fn cleanup_versions(self, id: String, cutoff_time: u64) -> Self {
-        let result = tokio::task::block_in_place(|| {
+        tokio::task::block_in_place(|| {
             // Get the current runtime handle.
             let handle = tokio::runtime::Handle::current();
             handle.block_on(self.cleanup_versions_async(id, cutoff_time))
-        });
-        result
+        })
     }
 }
 
@@ -817,7 +813,7 @@ impl StateMachineTest for GcTest {
             "Applying transition: {:?} to SUT",
             transition
         );
-        let state = match transition {
+        match transition {
             Transition::AddVersion {
                 id,
                 to_remove_block_ids: _,
@@ -837,8 +833,7 @@ impl StateMachineTest for GcTest {
             Transition::CleanupVersions { id, cutoff_time } => {
                 state.cleanup_versions(id, cutoff_time)
             }
-        };
-        state
+        }
     }
 
     fn check_invariants(
