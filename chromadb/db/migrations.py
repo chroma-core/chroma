@@ -228,6 +228,7 @@ def verify_migration_sequence(
                 db_hash=db_migration["hash"],
                 source_hash=source_migration["hash"],
             )
+
     return source_migrations[len(db_migrations) :]
 
 
