@@ -1,14 +1,12 @@
 import pytest
 from typing import Dict, Any, cast
 import numpy as np
-from chromadb.config import System
 from chromadb.api.types import (
     EmbeddingFunction,
     Embeddings,
     Space,
     Embeddable,
 )
-from chromadb.api.client import Client as ClientCreator
 from chromadb.api import ClientAPI
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
@@ -18,6 +16,7 @@ from chromadb.api.collection_configuration import (
     UpdateHNSWConfiguration,
 )
 from chromadb.utils.embedding_functions import register_embedding_function
+from chromadb.test.conftest import ClientFactories
 
 
 class LegacyEmbeddingFunction(EmbeddingFunction[Embeddable]):
@@ -76,9 +75,8 @@ def test_legacy_embedding_function(client: ClientAPI) -> None:
     # Verify the configuration marks it as legacy
     config = load_collection_configuration_from_json(coll._model.configuration_json)
     if config and isinstance(config, dict):
-        ef_config = config.get("embedding_function", {})  # type: ignore
-        if isinstance(ef_config, dict):
-            assert ef_config.get("type") == "legacy"
+        ef = config.get("embedding_function")
+        assert ef is None  # legacy embedding functions return as None
     else:
         assert False, f"config: {config}"
 
@@ -107,9 +105,10 @@ def test_legacy_embedding_function_with_name(client: ClientAPI) -> None:
     # Verify the configuration marks it as legacy
     config = load_collection_configuration_from_json(coll._model.configuration_json)
     if config and isinstance(config, dict):
-        ef_config = config.get("embedding_function", {})  # type: ignore
-        if isinstance(ef_config, dict):
-            assert ef_config.get("type") == "legacy"
+        ef = config.get("embedding_function")
+        assert ef is None  # legacy embedding functions return as None
+    else:
+        assert False, f"config: {config}"
 
     # Get with same legacy function
     coll2 = client.get_collection(
@@ -130,7 +129,7 @@ def test_legacy_metadata(client: ClientAPI) -> None:
     # Create with legacy metadata
     legacy_metadata = {
         "hnsw:space": "cosine",
-        "hnsw:construction_ef": 100,
+        "hnsw:construction_ef": 200,
         "hnsw:M": 10,  # This is the legacy name for max_neighbors
     }
     coll = client.create_collection(
@@ -143,8 +142,13 @@ def test_legacy_metadata(client: ClientAPI) -> None:
     if config and isinstance(config, dict):
         hnsw_config = cast(CreateHNSWConfiguration, config.get("hnsw", {}))
         assert str(hnsw_config.get("space")) == str("cosine")
-        assert hnsw_config.get("ef_construction") == 100
+        assert hnsw_config.get("ef_construction") == 200
         assert hnsw_config.get("max_neighbors") == 10
+        assert hnsw_config.get("ef_search") == 100
+
+        ef = config.get("embedding_function")
+        assert ef is not None
+        assert ef.name() == "default"
 
 
 def test_new_configuration(client: ClientAPI) -> None:
@@ -249,11 +253,15 @@ def test_configuration_updates(client: ClientAPI) -> None:
         if isinstance(hnsw_config, dict):
             assert hnsw_config.get("ef_search") == 20
             assert hnsw_config.get("num_threads") == 2
+            assert hnsw_config.get("space") == "cosine"
+            assert hnsw_config.get("ef_construction") == 100
+            assert hnsw_config.get("max_neighbors") == 16
 
 
-def test_configuration_persistence(sqlite_persistent: System) -> None:
+def test_configuration_persistence(client_factories: "ClientFactories") -> None:
     """Test configuration persistence across client restarts"""
-    client = ClientCreator.from_system(sqlite_persistent)
+    # Use the factory to create the initial client
+    client = client_factories.create_client_from_system()
     client.reset()
 
     # Create collection with specific configuration
@@ -272,14 +280,8 @@ def test_configuration_persistence(sqlite_persistent: System) -> None:
         configuration=config,
     )
 
-    system2 = System(client.get_settings())
-
-    # Stop and restart system
-    del client
-
-    # Create new system and verify configuration
-    system2.start()
-    client2 = ClientCreator.from_system(system2)
+    # Simulate client restart by creating a new client from the same system
+    client2 = client_factories.create_client_from_system()
 
     coll = client2.get_collection(
         name="test_persist_config",
@@ -290,15 +292,10 @@ def test_configuration_persistence(sqlite_persistent: System) -> None:
     )
     if loaded_config and isinstance(loaded_config, dict):
         hnsw_config = cast(CreateHNSWConfiguration, loaded_config.get("hnsw", {}))
-        ef_config = loaded_config.get("embedding_function", {})  # type: ignore
-        if isinstance(ef_config, dict):
-            assert hnsw_config.get("space") == "cosine"
-            assert hnsw_config.get("ef_construction") == 100
-            assert hnsw_config.get("max_neighbors") == 10
-            assert ef_config.get("name") == "custom_ef"
-            assert ef_config.get("config", {}).get("dim") == 5
-
-    system2.stop()
+        assert hnsw_config.get("space") == "cosine"
+        assert hnsw_config.get("ef_construction") == 100
+        assert hnsw_config.get("max_neighbors") == 10
+        assert hnsw_config.get("ef_search") == 100
 
 
 def test_configuration_result_format(client: ClientAPI) -> None:
@@ -316,7 +313,6 @@ def test_configuration_result_format(client: ClientAPI) -> None:
         configuration={"hnsw": initial_hnsw},
     )
 
-    print(coll._model.configuration_json)
     assert coll._model.configuration_json is not None
     hnsw_config = coll._model.configuration_json.get("hnsw")
     assert hnsw_config is not None

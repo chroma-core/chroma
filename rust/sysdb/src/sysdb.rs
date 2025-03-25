@@ -247,7 +247,6 @@ impl SysDb {
                     collection_id,
                     name,
                     config: configuration,
-                    legacy_configuration_json: (),
                     metadata,
                     dimension,
                     tenant: tenant.clone(),
