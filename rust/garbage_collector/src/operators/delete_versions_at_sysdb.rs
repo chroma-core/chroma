@@ -56,10 +56,13 @@ impl DeleteVersionsAtSysDbOperator {
         version_file: &CollectionVersionFile,
         versions_to_delete: &[i64],
     ) {
-        let version_files_to_delete: Vec<String> = version_file
-            .version_history
-            .as_ref()
-            .unwrap()
+        // Handle case where version_history is None
+        let version_history = match &version_file.version_history {
+            Some(history) => history,
+            None => return, // Nothing to delete if there's no version history
+        };
+
+        let version_files_to_delete: Vec<String> = version_history
             .versions
             .iter()
             .filter(|v| versions_to_delete.contains(&v.version))
@@ -192,6 +195,7 @@ mod tests {
     use super::*;
     use chroma_storage::local::LocalStorage;
     use chroma_sysdb::TestSysDb;
+    use chroma_types::chroma_proto;
     use tempfile::TempDir;
 
     #[tokio::test]
@@ -199,7 +203,14 @@ mod tests {
         let tmp_dir = TempDir::new().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let sysdb = SysDb::Test(TestSysDb::new());
-        let version_file = CollectionVersionFile::default();
+
+        // Create a version file with actual version history
+        let mut version_file = CollectionVersionFile::default();
+        version_file.version_history = Some(chroma_proto::CollectionVersionHistory {
+            versions: vec![],
+            ..Default::default()
+        });
+
         let versions_to_delete = VersionListForCollection {
             collection_id: "test_collection".to_string(),
             database_id: "default".to_string(),
