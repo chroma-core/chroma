@@ -133,6 +133,13 @@ impl LogReader {
             .0)
     }
 
+    pub async fn read_parquet(
+        &self,
+        fragment: &Fragment,
+    ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64), Error> {
+        read_parquet(&self.storage, &self.prefix, &fragment.path).await
+    }
+
     pub async fn scrub(&self) -> Result<ScrubSuccess, Error> {
         let Some((manifest, _)) =
             Manifest::load(&self.options.throttle, &self.storage, &self.prefix).await?

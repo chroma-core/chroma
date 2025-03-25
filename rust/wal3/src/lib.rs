@@ -15,7 +15,7 @@ mod writer;
 
 pub use backoff::ExponentialBackoff;
 pub use batch_manager::BatchManager;
-pub use cursors::{Cursor, CursorStore};
+pub use cursors::{Cursor, CursorName, CursorStore};
 pub use manifest::{Manifest, Snapshot, SnapshotPointer};
 pub use manifest_manager::ManifestManager;
 pub use reader::{Limits, LogReader};
@@ -157,7 +157,19 @@ pub enum ScrubError {
 
 /// A log position is a pair of an offset and a timestamp.  Every record has a unique log position.
 /// A LogPosition only implements equality, which checks both offset and timestamp_us.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Hash,
+    serde::Deserialize,
+    serde::Serialize,
+)]
 pub struct LogPosition {
     /// The offset field of a LogPosition is a strictly increasing timestamp.  It has no gaps and
     /// spans [0, u64::MAX).
@@ -165,6 +177,9 @@ pub struct LogPosition {
 }
 
 impl LogPosition {
+    pub const MAX: LogPosition = LogPosition { offset: u64::MAX };
+    pub const MIN: LogPosition = LogPosition { offset: u64::MIN };
+
     /// Create a new log position from offset and current time.
     pub fn from_offset(offset: u64) -> Self {
         LogPosition { offset }
@@ -181,6 +196,16 @@ impl LogPosition {
     }
 }
 
+impl std::ops::Add<u64> for LogPosition {
+    type Output = LogPosition;
+
+    fn add(self, rhs: u64) -> Self::Output {
+        LogPosition {
+            offset: self.offset.wrapping_add(rhs),
+        }
+    }
+}
+
 impl std::ops::Add<usize> for LogPosition {
     type Output = LogPosition;
 
@@ -188,6 +213,14 @@ impl std::ops::Add<usize> for LogPosition {
         LogPosition {
             offset: self.offset.wrapping_add(rhs as u64),
         }
+    }
+}
+
+impl std::ops::Sub<LogPosition> for LogPosition {
+    type Output = u64;
+
+    fn sub(self, rhs: LogPosition) -> Self::Output {
+        self.offset - rhs.offset
     }
 }
 
