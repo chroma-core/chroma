@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
-use chroma_storage::{ETag, PutOptions, Storage};
+use chroma_storage::{PutOptions, Storage, StorageError};
 
 use crate::{CursorStoreOptions, Error, LogPosition};
 
@@ -48,7 +48,7 @@ impl CursorName<'_> {
 ////////////////////////////////////////////// Witness /////////////////////////////////////////////
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
-pub struct Witness(ETag, pub Cursor);
+pub struct Witness(PutOptions, pub Cursor);
 
 impl Witness {
     pub fn cursor(&self) -> &Cursor {
@@ -56,9 +56,15 @@ impl Witness {
     }
 }
 
+impl Witness {
+    pub fn init() -> Self {
+        Self(PutOptions::if_not_exists(), Cursor::default())
+    }
+}
+
 ////////////////////////////////////////////// Cursor //////////////////////////////////////////////
 
-#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct Cursor {
     pub position: LogPosition,
     pub epoch_us: u64,
@@ -90,11 +96,17 @@ impl CursorStore {
         }
     }
 
-    pub async fn load<'a>(&self, name: &CursorName<'a>) -> Result<Witness, Error> {
+    pub async fn load<'a>(&self, name: &CursorName<'a>) -> Result<Option<Witness>, Error> {
         // SAFETY(rescrv):  Semaphore poisoning.
         let _permit = self.semaphore.acquire().await.unwrap();
         let path = format!("{}/{}", self.prefix, name.path());
-        let (data, e_tag) = self.storage.get_with_e_tag(&path).await.map_err(Arc::new)?;
+        let (data, e_tag) = match self.storage.get_with_e_tag(&path).await.map_err(Arc::new) {
+            Ok((data, e_tag)) => (data, e_tag),
+            Err(err) => match &*err {
+                StorageError::NotFound { path: _, source: _ } => return Ok(None),
+                _ => return Err(err.into()),
+            },
+        };
         let Some(e_tag) = e_tag else {
             return Err(Error::CorruptCursor(format!(
                 "Missing ETag for cursor {}",
@@ -104,7 +116,7 @@ impl CursorStore {
         let cursor: Cursor = serde_json::from_slice(&data).map_err(|e| {
             Error::CorruptCursor(format!("Failed to deserialize cursor {}: {}", name.0, e))
         })?;
-        Ok(Witness(e_tag, cursor))
+        Ok(Some(Witness(PutOptions::if_matches(&e_tag), cursor)))
     }
 
     pub async fn init<'a>(&self, name: &CursorName<'a>, cursor: Cursor) -> Result<Witness, Error> {
@@ -120,8 +132,7 @@ impl CursorStore {
         witness: &Witness,
     ) -> Result<Witness, Error> {
         // Semaphore taken by put.
-        let options = PutOptions::if_matches(&witness.0);
-        self.put(name, cursor.clone(), options).await
+        self.put(name, cursor.clone(), witness.0.clone()).await
     }
 
     async fn put<'a>(
@@ -148,7 +159,7 @@ impl CursorStore {
                 name.0
             )));
         };
-        Ok(Witness(e_tag, cursor))
+        Ok(Witness(PutOptions::if_matches(&e_tag), cursor))
     }
 }
 

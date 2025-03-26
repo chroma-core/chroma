@@ -15,7 +15,7 @@ mod writer;
 
 pub use backoff::ExponentialBackoff;
 pub use batch_manager::BatchManager;
-pub use cursors::{Cursor, CursorName, CursorStore};
+pub use cursors::{Cursor, CursorName, CursorStore, Witness};
 pub use manifest::{Manifest, Snapshot, SnapshotPointer};
 pub use manifest_manager::ManifestManager;
 pub use reader::{Limits, LogReader};
@@ -357,7 +357,7 @@ pub struct LogReaderOptions {
 //////////////////////////////////////// CursorStoreOptions ////////////////////////////////////////
 
 /// CursorStoreOptions control the behavior of the cursor store.
-#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct CursorStoreOptions {
     /// Number of concurrent cursor operations per cursor store.
     #[serde(default = "CursorStoreOptions::default_concurrency")]
@@ -368,6 +368,14 @@ impl CursorStoreOptions {
     /// Default concurrency for cursor store operations.
     fn default_concurrency() -> usize {
         10
+    }
+}
+
+impl Default for CursorStoreOptions {
+    fn default() -> Self {
+        Self {
+            concurrency: Self::default_concurrency(),
+        }
     }
 }
 
