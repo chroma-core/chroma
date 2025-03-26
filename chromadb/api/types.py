@@ -1,4 +1,4 @@
-from typing import Optional, Set, Union, TypeVar, List, Dict, Any, Tuple, cast
+from typing import Optional, Set, Union, TypeVar, List, Dict, Any, Tuple, cast, Literal
 from numpy.typing import NDArray
 import numpy as np
 from typing_extensions import TypedDict, Protocol, runtime_checkable
@@ -58,24 +58,7 @@ PyEmbeddings = List[PyEmbedding]
 Embedding = Vector
 Embeddings = List[Embedding]
 
-
-class Space(str, Enum):
-    COSINE = "cosine"
-    L2 = "l2"
-    IP = "ip"
-
-    def __str__(self) -> str:
-        return self.value
-
-    def to_json(self) -> str:
-        return self.value
-
-    @classmethod
-    def from_json(cls, value: str) -> "Space":
-        return cls(value)
-
-    def __repr__(self) -> str:
-        return f"Space.{self.name}"
+Space = Literal["cosine", "l2", "ip"]
 
 
 def normalize_embeddings(
@@ -555,16 +538,16 @@ class EmbeddingFunction(Protocol[D]):
         """
         Return the default space for the embedding function.
         """
-        return Space.COSINE
+        return "cosine"
 
     def supported_spaces(self) -> List[Space]:
         """
         Return the supported spaces for the embedding function.
         """
-        return [Space.COSINE, Space.L2, Space.IP]
+        return ["cosine", "l2", "ip"]
 
     @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "CollectionEmbeddingFunction":
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[D]":
         """
         Build the embedding function from a config, which will be used to
         deserialize the embedding function.
@@ -616,13 +599,6 @@ class EmbeddingFunction(Protocol[D]):
         return
 
 
-CollectionEmbeddingFunction = Union[
-    EmbeddingFunction[Embeddable],
-    EmbeddingFunction[Documents],
-    EmbeddingFunction[Images],
-]
-
-
 def validate_embedding_function(
     embedding_function: EmbeddingFunction[Embeddable],
 ) -> None:
@@ -637,6 +613,13 @@ def validate_embedding_function(
             "Please see https://docs.trychroma.com/guides/embeddings for details of the EmbeddingFunction interface.\n"
             "Please note the recent change to the EmbeddingFunction interface: https://docs.trychroma.com/deployment/migration#migration-to-0.4.16---november-7,-2023 \n"
         )
+
+
+CollectionEmbeddingFunction = Union[
+    EmbeddingFunction[Embeddable],
+    EmbeddingFunction[Documents],
+    EmbeddingFunction[Images],
+]
 
 
 class DataLoader(Protocol[L]):

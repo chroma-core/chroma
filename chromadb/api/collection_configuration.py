@@ -1,4 +1,4 @@
-from typing import TypedDict, Dict, Any, Optional, cast
+from typing import TypedDict, Dict, Any, Optional, cast, get_args
 import json
 from chromadb.api.types import (
     Space,
@@ -28,7 +28,7 @@ class HNSWConfiguration(TypedDict, total=False):
 
 def default_hnsw_configuration() -> HNSWConfiguration:
     return HNSWConfiguration(
-        space=Space.L2,
+        space="l2",
         ef_construction=100,
         max_neighbors=16,
         ef_search=100,
@@ -180,10 +180,10 @@ def json_to_create_hnsw_configuration(
     config: CreateHNSWConfiguration = {}
     if "space" in json_map:
         space_value = json_map["space"]
-        if isinstance(space_value, str):
-            config["space"] = Space(space_value)
-        else:
+        if space_value in get_args(Space):
             config["space"] = space_value
+        else:
+            raise ValueError(f"not a valid space: {space_value}")
     if "ef_construction" in json_map:
         config["ef_construction"] = json_map["ef_construction"]
     if "max_neighbors" in json_map:
@@ -382,7 +382,7 @@ def populate_create_hnsw_defaults(
 ) -> CreateHNSWConfiguration:
     """Populate a CreateHNSW configuration with default values"""
     if config.get("space") is None:
-        config["space"] = ef.default_space() if ef else Space.L2
+        config["space"] = ef.default_space() if ef else "l2"
     if config.get("ef_construction") is None:
         config["ef_construction"] = 100
     if config.get("max_neighbors") is None:
@@ -420,19 +420,9 @@ def validate_create_hnsw_config(
         if config["resize_factor"] <= 0:
             raise ValueError("resize_factor must be greater than 0")
     if "space" in config:
-        # Check if the space value is one of the string values of the Space enum
-        valid_spaces = [space.value for space in Space]
-        space_value = config["space"]
-        space_str = space_value.value if isinstance(space_value, Space) else space_value
-
-        if space_str not in valid_spaces:
-            raise ValueError(
-                f"space must be one of the following: {', '.join(valid_spaces)}"
-            )
-        if ef is not None:
-            supported_spaces = [space.value for space in ef.supported_spaces()]
-            if space_str not in supported_spaces:
-                raise ValueError("space must be supported by the embedding function")
+        # Check if the space value is one of the string values of the Space literal
+        if config["space"] not in get_args(Space):
+            raise ValueError(f"space must be one of: {get_args(Space)}")
     if "ef_construction" in config:
         if config["ef_construction"] <= 0:
             raise ValueError("ef_construction must be greater than 0")
@@ -664,7 +654,7 @@ def overwrite_embedding_function(
     existing_embedding_function: CollectionEmbeddingFunction,
     update_embedding_function: CollectionEmbeddingFunction,
 ) -> CollectionEmbeddingFunction:
-    """Overwrite an EmbeddingFunction with a new configuration"""
+    """Overwrite an CollectionEmbeddingFunction with a new configuration"""
     # Check for legacy embedding functions
     if (
         existing_embedding_function.name() is NotImplemented

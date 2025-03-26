@@ -58,7 +58,7 @@ class CustomEmbeddingFunction(EmbeddingFunction[Embeddable]):
         return CustomEmbeddingFunction(dim=config["dim"])
 
     def default_space(self) -> Space:
-        return Space.COSINE
+        return "cosine"
 
 
 def test_legacy_embedding_function(client: ClientAPI) -> None:
@@ -140,7 +140,7 @@ def test_legacy_metadata(client: ClientAPI) -> None:
     config = load_collection_configuration_from_json(coll._model.configuration_json)
     if config and isinstance(config, dict):
         hnsw_config = cast(CreateHNSWConfiguration, config.get("hnsw", {}))
-        assert str(hnsw_config.get("space")) == str(Space.COSINE)
+        assert str(hnsw_config.get("space")) == str("cosine")
         assert hnsw_config.get("ef_construction") == 100
         assert hnsw_config.get("max_neighbors") == 10
 
@@ -151,7 +151,7 @@ def test_new_configuration(client: ClientAPI) -> None:
 
     # Create with new configuration
     hnsw_config: CreateHNSWConfiguration = {
-        "space": Space.COSINE,  # Use enum value
+        "space": "cosine",  # Use enum value
         "ef_construction": 100,
         "max_neighbors": 10,  # Changed from M to max_neighbors
         "ef_search": 20,
@@ -175,7 +175,7 @@ def test_new_configuration(client: ClientAPI) -> None:
         hnsw_config = cast(CreateHNSWConfiguration, loaded_config.get("hnsw", {}))
         ef_config = loaded_config.get("embedding_function", {})  # type: ignore
         if isinstance(ef_config, dict):
-            assert hnsw_config.get("space") == Space.COSINE
+            assert hnsw_config.get("space") == "cosine"
             assert hnsw_config.get("ef_construction") == 100
             assert hnsw_config.get("max_neighbors") == 10
             assert ef_config.get("type") == "known"
@@ -190,7 +190,7 @@ def test_invalid_configurations(client: ClientAPI) -> None:
     with pytest.raises(ValueError):
         invalid_hnsw: CreateHNSWConfiguration = {
             "ef_construction": -1,  # Invalid negative value
-            "space": Space.COSINE,  # Required field
+            "space": "cosine",  # Required field
         }
         client.create_collection(
             name="test_invalid",
@@ -200,11 +200,11 @@ def test_invalid_configurations(client: ClientAPI) -> None:
     # Test invalid space for embedding function
     class InvalidSpaceEF(CustomEmbeddingFunction):
         def supported_spaces(self) -> list[Space]:
-            return [Space.L2]
+            return ["l2"]
 
     with pytest.raises(ValueError):
         invalid_space_hnsw: CreateHNSWConfiguration = {
-            "space": Space.COSINE,  # Use enum value
+            "space": "cosine",  # Use enum value
         }
         client.create_collection(
             name="test_invalid_space",
@@ -223,7 +223,7 @@ def test_configuration_updates(client: ClientAPI) -> None:
     initial_hnsw: CreateHNSWConfiguration = {
         "ef_search": 10,
         "num_threads": 1,
-        "space": Space.COSINE,
+        "space": "cosine",
     }
     coll = client.create_collection(
         name="test_updates",
@@ -256,7 +256,7 @@ def test_configuration_persistence(sqlite_persistent: System) -> None:
 
     # Create collection with specific configuration
     hnsw_config: CreateHNSWConfiguration = {
-        "space": Space.COSINE,
+        "space": "cosine",
         "ef_construction": 100,
         "max_neighbors": 10,
     }
@@ -290,7 +290,7 @@ def test_configuration_persistence(sqlite_persistent: System) -> None:
         hnsw_config = cast(CreateHNSWConfiguration, loaded_config.get("hnsw", {}))
         ef_config = loaded_config.get("embedding_function", {})  # type: ignore
         if isinstance(ef_config, dict):
-            assert hnsw_config.get("space") == Space.COSINE
+            assert hnsw_config.get("space") == "cosine"
             assert hnsw_config.get("ef_construction") == 100
             assert hnsw_config.get("max_neighbors") == 10
             assert ef_config.get("name") == "custom_ef"
@@ -307,7 +307,7 @@ def test_configuration_result_format(client: ClientAPI) -> None:
     initial_hnsw: CreateHNSWConfiguration = {
         "ef_search": 10,
         "num_threads": 2,
-        "space": Space.COSINE,  # Required field
+        "space": "cosine",  # Required field
     }
     coll = client.create_collection(
         name="test_updates",
@@ -320,4 +320,4 @@ def test_configuration_result_format(client: ClientAPI) -> None:
     assert hnsw_config is not None
     assert hnsw_config.get("ef_search") == 10
     assert hnsw_config.get("num_threads") == 2
-    assert hnsw_config.get("space") == Space.COSINE
+    assert hnsw_config.get("space") == "cosine"

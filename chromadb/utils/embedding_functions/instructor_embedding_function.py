@@ -71,10 +71,10 @@ class InstructorEmbeddingFunction(EmbeddingFunction[Documents]):
         return "instructor"
 
     def default_space(self) -> Space:
-        return Space.COSINE
+        return "cosine"
 
     def supported_spaces(self) -> List[Space]:
-        return [Space.COSINE, Space.L2, Space.IP]
+        return ["cosine", "l2", "ip"]
 
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
