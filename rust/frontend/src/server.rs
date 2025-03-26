@@ -198,6 +198,7 @@ impl FrontendServer {
                     .head(v1_deprecation_notice)
                     .options(v1_deprecation_notice),
             )
+            .route("/api/v2", get(heartbeat))
             .route("/api/v2/healthcheck", get(healthcheck))
             .route("/api/v2/heartbeat", get(heartbeat))
             .route("/api/v2/pre-flight-checks", get(pre_flight_checks))
