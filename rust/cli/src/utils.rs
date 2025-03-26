@@ -3,6 +3,7 @@ use crate::commands::db::DbError;
 use crate::commands::login::LoginError;
 use crate::commands::profile::ProfileError;
 use crate::commands::run::RunError;
+use crate::commands::update::UpdateError;
 use crate::commands::vacuum::VacuumError;
 use crate::dashboard_client::DashboardClientError;
 use arboard::Clipboard;
@@ -50,6 +51,8 @@ pub enum CliError {
     Client(#[from] ChromaClientError),
     #[error("{0}")]
     Db(#[from] DbError),
+    #[error("{0}")]
+    Update(#[from] UpdateError),
     #[error("{0}")]
     Login(#[from] LoginError),
     #[error("{0}")]
