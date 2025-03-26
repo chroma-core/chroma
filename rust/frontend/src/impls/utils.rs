@@ -80,7 +80,7 @@ pub(crate) fn to_records<
             operation,
         };
 
-        total_bytes += record.size_byte();
+        total_bytes += record.size_bytes();
 
         records.push(record);
     }
