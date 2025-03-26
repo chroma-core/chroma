@@ -113,6 +113,17 @@ impl Scheduler {
                             "Collection not found: {:?}",
                             collection_info.collection_id
                         );
+                        if let Err(err) = self
+                            .log
+                            .purge_dirty_for_collection(collection_info.collection_id)
+                            .await
+                        {
+                            tracing::error!(
+                                "Error purging dirty records for collection: {:?}, error: {:?}",
+                                collection_info.collection_id,
+                                err
+                            );
+                        }
                         continue;
                     }
 
