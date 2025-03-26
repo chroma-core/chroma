@@ -106,7 +106,22 @@ impl Log {
         }
     }
 
-    // Only supported in sqlite. Distributed has a different workflow.
+    /// Only supported in distributed. Sqlite has a different workflow.
+    pub async fn purge_dirty_for_collection(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<(), Box<dyn ChromaError>> {
+        match self {
+            Log::Sqlite(_) => unimplemented!(),
+            Log::Grpc(log) => Ok(log
+                .purge_dirty_for_collection(collection_id)
+                .await
+                .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?),
+            Log::InMemory(_) => unimplemented!(),
+        }
+    }
+
+    /// Only supported in sqlite. Distributed has a different workflow.
     pub async fn purge_logs(
         &mut self,
         collection_id: CollectionUuid,

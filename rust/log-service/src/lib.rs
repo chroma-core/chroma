@@ -11,7 +11,8 @@ use chroma_storage::Storage;
 use chroma_types::chroma_proto::{
     log_service_server::LogService, CollectionInfo, GetAllCollectionInfoToCompactRequest,
     GetAllCollectionInfoToCompactResponse, LogRecord, OperationRecord, PullLogsRequest,
-    PullLogsResponse, PushLogsRequest, PushLogsResponse, UpdateCollectionLogOffsetRequest,
+    PullLogsResponse, PurgeDirtyForCollectionRequest, PurgeDirtyForCollectionResponse,
+    PushLogsRequest, PushLogsResponse, UpdateCollectionLogOffsetRequest,
     UpdateCollectionLogOffsetResponse,
 };
 use chroma_types::CollectionUuid;
@@ -288,6 +289,7 @@ impl ContiguouslyDirtyRange {
 struct RollupPerCollection {
     dirty: Vec<ContiguouslyDirtyRange>,
     collected_up_to: LogPosition,
+    forgettable: bool,
 }
 
 impl RollupPerCollection {
@@ -295,6 +297,7 @@ impl RollupPerCollection {
         Self {
             dirty: vec![],
             collected_up_to: LogPosition::MIN,
+            forgettable: false,
         }
     }
 }
@@ -314,6 +317,9 @@ pub enum DirtyMarker {
         collection_id: CollectionUuid,
         log_position: LogPosition,
     },
+    MarkForgettable {
+        collection_id: CollectionUuid,
+    },
 }
 
 impl DirtyMarker {
@@ -322,6 +328,7 @@ impl DirtyMarker {
         match self {
             DirtyMarker::MarkDirty { collection_id, .. } => *collection_id,
             DirtyMarker::MarkCollected { collection_id, .. } => *collection_id,
+            DirtyMarker::MarkForgettable { collection_id, .. } => *collection_id,
         }
     }
 
@@ -388,7 +395,7 @@ impl DirtyMarker {
             let to_compact = num_records >= record_count_threshold
                 || now - initial_insertion_epoch_us >= timeout_us
                 || reinsert_count >= reinsert_threshold;
-            if to_compact {
+            if to_compact && !rollup_pc.forgettable {
                 let first_log_offset = rollup_pc.collected_up_to.offset() as i64;
                 let first_log_ts = first_log_offset;
                 compactable.push(CollectionInfo {
@@ -396,6 +403,8 @@ impl DirtyMarker {
                     first_log_offset,
                     first_log_ts,
                 });
+            } else if rollup_pc.forgettable {
+                // intentionally drop the markers for this collection.
             } else {
                 for dirty in rollup_pc.dirty.iter() {
                     let mut dirty = dirty.clone();
@@ -469,6 +478,13 @@ impl DirtyMarker {
                     rollup_pc.collected_up_to =
                         std::cmp::max(rollup_pc.collected_up_to, *log_position);
                 }
+                DirtyMarker::MarkForgettable { collection_id } => {
+                    let rollup_pc = match rollups.entry(*collection_id) {
+                        Entry::Vacant(entry) => entry.insert(RollupPerCollection::new()),
+                        Entry::Occupied(entry) => entry.into_mut(),
+                    };
+                    rollup_pc.forgettable = true;
+                }
             }
         }
         Ok(rollups)
@@ -528,7 +544,7 @@ pub struct LogServer {
 
 #[async_trait::async_trait]
 impl LogService for LogServer {
-    #[tracing::instrument(skip(self, request), ret)]
+    #[tracing::instrument(skip(self, request))]
     async fn push_logs(
         &self,
         request: Request<PushLogsRequest>,
@@ -576,7 +592,7 @@ impl LogService for LogServer {
         Ok(Response::new(PushLogsResponse { record_count }))
     }
 
-    #[tracing::instrument(skip(self, request), ret)]
+    #[tracing::instrument(skip(self, request))]
     async fn pull_logs(
         &self,
         request: Request<PullLogsRequest>,
@@ -585,7 +601,11 @@ impl LogService for LogServer {
         let collection_id = Uuid::parse_str(&pull_logs.collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
-        tracing::info!("Pulling logs for collection {}", collection_id);
+        tracing::info!(
+            "Pulling logs for collection {} from offset {}",
+            collection_id,
+            pull_logs.start_from_offset
+        );
         let prefix = storage_prefix_for_log(collection_id);
         let log_reader = LogReader::new(
             self.config.reader.clone(),
@@ -593,8 +613,8 @@ impl LogService for LogServer {
             prefix,
         );
         let limits = Limits {
-            max_files: Some(100),
-            max_bytes: Some(1_048_576),
+            max_files: Some(pull_logs.batch_size as u64),
+            max_bytes: Some(pull_logs.batch_size as u64 * 32_768),
         };
         let fragments = log_reader
             .scan(
@@ -628,7 +648,7 @@ impl LogService for LogServer {
         Ok(Response::new(PullLogsResponse { records }))
     }
 
-    #[tracing::instrument(skip(self, request), ret)]
+    #[tracing::instrument(skip(self, request))]
     async fn get_all_collection_info_to_compact(
         &self,
         request: Request<GetAllCollectionInfoToCompactRequest>,
@@ -726,7 +746,7 @@ impl LogService for LogServer {
         }))
     }
 
-    #[tracing::instrument(skip(self, request), ret)]
+    #[tracing::instrument(skip(self, request))]
     async fn update_collection_log_offset(
         &self,
         request: Request<UpdateCollectionLogOffsetRequest>,
@@ -747,6 +767,26 @@ impl LogService for LogServer {
             .await
             .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
         Ok(Response::new(UpdateCollectionLogOffsetResponse {}))
+    }
+
+    #[tracing::instrument(skip(self, request))]
+    async fn purge_dirty_for_collection(
+        &self,
+        request: Request<PurgeDirtyForCollectionRequest>,
+    ) -> Result<Response<PurgeDirtyForCollectionResponse>, Status> {
+        let request = request.into_inner();
+        let collection_id = Uuid::parse_str(&request.collection_id)
+            .map(CollectionUuid)
+            .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+        let dirty_marker = DirtyMarker::MarkForgettable { collection_id };
+        let dirty_marker = serde_json::to_string(&dirty_marker)
+            .map(Vec::from)
+            .map_err(|err| Status::unavailable(err.to_string()))?;
+        self.dirty_log
+            .append(dirty_marker)
+            .await
+            .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
+        Ok(Response::new(PurgeDirtyForCollectionResponse {}))
     }
 }
 
