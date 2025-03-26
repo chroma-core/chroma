@@ -791,7 +791,11 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
             }
         };
         tracing::info!("Pulled Records: {:?}", records.len());
-        let final_record_pulled = records.get(records.len() - 1);
+        let final_record_pulled = if !records.is_empty() {
+            records.get(records.len() - 1)
+        } else {
+            None
+        };
         match final_record_pulled {
             Some(record) => {
                 self.pulled_log_offset = Some(record.log_offset);
