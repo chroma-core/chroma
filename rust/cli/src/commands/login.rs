@@ -89,7 +89,7 @@ fn next_steps_message() -> String {
 }
 
 fn validate_profile_name(profile_name: String) -> Result<String, LoginError> {
-    Ok(validate_uri(profile_name).map_err(|e| LoginError::InvalidProfileName(e))?)
+    validate_uri(profile_name).map_err(LoginError::InvalidProfileName)
 }
 
 fn select_team(teams: Vec<Team>) -> Result<Team, CliError> {

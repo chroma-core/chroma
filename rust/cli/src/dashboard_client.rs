@@ -49,7 +49,7 @@ impl DashboardClient {
         let mut headers = HeaderMap::new();
         headers.insert(
             COOKIE,
-            HeaderValue::from_str(&session_cookies)
+            HeaderValue::from_str(session_cookies)
                 .map_err(|_| DashboardClientError::CookiesParse)?,
         );
         Ok(Some(headers))
