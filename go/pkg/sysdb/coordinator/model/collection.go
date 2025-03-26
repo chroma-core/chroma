@@ -19,6 +19,7 @@ type Collection struct {
 	TotalRecordsPostCompaction uint64
 	SizeBytesPostCompaction    uint64 // Note: This represents the size of the records off the log
 	LastCompactionTimeSecs     uint64
+	Tenant                     string
 }
 
 type CollectionToGc struct {
