@@ -189,8 +189,8 @@ def test_invalid_configurations(client: ClientAPI) -> None:
     # Test invalid HNSW parameters
     with pytest.raises(ValueError):
         invalid_hnsw: CreateHNSWConfiguration = {
-            "ef_construction": -1,  # Invalid negative value
-            "space": "cosine",  # Required field
+            "ef_construction": -1,
+            "space": "cosine",
         }
         client.create_collection(
             name="test_invalid",

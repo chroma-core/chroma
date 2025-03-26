@@ -423,6 +423,9 @@ def validate_create_hnsw_config(
         # Check if the space value is one of the string values of the Space literal
         if config["space"] not in get_args(Space):
             raise ValueError(f"space must be one of: {get_args(Space)}")
+        if ef is not None:
+            if config["space"] not in ef.supported_spaces():
+                raise ValueError("space must be supported by the embedding function")
     if "ef_construction" in config:
         if config["ef_construction"] <= 0:
             raise ValueError("ef_construction must be greater than 0")
