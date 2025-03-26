@@ -9,8 +9,12 @@ from overrides import override
 
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
+    UpdateCollectionConfiguration,
+    update_collection_configuration_to_json,
     create_collection_configuration_to_json,
     create_collection_configuration_from_legacy_metadata_dict,
+    populate_create_hnsw_defaults,
+    validate_create_hnsw_config,
 )
 from chromadb import __version__
 from chromadb.api.base_http_client import BaseHTTPClient
@@ -271,6 +275,10 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         else:
             # At this point we know configuration is not None and has hnsw
             assert configuration is not None  # Help type checker
+            hnsw_config = configuration.get("hnsw")
+            assert hnsw_config is not None  # Help type checker
+            populate_create_hnsw_defaults(hnsw_config)
+            validate_create_hnsw_config(hnsw_config)
             model.configuration_json = create_collection_configuration_to_json(
                 configuration
             )
@@ -321,6 +329,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
+        new_configuration: Optional[UpdateCollectionConfiguration] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
@@ -331,6 +340,11 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             json={
                 "new_metadata": new_metadata,
                 "new_name": new_name,
+                "new_configuration": update_collection_configuration_to_json(
+                    new_configuration
+                )
+                if new_configuration
+                else None,
             },
         )
 

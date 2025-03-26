@@ -16,8 +16,9 @@ use chroma_types::{
     GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
     GetTenantRequest, GetTenantResponse, GetUserIdentityResponse, HeartbeatResponse, IncludeList,
     ListCollectionsRequest, ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse,
-    Metadata, QueryRequest, QueryResponse, UpdateCollectionRecordsResponse,
-    UpdateCollectionResponse, UpdateMetadata, UpsertCollectionRecordsResponse,
+    Metadata, QueryRequest, QueryResponse, UpdateCollectionConfiguration,
+    UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateMetadata,
+    UpsertCollectionRecordsResponse,
 };
 use mdac::{Rule, Scorecard, ScorecardTicket};
 use opentelemetry::global;
@@ -42,11 +43,11 @@ use crate::{
     ac::AdmissionControlledService,
     auth::{AuthenticateAndAuthorize, AuthzAction, AuthzResource},
     config::FrontendServerConfig,
-    frontend::Frontend,
     quota::{Action, QuotaEnforcer, QuotaPayload},
     server_middleware::{always_json_errors_middleware, default_json_content_type_middleware},
     tower_tracing::add_tracing_middleware,
     types::errors::{ErrorResponse, ServerError, ValidationError},
+    Frontend,
 };
 
 struct ScorecardGuard {
@@ -930,6 +931,7 @@ async fn get_collection(
 pub struct UpdateCollectionPayload {
     pub new_name: Option<String>,
     pub new_metadata: Option<UpdateMetadata>,
+    pub new_configuration: Option<UpdateCollectionConfiguration>,
 }
 
 /// Updates an existing collection's name or metadata.
@@ -995,6 +997,7 @@ async fn update_collection(
         payload
             .new_metadata
             .map(CollectionMetadataUpdate::UpdateMetadata),
+        payload.new_configuration,
     )?;
 
     server.frontend.update_collection(request).await?;
@@ -1681,7 +1684,7 @@ struct ApiDoc;
 
 #[cfg(test)]
 mod tests {
-    use crate::{config::FrontendServerConfig, frontend::Frontend, FrontendServer};
+    use crate::{config::FrontendServerConfig, Frontend, FrontendServer};
     use chroma_config::{registry::Registry, Configurable};
     use chroma_system::System;
     use std::sync::Arc;

@@ -1,6 +1,6 @@
 use crate::{
     HnswConfiguration, HnswParametersFromSegmentError, InternalSpannConfiguration, Metadata,
-    Segment, SpannConfiguration,
+    Segment, SpannConfiguration, UpdateHnswConfiguration,
 };
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
@@ -29,6 +29,29 @@ pub enum VectorIndexConfiguration {
     Spann(InternalSpannConfiguration),
 }
 
+impl VectorIndexConfiguration {
+    pub fn update(&mut self, vector_index: &VectorIndexConfiguration) {
+        match (self, vector_index) {
+            (VectorIndexConfiguration::Hnsw(hnsw), VectorIndexConfiguration::Hnsw(hnsw_new)) => {
+                *hnsw = hnsw_new.clone();
+            }
+            (
+                VectorIndexConfiguration::Spann(spann),
+                VectorIndexConfiguration::Spann(spann_new),
+            ) => {
+                *spann = spann_new.clone();
+            }
+            (VectorIndexConfiguration::Hnsw(_), VectorIndexConfiguration::Spann(_)) => {
+                // For now, we don't support converting between different index types
+                // This could be implemented in the future if needed
+            }
+            (VectorIndexConfiguration::Spann(_), VectorIndexConfiguration::Hnsw(_)) => {
+                // For now, we don't support converting between different index types
+                // This could be implemented in the future if needed
+            }
+        }
+    }
+}
 impl From<HnswConfiguration> for VectorIndexConfiguration {
     fn from(config: HnswConfiguration) -> Self {
         VectorIndexConfiguration::Hnsw(config)
@@ -114,6 +137,54 @@ impl InternalCollectionConfiguration {
             _ => None,
         }
     }
+
+    pub fn update(&mut self, configuration: &UpdateCollectionConfiguration) {
+        // Update vector_index if it exists in the update configuration
+
+        if let Some(hnsw_config) = &configuration.hnsw {
+            if let VectorIndexConfiguration::Hnsw(current_config) = &mut self.vector_index {
+                // Update only the non-None fields from the update configuration
+                if let Some(ef_search) = hnsw_config.ef_search {
+                    current_config.ef_search = ef_search;
+                }
+                if let Some(max_neighbors) = hnsw_config.max_neighbors {
+                    current_config.max_neighbors = max_neighbors;
+                }
+                if let Some(num_threads) = hnsw_config.num_threads {
+                    current_config.num_threads = num_threads;
+                }
+                if let Some(resize_factor) = hnsw_config.resize_factor {
+                    current_config.resize_factor = resize_factor;
+                }
+                if let Some(sync_threshold) = hnsw_config.sync_threshold {
+                    current_config.sync_threshold = sync_threshold;
+                }
+                if let Some(batch_size) = hnsw_config.batch_size {
+                    current_config.batch_size = batch_size;
+                }
+            }
+        }
+        if let Some(spann_config) = &configuration.spann {
+            if let VectorIndexConfiguration::Spann(current_config) = &mut self.vector_index {
+                let search_nprobe = spann_config.search_nprobe;
+                current_config.search_nprobe = search_nprobe;
+                let write_nprobe = spann_config.write_nprobe;
+                current_config.write_nprobe = write_nprobe;
+                let space = spann_config.space.clone();
+                current_config.space = space;
+                let construction_ef = spann_config.construction_ef;
+                current_config.construction_ef = construction_ef;
+                let search_ef = spann_config.search_ef;
+                current_config.search_ef = search_ef;
+                let m = spann_config.m;
+                current_config.m = m;
+            }
+        }
+        // Update embedding_function if it exists in the update configuration
+        if let Some(embedding_function) = &configuration.embedding_function {
+            self.embedding_function = Some(embedding_function.clone());
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -177,6 +248,47 @@ impl From<InternalCollectionConfiguration> for CollectionConfiguration {
             embedding_function: value.embedding_function,
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateVectorIndexConfiguration {
+    Hnsw(Option<UpdateHnswConfiguration>),
+    Spann(Option<InternalSpannConfiguration>),
+}
+
+impl From<UpdateHnswConfiguration> for UpdateVectorIndexConfiguration {
+    fn from(config: UpdateHnswConfiguration) -> Self {
+        UpdateVectorIndexConfiguration::Hnsw(Some(config))
+    }
+}
+
+impl From<InternalSpannConfiguration> for UpdateVectorIndexConfiguration {
+    fn from(config: InternalSpannConfiguration) -> Self {
+        UpdateVectorIndexConfiguration::Spann(Some(config))
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum UpdateCollectionConfigurationToInternalConfigurationError {
+    #[error("Multiple vector index configurations provided")]
+    MultipleVectorIndexConfigurations,
+}
+
+impl ChromaError for UpdateCollectionConfigurationToInternalConfigurationError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            Self::MultipleVectorIndexConfigurations => ErrorCodes::InvalidArgument,
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
+#[cfg_attr(feature = "pyo3", pyo3::pyclass)]
+pub struct UpdateCollectionConfiguration {
+    pub hnsw: Option<UpdateHnswConfiguration>,
+    pub spann: Option<SpannConfiguration>,
+    pub embedding_function: Option<EmbeddingFunctionConfiguration>,
 }
 
 #[cfg(test)]

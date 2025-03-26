@@ -80,19 +80,17 @@ describe("collection operations", () => {
     expect(collection.name).toBe(collection2.name);
   });
 
-  // test("it should get or create a collection", async () => {
-  //   await client.createCollection("test");
-
-  //   const collection2 = await client.getOrCreateCollection("test");
-  //   expect(collection2).toBeDefined();
-  //   expect(collection2).toHaveProperty("name");
-  //   expect(collection2.name).toBe("test");
-
-  //   const collection3 = await client.getOrCreateCollection("test3");
-  //   expect(collection3).toBeDefined();
-  //   expect(collection3).toHaveProperty("name");
-  //   expect(collection3.name).toBe("test3");
-  // });
+  test("it should get or create a collection", async () => {
+    await client.createCollection({ name: "test" });
+    const collection2 = await client.getOrCreateCollection({ name: "test" });
+    expect(collection2).toBeDefined();
+    expect(collection2).toHaveProperty("name");
+    expect(collection2.name).toBe("test");
+    const collection3 = await client.getOrCreateCollection({ name: "test3" });
+    expect(collection3).toBeDefined();
+    expect(collection3).toHaveProperty("name");
+    expect(collection3.name).toBe("test3");
+  });
 
   test("it should delete a collection", async () => {
     const collection = await client.createCollection({ name: "test" });

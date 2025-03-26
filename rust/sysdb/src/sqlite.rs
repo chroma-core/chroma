@@ -13,7 +13,7 @@ use chroma_types::{
     DeleteDatabaseResponse, GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError,
     GetSegmentsError, GetTenantError, GetTenantResponse, InternalCollectionConfiguration,
     ListDatabasesError, Metadata, MetadataValue, ResetError, ResetResponse, Segment, SegmentScope,
-    SegmentType, SegmentUuid, UpdateCollectionError,
+    SegmentType, SegmentUuid, UpdateCollectionConfiguration, UpdateCollectionError,
 };
 use futures::TryStreamExt;
 use sea_query_binder::SqlxBinder;
@@ -348,6 +348,7 @@ impl SqliteSysDb {
         name: Option<String>,
         metadata: Option<CollectionMetadataUpdate>,
         dimension: Option<u32>,
+        configuration: Option<UpdateCollectionConfiguration>,
     ) -> Result<(), UpdateCollectionError> {
         let mut tx = self
             .db
@@ -355,6 +356,21 @@ impl SqliteSysDb {
             .begin()
             .await
             .map_err(|e| UpdateCollectionError::Internal(e.into()))?;
+
+        let mut configuration_json_str = None;
+        if let Some(configuration) = configuration {
+            let collections = self
+                .get_collections_with_conn(&mut *tx, Some(collection_id), None, None, None, None, 0)
+                .await;
+            let collections = collections.unwrap();
+            let collection = collections.into_iter().next().unwrap();
+            let mut existing_configuration = collection.config;
+            existing_configuration.update(&configuration);
+            configuration_json_str = Some(
+                serde_json::to_string(&existing_configuration)
+                    .map_err(UpdateCollectionError::Configuration)?,
+            );
+        }
 
         if name.is_some() || dimension.is_some() {
             let mut query = sea_query::Query::update();
@@ -382,6 +398,24 @@ impl SqliteSysDb {
             }
         }
 
+        if let Some(configuration_json_str) = configuration_json_str {
+            let mut query = sea_query::Query::update();
+            let mut query = query.table(table::Collections::Table).cond_where(
+                sea_query::Expr::col((table::Collections::Table, table::Collections::Id))
+                    .eq(collection_id.to_string()),
+            );
+            query = query.value(table::Collections::ConfigJsonStr, configuration_json_str);
+
+            let (sql, values) = query.build_sqlx(sea_query::SqliteQueryBuilder);
+
+            let result = sqlx::query_with(&sql, values)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| UpdateCollectionError::Internal(e.into()))?;
+            if result.rows_affected() == 0 {
+                return Err(UpdateCollectionError::NotFound(collection_id.to_string()));
+            }
+        }
         if let Some(metadata) = metadata {
             delete_metadata::<table::CollectionMetadata, _, _>(&mut *tx, collection_id.to_string())
                 .await
@@ -942,7 +976,8 @@ mod tests {
     use super::*;
     use chroma_sqlite::db::test_utils::get_new_sqlite_db;
     use chroma_types::{
-        SegmentScope, SegmentType, SegmentUuid, UpdateMetadata, UpdateMetadataValue,
+        SegmentScope, SegmentType, SegmentUuid, UpdateHnswConfiguration, UpdateMetadata,
+        UpdateMetadataValue, VectorIndexConfiguration,
     };
 
     #[tokio::test]
@@ -1244,6 +1279,15 @@ mod tests {
                 Some("new_name".to_string()),
                 Some(CollectionMetadataUpdate::UpdateMetadata(metadata)),
                 Some(1024),
+                Some(UpdateCollectionConfiguration {
+                    hnsw: Some(UpdateHnswConfiguration {
+                        ef_search: Some(20),
+                        num_threads: Some(4),
+                        ..Default::default()
+                    }),
+                    spann: None,
+                    embedding_function: None,
+                }),
             )
             .await
             .unwrap();
@@ -1261,6 +1305,15 @@ mod tests {
             metadata.get("key1").unwrap(),
             &MetadataValue::Str("value1".to_string())
         );
+
+        // Access HNSW configuration through pattern matching
+        match &collection.config.vector_index {
+            VectorIndexConfiguration::Hnsw(hnsw) => {
+                assert_eq!(hnsw.ef_search, 20);
+                assert_eq!(hnsw.num_threads, 4);
+            }
+            _ => panic!("Expected HNSW configuration"),
+        }
     }
 
     #[tokio::test]

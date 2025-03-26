@@ -1,5 +1,6 @@
 use std::{collections::HashSet, fmt::Debug, fmt::Formatter, str::FromStr, time::Duration};
 
+use crate::types::CleanupMode;
 use async_trait::async_trait;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
@@ -20,6 +21,7 @@ use crate::{
 #[allow(dead_code)]
 pub(crate) struct GarbageCollector {
     gc_interval_mins: u64,
+    cutoff_time_secs: u64,
     cutoff_time_hours: u32,
     max_collections_to_gc: u32,
     disabled_collections: HashSet<CollectionUuid>,
@@ -27,6 +29,7 @@ pub(crate) struct GarbageCollector {
     storage: Storage,
     dispatcher: Option<ComponentHandle<Dispatcher>>,
     system: Option<chroma_system::System>,
+    cleanup_mode: CleanupMode,
 }
 
 impl Debug for GarbageCollector {
@@ -35,17 +38,21 @@ impl Debug for GarbageCollector {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 impl GarbageCollector {
     pub fn new(
         gc_interval_mins: u64,
+        cutoff_time_secs: u64,
         cutoff_time_hours: u32,
         max_collections_to_gc: u32,
         disabled_collections: HashSet<CollectionUuid>,
         sysdb_client: SysDb,
         storage: Storage,
+        cleanup_mode: CleanupMode,
     ) -> Self {
         Self {
             gc_interval_mins,
+            cutoff_time_secs,
             cutoff_time_hours,
             max_collections_to_gc,
             disabled_collections,
@@ -53,6 +60,7 @@ impl GarbageCollector {
             storage,
             dispatcher: None,
             system: None,
+            cleanup_mode,
         }
     }
 
@@ -127,10 +135,12 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
                     let orchestrator = GarbageCollectorOrchestrator::new(
                         collection.id,
                         collection.version_file_path,
+                        self.cutoff_time_secs,
                         self.cutoff_time_hours,
                         self.sysdb_client.clone(),
                         dispatcher,
                         self.storage.clone(),
+                        self.cleanup_mode,
                     );
 
                     jobs.push(
@@ -190,13 +200,21 @@ impl Configurable<GarbageCollectorConfig> for GarbageCollector {
             disabled_collections.insert(collection_id);
         }
 
+        let cutoff_time_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            - (config.cutoff_time_hours as u64 * 3600);
+
         Ok(GarbageCollector::new(
             config.gc_interval_mins as u64,
+            cutoff_time_secs,
             config.cutoff_time_hours,
             config.max_collections_to_gc,
             disabled_collections,
             sysdb_client,
             storage,
+            CleanupMode::ListOnly,
         ))
     }
 }

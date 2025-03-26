@@ -4,11 +4,10 @@ use chroma_cli::chroma_cli;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_frontend::{
     executor::config::{ExecutorConfig, LocalExecutorConfig},
-    frontend::Frontend,
     get_collection_with_segments_provider::{
         CacheInvalidationRetryConfig, CollectionsWithSegmentsProviderConfig,
     },
-    FrontendConfig,
+    Frontend, FrontendConfig,
 };
 use chroma_log::config::{LogConfig, SqliteLogConfig};
 use chroma_segment::local_segment_manager::LocalSegmentManagerConfig;
@@ -20,8 +19,8 @@ use chroma_types::{
     CountResponse, CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest, Database,
     DeleteCollectionRequest, DeleteDatabaseRequest, GetCollectionRequest, GetDatabaseRequest,
     GetResponse, GetTenantRequest, GetTenantResponse, HeartbeatError, IncludeList,
-    ListCollectionsRequest, ListDatabasesRequest, Metadata, QueryResponse, UpdateCollectionRequest,
-    UpdateMetadata, WrappedSerdeJsonError,
+    ListCollectionsRequest, ListDatabasesRequest, Metadata, QueryResponse,
+    UpdateCollectionConfiguration, UpdateCollectionRequest, UpdateMetadata, WrappedSerdeJsonError,
 };
 use pyo3::{exceptions::PyValueError, pyclass, pyfunction, pymethods, types::PyAnyMethods, Python};
 use std::time::SystemTime;
@@ -297,22 +296,36 @@ impl Bindings {
     }
 
     #[pyo3(
-        signature = (collection_id, new_name = None, new_metadata = None)
+        signature = (collection_id, new_name = None, new_metadata = None, new_configuration_json_str = None)
     )]
     fn update_collection(
         &self,
         collection_id: String,
         new_name: Option<String>,
         new_metadata: Option<UpdateMetadata>,
+        new_configuration_json_str: Option<String>,
     ) -> ChromaPyResult<()> {
         let collection_id = chroma_types::CollectionUuid(
             uuid::Uuid::parse_str(&collection_id).map_err(WrappedUuidError)?,
         );
 
+        let configuration_json = match new_configuration_json_str {
+            Some(new_configuration_json_str) => {
+                let new_configuration_json = serde_json::from_str::<UpdateCollectionConfiguration>(
+                    &new_configuration_json_str,
+                )
+                .map_err(WrappedSerdeJsonError::SerdeJsonError)?;
+
+                Some(new_configuration_json)
+            }
+            None => None,
+        };
+
         let request = UpdateCollectionRequest::try_new(
             collection_id,
             new_name,
             new_metadata.map(CollectionMetadataUpdate::UpdateMetadata),
+            configuration_json,
         )?;
 
         let mut frontend = self.frontend.clone();

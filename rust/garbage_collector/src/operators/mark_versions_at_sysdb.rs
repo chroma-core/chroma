@@ -137,7 +137,7 @@ mod tests {
             collection_id: "test_collection".to_string(),
             database_id: "default".to_string(),
             tenant_id: "default".to_string(),
-            versions: vec![1],
+            versions: vec![0],
         };
 
         let input = MarkVersionsAtSysDbInput {

@@ -8,14 +8,15 @@ use chroma_error::{ChromaError, ErrorCodes, TonicError, TonicMissingFieldError};
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
 use chroma_types::chroma_proto::VersionListForCollection;
 use chroma_types::{
-    chroma_proto, CollectionAndSegments, CollectionMetadataUpdate, CountCollectionsError,
-    CreateCollectionError, CreateDatabaseError, CreateDatabaseResponse, CreateTenantError,
-    CreateTenantResponse, Database, DeleteCollectionError, DeleteDatabaseError,
-    DeleteDatabaseResponse, GetCollectionSizeError, GetCollectionWithSegmentsError,
-    GetCollectionsError, GetDatabaseError, GetDatabaseResponse, GetSegmentsError, GetTenantError,
-    GetTenantResponse, InternalCollectionConfiguration, ListDatabasesError, ListDatabasesResponse,
-    Metadata, ResetError, ResetResponse, SegmentFlushInfo, SegmentFlushInfoConversionError,
-    SegmentUuid, UpdateCollectionError, VectorIndexConfiguration,
+    chroma_proto, chroma_proto::CollectionVersionInfo, CollectionAndSegments,
+    CollectionMetadataUpdate, CountCollectionsError, CreateCollectionError, CreateDatabaseError,
+    CreateDatabaseResponse, CreateTenantError, CreateTenantResponse, Database,
+    DeleteCollectionError, DeleteDatabaseError, DeleteDatabaseResponse, GetCollectionSizeError,
+    GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError, GetDatabaseResponse,
+    GetSegmentsError, GetTenantError, GetTenantResponse, InternalCollectionConfiguration,
+    ListCollectionVersionsError, ListDatabasesError, ListDatabasesResponse, Metadata, ResetError,
+    ResetResponse, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
+    UpdateCollectionConfiguration, UpdateCollectionError, VectorIndexConfiguration,
 };
 use chroma_types::{
     Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
@@ -30,6 +31,8 @@ use tonic::transport::{Channel, Endpoint};
 use tonic::Code;
 use tower::ServiceBuilder;
 use uuid::{Error, Uuid};
+
+pub const VERSION_FILE_S3_PREFIX: &str = "sysdb/version_files/";
 
 #[derive(Debug, Clone)]
 pub enum SysDb {
@@ -271,15 +274,16 @@ impl SysDb {
         name: Option<String>,
         metadata: Option<CollectionMetadataUpdate>,
         dimension: Option<u32>,
+        configuration: Option<UpdateCollectionConfiguration>,
     ) -> Result<(), UpdateCollectionError> {
         match self {
             SysDb::Grpc(grpc) => {
-                grpc.update_collection(collection_id, name, metadata, dimension)
+                grpc.update_collection(collection_id, name, metadata, dimension, configuration)
                     .await
             }
             SysDb::Sqlite(sqlite) => {
                 sqlite
-                    .update_collection(collection_id, name, metadata, dimension)
+                    .update_collection(collection_id, name, metadata, dimension, configuration)
                     .await
             }
             SysDb::Test(_) => {
@@ -398,6 +402,17 @@ impl SysDb {
                 )
                 .await
             }
+        }
+    }
+
+    pub async fn list_collection_versions(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<Vec<CollectionVersionInfo>, ListCollectionVersionsError> {
+        match self {
+            SysDb::Grpc(_) => todo!(),
+            SysDb::Sqlite(_) => todo!(),
+            SysDb::Test(test) => test.list_collection_versions(collection_id).await,
         }
     }
 
@@ -815,10 +830,11 @@ impl GrpcSysDb {
         name: Option<String>,
         metadata: Option<CollectionMetadataUpdate>,
         dimension: Option<u32>,
+        _configuration: Option<UpdateCollectionConfiguration>,
     ) -> Result<(), UpdateCollectionError> {
         let req = chroma_proto::UpdateCollectionRequest {
             id: collection_id.0.to_string(),
-            name,
+            name: name.clone(),
             metadata_update: metadata.map(|metadata| match metadata {
                 CollectionMetadataUpdate::UpdateMetadata(metadata) => {
                     chroma_proto::update_collection_request::MetadataUpdate::Metadata(
