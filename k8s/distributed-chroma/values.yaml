@@ -26,7 +26,7 @@ frontendService:
   authzProvider: 'value: ""'
   authzConfigProvider: 'value: ""'
   memberlistProviderImpl: 'value: "chromadb.segment.impl.distributed.segment_directory.CustomResourceMemberlistProvider"'
-  logServiceHost: 'value: "logservice.chroma"'
+  logServiceHost: 'value: "rust-log-service.chroma"'
   logServicePort: 'value: "50051"'
   otherEnvConfig: |
     - name: CHROMA_OTEL_COLLECTION_ENDPOINT
