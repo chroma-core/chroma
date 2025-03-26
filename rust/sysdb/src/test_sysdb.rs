@@ -1,7 +1,11 @@
+use super::sysdb::FlushCompactionError;
+use super::sysdb::GetLastCompactionTimeError;
+use chroma_types::chroma_proto::VersionListForCollection;
 use chroma_types::{
-    Collection, CollectionUuid, Database, FlushCompactionResponse, GetCollectionSizeError,
-    GetSegmentsError, ListDatabasesError, ListDatabasesResponse, Segment, SegmentFlushInfo,
-    SegmentScope, SegmentType, Tenant,
+    Collection, CollectionUuid, CreateDatabaseError, CreateDatabaseResponse, Database,
+    FlushCompactionResponse, GetCollectionSizeError, GetDatabaseError, GetSegmentsError,
+    ListDatabasesError, ListDatabasesResponse, Segment, SegmentFlushInfo, SegmentScope,
+    SegmentType, Tenant,
 };
 use chroma_types::{GetCollectionsError, SegmentUuid};
 use parking_lot::Mutex;
@@ -24,6 +28,7 @@ use chroma_types::ListCollectionVersionsError;
 use chrono;
 use derivative::Derivative;
 use prost::Message;
+use uuid::Uuid;
 
 #[derive(Clone, Debug)]
 pub struct TestSysDb {
@@ -41,6 +46,7 @@ struct Inner {
     #[derivative(Debug = "ignore")]
     storage: Option<chroma_storage::Storage>,
     mock_time: u64,
+    databases: HashMap<Uuid, Database>,
 }
 
 impl TestSysDb {
@@ -55,6 +61,7 @@ impl TestSysDb {
                 collection_to_version_file_name: HashMap::new(),
                 storage: None,
                 mock_time: 0,
+                databases: HashMap::new(),
             })),
         }
     }
@@ -68,7 +75,23 @@ impl TestSysDb {
         let mut inner = self.inner.lock();
         inner
             .collections
-            .insert(collection.collection_id, collection);
+            .insert(collection.collection_id, collection.clone());
+
+        for db in inner.databases.values() {
+            if db.name == collection.database && db.tenant == collection.tenant {
+                return;
+            }
+        }
+
+        let database_id = uuid::Uuid::new_v4();
+        inner.databases.insert(
+            database_id,
+            Database {
+                id: database_id,
+                name: collection.database.clone(),
+                tenant: collection.tenant.clone(),
+            },
+        );
     }
 
     pub fn update_collection_size(&mut self, collection_id: CollectionUuid, collection_size: u64) {
@@ -184,25 +207,22 @@ impl TestSysDb {
         &self,
         tenant: String,
         limit: Option<u32>,
-        _offset: u32,
+        offset: u32,
     ) -> Result<ListDatabasesResponse, ListDatabasesError> {
         let inner = self.inner.lock();
-        let mut databases = Vec::new();
-        let mut seen_db_names = std::collections::HashSet::new();
 
-        for collection in inner.collections.values() {
-            if collection.tenant == tenant && !seen_db_names.contains(&collection.database) {
-                seen_db_names.insert(collection.database.clone());
+        let databases: Vec<Database> = inner
+            .databases
+            .values()
+            .filter(|db| db.tenant == tenant)
+            .map(|db| Database {
+                id: db.id,
+                name: db.name.clone(),
+                tenant: db.tenant.clone(),
+            })
+            .collect();
 
-                let db = Database {
-                    id: uuid::Uuid::new_v4(),
-                    name: collection.database.clone(),
-                    tenant: tenant.clone(),
-                };
-
-                databases.push(db);
-            }
-        }
+        let mut databases: Vec<Database> = databases.into_iter().skip(offset as usize).collect();
 
         if let Some(limit_value) = limit {
             if limit_value > 0 && databases.len() > limit_value as usize {
@@ -493,5 +513,43 @@ impl TestSysDb {
                 "Collection not found".to_string(),
             )),
         }
+    }
+
+    pub(crate) async fn create_database(
+        &mut self,
+        database_id: Uuid,
+        database_name: String,
+        tenant: String,
+    ) -> Result<CreateDatabaseResponse, CreateDatabaseError> {
+        let mut inner = self.inner.lock();
+        inner.databases.insert(
+            database_id,
+            Database {
+                id: database_id,
+                name: database_name,
+                tenant: tenant,
+            },
+        );
+        Ok(CreateDatabaseResponse {})
+    }
+
+    pub async fn get_database(
+        &mut self,
+        database_name: &str,
+        tenant: &str,
+    ) -> Result<Database, GetDatabaseError> {
+        let inner = self.inner.lock();
+
+        for db in inner.databases.values() {
+            if db.tenant == tenant && db.name == database_name {
+                return Ok(Database {
+                    id: db.id,
+                    name: db.name.clone(),
+                    tenant: db.tenant.clone(),
+                });
+            }
+        }
+
+        Err(GetDatabaseError::NotFound(database_name.to_string()))
     }
 }

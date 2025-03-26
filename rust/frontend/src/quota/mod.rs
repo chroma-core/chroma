@@ -261,7 +261,7 @@ lazy_static::lazy_static! {
         m.insert(UsageType::UriSizeBytes, 32);
         m.insert(UsageType::IdSizeBytes, 128);
         m.insert(UsageType::NameSizeBytes, 128);
-        m.insert(UsageType::LimitValue, 1000);
+        m.insert(UsageType::LimitValue, 100);
         m.insert(UsageType::NumResults, 100);
         m.insert(UsageType::NumQueryEmbeddings, 100);
         m.insert(UsageType::CollectionSizeRecords, 1_000_000);
