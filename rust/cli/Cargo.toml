@@ -22,8 +22,6 @@ rand = {workspace = true}
 reqwest = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true}
-strum = "0.27.1"
-strum_macros = "0.27.1"
 sqlx = { workspace = true }
 thiserror = { workspace = true }
 tempfile = { workspace = true }
