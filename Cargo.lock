@@ -1451,6 +1451,7 @@ dependencies = [
  "dirs 6.0.0",
  "indicatif",
  "predicates",
+ "rand 0.8.5",
  "regex",
  "reqwest 0.12.9",
  "semver",
