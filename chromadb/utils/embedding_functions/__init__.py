@@ -3,7 +3,6 @@ from chromadb.api.types import (
     EmbeddingFunction,
     Embeddings,
     Documents,
-    CollectionEmbeddingFunction,
 )
 
 # Import all embedding functions
@@ -117,7 +116,7 @@ class DefaultEmbeddingFunction(EmbeddingFunction[Documents]):
 
 
 # Dictionary of supported embedding functions
-known_embedding_functions: Dict[str, Type[CollectionEmbeddingFunction]] = {
+known_embedding_functions: Dict[str, Type[EmbeddingFunction]] = {  # type: ignore
     "cohere": CohereEmbeddingFunction,
     "openai": OpenAIEmbeddingFunction,
     "huggingface": HuggingFaceEmbeddingFunction,
@@ -141,7 +140,7 @@ known_embedding_functions: Dict[str, Type[CollectionEmbeddingFunction]] = {
 
 
 # Function to register custom embedding functions
-def register_embedding_function(ef_class: Type[CollectionEmbeddingFunction]) -> None:
+def register_embedding_function(ef_class: Type[EmbeddingFunction]) -> None:  # type: ignore
     """Register a custom embedding function.
 
     Args:
@@ -152,7 +151,7 @@ def register_embedding_function(ef_class: Type[CollectionEmbeddingFunction]) -> 
 
 
 # Function to convert config to embedding function
-def config_to_embedding_function(config: Dict[str, Any]) -> CollectionEmbeddingFunction:
+def config_to_embedding_function(config: Dict[str, Any]) -> EmbeddingFunction:  # type: ignore
     """Convert a config dictionary to an embedding function.
 
     Args:

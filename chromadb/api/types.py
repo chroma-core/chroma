@@ -615,13 +615,6 @@ def validate_embedding_function(
         )
 
 
-CollectionEmbeddingFunction = Union[
-    EmbeddingFunction[Embeddable],
-    EmbeddingFunction[Documents],
-    EmbeddingFunction[Images],
-]
-
-
 class DataLoader(Protocol[L]):
     def __call__(self, uris: URIs) -> L:
         ...
