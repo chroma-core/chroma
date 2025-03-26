@@ -58,9 +58,18 @@ message UpdateCollectionLogOffsetResponse {
   // Empty
 }
 
+message PurgeDirtyForCollectionRequest {
+  string collection_id = 1;
+}
+
+message PurgeDirtyForCollectionResponse {
+  // Empty
+}
+
 service LogService {
   rpc PushLogs(PushLogsRequest) returns (PushLogsResponse) {}
   rpc PullLogs(PullLogsRequest) returns (PullLogsResponse) {}
   rpc GetAllCollectionInfoToCompact(GetAllCollectionInfoToCompactRequest) returns (GetAllCollectionInfoToCompactResponse) {}
   rpc UpdateCollectionLogOffset(UpdateCollectionLogOffsetRequest) returns (UpdateCollectionLogOffsetResponse) {}
+  rpc PurgeDirtyForCollection(PurgeDirtyForCollectionRequest) returns (PurgeDirtyForCollectionResponse) {}
 }
