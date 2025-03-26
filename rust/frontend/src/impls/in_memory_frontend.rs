@@ -484,7 +484,7 @@ impl InMemoryFrontend {
     }
 
     pub fn count(
-        &mut self,
+        &self,
         request: chroma_types::CountRequest,
     ) -> Result<chroma_types::CountResponse, chroma_types::QueryError> {
         let collection = self
