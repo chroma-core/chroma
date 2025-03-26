@@ -39,7 +39,7 @@ def default_hnsw_configuration() -> HNSWConfiguration:
     )
 
 
-class CollectionConfiguration(TypedDict, total=True):
+class CollectionConfiguration(TypedDict, total=False):
     hnsw: Optional[HNSWConfiguration]
     embedding_function: Optional[EmbeddingFunction]  # type: ignore
 
@@ -64,10 +64,7 @@ def load_collection_configuration_from_json(
 ) -> CollectionConfiguration:
     if json_map.get("hnsw") is None:
         if json_map.get("embedding_function") is None:
-            return CollectionConfiguration(
-                hnsw=HNSWConfiguration(),
-                embedding_function=None,
-            )
+            return CollectionConfiguration()
         else:
             ef_config = json_map["embedding_function"]
             if ef_config["type"] == "legacy":
@@ -76,21 +73,16 @@ def load_collection_configuration_from_json(
                     DeprecationWarning,
                     stacklevel=2,
                 )
-                return CollectionConfiguration(
-                    hnsw=HNSWConfiguration(),
-                    embedding_function=None,
-                )
+                return CollectionConfiguration()
             else:
                 ef = known_embedding_functions[ef_config["name"]]
                 return CollectionConfiguration(
-                    hnsw=HNSWConfiguration(),
-                    embedding_function=ef.build_from_config(ef_config["config"]),
+                    embedding_function=ef.build_from_config(ef_config["config"])
                 )
     else:
         if json_map.get("embedding_function") is None:
             return CollectionConfiguration(
-                hnsw=cast(HNSWConfiguration, json_map["hnsw"]),
-                embedding_function=None,
+                hnsw=cast(HNSWConfiguration, json_map["hnsw"])
             )
         else:
             ef_config = json_map["embedding_function"]
@@ -101,8 +93,7 @@ def load_collection_configuration_from_json(
                     stacklevel=2,
                 )
                 return CollectionConfiguration(
-                    hnsw=cast(HNSWConfiguration, json_map["hnsw"]),
-                    embedding_function=None,
+                    hnsw=cast(HNSWConfiguration, json_map["hnsw"])
                 )
             else:
                 ef = known_embedding_functions[ef_config["name"]]

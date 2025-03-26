@@ -62,8 +62,6 @@ from chromadb.api.types import (
 from chromadb.api.collection_configuration import (
     UpdateCollectionConfiguration,
     overwrite_collection_configuration,
-    load_collection_configuration_from_json,
-    CollectionConfiguration,
 )
 
 # TODO: We should rename the types in chromadb.types to be Models where
@@ -139,10 +137,6 @@ class CollectionCommon(Generic[ClientT]):
     @property
     def name(self) -> str:
         return self._model.name
-
-    @property
-    def configuration(self) -> CollectionConfiguration:
-        return load_collection_configuration_from_json(self._model.configuration_json)
 
     @property
     def configuration_json(self) -> Dict[str, Any]:
@@ -550,10 +544,9 @@ class CollectionCommon(Generic[ClientT]):
         )
 
     def _embed(self, input: Any) -> Embeddings:
-        ef = self._model.get_configuration().get("embedding_function")
-        if ef is None:
+        if self._embedding_function is None:
             raise ValueError(
                 "You must provide an embedding function to compute embeddings."
-                "https://docs.trychroma.com/guides/embeddings"  # TODO: @jai add link to updated collection configuration docs
+                "https://docs.trychroma.com/guides/embeddings"
             )
-        return ef(input=input)
+        return self._embedding_function(input=input)
