@@ -39,7 +39,7 @@ def default_hnsw_configuration() -> HNSWConfiguration:
     )
 
 
-class CollectionConfiguration(TypedDict, total=False):
+class CollectionConfiguration(TypedDict, total=True):
     hnsw: Optional[HNSWConfiguration]
     embedding_function: Optional[EmbeddingFunction]  # type: ignore
 
@@ -64,25 +64,9 @@ def load_collection_configuration_from_json(
 ) -> CollectionConfiguration:
     if json_map.get("hnsw") is None:
         if json_map.get("embedding_function") is None:
-            return CollectionConfiguration()
-        else:
-            ef_config = json_map["embedding_function"]
-            if ef_config["type"] == "legacy":
-                warnings.warn(
-                    "legacy embedding function config",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-                return CollectionConfiguration()
-            else:
-                ef = known_embedding_functions[ef_config["name"]]
-                return CollectionConfiguration(
-                    embedding_function=ef.build_from_config(ef_config["config"])
-                )
-    else:
-        if json_map.get("embedding_function") is None:
             return CollectionConfiguration(
-                hnsw=cast(HNSWConfiguration, json_map["hnsw"])
+                hnsw=HNSWConfiguration(),
+                embedding_function=None,
             )
         else:
             ef_config = json_map["embedding_function"]
@@ -93,7 +77,32 @@ def load_collection_configuration_from_json(
                     stacklevel=2,
                 )
                 return CollectionConfiguration(
-                    hnsw=cast(HNSWConfiguration, json_map["hnsw"])
+                    hnsw=HNSWConfiguration(),
+                    embedding_function=None,
+                )
+            else:
+                ef = known_embedding_functions[ef_config["name"]]
+                return CollectionConfiguration(
+                    hnsw=HNSWConfiguration(),
+                    embedding_function=ef.build_from_config(ef_config["config"]),
+                )
+    else:
+        if json_map.get("embedding_function") is None:
+            return CollectionConfiguration(
+                hnsw=cast(HNSWConfiguration, json_map["hnsw"]),
+                embedding_function=None,
+            )
+        else:
+            ef_config = json_map["embedding_function"]
+            if ef_config["type"] == "legacy":
+                warnings.warn(
+                    "legacy embedding function config",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+                return CollectionConfiguration(
+                    hnsw=cast(HNSWConfiguration, json_map["hnsw"]),
+                    embedding_function=None,
                 )
             else:
                 ef = known_embedding_functions[ef_config["name"]]
