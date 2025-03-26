@@ -36,7 +36,7 @@ query_service:
                     max_concurrent_requests: 15
     log:
         grpc:
-            host: "logservice.chroma"
+            host: "rust-log-service.chroma"
             port: 50051
             connect_timeout_ms: 5000
             request_timeout_ms: 5000
@@ -109,7 +109,7 @@ compaction_service:
                     max_concurrent_requests: 30
     log:
         grpc:
-            host: "logservice.chroma"
+            host: "rust-log-service.chroma"
             port: 50051
             connect_timeout_ms: 5000
             request_timeout_ms: 5000
