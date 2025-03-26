@@ -1,8 +1,10 @@
 mod client;
 mod commands;
+mod dashboard_client;
 mod utils;
 
 use crate::commands::db::{db_command, DbCommand};
+use crate::commands::login::{login, LoginArgs};
 use crate::commands::profile::{profile_command, ProfileCommand};
 use crate::commands::run::{run, RunArgs};
 use crate::commands::vacuum::{vacuum, VacuumArgs};
@@ -16,6 +18,7 @@ enum Command {
     #[command(subcommand)]
     Db(DbCommand),
     Docs,
+    Login(LoginArgs),
     #[command(subcommand)]
     Profile(ProfileCommand),
     Run(RunArgs),
@@ -49,6 +52,7 @@ pub fn chroma_cli(args: Vec<String>) {
             let url = "https://docs.trychroma.com";
             open_browser(url)
         }
+        Command::Login(args) => login(args),
         Command::Profile(profile_subcommand) => profile_command(profile_subcommand),
         Command::Run(args) => run(args),
         Command::Support => {

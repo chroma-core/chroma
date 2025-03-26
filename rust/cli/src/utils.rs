@@ -1,10 +1,16 @@
-use crate::client::ClientError;
+use crate::client::ChromaClientError;
 use crate::commands::db::DbError;
+use crate::commands::login::LoginError;
 use crate::commands::profile::ProfileError;
 use crate::commands::run::RunError;
 use crate::commands::vacuum::VacuumError;
+use crate::dashboard_client::DashboardClientError;
 use arboard::Clipboard;
 use colored::Colorize;
+use regex::Regex;
+use reqwest::header::HeaderMap;
+use reqwest::{Client, Method};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
@@ -26,8 +32,8 @@ pub const LOGO: &str = "
                 \x1b[38;5;069m(((((\x1b[38;5;203m((((    \x1b[38;5;220m#########\x1b[0m
 ";
 
-const CHROMA_DIR: &str = ".chroma";
-const CREDENTIALS_FILE: &str = "credentials";
+pub const CHROMA_DIR: &str = ".chroma";
+pub const CREDENTIALS_FILE: &str = "credentials";
 const CONFIG_FILE: &str = "config.json";
 
 #[derive(Debug, Error)]
@@ -41,9 +47,13 @@ pub enum CliError {
     #[error("Failed to vacuum Chroma")]
     Vacuum(#[from] VacuumError),
     #[error("{0}")]
-    Client(#[from] ClientError),
+    Client(#[from] ChromaClientError),
     #[error("{0}")]
     Db(#[from] DbError),
+    #[error("{0}")]
+    Login(#[from] LoginError),
+    #[error("{0}")]
+    DashboardClient(#[from] DashboardClientError),
 }
 
 #[derive(Debug, Error)]
@@ -74,12 +84,22 @@ pub enum UtilsError {
     BrowserOpenFailed(String),
     #[error("Failed to copy to clipboard")]
     CopyToClipboardFailed,
+    #[error("Input validation failed")]
+    NameValidationFailed,
+    #[error("name cannot be empty and must only contain alphanumerics, underscores, or hyphens")]
+    InvalidName,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Profile {
     pub api_key: String,
     pub tenant_id: String,
+}
+
+impl Profile {
+    pub fn new(api_key: String, tenant_id: String) -> Self {
+        Self { api_key, tenant_id }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -90,18 +110,36 @@ pub struct CliConfig {
 #[derive(Debug, Deserialize)]
 pub struct AddressBook {
     pub frontend_url: String,
+    pub dashboard_api_url: String,
+    pub dashboard_frontend_url: String,
 }
 
 impl AddressBook {
-    pub fn new(frontend_url: String) -> Self {
-        AddressBook { frontend_url }
+    pub fn new(
+        frontend_url: String,
+        dashboard_api_url: String,
+        dashboard_frontend_url: String,
+    ) -> Self {
+        AddressBook {
+            frontend_url,
+            dashboard_api_url,
+            dashboard_frontend_url,
+        }
     }
     pub fn local() -> Self {
-        Self::new("http://localhost:8000".to_string())
+        Self::new(
+            "http://localhost:8000".to_string(),
+            "http://localhost:8002".to_string(),
+            "http://localhost:3001".to_string(),
+        )
     }
 
     pub fn cloud() -> Self {
-        Self::new("https://api.trychroma.com:8000".to_string())
+        Self::new(
+            "https://api.trychroma.com:8000".to_string(),
+            "https://backend.trychroma.com".to_string(),
+            "https://trychroma.com".to_string(),
+        )
     }
 }
 
@@ -224,4 +262,48 @@ pub fn copy_to_clipboard(copy_string: &str) -> Result<(), CliError> {
         .map_err(|_| UtilsError::CopyToClipboardFailed)?;
     println!("\n{}", "Copied to clipboard!".blue().bold());
     Ok(())
+}
+
+pub fn validate_uri(input: String) -> Result<String, UtilsError> {
+    if input.is_empty() {
+        return Err(UtilsError::InvalidName);
+    }
+
+    let re = Regex::new(r"^[a-zA-Z0-9_-]+$")
+        .map_err(|e| e.to_string())
+        .map_err(|_| UtilsError::NameValidationFailed)?;
+    if !re.is_match(&input) {
+        return Err(UtilsError::InvalidName);
+    }
+
+    Ok(input)
+}
+
+pub async fn send_request<T, R>(
+    url: &String,
+    method: Method,
+    route: &str,
+    headers: Option<HeaderMap>,
+    body: Option<&T>,
+) -> Result<R, Box<dyn Error>>
+where
+    T: Serialize,
+    R: DeserializeOwned + Default,
+{
+    let url = format!("{}{}", url, route);
+
+    let client = Client::new();
+    let mut request_builder = client.request(method, url);
+
+    if let Some(headers) = headers {
+        request_builder = request_builder.headers(headers);
+    }
+
+    if let Some(b) = body {
+        request_builder = request_builder.json(b);
+    }
+
+    let response = request_builder.send().await?.error_for_status()?;
+    let parsed_response = response.json::<R>().await?;
+    Ok(parsed_response)
 }
