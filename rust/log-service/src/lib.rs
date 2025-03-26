@@ -24,7 +24,7 @@ use tonic::{transport::Server, Request, Response, Status};
 use uuid::Uuid;
 use wal3::{
     CursorName, CursorStoreOptions, Limits, LogPosition, LogReader, LogReaderOptions, LogWriter,
-    LogWriterOptions,
+    LogWriterOptions, Witness,
 };
 
 pub mod state_hash_table;
@@ -528,6 +528,7 @@ pub struct LogServer {
 
 #[async_trait::async_trait]
 impl LogService for LogServer {
+    #[tracing::instrument(skip(self, request), ret)]
     async fn push_logs(
         &self,
         request: Request<PushLogsRequest>,
@@ -536,6 +537,7 @@ impl LogService for LogServer {
         let collection_id = Uuid::parse_str(&push_logs.collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+        tracing::info!("Pushing logs for collection {}", collection_id);
         if push_logs.records.len() > i32::MAX as usize {
             return Err(Status::invalid_argument("Too many records"));
         }
@@ -574,6 +576,7 @@ impl LogService for LogServer {
         Ok(Response::new(PushLogsResponse { record_count }))
     }
 
+    #[tracing::instrument(skip(self, request), ret)]
     async fn pull_logs(
         &self,
         request: Request<PullLogsRequest>,
@@ -582,6 +585,7 @@ impl LogService for LogServer {
         let collection_id = Uuid::parse_str(&pull_logs.collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+        tracing::info!("Pulling logs for collection {}", collection_id);
         let prefix = storage_prefix_for_log(collection_id);
         let log_reader = LogReader::new(
             self.config.reader.clone(),
@@ -613,8 +617,8 @@ impl LogService for LogServer {
                 if records.len() >= pull_logs.batch_size as usize {
                     break;
                 }
-                let op_record = OperationRecord::decode_length_delimited(record.1.as_slice())
-                    .map_err(|err| Status::unavailable(err.to_string()))?;
+                let op_record = OperationRecord::decode(record.1.as_slice())
+                    .map_err(|err| Status::data_loss(err.to_string()))?;
                 records.push(LogRecord {
                     log_offset: record.0.offset() as i64,
                     record: Some(op_record),
@@ -624,10 +628,12 @@ impl LogService for LogServer {
         Ok(Response::new(PullLogsResponse { records }))
     }
 
+    #[tracing::instrument(skip(self, request), ret)]
     async fn get_all_collection_info_to_compact(
         &self,
-        _request: Request<GetAllCollectionInfoToCompactRequest>,
+        request: Request<GetAllCollectionInfoToCompactRequest>,
     ) -> Result<Response<GetAllCollectionInfoToCompactResponse>, Status> {
+        let request = request.into_inner();
         let Some(reader) = self.dirty_log.reader(LogReaderOptions::default()) else {
             return Err(Status::unavailable("Failed to get dirty log reader"));
         };
@@ -635,12 +641,12 @@ impl LogService for LogServer {
             return Err(Status::unavailable("Failed to get dirty log cursors"));
         };
         let witness = match cursors.load(&STABLE_PREFIX).await {
-            Ok(witness) => witness,
+            Ok(Some(witness)) => witness,
+            Ok(None) => Witness::init(),
             Err(err) => {
                 return Err(Status::new(err.code().into(), err.to_string()));
             }
         };
-        //pub async fn load(&self, name: CursorName) -> Result<Witness, Error> {
         let dirty_fragments = reader
             .scan(
                 witness.cursor().position,
@@ -688,7 +694,10 @@ impl LogService for LogServer {
         }
         let rollup = DirtyMarker::rollup(
             &dirty_markers,
-            self.config.record_count_threshold,
+            std::cmp::min(
+                self.config.record_count_threshold,
+                request.min_compaction_size,
+            ),
             self.config.reinsert_threshold,
             self.config.timeout_us,
         )
@@ -717,17 +726,18 @@ impl LogService for LogServer {
         }))
     }
 
+    #[tracing::instrument(skip(self, request), ret)]
     async fn update_collection_log_offset(
         &self,
-        req: Request<UpdateCollectionLogOffsetRequest>,
+        request: Request<UpdateCollectionLogOffsetRequest>,
     ) -> Result<Response<UpdateCollectionLogOffsetResponse>, Status> {
-        let req = req.into_inner();
-        let collection_id = Uuid::parse_str(&req.collection_id)
+        let request = request.into_inner();
+        let collection_id = Uuid::parse_str(&request.collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
         let dirty_marker = DirtyMarker::MarkCollected {
             collection_id,
-            log_position: LogPosition::from_offset(req.log_offset as u64),
+            log_position: LogPosition::from_offset(request.log_offset as u64),
         };
         let dirty_marker = serde_json::to_string(&dirty_marker)
             .map(Vec::from)
