@@ -5,6 +5,7 @@ mod utils;
 use crate::commands::db::{db_command, DbCommand};
 use crate::commands::profile::{profile_command, ProfileCommand};
 use crate::commands::run::{run, RunArgs};
+use crate::commands::update::update;
 use crate::commands::vacuum::{vacuum, VacuumArgs};
 use clap::{Parser, Subcommand};
 use colored::Colorize;
@@ -20,6 +21,7 @@ enum Command {
     Profile(ProfileCommand),
     Run(RunArgs),
     Support,
+    Update,
     Vacuum(VacuumArgs),
 }
 
@@ -55,6 +57,7 @@ pub fn chroma_cli(args: Vec<String>) {
             let url = "https://discord.gg/MMeYNTmh3x";
             open_browser(url)
         }
+        Command::Update => update(),
         Command::Vacuum(args) => vacuum(args),
     };
 

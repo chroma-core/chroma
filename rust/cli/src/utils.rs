@@ -2,6 +2,7 @@ use crate::client::ClientError;
 use crate::commands::db::DbError;
 use crate::commands::profile::ProfileError;
 use crate::commands::run::RunError;
+use crate::commands::update::UpdateError;
 use crate::commands::vacuum::VacuumError;
 use arboard::Clipboard;
 use colored::Colorize;
@@ -44,6 +45,8 @@ pub enum CliError {
     Client(#[from] ClientError),
     #[error("{0}")]
     Db(#[from] DbError),
+    #[error("{0}")]
+    Update(#[from] UpdateError),
 }
 
 #[derive(Debug, Error)]
