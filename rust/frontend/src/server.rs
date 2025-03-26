@@ -43,11 +43,11 @@ use crate::{
     ac::AdmissionControlledService,
     auth::{AuthenticateAndAuthorize, AuthzAction, AuthzResource},
     config::FrontendServerConfig,
-    frontend::Frontend,
     quota::{Action, QuotaEnforcer, QuotaPayload},
     server_middleware::{always_json_errors_middleware, default_json_content_type_middleware},
     tower_tracing::add_tracing_middleware,
     types::errors::{ErrorResponse, ServerError, ValidationError},
+    Frontend,
 };
 
 struct ScorecardGuard {
@@ -1684,7 +1684,7 @@ struct ApiDoc;
 
 #[cfg(test)]
 mod tests {
-    use crate::{config::FrontendServerConfig, frontend::Frontend, FrontendServer};
+    use crate::{config::FrontendServerConfig, Frontend, FrontendServer};
     use chroma_config::{registry::Registry, Configurable};
     use chroma_system::System;
     use std::sync::Arc;

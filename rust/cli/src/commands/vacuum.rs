@@ -2,8 +2,7 @@ use crate::utils::CliError;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_frontend::config::FrontendServerConfig;
-use chroma_frontend::frontend::Frontend;
-use chroma_frontend::FrontendConfig;
+use chroma_frontend::{Frontend, FrontendConfig};
 use chroma_log::sqlite_log::{
     legacy_embeddings_queue_config_default_kind, LegacyEmbeddingsQueueConfig, SqliteLog,
 };
