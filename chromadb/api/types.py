@@ -564,7 +564,7 @@ class EmbeddingFunction(Protocol[D]):
         return [Space.COSINE, Space.L2, Space.IP]
 
     @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[D]":
+    def build_from_config(config: Dict[str, Any]) -> "CollectionEmbeddingFunction":
         """
         Build the embedding function from a config, which will be used to
         deserialize the embedding function.
@@ -614,6 +614,13 @@ class EmbeddingFunction(Protocol[D]):
         Validate the config.
         """
         return
+
+
+CollectionEmbeddingFunction = Union[
+    EmbeddingFunction[Embeddable],
+    EmbeddingFunction[Documents],
+    EmbeddingFunction[Images],
+]
 
 
 def validate_embedding_function(
