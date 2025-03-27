@@ -22,16 +22,16 @@ rand = {workspace = true}
 reqwest = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true}
-strum = "0.27.1"
-strum_macros = "0.27.1"
 sqlx = { workspace = true }
 thiserror = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true }
 toml = "0.8.20"
 webbrowser = "1.0.3"
+strum = "0.27.1"
+strum_macros = "0.27.1"
+semver = "1.0.26"
 regex = "1.11.1"
-
 
 [dev-dependencies]
 assert_cmd = "2.0.16"
