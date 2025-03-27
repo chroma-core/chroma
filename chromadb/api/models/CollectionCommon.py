@@ -131,10 +131,15 @@ class CollectionCommon(Generic[ClientT]):
         self._configuration = load_collection_configuration_from_json(
             model.configuration_json
         )
-        if self._configuration.get("embedding_function") is not None:
-            self._embedding_function = self._configuration.get("embedding_function")
 
-        self._embedding_function = embedding_function
+        if (
+            embedding_function is None
+            or isinstance(embedding_function, ef.DefaultEmbeddingFunction)
+            and self._configuration.get("embedding_function") is not None
+        ):
+            self._embedding_function = self._configuration.get("embedding_function")
+        else:
+            self._embedding_function = embedding_function
         self._data_loader = data_loader
 
     # Expose the model properties as read-only properties on the Collection class
