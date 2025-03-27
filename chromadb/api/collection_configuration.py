@@ -331,14 +331,20 @@ def create_collection_configuration_to_json(
     config: CreateCollectionConfiguration,
 ) -> Dict[str, Any]:
     """Convert a CreateCollection configuration to a JSON-serializable dict"""
-    if config.get("embedding_function") is None:
-        config["embedding_function"] = DefaultEmbeddingFunction()
+    ef_config: Dict[str, Any] | None = None
     try:
         hnsw_config = cast(CreateHNSWConfiguration, config.get("hnsw"))
     except Exception as e:
         raise ValueError(f"not a valid hnsw config: {e}")
+    if config.get("embedding_function") is None:
+        ef = None
+        validate_create_hnsw_config(hnsw_config, ef)
+        ef_config = {"type": "legacy"}
+        return {
+            "hnsw": hnsw_config,
+            "embedding_function": ef_config,
+        }
 
-    ef_config: Dict[str, Any] | None = None
     try:
         ef = cast(EmbeddingFunction, config.get("embedding_function"))  # type: ignore
         if ef.is_legacy():
