@@ -1,4 +1,4 @@
-from typing import Optional, Set, Union, TypeVar, List, Dict, Any, Tuple, cast
+from typing import Optional, Set, Union, TypeVar, List, Dict, Any, Tuple, cast, Literal
 from numpy.typing import NDArray
 import numpy as np
 from typing_extensions import TypedDict, Protocol, runtime_checkable
@@ -58,24 +58,7 @@ PyEmbeddings = List[PyEmbedding]
 Embedding = Vector
 Embeddings = List[Embedding]
 
-
-class Space(str, Enum):
-    COSINE = "cosine"
-    L2 = "l2"
-    IP = "ip"
-
-    def __str__(self) -> str:
-        return self.value
-
-    def to_json(self) -> str:
-        return self.value
-
-    @classmethod
-    def from_json(cls, value: str) -> "Space":
-        return cls(value)
-
-    def __repr__(self) -> str:
-        return f"Space.{self.name}"
+Space = Literal["cosine", "l2", "ip"]
 
 
 def normalize_embeddings(
@@ -555,13 +538,13 @@ class EmbeddingFunction(Protocol[D]):
         """
         Return the default space for the embedding function.
         """
-        return Space.COSINE
+        return "cosine"
 
     def supported_spaces(self) -> List[Space]:
         """
         Return the supported spaces for the embedding function.
         """
-        return [Space.COSINE, Space.L2, Space.IP]
+        return ["cosine", "l2", "ip"]
 
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[D]":
@@ -614,6 +597,15 @@ class EmbeddingFunction(Protocol[D]):
         Validate the config.
         """
         return
+
+    def is_legacy(self) -> bool:
+        if (
+            self.name() is NotImplemented
+            or self.get_config() is NotImplemented
+            or self.build_from_config(self.get_config()) is NotImplemented
+        ):
+            return True
+        return False
 
 
 def validate_embedding_function(

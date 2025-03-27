@@ -183,7 +183,7 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_UpdateLogPositionVersionTot
 	suite.Equal(int32(0), collections[0].Collection.Version)
 
 	// update log position and version
-	version, err := suite.collectionDb.UpdateLogPositionVersionTotalRecordsAndLogicalSize(collectionID, int64(10), 0, uint64(100), uint64(1000))
+	version, err := suite.collectionDb.UpdateLogPositionVersionTotalRecordsAndLogicalSize(collectionID, int64(10), 0, uint64(100), uint64(1000), "test_tenant2")
 	suite.NoError(err)
 	suite.Equal(int32(1), version)
 	collections, _ = suite.collectionDb.GetCollections(&collectionID, nil, "", "", nil, nil)
@@ -192,15 +192,16 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_UpdateLogPositionVersionTot
 	suite.Equal(int32(1), collections[0].Collection.Version)
 	suite.Equal(uint64(100), collections[0].Collection.TotalRecordsPostCompaction)
 	suite.Equal(uint64(1000), collections[0].Collection.SizeBytesPostCompaction)
+	suite.Equal("test_tenant2", collections[0].Collection.Tenant)
 
 	// invalid log position
-	_, err = suite.collectionDb.UpdateLogPositionVersionTotalRecordsAndLogicalSize(collectionID, int64(5), 0, uint64(100), uint64(1000))
+	_, err = suite.collectionDb.UpdateLogPositionVersionTotalRecordsAndLogicalSize(collectionID, int64(5), 0, uint64(100), uint64(1000), "test_tenant2")
 	suite.Error(err, "collection log position Stale")
 
 	// invalid version
-	_, err = suite.collectionDb.UpdateLogPositionVersionTotalRecordsAndLogicalSize(collectionID, int64(20), 0, uint64(100), uint64(1000))
+	_, err = suite.collectionDb.UpdateLogPositionVersionTotalRecordsAndLogicalSize(collectionID, int64(20), 0, uint64(100), uint64(1000), "test_tenant2")
 	suite.Error(err, "collection version invalid")
-	_, err = suite.collectionDb.UpdateLogPositionVersionTotalRecordsAndLogicalSize(collectionID, int64(20), 3, uint64(100), uint64(1000))
+	_, err = suite.collectionDb.UpdateLogPositionVersionTotalRecordsAndLogicalSize(collectionID, int64(20), 3, uint64(100), uint64(1000), "test_tenant2")
 	suite.Error(err, "collection version invalid")
 
 	//clean up

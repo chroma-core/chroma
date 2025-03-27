@@ -300,9 +300,9 @@ func (_m *ICollectionDb) UpdateLogPositionAndVersionInfo(collectionID string, lo
 	return r0, r1
 }
 
-// UpdateLogPositionVersionTotalRecordsAndLogicalSize provides a mock function with given fields: collectionID, logPosition, currentCollectionVersion, totalRecordsPostCompaction, sizeBytesPostCompaction
-func (_m *ICollectionDb) UpdateLogPositionVersionTotalRecordsAndLogicalSize(collectionID string, logPosition int64, currentCollectionVersion int32, totalRecordsPostCompaction uint64, sizeBytesPostCompaction uint64) (int32, error) {
-	ret := _m.Called(collectionID, logPosition, currentCollectionVersion, totalRecordsPostCompaction, sizeBytesPostCompaction)
+// UpdateLogPositionVersionTotalRecordsAndLogicalSize provides a mock function with given fields: collectionID, logPosition, currentCollectionVersion, totalRecordsPostCompaction, sizeBytesPostCompaction, tenant
+func (_m *ICollectionDb) UpdateLogPositionVersionTotalRecordsAndLogicalSize(collectionID string, logPosition int64, currentCollectionVersion int32, totalRecordsPostCompaction uint64, sizeBytesPostCompaction uint64, tenant string) (int32, error) {
+	ret := _m.Called(collectionID, logPosition, currentCollectionVersion, totalRecordsPostCompaction, sizeBytesPostCompaction, tenant)
 
 	if len(ret) == 0 {
 		panic("no return value specified for UpdateLogPositionVersionTotalRecordsAndLogicalSize")
@@ -310,17 +310,17 @@ func (_m *ICollectionDb) UpdateLogPositionVersionTotalRecordsAndLogicalSize(coll
 
 	var r0 int32
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string, int64, int32, uint64, uint64) (int32, error)); ok {
-		return rf(collectionID, logPosition, currentCollectionVersion, totalRecordsPostCompaction, sizeBytesPostCompaction)
+	if rf, ok := ret.Get(0).(func(string, int64, int32, uint64, uint64, string) (int32, error)); ok {
+		return rf(collectionID, logPosition, currentCollectionVersion, totalRecordsPostCompaction, sizeBytesPostCompaction, tenant)
 	}
-	if rf, ok := ret.Get(0).(func(string, int64, int32, uint64, uint64) int32); ok {
-		r0 = rf(collectionID, logPosition, currentCollectionVersion, totalRecordsPostCompaction, sizeBytesPostCompaction)
+	if rf, ok := ret.Get(0).(func(string, int64, int32, uint64, uint64, string) int32); ok {
+		r0 = rf(collectionID, logPosition, currentCollectionVersion, totalRecordsPostCompaction, sizeBytesPostCompaction, tenant)
 	} else {
 		r0 = ret.Get(0).(int32)
 	}
 
-	if rf, ok := ret.Get(1).(func(string, int64, int32, uint64, uint64) error); ok {
-		r1 = rf(collectionID, logPosition, currentCollectionVersion, totalRecordsPostCompaction, sizeBytesPostCompaction)
+	if rf, ok := ret.Get(1).(func(string, int64, int32, uint64, uint64, string) error); ok {
+		r1 = rf(collectionID, logPosition, currentCollectionVersion, totalRecordsPostCompaction, sizeBytesPostCompaction, tenant)
 	} else {
 		r1 = ret.Error(1)
 	}

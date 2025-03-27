@@ -4,7 +4,6 @@ from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
     UpdateCollectionConfiguration,
     load_collection_configuration_from_create_collection_configuration,
-    CollectionConfiguration,
 )
 from chromadb.auth import UserIdentity
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
@@ -236,7 +235,7 @@ class SegmentAPI(ServerAPI):
             name=name,
             metadata=metadata,
             configuration=load_collection_configuration_from_create_collection_configuration(
-                configuration or CollectionConfiguration()
+                configuration or CreateCollectionConfiguration()
             ),
             tenant=tenant,
             database=database,
@@ -247,7 +246,7 @@ class SegmentAPI(ServerAPI):
         coll, created = self._sysdb.create_collection(
             id=model.id,
             name=model.name,
-            configuration=configuration or CollectionConfiguration(),
+            configuration=configuration or CreateCollectionConfiguration(),
             segments=[],  # Passing empty till backend changes are deployed.
             metadata=model.metadata,
             dimension=None,  # This is lazily populated on the first add
