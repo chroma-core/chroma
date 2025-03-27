@@ -1,8 +1,14 @@
 from dataclasses import dataclass
 from typing import Optional
 
-from chromadb.api.types import Embeddings, IDs, Include, IncludeEnum
-from chromadb.types import Collection, RequestVersionContext, Segment, Where, WhereDocument
+from chromadb.api.types import Embeddings, IDs, Include
+from chromadb.types import (
+    Collection,
+    RequestVersionContext,
+    Segment,
+    Where,
+    WhereDocument,
+)
 
 
 @dataclass
@@ -18,6 +24,7 @@ class Scan:
             collection_version=self.collection.version,
             log_position=self.collection.log_position,
         )
+
 
 @dataclass
 class Filter:
@@ -50,13 +57,13 @@ class Projection:
     def included(self) -> Include:
         includes = list()
         if self.document:
-            includes.append(IncludeEnum.documents)
+            includes.append("documents")
         if self.embedding:
-            includes.append(IncludeEnum.embeddings)
+            includes.append("embeddings")
         if self.metadata:
-            includes.append(IncludeEnum.metadatas)
+            includes.append("metadatas")
         if self.rank:
-            includes.append(IncludeEnum.distances)
+            includes.append("distances")
         if self.uri:
-            includes.append(IncludeEnum.uris)
+            includes.append("uris")
         return includes

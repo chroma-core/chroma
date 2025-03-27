@@ -1,8 +1,19 @@
-from typing import Optional, Set, Union, TypeVar, List, Dict, Any, Tuple, cast, Literal
+from typing import (
+    Optional,
+    Set,
+    Union,
+    TypeVar,
+    List,
+    Dict,
+    Any,
+    Tuple,
+    cast,
+    Literal,
+    get_args,
+)
 from numpy.typing import NDArray
 import numpy as np
 from typing_extensions import TypedDict, Protocol, runtime_checkable
-from enum import Enum
 from pydantic import Field
 import chromadb.errors as errors
 from chromadb.base_types import (
@@ -312,19 +323,9 @@ def _validate_record_set_contains(
 
 Parameter = TypeVar("Parameter", Document, Image, Embedding, Metadata, ID)
 
-
-class IncludeEnum(str, Enum):
-    documents = "documents"
-    embeddings = "embeddings"
-    metadatas = "metadatas"
-    distances = "distances"
-    uris = "uris"
-    data = "data"
-
-
-# This should ust be List[Literal["documents", "embeddings", "metadatas", "distances"]]
-# However, this provokes an incompatibility with the Overrides library and Python 3.7
-Include = List[IncludeEnum]
+Include = List[
+    Literal["documents", "embeddings", "metadatas", "distances", "uris", "data"]
+]
 IncludeMetadataDocuments = Field(default=["metadatas", "documents"])
 IncludeMetadataDocumentsEmbeddings = Field(
     default=["metadatas", "documents", "embeddings"]
@@ -858,9 +859,9 @@ def validate_include(include: Include, dissalowed: Optional[Include] = None) -> 
         if not isinstance(item, str):
             raise ValueError(f"Expected include item to be a str, got {item}")
 
-        if not any(item == e for e in IncludeEnum):
+        if item not in get_args(Include):
             raise ValueError(
-                f"Expected include item to be one of {', '.join(IncludeEnum)}, got {item}"
+                f"Expected include item to be one of {', '.join(get_args(Include))}, got {item}"
             )
 
         if dissalowed is not None and any(item == e for e in dissalowed):
