@@ -4,11 +4,10 @@ use chroma_cli::chroma_cli;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_frontend::{
     executor::config::{ExecutorConfig, LocalExecutorConfig},
-    frontend::Frontend,
     get_collection_with_segments_provider::{
         CacheInvalidationRetryConfig, CollectionsWithSegmentsProviderConfig,
     },
-    FrontendConfig,
+    Frontend, FrontendConfig,
 };
 use chroma_log::config::{LogConfig, SqliteLogConfig};
 use chroma_segment::local_segment_manager::LocalSegmentManagerConfig;

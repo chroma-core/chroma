@@ -51,3 +51,9 @@ utoipa-swagger-ui = { version = "9", features = ["axum"] }
 [dev-dependencies]
 reqwest = { workspace = true }
 random-port = { workspace = true }
+proptest = { workspace = true }
+proptest-state-machine = { workspace = true }
+chroma-types = { workspace = true, features = ["testing"] }
+tempfile = { workspace = true }
+worker = { workspace = true }
+ndarray = { workspace = true }

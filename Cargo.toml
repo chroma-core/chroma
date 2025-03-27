@@ -56,9 +56,10 @@ bytemuck = "1.21.0"
 rayon = "1.10.0"
 validator = { version = "0.19", features = ["derive"] }
 rust-embed = { version = "8.5.0", features = ["include-exclude", "debug-embed"] }
-hnswlib = { version = "0.8.0", git = "https://github.com/chroma-core/hnswlib.git" }
+hnswlib = { version = "0.8.1", git = "https://github.com/chroma-core/hnswlib.git" }
 reqwest = { version = "0.12.9",  features = ["rustls-tls-native-roots", "http2"], default-features = false }
 random-port = "0.1.1"
+ndarray = { version = "0.16.1", features = ["approx"] }
 
 chroma-benchmark = { path = "rust/benchmark" }
 chroma-blockstore = { path = "rust/blockstore" }
@@ -85,8 +86,8 @@ worker = { path = "rust/worker" }
 # Dev dependencies
 bincode = "1.3.3"
 indicatif = "0.17.9"
-proptest = "1.5.0"
-proptest-state-machine = "0.3.0"
+proptest = "1.6.0"
+proptest-state-machine = "0.3.1"
 proptest-derive = "0.5.1"
 rand = "0.8.5"
 rand_xorshift = "0.3.0"

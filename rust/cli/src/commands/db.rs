@@ -1,7 +1,5 @@
-use crate::client::ChromaClient;
-use crate::utils::{
-    copy_to_clipboard, get_address_book, get_current_profile, CliError, Profile, UtilsError,
-};
+use crate::client::get_chroma_client;
+use crate::utils::{copy_to_clipboard, get_current_profile, CliError, Profile, UtilsError};
 use chroma_types::Database;
 use clap::{Args, Subcommand, ValueEnum};
 use colored::Colorize;
@@ -266,14 +264,6 @@ fn validate_db_name(db_name: &str) -> Result<String, CliError> {
     }
 
     Ok(db_name.to_string())
-}
-
-fn get_chroma_client(profile: Option<&Profile>, dev: bool) -> ChromaClient {
-    let address_book = get_address_book(dev);
-    match profile {
-        Some(profile) => ChromaClient::from_profile(profile, address_book.frontend_url),
-        None => ChromaClient::local_default(),
-    }
 }
 
 fn select_db(dbs: &[Database]) -> Result<String, CliError> {

@@ -43,11 +43,11 @@ use crate::{
     ac::AdmissionControlledService,
     auth::{AuthenticateAndAuthorize, AuthzAction, AuthzResource},
     config::FrontendServerConfig,
-    frontend::Frontend,
     quota::{Action, QuotaEnforcer, QuotaPayload},
     server_middleware::{always_json_errors_middleware, default_json_content_type_middleware},
     tower_tracing::add_tracing_middleware,
     types::errors::{ErrorResponse, ServerError, ValidationError},
+    Frontend,
 };
 
 struct ScorecardGuard {
@@ -199,6 +199,7 @@ impl FrontendServer {
                     .head(v1_deprecation_notice)
                     .options(v1_deprecation_notice),
             )
+            .route("/api/v2", get(heartbeat))
             .route("/api/v2/healthcheck", get(healthcheck))
             .route("/api/v2/heartbeat", get(heartbeat))
             .route("/api/v2/pre-flight-checks", get(pre_flight_checks))
@@ -1684,7 +1685,7 @@ struct ApiDoc;
 
 #[cfg(test)]
 mod tests {
-    use crate::{config::FrontendServerConfig, frontend::Frontend, FrontendServer};
+    use crate::{config::FrontendServerConfig, Frontend, FrontendServer};
     use chroma_config::{registry::Registry, Configurable};
     use chroma_system::System;
     use std::sync::Arc;

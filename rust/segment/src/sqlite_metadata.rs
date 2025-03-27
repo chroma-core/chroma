@@ -480,7 +480,9 @@ impl IntoSqliteExpr for DocumentExpression {
             EmbeddingFulltextSearch::Table,
             EmbeddingFulltextSearch::StringValue,
         ));
-        let doc_contains = doc_col.like(format!("%{}%", self.text)).is(true);
+        let doc_contains = doc_col
+            .like(format!("%{}%", self.text.replace("%", "")))
+            .is(true);
         match self.operator {
             DocumentOperator::Contains => doc_contains,
             DocumentOperator::NotContains => doc_contains.not(),
@@ -762,7 +764,7 @@ mod tests {
     use chroma_types::{
         operator::{Filter, Limit, Projection, Scan},
         plan::{Count, Get},
-        strategies::{TestCollectionData, TestWhereFilter},
+        strategies::{any_collection_data_and_where_filter, TestCollectionData},
         Chunk, LogRecord,
     };
     use proptest::prelude::*;
@@ -803,8 +805,7 @@ mod tests {
     proptest! {
         #[test]
         fn test_get(
-            test_data in any::<TestCollectionData>(),
-            where_clause in any::<TestWhereFilter>()
+            (test_data, where_clause) in any_collection_data_and_where_filter()
         ) {
             let runtime = Runtime::new().expect("Should be able to start tokio runtime");
             let mut ref_seg = TestReferenceSegment::default();
