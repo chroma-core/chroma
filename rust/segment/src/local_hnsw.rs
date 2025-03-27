@@ -138,6 +138,7 @@ impl LocalHnswSegmentReader {
                         let index = HnswIndex::load(
                             index_folder_str,
                             &index_config,
+                            hnsw_configuration.ef_search,
                             chroma_index::IndexUuid(segment.id.0),
                         )
                         .map_err(|_| LocalHnswSegmentReaderError::HnswIndexLoadError)?;
@@ -538,6 +539,7 @@ impl LocalHnswSegmentWriter {
                         let index = HnswIndex::load(
                             index_folder_str,
                             &index_config,
+                            hnsw_configuration.ef_search,
                             chroma_index::IndexUuid(segment.id.0),
                         )
                         .map_err(|_| LocalHnswSegmentWriterError::HnswIndexLoadError)?;
