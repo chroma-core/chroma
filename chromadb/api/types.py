@@ -598,6 +598,15 @@ class EmbeddingFunction(Protocol[D]):
         """
         return
 
+    def is_legacy(self) -> bool:
+        if (
+            self.name() is NotImplemented
+            or self.get_config() is NotImplemented
+            or self.build_from_config(self.get_config()) is NotImplemented
+        ):
+            return True
+        return False
+
 
 def validate_embedding_function(
     embedding_function: EmbeddingFunction[Embeddable],

@@ -185,9 +185,9 @@ class Client(SharedSystemClient, ClientAPI):
             model.configuration_json
         )
         # Only use the configuration's embedding_function if the user didn't provide one
-        if (
+        if configuration.get("embedding_function") is not None and (
             embedding_function is None
-            and configuration.get("embedding_function") is not None
+            or isinstance(embedding_function, ef.DefaultEmbeddingFunction)
         ):
             embedding_function = configuration.get("embedding_function")
         return Collection(

@@ -9,8 +9,9 @@ from chromadb.types import (
     WhereDocument,
 )
 from chromadb.api.collection_configuration import (
+    CreateCollectionConfiguration,
     CollectionConfiguration,
-    collection_configuration_to_json_str,
+    create_collection_configuration_to_json_str,
 )
 import chromadb.proto.chroma_pb2 as pb
 import chromadb.proto.query_executor_pb2 as query_pb
@@ -20,7 +21,10 @@ def test_collection_to_proto() -> None:
     collection = Collection(
         id=uuid.uuid4(),
         name="test_collection",
-        configuration=CollectionConfiguration(),
+        configuration=CollectionConfiguration(
+            hnsw=None,
+            embedding_function=None,
+        ),
         metadata={"hnsw_m": 128},
         dimension=512,
         tenant="test_tenant",
@@ -32,8 +36,8 @@ def test_collection_to_proto() -> None:
     assert convert.to_proto_collection(collection) == pb.Collection(
         id=collection.id.hex,
         name="test_collection",
-        configuration_json_str=collection_configuration_to_json_str(
-            CollectionConfiguration()
+        configuration_json_str=create_collection_configuration_to_json_str(
+            CreateCollectionConfiguration()
         ),
         metadata=pb.UpdateMetadata(
             metadata={"hnsw_m": pb.UpdateMetadataValue(int_value=128)}
@@ -50,8 +54,8 @@ def test_collection_from_proto() -> None:
     proto = pb.Collection(
         id=uuid.uuid4().hex,
         name="test_collection",
-        configuration_json_str=collection_configuration_to_json_str(
-            CollectionConfiguration()
+        configuration_json_str=create_collection_configuration_to_json_str(
+            CreateCollectionConfiguration()
         ),
         metadata=pb.UpdateMetadata(
             metadata={"hnsw_m": pb.UpdateMetadataValue(int_value=128)}
@@ -65,7 +69,10 @@ def test_collection_from_proto() -> None:
     assert convert.from_proto_collection(proto) == Collection(
         id=uuid.UUID(proto.id),
         name="test_collection",
-        configuration=CollectionConfiguration(),
+        configuration=CollectionConfiguration(
+            hnsw=None,
+            embedding_function=None,
+        ),
         metadata={"hnsw_m": 128},
         dimension=512,
         tenant="test_tenant",

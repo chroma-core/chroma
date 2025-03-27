@@ -39,7 +39,7 @@ def default_hnsw_configuration() -> HNSWConfiguration:
     )
 
 
-class CollectionConfiguration(TypedDict, total=False):
+class CollectionConfiguration(TypedDict, total=True):
     hnsw: Optional[HNSWConfiguration]
     embedding_function: Optional[EmbeddingFunction]  # type: ignore
 
@@ -64,25 +64,9 @@ def load_collection_configuration_from_json(
 ) -> CollectionConfiguration:
     if json_map.get("hnsw") is None:
         if json_map.get("embedding_function") is None:
-            return CollectionConfiguration()
-        else:
-            ef_config = json_map["embedding_function"]
-            if ef_config["type"] == "legacy":
-                warnings.warn(
-                    "legacy embedding function config",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-                return CollectionConfiguration()
-            else:
-                ef = known_embedding_functions[ef_config["name"]]
-                return CollectionConfiguration(
-                    embedding_function=ef.build_from_config(ef_config["config"])
-                )
-    else:
-        if json_map.get("embedding_function") is None:
             return CollectionConfiguration(
-                hnsw=cast(HNSWConfiguration, json_map["hnsw"])
+                hnsw=None,
+                embedding_function=None,
             )
         else:
             ef_config = json_map["embedding_function"]
@@ -93,7 +77,32 @@ def load_collection_configuration_from_json(
                     stacklevel=2,
                 )
                 return CollectionConfiguration(
-                    hnsw=cast(HNSWConfiguration, json_map["hnsw"])
+                    hnsw=None,
+                    embedding_function=None,
+                )
+            else:
+                ef = known_embedding_functions[ef_config["name"]]
+                return CollectionConfiguration(
+                    hnsw=None,
+                    embedding_function=ef.build_from_config(ef_config["config"]),
+                )
+    else:
+        if json_map.get("embedding_function") is None:
+            return CollectionConfiguration(
+                hnsw=cast(HNSWConfiguration, json_map["hnsw"]),
+                embedding_function=None,
+            )
+        else:
+            ef_config = json_map["embedding_function"]
+            if ef_config["type"] == "legacy":
+                warnings.warn(
+                    "legacy embedding function config",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+                return CollectionConfiguration(
+                    hnsw=cast(HNSWConfiguration, json_map["hnsw"]),
+                    embedding_function=None,
                 )
             else:
                 ef = known_embedding_functions[ef_config["name"]]
@@ -131,7 +140,7 @@ def collection_configuration_to_json(config: CollectionConfiguration) -> Dict[st
 
     ef_config: Dict[str, Any] | None = None
     try:
-        if ef.name() is NotImplemented:
+        if ef.is_legacy():
             ef_config = {"type": "legacy"}
         else:
             ef_config = {
@@ -331,11 +340,7 @@ def create_collection_configuration_to_json(
     ef_config: Dict[str, Any] | None = None
     try:
         ef = cast(EmbeddingFunction, config.get("embedding_function"))  # type: ignore
-        if (
-            ef.name() is NotImplemented
-            or ef.get_config() is NotImplemented
-            or ef.build_from_config(ef.get_config()) is NotImplemented
-        ):
+        if ef.is_legacy():
             ef_config = {"type": "legacy"}
         else:
             ef_config = {
@@ -353,6 +358,8 @@ def create_collection_configuration_to_json(
         ef = None
         ef_config = {"type": "legacy"}
 
+    print("HNSW CONFIG: ", hnsw_config)
+    print("EF CONFIG: ", ef_config)
     validate_create_hnsw_config(hnsw_config, ef)
 
     return {
@@ -537,7 +544,7 @@ def update_collection_configuration_to_json(
     ef_config: Dict[str, Any] | None = None
     ef = config.get("embedding_function")
     if ef is not None:
-        if ef.name() is NotImplemented:
+        if ef.is_legacy():
             ef_config = {"type": "legacy"}
         else:
             ef_config = {
