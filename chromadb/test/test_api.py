@@ -905,6 +905,9 @@ def test_query_document_valid_operators(client):
     with pytest.raises(ValueError, match="where document"):
         collection.get(where_document={"$contains": []})
 
+    with pytest.raises(ValueError, match="where document"):
+        collection.get(where_document={"$contains": {"text": "hello"}})
+
     # Test invalid $and, $or
     with pytest.raises(ValueError):
         collection.get(where_document={"$and": {"$unsupported": "doc"}})
