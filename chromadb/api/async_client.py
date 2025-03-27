@@ -181,6 +181,10 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
     ) -> AsyncCollection:
+        if configuration is None:
+            configuration = {}
+            if embedding_function is not None:
+                configuration["embedding_function"] = embedding_function
         model = await self._server.create_collection(
             name=name,
             configuration=configuration,
