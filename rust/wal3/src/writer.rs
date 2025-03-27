@@ -10,18 +10,9 @@ use parquet::file::properties::WriterProperties;
 use setsum::Setsum;
 
 use crate::{
-    BatchManager, Error, ExponentialBackoff, Fragment, FragmentSeqNo, LogPosition,
-    LogWriterOptions, Manifest, ManifestManager,
+    unprefixed_fragment_path, BatchManager, Error, ExponentialBackoff, Fragment, FragmentSeqNo,
+    LogPosition, LogWriterOptions, Manifest, ManifestManager,
 };
-
-fn fragment_path(prefix: &str, fragment_seq_no: FragmentSeqNo) -> String {
-    format!(
-        "{}/log/Bucket={}/FragmentSeqNo={}.parquet",
-        prefix,
-        fragment_seq_no.bucket(),
-        fragment_seq_no.0,
-    )
-}
 
 /// The epoch writer is a counting writer.  Every epoch exists.  An epoch goes
 /// unused->used->discarded.  The epoch of a writer is used to determine if and when log contention
@@ -89,36 +80,44 @@ impl LogWriter {
     pub async fn append_many(&self, messages: Vec<Vec<u8>>) -> Result<LogPosition, Error> {
         // SAFETY(rescrv):  Mutex poisoning.
         let inner = { self.inner.lock().unwrap().clone() };
-        loop {
-            if let Some(ref epoch_writer) = inner {
-                let res = epoch_writer.writer.append(messages.clone()).await;
-                if matches!(res, Err(Error::LogContention)) {
-                    let writer = OnceLogWriter::open(
-                        epoch_writer.writer.options.clone(),
-                        epoch_writer.writer.storage.clone(),
-                        epoch_writer.writer.prefix.clone(),
-                        self.writer.clone(),
-                    )
-                    .await?;
-                    // SAFETY(rescrv):  Mutex poisoning.
-                    let mut inner = self.inner.lock().unwrap();
-                    if let Some(second) = inner.as_mut() {
-                        if second.epoch == epoch_writer.epoch {
-                            second.epoch += 1;
-                            second.writer = writer;
-                        }
-                    } else {
-                        // This should never happen, so just be polite with an error.
-                        return Err(Error::LogClosed);
+        if let Some(ref epoch_writer) = inner {
+            let res = epoch_writer.writer.append(messages.clone()).await;
+            if matches!(res, Err(Error::LogContention)) {
+                let writer = OnceLogWriter::open(
+                    epoch_writer.writer.options.clone(),
+                    epoch_writer.writer.storage.clone(),
+                    epoch_writer.writer.prefix.clone(),
+                    self.writer.clone(),
+                )
+                .await?;
+                // SAFETY(rescrv):  Mutex poisoning.
+                let mut inner = self.inner.lock().unwrap();
+                if let Some(second) = inner.as_mut() {
+                    if second.epoch == epoch_writer.epoch {
+                        second.epoch += 1;
+                        second.writer.shutdown();
+                        second.writer = writer;
                     }
+                    Err(Error::LogContention)
                 } else {
-                    return res;
+                    // This should never happen, so just be polite with an error.
+                    Err(Error::LogClosed)
                 }
             } else {
-                // This should never happen, so just be polite with an error.
-                return Err(Error::LogClosed);
+                res
             }
+        } else {
+            // This should never happen, so just be polite with an error.
+            Err(Error::LogClosed)
         }
+    }
+}
+
+impl std::fmt::Debug for LogWriter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LogWriter")
+            .field("writer", &self.writer)
+            .finish()
     }
 }
 
@@ -144,11 +143,6 @@ struct OnceLogWriter {
     manifest_manager: ManifestManager,
     /// BatchManager coordinates batching writes to the log.
     batch_manager: BatchManager,
-    /// A channel to keep work alive on.
-    #[allow(dead_code)]
-    reap: tokio::sync::mpsc::Sender<tokio::task::JoinHandle<()>>,
-    /// A background future that collects dead tasks
-    reaper: Mutex<Option<tokio::task::JoinHandle<()>>>,
     /// A background future that flushes the log.
     flusher: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
@@ -161,9 +155,6 @@ impl OnceLogWriter {
         writer: String,
     ) -> Result<Arc<Self>, Error> {
         let done = AtomicBool::new(false);
-        // NOTE(rescrv):  The channel size is relatively meaningless if it can hold the number of
-        // outstanding operations on the log.  10x it for headroom.
-        let (reap, mut rx) = tokio::sync::mpsc::channel(10 * options.throttle_fragment.outstanding);
         let batch_manager = BatchManager::new(options.throttle_fragment).ok_or(Error::Internal)?;
         let mut manifest_manager = ManifestManager::new(
             options.throttle_manifest,
@@ -174,7 +165,6 @@ impl OnceLogWriter {
         )
         .await?;
         manifest_manager.recover().await?;
-        let reaper = Mutex::new(None);
         let flusher = Mutex::new(None);
         let this = Arc::new(Self {
             options,
@@ -183,14 +173,7 @@ impl OnceLogWriter {
             done,
             manifest_manager,
             batch_manager,
-            reap,
-            reaper,
             flusher,
-        });
-        let reaper = tokio::task::spawn(async move {
-            while let Some(handle) = rx.recv().await {
-                let _ = handle.await;
-            }
         });
         let that = Arc::clone(&this);
         let flusher = tokio::task::spawn(async move {
@@ -213,20 +196,20 @@ impl OnceLogWriter {
             }
         });
         // SAFETY(rescrv): Mutex poisoning.
-        this.reaper.lock().unwrap().replace(reaper);
         this.flusher.lock().unwrap().replace(flusher);
         Ok(this)
     }
 
-    async fn close(mut self: Arc<Self>) -> Result<(), Error> {
+    fn shutdown(&self) {
+        self.done.store(true, std::sync::atomic::Ordering::Relaxed);
         // SAFETY(rescrv): Mutex poisoning.
         if let Some(flusher) = self.flusher.lock().unwrap().take() {
             flusher.abort();
         }
-        // SAFETY(rescrv): Mutex poisoning.
-        if let Some(reaper) = self.reaper.lock().unwrap().take() {
-            reaper.abort();
-        }
+    }
+
+    async fn close(mut self: Arc<Self>) -> Result<(), Error> {
+        self.shutdown();
         loop {
             match Arc::try_unwrap(self) {
                 Ok(_) => {
@@ -248,10 +231,7 @@ impl OnceLogWriter {
             self.batch_manager.take_work(&self.manifest_manager)?
         {
             let this = Arc::clone(self);
-            let jh = tokio::task::spawn(async move {
-                this.append_batch(fragment_seq_no, log_position, work).await
-            });
-            let _ = self.reap.send(jh).await;
+            this.append_batch(fragment_seq_no, log_position, work).await
         }
         rx.await.map_err(|_| Error::Internal)?
     }
@@ -304,94 +284,120 @@ impl OnceLogWriter {
         log_position: LogPosition,
         messages: Vec<Vec<u8>>,
     ) -> Result<LogPosition, Error> {
-        assert!(
-            !messages.is_empty(),
-            "empty batch; this should be checked by caller"
-        );
-
-        // Construct the columns.
+        assert!(!messages.is_empty());
         let messages_len = messages.len();
-        let mut positions = Vec::with_capacity(messages_len);
-        let mut bodies = Vec::with_capacity(messages_len);
-        for (index, message) in messages.iter().enumerate() {
-            let position = log_position + index;
-            positions.push(position);
-            bodies.push(message.as_slice());
-        }
-        let offsets = positions.iter().map(|p| p.offset).collect::<Vec<_>>();
-        let epoch_micros = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap_or(Duration::ZERO)
-            .as_micros() as u64;
-        let timestamps_us = vec![epoch_micros; offsets.len()];
-        let offsets = UInt64Array::from(offsets);
-        let timestamps_us = UInt64Array::from(timestamps_us);
-        let bodies = BinaryArray::from(bodies);
-        // SAFETY(rescrv):  The try_from_iter call will always succeed because the three arrays
-        // have same length and the types check.
-        // TODO(rescrv):  Arrow pre-allocator.
-        let batch = RecordBatch::try_from_iter(vec![
-            ("offset", Arc::new(offsets) as ArrayRef),
-            ("timestamp_us", Arc::new(timestamps_us) as ArrayRef),
-            ("body", Arc::new(bodies) as ArrayRef),
-        ])
-        .unwrap();
-
-        let path = fragment_path(&self.prefix, fragment_seq_no);
-        let exp_backoff: ExponentialBackoff = self.options.throttle_fragment.into();
-        let start = Instant::now();
-        let mut num_bytes;
-        loop {
-            // Write to parquet.
-            let props = WriterProperties::builder()
-                .set_compression(Compression::SNAPPY)
-                .build();
-            let mut buffer = vec![];
-            let mut writer =
-                ArrowWriter::try_new(&mut buffer, batch.schema(), Some(props)).unwrap();
-            writer.write(&batch).map_err(Arc::new)?;
-            writer.close().map_err(Arc::new)?;
-            num_bytes = buffer.len() as u64;
-
-            // Upload the log.
-            match self
-                .storage
-                .put_bytes(&path, buffer, PutOptions::if_not_exists())
-                .await
-            {
-                Ok(_) => {
-                    break;
-                }
-                Err(StorageError::Precondition { path: _, source: _ }) => {
-                    return Err(Error::LogContention);
-                }
-                Err(_) => {
-                    if start.elapsed() > Duration::from_secs(60) {
-                        return Err(Error::LogWriteTimeout);
-                    }
-                    let mut backoff = exp_backoff.next();
-                    if backoff > Duration::from_secs(3_600) {
-                        backoff = Duration::from_secs(3_600);
-                    }
-                    tokio::time::sleep(backoff).await;
-                }
-            }
-        }
-
+        let (path, setsum, num_bytes) = upload_parquet(
+            &self.options,
+            &self.storage,
+            &self.prefix,
+            fragment_seq_no,
+            log_position,
+            messages,
+        )
+        .await?;
         // Upload to a coalesced manifest.
         let fragment = Fragment {
             path: path.to_string(),
             seq_no: fragment_seq_no,
             start: log_position,
             limit: log_position + messages_len,
-            num_bytes,
-            // TODO(rescrv):  This is a placeholder.
-            setsum: Setsum::default(),
+            num_bytes: num_bytes as u64,
+            setsum,
         };
-        self.manifest_manager.add_fragment(fragment).await?;
+        self.manifest_manager.publish_fragment(fragment).await?;
         // Record the records/batches written.
         self.batch_manager.update_average_batch_size(messages_len);
         self.batch_manager.finish_write();
         Ok(log_position)
+    }
+}
+
+pub fn construct_parquet(
+    log_position: LogPosition,
+    messages: &[Vec<u8>],
+) -> Result<(Vec<u8>, Setsum), Error> {
+    // Construct the columns and construct the setsum.
+    let mut setsum = Setsum::default();
+    let messages_len = messages.len();
+    let mut positions = Vec::with_capacity(messages_len);
+    let mut bodies = Vec::with_capacity(messages_len);
+    let epoch_micros = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
+        .as_micros() as u64;
+    for (index, message) in messages.iter().enumerate() {
+        let position = log_position + index;
+        setsum.insert_vectored(&[
+            &position.offset.to_be_bytes(),
+            &epoch_micros.to_be_bytes(),
+            message.as_slice(),
+        ]);
+        positions.push(position);
+        bodies.push(message.as_slice());
+    }
+    let offsets = positions.iter().map(|p| p.offset).collect::<Vec<_>>();
+    let timestamps_us = vec![epoch_micros; offsets.len()];
+
+    // Create an Arrow record batch
+    let offsets = UInt64Array::from(offsets);
+    let timestamps_us = UInt64Array::from(timestamps_us);
+    let bodies = BinaryArray::from(bodies);
+    // SAFETY(rescrv):  The try_from_iter call will always succeed.
+    // TODO(rescrv):  Arrow pre-allocator.
+    let batch = RecordBatch::try_from_iter(vec![
+        ("offset", Arc::new(offsets) as ArrayRef),
+        ("timestamp_us", Arc::new(timestamps_us) as ArrayRef),
+        ("body", Arc::new(bodies) as ArrayRef),
+    ])
+    .unwrap();
+
+    // Write to parquet.
+    let props = WriterProperties::builder()
+        .set_compression(Compression::SNAPPY)
+        .build();
+    let mut buffer = vec![];
+    let mut writer = ArrowWriter::try_new(&mut buffer, batch.schema(), Some(props)).unwrap();
+    writer.write(&batch).map_err(Arc::new)?;
+    writer.close().map_err(Arc::new)?;
+    Ok((buffer, setsum))
+}
+
+pub async fn upload_parquet(
+    options: &LogWriterOptions,
+    storage: &Storage,
+    prefix: &str,
+    fragment_seq_no: FragmentSeqNo,
+    log_position: LogPosition,
+    messages: Vec<Vec<u8>>,
+) -> Result<(String, Setsum, usize), Error> {
+    // Upload the log.
+    let unprefixed_path = unprefixed_fragment_path(fragment_seq_no);
+    let path = format!("{prefix}/{unprefixed_path}");
+    let exp_backoff: ExponentialBackoff = options.throttle_fragment.into();
+    let start = Instant::now();
+    loop {
+        tracing::info!("upload_parquet: {:?}", path);
+        let (buffer, setsum) = construct_parquet(log_position, &messages)?;
+        match storage
+            .put_bytes(&path, buffer.clone(), PutOptions::if_not_exists())
+            .await
+        {
+            Ok(_) => {
+                return Ok((unprefixed_path, setsum, buffer.len()));
+            }
+            Err(StorageError::Precondition { path: _, source: _ }) => {
+                return Err(Error::LogContention);
+            }
+            Err(err) => {
+                if start.elapsed() > Duration::from_secs(60) {
+                    return Err(Error::StorageError(Arc::new(err)));
+                }
+                let mut backoff = exp_backoff.next();
+                if backoff > Duration::from_secs(3_600) {
+                    backoff = Duration::from_secs(3_600);
+                }
+                tokio::time::sleep(backoff).await;
+            }
+        }
     }
 }

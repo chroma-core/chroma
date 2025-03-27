@@ -7,7 +7,7 @@ members = ["rust/benchmark", "rust/blockstore", "rust/cache", "rust/chroma", "ru
 arrow = "52.2.0"
 async-trait = "0.1"
 axum = { version = "0.8", features = ["macros"] }
-bytes = "1.7"
+bytes = "1.10"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 criterion = { version = "0.5", features = ["async_tokio"] }
