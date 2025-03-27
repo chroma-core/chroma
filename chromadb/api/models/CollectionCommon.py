@@ -28,7 +28,6 @@ from chromadb.api.types import (
     Embeddings,
     FilterSet,
     GetRequest,
-    IncludeEnum,
     PyEmbedding,
     Embeddable,
     GetResult,
@@ -260,9 +259,9 @@ class CollectionCommon(Generic[ClientT]):
             validate_ids(ids=unpacked_ids)
 
         validate_filter_set(filter_set=filters)
-        validate_include(include=include, dissalowed=[IncludeEnum.distances])
+        validate_include(include=include, dissalowed=["distances"])
 
-        if IncludeEnum.data in include and self._data_loader is None:
+        if "data" in include and self._data_loader is None:
             raise ValueError(
                 "You must set a data loader on the collection if loading from URIs."
             )
@@ -270,8 +269,8 @@ class CollectionCommon(Generic[ClientT]):
         # Prepare
         request_include = include
         # We need to include uris in the result from the API to load datas
-        if IncludeEnum.data in include and IncludeEnum.uris not in include:
-            request_include.append(IncludeEnum.uris)
+        if "data" in include and "uris" not in include:
+            request_include.append("uris")
 
         return GetRequest(
             ids=unpacked_ids,
@@ -329,7 +328,7 @@ class CollectionCommon(Generic[ClientT]):
         # We need to manually include uris in the result from the API to load datas
         request_include = include
         if "data" in request_include and "uris" not in request_include:
-            request_include.append(IncludeEnum.uris)
+            request_include.append("uris")
 
         return QueryRequest(
             embeddings=request_embeddings,

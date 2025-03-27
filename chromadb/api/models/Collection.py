@@ -6,7 +6,6 @@ from chromadb.api.types import (
     URI,
     CollectionMetadata,
     Embedding,
-    IncludeEnum,
     PyEmbedding,
     Include,
     Metadata,
@@ -106,7 +105,7 @@ class Collection(CollectionCommon["ServerAPI"]):
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = [IncludeEnum.metadatas, IncludeEnum.documents],
+        include: Include = ["metadatas", "documents"],
     ) -> GetResult:
         """Get embeddings and their associate data from the data store. If no ids or where filter is provided returns
         all embeddings up to limit starting at offset.
@@ -179,9 +178,9 @@ class Collection(CollectionCommon["ServerAPI"]):
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
         include: Include = [
-            IncludeEnum.metadatas,
-            IncludeEnum.documents,
-            IncludeEnum.distances,
+            "metadatas",
+            "documents",
+            "distances",
         ],
     ) -> QueryResult:
         """Get the n_results nearest neighbor embeddings for provided query_embeddings or query_texts.
