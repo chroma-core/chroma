@@ -5,7 +5,6 @@ use super::{
 };
 use crate::{chroma_proto, CHROMA_DOCUMENT_KEY};
 use chroma_error::{ChromaError, ErrorCodes};
-use prost::Message;
 use thiserror::Error;
 
 #[derive(Clone, Debug)]
@@ -32,9 +31,19 @@ impl OperationRecord {
             size_byte += size_of_val(&emb[..]);
         }
         if let Some(meta) = &self.metadata {
-            size_byte += chroma_proto::UpdateMetadata::from(meta.clone())
-                .encode_to_vec()
-                .len();
+            size_byte += meta
+                .iter()
+                .map(|(k, v)| {
+                    k.len()
+                        + match v {
+                            UpdateMetadataValue::Bool(b) => size_of_val(b),
+                            UpdateMetadataValue::Int(i) => size_of_val(i),
+                            UpdateMetadataValue::Float(f) => size_of_val(f),
+                            UpdateMetadataValue::Str(s) => s.len(),
+                            UpdateMetadataValue::None => 0,
+                        }
+                })
+                .sum::<usize>();
         }
         size_byte as u64
     }
