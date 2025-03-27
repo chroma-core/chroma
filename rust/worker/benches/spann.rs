@@ -79,6 +79,7 @@ fn add_to_index_and_get_reader<'a>(
         let collection_id = CollectionUuid::new();
         let dimensionality = 128;
         let params = SpannConfiguration::default();
+        let ef_search = params.search_ef;
         let gc_context = GarbageCollectionContext::try_from_config(
             &(
                 PlGarbageCollectionConfig::default(),
@@ -140,6 +141,7 @@ fn add_to_index_and_get_reader<'a>(
                 Some(&paths.pl_id),
                 Some(&paths.versions_map_id),
                 &blockfile_provider,
+                ef_search,
             )
             .await
             .expect("Error creating spann index reader"),

@@ -300,9 +300,16 @@ impl SpannIndexWriter {
         collection_id: &CollectionUuid,
         distance_function: DistanceFunction,
         dimensionality: usize,
+        ef_search: usize,
     ) -> Result<HnswIndexRef, SpannIndexWriterError> {
         match hnsw_provider
-            .fork(id, collection_id, dimensionality as i32, distance_function)
+            .fork(
+                id,
+                collection_id,
+                dimensionality as i32,
+                distance_function,
+                ef_search,
+            )
             .await
         {
             Ok(index) => Ok(index),
@@ -409,6 +416,7 @@ impl SpannIndexWriter {
                     collection_id,
                     distance_function.clone(),
                     dimensionality,
+                    params.search_ef,
                 )
                 .await?
             }
@@ -1799,12 +1807,19 @@ impl<'me> SpannIndexReader<'me> {
         cache_key: &CollectionUuid,
         distance_function: DistanceFunction,
         dimensionality: usize,
+        ef_search: usize,
     ) -> Result<HnswIndexRef, SpannIndexReaderError> {
         match hnsw_provider.get(id, cache_key).await {
             Some(index) => Ok(index),
             None => {
                 match hnsw_provider
-                    .open(id, cache_key, dimensionality as i32, distance_function)
+                    .open(
+                        id,
+                        cache_key,
+                        dimensionality as i32,
+                        distance_function,
+                        ef_search,
+                    )
                     .await
                 {
                     Ok(index) => Ok(index),
@@ -1847,6 +1862,7 @@ impl<'me> SpannIndexReader<'me> {
         pl_blockfile_id: Option<&Uuid>,
         versions_map_blockfile_id: Option<&Uuid>,
         blockfile_provider: &BlockfileProvider,
+        ef_search: usize,
     ) -> Result<SpannIndexReader<'me>, SpannIndexReaderError> {
         let hnsw_reader = match hnsw_id {
             Some(hnsw_id) => {
@@ -1856,6 +1872,7 @@ impl<'me> SpannIndexReader<'me> {
                     hnsw_cache_key,
                     distance_function,
                     dimensionality,
+                    ef_search,
                 )
                 .await?
             }
@@ -3238,6 +3255,7 @@ mod tests {
         let collection_id = CollectionUuid::new();
         let params = SpannConfiguration::default();
         let distance_function = params.space.clone().into();
+        let ef_search = params.search_ef;
         let dimensionality = 1000;
         let gc_context = GarbageCollectionContext::try_from_config(
             &(
@@ -3297,6 +3315,7 @@ mod tests {
             Some(&paths.pl_id),
             Some(&paths.versions_map_id),
             &blockfile_provider,
+            ef_search,
         )
         .await
         .expect("Error creating spann index reader");
@@ -3333,6 +3352,7 @@ mod tests {
         let collection_id = CollectionUuid::new();
         let params = SpannConfiguration::default();
         let distance_function = params.space.clone().into();
+        let ef_search = params.search_ef;
         let dimensionality = 1000;
         let gc_context = GarbageCollectionContext::try_from_config(
             &(
@@ -3414,6 +3434,7 @@ mod tests {
             Some(&paths.pl_id),
             Some(&paths.versions_map_id),
             &blockfile_provider,
+            ef_search,
         )
         .await
         .expect("Error creating spann index reader");
@@ -3441,6 +3462,7 @@ mod tests {
         let max_block_size_bytes = 8 * 1024 * 1024;
         let collection_id = CollectionUuid::new();
         let params = SpannConfiguration::default();
+        let ef_search = params.search_ef;
         let gc_context = GarbageCollectionContext::try_from_config(
             &(
                 PlGarbageCollectionConfig::default(),
@@ -3519,6 +3541,7 @@ mod tests {
             pl_path.as_ref(),
             versions_map_path.as_ref(),
             &blockfile_provider,
+            ef_search,
         )
         .await
         .expect("Error creating spann index reader");
@@ -3550,6 +3573,7 @@ mod tests {
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let max_block_size_bytes = 8 * 1024 * 1024;
         let params = SpannConfiguration::default();
+        let ef_search = params.search_ef;
         let gc_context = GarbageCollectionContext::try_from_config(
             &(
                 PlGarbageCollectionConfig::default(),
@@ -3651,6 +3675,7 @@ mod tests {
             pl_path.as_ref(),
             versions_map_path.as_ref(),
             &blockfile_provider,
+            ef_search,
         )
         .await
         .expect("Error creating spann index reader");
@@ -3702,6 +3727,7 @@ mod tests {
         )
         .await
         .expect("Error converting config to gc context");
+        let ef_seardh = params.search_ef;
         let distance_function: DistanceFunction = params.space.clone().into();
         let collection_id = CollectionUuid::new();
         let dimensionality = 1000;
@@ -3925,6 +3951,7 @@ mod tests {
             pl_path.as_ref(),
             versions_map_path.as_ref(),
             &blockfile_provider,
+            ef_seardh,
         )
         .await
         .expect("Error creating spann index reader");
@@ -3995,6 +4022,7 @@ mod tests {
             pl_path.as_ref(),
             versions_map_path.as_ref(),
             &blockfile_provider,
+            ef_seardh,
         )
         .await
         .expect("Error creating spann index reader");

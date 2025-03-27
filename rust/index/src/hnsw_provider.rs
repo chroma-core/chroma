@@ -180,6 +180,7 @@ impl HnswIndexProvider {
         cache_key: &CacheKey,
         dimensionality: i32,
         distance_function: DistanceFunction,
+        ef_search: usize,
     ) -> Result<HnswIndexRef, Box<HnswIndexProviderForkError>> {
         // We take a lock here to synchronize concurrent forks of the same index.
         // Otherwise, we could end up with a corrupted index since the filesystem
@@ -222,7 +223,7 @@ impl HnswIndexProvider {
         // another thread has loaded the index and we return it.
         match self.get(&new_id, cache_key).await {
             Some(index) => Ok(index.clone()),
-            None => match HnswIndex::load(storage_path_str, &index_config, new_id) {
+            None => match HnswIndex::load(storage_path_str, &index_config, ef_search, new_id) {
                 Ok(index) => {
                     let index = HnswIndexRef {
                         inner: Arc::new(RwLock::new(index)),
@@ -316,6 +317,7 @@ impl HnswIndexProvider {
         cache_key: &CacheKey,
         dimensionality: i32,
         distance_function: DistanceFunction,
+        ef_search: usize,
     ) -> Result<HnswIndexRef, Box<HnswIndexProviderOpenError>> {
         let index_storage_path = self.temporary_storage_path.join(id.to_string());
 
@@ -351,7 +353,7 @@ impl HnswIndexProvider {
         // another thread has loaded the index and we return it.
         match self.get(id, cache_key).await {
             Some(index) => Ok(index.clone()),
-            None => match HnswIndex::load(index_storage_path_str, &index_config, *id) {
+            None => match HnswIndex::load(index_storage_path_str, &index_config, ef_search, *id) {
                 Ok(index) => {
                     let index = HnswIndexRef {
                         inner: Arc::new(RwLock::new(index)),
@@ -682,6 +684,7 @@ mod tests {
                 &collection_id,
                 dimensionality,
                 distance_function,
+                default_hnsw_params.search_ef,
             )
             .await
             .unwrap();

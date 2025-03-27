@@ -483,6 +483,7 @@ impl<'me> SpannSegmentReader<'me> {
             posting_list_id.as_ref(),
             versions_map_id.as_ref(),
             blockfile_provider,
+            params.search_ef,
         )
         .await
         {
