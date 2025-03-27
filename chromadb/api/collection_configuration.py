@@ -644,10 +644,7 @@ def overwrite_embedding_function(
 ) -> EmbeddingFunction:  # type: ignore
     """Overwrite an EmbeddingFunction with a new configuration"""
     # Check for legacy embedding functions
-    if (
-        existing_embedding_function.name() is NotImplemented
-        or update_embedding_function.name() is NotImplemented
-    ):
+    if existing_embedding_function.is_legacy() or update_embedding_function.is_legacy():
         warnings.warn(
             "cannot update legacy embedding function config",
             DeprecationWarning,
