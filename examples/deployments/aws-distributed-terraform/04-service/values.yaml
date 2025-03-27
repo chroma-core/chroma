@@ -1,0 +1,149 @@
+namespace: 'chroma'
+
+frontendService:
+  image:
+    repository: '037879410068.dkr.ecr.us-east-1.amazonaws.com/frontend-service'
+    tag: '6b9f4e4-79b1b80'
+  isPersistent: 'value: "TRUE"'
+  producerImpl: 'value: "chromadb.logservice.logservice.LogService"'
+  consumerImpl: 'value: "chromadb.logservice.logservice.LogService"'
+  segmentManagerImpl: 'value: "chromadb.segment.impl.manager.distributed.DistributedSegmentManager"'
+  executorImpl: 'value: "chromadb.execution.executor.distributed.DistributedExecutor"'
+  allowReset: 'value: "TRUE"'
+  sysdbImpl: 'value: "chromadb.db.impl.grpc.client.GrpcSysDB"'
+  serverGrpcPort: 'value: "50051"'
+  coordinatorHost: 'value: "sysdb.chroma"'
+  authProvider: 'value: ""'
+  authCredentialsProvider: 'value: ""'
+  authzProvider: 'value: ""'
+  authzConfigProvider: 'value: ""'
+  memberlistProviderImpl: 'value: "chromadb.segment.impl.distributed.segment_directory.CustomResourceMemberlistProvider"'
+  logServiceHost: 'value: "logservice.chroma"'
+  logServicePort: 'value: "50051"'
+  replicaCount: 2
+
+rustFrontendService:
+  image:
+    repository: '037879410068.dkr.ecr.us-east-1.amazonaws.com/rust-frontend-service'
+    tag: '6b9f4e4-79b1b80'
+  replicaCount: 1
+  resources:
+    limits:
+      cpu: '2000m'
+      memory: '1Gi'
+    requests:
+      cpu: '1000m'
+      memory: '512Mi'
+
+sysdb:
+  image:
+    repository: '037879410068.dkr.ecr.us-east-1.amazonaws.com/sysdb-service'
+    tag: "6b9f4e4"
+  replicaCount: 1
+  env:
+    - name: PASSWORD
+      value: |
+        valueFrom:
+          secretKeyRef:
+            name: sysdb-secrets
+            key: password
+            optional: false
+    - name: USERNAME
+      value: |
+        valueFrom:
+          secretKeyRef:
+            name: sysdb-secrets
+            key: username
+            optional: false
+  resources:
+    limits:
+      cpu: '2000m'
+      memory: '1Gi'
+    requests:
+      cpu: '1000m'
+      memory: '512Mi'
+  flags:
+    system-catalog-provider: database
+    db-address: "MY_SYSDB_ENDPOINT"
+    read-db-address: "MY_SYSDB_RO_ENDPOINT"
+    db-port: "5432"
+    username: "$USERNAME"
+    password: "$PASSWORD"
+    db-name: sysdb
+    ssl-mode: "require"
+
+
+logService:
+  image:
+    repository: '037879410068.dkr.ecr.us-east-1.amazonaws.com/log-service'
+    tag: "6b9f4e4"
+  env:
+    - name: SYSDB_CONN
+      value: 'value: "sysdb.chroma:50051"'
+    - name: CHROMA_DATABASE_URL
+      value: |
+        valueFrom:
+          secretKeyRef:
+            name: logdb-secrets
+            key: database_url
+            optional: false
+  replicaCount: 1
+
+queryService:
+  image:
+    repository: '037879410068.dkr.ecr.us-east-1.amazonaws.com/query-service'
+    tag: '6b9f4e4'
+  env:
+  cache:
+    hostPath: '/local/cache/chroma-query-service'
+    mountPath: '/cache/'
+  replicaCount: 2
+
+compactionService:
+  image:
+    repository: '037879410068.dkr.ecr.us-east-1.amazonaws.com/compactor-service'
+    tag: '6b9f4e4'
+  env:
+  cache:
+    hostPath: '/local/cache/chroma-compaction-service'
+    mountPath: '/cache/'
+  replicaCount: 1
+
+sysdbMigration:
+  image:
+    repository: '037879410068.dkr.ecr.us-east-1.amazonaws.com/sysdb-migration'
+    tag: '6b9f4e4'
+  username: $(USERNAME)
+  password: $(PASSWORD)
+  netloc: "MY_SYSDB_ENDPOINT"
+  port: "5432"
+  dbName: sysdb
+  sslmode: require
+  env:
+    - name: PASSWORD
+      value: |
+        valueFrom:
+          secretKeyRef:
+            name: sysdb-secrets
+            key: password
+            optional: false
+    - name: USERNAME
+      value: |
+        valueFrom:
+          secretKeyRef:
+            name: sysdb-secrets
+            key: username
+            optional: false
+
+logServiceMigration:
+  image:
+    repository: '037879410068.dkr.ecr.us-east-1.amazonaws.com/log-service-db-migration'
+    tag: "6b9f4e4"
+  env:
+    - name: CHROMA_DB_LOG_URL
+      value: |
+        valueFrom:
+          secretKeyRef:
+            name: logdb-secrets
+            key: database_url
+            optional: false

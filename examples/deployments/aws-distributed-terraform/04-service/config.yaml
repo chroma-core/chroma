@@ -1,0 +1,29 @@
+query_service:
+    memberlist_provider:
+        CustomResource:
+            memberlist_name: "query-service-memberlist"
+    storage:
+        AdmissionControlledS3:
+            s3_config:
+                bucket: "MY_S3_BUCKET_NAME"
+                credentials: "AWS"
+    hnsw_provider:
+        hnsw_temporary_path: "/cache/chroma/hnsw"
+        hnsw_cache_config:
+          weighted_lru:
+              capacity: 17179869184 # 16GiB
+
+compaction_service:
+    memberlist_provider:
+        CustomResource:
+            memberlist_name: "compaction-service-memberlist"
+    storage:
+        AdmissionControlledS3:
+            s3_config:
+                bucket: "MY_S3_BUCKET_NAME"
+                credentials: "AWS"
+    hnsw_provider:
+        hnsw_temporary_path: "/cache/chroma/hnsw"
+        hnsw_cache_config:
+            weighted_lru:
+                capacity: 34359738368 # 32GiB
