@@ -132,12 +132,14 @@ class CollectionCommon(Generic[ClientT]):
             model.configuration_json
         )
 
-        if (
-            embedding_function is None
-            or isinstance(embedding_function, ef.DefaultEmbeddingFunction)
-            and self._configuration.get("embedding_function") is not None
-        ):
-            self._embedding_function = self._configuration.get("embedding_function")
+        config_ef = self._configuration.get("embedding_function")
+        if config_ef is not None:
+            if embedding_function is not None and not isinstance(
+                embedding_function, ef.DefaultEmbeddingFunction
+            ):
+                if embedding_function.name() is not config_ef.name():
+                    raise ValueError("Embedding function name mismatch")
+            self._embedding_function = config_ef
         else:
             self._embedding_function = embedding_function
         self._data_loader = data_loader
