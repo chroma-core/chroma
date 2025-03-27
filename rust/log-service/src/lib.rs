@@ -136,7 +136,9 @@ impl From<LogKey> for LogStub {
     }
 }
 
-/// Force a lifetime to outlive the Arc'd log writer.
+/// Hold a lifetime-bound reference to the log writer.  This takes a heap-backed Arc value and
+/// makes sure that it won't be allowed to exist past the lifetime of the handle.  Alternatively,
+/// it keeps the handle alive as long as you have a log-writer reference.
 struct LogRef<'a> {
     log: Arc<LogWriter>,
     _phantom: std::marker::PhantomData<&'a ()>,
@@ -240,6 +242,12 @@ impl LogService for LogServer {
         let collection_id = Uuid::parse_str(&push_logs.collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+        if push_logs.records.len() > i32::MAX as usize {
+            return Err(Status::invalid_argument("Too many records"));
+        }
+        if push_logs.records.is_empty() {
+            return Err(Status::invalid_argument("Too few records"));
+        }
         let prefix = storage_prefix_for_log(collection_id);
         let key = LogKey { collection_id };
         let handle = self.open_logs.get_or_create_state(key);
@@ -254,12 +262,6 @@ impl LogService for LogServer {
                 .encode(&mut buf)
                 .map_err(|err| Status::unknown(err.to_string()))?;
             messages.push(buf);
-        }
-        if messages.len() > i32::MAX as usize {
-            return Err(Status::invalid_argument("Too many records"));
-        }
-        if messages.is_empty() {
-            return Err(Status::invalid_argument("Too few records"));
         }
         let record_count = messages.len() as i32;
         log.append_many(messages)
