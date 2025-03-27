@@ -1,4 +1,3 @@
-{{if .Values.rustLogService.configuration}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -6,6 +5,7 @@ metadata:
   namespace: {{ .Values.namespace }}
 data:
   config.yaml: |
+{{if .Values.rustLogService.configuration }}
 {{  .Values.rustLogService.configuration | indent 4 }}
 {{ end }}
 
