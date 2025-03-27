@@ -859,9 +859,11 @@ def validate_include(include: Include, dissalowed: Optional[Include] = None) -> 
         if not isinstance(item, str):
             raise ValueError(f"Expected include item to be a str, got {item}")
 
-        if item not in get_args(Include):
+        # Get the valid items from the Literal type inside the List
+        valid_items = get_args(get_args(Include)[0])
+        if item not in valid_items:
             raise ValueError(
-                f"Expected include item to be one of {', '.join(get_args(Include))}, got {item}"
+                f"Expected include item to be one of {', '.join(valid_items)}, got {item}"
             )
 
         if dissalowed is not None and any(item == e for e in dissalowed):
