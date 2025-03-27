@@ -542,7 +542,7 @@ pub struct LogServer {
 
 #[async_trait::async_trait]
 impl LogService for LogServer {
-    #[tracing::instrument(skip(self, request))]
+    #[tracing::instrument(skip(self, request), err(Display))]
     async fn push_logs(
         &self,
         request: Request<PushLogsRequest>,
@@ -590,7 +590,7 @@ impl LogService for LogServer {
         Ok(Response::new(PushLogsResponse { record_count }))
     }
 
-    #[tracing::instrument(skip(self, request))]
+    #[tracing::instrument(skip(self, request), err(Display))]
     async fn pull_logs(
         &self,
         request: Request<PullLogsRequest>,
@@ -614,13 +614,22 @@ impl LogService for LogServer {
             max_files: Some(pull_logs.batch_size as u64),
             max_bytes: Some(pull_logs.batch_size as u64 * 32_768),
         };
-        let fragments = log_reader
+        let fragments = match log_reader
             .scan(
                 LogPosition::from_offset(pull_logs.start_from_offset as u64),
                 limits,
             )
             .await
-            .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
+        {
+            Ok(fragments) => fragments,
+            Err(err) => {
+                if let wal3::Error::UninitializedLog = err {
+                    return Ok(Response::new(PullLogsResponse { records: vec![] }));
+                } else {
+                    return Err(Status::new(err.code().into(), err.to_string()));
+                }
+            }
+        };
         let futures = fragments
             .iter()
             .map(|fragment| async { log_reader.fetch(fragment).await })
@@ -646,7 +655,7 @@ impl LogService for LogServer {
         Ok(Response::new(PullLogsResponse { records }))
     }
 
-    #[tracing::instrument(skip(self, request))]
+    #[tracing::instrument(skip(self, request), err(Display))]
     async fn get_all_collection_info_to_compact(
         &self,
         request: Request<GetAllCollectionInfoToCompactRequest>,
@@ -744,7 +753,7 @@ impl LogService for LogServer {
         }))
     }
 
-    #[tracing::instrument(skip(self, request))]
+    #[tracing::instrument(skip(self, request), err(Display))]
     async fn update_collection_log_offset(
         &self,
         request: Request<UpdateCollectionLogOffsetRequest>,
@@ -767,7 +776,7 @@ impl LogService for LogServer {
         Ok(Response::new(UpdateCollectionLogOffsetResponse {}))
     }
 
-    #[tracing::instrument(skip(self, request))]
+    #[tracing::instrument(skip(self, request), err(Display))]
     async fn purge_dirty_for_collection(
         &self,
         request: Request<PurgeDirtyForCollectionRequest>,
