@@ -151,7 +151,6 @@ class Client(SharedSystemClient, ClientAPI):
             configuration = {}
             if embedding_function is not None:
                 configuration["embedding_function"] = embedding_function
-        print("CONFIGURATION BEFORE RUST: ", configuration)
         model = self._server.create_collection(
             name=name,
             metadata=metadata,
@@ -160,7 +159,6 @@ class Client(SharedSystemClient, ClientAPI):
             get_or_create=get_or_create,
             configuration=configuration,
         )
-        print("MODEL CONFIGURATION AFTER RUST: ", model.configuration_json)
         return Collection(
             client=self._server,
             model=model,
