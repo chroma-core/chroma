@@ -135,8 +135,7 @@ impl S3Storage {
                     SdkError::ServiceError(err) => {
                         let inner = err.into_err();
                         match &inner {
-                            aws_sdk_s3::operation::get_object::GetObjectError::NoSuchKey(msg) => {
-                                 tracing::error!("no such key: {}", msg);
+                            aws_sdk_s3::operation::get_object::GetObjectError::NoSuchKey(_) => {
                                 Err(StorageError::NotFound {
                                     path: key.to_string(),
                                     source: Arc::new(inner),

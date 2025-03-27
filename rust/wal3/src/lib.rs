@@ -254,7 +254,7 @@ pub struct LogWriterOptions {
 ///////////////////////////////////////// LogReaderOptions /////////////////////////////////////////
 
 /// LogReaderOptions control the behavior of the log writer.
-#[derive(Clone, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct LogReaderOptions {
     /// Default throttling options for manifest.
     #[serde(default)]

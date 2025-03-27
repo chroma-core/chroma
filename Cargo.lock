@@ -1620,19 +1620,24 @@ dependencies = [
 name = "chroma-log"
 version = "0.1.0"
 dependencies = [
+ "arrow",
  "async-trait",
  "bytemuck",
+ "bytes",
  "chroma-config",
  "chroma-error",
  "chroma-segment",
  "chroma-sqlite",
+ "chroma-storage",
  "chroma-sysdb",
  "chroma-system",
  "chroma-tracing",
  "chroma-types",
+ "figment",
  "futures",
  "opentelemetry",
  "proptest",
+ "prost 0.13.3",
  "rand 0.8.5",
  "serde",
  "serde_json",
@@ -1646,6 +1651,47 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "uuid",
+ "wal3",
+]
+
+[[package]]
+name = "chroma-log-service"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "async-trait",
+ "bytemuck",
+ "bytes",
+ "chroma-config",
+ "chroma-error",
+ "chroma-log",
+ "chroma-segment",
+ "chroma-sqlite",
+ "chroma-storage",
+ "chroma-sysdb",
+ "chroma-system",
+ "chroma-tracing",
+ "chroma-types",
+ "figment",
+ "futures",
+ "opentelemetry",
+ "parquet",
+ "proptest",
+ "prost 0.13.3",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tonic",
+ "tonic-health",
+ "tower 0.5.2",
+ "tracing",
+ "tracing-opentelemetry",
+ "uuid",
+ "wal3",
 ]
 
 [[package]]

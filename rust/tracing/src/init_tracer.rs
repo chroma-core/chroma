@@ -23,6 +23,7 @@ pub fn init_global_filter_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
                 "chroma-cache",
                 "chroma-distance",
                 "chroma-error",
+                "chroma-log",
                 "chroma-frontend",
                 "chroma-index",
                 "chroma-storage",
