@@ -32,9 +32,12 @@ async fn test_k8s_integration_05_crash_safety_initialize_fails() {
     )
     .await
     .unwrap();
-    assert_eq!(path, "log/Bucket=0/FragmentSeqNo=1.parquet");
+    assert_eq!(
+        path,
+        "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000001.parquet"
+    );
     let fragment1 = FragmentCondition {
-        path: "log/Bucket=0/FragmentSeqNo=1.parquet".to_string(),
+        path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000001.parquet".to_string(),
         seq_no: FragmentSeqNo(1),
         start: 1,
         limit: 2,
@@ -49,7 +52,7 @@ async fn test_k8s_integration_05_crash_safety_initialize_fails() {
             fragments: vec![],
         }),
         Condition::Fragment(FragmentCondition {
-            path: "log/Bucket=0/FragmentSeqNo=1.parquet".to_string(),
+            path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000001.parquet".to_string(),
             seq_no: FragmentSeqNo(1),
             start: 1,
             limit: 2,
@@ -76,7 +79,7 @@ async fn test_k8s_integration_05_crash_safety_initialize_fails() {
     assert!(matches!(log_contention, wal3::Error::LogContention));
     let position = log.append(vec![81, 82, 83, 84]).await.unwrap();
     let fragment2 = FragmentCondition {
-        path: "log/Bucket=0/FragmentSeqNo=2.parquet".to_string(),
+        path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000002.parquet".to_string(),
         seq_no: FragmentSeqNo(2),
         start: 2,
         limit: 3,

@@ -340,7 +340,7 @@ impl FragmentSeqNo {
 
     // Round down to the nearest multiple of 5k.
     pub fn bucket(&self) -> u64 {
-        (self.0 / 5_000) * 5_000
+        (self.0 / 4_096) * 4_096
     }
 }
 
@@ -429,7 +429,7 @@ where
 
 pub fn unprefixed_fragment_path(fragment_seq_no: FragmentSeqNo) -> String {
     format!(
-        "log/Bucket={}/FragmentSeqNo={}.parquet",
+        "log/Bucket={:016x}/FragmentSeqNo={:016x}.parquet",
         fragment_seq_no.bucket(),
         fragment_seq_no.0,
     )
@@ -440,5 +440,5 @@ pub fn parse_fragment_path(path: &str) -> Option<FragmentSeqNo> {
     let (_, basename) = path.rsplit_once('/')?;
     let fsn_equals_number = basename.strip_suffix(".parquet")?;
     let number = fsn_equals_number.strip_prefix("FragmentSeqNo=")?;
-    number.parse::<u64>().ok().map(FragmentSeqNo)
+    u64::from_str_radix(number, 16).ok().map(FragmentSeqNo)
 }
