@@ -79,6 +79,7 @@ fn add_to_index_and_get_reader<'a>(
         let collection_id = CollectionUuid::new();
         let dimensionality = 128;
         let params = InternalSpannConfiguration::default();
+        let ef_search = params.search_ef;
         let gc_context = GarbageCollectionContext::try_from_config(
             &(
                 PlGarbageCollectionConfig::default(),
@@ -137,6 +138,7 @@ fn add_to_index_and_get_reader<'a>(
                 &collection_id,
                 params.space.into(),
                 dimensionality,
+                ef_search,
                 Some(&paths.pl_id),
                 Some(&paths.versions_map_id),
                 &blockfile_provider,

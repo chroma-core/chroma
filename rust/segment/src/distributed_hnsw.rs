@@ -139,6 +139,7 @@ impl DistributedHNSWSegmentWriter {
                     &segment.collection,
                     dimensionality as i32,
                     hnsw_configuration.space.clone().into(),
+                    hnsw_configuration.ef_search,
                 )
                 .await
             {
@@ -346,6 +347,7 @@ impl DistributedHNSWSegmentReader {
                                 &segment.collection,
                                 dimensionality as i32,
                                 hnsw_configuration.space.clone().into(),
+                                hnsw_configuration.ef_search,
                             )
                             .await
                         {
