@@ -133,7 +133,9 @@ class CollectionCommon(Generic[ClientT]):
                 embedding_function, ef.DefaultEmbeddingFunction
             ):
                 if embedding_function.name() is not config_ef.name():
-                    raise ValueError("Embedding function name mismatch: ")
+                    raise ValueError(
+                        f"Embedding function name mismatch: {embedding_function.name()} != {config_ef.name()}"
+                    )
             self._embedding_function = config_ef
         else:
             self._embedding_function = embedding_function
