@@ -131,7 +131,7 @@ def collection_configuration_to_json(config: CollectionConfiguration) -> Dict[st
             ef = None
 
     if ef is None:
-        ef = DefaultEmbeddingFunction()
+        ef = None
 
     try:
         hnsw_config = cast(CreateHNSWConfiguration, hnsw_config)
@@ -139,24 +139,25 @@ def collection_configuration_to_json(config: CollectionConfiguration) -> Dict[st
         raise ValueError(f"not a valid hnsw config: {e}")
 
     ef_config: Dict[str, Any] | None = None
-    try:
-        if ef.is_legacy():
+    if ef is not None:
+        try:
+            if ef.is_legacy():
+                ef_config = {"type": "legacy"}
+            else:
+                ef_config = {
+                    "name": ef.name(),
+                    "type": "known",
+                    "config": ef.get_config(),
+                }
+                register_embedding_function(type(ef))
+        except Exception as e:
+            warnings.warn(
+                f"legacy embedding function config: {e}",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            ef = None
             ef_config = {"type": "legacy"}
-        else:
-            ef_config = {
-                "name": ef.name(),
-                "type": "known",
-                "config": ef.get_config(),
-            }
-            register_embedding_function(type(ef))
-    except Exception as e:
-        warnings.warn(
-            f"legacy embedding function config: {e}",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        ef = None
-        ef_config = {"type": "legacy"}
 
     validate_create_hnsw_config(hnsw_config, ef)
 
@@ -358,8 +359,6 @@ def create_collection_configuration_to_json(
         ef = None
         ef_config = {"type": "legacy"}
 
-    print("HNSW CONFIG: ", hnsw_config)
-    print("EF CONFIG: ", ef_config)
     validate_create_hnsw_config(hnsw_config, ef)
 
     return {

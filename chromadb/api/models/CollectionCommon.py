@@ -108,7 +108,6 @@ class CollectionCommon(Generic[ClientT]):
     _client: ClientT
     _embedding_function: Optional[EmbeddingFunction[Embeddable]]
     _data_loader: Optional[DataLoader[Loadable]]
-    _configuration: CollectionConfiguration
 
     def __init__(
         self,
@@ -128,17 +127,13 @@ class CollectionCommon(Generic[ClientT]):
         if embedding_function is not None:
             validate_embedding_function(embedding_function)
 
-        self._configuration = load_collection_configuration_from_json(
-            model.configuration_json
-        )
-
-        config_ef = self._configuration.get("embedding_function")
+        config_ef = self.configuration.get("embedding_function")
         if config_ef is not None:
             if embedding_function is not None and not isinstance(
                 embedding_function, ef.DefaultEmbeddingFunction
             ):
                 if embedding_function.name() is not config_ef.name():
-                    raise ValueError("Embedding function name mismatch")
+                    raise ValueError("Embedding function name mismatch: ")
             self._embedding_function = config_ef
         else:
             self._embedding_function = embedding_function
@@ -156,7 +151,7 @@ class CollectionCommon(Generic[ClientT]):
 
     @property
     def configuration(self) -> CollectionConfiguration:
-        return self._configuration
+        return load_collection_configuration_from_json(self._model.configuration_json)
 
     @property
     def configuration_json(self) -> Dict[str, Any]:
