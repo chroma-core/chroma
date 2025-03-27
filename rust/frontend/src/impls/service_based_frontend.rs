@@ -659,6 +659,9 @@ impl ServiceBasedFrontend {
                 .get_collection_with_segments(collection_id)
                 .await
                 .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+            let latest_collection_logical_size_bytes = collection_and_segments
+                .collection
+                .size_bytes_post_compaction;
             let fts_query_length = where_clause.fts_query_length();
             let metadata_predicate_count = where_clause.metadata_predicate_count();
 
@@ -686,6 +689,8 @@ impl ServiceBasedFrontend {
                 })
                 .await?;
 
+            let return_bytes = get_result.size_bytes();
+
             for record in get_result.result.records {
                 records.push(OperationRecord {
                     id: record.id,
@@ -696,7 +701,6 @@ impl ServiceBasedFrontend {
                     metadata: None,
                 });
             }
-            // TODO: Inspect collection logical bytes and returned bytes
             // TODO: Submit event after the response is sent
             Some(MeterEvent::CollectionRead {
                 tenant: tenant_id.clone(),
@@ -707,8 +711,8 @@ impl ServiceBasedFrontend {
                 metadata_predicate_count,
                 query_embedding_count: 0,
                 pulled_log_size_bytes: get_result.pulled_log_bytes,
-                latest_collection_logical_size_bytes: 0,
-                return_bytes: 0,
+                latest_collection_logical_size_bytes,
+                return_bytes,
             })
         } else if let Some(user_ids) = ids {
             records.extend(user_ids.into_iter().map(|id| OperationRecord {
@@ -729,7 +733,7 @@ impl ServiceBasedFrontend {
             return Ok(DeleteCollectionRecordsResponse {});
         }
 
-        let log_size_bytes = records.iter().map(OperationRecord::size_byte).sum();
+        let log_size_bytes = records.iter().map(OperationRecord::size_bytes).sum();
 
         self.log_client
             .push_logs(collection_id, records)
@@ -809,7 +813,10 @@ impl ServiceBasedFrontend {
             .get_collection_with_segments(collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
-        let res = self
+        let latest_collection_logical_size_bytes = collection_and_segments
+            .collection
+            .size_bytes_post_compaction;
+        let count_result = self
             .executor
             .count(Count {
                 scan: Scan {
@@ -817,7 +824,7 @@ impl ServiceBasedFrontend {
                 },
             })
             .await?;
-        // TODO: Inspect collection logical bytes and returned bytes
+        let return_bytes = count_result.size_bytes();
         // TODO: Submit event after the response is sent
         MeterEvent::CollectionRead {
             tenant: tenant_id.clone(),
@@ -827,13 +834,13 @@ impl ServiceBasedFrontend {
             fts_query_length: 0,
             metadata_predicate_count: 0,
             query_embedding_count: 0,
-            pulled_log_size_bytes: res.pulled_log_bytes,
-            latest_collection_logical_size_bytes: 0,
-            return_bytes: 0,
+            pulled_log_size_bytes: count_result.pulled_log_bytes,
+            latest_collection_logical_size_bytes,
+            return_bytes,
         }
         .submit()
         .await;
-        Ok(res.count)
+        Ok(count_result.count)
     }
 
     pub async fn count(&mut self, request: CountRequest) -> Result<CountResponse, QueryError> {
@@ -898,6 +905,9 @@ impl ServiceBasedFrontend {
             .get_collection_with_segments(collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        let latest_collection_logical_size_bytes = collection_and_segments
+            .collection
+            .size_bytes_post_compaction;
         let metadata_predicate_count = r#where
             .as_ref()
             .map(Where::metadata_predicate_count)
@@ -929,7 +939,7 @@ impl ServiceBasedFrontend {
                 },
             })
             .await?;
-        // TODO: Inspect collection logical bytes and returned bytes
+        let return_bytes = get_result.size_bytes();
         // TODO: Submit event after the response is sent
         MeterEvent::CollectionRead {
             tenant: tenant_id.clone(),
@@ -940,8 +950,8 @@ impl ServiceBasedFrontend {
             fts_query_length,
             query_embedding_count: 0,
             pulled_log_size_bytes: get_result.pulled_log_bytes,
-            latest_collection_logical_size_bytes: 0,
-            return_bytes: 0,
+            latest_collection_logical_size_bytes,
+            return_bytes,
         }
         .submit()
         .await;
@@ -1010,6 +1020,9 @@ impl ServiceBasedFrontend {
             .get_collection_with_segments(collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        let latest_collection_logical_size_bytes = collection_and_segments
+            .collection
+            .size_bytes_post_compaction;
         let metadata_predicate_count = r#where
             .as_ref()
             .map(Where::metadata_predicate_count)
@@ -1045,7 +1058,7 @@ impl ServiceBasedFrontend {
                 },
             })
             .await?;
-        // TODO: Inspect collection logical bytes and returned bytes
+        let return_bytes = query_result.size_bytes();
         // TODO: Submit event after the response is sent
         MeterEvent::CollectionRead {
             tenant: tenant_id.clone(),
@@ -1056,8 +1069,8 @@ impl ServiceBasedFrontend {
             fts_query_length,
             query_embedding_count,
             pulled_log_size_bytes: query_result.pulled_log_bytes,
-            latest_collection_logical_size_bytes: 0,
-            return_bytes: 0,
+            latest_collection_logical_size_bytes,
+            return_bytes,
         }
         .submit()
         .await;
@@ -1175,5 +1188,100 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
             executor,
             max_batch_size,
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chroma_config::registry::Registry;
+    use chroma_sysdb::GrpcSysDbConfig;
+    use chroma_types::Collection;
+    use uuid::Uuid;
+
+    use crate::server::CreateCollectionPayload;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_default_sqlite_segments() {
+        // Creating a collection in SQLite should result in two segments.
+        let registry = Registry::new();
+        let system = System::new();
+        let config = FrontendConfig::sqlite_in_memory();
+        let mut frontend = ServiceBasedFrontend::try_from_config(&(config, system), &registry)
+            .await
+            .unwrap();
+
+        let collection = frontend
+            .create_collection(
+                CreateCollectionRequest::try_new(
+                    "default_tenant".to_string(),
+                    "default_database".to_string(),
+                    "test".to_string(),
+                    None,
+                    None,
+                    false,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let mut sysdb: SysDb = registry.get().unwrap();
+        let segments = sysdb
+            .get_segments(None, None, None, collection.collection_id)
+            .await
+            .unwrap();
+
+        assert_eq!(segments.len(), 2);
+        assert!(segments
+            .iter()
+            .any(|s| s.r#type == SegmentType::Sqlite && s.scope == SegmentScope::METADATA));
+        assert!(segments.iter().any(
+            |s| s.r#type == SegmentType::HnswLocalPersisted && s.scope == SegmentScope::VECTOR
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_default_distributed_segments() {
+        // Creating a collection in distributed should result in three segments.
+        // TODO: this should use our official Rust HTTP client, once we have one
+        let client = reqwest::Client::new();
+        let create_response = client
+            .post("http://localhost:3000/api/v2/tenants/default_tenant/databases/default_database/collections")
+            .json(
+                &CreateCollectionPayload { name: Uuid::new_v4().to_string(), configuration: None, metadata: None, get_or_create: false },
+            )
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(create_response.status(), 200);
+        let collection: Collection = create_response.json().await.unwrap();
+
+        let registry = Registry::new();
+        let sysdb_config = chroma_sysdb::SysDbConfig::Grpc(GrpcSysDbConfig {
+            host: "localhost".to_string(),
+            port: 50051,
+            ..Default::default()
+        });
+        let mut sysdb = SysDb::try_from_config(&sysdb_config, &registry)
+            .await
+            .unwrap();
+        let segments = sysdb
+            .get_segments(None, None, None, collection.collection_id)
+            .await
+            .unwrap();
+
+        assert_eq!(segments.len(), 3);
+        assert!(segments.iter().any(
+            |s| s.r#type == SegmentType::BlockfileMetadata && s.scope == SegmentScope::METADATA
+        ));
+        assert!(segments
+            .iter()
+            .any(|s| s.r#type == SegmentType::HnswDistributed && s.scope == SegmentScope::VECTOR));
+        assert!(segments
+            .iter()
+            .any(|s| s.r#type == SegmentType::BlockfileRecord && s.scope == SegmentScope::RECORD));
     }
 }

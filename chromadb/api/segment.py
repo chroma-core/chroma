@@ -39,7 +39,6 @@ from chromadb.api.types import (
     Where,
     WhereDocument,
     Include,
-    IncludeEnum,
     GetResult,
     QueryResult,
     validate_metadata,
@@ -659,11 +658,11 @@ class SegmentAPI(ServerAPI):
                 Filter(ids, where, where_document),
                 Limit(offset or 0, limit),
                 Projection(
-                    IncludeEnum.documents in include,
-                    IncludeEnum.embeddings in include,
-                    IncludeEnum.metadatas in include,
+                    "documents" in include,
+                    "embeddings" in include,
+                    "metadatas" in include,
                     False,
-                    IncludeEnum.uris in include,
+                    "uris" in include,
                 ),
             )
         )
@@ -839,11 +838,11 @@ class SegmentAPI(ServerAPI):
                 KNN(query_embeddings, n_results),
                 Filter(None, where, where_document),
                 Projection(
-                    IncludeEnum.documents in include,
-                    IncludeEnum.embeddings in include,
-                    IncludeEnum.metadatas in include,
-                    IncludeEnum.distances in include,
-                    IncludeEnum.uris in include,
+                    "documents" in include,
+                    "embeddings" in include,
+                    "metadatas" in include,
+                    "distances" in include,
+                    "uris" in include,
                 ),
             )
         )

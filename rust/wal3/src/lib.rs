@@ -12,14 +12,12 @@ mod manifest_manager;
 mod reader;
 mod writer;
 
-use manifest::SnapshotPointer;
-
 pub use backoff::ExponentialBackoff;
 pub use batch_manager::BatchManager;
-pub use manifest::{Manifest, Snapshot};
+pub use manifest::{Manifest, Snapshot, SnapshotPointer};
 pub use manifest_manager::ManifestManager;
 pub use reader::{Limits, LogReader};
-pub use writer::LogWriter;
+pub use writer::{upload_parquet, LogWriter, MarkDirty};
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
@@ -37,16 +35,20 @@ pub enum Error {
     GarbageCollected,
     #[error("log contention fails a write")]
     LogContention,
-    #[error("the log took too long to write")]
-    LogWriteTimeout,
     #[error("the log is full")]
     LogFull,
     #[error("the log is closed")]
     LogClosed,
+    #[error("an empty batch was passed to append")]
+    EmptyBatch,
     #[error("an internal, otherwise unclassifiable error")]
     Internal,
+    #[error("could not find FSN in path: {0}")]
+    MissingFragmentSequenceNumber(String),
     #[error("corrupt manifest: {0}")]
     CorruptManifest(String),
+    #[error("corrupt fragment: {0}")]
+    CorruptFragment(String),
     #[error("corrupt cursor: {0}")]
     CorruptCursor(String),
     #[error("missing cursor: {0}")]
@@ -66,10 +68,12 @@ impl chroma_error::ChromaError for Error {
             Self::GarbageCollected => chroma_error::ErrorCodes::NotFound,
             Self::LogContention => chroma_error::ErrorCodes::Aborted,
             Self::LogFull => chroma_error::ErrorCodes::Aborted,
-            Self::LogWriteTimeout => chroma_error::ErrorCodes::DeadlineExceeded,
             Self::LogClosed => chroma_error::ErrorCodes::FailedPrecondition,
+            Self::EmptyBatch => chroma_error::ErrorCodes::InvalidArgument,
             Self::Internal => chroma_error::ErrorCodes::Internal,
+            Self::MissingFragmentSequenceNumber(_) => chroma_error::ErrorCodes::Internal,
             Self::CorruptManifest(_) => chroma_error::ErrorCodes::DataLoss,
+            Self::CorruptFragment(_) => chroma_error::ErrorCodes::DataLoss,
             Self::CorruptCursor(_) => chroma_error::ErrorCodes::DataLoss,
             Self::NoSuchCursor(_) => chroma_error::ErrorCodes::Unknown,
             Self::ParquetError(_) => chroma_error::ErrorCodes::Unknown,
@@ -156,9 +160,6 @@ pub struct ThrottleOptions {
     /// The number of operations per second to reserve for backoff/retry.  Defaults to 1_500.
     #[serde(default = "ThrottleOptions::default_headroom")]
     pub headroom: usize,
-    /// The maximum number of outstanding requests to allow.  Defaults to 100.
-    #[serde(default = "ThrottleOptions::default_outstanding")]
-    pub outstanding: usize,
 }
 
 impl ThrottleOptions {
@@ -177,10 +178,6 @@ impl ThrottleOptions {
     fn default_headroom() -> usize {
         1_500
     }
-
-    fn default_outstanding() -> usize {
-        1
-    }
 }
 
 impl Default for ThrottleOptions {
@@ -195,8 +192,6 @@ impl Default for ThrottleOptions {
             throughput: Self::default_throughput(),
             // How much headroom we have for retries.
             headroom: Self::default_headroom(),
-            // Allow up to 1 requests to be outstanding.
-            outstanding: Self::default_outstanding(),
         }
     }
 }
@@ -246,7 +241,7 @@ impl Default for SnapshotOptions {
 ///////////////////////////////////////// LogWriterOptions /////////////////////////////////////////
 
 /// LogWriterOptions control the behavior of the log writer.
-#[derive(Clone, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct LogWriterOptions {
     /// Default throttling options for fragments.
     #[serde(default)]
@@ -262,7 +257,7 @@ pub struct LogWriterOptions {
 ///////////////////////////////////////// LogReaderOptions /////////////////////////////////////////
 
 /// LogReaderOptions control the behavior of the log writer.
-#[derive(Clone, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct LogReaderOptions {
     /// Default throttling options for manifest.
     #[serde(default)]
@@ -373,4 +368,22 @@ where
 {
     let s = setsum.hexdigest();
     s.serialize(serializer)
+}
+
+////////////////////////////////////////// Fragment Paths //////////////////////////////////////////
+
+pub fn unprefixed_fragment_path(fragment_seq_no: FragmentSeqNo) -> String {
+    format!(
+        "log/Bucket={}/FragmentSeqNo={}.parquet",
+        fragment_seq_no.bucket(),
+        fragment_seq_no.0,
+    )
+}
+
+pub fn parse_fragment_path(path: &str) -> Option<FragmentSeqNo> {
+    // FragmentSeqNo is always in the basename.
+    let (_, basename) = path.rsplit_once('/')?;
+    let fsn_equals_number = basename.strip_suffix(".parquet")?;
+    let number = fsn_equals_number.strip_prefix("FragmentSeqNo=")?;
+    number.parse::<u64>().ok().map(FragmentSeqNo)
 }
