@@ -62,6 +62,8 @@ from chromadb.api.types import (
 from chromadb.api.collection_configuration import (
     UpdateCollectionConfiguration,
     overwrite_collection_configuration,
+    load_collection_configuration_from_json,
+    CollectionConfiguration,
 )
 
 # TODO: We should rename the types in chromadb.types to be Models where
@@ -125,7 +127,18 @@ class CollectionCommon(Generic[ClientT]):
         if embedding_function is not None:
             validate_embedding_function(embedding_function)
 
-        self._embedding_function = embedding_function
+        config_ef = self.configuration.get("embedding_function")
+        if config_ef is not None:
+            if embedding_function is not None and not isinstance(
+                embedding_function, ef.DefaultEmbeddingFunction
+            ):
+                if embedding_function.name() is not config_ef.name():
+                    raise ValueError(
+                        f"Embedding function name mismatch: {embedding_function.name()} != {config_ef.name()}"
+                    )
+            self._embedding_function = config_ef
+        else:
+            self._embedding_function = embedding_function
         self._data_loader = data_loader
 
     # Expose the model properties as read-only properties on the Collection class
@@ -137,6 +150,10 @@ class CollectionCommon(Generic[ClientT]):
     @property
     def name(self) -> str:
         return self._model.name
+
+    @property
+    def configuration(self) -> CollectionConfiguration:
+        return load_collection_configuration_from_json(self._model.configuration_json)
 
     @property
     def configuration_json(self) -> Dict[str, Any]:

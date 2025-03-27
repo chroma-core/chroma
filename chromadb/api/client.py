@@ -7,7 +7,6 @@ from chromadb.api import AdminAPI, ClientAPI, ServerAPI
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
     UpdateCollectionConfiguration,
-    load_collection_configuration_from_json,
 )
 from chromadb.api.shared_system_client import SharedSystemClient
 from chromadb.api.types import (
@@ -181,15 +180,6 @@ class Client(SharedSystemClient, ClientAPI):
             tenant=self.tenant,
             database=self.database,
         )
-        configuration = load_collection_configuration_from_json(
-            model.configuration_json
-        )
-        # Only use the configuration's embedding_function if the user didn't provide one
-        if (
-            embedding_function is None
-            and configuration.get("embedding_function") is not None
-        ):
-            embedding_function = configuration.get("embedding_function")
         return Collection(
             client=self._server,
             model=model,
@@ -208,6 +198,10 @@ class Client(SharedSystemClient, ClientAPI):
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> Collection:
+        if configuration is None:
+            configuration = {}
+            if embedding_function is not None:
+                configuration["embedding_function"] = embedding_function
         model = self._server.get_or_create_collection(
             name=name,
             metadata=metadata,

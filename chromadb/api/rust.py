@@ -221,7 +221,6 @@ class RustBindingsAPI(ServerAPI):
         collection = self.bindings.create_collection(
             name, configuration_json_str, metadata, get_or_create, tenant, database
         )
-
         collection_model = CollectionModel(
             id=collection.id,
             name=collection.name,
