@@ -130,15 +130,21 @@ def collection_configuration_to_json(config: CollectionConfiguration) -> Dict[st
         except ValueError:
             ef = None
 
-    if ef is None:
-        ef = None
-
+    ef_config: Dict[str, Any] | None = None
     try:
         hnsw_config = cast(CreateHNSWConfiguration, hnsw_config)
     except Exception as e:
         raise ValueError(f"not a valid hnsw config: {e}")
 
-    ef_config: Dict[str, Any] | None = None
+    if ef is None:
+        ef = None
+        validate_create_hnsw_config(hnsw_config, ef)
+        ef_config = {"type": "legacy"}
+        return {
+            "hnsw": hnsw_config,
+            "embedding_function": ef_config,
+        }
+
     if ef is not None:
         try:
             if ef.is_legacy():

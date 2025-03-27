@@ -33,7 +33,9 @@ def test_collection_to_proto() -> None:
         log_position=42,
     )
 
-    assert convert.to_proto_collection(collection) == pb.Collection(
+    proto_coll = convert.to_proto_collection(collection)
+
+    expected_coll = pb.Collection(
         id=collection.id.hex,
         name="test_collection",
         configuration_json_str=create_collection_configuration_to_json_str(
@@ -48,6 +50,7 @@ def test_collection_to_proto() -> None:
         version=1,
         log_position=42,
     )
+    assert proto_coll == expected_coll
 
 
 def test_collection_from_proto() -> None:
