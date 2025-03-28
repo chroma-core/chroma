@@ -115,11 +115,11 @@ pub struct InternalSpannConfiguration {
     #[serde(default)]
     pub space: HnswSpace,
     #[serde(default = "default_construction_ef_spann")]
-    pub construction_ef: usize,
+    pub ef_construction: usize,
     #[serde(default = "default_search_ef_spann")]
-    pub search_ef: usize,
+    pub ef_search: usize,
     #[serde(default = "default_m_spann")]
-    pub m: usize,
+    pub max_neighbors: usize,
 }
 
 impl Default for InternalSpannConfiguration {
@@ -130,12 +130,18 @@ impl Default for InternalSpannConfiguration {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Validate, PartialEq, ToSchema)]
 pub struct SpannConfiguration {
+    #[serde(default = "default_search_nprobe")]
     pub search_nprobe: u32,
+    #[serde(default = "default_write_nprobe")]
     pub write_nprobe: u32,
+    #[serde(default)]
     pub space: HnswSpace,
-    pub construction_ef: usize,
-    pub search_ef: usize,
-    pub m: usize,
+    #[serde(default = "default_construction_ef_spann")]
+    pub ef_construction: usize,
+    #[serde(default = "default_search_ef_spann")]
+    pub ef_search: usize,
+    #[serde(default = "default_m_spann")]
+    pub max_neighbors: usize,
 }
 
 impl From<InternalSpannConfiguration> for SpannConfiguration {
@@ -144,9 +150,9 @@ impl From<InternalSpannConfiguration> for SpannConfiguration {
             search_nprobe: config.search_nprobe,
             write_nprobe: config.write_nprobe,
             space: config.space,
-            construction_ef: config.construction_ef,
-            search_ef: config.search_ef,
-            m: config.m,
+            ef_construction: config.ef_construction,
+            ef_search: config.ef_search,
+            max_neighbors: config.max_neighbors,
         }
     }
 }
@@ -157,9 +163,9 @@ impl From<SpannConfiguration> for InternalSpannConfiguration {
             search_nprobe: config.search_nprobe,
             write_nprobe: config.write_nprobe,
             space: config.space,
-            construction_ef: config.construction_ef,
-            search_ef: config.search_ef,
-            m: config.m,
+            ef_construction: config.ef_construction,
+            ef_search: config.ef_search,
+            max_neighbors: config.max_neighbors,
             ..Default::default()
         }
     }

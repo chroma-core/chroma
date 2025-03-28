@@ -172,12 +172,12 @@ impl InternalCollectionConfiguration {
                 current_config.write_nprobe = write_nprobe;
                 let space = spann_config.space.clone();
                 current_config.space = space;
-                let construction_ef = spann_config.construction_ef;
-                current_config.construction_ef = construction_ef;
-                let search_ef = spann_config.search_ef;
-                current_config.search_ef = search_ef;
-                let m = spann_config.m;
-                current_config.m = m;
+                let construction_ef = spann_config.ef_construction;
+                current_config.ef_construction = construction_ef;
+                let search_ef = spann_config.ef_search;
+                current_config.ef_search = search_ef;
+                let m = spann_config.max_neighbors;
+                current_config.max_neighbors = m;
             }
         }
         // Update embedding_function if it exists in the update configuration

@@ -112,7 +112,7 @@ fn default_max_payload_size_bytes() -> usize {
 }
 
 fn default_enable_span_indexing() -> bool {
-    false
+    true
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
