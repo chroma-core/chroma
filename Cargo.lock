@@ -3152,6 +3152,7 @@ dependencies = [
  "chroma-config",
  "chroma-error",
  "chroma-index",
+ "chroma-memberlist",
  "chroma-segment",
  "chroma-storage",
  "chroma-sysdb",
