@@ -41,3 +41,26 @@ await collection.query({
 {% /Tab %}
 
 {% /TabbedCodeBlock %}
+
+#### Using logical operators
+
+You can also use the logical operators `$and` and `$or` to combine multiple filters
+
+```python
+{
+    "$and": [
+        {"$contains": "search_string_1"},
+        {"$contains": "search_string_2"},
+    ]
+}
+```
+
+An `$or` operator will return results that match any of the filters in the list
+```python
+{
+    "$or": [
+        {"$contains": "search_string_1"},
+        {"$contains": "search_string_2"},
+    ]
+}
+```
