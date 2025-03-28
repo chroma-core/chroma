@@ -26,6 +26,7 @@ spec:
       labels:
         app: rust-log-service
     spec:
+      serviceAccountName: rust-log-service-serviceaccount
       containers:
         - name: rust-log-service
           {{ if .Values.rustLogService.command }}
@@ -90,5 +91,13 @@ spec:
     app: rust-log-service
   type: ClusterIP
 
+
+---
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: rust-log-service-serviceaccount
+  namespace: {{ .Values.namespace }}
 
 ---
