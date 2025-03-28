@@ -17,6 +17,11 @@ pub(super) struct GarbageCollectorConfig {
     pub(super) sysdb_config: chroma_sysdb::GrpcSysDbConfig,
     pub(super) dispatcher_config: DispatcherConfig,
     pub(super) storage_config: StorageConfig,
+    #[serde(default)]
+    pub(super) assignment_policy: chroma_config::assignment::config::AssignmentPolicyConfig,
+    #[serde(default)]
+    pub(super) memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig,
+    pub my_member_id: String,
 }
 
 impl GarbageCollectorConfig {
