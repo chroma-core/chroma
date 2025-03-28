@@ -14,8 +14,9 @@ use semver::Version;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use zip_extract::extract;
 use crate::commands::db::DbError;
-use crate::commands::install::InstallError::{GithubDownloadFailed, NoSuchApp, VersionMismatch};
+use crate::commands::install::InstallError::{GithubDownloadFailed, InstallFailed, NoSuchApp, VersionMismatch};
 use crate::commands::install::LlmProvider::OpenAI;
 use crate::utils::CliError;
 
@@ -258,6 +259,18 @@ async fn download_s3_file(url: &str, path: &str) -> Result<(), Box<dyn std::erro
     Ok(())
 }
 
+fn extract_zip_file(zip_file_path: &str, output_dir_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let zip_path = Path::new(zip_file_path);
+    let output_dir = Path::new(output_dir_path);
+
+    // Open the zip file so it can be read.
+    let file = File::open(zip_path)?;
+
+    // Pass the file (which implements Read) to extract.
+    extract(file, output_dir, true)?;
+    Ok(())
+}
+
 async fn install_sample_app(name: String, branch: Option<String>) -> Result<(), CliError> {
     // Get all apps manifest to verify app name
     let apps = download_github_file::<Vec<AppListing>>("sample_apps/config.json", branch.clone()).await.map_err(|_| GithubDownloadFailed)?;
@@ -285,9 +298,13 @@ async fn install_sample_app(name: String, branch: Option<String>) -> Result<(), 
     println!("\n{}", "Downloading your Chroma DB".bold());
     let url = "https://s3.us-east-1.amazonaws.com/public.trychroma.com/sample_apps/chatbot/chroma_data.zip";
     let download_path = format!("./{}/chroma_data.zip", name);
-    download_s3_file(url, &download_path).await.map_err(|_e| InstallError::InstallFailed(name))?;
+    download_s3_file(url, &download_path).await.map_err(|_e| InstallFailed(name.clone()))?;
+    
+    let zip_path = format!("./{}/chroma_data.zip", name);
+    let output = format!("./{}", name);
+    extract_zip_file(zip_path.as_str(), output.as_str()).map_err(|_e| InstallFailed(name.clone()))?;
     println!("{}\n", "Download complete!".bold());
-
+    
     // Set env variables
 
     // Ask for installer
