@@ -5,12 +5,16 @@ import { formatToK } from "@/lib/utils";
 import Link from "next/link";
 
 const GithubLink: React.FC = async () => {
-  const response = await fetch(
-    `https://api.github.com/repos/chroma-core/chroma`,
-  );
-  const stars = response.ok
-    ? (await response.json()).stargazers_count
-    : undefined;
+  let stars;
+  try {
+    const response = await fetch(
+      `https://api.github.com/repos/chroma-core/chroma`,
+    );
+    stars = response.ok ? (await response.json()).stargazers_count : undefined;
+    stars = formatToK(stars);
+  } catch {
+    stars = "Offline";
+  }
 
   return (
     <Link
@@ -20,7 +24,7 @@ const GithubLink: React.FC = async () => {
     >
       <UIButton className="flex items-center gap-2 p-[0.35rem] text-xs">
         <GitHubLogoIcon className="h-4 w-4" />
-        {stars && formatToK(stars)}
+        {stars}
       </UIButton>
     </Link>
   );

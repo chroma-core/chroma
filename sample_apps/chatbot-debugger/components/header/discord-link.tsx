@@ -4,13 +4,18 @@ import UIButton from "@/components/ui/ui-button";
 import { DiscordLogoIcon } from "@radix-ui/react-icons";
 
 const DiscordLink: React.FC = async () => {
-  const response = await fetch(
-    `https://discord.com/api/guilds/1073293645303795742/widget.json`,
-    { next: { revalidate: 3600 } },
-  );
-  const onlineUsers = response.ok
-    ? (await response.json()).presence_count
-    : undefined;
+  let onlineUsers;
+  try {
+    const response = await fetch(
+      `https://discord.com/api/guilds/1073293645303795742/widget.json`,
+      { next: { revalidate: 3600 } },
+    );
+    onlineUsers = response.ok
+      ? (await response.json()).presence_count
+      : undefined;
+  } catch {
+    onlineUsers = "Offline";
+  }
 
   return (
     <Link

@@ -3,6 +3,9 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import React from "react";
 import Header from "@/components/header/header";
+import AppLayout from "@/components/ui/app-layout";
+import ErrorWindow from "@/components/ui/error-window";
+import { appSetup } from "@/lib/server-utils";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -15,14 +18,16 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Chroma - Chat with your Docs",
+  title: "Chroma - Chatbot Debugger",
 };
 
-export default function RootLayout({
+const RootLayout = async ({
   children,
 }: Readonly<{
   children: React.ReactNode;
-}>) {
+}>) => {
+  const setUpResult = await appSetup();
+
   return (
     <html lang="en">
       <body
@@ -33,11 +38,18 @@ export default function RootLayout({
           <div className="relative z-10 flex flex-col h-full">
             <Header />
             <div className="flex items-center justify-center w-full h-full">
-              {children}
+              <div className="relative flex items-center justify-center w-full h-full">
+                {!setUpResult.ok && (
+                  <ErrorWindow message={setUpResult.error!.message} />
+                )}
+                {setUpResult.ok && <AppLayout>{children}</AppLayout>}
+              </div>
             </div>
           </div>
         </div>
       </body>
     </html>
   );
-}
+};
+
+export default RootLayout;
