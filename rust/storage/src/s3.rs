@@ -104,6 +104,8 @@ impl S3Storage {
         }
     }
 
+    #[tracing::instrument(skip(self))]
+    #[allow(clippy::type_complexity)]
     async fn get_stream_and_e_tag(
         &self,
         key: &str,
@@ -162,6 +164,8 @@ impl S3Storage {
         }
     }
 
+    #[tracing::instrument(skip(self))]
+    #[allow(clippy::type_complexity)]
     pub(super) async fn get_key_ranges(
         &self,
         key: &str,
@@ -204,6 +208,7 @@ impl S3Storage {
         Ok((content_length, ranges, e_tag.map(ETag)))
     }
 
+    #[tracing::instrument(skip(self))]
     pub(super) async fn fetch_range(
         &self,
         key: String,
@@ -251,6 +256,7 @@ impl S3Storage {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     pub(super) async fn get_parallel(
         &self,
         key: &str,
@@ -300,10 +306,12 @@ impl S3Storage {
         Ok((Arc::new(output_buffer), e_tag))
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn get(&self, key: &str) -> Result<Arc<Vec<u8>>, StorageError> {
         self.get_with_e_tag(key).await.map(|(buf, _)| buf)
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn get_with_e_tag(
         &self,
         key: &str,
@@ -327,7 +335,6 @@ impl S3Storage {
                         }
                     }
                 }
-                tracing::info!("Read {:?} bytes from s3", buf.len());
                 Ok(Some(buf))
             })
             .await?;
@@ -344,6 +351,7 @@ impl S3Storage {
         total_size_bytes < self.upload_part_size_bytes
     }
 
+    #[tracing::instrument(skip(self, bytes))]
     pub async fn put_bytes(
         &self,
         key: &str,
@@ -364,6 +372,7 @@ impl S3Storage {
         .await
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn put_file(&self, key: &str, path: &str) -> Result<Option<ETag>, StorageError> {
         let file_size = tokio::fs::metadata(path)
             .await
@@ -398,6 +407,7 @@ impl S3Storage {
         .await
     }
 
+    #[tracing::instrument(skip(self, create_bytestream_fn))]
     async fn put_object(
         &self,
         key: &str,
@@ -416,6 +426,7 @@ impl S3Storage {
             .await
     }
 
+    #[tracing::instrument(skip(self, create_bytestream_fn))]
     pub(super) async fn oneshot_upload(
         &self,
         key: &str,
@@ -457,6 +468,7 @@ impl S3Storage {
         Ok(resp.e_tag.map(ETag))
     }
 
+    #[tracing::instrument(skip(self))]
     pub(super) async fn prepare_multipart_upload(
         &self,
         key: &str,
@@ -492,6 +504,7 @@ impl S3Storage {
         Ok((part_count, size_of_last_part, upload_id))
     }
 
+    #[tracing::instrument(skip(self, create_bytestream_fn))]
     pub(super) async fn upload_part(
         &self,
         key: &str,
@@ -534,6 +547,7 @@ impl S3Storage {
             .build())
     }
 
+    #[tracing::instrument(skip(self, upload_parts))]
     pub(super) async fn finish_multipart_upload(
         &self,
         key: &str,

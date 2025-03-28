@@ -1,4 +1,3 @@
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
@@ -24,8 +23,8 @@ use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
 use uuid::Uuid;
 use wal3::{
-    CursorName, CursorStoreOptions, Limits, LogPosition, LogReader, LogReaderOptions, LogWriter,
-    LogWriterOptions, Witness,
+    Cursor, CursorName, CursorStore, CursorStoreOptions, Limits, LogPosition, LogReader,
+    LogReaderOptions, LogWriter, LogWriterOptions, Witness,
 };
 
 pub mod state_hash_table;
@@ -40,6 +39,7 @@ const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
 
 // SAFETY(rescrv):  There's a test that this produces a valid type.
 static STABLE_PREFIX: CursorName = unsafe { CursorName::from_string_unchecked("stable_prefix") };
+static COMPACTION: CursorName = unsafe { CursorName::from_string_unchecked("compaction") };
 
 ///////////////////////////////////////// state maintenance ////////////////////////////////////////
 
@@ -220,105 +220,66 @@ async fn get_log_from_handle<'a>(
 ////////////////////////////////////////////// Rollup //////////////////////////////////////////////
 
 #[derive(Debug, Default)]
-struct Rollup {
-    advance_to: LogPosition,
-    reinsert: Vec<DirtyMarker>,
-    compactable: Vec<CollectionInfo>,
-}
-
-////////////////////////////////////// ContiguouslyDirtyRange //////////////////////////////////////
-
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-struct ContiguouslyDirtyRange {
-    start: LogPosition,
-    num_records: u64,
-    reinsert_count: u64,
-    initial_insertion_epoch_us: u64,
-}
-
-impl ContiguouslyDirtyRange {
-    fn new(
-        start: LogPosition,
-        num_records: u64,
-        initial_insertion_epoch_us: u64,
-    ) -> Result<Self, wal3::Error> {
-        Ok(Self {
-            start,
-            num_records,
-            reinsert_count: 0,
-            initial_insertion_epoch_us,
-        })
-    }
-
-    fn coalesce(dirty: &mut Vec<ContiguouslyDirtyRange>) {
-        dirty.sort_by_key(|range| range.start);
-        if dirty.len() < 2 {
-            return;
-        }
-        let mut i = 0;
-        while i + 1 < dirty.len() {
-            if dirty[i].start + dirty[i].num_records == dirty[i + 1].start {
-                dirty[i].num_records += dirty[i + 1].num_records;
-                dirty[i].reinsert_count =
-                    std::cmp::max(dirty[i].reinsert_count, dirty[i + 1].reinsert_count);
-                dirty[i].initial_insertion_epoch_us = std::cmp::min(
-                    dirty[i].initial_insertion_epoch_us,
-                    dirty[i + 1].initial_insertion_epoch_us,
-                );
-                dirty.remove(i + 1);
-            } else {
-                i += 1;
-            }
-        }
-    }
-
-    fn num_records_after(&self, start: LogPosition) -> u64 {
-        if self.start + self.num_records <= start {
-            0
-        } else if self.start < start {
-            self.num_records - (start - self.start)
-        } else {
-            self.num_records
-        }
-    }
+pub struct Rollup {
+    pub advance_to: LogPosition,
+    pub reinsert: Vec<DirtyMarker>,
+    pub compactable: Vec<CollectionInfo>,
 }
 
 //////////////////////////////////////// RollupPerCollection ///////////////////////////////////////
 
 #[derive(Debug)]
 struct RollupPerCollection {
-    dirty: Vec<ContiguouslyDirtyRange>,
-    collected_up_to: LogPosition,
-    forgettable: bool,
+    start_log_position: LogPosition,
+    limit_log_position: LogPosition,
+    reinsert_count: u64,
+    initial_insertion_epoch_us: u64,
 }
 
 impl RollupPerCollection {
-    fn new() -> Self {
+    fn new(first_observation: LogPosition, num_records: u64) -> Self {
         Self {
-            dirty: vec![],
-            collected_up_to: LogPosition::MIN,
-            forgettable: false,
+            start_log_position: first_observation,
+            limit_log_position: first_observation + num_records,
+            reinsert_count: 0,
+            initial_insertion_epoch_us: 0,
         }
+    }
+
+    fn observe(
+        &mut self,
+        log_position: LogPosition,
+        num_records: u64,
+        reinsert_count: u64,
+        initial_insertion_epoch_us: u64,
+    ) {
+        if log_position < self.start_log_position {
+            self.start_log_position = log_position;
+        }
+        if log_position + num_records > self.limit_log_position {
+            self.limit_log_position = log_position + num_records;
+        }
+        // Count every reinsert cumulatively.
+        self.reinsert_count += reinsert_count;
+        // Consider the most recent initial insertion time so if we've compacted earlier we drop.
+        self.initial_insertion_epoch_us =
+            std::cmp::max(self.initial_insertion_epoch_us, initial_insertion_epoch_us);
     }
 }
 
 //////////////////////////////////////////// DirtyMarker ///////////////////////////////////////////
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+// NOTE(rescrv):  This is intentionally an enum for easy forwards/backwards compatibility.  Add a
+// new variant, handle both variants, cycle logs, stop handling old variant.
 pub enum DirtyMarker {
+    #[serde(rename = "mark_dirty")]
     MarkDirty {
         collection_id: CollectionUuid,
         log_position: LogPosition,
         num_records: u64,
         reinsert_count: u64,
         initial_insertion_epoch_us: u64,
-    },
-    MarkCollected {
-        collection_id: CollectionUuid,
-        log_position: LogPosition,
-    },
-    MarkForgettable {
-        collection_id: CollectionUuid,
     },
 }
 
@@ -327,120 +288,147 @@ impl DirtyMarker {
     pub fn collection_id(&self) -> CollectionUuid {
         match self {
             DirtyMarker::MarkDirty { collection_id, .. } => *collection_id,
-            DirtyMarker::MarkCollected { collection_id, .. } => *collection_id,
-            DirtyMarker::MarkForgettable { collection_id, .. } => *collection_id,
         }
     }
 
     /// Increment any reinsert counter on the variant.
     pub fn reinsert(&mut self) {
-        if let DirtyMarker::MarkDirty {
+        let DirtyMarker::MarkDirty {
             collection_id: _,
             log_position: _,
             num_records: _,
             reinsert_count,
             initial_insertion_epoch_us: _,
-        } = self
-        {
-            *reinsert_count += 1;
-        }
+        } = self;
+        *reinsert_count += 1;
     }
 
     /// Given a contiguous prefix of markers, process the log into a rollup.  That is, a set of
     /// markers to reinsert, a set of collections to compact, and an advance_to log position.
-    fn rollup(
+    pub async fn rollup(
+        storage: Arc<Storage>,
         markers: &[(LogPosition, DirtyMarker)],
         record_count_threshold: u64,
         reinsert_threshold: u64,
         timeout_us: u64,
-    ) -> Result<Rollup, wal3::Error> {
+    ) -> Result<Option<Rollup>, wal3::Error> {
         // NOTE(rescrv);  This is complicated code because it's a hard problem to do efficiently.
         // To cut complexity, I've chosen to do it in a way that is not the most efficient but is
         // readable and maintainable.  The most efficient way would be to do this in a single pass.
         // Someone better can do that if it's ever necessary.
         let per_collection = Self::coalesce_markers(markers)?;
-        let mut reinsert = vec![];
-        let mut compactable = vec![];
-        let now = SystemTime::now()
+        let now_us = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .map_err(|_| wal3::Error::Internal)?
             .as_micros() as u64;
-        // First we process and reinsert the highest completion marker for each log.
+        let mut reinsert = vec![];
+        let mut compactable = vec![];
+        // Process the output of the coalesce call to determine which collections need to be
+        // compacted.
         for (collection_id, rollup_pc) in per_collection.iter() {
-            reinsert.push(DirtyMarker::MarkCollected {
-                collection_id: *collection_id,
-                log_position: rollup_pc.collected_up_to,
-            });
-        }
-        // Now we process the MarkDirty variant.  It's been compressed in the per_collections
-        // coalesce_markers call.
-        for (collection_id, rollup_pc) in per_collection.iter() {
-            let num_records = rollup_pc
-                .dirty
-                .iter()
-                .map(|range| range.num_records_after(rollup_pc.collected_up_to))
-                .sum::<u64>();
-            let initial_insertion_epoch_us = rollup_pc
-                .dirty
-                .iter()
-                .map(|range| range.initial_insertion_epoch_us)
-                .max()
-                .unwrap_or(now);
-            let reinsert_count = rollup_pc
-                .dirty
-                .iter()
-                .map(|range| range.reinsert_count)
-                .max()
-                .unwrap_or(0);
+            if rollup_pc.start_log_position > rollup_pc.limit_log_position {
+                tracing::error!(
+                    "Invalid dirty range for {}: {:?} -> {:?}",
+                    collection_id,
+                    rollup_pc.start_log_position,
+                    rollup_pc.limit_log_position
+                );
+                continue;
+            }
+            let num_records = rollup_pc.limit_log_position - rollup_pc.start_log_position;
+            let reinsert_count = rollup_pc.reinsert_count;
+            let initial_insertion_epoch_us = rollup_pc.initial_insertion_epoch_us;
             let to_compact = num_records >= record_count_threshold
-                || now - initial_insertion_epoch_us >= timeout_us
+                || now_us - initial_insertion_epoch_us >= timeout_us
                 || reinsert_count >= reinsert_threshold;
-            if to_compact && !rollup_pc.forgettable {
-                let first_log_offset = rollup_pc.collected_up_to.offset() as i64;
-                let first_log_ts = first_log_offset;
-                compactable.push(CollectionInfo {
-                    collection_id: collection_id.to_string(),
-                    first_log_offset,
-                    first_log_ts,
-                });
-            } else if rollup_pc.forgettable {
-                // intentionally drop the markers for this collection.
+            if to_compact {
+                compactable.push(collection_id);
             } else {
-                for dirty in rollup_pc.dirty.iter() {
-                    let mut dirty = dirty.clone();
-                    if dirty.start + dirty.num_records <= rollup_pc.collected_up_to {
-                        continue;
-                    } else if dirty.start < rollup_pc.collected_up_to {
-                        dirty.num_records -= rollup_pc.collected_up_to - dirty.start;
-                        dirty.start = rollup_pc.collected_up_to;
+                let marker = DirtyMarker::MarkDirty {
+                    collection_id: *collection_id,
+                    log_position: rollup_pc.start_log_position,
+                    num_records,
+                    reinsert_count: reinsert_count + 1,
+                    initial_insertion_epoch_us,
+                };
+                reinsert.push(marker);
+            }
+        }
+        if compactable.is_empty() {
+            return Ok(None);
+        }
+        // Now fetch the compaction cursor for each collection.
+        let futs = compactable
+            .iter()
+            .map(|collection_id| (**collection_id, Arc::clone(&storage)))
+            .map(|(collection_id, storage)| async move {
+                let cursor = &COMPACTION;
+                let cursor_store = CursorStore::new(
+                    CursorStoreOptions::default(),
+                    storage,
+                    storage_prefix_for_log(collection_id),
+                    "writer".to_string(),
+                );
+                let cursor = cursor_store.load(cursor).await;
+                // We play a funny game of Ok(Ok(_)) to force try_join_all to not short-circuit.
+                match cursor {
+                    Ok(Some(witness)) => Ok::<_, wal3::Error>(Ok((collection_id, Some(witness)))),
+                    Ok(None) => Ok::<_, wal3::Error>(Ok((collection_id, None))),
+                    Err(err) => {
+                        // NOTE(rescrv):  We silence the error so we log it instead.
+                        tracing::error!("Failed to get cursor store for {}", collection_id);
+                        Ok::<_, wal3::Error>(Err(err))
                     }
-                    let mut marker = DirtyMarker::MarkDirty {
-                        collection_id: *collection_id,
-                        log_position: dirty.start,
-                        num_records: dirty.num_records,
-                        reinsert_count: dirty.reinsert_count,
-                        initial_insertion_epoch_us: dirty.initial_insertion_epoch_us,
-                    };
-                    marker.reinsert();
-                    reinsert.push(marker);
+                }
+            })
+            .collect::<Vec<_>>();
+        let cursors = futures::future::try_join_all(futs).await?;
+        let cursors = cursors
+            .into_iter()
+            .flat_map(Result::ok)
+            .collect::<HashMap<_, _>>();
+        let compactable = compactable
+            .into_iter()
+            .filter_map(|collection_id| {
+                let cursor = cursors
+                    .get(collection_id)?
+                    .clone()
+                    .unwrap_or(Witness::init());
+                let cursor = cursor.cursor();
+                Some(CollectionInfo {
+                    collection_id: collection_id.to_string(),
+                    first_log_offset: cursor.position.offset() as i64,
+                    first_log_ts: cursor.position.offset() as i64,
+                })
+            })
+            .collect::<Vec<_>>();
+        let mut advance_to = LogPosition::MIN;
+        for (log_position, marker) in markers {
+            advance_to = std::cmp::max(advance_to, *log_position);
+            let DirtyMarker::MarkDirty {
+                collection_id,
+                log_position,
+                num_records,
+                reinsert_count: _,
+                initial_insertion_epoch_us: _,
+            } = marker;
+            let collection_id = collection_id.to_string();
+            if let Some(compactable) = compactable
+                .iter()
+                .find(|x| x.collection_id == collection_id)
+            {
+                if LogPosition::from_offset(compactable.first_log_offset as u64)
+                    <= *log_position + *num_records
+                {
+                    break;
                 }
             }
         }
-        let mut advance_to = LogPosition::MIN;
-        for (log_position, marker) in markers {
-            if compactable
-                .iter()
-                .any(|c| c.collection_id == marker.collection_id().to_string())
-            {
-                break;
-            }
-            advance_to = std::cmp::max(advance_to, *log_position + 1u64);
-        }
-        Ok(Rollup {
+        Ok(Some(Rollup {
             advance_to,
             reinsert,
             compactable,
-        })
+        }))
     }
 
     fn coalesce_markers(
@@ -453,37 +441,18 @@ impl DirtyMarker {
                     collection_id,
                     log_position,
                     num_records,
-                    reinsert_count: _,
+                    reinsert_count,
                     initial_insertion_epoch_us,
                 } => {
-                    let rollup_pc = match rollups.entry(*collection_id) {
-                        Entry::Vacant(entry) => entry.insert(RollupPerCollection::new()),
-                        Entry::Occupied(entry) => entry.into_mut(),
-                    };
-                    rollup_pc.dirty.push(ContiguouslyDirtyRange::new(
+                    let position = rollups
+                        .entry(*collection_id)
+                        .or_insert_with(|| RollupPerCollection::new(*log_position, *num_records));
+                    position.observe(
                         *log_position,
                         *num_records,
+                        *reinsert_count,
                         *initial_insertion_epoch_us,
-                    )?);
-                    ContiguouslyDirtyRange::coalesce(&mut rollup_pc.dirty);
-                }
-                DirtyMarker::MarkCollected {
-                    collection_id,
-                    log_position,
-                } => {
-                    let rollup_pc = match rollups.entry(*collection_id) {
-                        Entry::Vacant(entry) => entry.insert(RollupPerCollection::new()),
-                        Entry::Occupied(entry) => entry.into_mut(),
-                    };
-                    rollup_pc.collected_up_to =
-                        std::cmp::max(rollup_pc.collected_up_to, *log_position);
-                }
-                DirtyMarker::MarkForgettable { collection_id } => {
-                    let rollup_pc = match rollups.entry(*collection_id) {
-                        Entry::Vacant(entry) => entry.insert(RollupPerCollection::new()),
-                        Entry::Occupied(entry) => entry.into_mut(),
-                    };
-                    rollup_pc.forgettable = true;
+                    );
                 }
             }
         }
@@ -540,6 +509,7 @@ pub struct LogServer {
     storage: Arc<Storage>,
     open_logs: Arc<StateHashTable<LogKey, LogStub>>,
     dirty_log: Arc<LogWriter>,
+    compacting: tokio::sync::Mutex<()>,
 }
 
 #[async_trait::async_trait]
@@ -663,6 +633,8 @@ impl LogService for LogServer {
         request: Request<GetAllCollectionInfoToCompactRequest>,
     ) -> Result<Response<GetAllCollectionInfoToCompactResponse>, Status> {
         let request = request.into_inner();
+        // Ensure at most one request at a time.
+        let _guard = self.compacting.lock().await;
         let Some(reader) = self.dirty_log.reader(LogReaderOptions::default()) else {
             return Err(Status::unavailable("Failed to get dirty log reader"));
         };
@@ -722,6 +694,7 @@ impl LogService for LogServer {
             dirty_markers.extend(records);
         }
         let rollup = DirtyMarker::rollup(
+            Arc::clone(&self.storage),
             &dirty_markers,
             std::cmp::min(
                 self.config.record_count_threshold,
@@ -730,7 +703,13 @@ impl LogService for LogServer {
             self.config.reinsert_threshold,
             self.config.timeout_us,
         )
+        .await
         .map_err(|err| Status::unavailable(err.to_string()))?;
+        let Some(rollup) = rollup else {
+            return Ok(Response::new(GetAllCollectionInfoToCompactResponse {
+                all_collection_info: vec![],
+            }));
+        };
         let reinsert_dirty_markers = rollup
             .reinsert
             .into_iter()
@@ -740,12 +719,27 @@ impl LogService for LogServer {
                     .map_err(|err| Status::unavailable(err.to_string()))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        self.dirty_log
-            .append_many(reinsert_dirty_markers)
-            .await
-            .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
         let mut new_cursor = witness.cursor().clone();
+        if rollup.advance_to < witness.cursor().position {
+            tracing::error!(
+                "advance_to went back in time: {:?} -> {:?}",
+                witness.cursor().position,
+                rollup.advance_to
+            );
+            return Err(Status::aborted("Invalid advance_to"));
+        }
+        if !reinsert_dirty_markers.is_empty() {
+            self.dirty_log
+                .append_many(reinsert_dirty_markers)
+                .await
+                .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
+        }
         new_cursor.position = rollup.advance_to;
+        tracing::info!(
+            "Advancing cursor {:?} -> {:?}",
+            witness.cursor().position,
+            new_cursor.position
+        );
         cursors
             .save(&STABLE_PREFIX, &new_cursor, &witness)
             .await
@@ -755,7 +749,7 @@ impl LogService for LogServer {
         }))
     }
 
-    #[tracing::instrument(skip(self, request), err(Display))]
+    #[tracing::instrument(info, skip(self, request), err(Display))]
     async fn update_collection_log_offset(
         &self,
         request: Request<UpdateCollectionLogOffsetRequest>,
@@ -764,17 +758,38 @@ impl LogService for LogServer {
         let collection_id = Uuid::parse_str(&request.collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
-        let dirty_marker = DirtyMarker::MarkCollected {
-            collection_id,
-            log_position: LogPosition::from_offset(request.log_offset as u64),
-        };
-        let dirty_marker = serde_json::to_string(&dirty_marker)
-            .map(Vec::from)
-            .map_err(|err| Status::unavailable(err.to_string()))?;
-        self.dirty_log
-            .append(dirty_marker)
+        let cursor_name = &COMPACTION;
+        let cursor_store = CursorStore::new(
+            CursorStoreOptions::default(),
+            Arc::clone(&self.storage),
+            storage_prefix_for_log(collection_id),
+            "writer".to_string(),
+        );
+        let witness = cursor_store
+            .load(cursor_name)
             .await
-            .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
+            .map_err(|err| {
+                Status::new(err.code().into(), format!("Failed to load cursor: {}", err))
+            })?
+            .unwrap_or(Witness::init());
+        if witness.cursor().position.offset() > request.log_offset as u64 {
+            return Err(Status::aborted("Invalid offset"));
+        }
+        let cursor = Cursor {
+            position: LogPosition::from_offset(request.log_offset as u64),
+            epoch_us: SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map_err(|_| wal3::Error::Internal)
+                .unwrap()
+                .as_micros() as u64,
+            writer: "TODO".to_string(),
+        };
+        cursor_store
+            .save(cursor_name, &cursor, &witness)
+            .await
+            .map_err(|err| {
+                Status::new(err.code().into(), format!("Failed to save cursor: {}", err))
+            })?;
         Ok(Response::new(UpdateCollectionLogOffsetResponse {}))
     }
 
@@ -787,14 +802,6 @@ impl LogService for LogServer {
         let collection_id = Uuid::parse_str(&request.collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
-        let dirty_marker = DirtyMarker::MarkForgettable { collection_id };
-        let dirty_marker = serde_json::to_string(&dirty_marker)
-            .map(Vec::from)
-            .map_err(|err| Status::unavailable(err.to_string()))?;
-        self.dirty_log
-            .append(dirty_marker)
-            .await
-            .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
         Ok(Response::new(PurgeDirtyForCollectionResponse {}))
     }
 }
@@ -1055,11 +1062,13 @@ impl Configurable<LogServerConfig> for LogServer {
         .await
         .map_err(|err| -> Box<dyn ChromaError> { Box::new(err) as _ })?;
         let dirty_log = Arc::new(dirty_log);
+        let compacting = tokio::sync::Mutex::new(());
         Ok(Self {
             config: config.clone(),
             open_logs: Arc::new(StateHashTable::default()),
             storage,
             dirty_log,
+            compacting,
         })
     }
 }
@@ -1102,9 +1111,10 @@ pub async fn log_entrypoint() {
 mod tests {
     use super::*;
 
-    #[test]
-    fn dirty_marker_coalesce1() {
-        // Test that a single collection gets coalesced to its completion marker.
+    #[tokio::test]
+    async fn dirty_marker_coalesce1() {
+        // Test that a single collection gets coalesced to nothing.
+        let storage = chroma_storage::test_storage();
         let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .map_err(|_| wal3::Error::Internal)
@@ -1133,17 +1143,13 @@ mod tests {
                 },
             ),
         ];
-        let rollup = DirtyMarker::rollup(&markers, 1, 1, 86_400_000_000).unwrap();
+        let rollup = DirtyMarker::rollup(Arc::new(storage), &markers, 1, 1, 86_400_000_000)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(LogPosition::from_offset(0), rollup.advance_to);
         println!("{:?}", rollup);
         assert_eq!(1, rollup.reinsert.len());
-        assert_eq!(
-            DirtyMarker::MarkCollected {
-                collection_id,
-                log_position: LogPosition::from_offset(0),
-            },
-            rollup.reinsert[0]
-        );
         assert_eq!(1, rollup.compactable.len());
         assert_eq!(
             collection_id.to_string(),
@@ -1151,9 +1157,10 @@ mod tests {
         );
     }
 
-    #[test]
-    fn dirty_marker_coalesce2() {
+    #[tokio::test]
+    async fn dirty_marker_coalesce2() {
         // Test that a single collection gets reinserted when there are not enough records.
+        let storage = chroma_storage::test_storage();
         let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .map_err(|_| wal3::Error::Internal)
@@ -1182,20 +1189,16 @@ mod tests {
                 },
             ),
         ];
-        let rollup = DirtyMarker::rollup(&markers, 3, 1, 86_400_000_000).unwrap();
+        let rollup = DirtyMarker::rollup(Arc::new(storage), &markers, 3, 1, 86_400_000_000)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(LogPosition::from_offset(2), rollup.advance_to);
         assert_eq!(0, rollup.compactable.len());
         assert_eq!(2, rollup.reinsert.len());
         assert_eq!(collection_id, rollup.reinsert[0].collection_id());
         assert_eq!(collection_id, rollup.reinsert[1].collection_id());
         // NOTE(rescrv):  MarkCollected are necessarily inserted before MarkDirty.
-        assert_eq!(
-            DirtyMarker::MarkCollected {
-                collection_id,
-                log_position: LogPosition::from_offset(0),
-            },
-            rollup.reinsert[0]
-        );
         assert_eq!(
             DirtyMarker::MarkDirty {
                 collection_id,
@@ -1208,9 +1211,10 @@ mod tests {
         );
     }
 
-    #[test]
-    fn dirty_marker_coalesce3() {
+    #[tokio::test]
+    async fn dirty_marker_coalesce3() {
         // Test that a collection without enough records won't induce head-of-line blocking.
+        let storage = chroma_storage::test_storage();
         let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .map_err(|_| wal3::Error::Internal)
@@ -1240,7 +1244,10 @@ mod tests {
                 },
             ),
         ];
-        let rollup = DirtyMarker::rollup(&markers, 3, 1, 86_400_000_000).unwrap();
+        let rollup = DirtyMarker::rollup(Arc::new(storage), &markers, 3, 1, 86_400_000_000)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(LogPosition::from_offset(1), rollup.advance_to);
         assert_eq!(1, rollup.compactable.len());
         assert_eq!(
