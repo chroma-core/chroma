@@ -108,6 +108,15 @@ Invariants of the manifest:
 - The range (fragment.start, fragment.limit) is disjoint for all fragments in a manifest.  No other
   fragment will have overlap with log position.
 
+### Cursor Structure
+
+A cursor is a JSON file that contains the following fields:
+
+- position:  A LogPosition of the cursor.
+- epoch_us:  A timestamp corresponding to when the cursor was written.  This is the number of
+  microseconds since UNIX epoch.
+- writer:  A plain-text string for debugging which process wrote the cursor.
+
 ## Object Store Layout
 
 wal3 is designed to maximize object store performance of object stores like S3 because it writes
@@ -176,27 +185,57 @@ Cursors are integral to utility of wal3 to Chroma, so we'll briefly revisit how 
 today to see how it could work with Chroma.  In Chroma, the log maintains two positions:  The
 compaction offset and the tail of the log.  At any time, a reader must brute force or scan the data
 on the log to be strongly consistent.  To counteract this from growing without bound, compaction
-periodically rewrites a snapshot of the data that includes the last compaction's snapshot and all
-data on the log.
+periodically rewrites a snapshot of the data that merges the last compaction's output with all data
+on the log.
 
 In wal3 terminology, the compaction offset is a cursor.  It pins the log in place.  Cursors are just
 files stored in object storage like so:
 
 ```text
-wal3/Cursor/compaction.json
-wal3/Cursor/emergency.json
+wal3/cursor/compaction.json
+wal3/cursor/emergency.json
 ```
 
 Here we see two cursors:  One for compaction and one named emergency.  The emergency cursor could
 e.g. have been from an emergency situation in which data needs to be retained regardless of
-compaction activity.  wal3 garbage collects only things in the past for all cursors.
+compaction activity.  wal3 garbage collects solely those objects in the past for all cursors.
 
 The cursor API needs to expose a compare-and-swap like interface for its update so that the client
-can move cursors.  Chroma's usage of wal3 would then look like this:
+can move cursors safely.  This means that when writing a cursor, you must provide a witness to the
+previous cursor.
 
-- read compaction cursor
-- read log manifest
-- from the compaction cursor, determine the set of files to compact.
+### Separate Files
+
+The cursor store intentionally uses separate files from the manifest.  This means that writing an
+emergency, "Pin the log in a hurry," cursor does not require contending on the manifest to write it.
+The alternative design is to embed cursors within the manifest and use conditional swaps to install
+the manifest.  The advantage of separate files is operational simplicity.  The advantage of using a
+manifest is that it allows for a single atomic operation to update the manifest and cursor.  As of
+today there's no reason to atomically update the cursor and manifest, but being able to adjust
+cursors independently of the manifest allows for more flexibility in the design of the log.
+
+### Garbage Collection Dance
+
+The cursor store is used to inhibit garbage collection.
+
+The garbage collection dance for the log is driven by a process external to wal3.  It goes something
+like:
+
+1.  Read all cursors
+2.  Read the manifest
+3.  Read all cursors again; if changed, goto 1.
+4.  Select the minimum timestamp across all cursors as the garbage collection cutoff.
+5.  Write a list of snapshots and fragments that hold data strictly less than the cutoff to a file
+    named `gc/GARBAGE.XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX` where the
+    hex digits are the setsum of the garbage.
+6.  Wait until the writer writes a manifest that does not contain the garbage's fragments.
+7.  Wait a sufficiently long time so that readers cannot see the fragments.
+8.  Slow-delete the contents of the garbage file.
+
+If this process crashes at any point before 5 is complete, the garbage collector has effectively
+taken no stateful action.  If the process crashes after the garbage file is written, step 6 will
+synchronize with the writer to ensure that the garbage file is not deleted until the writer no
+longer references it.
 
 ## Timing Assumptions
 
@@ -219,6 +258,8 @@ guarantee system safety.  Therefore:
   before it considers the operation complete.  If the reader somehow hangs between loading a log
   offset and writing the cursor for more than the garbage collection interval, the cursor will
   reference garbage collected data.  The reader will fail.
+
+This garbage collection interval is step 7 in the garbage collection dance above.
 
 ## Zero-Action Recovery
 
@@ -523,9 +564,9 @@ for maintaining a herd of wal3 instances in a single object store bucket.
 ## Serverless Behavior
 
 First off, wal3 is intended to run multiple wal3 instances in parallel and open at the same time.
-The over head per stream is single digit megabytes (manifest and a buffer of writes), meaning that
-we can handle hundreds or thousands of concurrent logs per stream.  We cannot open every log for
-every customer on a single machine and have it fit memory.  We will have to open and close logs.
+The over head per wal3 instance is single digit megabytes (manifest and a buffer of writes), meaning
+that we can handle hundreds or thousands of concurrent logs per server.  We cannot open every log
+for every customer on a single machine and have it fit memory.  We will have to open and close logs.
 
 Therefore the following considerations fall out:
 - Opening and closing of logs must not be expensive.
@@ -539,44 +580,40 @@ object store.  This becomes expensive as the number of logs grows, especially if
 written to regularly.  To facilitate this, we need a mechanism that scales O(logs written) instead
 of the more general O(logs).
 
-To do this, wal3 will provide a structure that can track whether a wal3 is dirty across thousands,
-millions, or even billions of collections.
+Conceptually, we're essentially looking for a way to aggregate the information about which
+logs were written when, so that we can compact and garbage collect logs and keep system resource
+usage for cleaning up proportional to the cost of making the mess.
 
-One potential straw-man approach considered would be to hash each log's prefix and then insert into
-a prefix of dirty logs.  It looks something like this:
+The insight we'll make use of here is, essentially, that the logs written by a single server can be
+summarized with a fraction of the resources of the server.  For starters, we don't need to write as
+much data to say a log has data as we write to that log.  If each append to a log is approximately
+4 kB+ (a reasonable document size with a vector), we can track the dirty log by name using at most
+48 B; an 85x reduction.  But it goes further---we only need to persist that 48B record once per
+fragment write, not once per append.
 
-```text
-wal3/dirty/ea8cd5d4f1b2ed79d8415c832e2fd2cef87e6ebcecde12aa01b2ccc5aceaab55
-wal3/dirty/ea47843f7d677b67d7364c2b34322770988e91e2b21df4d7c98064dfb14ae68d
-```
+This means that we can track the dirty logs with a single 48B record per fragment.  Where to put
+that record?  We need some way to record them as they happen and then scan/roll-up the records into
+a summary of dirty logs at all times.
 
-The problem with this approach is that listing `wal3/dirty` becomes expensive as things grow.  With
-1e9 collections, simply knowing which are dirty would cost $10k to LIST.  What if we knew every
-potential log name and could enumerate them?  We could do a GET/HEAD on each dirty "bit" to see if
-it exists in object storage.  This comes out to $5k per pass for 1e9 objects, but violates the
-requirement that work be proportional to the data written.
+Viewed another way, we have a stream of events that we need to record approximately in order.
 
-The observation to have is that if collection dirty bits are 1:1 with files in object storage, then
-there will be O(dirty collections) files to list.  One straw man approach considered was to make a
-hierarchy in S3 like a B+-tree:
+What if we just put it in another log?  wal3 is already configured to dynamically batch and write
+log data to object storage in an efficient manner.  Further, we know a single machine's multiplicity
+of logs can be sustained by the throughput of a single log by the math above.
 
-```text
-wal3/dirty/ea/8c/d5/d4/f1b2ed79d8415c832e2fd2cef87e6ebcecde12aa01b2ccc5aceaab55
-wal3/dirty/ea/47/84/3f/7d677b67d7364c2b34322770988e91e2b21df4d7c98064dfb14ae68d
-```
+The protocol for discovering dirty logs, then, is to write to a "dirty" log and roll-up the dirty
+log for compaction.  This requires either processing logs in FIFO order out of the dirty log (to
+roll up the collections to compact), or somehow compacting the data.  The following techniques give
+sufficient generality to handle every case we need:
 
-This strictly increases the number of list operations, but brings a useful property:  We can
-partition the space of dirty bits so that multiple scanners can pass over them in parallel.  This
-doesn't reduce the cost of finding dirty logs, but does make it faster.
+- Forcibly compact things that are at the head of the log.
+- Re-write dirty log entries at the end of the log so they can be collected from the beginning.
 
-To compromise, we want the following:
-- Tracking dirty per collection _written_, not _existing_.
-- Partitioning over dirty collections.
-- A way to support more collections in the future should costs be too great.
+To facilitate this, we will store the reinsertion count and initial insertion time as well as chroma
+collection ID when inserting the dirty log entry.  This allows us to roll up the dirty log by simply
+reading the first N records, picking those that are too old, picking those that are too big, and
+then reinsert any that are not selected by this algorithm.
 
-```text
-wal3/dirty/<prefix bits>/<suffix bits>
-```
-
-The number of prefix bits must be configurable, but shouldn't change much in practice.  Should it
-change, it is a straw-man away from being recreated.
+Thus each wal3 log service will independently manage its own dirty log.  This allows us to scale
+because each log server will maintain its own independent dirty log.  This does raise the
+operational complexity of getting logs to compact.
