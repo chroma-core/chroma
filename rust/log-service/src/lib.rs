@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
@@ -25,7 +26,7 @@ use tonic::{transport::Server, Request, Response, Status};
 use uuid::Uuid;
 use wal3::{
     Cursor, CursorName, CursorStore, CursorStoreOptions, Limits, LogPosition, LogReader,
-    LogReaderOptions, LogWriter, LogWriterOptions, Witness,
+    LogReaderOptions, LogWriter, LogWriterOptions, Manifest, Witness,
 };
 
 pub mod state_hash_table;
@@ -306,9 +307,13 @@ impl DirtyMarker {
 
     /// Given a contiguous prefix of markers, process the log into a rollup.  That is, a set of
     /// markers to reinsert, a set of collections to compact, and an advance_to log position.
-    pub async fn rollup<F: Future<Output = Result<Option<Witness>, wal3::Error>>>(
+    pub async fn rollup<
+        F1: Future<Output = Result<Option<Manifest>, wal3::Error>>,
+        F2: Future<Output = Result<Option<Witness>, wal3::Error>>,
+    >(
         storage: Arc<Storage>,
-        retrieve_cursor: impl Fn(Arc<Storage>, CollectionUuid) -> F,
+        retrieve_manifest: impl Fn(Arc<Storage>, CollectionUuid) -> F1,
+        retrieve_cursor: impl Fn(Arc<Storage>, CollectionUuid) -> F2,
         markers: &[(LogPosition, DirtyMarker)],
         record_count_threshold: u64,
         reinsert_threshold: u64,
@@ -359,6 +364,7 @@ impl DirtyMarker {
             return Ok(None);
         }
         // Now fetch the compaction cursor for each collection.
+        let retrieve_manifest = Arc::new(retrieve_manifest);
         let retrieve_cursor = Arc::new(retrieve_cursor);
         let futs = compactable
             .iter()
@@ -366,24 +372,37 @@ impl DirtyMarker {
                 (
                     **collection_id,
                     Arc::clone(&storage),
+                    Arc::clone(&retrieve_manifest),
                     Arc::clone(&retrieve_cursor),
                 )
             })
-            .map(|(collection_id, storage, retrieve_cursor)| async move {
-                let cursor = (*retrieve_cursor)(storage, collection_id).await;
-                // We play a funny game of Ok(Ok(_)) to force try_join_all to not short-circuit.
-                match cursor {
-                    Ok(Some(witness)) => Ok::<_, wal3::Error>(Ok((collection_id, Some(witness)))),
-                    Ok(None) => Ok::<_, wal3::Error>(Ok((collection_id, None))),
-                    Err(err) => {
-                        // NOTE(rescrv):  We silence the error so we log it instead.
-                        tracing::error!("Failed to get cursor store for {}", collection_id);
-                        Ok::<_, wal3::Error>(Err(err))
-                    }
-                }
-            })
+            .map(
+                |(collection_id, storage, retrieve_manifest, retrieve_cursor)| async move {
+                    // We play a funny game of Ok(Ok(_)) to force try_join_all to not short-circuit.
+                    let cursor = (*retrieve_cursor)(Arc::clone(&storage), collection_id);
+                    let manifest = (*retrieve_manifest)(Arc::clone(&storage), collection_id);
+                    let (cursor, manifest) = futures::future::join(cursor, manifest).await;
+                    // NOTE(rescrv):  We silence the error so we log it instead.
+                    let cursor = match cursor {
+                        Ok(cursor) => cursor,
+                        Err(err) => {
+                            tracing::error!("Failed to get cursor for {}", collection_id);
+                            return Err(err);
+                        }
+                    };
+                    // NOTE(rescrv):  We silence the error so we log it instead.
+                    let manifest = match manifest {
+                        Ok(manifest) => manifest,
+                        Err(err) => {
+                            tracing::error!("Failed to get manifest for {}", collection_id);
+                            return Err(err);
+                        }
+                    };
+                    Ok((collection_id, (cursor, manifest)))
+                },
+            )
             .collect::<Vec<_>>();
-        let cursors = futures::future::try_join_all(futs).await?;
+        let cursors = futures::future::join_all(futs).await;
         let cursors = cursors
             .into_iter()
             .flat_map(Result::ok)
@@ -391,21 +410,40 @@ impl DirtyMarker {
         let compactable = compactable
             .into_iter()
             .filter_map(|collection_id| {
-                let cursor = cursors
-                    .get(collection_id)?
-                    .clone()
-                    .unwrap_or(Witness::init());
+                let (cursor, manifest) = cursors.get(collection_id)?.clone();
+                let cursor = cursor.unwrap_or(Witness::init());
+                let manifest = match manifest {
+                    Some(manifest) => manifest,
+                    None => {
+                        // NOTE(rescrv):  If we saw that there is no manifest, we know that we can
+                        // drop the dirty bit because the collection was deleted and won't be
+                        // reinstantiated.
+                        reinsert.retain(|x| x.collection_id() != *collection_id);
+                        return None;
+                    }
+                };
                 let cursor = cursor.cursor();
-                Some(CollectionInfo {
-                    collection_id: collection_id.to_string(),
-                    first_log_offset: cursor.position.offset() as i64,
-                    first_log_ts: cursor.position.offset() as i64,
-                })
+                match manifest.maximum_log_position().cmp(&cursor.position) {
+                    Ordering::Equal => None,
+                    Ordering::Less => {
+                        tracing::error!(
+                            "compaction sees cursor ahead of manifest: {:?} > {:?}",
+                            cursor.position,
+                            manifest.maximum_log_position()
+                        );
+                        None
+                    }
+                    Ordering::Greater => Some(CollectionInfo {
+                        collection_id: collection_id.to_string(),
+                        first_log_offset: cursor.position.offset() as i64,
+                        first_log_ts: cursor.position.offset() as i64,
+                    }),
+                }
             })
             .collect::<Vec<_>>();
         let mut advance_to = markers
             .iter()
-            .map(|(log_position, _)| *log_position)
+            .map(|(log_position, _)| *log_position + 1u64)
             .max()
             .unwrap_or(LogPosition::default());
         for (log_position, marker) in markers {
@@ -601,6 +639,7 @@ impl LogService for LogServer {
             Ok(fragments) => fragments,
             Err(err) => {
                 if let wal3::Error::UninitializedLog = err {
+                    tracing::info!("Uninitialized log for collection {}", collection_id);
                     return Ok(Response::new(PullLogsResponse { records: vec![] }));
                 } else {
                     return Err(Status::new(err.code().into(), err.to_string()));
@@ -698,6 +737,14 @@ impl LogService for LogServer {
                 .collect::<Result<Vec<_>, _>>()?;
             dirty_markers.extend(records);
         }
+        let load_manifest = |storage, collection_id| async move {
+            let reader = LogReader::new(
+                LogReaderOptions::default(),
+                storage,
+                storage_prefix_for_log(collection_id),
+            );
+            reader.manifest().await
+        };
         let load_cursor = |storage, collection_id| async move {
             let cursor = &COMPACTION;
             let cursor_store = CursorStore::new(
@@ -710,6 +757,7 @@ impl LogService for LogServer {
         };
         let rollup = DirtyMarker::rollup(
             Arc::clone(&self.storage),
+            load_manifest,
             load_cursor,
             &dirty_markers,
             std::cmp::min(
@@ -1127,6 +1175,9 @@ pub async fn log_entrypoint() {
 mod tests {
     use std::future::ready;
 
+    use setsum::Setsum;
+    use wal3::{Fragment, FragmentSeqNo};
+
     use super::*;
 
     #[tokio::test]
@@ -1163,6 +1214,22 @@ mod tests {
         ];
         let rollup = DirtyMarker::rollup(
             Arc::new(storage),
+            |_, _| async move {
+                Ok(Some(Manifest {
+                    writer: "TODO".to_string(),
+                    acc_bytes: 0,
+                    setsum: Setsum::default(),
+                    snapshots: vec![],
+                    fragments: vec![Fragment {
+                        seq_no: FragmentSeqNo(1),
+                        num_bytes: 0,
+                        path: "TODO".to_string(),
+                        setsum: Setsum::default(),
+                        start: LogPosition::from_offset(1),
+                        limit: LogPosition::from_offset(3),
+                    }],
+                }))
+            },
             |_, _| ready(Ok(None)),
             &markers,
             1,
@@ -1216,6 +1283,14 @@ mod tests {
         ];
         assert!(DirtyMarker::rollup(
             Arc::new(storage),
+            |storage, collection_id| async move {
+                let reader = LogReader::new(
+                    LogReaderOptions::default(),
+                    storage,
+                    storage_prefix_for_log(collection_id),
+                );
+                reader.manifest().await
+            },
             |_, _| ready(Ok(None)),
             &markers,
             3,
@@ -1243,7 +1318,7 @@ mod tests {
                 LogPosition::from_offset(0),
                 DirtyMarker::MarkDirty {
                     collection_id: collection_id_blocking,
-                    log_position: LogPosition::from_offset(0),
+                    log_position: LogPosition::from_offset(1),
                     num_records: 1,
                     reinsert_count: 0,
                     initial_insertion_epoch_us: now,
@@ -1253,15 +1328,52 @@ mod tests {
                 LogPosition::from_offset(1),
                 DirtyMarker::MarkDirty {
                     collection_id: collection_id_acting,
-                    log_position: LogPosition::from_offset(0),
+                    log_position: LogPosition::from_offset(1),
                     num_records: 100,
                     reinsert_count: 0,
                     initial_insertion_epoch_us: now,
                 },
             ),
         ];
+        let collection_id_blocking_clone = collection_id_blocking;
+        let collection_id_acting_clone = collection_id_acting;
         let rollup = DirtyMarker::rollup(
             Arc::new(storage),
+            |_, collection_id| async move {
+                if collection_id == collection_id_blocking_clone {
+                    Ok(Some(Manifest {
+                        writer: "TODO".to_string(),
+                        acc_bytes: 0,
+                        setsum: Setsum::default(),
+                        snapshots: vec![],
+                        fragments: vec![Fragment {
+                            seq_no: FragmentSeqNo(1),
+                            num_bytes: 0,
+                            path: "TODO".to_string(),
+                            setsum: Setsum::default(),
+                            start: LogPosition::from_offset(1),
+                            limit: LogPosition::from_offset(2),
+                        }],
+                    }))
+                } else if collection_id == collection_id_acting_clone {
+                    Ok(Some(Manifest {
+                        writer: "TODO".to_string(),
+                        acc_bytes: 0,
+                        setsum: Setsum::default(),
+                        snapshots: vec![],
+                        fragments: vec![Fragment {
+                            seq_no: FragmentSeqNo(1),
+                            num_bytes: 0,
+                            path: "TODO".to_string(),
+                            setsum: Setsum::default(),
+                            start: LogPosition::from_offset(1),
+                            limit: LogPosition::from_offset(101),
+                        }],
+                    }))
+                } else {
+                    unreachable!("we aren't testing this case");
+                }
+            },
             |_, _| ready(Ok(None)),
             &markers,
             3,
@@ -1284,6 +1396,110 @@ mod tests {
                 || (rollup.reinsert[1].collection_id() == collection_id_blocking
                     && rollup.reinsert[0].collection_id() == collection_id_acting)
         );
+    }
+
+    #[tokio::test]
+    async fn dirty_marker_coalesce_race_condition() {
+        // There's a race condition that we patch-over.
+        //
+        // 1.  get_all_collections_to_compact(1) reads the log to roll it up for compactor 1;
+        //     wlog some record X will be reinserted that will be our victim record.
+        // 2.  compactor advances victim record from previous get_all_collections_compact
+        // 3.  get_all_collections_to_compact returns collections with empty records.
+        let storage = chroma_storage::test_storage();
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|_| wal3::Error::Internal)
+            .unwrap()
+            .as_micros() as u64;
+        let collection_id_blocking = CollectionUuid::new();
+        let collection_id_collected = CollectionUuid::new();
+        let markers = vec![
+            (
+                LogPosition::from_offset(0),
+                DirtyMarker::MarkDirty {
+                    collection_id: collection_id_blocking,
+                    log_position: LogPosition::from_offset(1),
+                    num_records: 1,
+                    reinsert_count: 0,
+                    initial_insertion_epoch_us: now,
+                },
+            ),
+            (
+                LogPosition::from_offset(1),
+                DirtyMarker::MarkDirty {
+                    collection_id: collection_id_collected,
+                    log_position: LogPosition::from_offset(1),
+                    num_records: 100,
+                    reinsert_count: 0,
+                    initial_insertion_epoch_us: now,
+                },
+            ),
+        ];
+        let collection_id_blocking_clone = collection_id_blocking;
+        let collection_id_collected_clone = collection_id_collected;
+        let rollup = DirtyMarker::rollup(
+            Arc::new(storage),
+            |_, collection_id| async move {
+                if collection_id == collection_id_blocking_clone {
+                    Ok(Some(Manifest {
+                        writer: "TODO".to_string(),
+                        acc_bytes: 0,
+                        setsum: Setsum::default(),
+                        snapshots: vec![],
+                        fragments: vec![Fragment {
+                            seq_no: FragmentSeqNo(1),
+                            num_bytes: 0,
+                            path: "TODO".to_string(),
+                            setsum: Setsum::default(),
+                            start: LogPosition::from_offset(1),
+                            limit: LogPosition::from_offset(2),
+                        }],
+                    }))
+                } else if collection_id == collection_id_collected_clone {
+                    Ok(Some(Manifest {
+                        writer: "TODO".to_string(),
+                        acc_bytes: 0,
+                        setsum: Setsum::default(),
+                        snapshots: vec![],
+                        fragments: vec![Fragment {
+                            seq_no: FragmentSeqNo(1),
+                            num_bytes: 0,
+                            path: "TODO".to_string(),
+                            setsum: Setsum::default(),
+                            start: LogPosition::from_offset(1),
+                            limit: LogPosition::from_offset(101),
+                        }],
+                    }))
+                } else {
+                    unreachable!("we aren't testing this case");
+                }
+            },
+            |_, collection_id| async move {
+                if collection_id == collection_id_blocking_clone {
+                    Ok(None)
+                } else if collection_id == collection_id_collected_clone {
+                    Ok(Some(Witness::from_cursor(Cursor {
+                        position: LogPosition::from_offset(101),
+                        epoch_us: 0,
+                        writer: "TODO".to_string(),
+                    })))
+                } else {
+                    unreachable!("we aren't testing this case");
+                }
+            },
+            &markers,
+            3,
+            1,
+            86_400_000_000,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(LogPosition::from_offset(1), rollup.advance_to);
+        assert_eq!(0, rollup.compactable.len());
+        assert_eq!(1, rollup.reinsert.len());
+        assert!(rollup.reinsert[0].collection_id() == collection_id_blocking);
     }
 
     #[test]

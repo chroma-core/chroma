@@ -65,7 +65,6 @@ use chroma_types::GetSegmentsError;
 use chroma_types::SegmentScope;
 use chroma_types::SegmentUuid;
 use chroma_types::{CollectionUuid, LogRecord, Segment, SegmentFlushInfo, SegmentType};
-use core::panic;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
@@ -803,10 +802,12 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
                 self.partition(records, ctx).await;
             }
             None => {
-                tracing::error!(
-                    "No records pulled by compaction, this is a system invariant violation"
+                self.terminate_with_result(
+                    Err(CompactionError::InvariantViolation(
+                        "No records pulled by compaction, this is a system invariant violation",
+                    )),
+                    ctx,
                 );
-                panic!("No records pulled by compaction, this is a system invariant violation");
             }
         }
     }

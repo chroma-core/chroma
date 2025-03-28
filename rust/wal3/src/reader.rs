@@ -50,6 +50,23 @@ impl LogReader {
         })
     }
 
+    pub async fn manifest(&self) -> Result<Option<Manifest>, Error> {
+        Ok(
+            Manifest::load(&self.options.throttle, &self.storage, &self.prefix)
+                .await?
+                .map(|(m, _)| m),
+        )
+    }
+
+    pub async fn maximum_log_position(&self) -> Result<LogPosition, Error> {
+        let Some((manifest, _)) =
+            Manifest::load(&self.options.throttle, &self.storage, &self.prefix).await?
+        else {
+            return Err(Error::UninitializedLog);
+        };
+        Ok(manifest.maximum_log_position())
+    }
+
     pub async fn minimum_log_position(&self) -> Result<LogPosition, Error> {
         let Some((manifest, _)) =
             Manifest::load(&self.options.throttle, &self.storage, &self.prefix).await?

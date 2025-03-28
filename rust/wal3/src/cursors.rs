@@ -51,6 +51,10 @@ impl CursorName<'_> {
 pub struct Witness(PutOptions, pub Cursor);
 
 impl Witness {
+    pub fn from_cursor(cursor: Cursor) -> Self {
+        Self(PutOptions::if_not_exists(), cursor)
+    }
+
     pub fn cursor(&self) -> &Cursor {
         &self.1
     }
