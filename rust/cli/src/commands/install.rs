@@ -167,12 +167,18 @@ async fn download_github_file<T: DeserializeOwned>(name: &str, branch: Option<St
 
 async fn install_sample_app(name: String, branch: Option<String>) -> Result<(), CliError> {
     // Get all apps manifest to verify app name
-    let apps = download_github_file::<Vec<AppListing>>("sample_apps/config.json", branch).await.map_err(|_| GithubDownloadFailed)?;
-    if apps.iter().find(|app| app.name == name).is_none() {
+    let apps = download_github_file::<Vec<AppListing>>("sample_apps/config.json", branch.clone()).await.map_err(|_| GithubDownloadFailed)?;
+    if !apps.iter().any(|app| app.name == name) {
         return Err(NoSuchApp(name.clone()))?
     }
     
     // Get app manifest and build config
+    let config_url = format!("sample_apps/{}/app_config.json", name);
+    let download_app_config = download_github_file::<SampleAppConfig>(&config_url, branch).await.map_err(|e| {
+        println!("Downloading sample app config failed: {}", e);
+        GithubDownloadFailed
+    })?;
+    println!("{:?}", download_app_config);
     let app_config = SampleAppConfig {
         package_managers: vec![
             PackageManager::Npm,
@@ -218,7 +224,7 @@ pub fn install(args: InstallArgs) -> Result<(), CliError> {
     
     let runtime = tokio::runtime::Runtime::new().map_err(|_| DbError::RuntimeError)?;
     runtime.block_on(async {
-        install_sample_app(args.dev).await
+        install_sample_app(args.name, args.dev).await
     })?;
     Ok(())
 }
