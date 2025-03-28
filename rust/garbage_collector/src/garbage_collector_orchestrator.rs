@@ -471,7 +471,9 @@ impl Handler<TaskResult<DeleteUnusedFilesOutput, DeleteUnusedFilesError>>
             .expect("Epoch ID should be set");
 
         let delete_versions_task = wrap(
-            Box::new(DeleteVersionsAtSysDbOperator {}),
+            Box::new(DeleteVersionsAtSysDbOperator {
+                storage: self.storage.clone(),
+            }),
             DeleteVersionsAtSysDbInput {
                 version_file,
                 epoch_id,
