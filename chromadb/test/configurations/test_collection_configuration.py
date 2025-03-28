@@ -16,7 +16,13 @@ from chromadb.api.collection_configuration import (
     load_collection_configuration_from_json,
     CreateHNSWConfiguration,
     UpdateHNSWConfiguration,
+    CreateSpannConfiguration,
+    UpdateSpannConfiguration,
+    load_update_collection_configuration_from_json,
+    SpannConfiguration,
+    overwrite_spann_configuration,
 )
+import json
 
 
 class LegacyEmbeddingFunction(EmbeddingFunction[Embeddable]):
@@ -215,7 +221,7 @@ def test_invalid_configurations(client: ClientAPI) -> None:
         )
 
 
-def test_configuration_updates(client: ClientAPI) -> None:
+def test_configuration_hnsw_updates(client: ClientAPI) -> None:
     """Test updating collection configurations"""
     client.reset()
 
@@ -321,3 +327,434 @@ def test_configuration_result_format(client: ClientAPI) -> None:
     assert hnsw_config.get("ef_search") == 10
     assert hnsw_config.get("num_threads") == 2
     assert hnsw_config.get("space") == "cosine"
+
+
+def test_spann_configuration(client: ClientAPI) -> None:
+    """Test creating collections with SPANN configuration format"""
+    client.reset()
+
+    # Create with SPANN configuration
+    spann_config: CreateSpannConfiguration = {
+        "space": "cosine",
+        "ef_construction": 100,
+        "max_neighbors": 10,
+        "ef_search": 20,
+        "search_nprobe": 5,
+        "write_nprobe": 10,
+    }
+    config: CreateCollectionConfiguration = {
+        "spann": spann_config,
+        "embedding_function": CustomEmbeddingFunction(dim=5),
+    }
+
+    coll = client.create_collection(
+        name="test_spann_config",
+        configuration=config,
+    )
+
+    # Verify configuration is preserved
+    loaded_config = load_collection_configuration_from_json(
+        coll._model.configuration_json
+    )
+    if loaded_config and isinstance(loaded_config, dict):
+        spann_config = cast(CreateSpannConfiguration, loaded_config.get("spann", {}))
+        ef_config = loaded_config.get("embedding_function", {})  # type: ignore
+        if isinstance(ef_config, dict):
+            assert spann_config.get("space") == "cosine"
+            assert spann_config.get("ef_construction") == 100
+            assert spann_config.get("max_neighbors") == 10
+            assert spann_config.get("search_nprobe") == 5
+            assert spann_config.get("write_nprobe") == 10
+            assert ef_config.get("type") == "known"
+            assert ef_config.get("name") == "custom_ef"
+
+
+def test_invalid_spann_configurations(client: ClientAPI) -> None:
+    """Test validation of invalid SPANN configurations"""
+    client.reset()
+
+    invalid_spann: CreateSpannConfiguration = {
+        "ef_construction": -1,
+        "space": "cosine",
+    }
+
+    # Test invalid SPANN parameters
+    with pytest.raises(ValueError):
+        invalid_spann = {
+            "ef_construction": -1,
+            "space": "cosine",
+        }
+        client.create_collection(
+            name="test_invalid_spann",
+            configuration={"spann": invalid_spann},
+        )
+
+    # Test invalid search_nprobe
+    with pytest.raises(ValueError):
+        invalid_spann = {
+            "space": "cosine",
+            "search_nprobe": -5,
+        }
+        client.create_collection(
+            name="test_invalid_spann_search",
+            configuration={"spann": invalid_spann},
+        )
+
+    # Test invalid space for embedding function
+    class InvalidSpaceEF(CustomEmbeddingFunction):
+        def supported_spaces(self) -> list[Space]:
+            return ["l2"]
+
+    with pytest.raises(ValueError):
+        invalid_space_spann: CreateSpannConfiguration = {
+            "space": "cosine",
+        }
+        client.create_collection(
+            name="test_invalid_space_spann",
+            configuration={
+                "spann": invalid_space_spann,
+                "embedding_function": InvalidSpaceEF(),
+            },
+        )
+
+
+def test_spann_configuration_persistence(sqlite_persistent: System) -> None:
+    """Test SPANN configuration persistence across client restarts"""
+    client = ClientCreator.from_system(sqlite_persistent)
+    client.reset()
+
+    # Create collection with specific SPANN configuration
+    spann_config: CreateSpannConfiguration = {
+        "space": "cosine",
+        "ef_construction": 100,
+        "max_neighbors": 10,
+        "search_nprobe": 5,
+        "write_nprobe": 10,
+    }
+    config: CreateCollectionConfiguration = {
+        "spann": spann_config,
+        "embedding_function": CustomEmbeddingFunction(dim=5),
+    }
+
+    client.create_collection(
+        name="test_persist_spann_config",
+        configuration=config,
+    )
+
+    system2 = System(client.get_settings())
+
+    # Stop and restart system
+    del client
+
+    # Create new system and verify configuration
+    system2.start()
+    client2 = ClientCreator.from_system(system2)
+
+    coll = client2.get_collection(
+        name="test_persist_spann_config",
+    )
+
+    loaded_config = load_collection_configuration_from_json(
+        coll._model.configuration_json
+    )
+    if loaded_config and isinstance(loaded_config, dict):
+        spann_config = cast(CreateSpannConfiguration, loaded_config.get("spann", {}))
+        ef_config = loaded_config.get("embedding_function", {})  # type: ignore
+        if isinstance(ef_config, dict):
+            assert spann_config.get("space") == "cosine"
+            assert spann_config.get("ef_construction") == 100
+            assert spann_config.get("max_neighbors") == 10
+            assert spann_config.get("search_nprobe") == 5
+            assert spann_config.get("write_nprobe") == 10
+            assert ef_config.get("name") == "custom_ef"
+            assert ef_config.get("config", {}).get("dim") == 5
+
+    system2.stop()
+
+
+def test_exclusive_hnsw_spann_configuration(client: ClientAPI) -> None:
+    """Test that HNSW and SPANN configurations cannot both be specified"""
+    client.reset()
+
+    # Attempt to create with both HNSW and SPANN configurations
+    hnsw_config: CreateHNSWConfiguration = {
+        "space": "cosine",
+        "ef_construction": 100,
+    }
+    spann_config: CreateSpannConfiguration = {
+        "space": "cosine",
+        "search_nprobe": 5,
+    }
+
+    with pytest.raises(ValueError):
+        client.create_collection(
+            name="test_dual_config",
+            configuration={
+                "hnsw": hnsw_config,
+                "spann": spann_config,
+            },
+        )
+
+
+def test_spann_default_parameters(client: ClientAPI) -> None:
+    """Test the default values for SPANN parameters"""
+    client.reset()
+
+    # Create with minimal SPANN configuration
+    spann_config: CreateSpannConfiguration = {
+        "space": "cosine",
+    }
+    config: CreateCollectionConfiguration = {
+        "spann": spann_config,
+    }
+
+    coll = client.create_collection(
+        name="test_spann_defaults",
+        configuration=config,
+    )
+
+    # Verify default values are populated
+    loaded_config = load_collection_configuration_from_json(
+        coll._model.configuration_json
+    )
+    if loaded_config and isinstance(loaded_config, dict):
+        spann_config = cast(CreateSpannConfiguration, loaded_config.get("spann", {}))
+        assert spann_config.get("space") == "cosine"
+        assert spann_config.get("ef_construction") == 200  # default
+        assert spann_config.get("max_neighbors") == 16  # default
+        assert spann_config.get("ef_search") == 200  # default
+        assert spann_config.get("search_nprobe") == 128  # default
+        assert spann_config.get("write_nprobe") == 128  # default
+
+
+def test_spann_json_serialization(client: ClientAPI) -> None:
+    """Test serializing and deserializing SPANN configuration to/from JSON"""
+    client.reset()
+
+    # Create JSON configuration with SPANN config
+    config_json = """
+    {
+        "spann": {
+            "space": "cosine",
+            "search_nprobe": 7,
+            "write_nprobe": 15,
+            "ef_construction": 200,
+            "ef_search": 150
+        },
+        "embedding_function": {
+            "type": "known",
+            "name": "custom_ef",
+            "config": {
+                "dim": 10
+            }
+        }
+    }
+    """
+
+    # Load the configuration from JSON
+    collection_config = load_collection_configuration_from_json(json.loads(config_json))
+
+    # Convert to CreateCollectionConfiguration for collection creation
+    create_config: CreateCollectionConfiguration = {}
+    if collection_config.get("spann") is not None:
+        create_config["spann"] = cast(
+            CreateSpannConfiguration, collection_config.get("spann")
+        )
+    if collection_config.get("embedding_function") is not None:
+        create_config["embedding_function"] = collection_config.get(
+            "embedding_function"
+        )
+
+    # Create collection with the converted configuration
+    coll = client.create_collection(
+        name="test_spann_json",
+        configuration=create_config,
+    )
+
+    # Verify the configuration was preserved correctly
+    loaded_config = load_collection_configuration_from_json(
+        coll._model.configuration_json
+    )
+    if loaded_config and isinstance(loaded_config, dict):
+        spann_config = cast(CreateSpannConfiguration, loaded_config.get("spann", {}))
+        assert spann_config.get("space") == "cosine"
+        assert spann_config.get("search_nprobe") == 7
+        assert spann_config.get("write_nprobe") == 15
+        assert spann_config.get("ef_construction") == 200
+        assert spann_config.get("ef_search") == 150
+
+
+def test_configuration_spann_updates(client: ClientAPI) -> None:
+    """Test updating SPANN collection configurations"""
+    client.reset()
+
+    # Create initial collection with SPANN
+    initial_spann: CreateSpannConfiguration = {
+        "ef_search": 100,
+        "search_nprobe": 10,
+        "space": "cosine",
+    }
+    coll = client.create_collection(
+        name="test_spann_updates",
+        configuration={"spann": initial_spann},
+    )
+
+    # Update SPANN configuration
+    update_spann: UpdateSpannConfiguration = {
+        "ef_search": 150,
+        "search_nprobe": 20,
+    }
+    update_config: UpdateCollectionConfiguration = {
+        "spann": update_spann,
+    }
+    coll.modify(configuration=update_config)
+
+    # Verify updates were applied
+    loaded_config = coll.configuration_json
+    if loaded_config and isinstance(loaded_config, dict):
+        spann_config = loaded_config.get("spann", {})
+        if isinstance(spann_config, dict):
+            assert spann_config.get("ef_search") == 150
+            assert spann_config.get("search_nprobe") == 20
+            # Original values should remain unchanged
+            assert spann_config.get("space") == "cosine"
+
+
+def test_spann_update_from_json(client: ClientAPI) -> None:
+    """Test updating SPANN configuration from JSON and applying it"""
+    client.reset()
+
+    # Create initial collection with SPANN
+    initial_spann: CreateSpannConfiguration = {
+        "ef_search": 100,
+        "search_nprobe": 10,
+        "space": "cosine",
+        "ef_construction": 150,
+        "max_neighbors": 12,
+        "write_nprobe": 20,
+    }
+    coll = client.create_collection(
+        name="test_spann_json_update",
+        configuration={"spann": initial_spann},
+    )
+
+    # Create JSON for update
+    update_json = """
+    {
+        "spann": {
+            "search_nprobe": 15,
+            "ef_search": 200
+        }
+    }
+    """
+
+    # Parse JSON and create update configuration
+    update_config = load_update_collection_configuration_from_json(
+        json.loads(update_json)
+    )
+
+    # Apply the update
+    coll.modify(configuration=update_config)
+
+    # Verify updates were applied
+    loaded_config = coll.configuration_json
+    if loaded_config and isinstance(loaded_config, dict):
+        spann_config = loaded_config.get("spann", {})
+        if isinstance(spann_config, dict):
+            # Updated values
+            assert spann_config.get("ef_search") == 200
+            assert spann_config.get("search_nprobe") == 15
+
+            # Unchanged values
+            assert spann_config.get("space") == "cosine"
+            assert spann_config.get("ef_construction") == 150
+            assert spann_config.get("max_neighbors") == 12
+            assert spann_config.get("write_nprobe") == 20
+
+
+def test_overwrite_spann_configuration() -> None:
+    """Test the overwrite_spann_configuration function directly"""
+    # Create original SPANN configuration
+    original_config: SpannConfiguration = {
+        "space": "cosine",
+        "search_nprobe": 10,
+        "write_nprobe": 20,
+        "ef_construction": 150,
+        "ef_search": 100,
+        "max_neighbors": 16,
+    }
+
+    # Create update configuration with only a few fields
+    update_config: UpdateSpannConfiguration = {
+        "search_nprobe": 15,
+        "ef_search": 200,
+    }
+
+    # Apply the update
+    updated_config = overwrite_spann_configuration(original_config, update_config)
+
+    # Verify updated fields
+    assert updated_config.get("search_nprobe") == 15
+    assert updated_config.get("ef_search") == 200
+
+    # Verify other fields remain unchanged
+    assert updated_config.get("space") == "cosine"
+    assert updated_config.get("write_nprobe") == 20
+    assert updated_config.get("ef_construction") == 150
+    assert updated_config.get("max_neighbors") == 16
+
+
+def test_exclusive_update_hnsw_spann_configuration(client: ClientAPI) -> None:
+    """Test that HNSW and SPANN configurations cannot both be specified in an update"""
+    client.reset()
+
+    # Create initial collection with HNSW
+    initial_hnsw: CreateHNSWConfiguration = {
+        "ef_search": 10,
+        "space": "cosine",
+    }
+    coll = client.create_collection(
+        name="test_exclusive_update",
+        configuration={"hnsw": initial_hnsw},
+    )
+
+    # Try to update with both HNSW and SPANN
+    update_hnsw: UpdateHNSWConfiguration = {
+        "ef_search": 20,
+    }
+    update_spann: UpdateSpannConfiguration = {
+        "search_nprobe": 15,
+    }
+    update_config: UpdateCollectionConfiguration = {
+        "hnsw": update_hnsw,
+        "spann": update_spann,
+    }
+
+    # This should raise a ValueError
+    with pytest.raises(ValueError):
+        coll.modify(configuration=update_config)
+
+
+def test_default_collection_creation(client: ClientAPI) -> None:
+    """Test creating a collection with default values"""
+    client.reset()
+
+    coll = client.create_collection(name="test_default_creation")
+    assert coll is not None
+
+    assert coll.configuration_json is not None
+    config = load_collection_configuration_from_json(coll.configuration_json)
+    assert config is not None
+    hnsw_config = config.get("hnsw")
+    assert hnsw_config is not None
+    assert hnsw_config.get("space") == "l2"
+    assert hnsw_config.get("ef_construction") == 100
+    assert hnsw_config.get("max_neighbors") == 16
+    assert hnsw_config.get("ef_search") == 100
+    assert hnsw_config.get("batch_size") == 100
+    assert hnsw_config.get("sync_threshold") == 1000
+
+    assert config.get("spann") is None
+    ef = config.get("embedding_function")
+    assert ef is not None
+    assert ef.name() == "default"
