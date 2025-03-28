@@ -1433,7 +1433,7 @@ dependencies = [
 
 [[package]]
 name = "chroma-cli"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "arboard",
  "assert_cmd",
@@ -1449,6 +1449,7 @@ dependencies = [
  "colored",
  "dialoguer",
  "dirs 6.0.0",
+ "futures-util",
  "indicatif",
  "predicates",
  "rand 0.8.5",

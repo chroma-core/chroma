@@ -1,17 +1,21 @@
 use std::collections::HashMap;
 use std::error::Error;
+use std::fmt::format;
+use std::fs;
 use std::fs::{create_dir_all, File};
 use std::io::Write;
 use std::path::Path;
 use clap::{Parser, ValueEnum};
-use indicatif::ProgressBar;
+use colored::Colorize;
+use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::Client;
 use reqwest::header::USER_AGENT;
+use semver::Version;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use crate::commands::db::DbError;
-use crate::commands::install::InstallError::{GithubDownloadFailed, NoSuchApp};
+use crate::commands::install::InstallError::{GithubDownloadFailed, NoSuchApp, VersionMismatch};
 use crate::commands::install::LlmProvider::OpenAI;
 use crate::utils::CliError;
 
@@ -24,6 +28,8 @@ pub enum InstallError {
     GithubDownloadFailed,
     #[error("No such app {0}")]
     NoSuchApp(String),
+    #[error("Sample app {0} requires Chroma CLI with version {1}. Please update your CLI using `chroma update`")]
+    VersionMismatch(String, String),
 }
 
 #[derive(Parser, Debug)]
@@ -125,7 +131,7 @@ async fn download_repo_files(
             ContentType::Dir => {
                 create_dir_all(&item_local_path)?;
                 let base_url = url.split('?').next().unwrap();
-                let sub_url = format!("{}/{}?ref=itai/demo-cli", base_url, item.name);
+                let sub_url = format!("{}/{}?ref=itai/init-sample-apps", base_url, item.name);
                 Box::pin(download_repo_files(client, &sub_url, &item_local_path, progress)).await?;
             }
         }
@@ -146,7 +152,7 @@ where
         .send()
         .await?
         .error_for_status()?;
-    
+
     let deserialized: T = response.json().await?;
     Ok(deserialized)
 }
@@ -156,7 +162,7 @@ async fn download_github_file<T: DeserializeOwned>(name: &str, branch: Option<St
     let repo = "chroma";
     let branch_name = branch.unwrap_or("main".to_string());
     let file_path = name;
-    
+
     let url = format!(
         "https://raw.githubusercontent.com/{}/{}/{}/{}",
         owner, repo, branch_name, file_path
@@ -165,47 +171,122 @@ async fn download_github_file<T: DeserializeOwned>(name: &str, branch: Option<St
     Ok(file)
 }
 
+fn check_version_compatibility(app_name: &str, app_config: &SampleAppConfig) -> Result<(), Box<dyn Error>> {
+    let cli_version = env!("CARGO_PKG_VERSION");
+    let app_version = &app_config.app_version;
+
+    let cli_semver = Version::parse(cli_version)?;
+    let app_semver = Version::parse(app_version)?;
+
+    if app_semver > cli_semver {
+        return Err(VersionMismatch(app_name.to_string(), app_version.to_string()).into());
+    }
+
+    Ok(())
+}
+
+async fn download_sample_app(name: &String, path: &String, branch: Option<String>) -> Result<(), Box<dyn Error>> {
+    let branch_ref = match branch {
+        Some(branch) => format!("?ref={}", branch),
+        None => String::new(),
+    };
+    let url = format!(
+        "https://api.github.com/repos/chroma-core/chroma/contents/sample_apps/{}{}",
+        name,
+        branch_ref
+    );
+    let app_path = format!("{}/{}", path, name);
+    create_dir_all(&app_path)?;
+
+    let client = Client::new();
+
+    println!("\n{} {}", "Downloading sample app".bold(), name.bold());
+
+    let progress = ProgressBar::new(47);
+
+    download_repo_files(&client, &url, Path::new(&app_path), &progress).await?;
+
+    println!("\n{}", "Download complete!".bold());
+
+    Ok(())
+}
+
+async fn download_s3_file(url: &str, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let client = Client::new();
+
+    // Create the progress bar
+    let progress_bar = ProgressBar::new(0);
+    progress_bar.set_style(
+        ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")
+            .unwrap()
+            .progress_chars("#>-"),
+    );
+
+    // Get the file size
+    let resp = client.head(url).send().await?;
+    let total_size = resp.headers()
+        .get(reqwest::header::CONTENT_LENGTH)
+        .and_then(|ct_len| ct_len.to_str().ok())
+        .and_then(|ct_len| ct_len.parse::<u64>().ok())
+        .unwrap_or(0);
+
+    progress_bar.set_length(total_size);
+
+    // Create directory if it doesn't exist
+    if let Some(parent) = Path::new(path).parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    // Create the file and download
+    let resp = client.get(url).send().await?;
+    let mut dest = File::create(path)?;
+    let mut stream = resp.bytes_stream();
+
+    let mut downloaded: u64 = 0;
+
+    use futures_util::StreamExt;
+    while let Some(item) = stream.next().await {
+        let chunk = item?;
+        dest.write_all(&chunk)?;
+        downloaded += chunk.len() as u64;
+        progress_bar.set_position(downloaded);
+    }
+
+    progress_bar.finish_with_message("Download complete");
+
+    Ok(())
+}
+
 async fn install_sample_app(name: String, branch: Option<String>) -> Result<(), CliError> {
     // Get all apps manifest to verify app name
     let apps = download_github_file::<Vec<AppListing>>("sample_apps/config.json", branch.clone()).await.map_err(|_| GithubDownloadFailed)?;
     if !apps.iter().any(|app| app.name == name) {
         return Err(NoSuchApp(name.clone()))?
     }
-    
+
     // Get app manifest and build config
     let config_url = format!("sample_apps/{}/app_config.json", name);
-    let download_app_config = download_github_file::<SampleAppConfig>(&config_url, branch).await.map_err(|e| {
+    let app_config = download_github_file::<SampleAppConfig>(&config_url, branch.clone()).await.map_err(|e| {
         println!("Downloading sample app config failed: {}", e);
         GithubDownloadFailed
     })?;
-    println!("{:?}", download_app_config);
-    let app_config = SampleAppConfig {
-        package_managers: vec![
-            PackageManager::Npm,
-            PackageManager::Pnpm,
-            PackageManager::Bun,
-            PackageManager::Yarn
-        ],
-        name: "chatbot_debugger".to_string(),
-        cli_version: "1.0.0".to_string(),
-        app_version: "1.0.0".to_string(),
-        llm_providers: vec![OpenAI],
-        startup_commands: [
-            (PackageManager::Npm, "npm run dev"),
-            (PackageManager::Pnpm, "pnpm run dev"),
-            (PackageManager::Yarn, "yarn dev"),
-            (PackageManager::Bun, "bun run dev"),
-        ]
-            .into_iter()
-            .map(|(k, v)| (k, v.to_string())) // Convert &str to String
-            .collect(),
-    };
 
     // Verify CLI version compat
+    check_version_compatibility(&name, &app_config).map_err(|_| VersionMismatch(name.clone(), app_config.app_version.clone()))?;
 
     // Download files
+    download_sample_app(&name, &".".to_string(), branch).await.map_err(|e| {
+        println!("Downloading sample app failed: {}", e);
+        GithubDownloadFailed
+    })?;
 
     // Download Chroma from S3
+    println!("\n{}", "Downloading your Chroma DB".bold());
+    let url = "https://s3.us-east-1.amazonaws.com/public.trychroma.com/sample_apps/chatbot/chroma_data.zip";
+    let download_path = format!("./{}/chroma_data.zip", name);
+    download_s3_file(url, &download_path).await.map_err(|_e| InstallError::InstallFailed(name))?;
+    println!("{}\n", "Download complete!".bold());
 
     // Set env variables
 
@@ -215,13 +296,12 @@ async fn install_sample_app(name: String, branch: Option<String>) -> Result<(), 
 
     // Output run instructions
 
-    // Add app to CLI config with version 
-    println!("hello");
+    // Add app to CLI config with version
     Ok(())
 }
 
 pub fn install(args: InstallArgs) -> Result<(), CliError> {
-    
+
     let runtime = tokio::runtime::Runtime::new().map_err(|_| DbError::RuntimeError)?;
     runtime.block_on(async {
         install_sample_app(args.name, args.dev).await
