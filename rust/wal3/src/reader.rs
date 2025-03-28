@@ -136,6 +136,7 @@ impl LogReader {
     }
 
     #[tracing::instrument(skip(self), err(Display))]
+    #[allow(clippy::type_complexity)]
     pub async fn read_parquet(
         &self,
         fragment: &Fragment,
