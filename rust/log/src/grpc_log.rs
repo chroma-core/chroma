@@ -10,7 +10,7 @@ use chroma_types::{CollectionUuid, LogRecord, OperationRecord, RecordConversionE
 use std::fmt::Debug;
 use std::time::Duration;
 use thiserror::Error;
-use tonic::transport::Endpoint;
+use tonic::transport::{Channel, Endpoint};
 use tower::ServiceBuilder;
 use uuid::Uuid;
 
