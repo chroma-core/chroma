@@ -18,6 +18,7 @@ use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
 use thiserror::Error;
+use crate::commands::install::InstallError;
 
 pub const LOGO: &str = "
                 \x1b[38;5;069m(((((((((    \x1b[38;5;203m(((((\x1b[38;5;220m####
@@ -57,6 +58,8 @@ pub enum CliError {
     Login(#[from] LoginError),
     #[error("{0}")]
     DashboardClient(#[from] DashboardClientError),
+    #[error("{0}")]
+    Install(#[from] InstallError),
 }
 
 #[derive(Debug, Error)]
