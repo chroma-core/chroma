@@ -64,7 +64,7 @@ impl LogReader {
     ///    interval.
     /// 2. Up to, and including, the number of files to return.
     /// 3. Up to, and including, the total number of bytes to return.
-    #[tracing::instrument(skip(self), err(Display))]
+    #[tracing::instrument(skip(self))]
     pub async fn scan(&self, from: LogPosition, limits: Limits) -> Result<Vec<Fragment>, Error> {
         let Some((manifest, _)) =
             Manifest::load(&self.options.throttle, &self.storage, &self.prefix).await?
@@ -124,7 +124,7 @@ impl LogReader {
         Ok(fragments)
     }
 
-    #[tracing::instrument(skip(self), err(Display))]
+    #[tracing::instrument(skip(self))]
     pub async fn fetch(&self, fragment: &Fragment) -> Result<Arc<Vec<u8>>, Error> {
         let path = format!("{}/{}", self.prefix, fragment.path);
         Ok(self
@@ -135,7 +135,7 @@ impl LogReader {
             .0)
     }
 
-    #[tracing::instrument(skip(self), err(Display))]
+    #[tracing::instrument(skip(self))]
     #[allow(clippy::type_complexity)]
     pub async fn read_parquet(
         &self,
@@ -144,7 +144,7 @@ impl LogReader {
         read_parquet(&self.storage, &self.prefix, &fragment.path).await
     }
 
-    #[tracing::instrument(skip(self), ret, err(Display))]
+    #[tracing::instrument(skip(self), ret)]
     pub async fn scrub(&self) -> Result<ScrubSuccess, Error> {
         let Some((manifest, _)) =
             Manifest::load(&self.options.throttle, &self.storage, &self.prefix).await?
