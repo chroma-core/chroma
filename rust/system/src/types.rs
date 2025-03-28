@@ -1,11 +1,12 @@
 use super::{scheduler::Scheduler, ChannelError, RequestError, WrappedMessage};
 use async_trait::async_trait;
 use chroma_config::registry::Injectable;
+use chroma_error::ChromaError;
 use core::panic;
 use futures::Stream;
 use parking_lot::Mutex;
 use std::{fmt::Debug, sync::Arc, time::Duration};
-use tokio::task::JoinError;
+use thiserror::Error;
 
 use super::{system::System, ReceiverForMessage};
 
@@ -45,7 +46,9 @@ pub trait Component: Send + Sized + Debug + 'static {
         ComponentRuntime::Inherit
     }
     async fn on_start(&mut self, _ctx: &ComponentContext<Self>) -> () {}
-    async fn on_stop(&mut self) {}
+    async fn on_stop(&mut self) -> Result<(), Box<dyn ChromaError>> {
+        Ok(())
+    }
     fn on_stop_timeout(&self) -> Duration {
         Duration::from_secs(6)
     }
@@ -92,26 +95,58 @@ where
 
 /// A thin wrapper over a join handle that will panic if it is consumed more than once.
 #[derive(Debug, Clone)]
-pub(super) struct ConsumableJoinHandle {
-    handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
+pub(super) enum ConsumableJoinHandle {
+    TokioTask(Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>),
+    Thread(Arc<Mutex<Option<std::thread::JoinHandle<()>>>>),
+}
+
+#[derive(Debug, Error)]
+pub enum ConsumeJoinHandleError {
+    #[error("Tokio task failed: {0}")]
+    TokioTaskFailed(#[from] tokio::task::JoinError),
+    #[error("Thread panicked")]
+    ThreadPanicked(Box<dyn std::any::Any + Send + 'static>),
 }
 
 impl ConsumableJoinHandle {
-    pub(super) fn new(handle: tokio::task::JoinHandle<()>) -> Self {
-        ConsumableJoinHandle {
-            handle: Arc::new(Mutex::new(Some(handle))),
-        }
+    pub(super) fn from_tokio_task_handle(handle: tokio::task::JoinHandle<()>) -> Self {
+        ConsumableJoinHandle::TokioTask(Arc::new(Mutex::new(Some(handle))))
     }
 
-    async fn consume(&mut self) -> Result<(), JoinError> {
-        let handle = { self.handle.lock().take() };
-        match handle {
-            Some(handle) => {
-                handle.await?;
-                Ok(())
+    pub(super) fn from_thread_handle(handle: std::thread::JoinHandle<()>) -> Self {
+        ConsumableJoinHandle::Thread(Arc::new(Mutex::new(Some(handle))))
+    }
+
+    async fn consume(&mut self) -> Result<(), ConsumeJoinHandleError> {
+        match self {
+            ConsumableJoinHandle::TokioTask(handle) => {
+                let handle = { handle.lock().take() };
+                match handle {
+                    Some(handle) => {
+                        handle.await?;
+                        Ok(())
+                    }
+                    None => {
+                        panic!("Join handle already consumed");
+                    }
+                }
             }
-            None => {
-                panic!("Join handle already consumed");
+            ConsumableJoinHandle::Thread(handle) => {
+                let handle = { handle.lock().take() };
+                match handle {
+                    Some(handle) => {
+                        tokio::task::spawn_blocking(move || {
+                            handle
+                                .join()
+                                .map_err(ConsumeJoinHandleError::ThreadPanicked)?;
+                            Ok(())
+                        })
+                        .await?
+                    }
+                    None => {
+                        panic!("Join handle already consumed");
+                    }
+                }
             }
         }
     }
@@ -231,7 +266,7 @@ impl<C: Component> ComponentHandle<C> {
     }
 
     /// Consumes the underlying join handle. Panics if it is consumed twice.
-    pub async fn join(&mut self) -> Result<(), JoinError> {
+    pub async fn join(&mut self) -> Result<(), ConsumeJoinHandleError> {
         if let Some(join_handle) = &mut self.join_handle {
             join_handle.consume().await
         } else {
@@ -386,7 +421,7 @@ mod tests {
     #[should_panic(expected = "Join handle already consumed")]
     async fn join_handle_panics_if_consumed_twice() {
         let handle = tokio::spawn(async {});
-        let mut handle = ConsumableJoinHandle::new(handle);
+        let mut handle = ConsumableJoinHandle::from_tokio_task_handle(handle);
         // Should be able to clone the handle
         let mut cloned = handle.clone();
 
