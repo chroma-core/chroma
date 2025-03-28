@@ -749,7 +749,8 @@ impl Orchestrator for CompactOrchestrator {
         vec![wrap(
             Box::new(FetchLogOperator {
                 log_client: self.log.clone(),
-                batch_size: 100,
+                // TODO(rescrv): Plumb through to configure this.
+                batch_size: const { 4 * 1024 * 1024 / 16_000 },
                 // Here we do not need to be inclusive since the compaction job
                 // offset is the one after the last compaction offset
                 start_log_offset_id: self.compaction_job.offset as u32,
