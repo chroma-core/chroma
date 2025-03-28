@@ -71,7 +71,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
 
         self._session = httpx.Client(timeout=None)
 
-        self._header = system.settings.chroma_server_headers or {}
+        self._header = (self._settings.chroma_server_headers or {}).copy()
         self._header["Content-Type"] = "application/json"
         self._header["User-Agent"] = (
             "Chroma Python Client v"
