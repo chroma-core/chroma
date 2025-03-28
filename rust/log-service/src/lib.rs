@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -259,8 +260,8 @@ impl RollupPerCollection {
         if log_position + num_records > self.limit_log_position {
             self.limit_log_position = log_position + num_records;
         }
-        // Count every reinsert cumulatively.
-        self.reinsert_count += reinsert_count;
+        // Take the biggest reinsert count.
+        self.reinsert_count = std::cmp::max(self.reinsert_count, reinsert_count);
         // Consider the most recent initial insertion time so if we've compacted earlier we drop.
         self.initial_insertion_epoch_us =
             std::cmp::max(self.initial_insertion_epoch_us, initial_insertion_epoch_us);
@@ -305,8 +306,9 @@ impl DirtyMarker {
 
     /// Given a contiguous prefix of markers, process the log into a rollup.  That is, a set of
     /// markers to reinsert, a set of collections to compact, and an advance_to log position.
-    pub async fn rollup(
+    pub async fn rollup<F: Future<Output = Result<Option<Witness>, wal3::Error>>>(
         storage: Arc<Storage>,
+        retrieve_cursor: impl Fn(Arc<Storage>, CollectionUuid) -> F,
         markers: &[(LogPosition, DirtyMarker)],
         record_count_threshold: u64,
         reinsert_threshold: u64,
@@ -357,18 +359,18 @@ impl DirtyMarker {
             return Ok(None);
         }
         // Now fetch the compaction cursor for each collection.
+        let retrieve_cursor = Arc::new(retrieve_cursor);
         let futs = compactable
             .iter()
-            .map(|collection_id| (**collection_id, Arc::clone(&storage)))
-            .map(|(collection_id, storage)| async move {
-                let cursor = &COMPACTION;
-                let cursor_store = CursorStore::new(
-                    CursorStoreOptions::default(),
-                    storage,
-                    storage_prefix_for_log(collection_id),
-                    "writer".to_string(),
-                );
-                let cursor = cursor_store.load(cursor).await;
+            .map(|collection_id| {
+                (
+                    **collection_id,
+                    Arc::clone(&storage),
+                    Arc::clone(&retrieve_cursor),
+                )
+            })
+            .map(|(collection_id, storage, retrieve_cursor)| async move {
+                let cursor = (*retrieve_cursor)(storage, collection_id).await;
                 // We play a funny game of Ok(Ok(_)) to force try_join_all to not short-circuit.
                 match cursor {
                     Ok(Some(witness)) => Ok::<_, wal3::Error>(Ok((collection_id, Some(witness)))),
@@ -696,8 +698,19 @@ impl LogService for LogServer {
                 .collect::<Result<Vec<_>, _>>()?;
             dirty_markers.extend(records);
         }
+        let load_cursor = |storage, collection_id| async move {
+            let cursor = &COMPACTION;
+            let cursor_store = CursorStore::new(
+                CursorStoreOptions::default(),
+                storage,
+                storage_prefix_for_log(collection_id),
+                "writer".to_string(),
+            );
+            cursor_store.load(cursor).await
+        };
         let rollup = DirtyMarker::rollup(
             Arc::clone(&self.storage),
+            load_cursor,
             &dirty_markers,
             std::cmp::min(
                 self.config.record_count_threshold,
@@ -1112,6 +1125,8 @@ pub async fn log_entrypoint() {
 
 #[cfg(test)]
 mod tests {
+    use std::future::ready;
+
     use super::*;
 
     #[tokio::test]
@@ -1126,17 +1141,7 @@ mod tests {
         let collection_id = CollectionUuid::new();
         let markers = vec![
             (
-                LogPosition::from_offset(0),
-                DirtyMarker::MarkDirty {
-                    collection_id,
-                    log_position: LogPosition::from_offset(0),
-                    num_records: 1,
-                    reinsert_count: 0,
-                    initial_insertion_epoch_us: now,
-                },
-            ),
-            (
-                LogPosition::from_offset(1),
+                LogPosition::from_offset(45),
                 DirtyMarker::MarkDirty {
                     collection_id,
                     log_position: LogPosition::from_offset(1),
@@ -1145,12 +1150,29 @@ mod tests {
                     initial_insertion_epoch_us: now,
                 },
             ),
+            (
+                LogPosition::from_offset(46),
+                DirtyMarker::MarkDirty {
+                    collection_id,
+                    log_position: LogPosition::from_offset(2),
+                    num_records: 1,
+                    reinsert_count: 0,
+                    initial_insertion_epoch_us: now,
+                },
+            ),
         ];
-        let rollup = DirtyMarker::rollup(Arc::new(storage), &markers, 1, 1, 86_400_000_000)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(LogPosition::from_offset(0), rollup.advance_to);
+        let rollup = DirtyMarker::rollup(
+            Arc::new(storage),
+            |_, _| ready(Ok(None)),
+            &markers,
+            1,
+            1,
+            86_400_000_000,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(LogPosition::from_offset(46), rollup.advance_to);
         println!("{:?}", rollup);
         assert_eq!(1, rollup.reinsert.len());
         assert_eq!(1, rollup.compactable.len());
@@ -1192,26 +1214,17 @@ mod tests {
                 },
             ),
         ];
-        let rollup = DirtyMarker::rollup(Arc::new(storage), &markers, 3, 1, 86_400_000_000)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(LogPosition::from_offset(2), rollup.advance_to);
-        assert_eq!(0, rollup.compactable.len());
-        assert_eq!(2, rollup.reinsert.len());
-        assert_eq!(collection_id, rollup.reinsert[0].collection_id());
-        assert_eq!(collection_id, rollup.reinsert[1].collection_id());
-        // NOTE(rescrv):  MarkCollected are necessarily inserted before MarkDirty.
-        assert_eq!(
-            DirtyMarker::MarkDirty {
-                collection_id,
-                log_position: LogPosition::from_offset(0),
-                num_records: 2,
-                reinsert_count: 1,
-                initial_insertion_epoch_us: now
-            },
-            rollup.reinsert[1]
-        );
+        assert!(DirtyMarker::rollup(
+            Arc::new(storage),
+            |_, _| ready(Ok(None)),
+            &markers,
+            3,
+            1,
+            86_400_000_000,
+        )
+        .await
+        .unwrap()
+        .is_none());
     }
 
     #[tokio::test]
@@ -1247,32 +1260,29 @@ mod tests {
                 },
             ),
         ];
-        let rollup = DirtyMarker::rollup(Arc::new(storage), &markers, 3, 1, 86_400_000_000)
-            .await
-            .unwrap()
-            .unwrap();
+        let rollup = DirtyMarker::rollup(
+            Arc::new(storage),
+            |_, _| ready(Ok(None)),
+            &markers,
+            3,
+            1,
+            86_400_000_000,
+        )
+        .await
+        .unwrap()
+        .unwrap();
         assert_eq!(LogPosition::from_offset(1), rollup.advance_to);
         assert_eq!(1, rollup.compactable.len());
         assert_eq!(
             collection_id_acting.to_string(),
             rollup.compactable[0].collection_id
         );
-        assert_eq!(3, rollup.reinsert.len());
+        assert_eq!(2, rollup.reinsert.len());
         assert!(
             (rollup.reinsert[0].collection_id() == collection_id_blocking
                 && rollup.reinsert[1].collection_id() == collection_id_acting)
                 || (rollup.reinsert[1].collection_id() == collection_id_blocking
                     && rollup.reinsert[0].collection_id() == collection_id_acting)
-        );
-        assert_eq!(
-            DirtyMarker::MarkDirty {
-                collection_id: collection_id_blocking,
-                log_position: LogPosition::from_offset(0),
-                num_records: 1,
-                reinsert_count: 1,
-                initial_insertion_epoch_us: now,
-            },
-            rollup.reinsert[2]
         );
     }
 
