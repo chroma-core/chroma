@@ -1,12 +1,15 @@
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::format;
-use std::fs;
+use std::{fmt, fs};
 use std::fs::{create_dir_all, File};
 use std::io::Write;
 use std::path::Path;
+use std::process::Command;
 use clap::{Parser, ValueEnum};
 use colored::Colorize;
+use dialoguer::{Input, Password, Select};
+use dialoguer::theme::ColorfulTheme;
 use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::Client;
 use reqwest::header::USER_AGENT;
@@ -18,7 +21,7 @@ use zip_extract::extract;
 use crate::commands::db::DbError;
 use crate::commands::install::InstallError::{GithubDownloadFailed, InstallFailed, NoSuchApp, VersionMismatch};
 use crate::commands::install::LlmProvider::OpenAI;
-use crate::utils::CliError;
+use crate::utils::{CliError, UtilsError};
 
 // Skip installing
 #[derive(Debug, Error)]
@@ -85,6 +88,13 @@ pub enum PackageManager {
     Bun,
     Pip,
     Poetry,
+}
+
+impl fmt::Display for PackageManager {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let lowercase_name = format!("{:?}", self).to_lowercase();
+        write!(f, "{}", lowercase_name)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -201,7 +211,7 @@ async fn download_sample_app(name: &String, path: &String, branch: Option<String
 
     let client = Client::new();
 
-    println!("\n{} {}", "Downloading sample app".bold(), name.bold());
+    println!("{} {}", "Downloading sample app".bold(), name.bold());
 
     let progress = ProgressBar::new(47);
 
@@ -271,6 +281,43 @@ fn extract_zip_file(zip_file_path: &str, output_dir_path: &str) -> Result<(), Bo
     Ok(())
 }
 
+fn install_dependencies(
+    path: &String,
+    package_manager: PackageManager,
+) -> Result<(), Box<dyn Error>> {
+    println!("\n{}", "Installing dependencies".bold());
+
+    let (command, arg) = match package_manager {
+        PackageManager::Npm => ("npm", "install"),
+        PackageManager::Pnpm => ("pnpm", "install"),
+        PackageManager::Yarn => ("yarn", "install"),
+        PackageManager::Bun => ("bun", "install"),
+        PackageManager::Pip => ("pip", "install -r requirements.txt"),
+        PackageManager::Poetry => ("poetry", "install"),
+    };
+
+    let status = Command::new(command).arg(arg).current_dir(path).status()?;
+
+    if status.success() {
+        println!("{}\n", "Installed app dependencies".bold());
+        Ok(())
+    } else {
+        Err("Failed to install dependencies".into())
+    }
+}
+
+fn write_env_file(path: &str, key: &str) -> std::io::Result<()> {
+    let env_content = format!(r#"CHROMA_HOST=http://localhost:8000
+CHROMA_TENANT=default_tenant
+CHROMA_DB_NAME=default_database
+OPENAI_API_KEY={}"#, key);
+
+    let path = Path::new(path);
+    let mut file = File::create(path)?;
+    file.write_all(env_content.as_bytes())?;
+    Ok(())
+}
+
 async fn install_sample_app(name: String, branch: Option<String>) -> Result<(), CliError> {
     // Get all apps manifest to verify app name
     let apps = download_github_file::<Vec<AppListing>>("sample_apps/config.json", branch.clone()).await.map_err(|_| GithubDownloadFailed)?;
@@ -289,27 +336,48 @@ async fn install_sample_app(name: String, branch: Option<String>) -> Result<(), 
     check_version_compatibility(&name, &app_config).map_err(|_| VersionMismatch(name.clone(), app_config.app_version.clone()))?;
 
     // Download files
-    download_sample_app(&name, &".".to_string(), branch).await.map_err(|e| {
-        println!("Downloading sample app failed: {}", e);
-        GithubDownloadFailed
-    })?;
+    // download_sample_app(&name, &".".to_string(), branch).await.map_err(|e| {
+    //     println!("Downloading sample app failed: {}", e);
+    //     GithubDownloadFailed
+    // })?;
+    // 
+    // // Download Chroma from S3
+    // println!("\n{}", "Downloading your Chroma DB".bold());
+    // let url = "https://s3.us-east-1.amazonaws.com/public.trychroma.com/sample_apps/chatbot/chroma_data.zip";
+    // let download_path = format!("./{}/chroma_data.zip", name);
+    // download_s3_file(url, &download_path).await.map_err(|_e| InstallFailed(name.clone()))?;
+    // 
+    // let zip_path = format!("./{}/chroma_data.zip", name);
+    // let output = format!("./{}", name);
+    // extract_zip_file(zip_path.as_str(), output.as_str()).map_err(|_e| InstallFailed(name.clone()))?;
+    // println!("{}\n", "Download complete!".bold());
 
-    // Download Chroma from S3
-    println!("\n{}", "Downloading your Chroma DB".bold());
-    let url = "https://s3.us-east-1.amazonaws.com/public.trychroma.com/sample_apps/chatbot/chroma_data.zip";
-    let download_path = format!("./{}/chroma_data.zip", name);
-    download_s3_file(url, &download_path).await.map_err(|_e| InstallFailed(name.clone()))?;
-    
-    let zip_path = format!("./{}/chroma_data.zip", name);
-    let output = format!("./{}", name);
-    extract_zip_file(zip_path.as_str(), output.as_str()).map_err(|_e| InstallFailed(name.clone()))?;
-    println!("{}\n", "Download complete!".bold());
-    
+    println!("{}", "This app requires an OpenAI key in the .env file. Input it here if you want the installer to set it for you, or hit Return to set it later.".bold().blue());
+    let key: String = Password::with_theme(&ColorfulTheme::default())
+        .allow_empty_password(true)
+        .report(true)
+        .interact()
+        .map_err(|_| UtilsError::UserInputFailed)?;
+
     // Set env variables
+    write_env_file(&format!("./{}/.env", name), &key).map_err(|_e| InstallFailed(name.clone()))?;
+    
+    println!("\n");
 
     // Ask for installer
+    println!(
+        "{}",
+        "Which package manager do you want to use?".blue().bold()
+    );
+    let selection = Select::with_theme(&ColorfulTheme::default())
+        .items(&app_config.package_managers)
+        .default(0)
+        .interact()
+        .unwrap();
+    let package_manager = app_config.package_managers[selection].clone();
 
     // Run installer
+    install_dependencies(&format!("./{}", name), package_manager.clone()).map_err(|_| InstallFailed(name.clone()))?;
 
     // Output run instructions
 
