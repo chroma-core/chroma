@@ -207,6 +207,7 @@ fn test_config_from_default_path() {
             .policy
         {
             HnswGarbageCollectionPolicyConfig::FullRebuild => {}
+            _ => panic!("Expected FullRebuild"),
         }
         Ok(())
     });
