@@ -38,7 +38,7 @@ async fn test_k8s_integration_04_initialized_append_until_snapshot() {
     .await;
     let mut options = LogWriterOptions::default();
     options.snapshot_manifest.fragment_rollover_threshold = 1;
-    options.snapshot_manifest.snapshot_rollover_threshold = 1;
+    options.snapshot_manifest.snapshot_rollover_threshold = 2;
     let log = LogWriter::open(
         options,
         Arc::clone(&storage),
@@ -50,7 +50,7 @@ async fn test_k8s_integration_04_initialized_append_until_snapshot() {
     .unwrap();
     let position = log.append(vec![42, 43, 44, 45]).await.unwrap();
     let fragment1 = FragmentCondition {
-        path: "log/Bucket=0/FragmentSeqNo=1.parquet".to_string(),
+        path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000001.parquet".to_string(),
         seq_no: FragmentSeqNo(1),
         start: 1,
         limit: 2,
@@ -74,7 +74,7 @@ async fn test_k8s_integration_04_initialized_append_until_snapshot() {
     .await;
     let position = log.append(vec![81, 82, 83, 84]).await.unwrap();
     let fragment2 = FragmentCondition {
-        path: "log/Bucket=0/FragmentSeqNo=2.parquet".to_string(),
+        path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000002.parquet".to_string(),
         seq_no: FragmentSeqNo(2),
         start: 2,
         limit: 3,
@@ -86,7 +86,6 @@ async fn test_k8s_integration_04_initialized_append_until_snapshot() {
             acc_bytes: 2374,
             writer: "test writer".to_string(),
             snapshots: vec![SnapshotCondition {
-                path: "snapshot/SNAPSHOT".to_string(),
                 depth: 1,
                 writer: "test writer".to_string(),
                 snapshots: vec![],
@@ -106,7 +105,7 @@ async fn test_k8s_integration_04_initialized_append_until_snapshot() {
     tokio::time::sleep(Duration::from_secs(1)).await;
     let position = log.append(vec![90, 91, 92, 93]).await.unwrap();
     let fragment3 = FragmentCondition {
-        path: "log/Bucket=0/FragmentSeqNo=3.parquet".to_string(),
+        path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000003.parquet".to_string(),
         seq_no: FragmentSeqNo(3),
         start: 3,
         limit: 4,
@@ -117,14 +116,21 @@ async fn test_k8s_integration_04_initialized_append_until_snapshot() {
         Condition::Manifest(ManifestCondition {
             acc_bytes: 3561,
             writer: "test writer".to_string(),
-            snapshots: vec![SnapshotCondition {
-                path: "snapshot/SNAPSHOT".to_string(),
-                depth: 1,
-                writer: "test writer".to_string(),
-                snapshots: vec![],
-                fragments: vec![fragment1.clone()],
-            }],
-            fragments: vec![fragment2.clone(), fragment3.clone()],
+            snapshots: vec![
+                SnapshotCondition {
+                    depth: 1,
+                    writer: "test writer".to_string(),
+                    snapshots: vec![],
+                    fragments: vec![fragment1.clone()],
+                },
+                SnapshotCondition {
+                    depth: 1,
+                    writer: "test writer".to_string(),
+                    snapshots: vec![],
+                    fragments: vec![fragment2.clone()],
+                },
+            ],
+            fragments: vec![fragment3.clone()],
         }),
         Condition::Fragment(fragment1.clone()),
         Condition::Fragment(fragment2.clone()),

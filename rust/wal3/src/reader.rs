@@ -11,7 +11,8 @@ use setsum::Setsum;
 use chroma_storage::{Storage, StorageError};
 
 use crate::{
-    parse_fragment_path, Error, Fragment, LogPosition, LogReaderOptions, Manifest, Snapshot,
+    parse_fragment_path, Error, Fragment, LogPosition, LogReaderOptions, Manifest, ScrubError,
+    ScrubSuccess, Snapshot,
 };
 
 /// Limits allows encoding things like offset, timestamp, and byte size limits for the read.
@@ -49,6 +50,15 @@ impl LogReader {
         })
     }
 
+    pub async fn minimum_log_position(&self) -> Result<LogPosition, Error> {
+        let Some((manifest, _)) =
+            Manifest::load(&self.options.throttle, &self.storage, &self.prefix).await?
+        else {
+            return Err(Error::UninitializedLog);
+        };
+        Ok(manifest.minimum_log_position())
+    }
+
     /// Scan up to:
     /// 1. Up to, but not including, the offset of the log position.  This makes it a half-open
     ///    interval.
@@ -79,7 +89,7 @@ impl LogReader {
                 .map(|s| {
                     let options = self.options.clone();
                     let storage = Arc::clone(&self.storage);
-                    async move { Snapshot::load(&options.throttle, &storage, s).await }
+                    async move { Snapshot::load(&options.throttle, &storage, &self.prefix, s).await }
                 })
                 .collect::<Vec<_>>();
             let resolved = futures::future::try_join_all(futures).await?;
@@ -121,6 +131,132 @@ impl LogReader {
             .await
             .map_err(Arc::new)?
             .0)
+    }
+
+    pub async fn scrub(&self) -> Result<ScrubSuccess, Error> {
+        let Some((manifest, _)) =
+            Manifest::load(&self.options.throttle, &self.storage, &self.prefix).await?
+        else {
+            return Err(Error::UninitializedLog);
+        };
+        let manifest_scrub_success = manifest.scrub()?;
+        let mut calculated_setsum = Setsum::default();
+        let mut bytes_read = 0u64;
+        for reference in manifest.snapshots.iter() {
+            if let Some(empirical) = Snapshot::load(
+                &self.options.throttle,
+                &self.storage,
+                &self.prefix,
+                reference,
+            )
+            .await?
+            {
+                let empirical_scrub_success = empirical.scrub()?;
+                if empirical_scrub_success.calculated_setsum != reference.setsum
+                    || empirical_scrub_success.calculated_setsum != empirical.setsum
+                {
+                    return Err(Error::ScrubError(
+                        ScrubError::MismatchedSnapshotSetsum {
+                            reference: reference.clone(),
+                            empirical,
+                        }
+                        .into(),
+                    ));
+                }
+                calculated_setsum += empirical_scrub_success.calculated_setsum;
+                bytes_read += empirical_scrub_success.bytes_read;
+            } else {
+                return Err(Error::ScrubError(
+                    ScrubError::MissingSnapshot {
+                        reference: reference.clone(),
+                    }
+                    .into(),
+                ));
+            }
+        }
+        for reference in manifest.fragments.iter() {
+            if let Some(empirical) =
+                read_fragment(&self.storage, &self.prefix, &reference.path).await?
+            {
+                calculated_setsum += empirical.setsum;
+                bytes_read += empirical.num_bytes;
+                if reference.path != empirical.path {
+                    return Err(Error::ScrubError(
+                        ScrubError::MismatchedPath {
+                            reference: reference.clone(),
+                            empirical,
+                        }
+                        .into(),
+                    ));
+                }
+                if reference.seq_no != empirical.seq_no {
+                    return Err(Error::ScrubError(
+                        ScrubError::MismatchedSeqNo {
+                            reference: reference.clone(),
+                            empirical,
+                        }
+                        .into(),
+                    ));
+                }
+                if reference.num_bytes != empirical.num_bytes {
+                    return Err(Error::ScrubError(
+                        ScrubError::MismatchedNumBytes {
+                            reference: reference.clone(),
+                            empirical,
+                        }
+                        .into(),
+                    ));
+                }
+                if reference.start != empirical.start {
+                    return Err(Error::ScrubError(
+                        ScrubError::MismatchedStart {
+                            reference: reference.clone(),
+                            empirical,
+                        }
+                        .into(),
+                    ));
+                }
+                if reference.limit != empirical.limit {
+                    return Err(Error::ScrubError(
+                        ScrubError::MismatchedLimit {
+                            reference: reference.clone(),
+                            empirical,
+                        }
+                        .into(),
+                    ));
+                }
+                if reference.setsum != empirical.setsum {
+                    return Err(Error::ScrubError(
+                        ScrubError::MismatchedFragmentSetsum {
+                            reference: reference.clone(),
+                            empirical,
+                        }
+                        .into(),
+                    ));
+                }
+            } else {
+                return Err(Error::ScrubError(
+                    ScrubError::MissingFragment {
+                        reference: reference.clone(),
+                    }
+                    .into(),
+                ));
+            }
+        }
+        let observed_scrub_success = ScrubSuccess {
+            calculated_setsum,
+            bytes_read,
+        };
+        if manifest_scrub_success != observed_scrub_success {
+            return Err(Error::ScrubError(
+                ScrubError::OverallMismatch {
+                    manifest: manifest_scrub_success,
+                    observed: observed_scrub_success,
+                }
+                .into(),
+            ));
+        }
+        Ok(observed_scrub_success)
     }
 }
 
