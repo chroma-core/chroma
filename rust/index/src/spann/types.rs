@@ -120,8 +120,14 @@ impl Configurable<PlGarbageCollectionPolicyConfig> for PlGarbageCollectionPolicy
 }
 
 #[derive(Clone, Debug)]
+pub struct DeletePercentageThresholdPolicy {
+    pub threshold: f32,
+}
+
+#[derive(Clone, Debug)]
 pub enum HnswGarbageCollectionPolicy {
     FullRebuild,
+    DeletePercentage(DeletePercentageThresholdPolicy),
 }
 
 #[async_trait::async_trait]
@@ -134,6 +140,11 @@ impl Configurable<HnswGarbageCollectionPolicyConfig> for HnswGarbageCollectionPo
             HnswGarbageCollectionPolicyConfig::FullRebuild => {
                 Ok(HnswGarbageCollectionPolicy::FullRebuild)
             }
+            HnswGarbageCollectionPolicyConfig::DeletePercentage(policy_config) => Ok(
+                HnswGarbageCollectionPolicy::DeletePercentage(DeletePercentageThresholdPolicy {
+                    threshold: policy_config.threshold,
+                }),
+            ),
         }
     }
 }
@@ -1628,17 +1639,22 @@ impl SpannIndexWriter {
         Ok(())
     }
 
-    pub async fn garbage_collect_heads(&mut self) -> Result<(), SpannIndexWriterError> {
+    pub fn eligible_to_gc(&mut self, threshold: f32) -> bool {
         let (len_with_deleted, len_without_deleted) = {
             let hnsw_read_guard = self.hnsw_index.inner.read();
             (hnsw_read_guard.len_with_deleted(), hnsw_read_guard.len())
         };
-        if (len_with_deleted as f32) < (1.1 * (len_without_deleted as f32)) {
+        if (len_with_deleted as f32) < ((1.0 + (threshold / 100.0)) * (len_without_deleted as f32))
+        {
             tracing::info!(
                 "No need to garbage collect heads since delete count is within threshold"
             );
-            return Ok(());
+            return false;
         }
+        true
+    }
+
+    pub async fn garbage_collect_heads(&mut self) -> Result<(), SpannIndexWriterError> {
         tracing::info!("Garbage collecting all the heads");
         // Create a new hnsw index and add elements to it.
         let clean_hnsw = self
@@ -1771,6 +1787,11 @@ impl SpannIndexWriter {
             match &self.gc_context.hnsw_context.policy {
                 HnswGarbageCollectionPolicy::FullRebuild => {
                     self.garbage_collect_heads().await?;
+                }
+                HnswGarbageCollectionPolicy::DeletePercentage(policy) => {
+                    if self.eligible_to_gc(policy.threshold) {
+                        self.garbage_collect_heads().await?;
+                    }
                 }
             }
         }
