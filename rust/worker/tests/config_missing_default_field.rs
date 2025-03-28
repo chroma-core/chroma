@@ -176,6 +176,7 @@ fn test_missing_default_field() {
             .policy
         {
             HnswGarbageCollectionPolicyConfig::FullRebuild => {}
+            _ => panic!("Expected FullRebuild policy"),
         }
         Ok(())
     });

@@ -147,7 +147,9 @@ fn test_config_from_specific_path() {
                                 sample_size: 0.1
                     hnsw_garbage_collection:
                         enabled: true
-                        policy: "full_rebuild"
+                        policy:
+                            delete_percentage:
+                                threshold: 10.0
             "#,
         );
         let config = RootConfig::load_from_path("random_path.yaml");
@@ -189,7 +191,10 @@ fn test_config_from_specific_path() {
             .hnsw_garbage_collection
             .policy
         {
-            HnswGarbageCollectionPolicyConfig::FullRebuild => {}
+            HnswGarbageCollectionPolicyConfig::DeletePercentage(policy) => {
+                assert_eq!(policy.threshold, 10.0);
+            }
+            _ => panic!("Expected DeletePercentage policy"),
         }
         Ok(())
     });
