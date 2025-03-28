@@ -611,6 +611,28 @@ impl Manifest {
     }
 
     /// Return the lowest addressable offset in the log.
+    pub fn maximum_log_position(&self) -> LogPosition {
+        let frags = self
+            .fragments
+            .iter()
+            .map(|f| f.limit)
+            .max_by_key(|p| p.offset());
+        let snaps = self
+            .snapshots
+            .iter()
+            .map(|s| s.limit)
+            .max_by_key(|p| p.offset());
+        match (frags, snaps) {
+            (Some(f), Some(s)) => LogPosition {
+                offset: std::cmp::max(f.offset, s.offset),
+            },
+            (Some(f), None) => f,
+            (None, Some(s)) => s,
+            (None, None) => LogPosition::default(),
+        }
+    }
+
+    /// Return the lowest addressable offset in the log.
     pub fn minimum_log_position(&self) -> LogPosition {
         let frags = self
             .fragments
