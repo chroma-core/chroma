@@ -90,10 +90,6 @@ spec:
       nodeSelector:
         {{ toYaml .Values.compactionService.nodeSelector | nindent 8 }}
       {{ end }}
-      updateStrategy:
-        type: RollingUpdate
-        rollingUpdate:
-          partition: 0
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: "kubernetes.io/hostname"
