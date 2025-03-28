@@ -476,7 +476,7 @@ impl SpannIndexWriter {
                     collection_id,
                     distance_function.clone(),
                     dimensionality,
-                    params.search_ef,
+                    params.ef_search,
                 )
                 .await?
             }
@@ -486,9 +486,9 @@ impl SpannIndexWriter {
                     collection_id,
                     distance_function.clone(),
                     dimensionality,
-                    params.m,
-                    params.construction_ef,
-                    params.search_ef,
+                    params.max_neighbors,
+                    params.ef_construction,
+                    params.ef_search,
                 )
                 .await?
             }
@@ -1662,9 +1662,9 @@ impl SpannIndexWriter {
             .hnsw_provider
             .create(
                 &self.collection_id,
-                self.params.m,
-                self.params.construction_ef,
-                self.params.search_ef,
+                self.params.max_neighbors,
+                self.params.ef_construction,
+                self.params.ef_search,
                 self.dimensionality as i32,
                 self.params.space.clone().into(),
             )
@@ -3507,7 +3507,7 @@ mod tests {
         let collection_id = CollectionUuid::new();
         let params = InternalSpannConfiguration::default();
         let distance_function = params.space.clone().into();
-        let ef_search = params.search_ef;
+        let ef_search = params.ef_search;
         let dimensionality = 1000;
         let gc_context = GarbageCollectionContext::try_from_config(
             &(
@@ -3606,7 +3606,7 @@ mod tests {
         let params = InternalSpannConfiguration::default();
         let distance_function = params.space.clone().into();
         let dimensionality = 1000;
-        let ef_search = params.search_ef;
+        let ef_search = params.ef_search;
         let gc_context = GarbageCollectionContext::try_from_config(
             &(
                 PlGarbageCollectionConfig::default(),
@@ -3727,7 +3727,7 @@ mod tests {
         .expect("Error converting config to gc context");
         let distance_function = params.space.clone().into();
         let dimensionality = 1000;
-        let ef_search = params.search_ef;
+        let ef_search = params.ef_search;
         let mut hnsw_path = None;
         let mut versions_map_path = None;
         let mut pl_path = None;
@@ -3840,7 +3840,7 @@ mod tests {
         let distance_function = params.space.clone().into();
         let collection_id = CollectionUuid::new();
         let dimensionality = 1000;
-        let ef_search = params.search_ef;
+        let ef_search = params.ef_search;
         let mut hnsw_path = None;
         let mut versions_map_path = None;
         let mut pl_path = None;
@@ -3986,7 +3986,7 @@ mod tests {
         let distance_function: DistanceFunction = params.space.clone().into();
         let collection_id = CollectionUuid::new();
         let dimensionality = 1000;
-        let ef_search = params.search_ef;
+        let ef_search = params.ef_search;
         let mut hnsw_path = None;
         let mut versions_map_path = None;
         let mut pl_path = None;
