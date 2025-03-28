@@ -50,7 +50,7 @@ You can also use the logical operators `$and` and `$or` to combine multiple filt
 {
     "$and": [
         {"$contains": "search_string_1"},
-        {"$contains": "search_string_2"},
+        {"$not_contains": "search_string_2"},
     ]
 }
 ```
@@ -60,7 +60,7 @@ An `$or` operator will return results that match any of the filters in the list
 {
     "$or": [
         {"$contains": "search_string_1"},
-        {"$contains": "search_string_2"},
+        {"$not_contains": "search_string_2"},
     ]
 }
 ```
