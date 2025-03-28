@@ -343,16 +343,15 @@ impl DirtyMarker {
                 || reinsert_count >= reinsert_threshold;
             if to_compact {
                 compactable.push(collection_id);
-            } else {
-                let marker = DirtyMarker::MarkDirty {
-                    collection_id: *collection_id,
-                    log_position: rollup_pc.start_log_position,
-                    num_records,
-                    reinsert_count: reinsert_count + 1,
-                    initial_insertion_epoch_us,
-                };
-                reinsert.push(marker);
             }
+            let marker = DirtyMarker::MarkDirty {
+                collection_id: *collection_id,
+                log_position: rollup_pc.start_log_position,
+                num_records,
+                reinsert_count: reinsert_count + 1,
+                initial_insertion_epoch_us,
+            };
+            reinsert.push(marker);
         }
         if compactable.is_empty() {
             return Ok(None);
@@ -402,7 +401,11 @@ impl DirtyMarker {
                 })
             })
             .collect::<Vec<_>>();
-        let mut advance_to = LogPosition::MIN;
+        let mut advance_to = markers
+            .iter()
+            .map(|(log_position, _)| *log_position)
+            .max()
+            .unwrap_or(LogPosition::default());
         for (log_position, marker) in markers {
             advance_to = std::cmp::max(advance_to, *log_position);
             let DirtyMarker::MarkDirty {
