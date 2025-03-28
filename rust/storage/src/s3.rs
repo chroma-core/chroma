@@ -759,6 +759,7 @@ pub async fn s3_client_for_test_with_new_bucket() -> crate::Storage {
         1024 * 1024 * 8,
         1024 * 1024 * 8,
     );
+    eprintln!("Creating bucket {}", storage.bucket);
     storage.create_bucket().await.unwrap();
     crate::Storage::S3(storage)
 }

@@ -53,6 +53,8 @@ pub enum Error {
     CorruptCursor(String),
     #[error("missing cursor: {0}")]
     NoSuchCursor(String),
+    #[error("scrub error: {0}")]
+    ScrubError(#[from] Box<ScrubError>),
     #[error("parquet error: {0}")]
     ParquetError(#[from] Arc<parquet::errors::ParquetError>),
     #[error("storage error: {0}")]
@@ -76,10 +78,19 @@ impl chroma_error::ChromaError for Error {
             Self::CorruptFragment(_) => chroma_error::ErrorCodes::DataLoss,
             Self::CorruptCursor(_) => chroma_error::ErrorCodes::DataLoss,
             Self::NoSuchCursor(_) => chroma_error::ErrorCodes::Unknown,
+            Self::ScrubError(_) => chroma_error::ErrorCodes::DataLoss,
             Self::ParquetError(_) => chroma_error::ErrorCodes::Unknown,
             Self::StorageError(storage) => storage.code(),
         }
     }
+}
+
+/////////////////////////////////////////// ScrubSuccess ///////////////////////////////////////////
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScrubSuccess {
+    pub calculated_setsum: Setsum,
+    pub bytes_read: u64,
 }
 
 //////////////////////////////////////////// ScrubError ////////////////////////////////////////////
@@ -93,6 +104,50 @@ pub enum ScrubError {
         manifest: String,
         seq_no: FragmentSeqNo,
         what: String,
+    },
+    #[error("MismatchedPath: {reference:?} expected {:?} got {:?}", reference.path, empirical.path)]
+    MismatchedPath {
+        reference: Fragment,
+        empirical: Fragment,
+    },
+    #[error("MismatchedSeqNo: {reference:?} expected {:?} got {:?}", reference.seq_no, empirical.seq_no)]
+    MismatchedSeqNo {
+        reference: Fragment,
+        empirical: Fragment,
+    },
+    #[error("MismatchedNumBytes: {reference:?} expected {:?} got {:?}", reference.num_bytes, empirical.num_bytes)]
+    MismatchedNumBytes {
+        reference: Fragment,
+        empirical: Fragment,
+    },
+    #[error("MismatchedStart: {reference:?} expected {:?} got {:?}", reference.start, empirical.start)]
+    MismatchedStart {
+        reference: Fragment,
+        empirical: Fragment,
+    },
+    #[error("MismatchedLimit: {reference:?} expected {:?} got {:?}", reference.limit, empirical.limit)]
+    MismatchedLimit {
+        reference: Fragment,
+        empirical: Fragment,
+    },
+    #[error("MismatchedSnapshotSetsum: {reference:?} expected {} got {}", reference.setsum.hexdigest(), empirical.setsum.hexdigest())]
+    MismatchedSnapshotSetsum {
+        reference: SnapshotPointer,
+        empirical: Snapshot,
+    },
+    #[error("MismatchedFragmentSetsum: {reference:?} expected {} got {}", reference.setsum.hexdigest(), empirical.setsum.hexdigest())]
+    MismatchedFragmentSetsum {
+        reference: Fragment,
+        empirical: Fragment,
+    },
+    #[error("MissingFragment: {reference:?}")]
+    MissingFragment { reference: Fragment },
+    #[error("MissingSnapshot: {reference:?}")]
+    MissingSnapshot { reference: SnapshotPointer },
+    #[error("OverallMismatch: {manifest:?} {observed:?}")]
+    OverallMismatch {
+        manifest: ScrubSuccess,
+        observed: ScrubSuccess,
     },
 }
 
@@ -285,7 +340,7 @@ impl FragmentSeqNo {
 
     // Round down to the nearest multiple of 5k.
     pub fn bucket(&self) -> u64 {
-        (self.0 / 5_000) * 5_000
+        (self.0 / 4_096) * 4_096
     }
 }
 
@@ -374,7 +429,7 @@ where
 
 pub fn unprefixed_fragment_path(fragment_seq_no: FragmentSeqNo) -> String {
     format!(
-        "log/Bucket={}/FragmentSeqNo={}.parquet",
+        "log/Bucket={:016x}/FragmentSeqNo={:016x}.parquet",
         fragment_seq_no.bucket(),
         fragment_seq_no.0,
     )
@@ -385,5 +440,5 @@ pub fn parse_fragment_path(path: &str) -> Option<FragmentSeqNo> {
     let (_, basename) = path.rsplit_once('/')?;
     let fsn_equals_number = basename.strip_suffix(".parquet")?;
     let number = fsn_equals_number.strip_prefix("FragmentSeqNo=")?;
-    number.parse::<u64>().ok().map(FragmentSeqNo)
+    u64::from_str_radix(number, 16).ok().map(FragmentSeqNo)
 }
