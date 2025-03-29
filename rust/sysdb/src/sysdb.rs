@@ -830,8 +830,12 @@ impl GrpcSysDb {
         name: Option<String>,
         metadata: Option<CollectionMetadataUpdate>,
         dimension: Option<u32>,
-        _configuration: Option<UpdateCollectionConfiguration>,
+        configuration: Option<UpdateCollectionConfiguration>,
     ) -> Result<(), UpdateCollectionError> {
+        let mut configuration_json_str = None;
+        if let Some(configuration) = configuration {
+            configuration_json_str = Some(serde_json::to_string(&configuration).unwrap());
+        }
         let req = chroma_proto::UpdateCollectionRequest {
             id: collection_id.0.to_string(),
             name: name.clone(),
@@ -846,6 +850,7 @@ impl GrpcSysDb {
                 }
             }),
             dimension: dimension.map(|dim| dim as i32),
+            configuration_json_str,
         };
 
         self.client.update_collection(req).await.map_err(|e| {

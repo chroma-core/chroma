@@ -48,14 +48,15 @@ type DeleteCollection struct {
 }
 
 type UpdateCollection struct {
-	ID            types.UniqueID
-	Name          *string
-	Dimension     *int32
-	Metadata      *CollectionMetadata[CollectionMetadataValueType]
-	ResetMetadata bool
-	TenantID      string
-	DatabaseName  string
-	Ts            types.Timestamp
+	ID                      types.UniqueID
+	Name                    *string
+	Dimension               *int32
+	Metadata                *CollectionMetadata[CollectionMetadataValueType]
+	ResetMetadata           bool
+	NewConfigurationJsonStr *string
+	TenantID                string
+	DatabaseName            string
+	Ts                      types.Timestamp
 }
 
 type FlushCollectionCompaction struct {
