@@ -1,0 +1,13 @@
+{
+  "packageManagers": ["npm", "pnpm", "bun", "yarn"],
+  "name": "chatbot_debugger",
+  "cliVersion": "1.0.0",
+  "appVersion": "1.0.0",
+  "llmProviders": ["openAI"],
+  "startupCommands": {
+    "npm": "npm run dev",
+    "pnpm": "pnpm run dev",
+    "yarn": "yarn dev",
+    "bun": "bun run dev"
+  }
+}
