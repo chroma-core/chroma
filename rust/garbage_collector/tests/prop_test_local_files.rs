@@ -294,7 +294,7 @@ impl RefState {
         );
         tracing::info!(
             line = line!(),
-            "RSM: cleanup_versions: cutoff_time: {:?}, versions_present: {:?}, oldest_to_keep: {:?}, to_delete: {:?}   ", 
+            "RSM: cleanup_versions: cutoff_time: {:?}, versions_present: {:?}, oldest_to_keep: {:?}, to_delete: {:?}   ",
             cutoff_time,
             versions_present,
             oldest_version_to_keep,
@@ -357,13 +357,13 @@ impl RefState {
         // Print the entire version to segment block id mapping for the collection.
         tracing::info!(
             line = line!(),
-            "************\nRSM: cleanup_versions: version to segment block id mapping for collection: {:?}\n************", 
+            "************\nRSM: cleanup_versions: version to segment block id mapping for collection: {:?}\n************",
             self.coll_to_segment_block_ids_map[&collection_id]
         );
         // Print the files to delete.
         tracing::info!(
             line = line!(),
-            "************\nRSM: cleanup_versions: files to delete for collection: {:?}\n************", 
+            "************\nRSM: cleanup_versions: files to delete for collection: {:?}\n************",
             self.last_cleanup_files
         );
 
@@ -432,7 +432,7 @@ impl ReferenceStateMachine for RefState {
                     );
                     // tracing::info!(
                     //     line = line!(),
-                    //     "RSM: transitions: segment_block_ids for existing collection: {:?}", 
+                    //     "RSM: transitions: segment_block_ids for existing collection: {:?}",
                     //     segment_block_ids
                     // );
                     let (segment_block_ids_new_version, dropped_block_ids) = segment_block_ids_for_next_version(segment_block_ids);
@@ -719,7 +719,7 @@ impl GcTest {
         // Do the actual Garbage Collection.
         let system = chroma_system::System::new();
         let dispatcher = chroma_system::Dispatcher::new(chroma_system::DispatcherConfig::default());
-        let dispatcher_handle = system.start_component(dispatcher);
+        let mut dispatcher_handle = system.start_component(dispatcher);
 
         let collection_id = Uuid::parse_str(&id).unwrap();
         let collections = sysdb
@@ -752,13 +752,13 @@ impl GcTest {
             cutoff_time,
             0,
             sysdb,
-            dispatcher_handle,
+            dispatcher_handle.clone(),
             storage,
             CleanupMode::ListOnly,
         );
 
         self.last_cleanup_files = Vec::new();
-        match orchestrator.run(system).await {
+        match orchestrator.run(system.clone()).await {
             Ok(response) => {
                 tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
                 self.last_cleanup_files = response.deletion_list.clone();
@@ -779,6 +779,11 @@ impl GcTest {
             "==========\nGcTest: cleanup_versions: last_cleanup_files: {:?}\n==========",
             self.last_cleanup_files
         );
+
+        system.stop().await;
+        system.join().await;
+        dispatcher_handle.stop();
+        dispatcher_handle.join().await.unwrap();
 
         self
     }

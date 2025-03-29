@@ -109,10 +109,6 @@ spec:
       nodeSelector:
         {{ toYaml .Values.queryService.nodeSelector | nindent 8 }}
       {{ end }}
-      updateStrategy:
-        type: RollingUpdate
-        rollingUpdate:
-          partition: 0
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: "kubernetes.io/hostname"

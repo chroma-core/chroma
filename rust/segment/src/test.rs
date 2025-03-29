@@ -176,7 +176,6 @@ impl TestReferenceSegment {
         } else {
             (HashSet::new(), None)
         };
-        let new_meta = new_meta.and_then(|meta| if meta.is_empty() { None } else { Some(meta) });
         match (old_meta, new_meta) {
             (None, None) => None,
             (None, Some(m)) | (Some(m), None) => Some(m),

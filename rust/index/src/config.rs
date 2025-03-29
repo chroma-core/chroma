@@ -70,11 +70,18 @@ impl Default for RandomSamplePolicyConfig {
     }
 }
 
+#[derive(Deserialize, Debug, Clone, Serialize)]
+pub struct DeletePercentageThresholdPolicyConfig {
+    pub threshold: f32,
+}
+
 #[derive(Deserialize, Debug, Clone, Serialize, Default)]
 pub enum HnswGarbageCollectionPolicyConfig {
     #[default]
     #[serde(rename = "full_rebuild")]
     FullRebuild,
+    #[serde(rename = "delete_percentage")]
+    DeletePercentage(DeletePercentageThresholdPolicyConfig),
 }
 
 #[derive(Deserialize, Debug, Clone, Serialize, Default)]
