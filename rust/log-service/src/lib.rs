@@ -424,8 +424,13 @@ impl DirtyMarker {
                 };
                 let cursor = cursor.cursor();
                 match manifest.maximum_log_position().cmp(&cursor.position) {
-                    Ordering::Equal => None,
+                    Ordering::Equal => {
+                        // Same as above.
+                        reinsert.retain(|x| x.collection_id() != *collection_id);
+                        None
+                    }
                     Ordering::Less => {
+                        // We don't un-reinsert here because it'd snowball a bug.
                         tracing::error!(
                             "compaction sees cursor ahead of manifest: {:?} > {:?}",
                             cursor.position,
@@ -1239,7 +1244,7 @@ mod tests {
         .await
         .unwrap()
         .unwrap();
-        assert_eq!(LogPosition::from_offset(46), rollup.advance_to);
+        assert_eq!(LogPosition::from_offset(47), rollup.advance_to);
         println!("{:?}", rollup);
         assert_eq!(1, rollup.reinsert.len());
         assert_eq!(1, rollup.compactable.len());
@@ -1383,7 +1388,7 @@ mod tests {
         .await
         .unwrap()
         .unwrap();
-        assert_eq!(LogPosition::from_offset(1), rollup.advance_to);
+        assert_eq!(LogPosition::from_offset(2), rollup.advance_to);
         assert_eq!(1, rollup.compactable.len());
         assert_eq!(
             collection_id_acting.to_string(),
@@ -1496,7 +1501,7 @@ mod tests {
         .await
         .unwrap()
         .unwrap();
-        assert_eq!(LogPosition::from_offset(1), rollup.advance_to);
+        assert_eq!(LogPosition::from_offset(2), rollup.advance_to);
         assert_eq!(0, rollup.compactable.len());
         assert_eq!(1, rollup.reinsert.len());
         assert!(rollup.reinsert[0].collection_id() == collection_id_blocking);
