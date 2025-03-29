@@ -1,18 +1,27 @@
+use std::borrow::Cow;
 use std::sync::Arc;
 
-use chroma_storage::{ETag, PutOptions, Storage};
+use chroma_storage::{PutOptions, Storage, StorageError};
 
 use crate::{CursorStoreOptions, Error, LogPosition};
 
 //////////////////////////////////////////// CursorName ////////////////////////////////////////////
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
-pub struct CursorName(String);
+pub struct CursorName<'a>(Cow<'a, str>);
 
-impl CursorName {
+impl CursorName<'_> {
+    /// # Safety
+    ///
+    /// The caller must ensure that the name is a valid cursor name.  This means a non-empty
+    /// alphanumeric string with underscores.
+    pub const unsafe fn from_string_unchecked(name: &str) -> CursorName {
+        CursorName(Cow::Borrowed(name))
+    }
+
     pub fn new(name: &str) -> Option<Self> {
-        if !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-            Some(Self(name.to_string()))
+        if Self::validate(name) {
+            Some(Self(name.to_string().into()))
         } else {
             None
         }
@@ -26,20 +35,44 @@ impl CursorName {
         let cursor_name = path.strip_prefix("cursor/")?.strip_suffix(".json")?;
         CursorName::new(cursor_name)
     }
+
+    pub fn is_valid(&self) -> bool {
+        Self::validate(&self.0)
+    }
+
+    fn validate(name: &str) -> bool {
+        !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    }
 }
 
 ////////////////////////////////////////////// Witness /////////////////////////////////////////////
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
-pub struct Witness(ETag, pub Cursor);
+pub struct Witness(PutOptions, pub Cursor);
+
+impl Witness {
+    pub fn from_cursor(cursor: Cursor) -> Self {
+        Self(PutOptions::if_not_exists(), cursor)
+    }
+
+    pub fn cursor(&self) -> &Cursor {
+        &self.1
+    }
+}
+
+impl Witness {
+    pub fn init() -> Self {
+        Self(PutOptions::if_not_exists(), Cursor::default())
+    }
+}
 
 ////////////////////////////////////////////// Cursor //////////////////////////////////////////////
 
-#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct Cursor {
-    position: LogPosition,
-    epoch_us: u64,
-    writer: String,
+    pub position: LogPosition,
+    pub epoch_us: u64,
+    pub writer: String,
 }
 
 //////////////////////////////////////////// CursorStore ///////////////////////////////////////////
@@ -67,11 +100,17 @@ impl CursorStore {
         }
     }
 
-    pub async fn load(&self, name: CursorName) -> Result<Witness, Error> {
+    pub async fn load<'a>(&self, name: &CursorName<'a>) -> Result<Option<Witness>, Error> {
         // SAFETY(rescrv):  Semaphore poisoning.
         let _permit = self.semaphore.acquire().await.unwrap();
         let path = format!("{}/{}", self.prefix, name.path());
-        let (data, e_tag) = self.storage.get_with_e_tag(&path).await.map_err(Arc::new)?;
+        let (data, e_tag) = match self.storage.get_with_e_tag(&path).await.map_err(Arc::new) {
+            Ok((data, e_tag)) => (data, e_tag),
+            Err(err) => match &*err {
+                StorageError::NotFound { path: _, source: _ } => return Ok(None),
+                _ => return Err(err.into()),
+            },
+        };
         let Some(e_tag) = e_tag else {
             return Err(Error::CorruptCursor(format!(
                 "Missing ETag for cursor {}",
@@ -81,29 +120,28 @@ impl CursorStore {
         let cursor: Cursor = serde_json::from_slice(&data).map_err(|e| {
             Error::CorruptCursor(format!("Failed to deserialize cursor {}: {}", name.0, e))
         })?;
-        Ok(Witness(e_tag, cursor))
+        Ok(Some(Witness(PutOptions::if_matches(&e_tag), cursor)))
     }
 
-    pub async fn init(&self, name: CursorName, cursor: Cursor) -> Result<Witness, Error> {
+    pub async fn init<'a>(&self, name: &CursorName<'a>, cursor: Cursor) -> Result<Witness, Error> {
         // Semaphore taken by put.
         let options = PutOptions::if_not_exists();
         self.put(name, cursor, options).await
     }
 
-    pub async fn save(
+    pub async fn save<'a>(
         &self,
-        name: CursorName,
-        cursor: Cursor,
-        witness: Witness,
+        name: &CursorName<'a>,
+        cursor: &Cursor,
+        witness: &Witness,
     ) -> Result<Witness, Error> {
         // Semaphore taken by put.
-        let options = PutOptions::if_matches(&witness.0);
-        self.put(name, cursor, options).await
+        self.put(name, cursor.clone(), witness.0.clone()).await
     }
 
-    async fn put(
+    async fn put<'a>(
         &self,
-        name: CursorName,
+        name: &CursorName<'a>,
         mut cursor: Cursor,
         options: PutOptions,
     ) -> Result<Witness, Error> {
@@ -125,7 +163,7 @@ impl CursorStore {
                 name.0
             )));
         };
-        Ok(Witness(e_tag, cursor))
+        Ok(Witness(PutOptions::if_matches(&e_tag), cursor))
     }
 }
 

@@ -10,7 +10,7 @@ use chroma_types::{CollectionUuid, LogRecord, OperationRecord, RecordConversionE
 use std::fmt::Debug;
 use std::time::Duration;
 use thiserror::Error;
-use tonic::transport::Endpoint;
+use tonic::transport::{Channel, Endpoint};
 use tower::ServiceBuilder;
 use uuid::Uuid;
 
@@ -76,6 +76,20 @@ impl ChromaError for GrpcUpdateCollectionLogOffsetError {
             GrpcUpdateCollectionLogOffsetError::FailedToUpdateCollectionLogOffset(_) => {
                 ErrorCodes::Internal
             }
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum GrpcPurgeDirtyForCollectionError {
+    #[error("Failed to update collection log offset")]
+    FailedToPurgeDirty(#[from] tonic::Status),
+}
+
+impl ChromaError for GrpcPurgeDirtyForCollectionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GrpcPurgeDirtyForCollectionError::FailedToPurgeDirty(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -258,6 +272,23 @@ impl GrpcLog {
         match response {
             Ok(_) => Ok(()),
             Err(e) => Err(GrpcUpdateCollectionLogOffsetError::FailedToUpdateCollectionLogOffset(e)),
+        }
+    }
+
+    pub(super) async fn purge_dirty_for_collection(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<(), GrpcPurgeDirtyForCollectionError> {
+        let request =
+            self.client
+                .purge_dirty_for_collection(chroma_proto::PurgeDirtyForCollectionRequest {
+                    // NOTE(rescrv):  Use the untyped string representation of the collection ID.
+                    collection_id: collection_id.0.to_string(),
+                });
+        let response = request.await;
+        match response {
+            Ok(_) => Ok(()),
+            Err(e) => Err(GrpcPurgeDirtyForCollectionError::FailedToPurgeDirty(e)),
         }
     }
 }

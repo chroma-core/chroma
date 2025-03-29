@@ -24,6 +24,7 @@ pub fn init_global_filter_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
                 "chroma-distance",
                 "chroma-error",
                 "chroma-log",
+                "chroma-log-service",
                 "chroma-frontend",
                 "chroma-index",
                 "chroma-storage",
@@ -35,6 +36,7 @@ pub fn init_global_filter_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
                 "hosted-frontend",
                 "metadata_filtering",
                 "query_service",
+                "wal3",
                 "worker",
             ]
             .into_iter()

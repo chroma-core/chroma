@@ -65,7 +65,6 @@ use chroma_types::GetSegmentsError;
 use chroma_types::SegmentScope;
 use chroma_types::SegmentUuid;
 use chroma_types::{CollectionUuid, LogRecord, Segment, SegmentFlushInfo, SegmentType};
-use core::panic;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
@@ -750,7 +749,8 @@ impl Orchestrator for CompactOrchestrator {
         vec![wrap(
             Box::new(FetchLogOperator {
                 log_client: self.log.clone(),
-                batch_size: 100,
+                // TODO(rescrv): Plumb through to configure this.
+                batch_size: 500,
                 // Here we do not need to be inclusive since the compaction job
                 // offset is the one after the last compaction offset
                 start_log_offset_id: self.compaction_job.offset as u32,
@@ -791,7 +791,11 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
             }
         };
         tracing::info!("Pulled Records: {:?}", records.len());
-        let final_record_pulled = records.get(records.len() - 1);
+        let final_record_pulled = if !records.is_empty() {
+            records.get(records.len() - 1)
+        } else {
+            None
+        };
         match final_record_pulled {
             Some(record) => {
                 self.pulled_log_offset = Some(record.log_offset);
@@ -799,10 +803,12 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
                 self.partition(records, ctx).await;
             }
             None => {
-                tracing::error!(
-                    "No records pulled by compaction, this is a system invariant violation"
+                self.terminate_with_result(
+                    Err(CompactionError::InvariantViolation(
+                        "No records pulled by compaction, this is a system invariant violation",
+                    )),
+                    ctx,
                 );
-                panic!("No records pulled by compaction, this is a system invariant violation");
             }
         }
     }
