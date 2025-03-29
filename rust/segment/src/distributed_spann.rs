@@ -27,7 +27,7 @@ use uuid::Uuid;
 
 const HNSW_PATH: &str = "hnsw_path";
 const VERSION_MAP_PATH: &str = "version_map_path";
-const POSTING_LIST_PATH: &str = "posting_list_path";
+pub const POSTING_LIST_PATH: &str = "posting_list_path";
 const MAX_HEAD_ID_BF_PATH: &str = "max_head_id_path";
 
 #[derive(Clone)]
