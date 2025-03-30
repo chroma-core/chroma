@@ -184,7 +184,9 @@ class RustBindingsAPI(ServerAPI):
             CollectionModel(
                 id=collection.id,
                 name=collection.name,
-                configuration=collection.configuration,
+                configuration=load_collection_configuration_from_json(
+                    collection.configuration
+                ),
                 metadata=collection.metadata,
                 dimension=collection.dimension,
                 tenant=collection.tenant,

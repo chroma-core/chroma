@@ -31,7 +31,7 @@ from chromadb.auth import UserIdentity
 from chromadb.config import Component, Settings
 from chromadb.types import Database, Tenant, Collection as CollectionModel
 import chromadb.utils.embedding_functions as ef
-from chromadb.api.models.Collection import Collection, CollectionName
+from chromadb.api.models.Collection import Collection
 
 # Re-export the async version
 from chromadb.api.async_api import (  # noqa: F401
@@ -349,19 +349,19 @@ class ClientAPI(BaseAPI, ABC):
         self,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
-    ) -> Sequence[CollectionName]:
+    ) -> Sequence[Collection]:
         """List all collections.
         Args:
             limit: The maximum number of entries to return. Defaults to None.
             offset: The number of entries to skip before returning. Defaults to None.
 
         Returns:
-            Sequence[CollectionName]: A list of collection names
+            Sequence[Collection]: A list of collections
 
         Examples:
             ```python
             client.list_collections()
-            # ["my_collection"]
+            # [collection(name="my_collection", metadata={})]
             ```
         """
         pass

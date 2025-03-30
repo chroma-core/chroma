@@ -28,7 +28,7 @@ from chromadb.auth import UserIdentity
 from chromadb.auth.utils import maybe_set_tenant_and_database
 from chromadb.config import Settings, System
 from chromadb.config import DEFAULT_TENANT, DEFAULT_DATABASE
-from chromadb.api.models.Collection import Collection, CollectionName
+from chromadb.api.models.Collection import Collection
 from chromadb.errors import ChromaError
 from chromadb.types import Database, Tenant, Where, WhereDocument
 import chromadb.utils.embedding_functions as ef
@@ -121,9 +121,9 @@ class Client(SharedSystemClient, ClientAPI):
     @override
     def list_collections(
         self, limit: Optional[int] = None, offset: Optional[int] = None
-    ) -> Sequence[CollectionName]:
+    ) -> Sequence[Collection]:
         return [
-            CollectionName(model.name)
+            Collection(client=self._server, model=model)
             for model in self._server.list_collections(
                 limit, offset, tenant=self.tenant, database=self.database
             )

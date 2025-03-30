@@ -23,6 +23,18 @@ from chromadb.api.collection_configuration import (
     overwrite_spann_configuration,
 )
 import json
+import os
+import chromadb.errors
+
+# Check if we are running in a mode where SPANN is disabled
+# (Rust bindings test OR Rust single-node integration test)
+is_spann_disabled_mode = (
+    os.getenv("CHROMA_RUST_BINDINGS_TEST_ONLY") == "1"
+    or os.getenv("CHROMA_INTEGRATION_TEST_ONLY") == "1"
+)
+skip_reason_spann_disabled = (
+    "SPANN creation/modification disallowed in Rust bindings or integration test mode"
+)
 
 
 class LegacyEmbeddingFunction(EmbeddingFunction[Embeddable]):
@@ -347,77 +359,103 @@ def test_spann_configuration(client: ClientAPI) -> None:
         "embedding_function": CustomEmbeddingFunction(dim=5),
     }
 
-    coll = client.create_collection(
-        name="test_spann_config",
-        configuration=config,
-    )
+    if is_spann_disabled_mode:
+        with pytest.raises(
+            chromadb.errors.InvalidArgumentError,
+            match="SPANN is still in development",
+        ):
+            client.create_collection(
+                name="test_spann_config",
+                configuration=config,
+            )
+    else:
+        coll = client.create_collection(
+            name="test_spann_config",
+            configuration=config,
+        )
 
-    # Verify configuration is preserved
-    loaded_config = load_collection_configuration_from_json(
-        coll._model.configuration_json
-    )
-    if loaded_config and isinstance(loaded_config, dict):
-        spann_config = cast(CreateSpannConfiguration, loaded_config.get("spann", {}))
-        ef_config = loaded_config.get("embedding_function", {})  # type: ignore
-        if isinstance(ef_config, dict):
-            assert spann_config.get("space") == "cosine"
-            assert spann_config.get("ef_construction") == 100
-            assert spann_config.get("max_neighbors") == 10
-            assert spann_config.get("search_nprobe") == 5
-            assert spann_config.get("write_nprobe") == 10
-            assert ef_config.get("type") == "known"
-            assert ef_config.get("name") == "custom_ef"
+        # Verify configuration is preserved
+        loaded_config = load_collection_configuration_from_json(
+            coll._model.configuration_json
+        )
+        if loaded_config and isinstance(loaded_config, dict):
+            spann_config_loaded = cast(
+                CreateSpannConfiguration, loaded_config.get("spann", {})
+            )
+            ef_config = loaded_config.get("embedding_function", {})  # type: ignore
+            if isinstance(ef_config, dict):
+                assert spann_config_loaded.get("space") == "cosine"
+                assert spann_config_loaded.get("ef_construction") == 100
+                assert spann_config_loaded.get("max_neighbors") == 10
+                assert spann_config_loaded.get("search_nprobe") == 5
+                assert spann_config_loaded.get("write_nprobe") == 10
+                assert ef_config.get("type") == "known"
+                assert ef_config.get("name") == "custom_ef"
 
 
 def test_invalid_spann_configurations(client: ClientAPI) -> None:
     """Test validation of invalid SPANN configurations"""
     client.reset()
 
-    invalid_spann: CreateSpannConfiguration = {
-        "ef_construction": -1,
-        "space": "cosine",
-    }
-
-    # Test invalid SPANN parameters
-    with pytest.raises(ValueError):
-        invalid_spann = {
-            "ef_construction": -1,
-            "space": "cosine",
-        }
-        client.create_collection(
-            name="test_invalid_spann",
-            configuration={"spann": invalid_spann},
-        )
-
-    # Test invalid search_nprobe
-    with pytest.raises(ValueError):
-        invalid_spann = {
-            "space": "cosine",
-            "search_nprobe": -5,
-        }
-        client.create_collection(
-            name="test_invalid_spann_search",
-            configuration={"spann": invalid_spann},
-        )
-
-    # Test invalid space for embedding function
+    # Define this class once outside the conditional logic
     class InvalidSpaceEF(CustomEmbeddingFunction):
         def supported_spaces(self) -> list[Space]:
             return ["l2"]
 
-    with pytest.raises(ValueError):
-        invalid_space_spann: CreateSpannConfiguration = {
+    if is_spann_disabled_mode:
+        # In SPANN-disabled modes, any SPANN creation attempt should fail
+        # with InvalidArgumentError before specific parameter validation.
+        with pytest.raises(
+            chromadb.errors.InvalidArgumentError,
+            match="SPANN is still in development",
+        ):
+            client.create_collection(
+                name="test_invalid_spann",
+                configuration={"spann": {}},
+            )
+    else:
+        invalid_spann: CreateSpannConfiguration = {
+            "ef_construction": -1,
             "space": "cosine",
         }
-        client.create_collection(
-            name="test_invalid_space_spann",
-            configuration={
-                "spann": invalid_space_spann,
-                "embedding_function": InvalidSpaceEF(),
-            },
-        )
+
+        # Test invalid SPANN parameters
+        with pytest.raises(ValueError):
+            invalid_spann = {
+                "ef_construction": -1,
+                "space": "cosine",
+            }
+            client.create_collection(
+                name="test_invalid_spann",
+                configuration={"spann": invalid_spann},
+            )
+
+        # Test invalid search_nprobe
+        with pytest.raises(ValueError):
+            invalid_spann = {
+                "space": "cosine",
+                "search_nprobe": -5,
+            }
+            client.create_collection(
+                name="test_invalid_spann_search",
+                configuration={"spann": invalid_spann},
+            )
+
+        # Test invalid space for embedding function
+        with pytest.raises(ValueError):
+            invalid_space_spann: CreateSpannConfiguration = {
+                "space": "cosine",
+            }
+            client.create_collection(
+                name="test_invalid_space_spann",
+                configuration={
+                    "spann": invalid_space_spann,
+                    "embedding_function": InvalidSpaceEF(),
+                },
+            )
 
 
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
 def test_spann_configuration_persistence(sqlite_persistent: System) -> None:
     """Test SPANN configuration persistence across client restarts"""
     client = ClientCreator.from_system(sqlite_persistent)
@@ -486,7 +524,9 @@ def test_exclusive_hnsw_spann_configuration(client: ClientAPI) -> None:
         "search_nprobe": 5,
     }
 
-    with pytest.raises(ValueError):
+    # This validation always runs and raises ValueError if both are provided,
+    # regardless of whether SPANN is generally allowed or not.
+    with pytest.raises(ValueError, match="hnsw and spann cannot both be provided"):
         client.create_collection(
             name="test_dual_config",
             configuration={
@@ -508,23 +548,35 @@ def test_spann_default_parameters(client: ClientAPI) -> None:
         "spann": spann_config,
     }
 
-    coll = client.create_collection(
-        name="test_spann_defaults",
-        configuration=config,
-    )
+    if is_spann_disabled_mode:
+        with pytest.raises(
+            chromadb.errors.InvalidArgumentError,
+            match="SPANN is still in development",
+        ):
+            client.create_collection(
+                name="test_spann_defaults",
+                configuration=config,
+            )
+    else:
+        coll = client.create_collection(
+            name="test_spann_defaults",
+            configuration=config,
+        )
 
-    # Verify default values are populated
-    loaded_config = load_collection_configuration_from_json(
-        coll._model.configuration_json
-    )
-    if loaded_config and isinstance(loaded_config, dict):
-        spann_config = cast(CreateSpannConfiguration, loaded_config.get("spann", {}))
-        assert spann_config.get("space") == "cosine"
-        assert spann_config.get("ef_construction") == 200  # default
-        assert spann_config.get("max_neighbors") == 16  # default
-        assert spann_config.get("ef_search") == 200  # default
-        assert spann_config.get("search_nprobe") == 128  # default
-        assert spann_config.get("write_nprobe") == 128  # default
+        # Verify default values are populated
+        loaded_config = load_collection_configuration_from_json(
+            coll._model.configuration_json
+        )
+        if loaded_config and isinstance(loaded_config, dict):
+            spann_config_loaded = cast(
+                CreateSpannConfiguration, loaded_config.get("spann", {})
+            )
+            assert spann_config_loaded.get("space") == "cosine"
+            assert spann_config_loaded.get("ef_construction") == 200  # default
+            assert spann_config_loaded.get("max_neighbors") == 16  # default
+            assert spann_config_loaded.get("ef_search") == 200  # default
+            assert spann_config_loaded.get("search_nprobe") == 128  # default
+            assert spann_config_loaded.get("write_nprobe") == 128  # default
 
 
 def test_spann_json_serialization(client: ClientAPI) -> None:
@@ -565,25 +617,38 @@ def test_spann_json_serialization(client: ClientAPI) -> None:
             "embedding_function"
         )
 
-    # Create collection with the converted configuration
-    coll = client.create_collection(
-        name="test_spann_json",
-        configuration=create_config,
-    )
+    if is_spann_disabled_mode:
+        with pytest.raises(
+            chromadb.errors.InvalidArgumentError,
+            match="SPANN is still in development",
+        ):
+            client.create_collection(
+                name="test_spann_json",
+                configuration=create_config,
+            )
+    else:
+        # Create collection with the converted configuration
+        coll = client.create_collection(
+            name="test_spann_json",
+            configuration=create_config,
+        )
 
-    # Verify the configuration was preserved correctly
-    loaded_config = load_collection_configuration_from_json(
-        coll._model.configuration_json
-    )
-    if loaded_config and isinstance(loaded_config, dict):
-        spann_config = cast(CreateSpannConfiguration, loaded_config.get("spann", {}))
-        assert spann_config.get("space") == "cosine"
-        assert spann_config.get("search_nprobe") == 7
-        assert spann_config.get("write_nprobe") == 15
-        assert spann_config.get("ef_construction") == 200
-        assert spann_config.get("ef_search") == 150
+        # Verify the configuration was preserved correctly
+        loaded_config = load_collection_configuration_from_json(
+            coll._model.configuration_json
+        )
+        if loaded_config and isinstance(loaded_config, dict):
+            spann_config_loaded = cast(
+                CreateSpannConfiguration, loaded_config.get("spann", {})
+            )
+            assert spann_config_loaded.get("space") == "cosine"
+            assert spann_config_loaded.get("search_nprobe") == 7
+            assert spann_config_loaded.get("write_nprobe") == 15
+            assert spann_config_loaded.get("ef_construction") == 200
+            assert spann_config_loaded.get("ef_search") == 150
 
 
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
 def test_configuration_spann_updates(client: ClientAPI) -> None:
     """Test updating SPANN collection configurations"""
     client.reset()
@@ -620,6 +685,7 @@ def test_configuration_spann_updates(client: ClientAPI) -> None:
             assert spann_config.get("space") == "cosine"
 
 
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
 def test_spann_update_from_json(client: ClientAPI) -> None:
     """Test updating SPANN configuration from JSON and applying it"""
     client.reset()
@@ -704,6 +770,7 @@ def test_overwrite_spann_configuration() -> None:
     assert updated_config.get("max_neighbors") == 16
 
 
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
 def test_exclusive_update_hnsw_spann_configuration(client: ClientAPI) -> None:
     """Test that HNSW and SPANN configurations cannot both be specified in an update"""
     client.reset()

@@ -341,6 +341,13 @@ impl ServiceBasedFrontend {
         let configuration: Option<InternalCollectionConfiguration> =
             configuration.map(|c| c.try_into()).transpose()?;
 
+        // Check if spann is requested with a local executor
+        if let (Some(config), Executor::Local(_)) = (configuration.as_ref(), &self.executor) {
+            if matches!(config.vector_index, VectorIndexConfiguration::Spann(_)) {
+                return Err(CreateCollectionError::SpannNotImplemented);
+            }
+        }
+
         let segments = match self.executor {
             Executor::Distributed(_) => {
                 let mut vector_segment_type = SegmentType::HnswDistributed;
@@ -432,6 +439,13 @@ impl ServiceBasedFrontend {
             ..
         }: UpdateCollectionRequest,
     ) -> Result<UpdateCollectionResponse, UpdateCollectionError> {
+        // Check if spann is requested with a local executor
+        if let (Some(config), Executor::Local(_)) = (new_configuration.as_ref(), &self.executor) {
+            if config.spann.is_some() {
+                return Err(UpdateCollectionError::SpannNotImplemented);
+            }
+        }
+
         self.sysdb_client
             .update_collection(
                 collection_id,

@@ -592,6 +592,8 @@ pub enum CreateCollectionError {
     Configuration(#[from] serde_json::Error),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
+    #[error("SPANN is still in development. Not allowed to created spann indexes")]
+    SpannNotImplemented,
 }
 
 impl ChromaError for CreateCollectionError {
@@ -605,6 +607,7 @@ impl ChromaError for CreateCollectionError {
             CreateCollectionError::Get(err) => err.code(),
             CreateCollectionError::Configuration(_) => ErrorCodes::Internal,
             CreateCollectionError::Internal(err) => err.code(),
+            CreateCollectionError::SpannNotImplemented => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -693,6 +696,8 @@ pub enum UpdateCollectionError {
     Internal(#[from] Box<dyn ChromaError>),
     #[error("Could not parse config: {0}")]
     InvalidConfig(#[from] CollectionConfigurationToInternalConfigurationError),
+    #[error("SPANN is still in development. Not allowed to created spann indexes")]
+    SpannNotImplemented,
 }
 
 impl ChromaError for UpdateCollectionError {
@@ -703,6 +708,7 @@ impl ChromaError for UpdateCollectionError {
             UpdateCollectionError::Configuration(_) => ErrorCodes::Internal,
             UpdateCollectionError::Internal(err) => err.code(),
             UpdateCollectionError::InvalidConfig(_) => ErrorCodes::InvalidArgument,
+            UpdateCollectionError::SpannNotImplemented => ErrorCodes::InvalidArgument,
         }
     }
 }
