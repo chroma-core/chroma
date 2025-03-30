@@ -1,10 +1,11 @@
-import { startChromaContainer } from "./startChromaContainer";
+import { startChromaRustServer } from "./startChromaContainer";
 import { execSync } from "child_process";
 import { startOllamaContainer } from "./embeddings/startOllamaContainer";
+
 export default async function testSetup() {
-  const { container, url } = await startChromaContainer();
+  const { url, stop } = await startChromaRustServer();
   process.env.DEFAULT_CHROMA_INSTANCE_URL = url;
-  (globalThis as any).chromaContainer = container;
+  (globalThis as any).stopChromaServer = stop;
   (globalThis as any).ollamaAvailable = false;
   try {
     execSync("npm ls ollama", { stdio: "ignore" });

@@ -14,9 +14,15 @@ import {
   DeleteParams,
   Embeddings,
   CollectionParams,
+  IncludeEnum,
+  Metadata,
 } from "./types";
 import { prepareRecordRequest, toArray, toArrayOfArrays } from "./utils";
-import { Api as GeneratedApi } from "./generated";
+import { Api as GeneratedApi, Api } from "./generated";
+import {
+  UpdateCollectionConfiguration,
+  loadApiUpdateCollectionConfigurationFromUpdateCollectionConfiguration,
+} from "./CollectionConfiguration";
 
 export class Collection {
   public name: string;
@@ -31,6 +37,8 @@ export class Collection {
    */
   public embeddingFunction: IEmbeddingFunction;
 
+  public configuration: Api.CollectionConfiguration | undefined;
+
   /**
    * @ignore
    */
@@ -40,12 +48,14 @@ export class Collection {
     client: ChromaClient,
     embeddingFunction: IEmbeddingFunction,
     metadata?: CollectionMetadata,
+    configuration?: Api.CollectionConfiguration,
   ) {
     this.name = name;
     this.id = id;
     this.metadata = metadata;
     this.client = client;
     this.embeddingFunction = embeddingFunction;
+    this.configuration = configuration;
   }
 
   /**
@@ -172,7 +182,7 @@ export class Collection {
 
     const idsArray = ids ? toArray(ids) : undefined;
 
-    const resp = (await this.client.api.collectionGet(
+    const resp = await this.client.api.collectionGet(
       this.client.tenant,
       this.client.database,
       this.id,
@@ -185,9 +195,17 @@ export class Collection {
         where_document: whereDocument,
       },
       this.client.api.options,
-    )) as unknown as GetResponse;
+    );
 
-    return resp;
+    const finalResp: GetResponse = {
+      ...resp,
+      metadatas: resp.metadatas as (Metadata | null)[],
+      documents: resp.documents as (string | null)[],
+      embeddings: resp.embeddings as Embeddings | null,
+      included: resp.include as unknown as IncludeEnum[],
+    };
+
+    return finalResp;
   }
 
   /**
@@ -281,7 +299,7 @@ export class Collection {
       );
     }
 
-    const resp = (await this.client.api.collectionQuery(
+    const resp = await this.client.api.collectionQuery(
       this.client.tenant,
       this.client.database,
       this.id,
@@ -295,9 +313,18 @@ export class Collection {
         include: include as GeneratedApi.Include[] | undefined,
       },
       this.client.api.options,
-    )) as unknown as MultiQueryResponse;
+    );
 
-    return resp;
+    const finalResp: MultiQueryResponse = {
+      ...resp,
+      metadatas: resp.metadatas as (Metadata | null)[][],
+      documents: resp.documents as (string | null)[][],
+      embeddings: resp.embeddings as Embeddings[] | null,
+      distances: resp.distances as number[][] | null,
+      included: resp.include as unknown as IncludeEnum[],
+    };
+
+    return finalResp;
   }
 
   /**
@@ -318,12 +345,22 @@ export class Collection {
   async modify({
     name,
     metadata,
+    configuration,
   }: {
     name?: string;
     metadata?: CollectionMetadata;
+    configuration?: UpdateCollectionConfiguration;
   }): Promise<CollectionParams> {
     await this.client.init();
-
+    let updateCollectionConfiguration:
+      | Api.UpdateCollectionConfiguration
+      | undefined = undefined;
+    if (configuration) {
+      updateCollectionConfiguration =
+        loadApiUpdateCollectionConfigurationFromUpdateCollectionConfiguration(
+          configuration,
+        );
+    }
     const resp = (await this.client.api.updateCollection(
       this.client.tenant,
       this.client.database,
@@ -331,6 +368,7 @@ export class Collection {
       {
         new_name: name,
         new_metadata: metadata,
+        new_configuration: updateCollectionConfiguration,
       },
       this.client.api.options,
     )) as CollectionParams;

@@ -1,5 +1,7 @@
 import { AuthOptions } from "./auth";
+import { CreateCollectionConfiguration } from "./CollectionConfiguration";
 import { IEmbeddingFunction } from "./embeddings/IEmbeddingFunction";
+import { Api } from "./generated";
 
 export enum IncludeEnum {
   Documents = "documents",
@@ -92,6 +94,7 @@ export interface CollectionParams {
   id: string;
   metadata: CollectionMetadata | undefined;
   embeddingFunction: IEmbeddingFunction;
+  configuration: Api.CollectionConfiguration | undefined;
 }
 
 export type CollectionMetadata = Record<string, boolean | number | string>;
@@ -138,13 +141,14 @@ export type CreateCollectionParams = {
   name: string;
   metadata?: CollectionMetadata;
   embeddingFunction?: IEmbeddingFunction;
+  configuration?: CreateCollectionConfiguration;
 };
 
 export type GetOrCreateCollectionParams = CreateCollectionParams;
 
 export type GetCollectionParams = {
   name: string;
-  embeddingFunction: IEmbeddingFunction;
+  embeddingFunction?: IEmbeddingFunction;
 };
 
 export type DeleteCollectionParams = {
