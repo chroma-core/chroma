@@ -4,7 +4,7 @@ import { authOptionsToAuthProvider, ClientAuthProvider } from "./auth";
 import { chromaFetch } from "./ChromaFetch";
 import { Collection } from "./Collection";
 import { DefaultEmbeddingFunction } from "./embeddings/DefaultEmbeddingFunction";
-import { Configuration, ApiApi as DefaultApi } from "./generated";
+import { Configuration, ApiApi as DefaultApi, Api } from "./generated";
 import type {
   ChromaClientParams,
   CollectionMetadata,
@@ -18,7 +18,7 @@ import type {
   UserIdentity,
 } from "./types";
 import { validateTenantDatabase, wrapCollection } from "./utils";
-
+import { loadApiCollectionConfigurationFromCreateCollectionConfiguration } from "./CollectionConfiguration";
 const DEFAULT_TENANT = "default_tenant";
 const DEFAULT_DATABASE = "default_database";
 
@@ -224,15 +224,23 @@ export class ChromaClient {
     name,
     metadata,
     embeddingFunction = new DefaultEmbeddingFunction(),
+    configuration,
   }: CreateCollectionParams): Promise<Collection> {
     await this.init();
+    let collectionConfiguration: Api.CollectionConfiguration | undefined =
+      undefined;
+    if (configuration) {
+      collectionConfiguration =
+        loadApiCollectionConfigurationFromCreateCollectionConfiguration(
+          configuration,
+        );
+    }
     const newCollection = await this.api.createCollection(
       this.tenant,
       this.database,
       {
         name,
-        // @ts-ignore: we need to generate the client libraries again
-        configuration: null, //TODO: Configuration type in JavaScript
+        configuration: collectionConfiguration,
         metadata: metadata as any,
       },
       this.api.options,
@@ -243,6 +251,7 @@ export class ChromaClient {
       id: newCollection.id,
       metadata: newCollection.metadata as CollectionMetadata | undefined,
       embeddingFunction,
+      configuration: collectionConfiguration,
     });
   }
 
@@ -291,6 +300,8 @@ export class ChromaClient {
       id: newCollection.id,
       metadata: newCollection.metadata as CollectionMetadata | undefined,
       embeddingFunction,
+      // TODO: once server returns configuration, add it here
+      configuration: undefined,
     });
   }
 
@@ -420,6 +431,8 @@ export class ChromaClient {
         embeddingFunction !== undefined
           ? embeddingFunction
           : new DefaultEmbeddingFunction(),
+      // TODO: once server returns configuration, add it here
+      configuration: undefined,
     });
   }
 
