@@ -902,10 +902,15 @@ def test_query_document_valid_operators(client):
         collection.query(query_embeddings=[0, 0, 0], where_document={"$contains": 2})
 
     with pytest.raises(ValueError, match="where document"):
-        collection.get(where_document={"$contains": []})
+        collection.get(where_document={"$contains": []}
 
+    # Test invalid $contains
     with pytest.raises(ValueError, match="where document"):
         collection.get(where_document={"$contains": {"text": "hello"}})
+
+    # Test invalid $not_contains
+    with pytest.raises(ValueError, match="where document"):
+        collection.get(where_document={"$not_contains": {"text": "hello"}})
 
     # Test invalid $and, $or
     with pytest.raises(ValueError):
