@@ -16,7 +16,11 @@ import {
   CollectionParams,
 } from "./types";
 import { prepareRecordRequest, toArray, toArrayOfArrays } from "./utils";
-import { Api as GeneratedApi } from "./generated";
+import { Api as GeneratedApi, Api } from "./generated";
+import {
+  UpdateCollectionConfiguration,
+  loadApiUpdateCollectionConfigurationFromUpdateCollectionConfiguration,
+} from "./CollectionConfiguration";
 
 export class Collection {
   public name: string;
@@ -31,6 +35,8 @@ export class Collection {
    */
   public embeddingFunction: IEmbeddingFunction;
 
+  public configuration: Api.CollectionConfiguration | undefined;
+
   /**
    * @ignore
    */
@@ -40,12 +46,14 @@ export class Collection {
     client: ChromaClient,
     embeddingFunction: IEmbeddingFunction,
     metadata?: CollectionMetadata,
+    configuration?: Api.CollectionConfiguration,
   ) {
     this.name = name;
     this.id = id;
     this.metadata = metadata;
     this.client = client;
     this.embeddingFunction = embeddingFunction;
+    this.configuration = configuration;
   }
 
   /**
@@ -318,12 +326,22 @@ export class Collection {
   async modify({
     name,
     metadata,
+    configuration,
   }: {
     name?: string;
     metadata?: CollectionMetadata;
+    configuration?: UpdateCollectionConfiguration;
   }): Promise<CollectionParams> {
     await this.client.init();
-
+    let updateCollectionConfiguration:
+      | Api.UpdateCollectionConfiguration
+      | undefined = undefined;
+    if (configuration) {
+      updateCollectionConfiguration =
+        loadApiUpdateCollectionConfigurationFromUpdateCollectionConfiguration(
+          configuration,
+        );
+    }
     const resp = (await this.client.api.updateCollection(
       this.client.tenant,
       this.client.database,
@@ -331,6 +349,7 @@ export class Collection {
       {
         new_name: name,
         new_metadata: metadata,
+        new_configuration: updateCollectionConfiguration,
       },
       this.client.api.options,
     )) as CollectionParams;

@@ -173,5 +173,6 @@ export function wrapCollection(
     api,
     collection.embeddingFunction,
     collection.metadata,
+    collection.configuration,
   );
 }

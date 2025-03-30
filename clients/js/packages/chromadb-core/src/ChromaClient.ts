@@ -4,7 +4,7 @@ import { authOptionsToAuthProvider, ClientAuthProvider } from "./auth";
 import { chromaFetch } from "./ChromaFetch";
 import { Collection } from "./Collection";
 import { DefaultEmbeddingFunction } from "./embeddings/DefaultEmbeddingFunction";
-import { Configuration, ApiApi as DefaultApi } from "./generated";
+import { Configuration, ApiApi as DefaultApi, Api } from "./generated";
 import type {
   ChromaClientParams,
   CollectionMetadata,
@@ -18,7 +18,7 @@ import type {
   UserIdentity,
 } from "./types";
 import { validateTenantDatabase, wrapCollection } from "./utils";
-
+import { loadApiCollectionConfigurationFromCreateCollectionConfiguration } from "./CollectionConfiguration";
 const DEFAULT_TENANT = "default_tenant";
 const DEFAULT_DATABASE = "default_database";
 
@@ -224,18 +224,31 @@ export class ChromaClient {
     name,
     metadata,
     embeddingFunction = new DefaultEmbeddingFunction(),
+    configuration,
   }: CreateCollectionParams): Promise<Collection> {
     await this.init();
+    let collectionConfiguration: Api.CollectionConfiguration | undefined =
+      undefined;
+    if (configuration) {
+      collectionConfiguration =
+        loadApiCollectionConfigurationFromCreateCollectionConfiguration(
+          configuration,
+        );
+    }
     const newCollection = await this.api.createCollection(
       this.tenant,
       this.database,
       {
         name,
-        // @ts-ignore: we need to generate the client libraries again
-        configuration: null, //TODO: Configuration type in JavaScript
+        configuration: collectionConfiguration,
         metadata: metadata,
       },
       this.api.options,
+    );
+
+    console.log(
+      "NEW CREATE COLLECTION CONFIGURATION: ",
+      newCollection.configuration_json,
     );
 
     return wrapCollection(this, {
@@ -243,6 +256,7 @@ export class ChromaClient {
       id: newCollection.id,
       metadata: newCollection.metadata as CollectionMetadata | undefined,
       embeddingFunction,
+      configuration: newCollection.configuration_json,
     });
   }
 
@@ -286,11 +300,18 @@ export class ChromaClient {
       this.api.options,
     );
 
+    console.log(
+      "NEW GET_OR_CREATE COLLECTION CONFIGURATION: ",
+      newCollection.configuration_json,
+    );
+
     return wrapCollection(this, {
       name: newCollection.name,
       id: newCollection.id,
       metadata: newCollection.metadata as CollectionMetadata | undefined,
       embeddingFunction,
+      // TODO: once server returns configuration, add it here
+      configuration: newCollection.configuration_json,
     });
   }
 
@@ -412,6 +433,7 @@ export class ChromaClient {
       this.api.options,
     );
 
+    console.log("GET COLLECTION CONFIGURATION: ", response.configuration_json);
     return wrapCollection(this, {
       id: response.id,
       name: response.name,
@@ -420,6 +442,7 @@ export class ChromaClient {
         embeddingFunction !== undefined
           ? embeddingFunction
           : new DefaultEmbeddingFunction(),
+      configuration: response.configuration_json,
     });
   }
 

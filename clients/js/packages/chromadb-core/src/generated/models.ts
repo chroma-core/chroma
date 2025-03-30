@@ -35,6 +35,7 @@ export namespace Api {
   }
 
   export interface Collection {
+    configuration_json: Api.CollectionConfiguration;
     database: string;
     /**
      * @type {number | null}
@@ -397,6 +398,7 @@ export namespace Api {
   export interface UpsertCollectionRecordsResponse {}
 
   export interface Vec2 {
+    configuration_json: Api.CollectionConfiguration;
     database: string;
     /**
      * @type {number | null}
