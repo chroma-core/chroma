@@ -70,7 +70,7 @@ export class Collection {
   async add(params: AddRecordsParams): Promise<void> {
     await this.client.init();
 
-    await this.client.api.addV2(
+    await this.client.api.collectionAdd(
       this.client.tenant,
       this.client.database,
       this.id,
@@ -78,7 +78,7 @@ export class Collection {
       (await prepareRecordRequest(
         params,
         this.embeddingFunction,
-      )) as GeneratedApi.AddV2Request,
+      )) as GeneratedApi.AddCollectionRecordsPayload,
       this.client.api.options,
     );
   }
@@ -105,7 +105,7 @@ export class Collection {
   async upsert(params: UpsertRecordsParams): Promise<void> {
     await this.client.init();
 
-    await this.client.api.upsertV2(
+    await this.client.api.collectionUpsert(
       this.client.tenant,
       this.client.database,
       this.id,
@@ -113,7 +113,7 @@ export class Collection {
       (await prepareRecordRequest(
         params,
         this.embeddingFunction,
-      )) as GeneratedApi.AddV2Request,
+      )) as GeneratedApi.UpsertCollectionRecordsPayload,
       this.client.api.options,
     );
   }
@@ -129,7 +129,7 @@ export class Collection {
    */
   async count(): Promise<number> {
     await this.client.init();
-    return (await this.client.api.countV2(
+    return (await this.client.api.collectionCount(
       this.client.tenant,
       this.client.database,
       this.id,
@@ -172,20 +172,20 @@ export class Collection {
 
     const idsArray = ids ? toArray(ids) : undefined;
 
-    const resp = (await this.client.api.getV2(
-      this.id,
+    const resp = (await this.client.api.collectionGet(
       this.client.tenant,
       this.client.database,
+      this.id,
       {
         ids: idsArray,
         where,
         limit,
         offset,
-        include,
+        include: include as GeneratedApi.Include[] | undefined,
         where_document: whereDocument,
       },
       this.client.api.options,
-    )) as MultiGetResponse;
+    )) as unknown as GetResponse;
 
     return resp;
   }
@@ -212,7 +212,7 @@ export class Collection {
   async update(params: UpdateRecordsParams): Promise<void> {
     await this.client.init();
 
-    await this.client.api.updateV2(
+    await this.client.api.collectionUpdate(
       this.client.tenant,
       this.client.database,
       this.id,
@@ -264,7 +264,7 @@ export class Collection {
   }: QueryRecordsParams): Promise<MultiQueryResponse> {
     await this.client.init();
 
-    let embeddings: unknown[] = [];
+    let embeddings: number[][] = [];
 
     // If queryEmbeddings is provided, use it
     if (queryEmbeddings) {
@@ -281,19 +281,21 @@ export class Collection {
       );
     }
 
-    const resp = (await this.client.api.getNearestNeighborsV2(
+    const resp = (await this.client.api.collectionQuery(
       this.client.tenant,
       this.client.database,
       this.id,
+      nResults,
+      undefined,
       {
         query_embeddings: embeddings,
         n_results: nResults,
         where,
         where_document: whereDocument,
-        include,
+        include: include as GeneratedApi.Include[] | undefined,
       },
       this.client.api.options,
-    )) as MultiQueryResponse;
+    )) as unknown as MultiQueryResponse;
 
     return resp;
   }
@@ -322,13 +324,13 @@ export class Collection {
   }): Promise<CollectionParams> {
     await this.client.init();
 
-    const resp = (await this.client.api.updateCollectionV2(
+    const resp = (await this.client.api.updateCollection(
       this.client.tenant,
       this.client.database,
       this.id,
       {
         new_name: name,
-        new_metadata: metadata,
+        new_metadata: metadata as any,
       },
       this.client.api.options,
     )) as CollectionParams;
@@ -360,15 +362,15 @@ export class Collection {
    */
   async peek({ limit = 10 }: PeekParams = {}): Promise<MultiGetResponse> {
     await this.client.init();
-    return (await this.client.api.getV2(
-      this.id,
+    return (await this.client.api.collectionGet(
       this.client.tenant,
       this.client.database,
+      this.id,
       {
         limit,
       },
       this.client.api.options,
-    )) as MultiGetResponse;
+    )) as unknown as MultiGetResponse;
   }
 
   /**
@@ -398,10 +400,10 @@ export class Collection {
 
     const idsArray = ids ? toArray(ids) : undefined;
 
-    await this.client.api.deleteV2(
-      this.id,
+    await this.client.api.collectionDelete(
       this.client.tenant,
       this.client.database,
+      this.id,
       {
         ids: idsArray,
         where: where,

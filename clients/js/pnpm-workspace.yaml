@@ -1,2 +1,9 @@
 packages:
-  - 'packages/*'
+  - packages/*
+onlyBuiltDependencies:
+  - bcrypt
+  - cpu-features
+  - esbuild
+  - protobufjs
+  - sharp
+  - ssh2
