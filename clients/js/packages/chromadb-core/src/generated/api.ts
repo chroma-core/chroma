@@ -1,7 +1,7 @@
 /* eslint-disable */
 // tslint:disable
 /**
- * Chroma
+ * chroma-frontend
  *
  *
  * OpenAPI spec version: 1.0.0
@@ -13,99 +13,98 @@
  */
 
 import { Configuration } from "./configuration";
-import { BASE_PATH, COLLECTION_FORMATS, FetchAPI, FetchArgs, BaseAPI, RequiredError, defaultFetch } from "./runtime";
+import {
+  BASE_PATH,
+  COLLECTION_FORMATS,
+  FetchAPI,
+  FetchArgs,
+  BaseAPI,
+  RequiredError,
+  defaultFetch,
+} from "./runtime";
 import { Api } from "./models";
 
-export type FactoryFunction<T> = (configuration?: Configuration, basePath?: string, fetch?: FetchAPI) => T;
+export type FactoryFunction<T> = (
+  configuration?: Configuration,
+  basePath?: string,
+  fetch?: FetchAPI,
+) => T;
 
 /**
  * ApiApi - fetch parameter creator
  * @export
  */
-export const ApiApiFetchParamCreator = function (configuration?: Configuration) {
+export const ApiApiFetchParamCreator = function (
+  configuration?: Configuration,
+) {
   return {
     /**
-     * @summary Add V1
-     * @param {string} collectionId
-     * @param {Api.AddV1V1Request} request
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    addV1V1(collectionId: string, request: Api.AddV1V1Request, options: RequestInit = {}): FetchArgs {
-      // verify required parameter 'collectionId' is not null or undefined
-      if (collectionId === null || collectionId === undefined) {
-        throw new RequiredError('collectionId', 'Required parameter collectionId was null or undefined when calling addV1V1.');
-      }
-      // verify required parameter 'request' is not null or undefined
-      if (request === null || request === undefined) {
-        throw new RequiredError('request', 'Required parameter request was null or undefined when calling addV1V1.');
-      }
-      let localVarPath = `/api/v1/collections/{collection_id}/add`
-        .replace('{collection_id}', encodeURIComponent(String(collectionId)));
-      const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'POST' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
-      if (localVarPathQueryStart !== -1) {
-        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
-      }
-
-      localVarHeaderParameter.set('Content-Type', 'application/json');
-
-      localVarRequestOptions.headers = localVarHeaderParameter;
-
-      if (request !== undefined) {
-        localVarRequestOptions.body = JSON.stringify(request || {});
-      }
-
-      const localVarQueryParameterString = localVarQueryParameter.toString();
-      if (localVarQueryParameterString) {
-        localVarPath += "?" + localVarQueryParameterString;
-      }
-      return {
-        url: localVarPath,
-        options: localVarRequestOptions,
-      };
-    },
-    /**
-     * @summary Add
+     * @summary Adds records to a collection.
      * @param {string} tenant
-     * @param {string} databaseName
+     * @param {string} database
      * @param {string} collectionId
-     * @param {Api.AddV2Request} request
+     * @param {Api.AddCollectionRecordsPayload} request
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
-    addV2(tenant: string, databaseName: string, collectionId: string, request: Api.AddV2Request, options: RequestInit = {}): FetchArgs {
+    collectionAdd(
+      tenant: string,
+      database: string,
+      collectionId: string,
+      request: Api.AddCollectionRecordsPayload,
+      options: RequestInit = {},
+    ): FetchArgs {
       // verify required parameter 'tenant' is not null or undefined
       if (tenant === null || tenant === undefined) {
-        throw new RequiredError('tenant', 'Required parameter tenant was null or undefined when calling addV2.');
+        throw new RequiredError(
+          "tenant",
+          "Required parameter tenant was null or undefined when calling collectionAdd.",
+        );
       }
-      // verify required parameter 'databaseName' is not null or undefined
-      if (databaseName === null || databaseName === undefined) {
-        throw new RequiredError('databaseName', 'Required parameter databaseName was null or undefined when calling addV2.');
+      // verify required parameter 'database' is not null or undefined
+      if (database === null || database === undefined) {
+        throw new RequiredError(
+          "database",
+          "Required parameter database was null or undefined when calling collectionAdd.",
+        );
       }
       // verify required parameter 'collectionId' is not null or undefined
       if (collectionId === null || collectionId === undefined) {
-        throw new RequiredError('collectionId', 'Required parameter collectionId was null or undefined when calling addV2.');
+        throw new RequiredError(
+          "collectionId",
+          "Required parameter collectionId was null or undefined when calling collectionAdd.",
+        );
       }
       // verify required parameter 'request' is not null or undefined
       if (request === null || request === undefined) {
-        throw new RequiredError('request', 'Required parameter request was null or undefined when calling addV2.');
+        throw new RequiredError(
+          "request",
+          "Required parameter request was null or undefined when calling collectionAdd.",
+        );
       }
-      let localVarPath = `/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/add`
-        .replace('{tenant}', encodeURIComponent(String(tenant)))
-        .replace('{database_name}', encodeURIComponent(String(databaseName)))
-        .replace('{collection_id}', encodeURIComponent(String(collectionId)));
+      let localVarPath =
+        `/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/add`
+          .replace("{tenant}", encodeURIComponent(String(tenant)))
+          .replace("{database}", encodeURIComponent(String(database)))
+          .replace("{collection_id}", encodeURIComponent(String(collectionId)));
       const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'POST' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
+      const localVarRequestOptions: RequestInit = Object.assign(
+        { method: "POST" },
+        options,
+      );
+      const localVarHeaderParameter: Headers = options.headers
+        ? new Headers(options.headers)
+        : new Headers();
+      const localVarQueryParameter = new URLSearchParams(
+        localVarPathQueryStart !== -1
+          ? localVarPath.substring(localVarPathQueryStart + 1)
+          : "",
+      );
       if (localVarPathQueryStart !== -1) {
         localVarPath = localVarPath.substring(0, localVarPathQueryStart);
       }
 
-      localVarHeaderParameter.set('Content-Type', 'application/json');
+      localVarHeaderParameter.set("Content-Type", "application/json");
 
       localVarRequestOptions.headers = localVarHeaderParameter;
 
@@ -123,140 +122,58 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
       };
     },
     /**
-     * @summary Count Collections V1
-     * @param {string} [tenant]
-     * @param {string} [database]
+     * @summary Retrieves the number of records in a collection.
+     * @param {string} tenant <p>Tenant ID for the collection</p>
+     * @param {string} database <p>Database containing this collection</p>
+     * @param {string} collectionId <p>Collection ID whose records are counted</p>
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
-    countCollectionsV1V1(tenant: string | undefined, database: string | undefined, options: RequestInit = {}): FetchArgs {
-      let localVarPath = `/api/v1/count_collections`;
-      const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'GET' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
-      if (localVarPathQueryStart !== -1) {
-        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
-      }
-
-      if (tenant !== undefined) {
-        localVarQueryParameter.append('tenant', String(tenant));
-      }
-
-      if (database !== undefined) {
-        localVarQueryParameter.append('database', String(database));
-      }
-
-      localVarRequestOptions.headers = localVarHeaderParameter;
-
-      const localVarQueryParameterString = localVarQueryParameter.toString();
-      if (localVarQueryParameterString) {
-        localVarPath += "?" + localVarQueryParameterString;
-      }
-      return {
-        url: localVarPath,
-        options: localVarRequestOptions,
-      };
-    },
-    /**
-     * @summary Count Collections
-     * @param {string} tenant
-     * @param {string} databaseName
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    countCollectionsV2(tenant: string, databaseName: string, options: RequestInit = {}): FetchArgs {
+    collectionCount(
+      tenant: string,
+      database: string,
+      collectionId: string,
+      options: RequestInit = {},
+    ): FetchArgs {
       // verify required parameter 'tenant' is not null or undefined
       if (tenant === null || tenant === undefined) {
-        throw new RequiredError('tenant', 'Required parameter tenant was null or undefined when calling countCollectionsV2.');
+        throw new RequiredError(
+          "tenant",
+          "Required parameter tenant was null or undefined when calling collectionCount.",
+        );
       }
-      // verify required parameter 'databaseName' is not null or undefined
-      if (databaseName === null || databaseName === undefined) {
-        throw new RequiredError('databaseName', 'Required parameter databaseName was null or undefined when calling countCollectionsV2.');
-      }
-      let localVarPath = `/api/v2/tenants/{tenant}/databases/{database_name}/collections_count`
-        .replace('{tenant}', encodeURIComponent(String(tenant)))
-        .replace('{database_name}', encodeURIComponent(String(databaseName)));
-      const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'GET' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
-      if (localVarPathQueryStart !== -1) {
-        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
-      }
-
-      localVarRequestOptions.headers = localVarHeaderParameter;
-
-      const localVarQueryParameterString = localVarQueryParameter.toString();
-      if (localVarQueryParameterString) {
-        localVarPath += "?" + localVarQueryParameterString;
-      }
-      return {
-        url: localVarPath,
-        options: localVarRequestOptions,
-      };
-    },
-    /**
-     * @summary Count V1
-     * @param {string} collectionId
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    countV1V1(collectionId: string, options: RequestInit = {}): FetchArgs {
-      // verify required parameter 'collectionId' is not null or undefined
-      if (collectionId === null || collectionId === undefined) {
-        throw new RequiredError('collectionId', 'Required parameter collectionId was null or undefined when calling countV1V1.');
-      }
-      let localVarPath = `/api/v1/collections/{collection_id}/count`
-        .replace('{collection_id}', encodeURIComponent(String(collectionId)));
-      const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'GET' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
-      if (localVarPathQueryStart !== -1) {
-        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
-      }
-
-      localVarRequestOptions.headers = localVarHeaderParameter;
-
-      const localVarQueryParameterString = localVarQueryParameter.toString();
-      if (localVarQueryParameterString) {
-        localVarPath += "?" + localVarQueryParameterString;
-      }
-      return {
-        url: localVarPath,
-        options: localVarRequestOptions,
-      };
-    },
-    /**
-     * @summary Count
-     * @param {string} tenant
-     * @param {string} databaseName
-     * @param {string} collectionId
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    countV2(tenant: string, databaseName: string, collectionId: string, options: RequestInit = {}): FetchArgs {
-      // verify required parameter 'tenant' is not null or undefined
-      if (tenant === null || tenant === undefined) {
-        throw new RequiredError('tenant', 'Required parameter tenant was null or undefined when calling countV2.');
-      }
-      // verify required parameter 'databaseName' is not null or undefined
-      if (databaseName === null || databaseName === undefined) {
-        throw new RequiredError('databaseName', 'Required parameter databaseName was null or undefined when calling countV2.');
+      // verify required parameter 'database' is not null or undefined
+      if (database === null || database === undefined) {
+        throw new RequiredError(
+          "database",
+          "Required parameter database was null or undefined when calling collectionCount.",
+        );
       }
       // verify required parameter 'collectionId' is not null or undefined
       if (collectionId === null || collectionId === undefined) {
-        throw new RequiredError('collectionId', 'Required parameter collectionId was null or undefined when calling countV2.');
+        throw new RequiredError(
+          "collectionId",
+          "Required parameter collectionId was null or undefined when calling collectionCount.",
+        );
       }
-      let localVarPath = `/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/count`
-        .replace('{tenant}', encodeURIComponent(String(tenant)))
-        .replace('{database_name}', encodeURIComponent(String(databaseName)))
-        .replace('{collection_id}', encodeURIComponent(String(collectionId)));
+      let localVarPath =
+        `/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/count`
+          .replace("{tenant}", encodeURIComponent(String(tenant)))
+          .replace("{database}", encodeURIComponent(String(database)))
+          .replace("{collection_id}", encodeURIComponent(String(collectionId)));
       const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'GET' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
+      const localVarRequestOptions: RequestInit = Object.assign(
+        { method: "GET" },
+        options,
+      );
+      const localVarHeaderParameter: Headers = options.headers
+        ? new Headers(options.headers)
+        : new Headers();
+      const localVarQueryParameter = new URLSearchParams(
+        localVarPathQueryStart !== -1
+          ? localVarPath.substring(localVarPathQueryStart + 1)
+          : "",
+      );
       if (localVarPathQueryStart !== -1) {
         localVarPath = localVarPath.substring(0, localVarPathQueryStart);
       }
@@ -273,85 +190,72 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
       };
     },
     /**
-     * @summary Create Collection V1
-     * @param {string} [tenant]
-     * @param {string} [database]
-     * @param {Api.CreateCollectionV1V1Request} request
+     * @summary Deletes records in a collection. Can filter by IDs or metadata.
+     * @param {string} tenant <p>Tenant ID</p>
+     * @param {string} database <p>Database name</p>
+     * @param {string} collectionId <p>Collection ID</p>
+     * @param {Api.DeleteCollectionRecordsPayload} request
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
-    createCollectionV1V1(tenant: string | undefined, database: string | undefined, request: Api.CreateCollectionV1V1Request, options: RequestInit = {}): FetchArgs {
-      // verify required parameter 'request' is not null or undefined
-      if (request === null || request === undefined) {
-        throw new RequiredError('request', 'Required parameter request was null or undefined when calling createCollectionV1V1.');
-      }
-      let localVarPath = `/api/v1/collections`;
-      const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'POST' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
-      if (localVarPathQueryStart !== -1) {
-        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
-      }
-
-      if (tenant !== undefined) {
-        localVarQueryParameter.append('tenant', String(tenant));
-      }
-
-      if (database !== undefined) {
-        localVarQueryParameter.append('database', String(database));
-      }
-
-      localVarHeaderParameter.set('Content-Type', 'application/json');
-
-      localVarRequestOptions.headers = localVarHeaderParameter;
-
-      if (request !== undefined) {
-        localVarRequestOptions.body = JSON.stringify(request || {});
-      }
-
-      const localVarQueryParameterString = localVarQueryParameter.toString();
-      if (localVarQueryParameterString) {
-        localVarPath += "?" + localVarQueryParameterString;
-      }
-      return {
-        url: localVarPath,
-        options: localVarRequestOptions,
-      };
-    },
-    /**
-     * @summary Create Collection
-     * @param {string} tenant
-     * @param {string} databaseName
-     * @param {Api.CreateCollectionV2Request} request
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    createCollectionV2(tenant: string, databaseName: string, request: Api.CreateCollectionV2Request, options: RequestInit = {}): FetchArgs {
+    collectionDelete(
+      tenant: string,
+      database: string,
+      collectionId: string,
+      request: Api.DeleteCollectionRecordsPayload,
+      options: RequestInit = {},
+    ): FetchArgs {
       // verify required parameter 'tenant' is not null or undefined
       if (tenant === null || tenant === undefined) {
-        throw new RequiredError('tenant', 'Required parameter tenant was null or undefined when calling createCollectionV2.');
+        throw new RequiredError(
+          "tenant",
+          "Required parameter tenant was null or undefined when calling collectionDelete.",
+        );
       }
-      // verify required parameter 'databaseName' is not null or undefined
-      if (databaseName === null || databaseName === undefined) {
-        throw new RequiredError('databaseName', 'Required parameter databaseName was null or undefined when calling createCollectionV2.');
+      // verify required parameter 'database' is not null or undefined
+      if (database === null || database === undefined) {
+        throw new RequiredError(
+          "database",
+          "Required parameter database was null or undefined when calling collectionDelete.",
+        );
+      }
+      // verify required parameter 'collectionId' is not null or undefined
+      if (collectionId === null || collectionId === undefined) {
+        throw new RequiredError(
+          "collectionId",
+          "Required parameter collectionId was null or undefined when calling collectionDelete.",
+        );
       }
       // verify required parameter 'request' is not null or undefined
       if (request === null || request === undefined) {
-        throw new RequiredError('request', 'Required parameter request was null or undefined when calling createCollectionV2.');
+        throw new RequiredError(
+          "request",
+          "Required parameter request was null or undefined when calling collectionDelete.",
+        );
       }
-      let localVarPath = `/api/v2/tenants/{tenant}/databases/{database_name}/collections`
-        .replace('{tenant}', encodeURIComponent(String(tenant)))
-        .replace('{database_name}', encodeURIComponent(String(databaseName)));
+      let localVarPath =
+        `/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/delete`
+          .replace("{tenant}", encodeURIComponent(String(tenant)))
+          .replace("{database}", encodeURIComponent(String(database)))
+          .replace("{collection_id}", encodeURIComponent(String(collectionId)));
       const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'POST' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
+      const localVarRequestOptions: RequestInit = Object.assign(
+        { method: "POST" },
+        options,
+      );
+      const localVarHeaderParameter: Headers = options.headers
+        ? new Headers(options.headers)
+        : new Headers();
+      const localVarQueryParameter = new URLSearchParams(
+        localVarPathQueryStart !== -1
+          ? localVarPath.substring(localVarPathQueryStart + 1)
+          : "",
+      );
       if (localVarPathQueryStart !== -1) {
         localVarPath = localVarPath.substring(0, localVarPathQueryStart);
       }
 
-      localVarHeaderParameter.set('Content-Type', 'application/json');
+      localVarHeaderParameter.set("Content-Type", "application/json");
 
       localVarRequestOptions.headers = localVarHeaderParameter;
 
@@ -369,74 +273,72 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
       };
     },
     /**
-     * @summary Create Database V1
-     * @param {string} [tenant]
-     * @param {Api.CreateDatabaseV1V1Request} request
+     * @summary Retrieves records from a collection by ID or metadata filter.
+     * @param {string} tenant <p>Tenant ID</p>
+     * @param {string} database <p>Database name for the collection</p>
+     * @param {string} collectionId <p>Collection ID to fetch records from</p>
+     * @param {Api.GetRequestPayload} request
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
-    createDatabaseV1V1(tenant: string | undefined, request: Api.CreateDatabaseV1V1Request, options: RequestInit = {}): FetchArgs {
-      // verify required parameter 'request' is not null or undefined
-      if (request === null || request === undefined) {
-        throw new RequiredError('request', 'Required parameter request was null or undefined when calling createDatabaseV1V1.');
-      }
-      let localVarPath = `/api/v1/databases`;
-      const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'POST' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
-      if (localVarPathQueryStart !== -1) {
-        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
-      }
-
-      if (tenant !== undefined) {
-        localVarQueryParameter.append('tenant', String(tenant));
-      }
-
-      localVarHeaderParameter.set('Content-Type', 'application/json');
-
-      localVarRequestOptions.headers = localVarHeaderParameter;
-
-      if (request !== undefined) {
-        localVarRequestOptions.body = JSON.stringify(request || {});
-      }
-
-      const localVarQueryParameterString = localVarQueryParameter.toString();
-      if (localVarQueryParameterString) {
-        localVarPath += "?" + localVarQueryParameterString;
-      }
-      return {
-        url: localVarPath,
-        options: localVarRequestOptions,
-      };
-    },
-    /**
-     * @summary Create Database
-     * @param {string} tenant
-     * @param {Api.CreateDatabaseV2Request} request
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    createDatabaseV2(tenant: string, request: Api.CreateDatabaseV2Request, options: RequestInit = {}): FetchArgs {
+    collectionGet(
+      tenant: string,
+      database: string,
+      collectionId: string,
+      request: Api.GetRequestPayload,
+      options: RequestInit = {},
+    ): FetchArgs {
       // verify required parameter 'tenant' is not null or undefined
       if (tenant === null || tenant === undefined) {
-        throw new RequiredError('tenant', 'Required parameter tenant was null or undefined when calling createDatabaseV2.');
+        throw new RequiredError(
+          "tenant",
+          "Required parameter tenant was null or undefined when calling collectionGet.",
+        );
+      }
+      // verify required parameter 'database' is not null or undefined
+      if (database === null || database === undefined) {
+        throw new RequiredError(
+          "database",
+          "Required parameter database was null or undefined when calling collectionGet.",
+        );
+      }
+      // verify required parameter 'collectionId' is not null or undefined
+      if (collectionId === null || collectionId === undefined) {
+        throw new RequiredError(
+          "collectionId",
+          "Required parameter collectionId was null or undefined when calling collectionGet.",
+        );
       }
       // verify required parameter 'request' is not null or undefined
       if (request === null || request === undefined) {
-        throw new RequiredError('request', 'Required parameter request was null or undefined when calling createDatabaseV2.');
+        throw new RequiredError(
+          "request",
+          "Required parameter request was null or undefined when calling collectionGet.",
+        );
       }
-      let localVarPath = `/api/v2/tenants/{tenant}/databases`
-        .replace('{tenant}', encodeURIComponent(String(tenant)));
+      let localVarPath =
+        `/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/get`
+          .replace("{tenant}", encodeURIComponent(String(tenant)))
+          .replace("{database}", encodeURIComponent(String(database)))
+          .replace("{collection_id}", encodeURIComponent(String(collectionId)));
       const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'POST' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
+      const localVarRequestOptions: RequestInit = Object.assign(
+        { method: "POST" },
+        options,
+      );
+      const localVarHeaderParameter: Headers = options.headers
+        ? new Headers(options.headers)
+        : new Headers();
+      const localVarQueryParameter = new URLSearchParams(
+        localVarPathQueryStart !== -1
+          ? localVarPath.substring(localVarPathQueryStart + 1)
+          : "",
+      );
       if (localVarPathQueryStart !== -1) {
         localVarPath = localVarPath.substring(0, localVarPathQueryStart);
       }
 
-      localVarHeaderParameter.set('Content-Type', 'application/json');
+      localVarHeaderParameter.set("Content-Type", "application/json");
 
       localVarRequestOptions.headers = localVarHeaderParameter;
 
@@ -454,26 +356,84 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
       };
     },
     /**
-     * @summary Create Tenant V1
-     * @param {Api.CreateTenantV1V1Request} request
+     * @summary Query a collection in a variety of ways, including vector search, metadata filtering, and full-text search
+     * @param {string} tenant <p>Tenant ID</p>
+     * @param {string} database <p>Database name containing the collection</p>
+     * @param {string} collectionId <p>Collection ID to query</p>
+     * @param {number} [limit] <p>Limit for pagination</p>
+     * @param {number} [offset] <p>Offset for pagination</p>
+     * @param {Api.QueryRequestPayload} request
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
-    createTenantV1V1(request: Api.CreateTenantV1V1Request, options: RequestInit = {}): FetchArgs {
+    collectionQuery(
+      tenant: string,
+      database: string,
+      collectionId: string,
+      limit: number | undefined,
+      offset: number | undefined,
+      request: Api.QueryRequestPayload,
+      options: RequestInit = {},
+    ): FetchArgs {
+      // verify required parameter 'tenant' is not null or undefined
+      if (tenant === null || tenant === undefined) {
+        throw new RequiredError(
+          "tenant",
+          "Required parameter tenant was null or undefined when calling collectionQuery.",
+        );
+      }
+      // verify required parameter 'database' is not null or undefined
+      if (database === null || database === undefined) {
+        throw new RequiredError(
+          "database",
+          "Required parameter database was null or undefined when calling collectionQuery.",
+        );
+      }
+      // verify required parameter 'collectionId' is not null or undefined
+      if (collectionId === null || collectionId === undefined) {
+        throw new RequiredError(
+          "collectionId",
+          "Required parameter collectionId was null or undefined when calling collectionQuery.",
+        );
+      }
       // verify required parameter 'request' is not null or undefined
       if (request === null || request === undefined) {
-        throw new RequiredError('request', 'Required parameter request was null or undefined when calling createTenantV1V1.');
+        throw new RequiredError(
+          "request",
+          "Required parameter request was null or undefined when calling collectionQuery.",
+        );
       }
-      let localVarPath = `/api/v1/tenants`;
+      let localVarPath =
+        `/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/query`
+          .replace("{tenant}", encodeURIComponent(String(tenant)))
+          .replace("{database}", encodeURIComponent(String(database)))
+          .replace("{collection_id}", encodeURIComponent(String(collectionId)));
       const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'POST' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
+      const localVarRequestOptions: RequestInit = Object.assign(
+        { method: "POST" },
+        options,
+      );
+      const localVarHeaderParameter: Headers = options.headers
+        ? new Headers(options.headers)
+        : new Headers();
+      const localVarQueryParameter = new URLSearchParams(
+        localVarPathQueryStart !== -1
+          ? localVarPath.substring(localVarPathQueryStart + 1)
+          : "",
+      );
       if (localVarPathQueryStart !== -1) {
         localVarPath = localVarPath.substring(0, localVarPathQueryStart);
       }
 
-      localVarHeaderParameter.set('Content-Type', 'application/json');
+      if (limit !== undefined) {
+        localVarQueryParameter.append("limit", String(limit));
+      }
+
+      if (offset !== undefined) {
+        localVarQueryParameter.append("offset", String(offset));
+      }
+
+      localVarHeaderParameter.set("Content-Type", "application/json");
 
       localVarRequestOptions.headers = localVarHeaderParameter;
 
@@ -491,26 +451,402 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
       };
     },
     /**
-     * @summary Create Tenant
-     * @param {Api.CreateTenantV2Request} request
+     * @summary Updates records in a collection by ID.
+     * @param {string} tenant
+     * @param {string} database
+     * @param {string} collectionId
+     * @param {Api.UpdateCollectionRecordsPayload} request
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
-    createTenantV2(request: Api.CreateTenantV2Request, options: RequestInit = {}): FetchArgs {
+    collectionUpdate(
+      tenant: string,
+      database: string,
+      collectionId: string,
+      request: Api.UpdateCollectionRecordsPayload,
+      options: RequestInit = {},
+    ): FetchArgs {
+      // verify required parameter 'tenant' is not null or undefined
+      if (tenant === null || tenant === undefined) {
+        throw new RequiredError(
+          "tenant",
+          "Required parameter tenant was null or undefined when calling collectionUpdate.",
+        );
+      }
+      // verify required parameter 'database' is not null or undefined
+      if (database === null || database === undefined) {
+        throw new RequiredError(
+          "database",
+          "Required parameter database was null or undefined when calling collectionUpdate.",
+        );
+      }
+      // verify required parameter 'collectionId' is not null or undefined
+      if (collectionId === null || collectionId === undefined) {
+        throw new RequiredError(
+          "collectionId",
+          "Required parameter collectionId was null or undefined when calling collectionUpdate.",
+        );
+      }
       // verify required parameter 'request' is not null or undefined
       if (request === null || request === undefined) {
-        throw new RequiredError('request', 'Required parameter request was null or undefined when calling createTenantV2.');
+        throw new RequiredError(
+          "request",
+          "Required parameter request was null or undefined when calling collectionUpdate.",
+        );
+      }
+      let localVarPath =
+        `/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/update`
+          .replace("{tenant}", encodeURIComponent(String(tenant)))
+          .replace("{database}", encodeURIComponent(String(database)))
+          .replace("{collection_id}", encodeURIComponent(String(collectionId)));
+      const localVarPathQueryStart = localVarPath.indexOf("?");
+      const localVarRequestOptions: RequestInit = Object.assign(
+        { method: "POST" },
+        options,
+      );
+      const localVarHeaderParameter: Headers = options.headers
+        ? new Headers(options.headers)
+        : new Headers();
+      const localVarQueryParameter = new URLSearchParams(
+        localVarPathQueryStart !== -1
+          ? localVarPath.substring(localVarPathQueryStart + 1)
+          : "",
+      );
+      if (localVarPathQueryStart !== -1) {
+        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
+      }
+
+      localVarHeaderParameter.set("Content-Type", "application/json");
+
+      localVarRequestOptions.headers = localVarHeaderParameter;
+
+      if (request !== undefined) {
+        localVarRequestOptions.body = JSON.stringify(request || {});
+      }
+
+      const localVarQueryParameterString = localVarQueryParameter.toString();
+      if (localVarQueryParameterString) {
+        localVarPath += "?" + localVarQueryParameterString;
+      }
+      return {
+        url: localVarPath,
+        options: localVarRequestOptions,
+      };
+    },
+    /**
+     * @summary Upserts records in a collection (create if not exists, otherwise update).
+     * @param {string} tenant <p>Tenant ID</p>
+     * @param {string} database <p>Database name</p>
+     * @param {string} collectionId <p>Collection ID</p>
+     * @param {Api.UpsertCollectionRecordsPayload} request
+     * @param {RequestInit} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    collectionUpsert(
+      tenant: string,
+      database: string,
+      collectionId: string,
+      request: Api.UpsertCollectionRecordsPayload,
+      options: RequestInit = {},
+    ): FetchArgs {
+      // verify required parameter 'tenant' is not null or undefined
+      if (tenant === null || tenant === undefined) {
+        throw new RequiredError(
+          "tenant",
+          "Required parameter tenant was null or undefined when calling collectionUpsert.",
+        );
+      }
+      // verify required parameter 'database' is not null or undefined
+      if (database === null || database === undefined) {
+        throw new RequiredError(
+          "database",
+          "Required parameter database was null or undefined when calling collectionUpsert.",
+        );
+      }
+      // verify required parameter 'collectionId' is not null or undefined
+      if (collectionId === null || collectionId === undefined) {
+        throw new RequiredError(
+          "collectionId",
+          "Required parameter collectionId was null or undefined when calling collectionUpsert.",
+        );
+      }
+      // verify required parameter 'request' is not null or undefined
+      if (request === null || request === undefined) {
+        throw new RequiredError(
+          "request",
+          "Required parameter request was null or undefined when calling collectionUpsert.",
+        );
+      }
+      let localVarPath =
+        `/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/upsert`
+          .replace("{tenant}", encodeURIComponent(String(tenant)))
+          .replace("{database}", encodeURIComponent(String(database)))
+          .replace("{collection_id}", encodeURIComponent(String(collectionId)));
+      const localVarPathQueryStart = localVarPath.indexOf("?");
+      const localVarRequestOptions: RequestInit = Object.assign(
+        { method: "POST" },
+        options,
+      );
+      const localVarHeaderParameter: Headers = options.headers
+        ? new Headers(options.headers)
+        : new Headers();
+      const localVarQueryParameter = new URLSearchParams(
+        localVarPathQueryStart !== -1
+          ? localVarPath.substring(localVarPathQueryStart + 1)
+          : "",
+      );
+      if (localVarPathQueryStart !== -1) {
+        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
+      }
+
+      localVarHeaderParameter.set("Content-Type", "application/json");
+
+      localVarRequestOptions.headers = localVarHeaderParameter;
+
+      if (request !== undefined) {
+        localVarRequestOptions.body = JSON.stringify(request || {});
+      }
+
+      const localVarQueryParameterString = localVarQueryParameter.toString();
+      if (localVarQueryParameterString) {
+        localVarPath += "?" + localVarQueryParameterString;
+      }
+      return {
+        url: localVarPath,
+        options: localVarRequestOptions,
+      };
+    },
+    /**
+     * @summary Retrieves the total number of collections in a given database.
+     * @param {string} tenant <p>Tenant ID</p>
+     * @param {string} database <p>Database name to count collections from</p>
+     * @param {RequestInit} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    countCollections(
+      tenant: string,
+      database: string,
+      options: RequestInit = {},
+    ): FetchArgs {
+      // verify required parameter 'tenant' is not null or undefined
+      if (tenant === null || tenant === undefined) {
+        throw new RequiredError(
+          "tenant",
+          "Required parameter tenant was null or undefined when calling countCollections.",
+        );
+      }
+      // verify required parameter 'database' is not null or undefined
+      if (database === null || database === undefined) {
+        throw new RequiredError(
+          "database",
+          "Required parameter database was null or undefined when calling countCollections.",
+        );
+      }
+      let localVarPath =
+        `/api/v2/tenants/{tenant}/databases/{database}/collections_count`
+          .replace("{tenant}", encodeURIComponent(String(tenant)))
+          .replace("{database}", encodeURIComponent(String(database)));
+      const localVarPathQueryStart = localVarPath.indexOf("?");
+      const localVarRequestOptions: RequestInit = Object.assign(
+        { method: "GET" },
+        options,
+      );
+      const localVarHeaderParameter: Headers = options.headers
+        ? new Headers(options.headers)
+        : new Headers();
+      const localVarQueryParameter = new URLSearchParams(
+        localVarPathQueryStart !== -1
+          ? localVarPath.substring(localVarPathQueryStart + 1)
+          : "",
+      );
+      if (localVarPathQueryStart !== -1) {
+        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
+      }
+
+      localVarRequestOptions.headers = localVarHeaderParameter;
+
+      const localVarQueryParameterString = localVarQueryParameter.toString();
+      if (localVarQueryParameterString) {
+        localVarPath += "?" + localVarQueryParameterString;
+      }
+      return {
+        url: localVarPath,
+        options: localVarRequestOptions,
+      };
+    },
+    /**
+     * @summary Creates a new collection under the specified database.
+     * @param {string} tenant <p>Tenant ID</p>
+     * @param {string} database <p>Database name containing the new collection</p>
+     * @param {Api.CreateCollectionPayload} request
+     * @param {RequestInit} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    createCollection(
+      tenant: string,
+      database: string,
+      request: Api.CreateCollectionPayload,
+      options: RequestInit = {},
+    ): FetchArgs {
+      // verify required parameter 'tenant' is not null or undefined
+      if (tenant === null || tenant === undefined) {
+        throw new RequiredError(
+          "tenant",
+          "Required parameter tenant was null or undefined when calling createCollection.",
+        );
+      }
+      // verify required parameter 'database' is not null or undefined
+      if (database === null || database === undefined) {
+        throw new RequiredError(
+          "database",
+          "Required parameter database was null or undefined when calling createCollection.",
+        );
+      }
+      // verify required parameter 'request' is not null or undefined
+      if (request === null || request === undefined) {
+        throw new RequiredError(
+          "request",
+          "Required parameter request was null or undefined when calling createCollection.",
+        );
+      }
+      let localVarPath =
+        `/api/v2/tenants/{tenant}/databases/{database}/collections`
+          .replace("{tenant}", encodeURIComponent(String(tenant)))
+          .replace("{database}", encodeURIComponent(String(database)));
+      const localVarPathQueryStart = localVarPath.indexOf("?");
+      const localVarRequestOptions: RequestInit = Object.assign(
+        { method: "POST" },
+        options,
+      );
+      const localVarHeaderParameter: Headers = options.headers
+        ? new Headers(options.headers)
+        : new Headers();
+      const localVarQueryParameter = new URLSearchParams(
+        localVarPathQueryStart !== -1
+          ? localVarPath.substring(localVarPathQueryStart + 1)
+          : "",
+      );
+      if (localVarPathQueryStart !== -1) {
+        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
+      }
+
+      localVarHeaderParameter.set("Content-Type", "application/json");
+
+      localVarRequestOptions.headers = localVarHeaderParameter;
+
+      if (request !== undefined) {
+        localVarRequestOptions.body = JSON.stringify(request || {});
+      }
+
+      const localVarQueryParameterString = localVarQueryParameter.toString();
+      if (localVarQueryParameterString) {
+        localVarPath += "?" + localVarQueryParameterString;
+      }
+      return {
+        url: localVarPath,
+        options: localVarRequestOptions,
+      };
+    },
+    /**
+     * @summary Creates a new database for a given tenant.
+     * @param {string} tenant <p>Tenant ID to associate with the new database</p>
+     * @param {Api.CreateDatabasePayload} request
+     * @param {RequestInit} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    createDatabase(
+      tenant: string,
+      request: Api.CreateDatabasePayload,
+      options: RequestInit = {},
+    ): FetchArgs {
+      // verify required parameter 'tenant' is not null or undefined
+      if (tenant === null || tenant === undefined) {
+        throw new RequiredError(
+          "tenant",
+          "Required parameter tenant was null or undefined when calling createDatabase.",
+        );
+      }
+      // verify required parameter 'request' is not null or undefined
+      if (request === null || request === undefined) {
+        throw new RequiredError(
+          "request",
+          "Required parameter request was null or undefined when calling createDatabase.",
+        );
+      }
+      let localVarPath = `/api/v2/tenants/{tenant}/databases`.replace(
+        "{tenant}",
+        encodeURIComponent(String(tenant)),
+      );
+      const localVarPathQueryStart = localVarPath.indexOf("?");
+      const localVarRequestOptions: RequestInit = Object.assign(
+        { method: "POST" },
+        options,
+      );
+      const localVarHeaderParameter: Headers = options.headers
+        ? new Headers(options.headers)
+        : new Headers();
+      const localVarQueryParameter = new URLSearchParams(
+        localVarPathQueryStart !== -1
+          ? localVarPath.substring(localVarPathQueryStart + 1)
+          : "",
+      );
+      if (localVarPathQueryStart !== -1) {
+        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
+      }
+
+      localVarHeaderParameter.set("Content-Type", "application/json");
+
+      localVarRequestOptions.headers = localVarHeaderParameter;
+
+      if (request !== undefined) {
+        localVarRequestOptions.body = JSON.stringify(request || {});
+      }
+
+      const localVarQueryParameterString = localVarQueryParameter.toString();
+      if (localVarQueryParameterString) {
+        localVarPath += "?" + localVarQueryParameterString;
+      }
+      return {
+        url: localVarPath,
+        options: localVarRequestOptions,
+      };
+    },
+    /**
+     * @summary Creates a new tenant.
+     * @param {Api.CreateTenantPayload} request
+     * @param {RequestInit} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    createTenant(
+      request: Api.CreateTenantPayload,
+      options: RequestInit = {},
+    ): FetchArgs {
+      // verify required parameter 'request' is not null or undefined
+      if (request === null || request === undefined) {
+        throw new RequiredError(
+          "request",
+          "Required parameter request was null or undefined when calling createTenant.",
+        );
       }
       let localVarPath = `/api/v2/tenants`;
       const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'POST' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
+      const localVarRequestOptions: RequestInit = Object.assign(
+        { method: "POST" },
+        options,
+      );
+      const localVarHeaderParameter: Headers = options.headers
+        ? new Headers(options.headers)
+        : new Headers();
+      const localVarQueryParameter = new URLSearchParams(
+        localVarPathQueryStart !== -1
+          ? localVarPath.substring(localVarPathQueryStart + 1)
+          : "",
+      );
       if (localVarPathQueryStart !== -1) {
         localVarPath = localVarPath.substring(0, localVarPathQueryStart);
       }
 
-      localVarHeaderParameter.set('Content-Type', 'application/json');
+      localVarHeaderParameter.set("Content-Type", "application/json");
 
       localVarRequestOptions.headers = localVarHeaderParameter;
 
@@ -528,476 +864,63 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
       };
     },
     /**
-     * @summary Delete Collection V1
-     * @param {string} collectionName
-     * @param {string} [tenant]
-     * @param {string} [database]
+     * @summary Deletes a collection in a given database.
+     * @param {string} tenant <p>Tenant ID</p>
+     * @param {string} database <p>Database name</p>
+     * @param {string} collectionId <p>UUID of the collection to delete</p>
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
-    deleteCollectionV1V1(collectionName: string, tenant: string | undefined, database: string | undefined, options: RequestInit = {}): FetchArgs {
-      // verify required parameter 'collectionName' is not null or undefined
-      if (collectionName === null || collectionName === undefined) {
-        throw new RequiredError('collectionName', 'Required parameter collectionName was null or undefined when calling deleteCollectionV1V1.');
-      }
-      let localVarPath = `/api/v1/collections/{collection_name}`
-        .replace('{collection_name}', encodeURIComponent(String(collectionName)));
-      const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'DELETE' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
-      if (localVarPathQueryStart !== -1) {
-        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
-      }
-
-      if (tenant !== undefined) {
-        localVarQueryParameter.append('tenant', String(tenant));
-      }
-
-      if (database !== undefined) {
-        localVarQueryParameter.append('database', String(database));
-      }
-
-      localVarRequestOptions.headers = localVarHeaderParameter;
-
-      const localVarQueryParameterString = localVarQueryParameter.toString();
-      if (localVarQueryParameterString) {
-        localVarPath += "?" + localVarQueryParameterString;
-      }
-      return {
-        url: localVarPath,
-        options: localVarRequestOptions,
-      };
-    },
-    /**
-     * @summary Delete Collection
-     * @param {string} collectionName
-     * @param {string} tenant
-     * @param {string} databaseName
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    deleteCollectionV2(collectionName: string, tenant: string, databaseName: string, options: RequestInit = {}): FetchArgs {
-      // verify required parameter 'collectionName' is not null or undefined
-      if (collectionName === null || collectionName === undefined) {
-        throw new RequiredError('collectionName', 'Required parameter collectionName was null or undefined when calling deleteCollectionV2.');
-      }
+    deleteCollection(
+      tenant: string,
+      database: string,
+      collectionId: string,
+      options: RequestInit = {},
+    ): FetchArgs {
       // verify required parameter 'tenant' is not null or undefined
       if (tenant === null || tenant === undefined) {
-        throw new RequiredError('tenant', 'Required parameter tenant was null or undefined when calling deleteCollectionV2.');
+        throw new RequiredError(
+          "tenant",
+          "Required parameter tenant was null or undefined when calling deleteCollection.",
+        );
       }
-      // verify required parameter 'databaseName' is not null or undefined
-      if (databaseName === null || databaseName === undefined) {
-        throw new RequiredError('databaseName', 'Required parameter databaseName was null or undefined when calling deleteCollectionV2.');
-      }
-      let localVarPath = `/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_name}`
-        .replace('{tenant}', encodeURIComponent(String(tenant)))
-        .replace('{database_name}', encodeURIComponent(String(databaseName)))
-        .replace('{collection_name}', encodeURIComponent(String(collectionName)));
-      const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'DELETE' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
-      if (localVarPathQueryStart !== -1) {
-        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
-      }
-
-      localVarRequestOptions.headers = localVarHeaderParameter;
-
-      const localVarQueryParameterString = localVarQueryParameter.toString();
-      if (localVarQueryParameterString) {
-        localVarPath += "?" + localVarQueryParameterString;
-      }
-      return {
-        url: localVarPath,
-        options: localVarRequestOptions,
-      };
-    },
-    /**
-     * @summary Delete Database
-     * @param {string} databaseName
-     * @param {string} tenant
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    deleteDatabaseV2(databaseName: string, tenant: string, options: RequestInit = {}): FetchArgs {
-      // verify required parameter 'databaseName' is not null or undefined
-      if (databaseName === null || databaseName === undefined) {
-        throw new RequiredError('databaseName', 'Required parameter databaseName was null or undefined when calling deleteDatabaseV2.');
-      }
-      // verify required parameter 'tenant' is not null or undefined
-      if (tenant === null || tenant === undefined) {
-        throw new RequiredError('tenant', 'Required parameter tenant was null or undefined when calling deleteDatabaseV2.');
-      }
-      let localVarPath = `/api/v2/tenants/{tenant}/databases/{database_name}`
-        .replace('{tenant}', encodeURIComponent(String(tenant)))
-        .replace('{database_name}', encodeURIComponent(String(databaseName)));
-      const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'DELETE' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
-      if (localVarPathQueryStart !== -1) {
-        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
-      }
-
-      localVarRequestOptions.headers = localVarHeaderParameter;
-
-      const localVarQueryParameterString = localVarQueryParameter.toString();
-      if (localVarQueryParameterString) {
-        localVarPath += "?" + localVarQueryParameterString;
-      }
-      return {
-        url: localVarPath,
-        options: localVarRequestOptions,
-      };
-    },
-    /**
-     * @summary Delete V1
-     * @param {string} collectionId
-     * @param {Api.DeleteV1V1Request} request
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    deleteV1V1(collectionId: string, request: Api.DeleteV1V1Request, options: RequestInit = {}): FetchArgs {
-      // verify required parameter 'collectionId' is not null or undefined
-      if (collectionId === null || collectionId === undefined) {
-        throw new RequiredError('collectionId', 'Required parameter collectionId was null or undefined when calling deleteV1V1.');
-      }
-      // verify required parameter 'request' is not null or undefined
-      if (request === null || request === undefined) {
-        throw new RequiredError('request', 'Required parameter request was null or undefined when calling deleteV1V1.');
-      }
-      let localVarPath = `/api/v1/collections/{collection_id}/delete`
-        .replace('{collection_id}', encodeURIComponent(String(collectionId)));
-      const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'POST' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
-      if (localVarPathQueryStart !== -1) {
-        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
-      }
-
-      localVarHeaderParameter.set('Content-Type', 'application/json');
-
-      localVarRequestOptions.headers = localVarHeaderParameter;
-
-      if (request !== undefined) {
-        localVarRequestOptions.body = JSON.stringify(request || {});
-      }
-
-      const localVarQueryParameterString = localVarQueryParameter.toString();
-      if (localVarQueryParameterString) {
-        localVarPath += "?" + localVarQueryParameterString;
-      }
-      return {
-        url: localVarPath,
-        options: localVarRequestOptions,
-      };
-    },
-    /**
-     * @summary Delete
-     * @param {string} collectionId
-     * @param {string} tenant
-     * @param {string} databaseName
-     * @param {Api.DeleteV2Request} request
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    deleteV2(collectionId: string, tenant: string, databaseName: string, request: Api.DeleteV2Request, options: RequestInit = {}): FetchArgs {
-      // verify required parameter 'collectionId' is not null or undefined
-      if (collectionId === null || collectionId === undefined) {
-        throw new RequiredError('collectionId', 'Required parameter collectionId was null or undefined when calling deleteV2.');
-      }
-      // verify required parameter 'tenant' is not null or undefined
-      if (tenant === null || tenant === undefined) {
-        throw new RequiredError('tenant', 'Required parameter tenant was null or undefined when calling deleteV2.');
-      }
-      // verify required parameter 'databaseName' is not null or undefined
-      if (databaseName === null || databaseName === undefined) {
-        throw new RequiredError('databaseName', 'Required parameter databaseName was null or undefined when calling deleteV2.');
-      }
-      // verify required parameter 'request' is not null or undefined
-      if (request === null || request === undefined) {
-        throw new RequiredError('request', 'Required parameter request was null or undefined when calling deleteV2.');
-      }
-      let localVarPath = `/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/delete`
-        .replace('{tenant}', encodeURIComponent(String(tenant)))
-        .replace('{database_name}', encodeURIComponent(String(databaseName)))
-        .replace('{collection_id}', encodeURIComponent(String(collectionId)));
-      const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'POST' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
-      if (localVarPathQueryStart !== -1) {
-        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
-      }
-
-      localVarHeaderParameter.set('Content-Type', 'application/json');
-
-      localVarRequestOptions.headers = localVarHeaderParameter;
-
-      if (request !== undefined) {
-        localVarRequestOptions.body = JSON.stringify(request || {});
-      }
-
-      const localVarQueryParameterString = localVarQueryParameter.toString();
-      if (localVarQueryParameterString) {
-        localVarPath += "?" + localVarQueryParameterString;
-      }
-      return {
-        url: localVarPath,
-        options: localVarRequestOptions,
-      };
-    },
-    /**
-     * @summary Get Collection V1
-     * @param {string} collectionName
-     * @param {string} [tenant]
-     * @param {string} [database]
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    getCollectionV1V1(collectionName: string, tenant: string | undefined, database: string | undefined, options: RequestInit = {}): FetchArgs {
-      // verify required parameter 'collectionName' is not null or undefined
-      if (collectionName === null || collectionName === undefined) {
-        throw new RequiredError('collectionName', 'Required parameter collectionName was null or undefined when calling getCollectionV1V1.');
-      }
-      let localVarPath = `/api/v1/collections/{collection_name}`
-        .replace('{collection_name}', encodeURIComponent(String(collectionName)));
-      const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'GET' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
-      if (localVarPathQueryStart !== -1) {
-        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
-      }
-
-      if (tenant !== undefined) {
-        localVarQueryParameter.append('tenant', String(tenant));
-      }
-
-      if (database !== undefined) {
-        localVarQueryParameter.append('database', String(database));
-      }
-
-      localVarRequestOptions.headers = localVarHeaderParameter;
-
-      const localVarQueryParameterString = localVarQueryParameter.toString();
-      if (localVarQueryParameterString) {
-        localVarPath += "?" + localVarQueryParameterString;
-      }
-      return {
-        url: localVarPath,
-        options: localVarRequestOptions,
-      };
-    },
-    /**
-     * @summary Get Collection
-     * @param {string} tenant
-     * @param {string} databaseName
-     * @param {string} collectionName
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    getCollectionV2(tenant: string, databaseName: string, collectionName: string, options: RequestInit = {}): FetchArgs {
-      // verify required parameter 'tenant' is not null or undefined
-      if (tenant === null || tenant === undefined) {
-        throw new RequiredError('tenant', 'Required parameter tenant was null or undefined when calling getCollectionV2.');
-      }
-      // verify required parameter 'databaseName' is not null or undefined
-      if (databaseName === null || databaseName === undefined) {
-        throw new RequiredError('databaseName', 'Required parameter databaseName was null or undefined when calling getCollectionV2.');
-      }
-      // verify required parameter 'collectionName' is not null or undefined
-      if (collectionName === null || collectionName === undefined) {
-        throw new RequiredError('collectionName', 'Required parameter collectionName was null or undefined when calling getCollectionV2.');
-      }
-      let localVarPath = `/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_name}`
-        .replace('{tenant}', encodeURIComponent(String(tenant)))
-        .replace('{database_name}', encodeURIComponent(String(databaseName)))
-        .replace('{collection_name}', encodeURIComponent(String(collectionName)));
-      const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'GET' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
-      if (localVarPathQueryStart !== -1) {
-        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
-      }
-
-      localVarRequestOptions.headers = localVarHeaderParameter;
-
-      const localVarQueryParameterString = localVarQueryParameter.toString();
-      if (localVarQueryParameterString) {
-        localVarPath += "?" + localVarQueryParameterString;
-      }
-      return {
-        url: localVarPath,
-        options: localVarRequestOptions,
-      };
-    },
-    /**
-     * @summary Get Database V1
-     * @param {string} database
-     * @param {string} [tenant]
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    getDatabaseV1V1(database: string, tenant: string | undefined, options: RequestInit = {}): FetchArgs {
       // verify required parameter 'database' is not null or undefined
       if (database === null || database === undefined) {
-        throw new RequiredError('database', 'Required parameter database was null or undefined when calling getDatabaseV1V1.');
-      }
-      let localVarPath = `/api/v1/databases/{database}`
-        .replace('{database}', encodeURIComponent(String(database)));
-      const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'GET' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
-      if (localVarPathQueryStart !== -1) {
-        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
-      }
-
-      if (tenant !== undefined) {
-        localVarQueryParameter.append('tenant', String(tenant));
-      }
-
-      localVarRequestOptions.headers = localVarHeaderParameter;
-
-      const localVarQueryParameterString = localVarQueryParameter.toString();
-      if (localVarQueryParameterString) {
-        localVarPath += "?" + localVarQueryParameterString;
-      }
-      return {
-        url: localVarPath,
-        options: localVarRequestOptions,
-      };
-    },
-    /**
-     * @summary Get Database
-     * @param {string} databaseName
-     * @param {string} tenant
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    getDatabaseV2(databaseName: string, tenant: string, options: RequestInit = {}): FetchArgs {
-      // verify required parameter 'databaseName' is not null or undefined
-      if (databaseName === null || databaseName === undefined) {
-        throw new RequiredError('databaseName', 'Required parameter databaseName was null or undefined when calling getDatabaseV2.');
-      }
-      // verify required parameter 'tenant' is not null or undefined
-      if (tenant === null || tenant === undefined) {
-        throw new RequiredError('tenant', 'Required parameter tenant was null or undefined when calling getDatabaseV2.');
-      }
-      let localVarPath = `/api/v2/tenants/{tenant}/databases/{database_name}`
-        .replace('{tenant}', encodeURIComponent(String(tenant)))
-        .replace('{database_name}', encodeURIComponent(String(databaseName)));
-      const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'GET' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
-      if (localVarPathQueryStart !== -1) {
-        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
-      }
-
-      localVarRequestOptions.headers = localVarHeaderParameter;
-
-      const localVarQueryParameterString = localVarQueryParameter.toString();
-      if (localVarQueryParameterString) {
-        localVarPath += "?" + localVarQueryParameterString;
-      }
-      return {
-        url: localVarPath,
-        options: localVarRequestOptions,
-      };
-    },
-    /**
-     * @summary Get Nearest Neighbors V1
-     * @param {string} collectionId
-     * @param {Api.GetNearestNeighborsV1V1Request} request
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    getNearestNeighborsV1V1(collectionId: string, request: Api.GetNearestNeighborsV1V1Request, options: RequestInit = {}): FetchArgs {
-      // verify required parameter 'collectionId' is not null or undefined
-      if (collectionId === null || collectionId === undefined) {
-        throw new RequiredError('collectionId', 'Required parameter collectionId was null or undefined when calling getNearestNeighborsV1V1.');
-      }
-      // verify required parameter 'request' is not null or undefined
-      if (request === null || request === undefined) {
-        throw new RequiredError('request', 'Required parameter request was null or undefined when calling getNearestNeighborsV1V1.');
-      }
-      let localVarPath = `/api/v1/collections/{collection_id}/query`
-        .replace('{collection_id}', encodeURIComponent(String(collectionId)));
-      const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'POST' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
-      if (localVarPathQueryStart !== -1) {
-        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
-      }
-
-      localVarHeaderParameter.set('Content-Type', 'application/json');
-
-      localVarRequestOptions.headers = localVarHeaderParameter;
-
-      if (request !== undefined) {
-        localVarRequestOptions.body = JSON.stringify(request || {});
-      }
-
-      const localVarQueryParameterString = localVarQueryParameter.toString();
-      if (localVarQueryParameterString) {
-        localVarPath += "?" + localVarQueryParameterString;
-      }
-      return {
-        url: localVarPath,
-        options: localVarRequestOptions,
-      };
-    },
-    /**
-     * @summary Get Nearest Neighbors
-     * @param {string} tenant
-     * @param {string} databaseName
-     * @param {string} collectionId
-     * @param {Api.GetNearestNeighborsV2Request} request
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    getNearestNeighborsV2(tenant: string, databaseName: string, collectionId: string, request: Api.GetNearestNeighborsV2Request, options: RequestInit = {}): FetchArgs {
-      // verify required parameter 'tenant' is not null or undefined
-      if (tenant === null || tenant === undefined) {
-        throw new RequiredError('tenant', 'Required parameter tenant was null or undefined when calling getNearestNeighborsV2.');
-      }
-      // verify required parameter 'databaseName' is not null or undefined
-      if (databaseName === null || databaseName === undefined) {
-        throw new RequiredError('databaseName', 'Required parameter databaseName was null or undefined when calling getNearestNeighborsV2.');
+        throw new RequiredError(
+          "database",
+          "Required parameter database was null or undefined when calling deleteCollection.",
+        );
       }
       // verify required parameter 'collectionId' is not null or undefined
       if (collectionId === null || collectionId === undefined) {
-        throw new RequiredError('collectionId', 'Required parameter collectionId was null or undefined when calling getNearestNeighborsV2.');
+        throw new RequiredError(
+          "collectionId",
+          "Required parameter collectionId was null or undefined when calling deleteCollection.",
+        );
       }
-      // verify required parameter 'request' is not null or undefined
-      if (request === null || request === undefined) {
-        throw new RequiredError('request', 'Required parameter request was null or undefined when calling getNearestNeighborsV2.');
-      }
-      let localVarPath = `/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/query`
-        .replace('{tenant}', encodeURIComponent(String(tenant)))
-        .replace('{database_name}', encodeURIComponent(String(databaseName)))
-        .replace('{collection_id}', encodeURIComponent(String(collectionId)));
+      let localVarPath =
+        `/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}`
+          .replace("{tenant}", encodeURIComponent(String(tenant)))
+          .replace("{database}", encodeURIComponent(String(database)))
+          .replace("{collection_id}", encodeURIComponent(String(collectionId)));
       const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'POST' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
+      const localVarRequestOptions: RequestInit = Object.assign(
+        { method: "DELETE" },
+        options,
+      );
+      const localVarHeaderParameter: Headers = options.headers
+        ? new Headers(options.headers)
+        : new Headers();
+      const localVarQueryParameter = new URLSearchParams(
+        localVarPathQueryStart !== -1
+          ? localVarPath.substring(localVarPathQueryStart + 1)
+          : "",
+      );
       if (localVarPathQueryStart !== -1) {
         localVarPath = localVarPath.substring(0, localVarPathQueryStart);
       }
 
-      localVarHeaderParameter.set('Content-Type', 'application/json');
-
       localVarRequestOptions.headers = localVarHeaderParameter;
-
-      if (request !== undefined) {
-        localVarRequestOptions.body = JSON.stringify(request || {});
-      }
 
       const localVarQueryParameterString = localVarQueryParameter.toString();
       if (localVarQueryParameterString) {
@@ -1009,22 +932,47 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
       };
     },
     /**
-     * @summary Get Tenant V1
-     * @param {string} tenant
+     * @summary Deletes a specific database.
+     * @param {string} tenant <p>Tenant ID</p>
+     * @param {string} database <p>Name of the database to delete</p>
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
-    getTenantV1V1(tenant: string, options: RequestInit = {}): FetchArgs {
+    deleteDatabase(
+      tenant: string,
+      database: string,
+      options: RequestInit = {},
+    ): FetchArgs {
       // verify required parameter 'tenant' is not null or undefined
       if (tenant === null || tenant === undefined) {
-        throw new RequiredError('tenant', 'Required parameter tenant was null or undefined when calling getTenantV1V1.');
+        throw new RequiredError(
+          "tenant",
+          "Required parameter tenant was null or undefined when calling deleteDatabase.",
+        );
       }
-      let localVarPath = `/api/v1/tenants/{tenant}`
-        .replace('{tenant}', encodeURIComponent(String(tenant)));
+      // verify required parameter 'database' is not null or undefined
+      if (database === null || database === undefined) {
+        throw new RequiredError(
+          "database",
+          "Required parameter database was null or undefined when calling deleteDatabase.",
+        );
+      }
+      let localVarPath = `/api/v2/tenants/{tenant}/databases/{database}`
+        .replace("{tenant}", encodeURIComponent(String(tenant)))
+        .replace("{database}", encodeURIComponent(String(database)));
       const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'GET' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
+      const localVarRequestOptions: RequestInit = Object.assign(
+        { method: "DELETE" },
+        options,
+      );
+      const localVarHeaderParameter: Headers = options.headers
+        ? new Headers(options.headers)
+        : new Headers();
+      const localVarQueryParameter = new URLSearchParams(
+        localVarPathQueryStart !== -1
+          ? localVarPath.substring(localVarPathQueryStart + 1)
+          : "",
+      );
       if (localVarPathQueryStart !== -1) {
         localVarPath = localVarPath.substring(0, localVarPathQueryStart);
       }
@@ -1041,22 +989,58 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
       };
     },
     /**
-     * @summary Get Tenant
-     * @param {string} tenant
+     * @summary Retrieves a collection by ID or name.
+     * @param {string} tenant <p>Tenant ID</p>
+     * @param {string} database <p>Database name</p>
+     * @param {string} collectionId <p>UUID of the collection</p>
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
-    getTenantV2(tenant: string, options: RequestInit = {}): FetchArgs {
+    getCollection(
+      tenant: string,
+      database: string,
+      collectionId: string,
+      options: RequestInit = {},
+    ): FetchArgs {
       // verify required parameter 'tenant' is not null or undefined
       if (tenant === null || tenant === undefined) {
-        throw new RequiredError('tenant', 'Required parameter tenant was null or undefined when calling getTenantV2.');
+        throw new RequiredError(
+          "tenant",
+          "Required parameter tenant was null or undefined when calling getCollection.",
+        );
       }
-      let localVarPath = `/api/v2/tenants/{tenant}`
-        .replace('{tenant}', encodeURIComponent(String(tenant)));
+      // verify required parameter 'database' is not null or undefined
+      if (database === null || database === undefined) {
+        throw new RequiredError(
+          "database",
+          "Required parameter database was null or undefined when calling getCollection.",
+        );
+      }
+      // verify required parameter 'collectionId' is not null or undefined
+      if (collectionId === null || collectionId === undefined) {
+        throw new RequiredError(
+          "collectionId",
+          "Required parameter collectionId was null or undefined when calling getCollection.",
+        );
+      }
+      let localVarPath =
+        `/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}`
+          .replace("{tenant}", encodeURIComponent(String(tenant)))
+          .replace("{database}", encodeURIComponent(String(database)))
+          .replace("{collection_id}", encodeURIComponent(String(collectionId)));
       const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'GET' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
+      const localVarRequestOptions: RequestInit = Object.assign(
+        { method: "GET" },
+        options,
+      );
+      const localVarHeaderParameter: Headers = options.headers
+        ? new Headers(options.headers)
+        : new Headers();
+      const localVarQueryParameter = new URLSearchParams(
+        localVarPathQueryStart !== -1
+          ? localVarPath.substring(localVarPathQueryStart + 1)
+          : "",
+      );
       if (localVarPathQueryStart !== -1) {
         localVarPath = localVarPath.substring(0, localVarPathQueryStart);
       }
@@ -1073,16 +1057,128 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
       };
     },
     /**
-     * @summary Get User Identity
+     * @summary Retrieves a specific database by name.
+     * @param {string} tenant <p>Tenant ID</p>
+     * @param {string} database <p>Name of the database to retrieve</p>
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
-    getUserIdentityV2(options: RequestInit = {}): FetchArgs {
+    getDatabase(
+      tenant: string,
+      database: string,
+      options: RequestInit = {},
+    ): FetchArgs {
+      // verify required parameter 'tenant' is not null or undefined
+      if (tenant === null || tenant === undefined) {
+        throw new RequiredError(
+          "tenant",
+          "Required parameter tenant was null or undefined when calling getDatabase.",
+        );
+      }
+      // verify required parameter 'database' is not null or undefined
+      if (database === null || database === undefined) {
+        throw new RequiredError(
+          "database",
+          "Required parameter database was null or undefined when calling getDatabase.",
+        );
+      }
+      let localVarPath = `/api/v2/tenants/{tenant}/databases/{database}`
+        .replace("{tenant}", encodeURIComponent(String(tenant)))
+        .replace("{database}", encodeURIComponent(String(database)));
+      const localVarPathQueryStart = localVarPath.indexOf("?");
+      const localVarRequestOptions: RequestInit = Object.assign(
+        { method: "GET" },
+        options,
+      );
+      const localVarHeaderParameter: Headers = options.headers
+        ? new Headers(options.headers)
+        : new Headers();
+      const localVarQueryParameter = new URLSearchParams(
+        localVarPathQueryStart !== -1
+          ? localVarPath.substring(localVarPathQueryStart + 1)
+          : "",
+      );
+      if (localVarPathQueryStart !== -1) {
+        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
+      }
+
+      localVarRequestOptions.headers = localVarHeaderParameter;
+
+      const localVarQueryParameterString = localVarQueryParameter.toString();
+      if (localVarQueryParameterString) {
+        localVarPath += "?" + localVarQueryParameterString;
+      }
+      return {
+        url: localVarPath,
+        options: localVarRequestOptions,
+      };
+    },
+    /**
+     * @summary Returns an existing tenant by name.
+     * @param {string} tenantName <p>Tenant name or ID to retrieve</p>
+     * @param {RequestInit} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    getTenant(tenantName: string, options: RequestInit = {}): FetchArgs {
+      // verify required parameter 'tenantName' is not null or undefined
+      if (tenantName === null || tenantName === undefined) {
+        throw new RequiredError(
+          "tenantName",
+          "Required parameter tenantName was null or undefined when calling getTenant.",
+        );
+      }
+      let localVarPath = `/api/v2/tenants/{tenant_name}`.replace(
+        "{tenant_name}",
+        encodeURIComponent(String(tenantName)),
+      );
+      const localVarPathQueryStart = localVarPath.indexOf("?");
+      const localVarRequestOptions: RequestInit = Object.assign(
+        { method: "GET" },
+        options,
+      );
+      const localVarHeaderParameter: Headers = options.headers
+        ? new Headers(options.headers)
+        : new Headers();
+      const localVarQueryParameter = new URLSearchParams(
+        localVarPathQueryStart !== -1
+          ? localVarPath.substring(localVarPathQueryStart + 1)
+          : "",
+      );
+      if (localVarPathQueryStart !== -1) {
+        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
+      }
+
+      localVarRequestOptions.headers = localVarHeaderParameter;
+
+      const localVarQueryParameterString = localVarQueryParameter.toString();
+      if (localVarQueryParameterString) {
+        localVarPath += "?" + localVarQueryParameterString;
+      }
+      return {
+        url: localVarPath,
+        options: localVarRequestOptions,
+      };
+    },
+    /**
+     * @summary Retrieves the current user's identity, tenant, and databases.
+     * @param {RequestInit} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    getUserIdentity(options: RequestInit = {}): FetchArgs {
       let localVarPath = `/api/v2/auth/identity`;
       const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'GET' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
+      const localVarRequestOptions: RequestInit = Object.assign(
+        { method: "GET" },
+        options,
+      );
+      const localVarHeaderParameter: Headers = options.headers
+        ? new Headers(options.headers)
+        : new Headers();
+      const localVarQueryParameter = new URLSearchParams(
+        localVarPathQueryStart !== -1
+          ? localVarPath.substring(localVarPathQueryStart + 1)
+          : "",
+      );
       if (localVarPathQueryStart !== -1) {
         localVarPath = localVarPath.substring(0, localVarPathQueryStart);
       }
@@ -1099,114 +1195,25 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
       };
     },
     /**
-     * @summary Get V1
-     * @param {string} collectionId
-     * @param {Api.GetV1V1Request} request
+     * @summary Health check endpoint that returns 200 if the server and executor are ready
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
-    getV1V1(collectionId: string, request: Api.GetV1V1Request, options: RequestInit = {}): FetchArgs {
-      // verify required parameter 'collectionId' is not null or undefined
-      if (collectionId === null || collectionId === undefined) {
-        throw new RequiredError('collectionId', 'Required parameter collectionId was null or undefined when calling getV1V1.');
-      }
-      // verify required parameter 'request' is not null or undefined
-      if (request === null || request === undefined) {
-        throw new RequiredError('request', 'Required parameter request was null or undefined when calling getV1V1.');
-      }
-      let localVarPath = `/api/v1/collections/{collection_id}/get`
-        .replace('{collection_id}', encodeURIComponent(String(collectionId)));
+    healthcheck(options: RequestInit = {}): FetchArgs {
+      let localVarPath = `/api/v2/healthcheck`;
       const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'POST' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
-      if (localVarPathQueryStart !== -1) {
-        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
-      }
-
-      localVarHeaderParameter.set('Content-Type', 'application/json');
-
-      localVarRequestOptions.headers = localVarHeaderParameter;
-
-      if (request !== undefined) {
-        localVarRequestOptions.body = JSON.stringify(request || {});
-      }
-
-      const localVarQueryParameterString = localVarQueryParameter.toString();
-      if (localVarQueryParameterString) {
-        localVarPath += "?" + localVarQueryParameterString;
-      }
-      return {
-        url: localVarPath,
-        options: localVarRequestOptions,
-      };
-    },
-    /**
-     * @summary Get
-     * @param {string} collectionId
-     * @param {string} tenant
-     * @param {string} databaseName
-     * @param {Api.GetV2Request} request
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    getV2(collectionId: string, tenant: string, databaseName: string, request: Api.GetV2Request, options: RequestInit = {}): FetchArgs {
-      // verify required parameter 'collectionId' is not null or undefined
-      if (collectionId === null || collectionId === undefined) {
-        throw new RequiredError('collectionId', 'Required parameter collectionId was null or undefined when calling getV2.');
-      }
-      // verify required parameter 'tenant' is not null or undefined
-      if (tenant === null || tenant === undefined) {
-        throw new RequiredError('tenant', 'Required parameter tenant was null or undefined when calling getV2.');
-      }
-      // verify required parameter 'databaseName' is not null or undefined
-      if (databaseName === null || databaseName === undefined) {
-        throw new RequiredError('databaseName', 'Required parameter databaseName was null or undefined when calling getV2.');
-      }
-      // verify required parameter 'request' is not null or undefined
-      if (request === null || request === undefined) {
-        throw new RequiredError('request', 'Required parameter request was null or undefined when calling getV2.');
-      }
-      let localVarPath = `/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/get`
-        .replace('{tenant}', encodeURIComponent(String(tenant)))
-        .replace('{database_name}', encodeURIComponent(String(databaseName)))
-        .replace('{collection_id}', encodeURIComponent(String(collectionId)));
-      const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'POST' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
-      if (localVarPathQueryStart !== -1) {
-        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
-      }
-
-      localVarHeaderParameter.set('Content-Type', 'application/json');
-
-      localVarRequestOptions.headers = localVarHeaderParameter;
-
-      if (request !== undefined) {
-        localVarRequestOptions.body = JSON.stringify(request || {});
-      }
-
-      const localVarQueryParameterString = localVarQueryParameter.toString();
-      if (localVarQueryParameterString) {
-        localVarPath += "?" + localVarQueryParameterString;
-      }
-      return {
-        url: localVarPath,
-        options: localVarRequestOptions,
-      };
-    },
-    /**
-     * @summary Heartbeat
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    heartbeatV1(options: RequestInit = {}): FetchArgs {
-      let localVarPath = `/api/v1/heartbeat`;
-      const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'GET' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
+      const localVarRequestOptions: RequestInit = Object.assign(
+        { method: "GET" },
+        options,
+      );
+      const localVarHeaderParameter: Headers = options.headers
+        ? new Headers(options.headers)
+        : new Headers();
+      const localVarQueryParameter = new URLSearchParams(
+        localVarPathQueryStart !== -1
+          ? localVarPath.substring(localVarPathQueryStart + 1)
+          : "",
+      );
       if (localVarPathQueryStart !== -1) {
         localVarPath = localVarPath.substring(0, localVarPathQueryStart);
       }
@@ -1223,16 +1230,25 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
       };
     },
     /**
-     * @summary Heartbeat
+     * @summary Heartbeat endpoint that returns a nanosecond timestamp of the current time.
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
-    heartbeatV2(options: RequestInit = {}): FetchArgs {
+    heartbeat(options: RequestInit = {}): FetchArgs {
       let localVarPath = `/api/v2/heartbeat`;
       const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'GET' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
+      const localVarRequestOptions: RequestInit = Object.assign(
+        { method: "GET" },
+        options,
+      );
+      const localVarHeaderParameter: Headers = options.headers
+        ? new Headers(options.headers)
+        : new Headers();
+      const localVarQueryParameter = new URLSearchParams(
+        localVarPathQueryStart !== -1
+          ? localVarPath.substring(localVarPathQueryStart + 1)
+          : "",
+      );
       if (localVarPathQueryStart !== -1) {
         localVarPath = localVarPath.substring(0, localVarPathQueryStart);
       }
@@ -1249,86 +1265,62 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
       };
     },
     /**
-     * @summary List Collections V1
-     * @param {number | null} [limit]
-     * @param {number | null} [offset]
-     * @param {string} [tenant]
-     * @param {string} [database]
+     * @summary Lists all collections in the specified database.
+     * @param {string} tenant <p>Tenant ID</p>
+     * @param {string} database <p>Database name to list collections from</p>
+     * @param {number} [limit] <p>Limit for pagination</p>
+     * @param {number} [offset] <p>Offset for pagination</p>
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
-    listCollectionsV1V1(limit: number | null | undefined, offset: number | null | undefined, tenant: string | undefined, database: string | undefined, options: RequestInit = {}): FetchArgs {
-      let localVarPath = `/api/v1/collections`;
-      const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'GET' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
-      if (localVarPathQueryStart !== -1) {
-        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
-      }
-
-      if (limit !== undefined) {
-        localVarQueryParameter.append('limit', String(limit));
-      }
-
-      if (offset !== undefined) {
-        localVarQueryParameter.append('offset', String(offset));
-      }
-
-      if (tenant !== undefined) {
-        localVarQueryParameter.append('tenant', String(tenant));
-      }
-
-      if (database !== undefined) {
-        localVarQueryParameter.append('database', String(database));
-      }
-
-      localVarRequestOptions.headers = localVarHeaderParameter;
-
-      const localVarQueryParameterString = localVarQueryParameter.toString();
-      if (localVarQueryParameterString) {
-        localVarPath += "?" + localVarQueryParameterString;
-      }
-      return {
-        url: localVarPath,
-        options: localVarRequestOptions,
-      };
-    },
-    /**
-     * @summary List Collections
-     * @param {string} tenant
-     * @param {string} databaseName
-     * @param {number | null} [limit]
-     * @param {number | null} [offset]
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    listCollectionsV2(tenant: string, databaseName: string, limit: number | null | undefined, offset: number | null | undefined, options: RequestInit = {}): FetchArgs {
+    listCollections(
+      tenant: string,
+      database: string,
+      limit: number | undefined,
+      offset: number | undefined,
+      options: RequestInit = {},
+    ): FetchArgs {
       // verify required parameter 'tenant' is not null or undefined
       if (tenant === null || tenant === undefined) {
-        throw new RequiredError('tenant', 'Required parameter tenant was null or undefined when calling listCollectionsV2.');
+        throw new RequiredError(
+          "tenant",
+          "Required parameter tenant was null or undefined when calling listCollections.",
+        );
       }
-      // verify required parameter 'databaseName' is not null or undefined
-      if (databaseName === null || databaseName === undefined) {
-        throw new RequiredError('databaseName', 'Required parameter databaseName was null or undefined when calling listCollectionsV2.');
+      // verify required parameter 'database' is not null or undefined
+      if (database === null || database === undefined) {
+        throw new RequiredError(
+          "database",
+          "Required parameter database was null or undefined when calling listCollections.",
+        );
       }
-      let localVarPath = `/api/v2/tenants/{tenant}/databases/{database_name}/collections`
-        .replace('{tenant}', encodeURIComponent(String(tenant)))
-        .replace('{database_name}', encodeURIComponent(String(databaseName)));
+      let localVarPath =
+        `/api/v2/tenants/{tenant}/databases/{database}/collections`
+          .replace("{tenant}", encodeURIComponent(String(tenant)))
+          .replace("{database}", encodeURIComponent(String(database)));
       const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'GET' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
+      const localVarRequestOptions: RequestInit = Object.assign(
+        { method: "GET" },
+        options,
+      );
+      const localVarHeaderParameter: Headers = options.headers
+        ? new Headers(options.headers)
+        : new Headers();
+      const localVarQueryParameter = new URLSearchParams(
+        localVarPathQueryStart !== -1
+          ? localVarPath.substring(localVarPathQueryStart + 1)
+          : "",
+      );
       if (localVarPathQueryStart !== -1) {
         localVarPath = localVarPath.substring(0, localVarPathQueryStart);
       }
 
       if (limit !== undefined) {
-        localVarQueryParameter.append('limit', String(limit));
+        localVarQueryParameter.append("limit", String(limit));
       }
 
       if (offset !== undefined) {
-        localVarQueryParameter.append('offset', String(offset));
+        localVarQueryParameter.append("offset", String(offset));
       }
 
       localVarRequestOptions.headers = localVarHeaderParameter;
@@ -1343,34 +1335,53 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
       };
     },
     /**
-     * @summary List Databases
-     * @param {string} tenant
-     * @param {number | null} [limit]
-     * @param {number | null} [offset]
+     * @summary Lists all databases for a given tenant.
+     * @param {string} tenant <p>Tenant ID to list databases for</p>
+     * @param {number} [limit] <p>Limit for pagination</p>
+     * @param {number} [offset] <p>Offset for pagination</p>
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
-    listDatabasesV2(tenant: string, limit: number | null | undefined, offset: number | null | undefined, options: RequestInit = {}): FetchArgs {
+    listDatabases(
+      tenant: string,
+      limit: number | undefined,
+      offset: number | undefined,
+      options: RequestInit = {},
+    ): FetchArgs {
       // verify required parameter 'tenant' is not null or undefined
       if (tenant === null || tenant === undefined) {
-        throw new RequiredError('tenant', 'Required parameter tenant was null or undefined when calling listDatabasesV2.');
+        throw new RequiredError(
+          "tenant",
+          "Required parameter tenant was null or undefined when calling listDatabases.",
+        );
       }
-      let localVarPath = `/api/v2/tenants/{tenant}/databases`
-        .replace('{tenant}', encodeURIComponent(String(tenant)));
+      let localVarPath = `/api/v2/tenants/{tenant}/databases`.replace(
+        "{tenant}",
+        encodeURIComponent(String(tenant)),
+      );
       const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'GET' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
+      const localVarRequestOptions: RequestInit = Object.assign(
+        { method: "GET" },
+        options,
+      );
+      const localVarHeaderParameter: Headers = options.headers
+        ? new Headers(options.headers)
+        : new Headers();
+      const localVarQueryParameter = new URLSearchParams(
+        localVarPathQueryStart !== -1
+          ? localVarPath.substring(localVarPathQueryStart + 1)
+          : "",
+      );
       if (localVarPathQueryStart !== -1) {
         localVarPath = localVarPath.substring(0, localVarPathQueryStart);
       }
 
       if (limit !== undefined) {
-        localVarQueryParameter.append('limit', String(limit));
+        localVarQueryParameter.append("limit", String(limit));
       }
 
       if (offset !== undefined) {
-        localVarQueryParameter.append('offset', String(offset));
+        localVarQueryParameter.append("offset", String(offset));
       }
 
       localVarRequestOptions.headers = localVarHeaderParameter;
@@ -1385,42 +1396,25 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
       };
     },
     /**
-     * @summary Pre Flight Checks
+     * @summary Pre-flight checks endpoint reporting basic readiness info.
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
-    preFlightChecksV1(options: RequestInit = {}): FetchArgs {
-      let localVarPath = `/api/v1/pre-flight-checks`;
-      const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'GET' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
-      if (localVarPathQueryStart !== -1) {
-        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
-      }
-
-      localVarRequestOptions.headers = localVarHeaderParameter;
-
-      const localVarQueryParameterString = localVarQueryParameter.toString();
-      if (localVarQueryParameterString) {
-        localVarPath += "?" + localVarQueryParameterString;
-      }
-      return {
-        url: localVarPath,
-        options: localVarRequestOptions,
-      };
-    },
-    /**
-     * @summary Pre Flight Checks
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    preFlightChecksV2(options: RequestInit = {}): FetchArgs {
+    preFlightChecks(options: RequestInit = {}): FetchArgs {
       let localVarPath = `/api/v2/pre-flight-checks`;
       const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'GET' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
+      const localVarRequestOptions: RequestInit = Object.assign(
+        { method: "GET" },
+        options,
+      );
+      const localVarHeaderParameter: Headers = options.headers
+        ? new Headers(options.headers)
+        : new Headers();
+      const localVarQueryParameter = new URLSearchParams(
+        localVarPathQueryStart !== -1
+          ? localVarPath.substring(localVarPathQueryStart + 1)
+          : "",
+      );
       if (localVarPathQueryStart !== -1) {
         localVarPath = localVarPath.substring(0, localVarPathQueryStart);
       }
@@ -1437,42 +1431,25 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
       };
     },
     /**
-     * @summary Reset
+     * @summary Reset endpoint allowing authorized users to reset the database.
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
-    resetV1(options: RequestInit = {}): FetchArgs {
-      let localVarPath = `/api/v1/reset`;
-      const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'POST' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
-      if (localVarPathQueryStart !== -1) {
-        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
-      }
-
-      localVarRequestOptions.headers = localVarHeaderParameter;
-
-      const localVarQueryParameterString = localVarQueryParameter.toString();
-      if (localVarQueryParameterString) {
-        localVarPath += "?" + localVarQueryParameterString;
-      }
-      return {
-        url: localVarPath,
-        options: localVarRequestOptions,
-      };
-    },
-    /**
-     * @summary Reset
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    resetV2(options: RequestInit = {}): FetchArgs {
+    reset(options: RequestInit = {}): FetchArgs {
       let localVarPath = `/api/v2/reset`;
       const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'POST' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
+      const localVarRequestOptions: RequestInit = Object.assign(
+        { method: "POST" },
+        options,
+      );
+      const localVarHeaderParameter: Headers = options.headers
+        ? new Headers(options.headers)
+        : new Headers();
+      const localVarQueryParameter = new URLSearchParams(
+        localVarPathQueryStart !== -1
+          ? localVarPath.substring(localVarPathQueryStart + 1)
+          : "",
+      );
       if (localVarPathQueryStart !== -1) {
         localVarPath = localVarPath.substring(0, localVarPathQueryStart);
       }
@@ -1489,139 +1466,72 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
       };
     },
     /**
-     * @summary Root
+     * @summary Updates an existing collection's name or metadata.
+     * @param {string} tenant <p>Tenant ID</p>
+     * @param {string} database <p>Database name</p>
+     * @param {string} collectionId <p>UUID of the collection to update</p>
+     * @param {Api.UpdateCollectionPayload} request
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
-    rootV1(options: RequestInit = {}): FetchArgs {
-      let localVarPath = `/api/v1`;
-      const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'GET' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
-      if (localVarPathQueryStart !== -1) {
-        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
-      }
-
-      localVarRequestOptions.headers = localVarHeaderParameter;
-
-      const localVarQueryParameterString = localVarQueryParameter.toString();
-      if (localVarQueryParameterString) {
-        localVarPath += "?" + localVarQueryParameterString;
-      }
-      return {
-        url: localVarPath,
-        options: localVarRequestOptions,
-      };
-    },
-    /**
-     * @summary Root
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    rootV2(options: RequestInit = {}): FetchArgs {
-      let localVarPath = `/api/v2`;
-      const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'GET' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
-      if (localVarPathQueryStart !== -1) {
-        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
-      }
-
-      localVarRequestOptions.headers = localVarHeaderParameter;
-
-      const localVarQueryParameterString = localVarQueryParameter.toString();
-      if (localVarQueryParameterString) {
-        localVarPath += "?" + localVarQueryParameterString;
-      }
-      return {
-        url: localVarPath,
-        options: localVarRequestOptions,
-      };
-    },
-    /**
-     * @summary Update Collection V1
-     * @param {string} collectionId
-     * @param {Api.UpdateCollectionV1V1Request} request
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    updateCollectionV1V1(collectionId: string, request: Api.UpdateCollectionV1V1Request, options: RequestInit = {}): FetchArgs {
-      // verify required parameter 'collectionId' is not null or undefined
-      if (collectionId === null || collectionId === undefined) {
-        throw new RequiredError('collectionId', 'Required parameter collectionId was null or undefined when calling updateCollectionV1V1.');
-      }
-      // verify required parameter 'request' is not null or undefined
-      if (request === null || request === undefined) {
-        throw new RequiredError('request', 'Required parameter request was null or undefined when calling updateCollectionV1V1.');
-      }
-      let localVarPath = `/api/v1/collections/{collection_id}`
-        .replace('{collection_id}', encodeURIComponent(String(collectionId)));
-      const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'PUT' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
-      if (localVarPathQueryStart !== -1) {
-        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
-      }
-
-      localVarHeaderParameter.set('Content-Type', 'application/json');
-
-      localVarRequestOptions.headers = localVarHeaderParameter;
-
-      if (request !== undefined) {
-        localVarRequestOptions.body = JSON.stringify(request || {});
-      }
-
-      const localVarQueryParameterString = localVarQueryParameter.toString();
-      if (localVarQueryParameterString) {
-        localVarPath += "?" + localVarQueryParameterString;
-      }
-      return {
-        url: localVarPath,
-        options: localVarRequestOptions,
-      };
-    },
-    /**
-     * @summary Update Collection
-     * @param {string} tenant
-     * @param {string} databaseName
-     * @param {string} collectionId
-     * @param {Api.UpdateCollectionV2Request} request
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    updateCollectionV2(tenant: string, databaseName: string, collectionId: string, request: Api.UpdateCollectionV2Request, options: RequestInit = {}): FetchArgs {
+    updateCollection(
+      tenant: string,
+      database: string,
+      collectionId: string,
+      request: Api.UpdateCollectionPayload,
+      options: RequestInit = {},
+    ): FetchArgs {
       // verify required parameter 'tenant' is not null or undefined
       if (tenant === null || tenant === undefined) {
-        throw new RequiredError('tenant', 'Required parameter tenant was null or undefined when calling updateCollectionV2.');
+        throw new RequiredError(
+          "tenant",
+          "Required parameter tenant was null or undefined when calling updateCollection.",
+        );
       }
-      // verify required parameter 'databaseName' is not null or undefined
-      if (databaseName === null || databaseName === undefined) {
-        throw new RequiredError('databaseName', 'Required parameter databaseName was null or undefined when calling updateCollectionV2.');
+      // verify required parameter 'database' is not null or undefined
+      if (database === null || database === undefined) {
+        throw new RequiredError(
+          "database",
+          "Required parameter database was null or undefined when calling updateCollection.",
+        );
       }
       // verify required parameter 'collectionId' is not null or undefined
       if (collectionId === null || collectionId === undefined) {
-        throw new RequiredError('collectionId', 'Required parameter collectionId was null or undefined when calling updateCollectionV2.');
+        throw new RequiredError(
+          "collectionId",
+          "Required parameter collectionId was null or undefined when calling updateCollection.",
+        );
       }
       // verify required parameter 'request' is not null or undefined
       if (request === null || request === undefined) {
-        throw new RequiredError('request', 'Required parameter request was null or undefined when calling updateCollectionV2.');
+        throw new RequiredError(
+          "request",
+          "Required parameter request was null or undefined when calling updateCollection.",
+        );
       }
-      let localVarPath = `/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}`
-        .replace('{tenant}', encodeURIComponent(String(tenant)))
-        .replace('{database_name}', encodeURIComponent(String(databaseName)))
-        .replace('{collection_id}', encodeURIComponent(String(collectionId)));
+      let localVarPath =
+        `/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}`
+          .replace("{tenant}", encodeURIComponent(String(tenant)))
+          .replace("{database}", encodeURIComponent(String(database)))
+          .replace("{collection_id}", encodeURIComponent(String(collectionId)));
       const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'PUT' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
+      const localVarRequestOptions: RequestInit = Object.assign(
+        { method: "PUT" },
+        options,
+      );
+      const localVarHeaderParameter: Headers = options.headers
+        ? new Headers(options.headers)
+        : new Headers();
+      const localVarQueryParameter = new URLSearchParams(
+        localVarPathQueryStart !== -1
+          ? localVarPath.substring(localVarPathQueryStart + 1)
+          : "",
+      );
       if (localVarPathQueryStart !== -1) {
         localVarPath = localVarPath.substring(0, localVarPathQueryStart);
       }
 
-      localVarHeaderParameter.set('Content-Type', 'application/json');
+      localVarHeaderParameter.set("Content-Type", "application/json");
 
       localVarRequestOptions.headers = localVarHeaderParameter;
 
@@ -1639,238 +1549,25 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
       };
     },
     /**
-     * @summary Update V1
-     * @param {string} collectionId
-     * @param {Api.UpdateV1V1Request} request
+     * @summary Returns the version of the server.
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
-    updateV1V1(collectionId: string, request: Api.UpdateV1V1Request, options: RequestInit = {}): FetchArgs {
-      // verify required parameter 'collectionId' is not null or undefined
-      if (collectionId === null || collectionId === undefined) {
-        throw new RequiredError('collectionId', 'Required parameter collectionId was null or undefined when calling updateV1V1.');
-      }
-      // verify required parameter 'request' is not null or undefined
-      if (request === null || request === undefined) {
-        throw new RequiredError('request', 'Required parameter request was null or undefined when calling updateV1V1.');
-      }
-      let localVarPath = `/api/v1/collections/{collection_id}/update`
-        .replace('{collection_id}', encodeURIComponent(String(collectionId)));
-      const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'POST' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
-      if (localVarPathQueryStart !== -1) {
-        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
-      }
-
-      localVarHeaderParameter.set('Content-Type', 'application/json');
-
-      localVarRequestOptions.headers = localVarHeaderParameter;
-
-      if (request !== undefined) {
-        localVarRequestOptions.body = JSON.stringify(request || {});
-      }
-
-      const localVarQueryParameterString = localVarQueryParameter.toString();
-      if (localVarQueryParameterString) {
-        localVarPath += "?" + localVarQueryParameterString;
-      }
-      return {
-        url: localVarPath,
-        options: localVarRequestOptions,
-      };
-    },
-    /**
-     * @summary Update
-     * @param {string} tenant
-     * @param {string} databaseName
-     * @param {string} collectionId
-     * @param {Api.UpdateV2Request} request
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    updateV2(tenant: string, databaseName: string, collectionId: string, request: Api.UpdateV2Request, options: RequestInit = {}): FetchArgs {
-      // verify required parameter 'tenant' is not null or undefined
-      if (tenant === null || tenant === undefined) {
-        throw new RequiredError('tenant', 'Required parameter tenant was null or undefined when calling updateV2.');
-      }
-      // verify required parameter 'databaseName' is not null or undefined
-      if (databaseName === null || databaseName === undefined) {
-        throw new RequiredError('databaseName', 'Required parameter databaseName was null or undefined when calling updateV2.');
-      }
-      // verify required parameter 'collectionId' is not null or undefined
-      if (collectionId === null || collectionId === undefined) {
-        throw new RequiredError('collectionId', 'Required parameter collectionId was null or undefined when calling updateV2.');
-      }
-      // verify required parameter 'request' is not null or undefined
-      if (request === null || request === undefined) {
-        throw new RequiredError('request', 'Required parameter request was null or undefined when calling updateV2.');
-      }
-      let localVarPath = `/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/update`
-        .replace('{tenant}', encodeURIComponent(String(tenant)))
-        .replace('{database_name}', encodeURIComponent(String(databaseName)))
-        .replace('{collection_id}', encodeURIComponent(String(collectionId)));
-      const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'POST' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
-      if (localVarPathQueryStart !== -1) {
-        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
-      }
-
-      localVarHeaderParameter.set('Content-Type', 'application/json');
-
-      localVarRequestOptions.headers = localVarHeaderParameter;
-
-      if (request !== undefined) {
-        localVarRequestOptions.body = JSON.stringify(request || {});
-      }
-
-      const localVarQueryParameterString = localVarQueryParameter.toString();
-      if (localVarQueryParameterString) {
-        localVarPath += "?" + localVarQueryParameterString;
-      }
-      return {
-        url: localVarPath,
-        options: localVarRequestOptions,
-      };
-    },
-    /**
-     * @summary Upsert V1
-     * @param {string} collectionId
-     * @param {Api.UpsertV1V1Request} request
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    upsertV1V1(collectionId: string, request: Api.UpsertV1V1Request, options: RequestInit = {}): FetchArgs {
-      // verify required parameter 'collectionId' is not null or undefined
-      if (collectionId === null || collectionId === undefined) {
-        throw new RequiredError('collectionId', 'Required parameter collectionId was null or undefined when calling upsertV1V1.');
-      }
-      // verify required parameter 'request' is not null or undefined
-      if (request === null || request === undefined) {
-        throw new RequiredError('request', 'Required parameter request was null or undefined when calling upsertV1V1.');
-      }
-      let localVarPath = `/api/v1/collections/{collection_id}/upsert`
-        .replace('{collection_id}', encodeURIComponent(String(collectionId)));
-      const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'POST' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
-      if (localVarPathQueryStart !== -1) {
-        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
-      }
-
-      localVarHeaderParameter.set('Content-Type', 'application/json');
-
-      localVarRequestOptions.headers = localVarHeaderParameter;
-
-      if (request !== undefined) {
-        localVarRequestOptions.body = JSON.stringify(request || {});
-      }
-
-      const localVarQueryParameterString = localVarQueryParameter.toString();
-      if (localVarQueryParameterString) {
-        localVarPath += "?" + localVarQueryParameterString;
-      }
-      return {
-        url: localVarPath,
-        options: localVarRequestOptions,
-      };
-    },
-    /**
-     * @summary Upsert
-     * @param {string} tenant
-     * @param {string} databaseName
-     * @param {string} collectionId
-     * @param {Api.UpsertV2Request} request
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    upsertV2(tenant: string, databaseName: string, collectionId: string, request: Api.UpsertV2Request, options: RequestInit = {}): FetchArgs {
-      // verify required parameter 'tenant' is not null or undefined
-      if (tenant === null || tenant === undefined) {
-        throw new RequiredError('tenant', 'Required parameter tenant was null or undefined when calling upsertV2.');
-      }
-      // verify required parameter 'databaseName' is not null or undefined
-      if (databaseName === null || databaseName === undefined) {
-        throw new RequiredError('databaseName', 'Required parameter databaseName was null or undefined when calling upsertV2.');
-      }
-      // verify required parameter 'collectionId' is not null or undefined
-      if (collectionId === null || collectionId === undefined) {
-        throw new RequiredError('collectionId', 'Required parameter collectionId was null or undefined when calling upsertV2.');
-      }
-      // verify required parameter 'request' is not null or undefined
-      if (request === null || request === undefined) {
-        throw new RequiredError('request', 'Required parameter request was null or undefined when calling upsertV2.');
-      }
-      let localVarPath = `/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/upsert`
-        .replace('{tenant}', encodeURIComponent(String(tenant)))
-        .replace('{database_name}', encodeURIComponent(String(databaseName)))
-        .replace('{collection_id}', encodeURIComponent(String(collectionId)));
-      const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'POST' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
-      if (localVarPathQueryStart !== -1) {
-        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
-      }
-
-      localVarHeaderParameter.set('Content-Type', 'application/json');
-
-      localVarRequestOptions.headers = localVarHeaderParameter;
-
-      if (request !== undefined) {
-        localVarRequestOptions.body = JSON.stringify(request || {});
-      }
-
-      const localVarQueryParameterString = localVarQueryParameter.toString();
-      if (localVarQueryParameterString) {
-        localVarPath += "?" + localVarQueryParameterString;
-      }
-      return {
-        url: localVarPath,
-        options: localVarRequestOptions,
-      };
-    },
-    /**
-     * @summary Version
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    versionV1(options: RequestInit = {}): FetchArgs {
-      let localVarPath = `/api/v1/version`;
-      const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'GET' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
-      if (localVarPathQueryStart !== -1) {
-        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
-      }
-
-      localVarRequestOptions.headers = localVarHeaderParameter;
-
-      const localVarQueryParameterString = localVarQueryParameter.toString();
-      if (localVarQueryParameterString) {
-        localVarPath += "?" + localVarQueryParameterString;
-      }
-      return {
-        url: localVarPath,
-        options: localVarRequestOptions,
-      };
-    },
-    /**
-     * @summary Version
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    versionV2(options: RequestInit = {}): FetchArgs {
+    version(options: RequestInit = {}): FetchArgs {
       let localVarPath = `/api/v2/version`;
       const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign({ method: 'GET' }, options);
-      const localVarHeaderParameter: Headers = options.headers ? new Headers(options.headers) : new Headers();
-      const localVarQueryParameter = new URLSearchParams(localVarPathQueryStart !== -1 ? localVarPath.substring(localVarPathQueryStart + 1) : "");
+      const localVarRequestOptions: RequestInit = Object.assign(
+        { method: "GET" },
+        options,
+      );
+      const localVarHeaderParameter: Headers = options.headers
+        ? new Headers(options.headers)
+        : new Headers();
+      const localVarQueryParameter = new URLSearchParams(
+        localVarPathQueryStart !== -1
+          ? localVarPath.substring(localVarPathQueryStart + 1)
+          : "",
+      );
       if (localVarPathQueryStart !== -1) {
         localVarPath = localVarPath.substring(0, localVarPathQueryStart);
       }
@@ -1886,7 +1583,7 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
         options: localVarRequestOptions,
       };
     },
-  }
+  };
 };
 
 /**
@@ -1896,653 +1593,97 @@ export const ApiApiFetchParamCreator = function (configuration?: Configuration) 
 export const ApiApiFp = function (configuration?: Configuration) {
   return {
     /**
-     * @summary Add V1
-     * @param {string} collectionId
-     * @param {Api.AddV1V1Request} request
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    addV1V1(collectionId: string, request: Api.AddV1V1Request, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<unknown> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).addV1V1(collectionId, request, options);
-      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
-          if (response.status === 201) {
-            if (mimeType === 'application/json') {
-              return response.json() as any;
-            }
-            throw response;
-          }
-          if (response.status === 422) {
-            if (mimeType === 'application/json') {
-              throw response;
-            }
-            throw response;
-          }
-          throw response;
-        });
-      };
-    },
-    /**
-     * @summary Add
+     * @summary Adds records to a collection.
      * @param {string} tenant
-     * @param {string} databaseName
-     * @param {string} collectionId
-     * @param {Api.AddV2Request} request
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    addV2(tenant: string, databaseName: string, collectionId: string, request: Api.AddV2Request, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<unknown> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).addV2(tenant, databaseName, collectionId, request, options);
-      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
-          if (response.status === 201) {
-            if (mimeType === 'application/json') {
-              return response.json() as any;
-            }
-            throw response;
-          }
-          if (response.status === 422) {
-            if (mimeType === 'application/json') {
-              throw response;
-            }
-            throw response;
-          }
-          throw response;
-        });
-      };
-    },
-    /**
-     * @summary Count Collections V1
-     * @param {string} [tenant]
-     * @param {string} [database]
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    countCollectionsV1V1(tenant: string | undefined, database: string | undefined, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<unknown> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).countCollectionsV1V1(tenant, database, options);
-      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
-          if (response.status === 200) {
-            if (mimeType === 'application/json') {
-              return response.json() as any;
-            }
-            throw response;
-          }
-          if (response.status === 422) {
-            if (mimeType === 'application/json') {
-              throw response;
-            }
-            throw response;
-          }
-          throw response;
-        });
-      };
-    },
-    /**
-     * @summary Count Collections
-     * @param {string} tenant
-     * @param {string} databaseName
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    countCollectionsV2(tenant: string, databaseName: string, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<unknown> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).countCollectionsV2(tenant, databaseName, options);
-      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
-          if (response.status === 200) {
-            if (mimeType === 'application/json') {
-              return response.json() as any;
-            }
-            throw response;
-          }
-          if (response.status === 422) {
-            if (mimeType === 'application/json') {
-              throw response;
-            }
-            throw response;
-          }
-          throw response;
-        });
-      };
-    },
-    /**
-     * @summary Count V1
-     * @param {string} collectionId
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    countV1V1(collectionId: string, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<unknown> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).countV1V1(collectionId, options);
-      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
-          if (response.status === 200) {
-            if (mimeType === 'application/json') {
-              return response.json() as any;
-            }
-            throw response;
-          }
-          if (response.status === 422) {
-            if (mimeType === 'application/json') {
-              throw response;
-            }
-            throw response;
-          }
-          throw response;
-        });
-      };
-    },
-    /**
-     * @summary Count
-     * @param {string} tenant
-     * @param {string} databaseName
-     * @param {string} collectionId
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    countV2(tenant: string, databaseName: string, collectionId: string, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<unknown> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).countV2(tenant, databaseName, collectionId, options);
-      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
-          if (response.status === 200) {
-            if (mimeType === 'application/json') {
-              return response.json() as any;
-            }
-            throw response;
-          }
-          if (response.status === 422) {
-            if (mimeType === 'application/json') {
-              throw response;
-            }
-            throw response;
-          }
-          throw response;
-        });
-      };
-    },
-    /**
-     * @summary Create Collection V1
-     * @param {string} [tenant]
-     * @param {string} [database]
-     * @param {Api.CreateCollectionV1V1Request} request
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    createCollectionV1V1(tenant: string | undefined, database: string | undefined, request: Api.CreateCollectionV1V1Request, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<unknown> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).createCollectionV1V1(tenant, database, request, options);
-      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
-          if (response.status === 200) {
-            if (mimeType === 'application/json') {
-              return response.json() as any;
-            }
-            throw response;
-          }
-          if (response.status === 422) {
-            if (mimeType === 'application/json') {
-              throw response;
-            }
-            throw response;
-          }
-          throw response;
-        });
-      };
-    },
-    /**
-     * @summary Create Collection
-     * @param {string} tenant
-     * @param {string} databaseName
-     * @param {Api.CreateCollectionV2Request} request
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    createCollectionV2(tenant: string, databaseName: string, request: Api.CreateCollectionV2Request, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<unknown> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).createCollectionV2(tenant, databaseName, request, options);
-      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
-          if (response.status === 200) {
-            if (mimeType === 'application/json') {
-              return response.json() as any;
-            }
-            throw response;
-          }
-          if (response.status === 422) {
-            if (mimeType === 'application/json') {
-              throw response;
-            }
-            throw response;
-          }
-          throw response;
-        });
-      };
-    },
-    /**
-     * @summary Create Database V1
-     * @param {string} [tenant]
-     * @param {Api.CreateDatabaseV1V1Request} request
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    createDatabaseV1V1(tenant: string | undefined, request: Api.CreateDatabaseV1V1Request, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<unknown> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).createDatabaseV1V1(tenant, request, options);
-      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
-          if (response.status === 200) {
-            if (mimeType === 'application/json') {
-              return response.json() as any;
-            }
-            throw response;
-          }
-          if (response.status === 422) {
-            if (mimeType === 'application/json') {
-              throw response;
-            }
-            throw response;
-          }
-          throw response;
-        });
-      };
-    },
-    /**
-     * @summary Create Database
-     * @param {string} tenant
-     * @param {Api.CreateDatabaseV2Request} request
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    createDatabaseV2(tenant: string, request: Api.CreateDatabaseV2Request, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<unknown> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).createDatabaseV2(tenant, request, options);
-      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
-          if (response.status === 200) {
-            if (mimeType === 'application/json') {
-              return response.json() as any;
-            }
-            throw response;
-          }
-          if (response.status === 422) {
-            if (mimeType === 'application/json') {
-              throw response;
-            }
-            throw response;
-          }
-          throw response;
-        });
-      };
-    },
-    /**
-     * @summary Create Tenant V1
-     * @param {Api.CreateTenantV1V1Request} request
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    createTenantV1V1(request: Api.CreateTenantV1V1Request, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<unknown> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).createTenantV1V1(request, options);
-      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
-          if (response.status === 200) {
-            if (mimeType === 'application/json') {
-              return response.json() as any;
-            }
-            throw response;
-          }
-          throw response;
-        });
-      };
-    },
-    /**
-     * @summary Create Tenant
-     * @param {Api.CreateTenantV2Request} request
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    createTenantV2(request: Api.CreateTenantV2Request, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<unknown> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).createTenantV2(request, options);
-      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
-          if (response.status === 200) {
-            if (mimeType === 'application/json') {
-              return response.json() as any;
-            }
-            throw response;
-          }
-          throw response;
-        });
-      };
-    },
-    /**
-     * @summary Delete Collection V1
-     * @param {string} collectionName
-     * @param {string} [tenant]
-     * @param {string} [database]
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    deleteCollectionV1V1(collectionName: string, tenant: string | undefined, database: string | undefined, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<unknown> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).deleteCollectionV1V1(collectionName, tenant, database, options);
-      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
-          if (response.status === 200) {
-            if (mimeType === 'application/json') {
-              return response.json() as any;
-            }
-            throw response;
-          }
-          if (response.status === 422) {
-            if (mimeType === 'application/json') {
-              throw response;
-            }
-            throw response;
-          }
-          throw response;
-        });
-      };
-    },
-    /**
-     * @summary Delete Collection
-     * @param {string} collectionName
-     * @param {string} tenant
-     * @param {string} databaseName
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    deleteCollectionV2(collectionName: string, tenant: string, databaseName: string, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<unknown> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).deleteCollectionV2(collectionName, tenant, databaseName, options);
-      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
-          if (response.status === 200) {
-            if (mimeType === 'application/json') {
-              return response.json() as any;
-            }
-            throw response;
-          }
-          if (response.status === 422) {
-            if (mimeType === 'application/json') {
-              throw response;
-            }
-            throw response;
-          }
-          throw response;
-        });
-      };
-    },
-    /**
-     * @summary Delete Database
-     * @param {string} databaseName
-     * @param {string} tenant
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    deleteDatabaseV2(databaseName: string, tenant: string, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<unknown> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).deleteDatabaseV2(databaseName, tenant, options);
-      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
-          if (response.status === 200) {
-            if (mimeType === 'application/json') {
-              return response.json() as any;
-            }
-            throw response;
-          }
-          if (response.status === 422) {
-            if (mimeType === 'application/json') {
-              throw response;
-            }
-            throw response;
-          }
-          throw response;
-        });
-      };
-    },
-    /**
-     * @summary Delete V1
-     * @param {string} collectionId
-     * @param {Api.DeleteV1V1Request} request
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    deleteV1V1(collectionId: string, request: Api.DeleteV1V1Request, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<unknown> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).deleteV1V1(collectionId, request, options);
-      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
-          if (response.status === 200) {
-            if (mimeType === 'application/json') {
-              return response.json() as any;
-            }
-            throw response;
-          }
-          if (response.status === 422) {
-            if (mimeType === 'application/json') {
-              throw response;
-            }
-            throw response;
-          }
-          throw response;
-        });
-      };
-    },
-    /**
-     * @summary Delete
-     * @param {string} collectionId
-     * @param {string} tenant
-     * @param {string} databaseName
-     * @param {Api.DeleteV2Request} request
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    deleteV2(collectionId: string, tenant: string, databaseName: string, request: Api.DeleteV2Request, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<unknown> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).deleteV2(collectionId, tenant, databaseName, request, options);
-      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
-          if (response.status === 200) {
-            if (mimeType === 'application/json') {
-              return response.json() as any;
-            }
-            throw response;
-          }
-          if (response.status === 422) {
-            if (mimeType === 'application/json') {
-              throw response;
-            }
-            throw response;
-          }
-          throw response;
-        });
-      };
-    },
-    /**
-     * @summary Get Collection V1
-     * @param {string} collectionName
-     * @param {string} [tenant]
-     * @param {string} [database]
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    getCollectionV1V1(collectionName: string, tenant: string | undefined, database: string | undefined, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<unknown> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).getCollectionV1V1(collectionName, tenant, database, options);
-      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
-          if (response.status === 200) {
-            if (mimeType === 'application/json') {
-              return response.json() as any;
-            }
-            throw response;
-          }
-          if (response.status === 422) {
-            if (mimeType === 'application/json') {
-              throw response;
-            }
-            throw response;
-          }
-          throw response;
-        });
-      };
-    },
-    /**
-     * @summary Get Collection
-     * @param {string} tenant
-     * @param {string} databaseName
-     * @param {string} collectionName
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    getCollectionV2(tenant: string, databaseName: string, collectionName: string, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<unknown> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).getCollectionV2(tenant, databaseName, collectionName, options);
-      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
-          if (response.status === 200) {
-            if (mimeType === 'application/json') {
-              return response.json() as any;
-            }
-            throw response;
-          }
-          if (response.status === 422) {
-            if (mimeType === 'application/json') {
-              throw response;
-            }
-            throw response;
-          }
-          throw response;
-        });
-      };
-    },
-    /**
-     * @summary Get Database V1
      * @param {string} database
-     * @param {string} [tenant]
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    getDatabaseV1V1(database: string, tenant: string | undefined, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<unknown> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).getDatabaseV1V1(database, tenant, options);
-      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
-          if (response.status === 200) {
-            if (mimeType === 'application/json') {
-              return response.json() as any;
-            }
-            throw response;
-          }
-          if (response.status === 422) {
-            if (mimeType === 'application/json') {
-              throw response;
-            }
-            throw response;
-          }
-          throw response;
-        });
-      };
-    },
-    /**
-     * @summary Get Database
-     * @param {string} databaseName
-     * @param {string} tenant
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    getDatabaseV2(databaseName: string, tenant: string, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<unknown> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).getDatabaseV2(databaseName, tenant, options);
-      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
-          if (response.status === 200) {
-            if (mimeType === 'application/json') {
-              return response.json() as any;
-            }
-            throw response;
-          }
-          if (response.status === 422) {
-            if (mimeType === 'application/json') {
-              throw response;
-            }
-            throw response;
-          }
-          throw response;
-        });
-      };
-    },
-    /**
-     * @summary Get Nearest Neighbors V1
      * @param {string} collectionId
-     * @param {Api.GetNearestNeighborsV1V1Request} request
+     * @param {Api.AddCollectionRecordsPayload} request
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
-    getNearestNeighborsV1V1(collectionId: string, request: Api.GetNearestNeighborsV1V1Request, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<unknown> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).getNearestNeighborsV1V1(collectionId, request, options);
+    collectionAdd(
+      tenant: string,
+      database: string,
+      collectionId: string,
+      request: Api.AddCollectionRecordsPayload,
+      options?: RequestInit,
+    ): (
+      fetch?: FetchAPI,
+      basePath?: string,
+    ) => Promise<Api.AddCollectionRecordsResponse> {
+      const localVarFetchArgs = ApiApiFetchParamCreator(
+        configuration,
+      ).collectionAdd(tenant, database, collectionId, request, options);
       return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
+        return fetch(
+          basePath + localVarFetchArgs.url,
+          localVarFetchArgs.options,
+        ).then((response) => {
+          const contentType = response.headers.get("Content-Type");
+          const mimeType = contentType
+            ? contentType.replace(/;.*/, "")
+            : undefined;
 
-          if (response.status === 200) {
-            if (mimeType === 'application/json') {
+          if (response.status === 201) {
+            if (mimeType === "application/json") {
               return response.json() as any;
             }
             throw response;
           }
-          if (response.status === 422) {
-            if (mimeType === 'application/json') {
+          if (response.status === 400) {
+            return response;
+          }
+          throw response;
+        });
+      };
+    },
+    /**
+     * @summary Retrieves the number of records in a collection.
+     * @param {string} tenant <p>Tenant ID for the collection</p>
+     * @param {string} database <p>Database containing this collection</p>
+     * @param {string} collectionId <p>Collection ID whose records are counted</p>
+     * @param {RequestInit} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    collectionCount(
+      tenant: string,
+      database: string,
+      collectionId: string,
+      options?: RequestInit,
+    ): (fetch?: FetchAPI, basePath?: string) => Promise<number> {
+      const localVarFetchArgs = ApiApiFetchParamCreator(
+        configuration,
+      ).collectionCount(tenant, database, collectionId, options);
+      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
+        return fetch(
+          basePath + localVarFetchArgs.url,
+          localVarFetchArgs.options,
+        ).then((response) => {
+          const contentType = response.headers.get("Content-Type");
+          const mimeType = contentType
+            ? contentType.replace(/;.*/, "")
+            : undefined;
+
+          if (response.status === 200) {
+            if (mimeType === "application/json") {
+              return response.json() as any;
+            }
+            throw response;
+          }
+          if (response.status === 401) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          if (response.status === 404) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          if (response.status === 500) {
+            if (mimeType === "application/json") {
               throw response;
             }
             throw response;
@@ -2552,29 +1693,288 @@ export const ApiApiFp = function (configuration?: Configuration) {
       };
     },
     /**
-     * @summary Get Nearest Neighbors
+     * @summary Deletes records in a collection. Can filter by IDs or metadata.
+     * @param {string} tenant <p>Tenant ID</p>
+     * @param {string} database <p>Database name</p>
+     * @param {string} collectionId <p>Collection ID</p>
+     * @param {Api.DeleteCollectionRecordsPayload} request
+     * @param {RequestInit} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    collectionDelete(
+      tenant: string,
+      database: string,
+      collectionId: string,
+      request: Api.DeleteCollectionRecordsPayload,
+      options?: RequestInit,
+    ): (
+      fetch?: FetchAPI,
+      basePath?: string,
+    ) => Promise<Api.DeleteCollectionRecordsResponse> {
+      const localVarFetchArgs = ApiApiFetchParamCreator(
+        configuration,
+      ).collectionDelete(tenant, database, collectionId, request, options);
+      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
+        return fetch(
+          basePath + localVarFetchArgs.url,
+          localVarFetchArgs.options,
+        ).then((response) => {
+          const contentType = response.headers.get("Content-Type");
+          const mimeType = contentType
+            ? contentType.replace(/;.*/, "")
+            : undefined;
+
+          if (response.status === 200) {
+            if (mimeType === "application/json") {
+              return response.json() as any;
+            }
+            throw response;
+          }
+          if (response.status === 401) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          if (response.status === 404) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          if (response.status === 500) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          throw response;
+        });
+      };
+    },
+    /**
+     * @summary Retrieves records from a collection by ID or metadata filter.
+     * @param {string} tenant <p>Tenant ID</p>
+     * @param {string} database <p>Database name for the collection</p>
+     * @param {string} collectionId <p>Collection ID to fetch records from</p>
+     * @param {Api.GetRequestPayload} request
+     * @param {RequestInit} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    collectionGet(
+      tenant: string,
+      database: string,
+      collectionId: string,
+      request: Api.GetRequestPayload,
+      options?: RequestInit,
+    ): (fetch?: FetchAPI, basePath?: string) => Promise<Api.GetResponse> {
+      const localVarFetchArgs = ApiApiFetchParamCreator(
+        configuration,
+      ).collectionGet(tenant, database, collectionId, request, options);
+      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
+        return fetch(
+          basePath + localVarFetchArgs.url,
+          localVarFetchArgs.options,
+        ).then((response) => {
+          const contentType = response.headers.get("Content-Type");
+          const mimeType = contentType
+            ? contentType.replace(/;.*/, "")
+            : undefined;
+
+          if (response.status === 200) {
+            if (mimeType === "application/json") {
+              return response.json() as any;
+            }
+            throw response;
+          }
+          if (response.status === 401) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          if (response.status === 404) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          if (response.status === 500) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          throw response;
+        });
+      };
+    },
+    /**
+     * @summary Query a collection in a variety of ways, including vector search, metadata filtering, and full-text search
+     * @param {string} tenant <p>Tenant ID</p>
+     * @param {string} database <p>Database name containing the collection</p>
+     * @param {string} collectionId <p>Collection ID to query</p>
+     * @param {number} [limit] <p>Limit for pagination</p>
+     * @param {number} [offset] <p>Offset for pagination</p>
+     * @param {Api.QueryRequestPayload} request
+     * @param {RequestInit} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    collectionQuery(
+      tenant: string,
+      database: string,
+      collectionId: string,
+      limit: number | undefined,
+      offset: number | undefined,
+      request: Api.QueryRequestPayload,
+      options?: RequestInit,
+    ): (fetch?: FetchAPI, basePath?: string) => Promise<Api.QueryResponse> {
+      const localVarFetchArgs = ApiApiFetchParamCreator(
+        configuration,
+      ).collectionQuery(
+        tenant,
+        database,
+        collectionId,
+        limit,
+        offset,
+        request,
+        options,
+      );
+      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
+        return fetch(
+          basePath + localVarFetchArgs.url,
+          localVarFetchArgs.options,
+        ).then((response) => {
+          const contentType = response.headers.get("Content-Type");
+          const mimeType = contentType
+            ? contentType.replace(/;.*/, "")
+            : undefined;
+
+          if (response.status === 200) {
+            if (mimeType === "application/json") {
+              return response.json() as any;
+            }
+            throw response;
+          }
+          if (response.status === 401) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          if (response.status === 404) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          if (response.status === 500) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          throw response;
+        });
+      };
+    },
+    /**
+     * @summary Updates records in a collection by ID.
      * @param {string} tenant
-     * @param {string} databaseName
+     * @param {string} database
      * @param {string} collectionId
-     * @param {Api.GetNearestNeighborsV2Request} request
+     * @param {Api.UpdateCollectionRecordsPayload} request
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
-    getNearestNeighborsV2(tenant: string, databaseName: string, collectionId: string, request: Api.GetNearestNeighborsV2Request, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<unknown> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).getNearestNeighborsV2(tenant, databaseName, collectionId, request, options);
+    collectionUpdate(
+      tenant: string,
+      database: string,
+      collectionId: string,
+      request: Api.UpdateCollectionRecordsPayload,
+      options?: RequestInit,
+    ): (
+      fetch?: FetchAPI,
+      basePath?: string,
+    ) => Promise<Api.UpdateCollectionRecordsResponse> {
+      const localVarFetchArgs = ApiApiFetchParamCreator(
+        configuration,
+      ).collectionUpdate(tenant, database, collectionId, request, options);
       return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
+        return fetch(
+          basePath + localVarFetchArgs.url,
+          localVarFetchArgs.options,
+        ).then((response) => {
+          const contentType = response.headers.get("Content-Type");
+          const mimeType = contentType
+            ? contentType.replace(/;.*/, "")
+            : undefined;
 
           if (response.status === 200) {
-            if (mimeType === 'application/json') {
+            if (mimeType === "application/json") {
               return response.json() as any;
             }
             throw response;
           }
-          if (response.status === 422) {
-            if (mimeType === 'application/json') {
+          if (response.status === 404) {
+            return response;
+          }
+          throw response;
+        });
+      };
+    },
+    /**
+     * @summary Upserts records in a collection (create if not exists, otherwise update).
+     * @param {string} tenant <p>Tenant ID</p>
+     * @param {string} database <p>Database name</p>
+     * @param {string} collectionId <p>Collection ID</p>
+     * @param {Api.UpsertCollectionRecordsPayload} request
+     * @param {RequestInit} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    collectionUpsert(
+      tenant: string,
+      database: string,
+      collectionId: string,
+      request: Api.UpsertCollectionRecordsPayload,
+      options?: RequestInit,
+    ): (
+      fetch?: FetchAPI,
+      basePath?: string,
+    ) => Promise<Api.UpsertCollectionRecordsResponse> {
+      const localVarFetchArgs = ApiApiFetchParamCreator(
+        configuration,
+      ).collectionUpsert(tenant, database, collectionId, request, options);
+      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
+        return fetch(
+          basePath + localVarFetchArgs.url,
+          localVarFetchArgs.options,
+        ).then((response) => {
+          const contentType = response.headers.get("Content-Type");
+          const mimeType = contentType
+            ? contentType.replace(/;.*/, "")
+            : undefined;
+
+          if (response.status === 200) {
+            if (mimeType === "application/json") {
+              return response.json() as any;
+            }
+            throw response;
+          }
+          if (response.status === 401) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          if (response.status === 404) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          if (response.status === 500) {
+            if (mimeType === "application/json") {
               throw response;
             }
             throw response;
@@ -2584,26 +1984,44 @@ export const ApiApiFp = function (configuration?: Configuration) {
       };
     },
     /**
-     * @summary Get Tenant V1
-     * @param {string} tenant
+     * @summary Retrieves the total number of collections in a given database.
+     * @param {string} tenant <p>Tenant ID</p>
+     * @param {string} database <p>Database name to count collections from</p>
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
-    getTenantV1V1(tenant: string, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<unknown> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).getTenantV1V1(tenant, options);
+    countCollections(
+      tenant: string,
+      database: string,
+      options?: RequestInit,
+    ): (fetch?: FetchAPI, basePath?: string) => Promise<number> {
+      const localVarFetchArgs = ApiApiFetchParamCreator(
+        configuration,
+      ).countCollections(tenant, database, options);
       return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
+        return fetch(
+          basePath + localVarFetchArgs.url,
+          localVarFetchArgs.options,
+        ).then((response) => {
+          const contentType = response.headers.get("Content-Type");
+          const mimeType = contentType
+            ? contentType.replace(/;.*/, "")
+            : undefined;
 
           if (response.status === 200) {
-            if (mimeType === 'application/json') {
+            if (mimeType === "application/json") {
               return response.json() as any;
             }
             throw response;
           }
-          if (response.status === 422) {
-            if (mimeType === 'application/json') {
+          if (response.status === 401) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          if (response.status === 500) {
+            if (mimeType === "application/json") {
               throw response;
             }
             throw response;
@@ -2613,26 +2031,46 @@ export const ApiApiFp = function (configuration?: Configuration) {
       };
     },
     /**
-     * @summary Get Tenant
-     * @param {string} tenant
+     * @summary Creates a new collection under the specified database.
+     * @param {string} tenant <p>Tenant ID</p>
+     * @param {string} database <p>Database name containing the new collection</p>
+     * @param {Api.CreateCollectionPayload} request
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
-    getTenantV2(tenant: string, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<unknown> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).getTenantV2(tenant, options);
+    createCollection(
+      tenant: string,
+      database: string,
+      request: Api.CreateCollectionPayload,
+      options?: RequestInit,
+    ): (fetch?: FetchAPI, basePath?: string) => Promise<Api.Collection> {
+      const localVarFetchArgs = ApiApiFetchParamCreator(
+        configuration,
+      ).createCollection(tenant, database, request, options);
       return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
+        return fetch(
+          basePath + localVarFetchArgs.url,
+          localVarFetchArgs.options,
+        ).then((response) => {
+          const contentType = response.headers.get("Content-Type");
+          const mimeType = contentType
+            ? contentType.replace(/;.*/, "")
+            : undefined;
 
           if (response.status === 200) {
-            if (mimeType === 'application/json') {
+            if (mimeType === "application/json") {
               return response.json() as any;
             }
             throw response;
           }
-          if (response.status === 422) {
-            if (mimeType === 'application/json') {
+          if (response.status === 401) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          if (response.status === 500) {
+            if (mimeType === "application/json") {
               throw response;
             }
             throw response;
@@ -2642,49 +2080,47 @@ export const ApiApiFp = function (configuration?: Configuration) {
       };
     },
     /**
-     * @summary Get User Identity
+     * @summary Creates a new database for a given tenant.
+     * @param {string} tenant <p>Tenant ID to associate with the new database</p>
+     * @param {Api.CreateDatabasePayload} request
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
-    getUserIdentityV2(options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<unknown> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).getUserIdentityV2(options);
+    createDatabase(
+      tenant: string,
+      request: Api.CreateDatabasePayload,
+      options?: RequestInit,
+    ): (
+      fetch?: FetchAPI,
+      basePath?: string,
+    ) => Promise<Api.CreateDatabaseResponse> {
+      const localVarFetchArgs = ApiApiFetchParamCreator(
+        configuration,
+      ).createDatabase(tenant, request, options);
       return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
+        return fetch(
+          basePath + localVarFetchArgs.url,
+          localVarFetchArgs.options,
+        ).then((response) => {
+          const contentType = response.headers.get("Content-Type");
+          const mimeType = contentType
+            ? contentType.replace(/;.*/, "")
+            : undefined;
 
           if (response.status === 200) {
-            if (mimeType === 'application/json') {
+            if (mimeType === "application/json") {
               return response.json() as any;
             }
             throw response;
           }
-          throw response;
-        });
-      };
-    },
-    /**
-     * @summary Get V1
-     * @param {string} collectionId
-     * @param {Api.GetV1V1Request} request
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    getV1V1(collectionId: string, request: Api.GetV1V1Request, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<unknown> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).getV1V1(collectionId, request, options);
-      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
-          if (response.status === 200) {
-            if (mimeType === 'application/json') {
-              return response.json() as any;
+          if (response.status === 401) {
+            if (mimeType === "application/json") {
+              throw response;
             }
             throw response;
           }
-          if (response.status === 422) {
-            if (mimeType === 'application/json') {
+          if (response.status === 500) {
+            if (mimeType === "application/json") {
               throw response;
             }
             throw response;
@@ -2694,29 +2130,45 @@ export const ApiApiFp = function (configuration?: Configuration) {
       };
     },
     /**
-     * @summary Get
-     * @param {string} collectionId
-     * @param {string} tenant
-     * @param {string} databaseName
-     * @param {Api.GetV2Request} request
+     * @summary Creates a new tenant.
+     * @param {Api.CreateTenantPayload} request
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
-    getV2(collectionId: string, tenant: string, databaseName: string, request: Api.GetV2Request, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<unknown> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).getV2(collectionId, tenant, databaseName, request, options);
+    createTenant(
+      request: Api.CreateTenantPayload,
+      options?: RequestInit,
+    ): (
+      fetch?: FetchAPI,
+      basePath?: string,
+    ) => Promise<Api.CreateTenantResponse> {
+      const localVarFetchArgs = ApiApiFetchParamCreator(
+        configuration,
+      ).createTenant(request, options);
       return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
+        return fetch(
+          basePath + localVarFetchArgs.url,
+          localVarFetchArgs.options,
+        ).then((response) => {
+          const contentType = response.headers.get("Content-Type");
+          const mimeType = contentType
+            ? contentType.replace(/;.*/, "")
+            : undefined;
 
           if (response.status === 200) {
-            if (mimeType === 'application/json') {
+            if (mimeType === "application/json") {
               return response.json() as any;
             }
             throw response;
           }
-          if (response.status === 422) {
-            if (mimeType === 'application/json') {
+          if (response.status === 401) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          if (response.status === 500) {
+            if (mimeType === "application/json") {
               throw response;
             }
             throw response;
@@ -2726,73 +2178,55 @@ export const ApiApiFp = function (configuration?: Configuration) {
       };
     },
     /**
-     * @summary Heartbeat
+     * @summary Deletes a collection in a given database.
+     * @param {string} tenant <p>Tenant ID</p>
+     * @param {string} database <p>Database name</p>
+     * @param {string} collectionId <p>UUID of the collection to delete</p>
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
-    heartbeatV1(options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<{ [name: string]: number }> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).heartbeatV1(options);
+    deleteCollection(
+      tenant: string,
+      database: string,
+      collectionId: string,
+      options?: RequestInit,
+    ): (
+      fetch?: FetchAPI,
+      basePath?: string,
+    ) => Promise<Api.UpdateCollectionResponse> {
+      const localVarFetchArgs = ApiApiFetchParamCreator(
+        configuration,
+      ).deleteCollection(tenant, database, collectionId, options);
       return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
+        return fetch(
+          basePath + localVarFetchArgs.url,
+          localVarFetchArgs.options,
+        ).then((response) => {
+          const contentType = response.headers.get("Content-Type");
+          const mimeType = contentType
+            ? contentType.replace(/;.*/, "")
+            : undefined;
 
           if (response.status === 200) {
-            if (mimeType === 'application/json') {
+            if (mimeType === "application/json") {
               return response.json() as any;
             }
             throw response;
           }
-          throw response;
-        });
-      };
-    },
-    /**
-     * @summary Heartbeat
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    heartbeatV2(options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<{ [name: string]: number }> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).heartbeatV2(options);
-      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
-          if (response.status === 200) {
-            if (mimeType === 'application/json') {
-              return response.json() as any;
+          if (response.status === 401) {
+            if (mimeType === "application/json") {
+              throw response;
             }
             throw response;
           }
-          throw response;
-        });
-      };
-    },
-    /**
-     * @summary List Collections V1
-     * @param {number | null} [limit]
-     * @param {number | null} [offset]
-     * @param {string} [tenant]
-     * @param {string} [database]
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    listCollectionsV1V1(limit: number | null | undefined, offset: number | null | undefined, tenant: string | undefined, database: string | undefined, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<unknown> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).listCollectionsV1V1(limit, offset, tenant, database, options);
-      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
-          if (response.status === 200) {
-            if (mimeType === 'application/json') {
-              return response.json() as any;
+          if (response.status === 404) {
+            if (mimeType === "application/json") {
+              throw response;
             }
             throw response;
           }
-          if (response.status === 422) {
-            if (mimeType === 'application/json') {
+          if (response.status === 500) {
+            if (mimeType === "application/json") {
               throw response;
             }
             throw response;
@@ -2802,29 +2236,53 @@ export const ApiApiFp = function (configuration?: Configuration) {
       };
     },
     /**
-     * @summary List Collections
-     * @param {string} tenant
-     * @param {string} databaseName
-     * @param {number | null} [limit]
-     * @param {number | null} [offset]
+     * @summary Deletes a specific database.
+     * @param {string} tenant <p>Tenant ID</p>
+     * @param {string} database <p>Name of the database to delete</p>
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
-    listCollectionsV2(tenant: string, databaseName: string, limit: number | null | undefined, offset: number | null | undefined, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<unknown> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).listCollectionsV2(tenant, databaseName, limit, offset, options);
+    deleteDatabase(
+      tenant: string,
+      database: string,
+      options?: RequestInit,
+    ): (
+      fetch?: FetchAPI,
+      basePath?: string,
+    ) => Promise<Api.DeleteDatabaseResponse> {
+      const localVarFetchArgs = ApiApiFetchParamCreator(
+        configuration,
+      ).deleteDatabase(tenant, database, options);
       return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
+        return fetch(
+          basePath + localVarFetchArgs.url,
+          localVarFetchArgs.options,
+        ).then((response) => {
+          const contentType = response.headers.get("Content-Type");
+          const mimeType = contentType
+            ? contentType.replace(/;.*/, "")
+            : undefined;
 
           if (response.status === 200) {
-            if (mimeType === 'application/json') {
+            if (mimeType === "application/json") {
               return response.json() as any;
             }
             throw response;
           }
-          if (response.status === 422) {
-            if (mimeType === 'application/json') {
+          if (response.status === 401) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          if (response.status === 404) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          if (response.status === 500) {
+            if (mimeType === "application/json") {
               throw response;
             }
             throw response;
@@ -2834,28 +2292,52 @@ export const ApiApiFp = function (configuration?: Configuration) {
       };
     },
     /**
-     * @summary List Databases
-     * @param {string} tenant
-     * @param {number | null} [limit]
-     * @param {number | null} [offset]
+     * @summary Retrieves a collection by ID or name.
+     * @param {string} tenant <p>Tenant ID</p>
+     * @param {string} database <p>Database name</p>
+     * @param {string} collectionId <p>UUID of the collection</p>
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
-    listDatabasesV2(tenant: string, limit: number | null | undefined, offset: number | null | undefined, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<unknown> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).listDatabasesV2(tenant, limit, offset, options);
+    getCollection(
+      tenant: string,
+      database: string,
+      collectionId: string,
+      options?: RequestInit,
+    ): (fetch?: FetchAPI, basePath?: string) => Promise<Api.Collection> {
+      const localVarFetchArgs = ApiApiFetchParamCreator(
+        configuration,
+      ).getCollection(tenant, database, collectionId, options);
       return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
+        return fetch(
+          basePath + localVarFetchArgs.url,
+          localVarFetchArgs.options,
+        ).then((response) => {
+          const contentType = response.headers.get("Content-Type");
+          const mimeType = contentType
+            ? contentType.replace(/;.*/, "")
+            : undefined;
 
           if (response.status === 200) {
-            if (mimeType === 'application/json') {
+            if (mimeType === "application/json") {
               return response.json() as any;
             }
             throw response;
           }
-          if (response.status === 422) {
-            if (mimeType === 'application/json') {
+          if (response.status === 401) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          if (response.status === 404) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          if (response.status === 500) {
+            if (mimeType === "application/json") {
               throw response;
             }
             throw response;
@@ -2865,159 +2347,50 @@ export const ApiApiFp = function (configuration?: Configuration) {
       };
     },
     /**
-     * @summary Pre Flight Checks
+     * @summary Retrieves a specific database by name.
+     * @param {string} tenant <p>Tenant ID</p>
+     * @param {string} database <p>Name of the database to retrieve</p>
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
-    preFlightChecksV1(options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.PreFlightChecksV1200Response> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).preFlightChecksV1(options);
+    getDatabase(
+      tenant: string,
+      database: string,
+      options?: RequestInit,
+    ): (fetch?: FetchAPI, basePath?: string) => Promise<Api.Database> {
+      const localVarFetchArgs = ApiApiFetchParamCreator(
+        configuration,
+      ).getDatabase(tenant, database, options);
       return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
+        return fetch(
+          basePath + localVarFetchArgs.url,
+          localVarFetchArgs.options,
+        ).then((response) => {
+          const contentType = response.headers.get("Content-Type");
+          const mimeType = contentType
+            ? contentType.replace(/;.*/, "")
+            : undefined;
 
           if (response.status === 200) {
-            if (mimeType === 'application/json') {
+            if (mimeType === "application/json") {
               return response.json() as any;
             }
             throw response;
           }
-          throw response;
-        });
-      };
-    },
-    /**
-     * @summary Pre Flight Checks
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    preFlightChecksV2(options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<Api.PreFlightChecksV2200Response> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).preFlightChecksV2(options);
-      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
-          if (response.status === 200) {
-            if (mimeType === 'application/json') {
-              return response.json() as any;
+          if (response.status === 401) {
+            if (mimeType === "application/json") {
+              throw response;
             }
             throw response;
           }
-          throw response;
-        });
-      };
-    },
-    /**
-     * @summary Reset
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    resetV1(options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<boolean> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).resetV1(options);
-      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
-          if (response.status === 200) {
-            if (mimeType === 'application/json') {
-              return response.json() as any;
+          if (response.status === 404) {
+            if (mimeType === "application/json") {
+              throw response;
             }
             throw response;
           }
-          throw response;
-        });
-      };
-    },
-    /**
-     * @summary Reset
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    resetV2(options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<boolean> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).resetV2(options);
-      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
-          if (response.status === 200) {
-            if (mimeType === 'application/json') {
-              return response.json() as any;
-            }
-            throw response;
-          }
-          throw response;
-        });
-      };
-    },
-    /**
-     * @summary Root
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    rootV1(options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<{ [name: string]: number }> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).rootV1(options);
-      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
-          if (response.status === 200) {
-            if (mimeType === 'application/json') {
-              return response.json() as any;
-            }
-            throw response;
-          }
-          throw response;
-        });
-      };
-    },
-    /**
-     * @summary Root
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    rootV2(options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<{ [name: string]: number }> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).rootV2(options);
-      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
-          if (response.status === 200) {
-            if (mimeType === 'application/json') {
-              return response.json() as any;
-            }
-            throw response;
-          }
-          throw response;
-        });
-      };
-    },
-    /**
-     * @summary Update Collection V1
-     * @param {string} collectionId
-     * @param {Api.UpdateCollectionV1V1Request} request
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    updateCollectionV1V1(collectionId: string, request: Api.UpdateCollectionV1V1Request, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<unknown> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).updateCollectionV1V1(collectionId, request, options);
-      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
-
-          if (response.status === 200) {
-            if (mimeType === 'application/json') {
-              return response.json() as any;
-            }
-            throw response;
-          }
-          if (response.status === 422) {
-            if (mimeType === 'application/json') {
+          if (response.status === 500) {
+            if (mimeType === "application/json") {
               throw response;
             }
             throw response;
@@ -3027,29 +2400,48 @@ export const ApiApiFp = function (configuration?: Configuration) {
       };
     },
     /**
-     * @summary Update Collection
-     * @param {string} tenant
-     * @param {string} databaseName
-     * @param {string} collectionId
-     * @param {Api.UpdateCollectionV2Request} request
+     * @summary Returns an existing tenant by name.
+     * @param {string} tenantName <p>Tenant name or ID to retrieve</p>
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
-    updateCollectionV2(tenant: string, databaseName: string, collectionId: string, request: Api.UpdateCollectionV2Request, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<unknown> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).updateCollectionV2(tenant, databaseName, collectionId, request, options);
+    getTenant(
+      tenantName: string,
+      options?: RequestInit,
+    ): (fetch?: FetchAPI, basePath?: string) => Promise<Api.GetTenantResponse> {
+      const localVarFetchArgs = ApiApiFetchParamCreator(
+        configuration,
+      ).getTenant(tenantName, options);
       return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
+        return fetch(
+          basePath + localVarFetchArgs.url,
+          localVarFetchArgs.options,
+        ).then((response) => {
+          const contentType = response.headers.get("Content-Type");
+          const mimeType = contentType
+            ? contentType.replace(/;.*/, "")
+            : undefined;
 
           if (response.status === 200) {
-            if (mimeType === 'application/json') {
+            if (mimeType === "application/json") {
               return response.json() as any;
             }
             throw response;
           }
-          if (response.status === 422) {
-            if (mimeType === 'application/json') {
+          if (response.status === 401) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          if (response.status === 404) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          if (response.status === 500) {
+            if (mimeType === "application/json") {
               throw response;
             }
             throw response;
@@ -3059,27 +2451,36 @@ export const ApiApiFp = function (configuration?: Configuration) {
       };
     },
     /**
-     * @summary Update V1
-     * @param {string} collectionId
-     * @param {Api.UpdateV1V1Request} request
+     * @summary Retrieves the current user's identity, tenant, and databases.
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
-    updateV1V1(collectionId: string, request: Api.UpdateV1V1Request, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<unknown> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).updateV1V1(collectionId, request, options);
+    getUserIdentity(
+      options?: RequestInit,
+    ): (
+      fetch?: FetchAPI,
+      basePath?: string,
+    ) => Promise<Api.GetUserIdentityResponse> {
+      const localVarFetchArgs =
+        ApiApiFetchParamCreator(configuration).getUserIdentity(options);
       return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
+        return fetch(
+          basePath + localVarFetchArgs.url,
+          localVarFetchArgs.options,
+        ).then((response) => {
+          const contentType = response.headers.get("Content-Type");
+          const mimeType = contentType
+            ? contentType.replace(/;.*/, "")
+            : undefined;
 
           if (response.status === 200) {
-            if (mimeType === 'application/json') {
+            if (mimeType === "application/json") {
               return response.json() as any;
             }
             throw response;
           }
-          if (response.status === 422) {
-            if (mimeType === 'application/json') {
+          if (response.status === 500) {
+            if (mimeType === "application/json") {
               throw response;
             }
             throw response;
@@ -3089,29 +2490,33 @@ export const ApiApiFp = function (configuration?: Configuration) {
       };
     },
     /**
-     * @summary Update
-     * @param {string} tenant
-     * @param {string} databaseName
-     * @param {string} collectionId
-     * @param {Api.UpdateV2Request} request
+     * @summary Health check endpoint that returns 200 if the server and executor are ready
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
-    updateV2(tenant: string, databaseName: string, collectionId: string, request: Api.UpdateV2Request, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<unknown> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).updateV2(tenant, databaseName, collectionId, request, options);
+    healthcheck(
+      options?: RequestInit,
+    ): (fetch?: FetchAPI, basePath?: string) => Promise<string> {
+      const localVarFetchArgs =
+        ApiApiFetchParamCreator(configuration).healthcheck(options);
       return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
+        return fetch(
+          basePath + localVarFetchArgs.url,
+          localVarFetchArgs.options,
+        ).then((response) => {
+          const contentType = response.headers.get("Content-Type");
+          const mimeType = contentType
+            ? contentType.replace(/;.*/, "")
+            : undefined;
 
           if (response.status === 200) {
-            if (mimeType === 'application/json') {
+            if (mimeType === "application/json") {
               return response.json() as any;
             }
             throw response;
           }
-          if (response.status === 422) {
-            if (mimeType === 'application/json') {
+          if (response.status === 503) {
+            if (mimeType === "application/json") {
               throw response;
             }
             throw response;
@@ -3121,27 +2526,33 @@ export const ApiApiFp = function (configuration?: Configuration) {
       };
     },
     /**
-     * @summary Upsert V1
-     * @param {string} collectionId
-     * @param {Api.UpsertV1V1Request} request
+     * @summary Heartbeat endpoint that returns a nanosecond timestamp of the current time.
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
-    upsertV1V1(collectionId: string, request: Api.UpsertV1V1Request, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<unknown> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).upsertV1V1(collectionId, request, options);
+    heartbeat(
+      options?: RequestInit,
+    ): (fetch?: FetchAPI, basePath?: string) => Promise<Api.HeartbeatResponse> {
+      const localVarFetchArgs =
+        ApiApiFetchParamCreator(configuration).heartbeat(options);
       return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
+        return fetch(
+          basePath + localVarFetchArgs.url,
+          localVarFetchArgs.options,
+        ).then((response) => {
+          const contentType = response.headers.get("Content-Type");
+          const mimeType = contentType
+            ? contentType.replace(/;.*/, "")
+            : undefined;
 
           if (response.status === 200) {
-            if (mimeType === 'application/json') {
+            if (mimeType === "application/json") {
               return response.json() as any;
             }
             throw response;
           }
-          if (response.status === 422) {
-            if (mimeType === 'application/json') {
+          if (response.status === 500) {
+            if (mimeType === "application/json") {
               throw response;
             }
             throw response;
@@ -3151,29 +2562,48 @@ export const ApiApiFp = function (configuration?: Configuration) {
       };
     },
     /**
-     * @summary Upsert
-     * @param {string} tenant
-     * @param {string} databaseName
-     * @param {string} collectionId
-     * @param {Api.UpsertV2Request} request
+     * @summary Lists all collections in the specified database.
+     * @param {string} tenant <p>Tenant ID</p>
+     * @param {string} database <p>Database name to list collections from</p>
+     * @param {number} [limit] <p>Limit for pagination</p>
+     * @param {number} [offset] <p>Offset for pagination</p>
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
-    upsertV2(tenant: string, databaseName: string, collectionId: string, request: Api.UpsertV2Request, options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<unknown> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).upsertV2(tenant, databaseName, collectionId, request, options);
+    listCollections(
+      tenant: string,
+      database: string,
+      limit: number | undefined,
+      offset: number | undefined,
+      options?: RequestInit,
+    ): (fetch?: FetchAPI, basePath?: string) => Promise<Api.Vec2[]> {
+      const localVarFetchArgs = ApiApiFetchParamCreator(
+        configuration,
+      ).listCollections(tenant, database, limit, offset, options);
       return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
+        return fetch(
+          basePath + localVarFetchArgs.url,
+          localVarFetchArgs.options,
+        ).then((response) => {
+          const contentType = response.headers.get("Content-Type");
+          const mimeType = contentType
+            ? contentType.replace(/;.*/, "")
+            : undefined;
 
           if (response.status === 200) {
-            if (mimeType === 'application/json') {
+            if (mimeType === "application/json") {
               return response.json() as any;
             }
             throw response;
           }
-          if (response.status === 422) {
-            if (mimeType === 'application/json') {
+          if (response.status === 401) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          if (response.status === 500) {
+            if (mimeType === "application/json") {
               throw response;
             }
             throw response;
@@ -3183,20 +2613,47 @@ export const ApiApiFp = function (configuration?: Configuration) {
       };
     },
     /**
-     * @summary Version
+     * @summary Lists all databases for a given tenant.
+     * @param {string} tenant <p>Tenant ID to list databases for</p>
+     * @param {number} [limit] <p>Limit for pagination</p>
+     * @param {number} [offset] <p>Offset for pagination</p>
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
-    versionV1(options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<string> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).versionV1(options);
+    listDatabases(
+      tenant: string,
+      limit: number | undefined,
+      offset: number | undefined,
+      options?: RequestInit,
+    ): (fetch?: FetchAPI, basePath?: string) => Promise<Api.Vec2[]> {
+      const localVarFetchArgs = ApiApiFetchParamCreator(
+        configuration,
+      ).listDatabases(tenant, limit, offset, options);
       return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
+        return fetch(
+          basePath + localVarFetchArgs.url,
+          localVarFetchArgs.options,
+        ).then((response) => {
+          const contentType = response.headers.get("Content-Type");
+          const mimeType = contentType
+            ? contentType.replace(/;.*/, "")
+            : undefined;
 
           if (response.status === 200) {
-            if (mimeType === 'application/json') {
+            if (mimeType === "application/json") {
               return response.json() as any;
+            }
+            throw response;
+          }
+          if (response.status === 401) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          if (response.status === 500) {
+            if (mimeType === "application/json") {
+              throw response;
             }
             throw response;
           }
@@ -3205,19 +2662,165 @@ export const ApiApiFp = function (configuration?: Configuration) {
       };
     },
     /**
-     * @summary Version
+     * @summary Pre-flight checks endpoint reporting basic readiness info.
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
-    versionV2(options?: RequestInit): (fetch?: FetchAPI, basePath?: string) => Promise<string> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(configuration).versionV2(options);
+    preFlightChecks(
+      options?: RequestInit,
+    ): (fetch?: FetchAPI, basePath?: string) => Promise<Api.ChecklistResponse> {
+      const localVarFetchArgs =
+        ApiApiFetchParamCreator(configuration).preFlightChecks(options);
       return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-          const contentType = response.headers.get('Content-Type');
-          const mimeType = contentType ? contentType.replace(/;.*/, '') : undefined;
+        return fetch(
+          basePath + localVarFetchArgs.url,
+          localVarFetchArgs.options,
+        ).then((response) => {
+          const contentType = response.headers.get("Content-Type");
+          const mimeType = contentType
+            ? contentType.replace(/;.*/, "")
+            : undefined;
 
           if (response.status === 200) {
-            if (mimeType === 'application/json') {
+            if (mimeType === "application/json") {
+              return response.json() as any;
+            }
+            throw response;
+          }
+          if (response.status === 500) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          throw response;
+        });
+      };
+    },
+    /**
+     * @summary Reset endpoint allowing authorized users to reset the database.
+     * @param {RequestInit} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    reset(
+      options?: RequestInit,
+    ): (fetch?: FetchAPI, basePath?: string) => Promise<boolean> {
+      const localVarFetchArgs =
+        ApiApiFetchParamCreator(configuration).reset(options);
+      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
+        return fetch(
+          basePath + localVarFetchArgs.url,
+          localVarFetchArgs.options,
+        ).then((response) => {
+          const contentType = response.headers.get("Content-Type");
+          const mimeType = contentType
+            ? contentType.replace(/;.*/, "")
+            : undefined;
+
+          if (response.status === 200) {
+            if (mimeType === "application/json") {
+              return response.json() as any;
+            }
+            throw response;
+          }
+          if (response.status === 401) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          if (response.status === 500) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          throw response;
+        });
+      };
+    },
+    /**
+     * @summary Updates an existing collection's name or metadata.
+     * @param {string} tenant <p>Tenant ID</p>
+     * @param {string} database <p>Database name</p>
+     * @param {string} collectionId <p>UUID of the collection to update</p>
+     * @param {Api.UpdateCollectionPayload} request
+     * @param {RequestInit} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    updateCollection(
+      tenant: string,
+      database: string,
+      collectionId: string,
+      request: Api.UpdateCollectionPayload,
+      options?: RequestInit,
+    ): (
+      fetch?: FetchAPI,
+      basePath?: string,
+    ) => Promise<Api.UpdateCollectionResponse> {
+      const localVarFetchArgs = ApiApiFetchParamCreator(
+        configuration,
+      ).updateCollection(tenant, database, collectionId, request, options);
+      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
+        return fetch(
+          basePath + localVarFetchArgs.url,
+          localVarFetchArgs.options,
+        ).then((response) => {
+          const contentType = response.headers.get("Content-Type");
+          const mimeType = contentType
+            ? contentType.replace(/;.*/, "")
+            : undefined;
+
+          if (response.status === 200) {
+            if (mimeType === "application/json") {
+              return response.json() as any;
+            }
+            throw response;
+          }
+          if (response.status === 401) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          if (response.status === 404) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          if (response.status === 500) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          throw response;
+        });
+      };
+    },
+    /**
+     * @summary Returns the version of the server.
+     * @param {RequestInit} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    version(
+      options?: RequestInit,
+    ): (fetch?: FetchAPI, basePath?: string) => Promise<string> {
+      const localVarFetchArgs =
+        ApiApiFetchParamCreator(configuration).version(options);
+      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
+        return fetch(
+          basePath + localVarFetchArgs.url,
+          localVarFetchArgs.options,
+        ).then((response) => {
+          const contentType = response.headers.get("Content-Type");
+          const mimeType = contentType
+            ? contentType.replace(/;.*/, "")
+            : undefined;
+
+          if (response.status === 200) {
+            if (mimeType === "application/json") {
               return response.json() as any;
             }
             throw response;
@@ -3226,14 +2829,18 @@ export const ApiApiFp = function (configuration?: Configuration) {
         });
       };
     },
-  }
+  };
 };
 
 /**
  * ApiApi - factory interface
  * @export
  */
-export const ApiApiFactory: FactoryFunction<ApiApi> = function (configuration?: Configuration, basePath?: string, fetch?: FetchAPI) {
+export const ApiApiFactory: FactoryFunction<ApiApi> = function (
+  configuration?: Configuration,
+  basePath?: string,
+  fetch?: FetchAPI,
+) {
   return new ApiApi(configuration, basePath, fetch);
 };
 
@@ -3245,521 +2852,490 @@ export const ApiApiFactory: FactoryFunction<ApiApi> = function (configuration?: 
  */
 export class ApiApi extends BaseAPI {
   /**
-   * @summary Add V1
-   * @param {string} collectionId
-   * @param {Api.AddV1V1Request} request
-   * @param {RequestInit} [options] Override http request option.
-   * @throws {RequiredError}
-   */
-  public addV1V1(collectionId: string, request: Api.AddV1V1Request, options?: RequestInit) {
-    return ApiApiFp(this.configuration).addV1V1(collectionId, request, options)(this.fetch, this.basePath);
-  }
-
-  /**
-   * @summary Add
+   * @summary Adds records to a collection.
    * @param {string} tenant
-   * @param {string} databaseName
-   * @param {string} collectionId
-   * @param {Api.AddV2Request} request
-   * @param {RequestInit} [options] Override http request option.
-   * @throws {RequiredError}
-   */
-  public addV2(tenant: string, databaseName: string, collectionId: string, request: Api.AddV2Request, options?: RequestInit) {
-    return ApiApiFp(this.configuration).addV2(tenant, databaseName, collectionId, request, options)(this.fetch, this.basePath);
-  }
-
-  /**
-   * @summary Count Collections V1
-   * @param {string} [tenant]
-   * @param {string} [database]
-   * @param {RequestInit} [options] Override http request option.
-   * @throws {RequiredError}
-   */
-  public countCollectionsV1V1(tenant: string | undefined, database: string | undefined, options?: RequestInit) {
-    return ApiApiFp(this.configuration).countCollectionsV1V1(tenant, database, options)(this.fetch, this.basePath);
-  }
-
-  /**
-   * @summary Count Collections
-   * @param {string} tenant
-   * @param {string} databaseName
-   * @param {RequestInit} [options] Override http request option.
-   * @throws {RequiredError}
-   */
-  public countCollectionsV2(tenant: string, databaseName: string, options?: RequestInit) {
-    return ApiApiFp(this.configuration).countCollectionsV2(tenant, databaseName, options)(this.fetch, this.basePath);
-  }
-
-  /**
-   * @summary Count V1
-   * @param {string} collectionId
-   * @param {RequestInit} [options] Override http request option.
-   * @throws {RequiredError}
-   */
-  public countV1V1(collectionId: string, options?: RequestInit) {
-    return ApiApiFp(this.configuration).countV1V1(collectionId, options)(this.fetch, this.basePath);
-  }
-
-  /**
-   * @summary Count
-   * @param {string} tenant
-   * @param {string} databaseName
-   * @param {string} collectionId
-   * @param {RequestInit} [options] Override http request option.
-   * @throws {RequiredError}
-   */
-  public countV2(tenant: string, databaseName: string, collectionId: string, options?: RequestInit) {
-    return ApiApiFp(this.configuration).countV2(tenant, databaseName, collectionId, options)(this.fetch, this.basePath);
-  }
-
-  /**
-   * @summary Create Collection V1
-   * @param {string} [tenant]
-   * @param {string} [database]
-   * @param {Api.CreateCollectionV1V1Request} request
-   * @param {RequestInit} [options] Override http request option.
-   * @throws {RequiredError}
-   */
-  public createCollectionV1V1(tenant: string | undefined, database: string | undefined, request: Api.CreateCollectionV1V1Request, options?: RequestInit) {
-    return ApiApiFp(this.configuration).createCollectionV1V1(tenant, database, request, options)(this.fetch, this.basePath);
-  }
-
-  /**
-   * @summary Create Collection
-   * @param {string} tenant
-   * @param {string} databaseName
-   * @param {Api.CreateCollectionV2Request} request
-   * @param {RequestInit} [options] Override http request option.
-   * @throws {RequiredError}
-   */
-  public createCollectionV2(tenant: string, databaseName: string, request: Api.CreateCollectionV2Request, options?: RequestInit) {
-    return ApiApiFp(this.configuration).createCollectionV2(tenant, databaseName, request, options)(this.fetch, this.basePath);
-  }
-
-  /**
-   * @summary Create Database V1
-   * @param {string} [tenant]
-   * @param {Api.CreateDatabaseV1V1Request} request
-   * @param {RequestInit} [options] Override http request option.
-   * @throws {RequiredError}
-   */
-  public createDatabaseV1V1(tenant: string | undefined, request: Api.CreateDatabaseV1V1Request, options?: RequestInit) {
-    return ApiApiFp(this.configuration).createDatabaseV1V1(tenant, request, options)(this.fetch, this.basePath);
-  }
-
-  /**
-   * @summary Create Database
-   * @param {string} tenant
-   * @param {Api.CreateDatabaseV2Request} request
-   * @param {RequestInit} [options] Override http request option.
-   * @throws {RequiredError}
-   */
-  public createDatabaseV2(tenant: string, request: Api.CreateDatabaseV2Request, options?: RequestInit) {
-    return ApiApiFp(this.configuration).createDatabaseV2(tenant, request, options)(this.fetch, this.basePath);
-  }
-
-  /**
-   * @summary Create Tenant V1
-   * @param {Api.CreateTenantV1V1Request} request
-   * @param {RequestInit} [options] Override http request option.
-   * @throws {RequiredError}
-   */
-  public createTenantV1V1(request: Api.CreateTenantV1V1Request, options?: RequestInit) {
-    return ApiApiFp(this.configuration).createTenantV1V1(request, options)(this.fetch, this.basePath);
-  }
-
-  /**
-   * @summary Create Tenant
-   * @param {Api.CreateTenantV2Request} request
-   * @param {RequestInit} [options] Override http request option.
-   * @throws {RequiredError}
-   */
-  public createTenantV2(request: Api.CreateTenantV2Request, options?: RequestInit) {
-    return ApiApiFp(this.configuration).createTenantV2(request, options)(this.fetch, this.basePath);
-  }
-
-  /**
-   * @summary Delete Collection V1
-   * @param {string} collectionName
-   * @param {string} [tenant]
-   * @param {string} [database]
-   * @param {RequestInit} [options] Override http request option.
-   * @throws {RequiredError}
-   */
-  public deleteCollectionV1V1(collectionName: string, tenant: string | undefined, database: string | undefined, options?: RequestInit) {
-    return ApiApiFp(this.configuration).deleteCollectionV1V1(collectionName, tenant, database, options)(this.fetch, this.basePath);
-  }
-
-  /**
-   * @summary Delete Collection
-   * @param {string} collectionName
-   * @param {string} tenant
-   * @param {string} databaseName
-   * @param {RequestInit} [options] Override http request option.
-   * @throws {RequiredError}
-   */
-  public deleteCollectionV2(collectionName: string, tenant: string, databaseName: string, options?: RequestInit) {
-    return ApiApiFp(this.configuration).deleteCollectionV2(collectionName, tenant, databaseName, options)(this.fetch, this.basePath);
-  }
-
-  /**
-   * @summary Delete Database
-   * @param {string} databaseName
-   * @param {string} tenant
-   * @param {RequestInit} [options] Override http request option.
-   * @throws {RequiredError}
-   */
-  public deleteDatabaseV2(databaseName: string, tenant: string, options?: RequestInit) {
-    return ApiApiFp(this.configuration).deleteDatabaseV2(databaseName, tenant, options)(this.fetch, this.basePath);
-  }
-
-  /**
-   * @summary Delete V1
-   * @param {string} collectionId
-   * @param {Api.DeleteV1V1Request} request
-   * @param {RequestInit} [options] Override http request option.
-   * @throws {RequiredError}
-   */
-  public deleteV1V1(collectionId: string, request: Api.DeleteV1V1Request, options?: RequestInit) {
-    return ApiApiFp(this.configuration).deleteV1V1(collectionId, request, options)(this.fetch, this.basePath);
-  }
-
-  /**
-   * @summary Delete
-   * @param {string} collectionId
-   * @param {string} tenant
-   * @param {string} databaseName
-   * @param {Api.DeleteV2Request} request
-   * @param {RequestInit} [options] Override http request option.
-   * @throws {RequiredError}
-   */
-  public deleteV2(collectionId: string, tenant: string, databaseName: string, request: Api.DeleteV2Request, options?: RequestInit) {
-    return ApiApiFp(this.configuration).deleteV2(collectionId, tenant, databaseName, request, options)(this.fetch, this.basePath);
-  }
-
-  /**
-   * @summary Get Collection V1
-   * @param {string} collectionName
-   * @param {string} [tenant]
-   * @param {string} [database]
-   * @param {RequestInit} [options] Override http request option.
-   * @throws {RequiredError}
-   */
-  public getCollectionV1V1(collectionName: string, tenant: string | undefined, database: string | undefined, options?: RequestInit) {
-    return ApiApiFp(this.configuration).getCollectionV1V1(collectionName, tenant, database, options)(this.fetch, this.basePath);
-  }
-
-  /**
-   * @summary Get Collection
-   * @param {string} tenant
-   * @param {string} databaseName
-   * @param {string} collectionName
-   * @param {RequestInit} [options] Override http request option.
-   * @throws {RequiredError}
-   */
-  public getCollectionV2(tenant: string, databaseName: string, collectionName: string, options?: RequestInit) {
-    return ApiApiFp(this.configuration).getCollectionV2(tenant, databaseName, collectionName, options)(this.fetch, this.basePath);
-  }
-
-  /**
-   * @summary Get Database V1
    * @param {string} database
-   * @param {string} [tenant]
-   * @param {RequestInit} [options] Override http request option.
-   * @throws {RequiredError}
-   */
-  public getDatabaseV1V1(database: string, tenant: string | undefined, options?: RequestInit) {
-    return ApiApiFp(this.configuration).getDatabaseV1V1(database, tenant, options)(this.fetch, this.basePath);
-  }
-
-  /**
-   * @summary Get Database
-   * @param {string} databaseName
-   * @param {string} tenant
-   * @param {RequestInit} [options] Override http request option.
-   * @throws {RequiredError}
-   */
-  public getDatabaseV2(databaseName: string, tenant: string, options?: RequestInit) {
-    return ApiApiFp(this.configuration).getDatabaseV2(databaseName, tenant, options)(this.fetch, this.basePath);
-  }
-
-  /**
-   * @summary Get Nearest Neighbors V1
    * @param {string} collectionId
-   * @param {Api.GetNearestNeighborsV1V1Request} request
+   * @param {Api.AddCollectionRecordsPayload} request
    * @param {RequestInit} [options] Override http request option.
    * @throws {RequiredError}
    */
-  public getNearestNeighborsV1V1(collectionId: string, request: Api.GetNearestNeighborsV1V1Request, options?: RequestInit) {
-    return ApiApiFp(this.configuration).getNearestNeighborsV1V1(collectionId, request, options)(this.fetch, this.basePath);
+  public collectionAdd(
+    tenant: string,
+    database: string,
+    collectionId: string,
+    request: Api.AddCollectionRecordsPayload,
+    options?: RequestInit,
+  ) {
+    return ApiApiFp(this.configuration).collectionAdd(
+      tenant,
+      database,
+      collectionId,
+      request,
+      options,
+    )(this.fetch, this.basePath);
   }
 
   /**
-   * @summary Get Nearest Neighbors
+   * @summary Retrieves the number of records in a collection.
+   * @param {string} tenant <p>Tenant ID for the collection</p>
+   * @param {string} database <p>Database containing this collection</p>
+   * @param {string} collectionId <p>Collection ID whose records are counted</p>
+   * @param {RequestInit} [options] Override http request option.
+   * @throws {RequiredError}
+   */
+  public collectionCount(
+    tenant: string,
+    database: string,
+    collectionId: string,
+    options?: RequestInit,
+  ) {
+    return ApiApiFp(this.configuration).collectionCount(
+      tenant,
+      database,
+      collectionId,
+      options,
+    )(this.fetch, this.basePath);
+  }
+
+  /**
+   * @summary Deletes records in a collection. Can filter by IDs or metadata.
+   * @param {string} tenant <p>Tenant ID</p>
+   * @param {string} database <p>Database name</p>
+   * @param {string} collectionId <p>Collection ID</p>
+   * @param {Api.DeleteCollectionRecordsPayload} request
+   * @param {RequestInit} [options] Override http request option.
+   * @throws {RequiredError}
+   */
+  public collectionDelete(
+    tenant: string,
+    database: string,
+    collectionId: string,
+    request: Api.DeleteCollectionRecordsPayload,
+    options?: RequestInit,
+  ) {
+    return ApiApiFp(this.configuration).collectionDelete(
+      tenant,
+      database,
+      collectionId,
+      request,
+      options,
+    )(this.fetch, this.basePath);
+  }
+
+  /**
+   * @summary Retrieves records from a collection by ID or metadata filter.
+   * @param {string} tenant <p>Tenant ID</p>
+   * @param {string} database <p>Database name for the collection</p>
+   * @param {string} collectionId <p>Collection ID to fetch records from</p>
+   * @param {Api.GetRequestPayload} request
+   * @param {RequestInit} [options] Override http request option.
+   * @throws {RequiredError}
+   */
+  public collectionGet(
+    tenant: string,
+    database: string,
+    collectionId: string,
+    request: Api.GetRequestPayload,
+    options?: RequestInit,
+  ) {
+    return ApiApiFp(this.configuration).collectionGet(
+      tenant,
+      database,
+      collectionId,
+      request,
+      options,
+    )(this.fetch, this.basePath);
+  }
+
+  /**
+   * @summary Query a collection in a variety of ways, including vector search, metadata filtering, and full-text search
+   * @param {string} tenant <p>Tenant ID</p>
+   * @param {string} database <p>Database name containing the collection</p>
+   * @param {string} collectionId <p>Collection ID to query</p>
+   * @param {number} [limit] <p>Limit for pagination</p>
+   * @param {number} [offset] <p>Offset for pagination</p>
+   * @param {Api.QueryRequestPayload} request
+   * @param {RequestInit} [options] Override http request option.
+   * @throws {RequiredError}
+   */
+  public collectionQuery(
+    tenant: string,
+    database: string,
+    collectionId: string,
+    limit: number | undefined,
+    offset: number | undefined,
+    request: Api.QueryRequestPayload,
+    options?: RequestInit,
+  ) {
+    return ApiApiFp(this.configuration).collectionQuery(
+      tenant,
+      database,
+      collectionId,
+      limit,
+      offset,
+      request,
+      options,
+    )(this.fetch, this.basePath);
+  }
+
+  /**
+   * @summary Updates records in a collection by ID.
    * @param {string} tenant
-   * @param {string} databaseName
+   * @param {string} database
    * @param {string} collectionId
-   * @param {Api.GetNearestNeighborsV2Request} request
+   * @param {Api.UpdateCollectionRecordsPayload} request
    * @param {RequestInit} [options] Override http request option.
    * @throws {RequiredError}
    */
-  public getNearestNeighborsV2(tenant: string, databaseName: string, collectionId: string, request: Api.GetNearestNeighborsV2Request, options?: RequestInit) {
-    return ApiApiFp(this.configuration).getNearestNeighborsV2(tenant, databaseName, collectionId, request, options)(this.fetch, this.basePath);
+  public collectionUpdate(
+    tenant: string,
+    database: string,
+    collectionId: string,
+    request: Api.UpdateCollectionRecordsPayload,
+    options?: RequestInit,
+  ) {
+    return ApiApiFp(this.configuration).collectionUpdate(
+      tenant,
+      database,
+      collectionId,
+      request,
+      options,
+    )(this.fetch, this.basePath);
   }
 
   /**
-   * @summary Get Tenant V1
-   * @param {string} tenant
+   * @summary Upserts records in a collection (create if not exists, otherwise update).
+   * @param {string} tenant <p>Tenant ID</p>
+   * @param {string} database <p>Database name</p>
+   * @param {string} collectionId <p>Collection ID</p>
+   * @param {Api.UpsertCollectionRecordsPayload} request
    * @param {RequestInit} [options] Override http request option.
    * @throws {RequiredError}
    */
-  public getTenantV1V1(tenant: string, options?: RequestInit) {
-    return ApiApiFp(this.configuration).getTenantV1V1(tenant, options)(this.fetch, this.basePath);
+  public collectionUpsert(
+    tenant: string,
+    database: string,
+    collectionId: string,
+    request: Api.UpsertCollectionRecordsPayload,
+    options?: RequestInit,
+  ) {
+    return ApiApiFp(this.configuration).collectionUpsert(
+      tenant,
+      database,
+      collectionId,
+      request,
+      options,
+    )(this.fetch, this.basePath);
   }
 
   /**
-   * @summary Get Tenant
-   * @param {string} tenant
+   * @summary Retrieves the total number of collections in a given database.
+   * @param {string} tenant <p>Tenant ID</p>
+   * @param {string} database <p>Database name to count collections from</p>
    * @param {RequestInit} [options] Override http request option.
    * @throws {RequiredError}
    */
-  public getTenantV2(tenant: string, options?: RequestInit) {
-    return ApiApiFp(this.configuration).getTenantV2(tenant, options)(this.fetch, this.basePath);
+  public countCollections(
+    tenant: string,
+    database: string,
+    options?: RequestInit,
+  ) {
+    return ApiApiFp(this.configuration).countCollections(
+      tenant,
+      database,
+      options,
+    )(this.fetch, this.basePath);
   }
 
   /**
-   * @summary Get User Identity
+   * @summary Creates a new collection under the specified database.
+   * @param {string} tenant <p>Tenant ID</p>
+   * @param {string} database <p>Database name containing the new collection</p>
+   * @param {Api.CreateCollectionPayload} request
    * @param {RequestInit} [options] Override http request option.
    * @throws {RequiredError}
    */
-  public getUserIdentityV2(options?: RequestInit) {
-    return ApiApiFp(this.configuration).getUserIdentityV2(options)(this.fetch, this.basePath);
+  public createCollection(
+    tenant: string,
+    database: string,
+    request: Api.CreateCollectionPayload,
+    options?: RequestInit,
+  ) {
+    return ApiApiFp(this.configuration).createCollection(
+      tenant,
+      database,
+      request,
+      options,
+    )(this.fetch, this.basePath);
   }
 
   /**
-   * @summary Get V1
-   * @param {string} collectionId
-   * @param {Api.GetV1V1Request} request
+   * @summary Creates a new database for a given tenant.
+   * @param {string} tenant <p>Tenant ID to associate with the new database</p>
+   * @param {Api.CreateDatabasePayload} request
    * @param {RequestInit} [options] Override http request option.
    * @throws {RequiredError}
    */
-  public getV1V1(collectionId: string, request: Api.GetV1V1Request, options?: RequestInit) {
-    return ApiApiFp(this.configuration).getV1V1(collectionId, request, options)(this.fetch, this.basePath);
+  public createDatabase(
+    tenant: string,
+    request: Api.CreateDatabasePayload,
+    options?: RequestInit,
+  ) {
+    return ApiApiFp(this.configuration).createDatabase(
+      tenant,
+      request,
+      options,
+    )(this.fetch, this.basePath);
   }
 
   /**
-   * @summary Get
-   * @param {string} collectionId
-   * @param {string} tenant
-   * @param {string} databaseName
-   * @param {Api.GetV2Request} request
+   * @summary Creates a new tenant.
+   * @param {Api.CreateTenantPayload} request
    * @param {RequestInit} [options] Override http request option.
    * @throws {RequiredError}
    */
-  public getV2(collectionId: string, tenant: string, databaseName: string, request: Api.GetV2Request, options?: RequestInit) {
-    return ApiApiFp(this.configuration).getV2(collectionId, tenant, databaseName, request, options)(this.fetch, this.basePath);
+  public createTenant(request: Api.CreateTenantPayload, options?: RequestInit) {
+    return ApiApiFp(this.configuration).createTenant(request, options)(
+      this.fetch,
+      this.basePath,
+    );
   }
 
   /**
-   * @summary Heartbeat
+   * @summary Deletes a collection in a given database.
+   * @param {string} tenant <p>Tenant ID</p>
+   * @param {string} database <p>Database name</p>
+   * @param {string} collectionId <p>UUID of the collection to delete</p>
    * @param {RequestInit} [options] Override http request option.
    * @throws {RequiredError}
    */
-  public heartbeatV1(options?: RequestInit) {
-    return ApiApiFp(this.configuration).heartbeatV1(options)(this.fetch, this.basePath);
+  public deleteCollection(
+    tenant: string,
+    database: string,
+    collectionId: string,
+    options?: RequestInit,
+  ) {
+    return ApiApiFp(this.configuration).deleteCollection(
+      tenant,
+      database,
+      collectionId,
+      options,
+    )(this.fetch, this.basePath);
   }
 
   /**
-   * @summary Heartbeat
+   * @summary Deletes a specific database.
+   * @param {string} tenant <p>Tenant ID</p>
+   * @param {string} database <p>Name of the database to delete</p>
    * @param {RequestInit} [options] Override http request option.
    * @throws {RequiredError}
    */
-  public heartbeatV2(options?: RequestInit) {
-    return ApiApiFp(this.configuration).heartbeatV2(options)(this.fetch, this.basePath);
+  public deleteDatabase(
+    tenant: string,
+    database: string,
+    options?: RequestInit,
+  ) {
+    return ApiApiFp(this.configuration).deleteDatabase(
+      tenant,
+      database,
+      options,
+    )(this.fetch, this.basePath);
   }
 
   /**
-   * @summary List Collections V1
-   * @param {number | null} [limit]
-   * @param {number | null} [offset]
-   * @param {string} [tenant]
-   * @param {string} [database]
+   * @summary Retrieves a collection by ID or name.
+   * @param {string} tenant <p>Tenant ID</p>
+   * @param {string} database <p>Database name</p>
+   * @param {string} collectionId <p>UUID of the collection</p>
    * @param {RequestInit} [options] Override http request option.
    * @throws {RequiredError}
    */
-  public listCollectionsV1V1(limit: number | null | undefined, offset: number | null | undefined, tenant: string | undefined, database: string | undefined, options?: RequestInit) {
-    return ApiApiFp(this.configuration).listCollectionsV1V1(limit, offset, tenant, database, options)(this.fetch, this.basePath);
+  public getCollection(
+    tenant: string,
+    database: string,
+    collectionId: string,
+    options?: RequestInit,
+  ) {
+    return ApiApiFp(this.configuration).getCollection(
+      tenant,
+      database,
+      collectionId,
+      options,
+    )(this.fetch, this.basePath);
   }
 
   /**
-   * @summary List Collections
-   * @param {string} tenant
-   * @param {string} databaseName
-   * @param {number | null} [limit]
-   * @param {number | null} [offset]
+   * @summary Retrieves a specific database by name.
+   * @param {string} tenant <p>Tenant ID</p>
+   * @param {string} database <p>Name of the database to retrieve</p>
    * @param {RequestInit} [options] Override http request option.
    * @throws {RequiredError}
    */
-  public listCollectionsV2(tenant: string, databaseName: string, limit: number | null | undefined, offset: number | null | undefined, options?: RequestInit) {
-    return ApiApiFp(this.configuration).listCollectionsV2(tenant, databaseName, limit, offset, options)(this.fetch, this.basePath);
+  public getDatabase(tenant: string, database: string, options?: RequestInit) {
+    return ApiApiFp(this.configuration).getDatabase(
+      tenant,
+      database,
+      options,
+    )(this.fetch, this.basePath);
   }
 
   /**
-   * @summary List Databases
-   * @param {string} tenant
-   * @param {number | null} [limit]
-   * @param {number | null} [offset]
+   * @summary Returns an existing tenant by name.
+   * @param {string} tenantName <p>Tenant name or ID to retrieve</p>
    * @param {RequestInit} [options] Override http request option.
    * @throws {RequiredError}
    */
-  public listDatabasesV2(tenant: string, limit: number | null | undefined, offset: number | null | undefined, options?: RequestInit) {
-    return ApiApiFp(this.configuration).listDatabasesV2(tenant, limit, offset, options)(this.fetch, this.basePath);
+  public getTenant(tenantName: string, options?: RequestInit) {
+    return ApiApiFp(this.configuration).getTenant(tenantName, options)(
+      this.fetch,
+      this.basePath,
+    );
   }
 
   /**
-   * @summary Pre Flight Checks
+   * @summary Retrieves the current user's identity, tenant, and databases.
    * @param {RequestInit} [options] Override http request option.
    * @throws {RequiredError}
    */
-  public preFlightChecksV1(options?: RequestInit) {
-    return ApiApiFp(this.configuration).preFlightChecksV1(options)(this.fetch, this.basePath);
+  public getUserIdentity(options?: RequestInit) {
+    return ApiApiFp(this.configuration).getUserIdentity(options)(
+      this.fetch,
+      this.basePath,
+    );
   }
 
   /**
-   * @summary Pre Flight Checks
+   * @summary Health check endpoint that returns 200 if the server and executor are ready
    * @param {RequestInit} [options] Override http request option.
    * @throws {RequiredError}
    */
-  public preFlightChecksV2(options?: RequestInit) {
-    return ApiApiFp(this.configuration).preFlightChecksV2(options)(this.fetch, this.basePath);
+  public healthcheck(options?: RequestInit) {
+    return ApiApiFp(this.configuration).healthcheck(options)(
+      this.fetch,
+      this.basePath,
+    );
   }
 
   /**
-   * @summary Reset
+   * @summary Heartbeat endpoint that returns a nanosecond timestamp of the current time.
    * @param {RequestInit} [options] Override http request option.
    * @throws {RequiredError}
    */
-  public resetV1(options?: RequestInit) {
-    return ApiApiFp(this.configuration).resetV1(options)(this.fetch, this.basePath);
+  public heartbeat(options?: RequestInit) {
+    return ApiApiFp(this.configuration).heartbeat(options)(
+      this.fetch,
+      this.basePath,
+    );
   }
 
   /**
-   * @summary Reset
+   * @summary Lists all collections in the specified database.
+   * @param {string} tenant <p>Tenant ID</p>
+   * @param {string} database <p>Database name to list collections from</p>
+   * @param {number} [limit] <p>Limit for pagination</p>
+   * @param {number} [offset] <p>Offset for pagination</p>
    * @param {RequestInit} [options] Override http request option.
    * @throws {RequiredError}
    */
-  public resetV2(options?: RequestInit) {
-    return ApiApiFp(this.configuration).resetV2(options)(this.fetch, this.basePath);
+  public listCollections(
+    tenant: string,
+    database: string,
+    limit: number | undefined,
+    offset: number | undefined,
+    options?: RequestInit,
+  ) {
+    return ApiApiFp(this.configuration).listCollections(
+      tenant,
+      database,
+      limit,
+      offset,
+      options,
+    )(this.fetch, this.basePath);
   }
 
   /**
-   * @summary Root
+   * @summary Lists all databases for a given tenant.
+   * @param {string} tenant <p>Tenant ID to list databases for</p>
+   * @param {number} [limit] <p>Limit for pagination</p>
+   * @param {number} [offset] <p>Offset for pagination</p>
    * @param {RequestInit} [options] Override http request option.
    * @throws {RequiredError}
    */
-  public rootV1(options?: RequestInit) {
-    return ApiApiFp(this.configuration).rootV1(options)(this.fetch, this.basePath);
+  public listDatabases(
+    tenant: string,
+    limit: number | undefined,
+    offset: number | undefined,
+    options?: RequestInit,
+  ) {
+    return ApiApiFp(this.configuration).listDatabases(
+      tenant,
+      limit,
+      offset,
+      options,
+    )(this.fetch, this.basePath);
   }
 
   /**
-   * @summary Root
+   * @summary Pre-flight checks endpoint reporting basic readiness info.
    * @param {RequestInit} [options] Override http request option.
    * @throws {RequiredError}
    */
-  public rootV2(options?: RequestInit) {
-    return ApiApiFp(this.configuration).rootV2(options)(this.fetch, this.basePath);
+  public preFlightChecks(options?: RequestInit) {
+    return ApiApiFp(this.configuration).preFlightChecks(options)(
+      this.fetch,
+      this.basePath,
+    );
   }
 
   /**
-   * @summary Update Collection V1
-   * @param {string} collectionId
-   * @param {Api.UpdateCollectionV1V1Request} request
+   * @summary Reset endpoint allowing authorized users to reset the database.
    * @param {RequestInit} [options] Override http request option.
    * @throws {RequiredError}
    */
-  public updateCollectionV1V1(collectionId: string, request: Api.UpdateCollectionV1V1Request, options?: RequestInit) {
-    return ApiApiFp(this.configuration).updateCollectionV1V1(collectionId, request, options)(this.fetch, this.basePath);
+  public reset(options?: RequestInit) {
+    return ApiApiFp(this.configuration).reset(options)(
+      this.fetch,
+      this.basePath,
+    );
   }
 
   /**
-   * @summary Update Collection
-   * @param {string} tenant
-   * @param {string} databaseName
-   * @param {string} collectionId
-   * @param {Api.UpdateCollectionV2Request} request
+   * @summary Updates an existing collection's name or metadata.
+   * @param {string} tenant <p>Tenant ID</p>
+   * @param {string} database <p>Database name</p>
+   * @param {string} collectionId <p>UUID of the collection to update</p>
+   * @param {Api.UpdateCollectionPayload} request
    * @param {RequestInit} [options] Override http request option.
    * @throws {RequiredError}
    */
-  public updateCollectionV2(tenant: string, databaseName: string, collectionId: string, request: Api.UpdateCollectionV2Request, options?: RequestInit) {
-    return ApiApiFp(this.configuration).updateCollectionV2(tenant, databaseName, collectionId, request, options)(this.fetch, this.basePath);
+  public updateCollection(
+    tenant: string,
+    database: string,
+    collectionId: string,
+    request: Api.UpdateCollectionPayload,
+    options?: RequestInit,
+  ) {
+    return ApiApiFp(this.configuration).updateCollection(
+      tenant,
+      database,
+      collectionId,
+      request,
+      options,
+    )(this.fetch, this.basePath);
   }
 
   /**
-   * @summary Update V1
-   * @param {string} collectionId
-   * @param {Api.UpdateV1V1Request} request
+   * @summary Returns the version of the server.
    * @param {RequestInit} [options] Override http request option.
    * @throws {RequiredError}
    */
-  public updateV1V1(collectionId: string, request: Api.UpdateV1V1Request, options?: RequestInit) {
-    return ApiApiFp(this.configuration).updateV1V1(collectionId, request, options)(this.fetch, this.basePath);
+  public version(options?: RequestInit) {
+    return ApiApiFp(this.configuration).version(options)(
+      this.fetch,
+      this.basePath,
+    );
   }
-
-  /**
-   * @summary Update
-   * @param {string} tenant
-   * @param {string} databaseName
-   * @param {string} collectionId
-   * @param {Api.UpdateV2Request} request
-   * @param {RequestInit} [options] Override http request option.
-   * @throws {RequiredError}
-   */
-  public updateV2(tenant: string, databaseName: string, collectionId: string, request: Api.UpdateV2Request, options?: RequestInit) {
-    return ApiApiFp(this.configuration).updateV2(tenant, databaseName, collectionId, request, options)(this.fetch, this.basePath);
-  }
-
-  /**
-   * @summary Upsert V1
-   * @param {string} collectionId
-   * @param {Api.UpsertV1V1Request} request
-   * @param {RequestInit} [options] Override http request option.
-   * @throws {RequiredError}
-   */
-  public upsertV1V1(collectionId: string, request: Api.UpsertV1V1Request, options?: RequestInit) {
-    return ApiApiFp(this.configuration).upsertV1V1(collectionId, request, options)(this.fetch, this.basePath);
-  }
-
-  /**
-   * @summary Upsert
-   * @param {string} tenant
-   * @param {string} databaseName
-   * @param {string} collectionId
-   * @param {Api.UpsertV2Request} request
-   * @param {RequestInit} [options] Override http request option.
-   * @throws {RequiredError}
-   */
-  public upsertV2(tenant: string, databaseName: string, collectionId: string, request: Api.UpsertV2Request, options?: RequestInit) {
-    return ApiApiFp(this.configuration).upsertV2(tenant, databaseName, collectionId, request, options)(this.fetch, this.basePath);
-  }
-
-  /**
-   * @summary Version
-   * @param {RequestInit} [options] Override http request option.
-   * @throws {RequiredError}
-   */
-  public versionV1(options?: RequestInit) {
-    return ApiApiFp(this.configuration).versionV1(options)(this.fetch, this.basePath);
-  }
-
-  /**
-   * @summary Version
-   * @param {RequestInit} [options] Override http request option.
-   * @throws {RequiredError}
-   */
-  public versionV2(options?: RequestInit) {
-    return ApiApiFp(this.configuration).versionV2(options)(this.fetch, this.basePath);
-  }
-
 }
 
 /**
@@ -3769,7 +3345,7 @@ export class ApiApi extends BaseAPI {
 function dateToString(value: Date | string | undefined): string | undefined {
   if (value instanceof Date) {
     return value.toISOString();
-  } else if (typeof value === 'string') {
+  } else if (typeof value === "string") {
     return value;
   } else {
     return undefined;

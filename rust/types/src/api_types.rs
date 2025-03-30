@@ -128,6 +128,7 @@ pub struct ChecklistResponse {
 #[derive(Serialize, ToSchema)]
 pub struct HeartbeatResponse {
     #[serde(rename(serialize = "nanosecond heartbeat"))]
+    #[schema(rename = "nanosecond heartbeat")]
     pub nanosecond_heartbeat: u128,
 }
 
