@@ -6,6 +6,7 @@ export enum IncludeEnum {
   Embeddings = "embeddings",
   Metadatas = "metadatas",
   Distances = "distances",
+  Uris = "uris",
 }
 
 export type Embedding = number[];
