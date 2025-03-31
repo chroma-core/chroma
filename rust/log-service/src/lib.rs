@@ -283,6 +283,8 @@ pub enum DirtyMarker {
         reinsert_count: u64,
         initial_insertion_epoch_us: u64,
     },
+    #[serde(rename = "purge")]
+    Purge { collection_id: CollectionUuid },
 }
 
 impl DirtyMarker {
@@ -290,19 +292,22 @@ impl DirtyMarker {
     pub fn collection_id(&self) -> CollectionUuid {
         match self {
             DirtyMarker::MarkDirty { collection_id, .. } => *collection_id,
+            DirtyMarker::Purge { collection_id } => *collection_id,
         }
     }
 
     /// Increment any reinsert counter on the variant.
     pub fn reinsert(&mut self) {
-        let DirtyMarker::MarkDirty {
+        if let DirtyMarker::MarkDirty {
             collection_id: _,
             log_position: _,
             num_records: _,
             reinsert_count,
             initial_insertion_epoch_us: _,
-        } = self;
-        *reinsert_count += 1;
+        } = self
+        {
+            *reinsert_count += 1;
+        }
     }
 
     /// Given a contiguous prefix of markers, process the log into a rollup.  That is, a set of
@@ -453,22 +458,24 @@ impl DirtyMarker {
             .unwrap_or(LogPosition::default());
         for (log_position, marker) in markers {
             advance_to = std::cmp::max(advance_to, *log_position);
-            let DirtyMarker::MarkDirty {
+            if let DirtyMarker::MarkDirty {
                 collection_id,
                 log_position,
                 num_records,
                 reinsert_count: _,
                 initial_insertion_epoch_us: _,
-            } = marker;
-            let collection_id = collection_id.to_string();
-            if let Some(compactable) = compactable
-                .iter()
-                .find(|x| x.collection_id == collection_id)
+            } = marker
             {
-                if LogPosition::from_offset(compactable.first_log_offset as u64)
-                    <= *log_position + *num_records
+                let collection_id = collection_id.to_string();
+                if let Some(compactable) = compactable
+                    .iter()
+                    .find(|x| x.collection_id == collection_id)
                 {
-                    break;
+                    if LogPosition::from_offset(compactable.first_log_offset as u64)
+                        <= *log_position + *num_records
+                    {
+                        break;
+                    }
                 }
             }
         }
@@ -483,6 +490,7 @@ impl DirtyMarker {
         markers: &[(LogPosition, DirtyMarker)],
     ) -> Result<HashMap<CollectionUuid, RollupPerCollection>, wal3::Error> {
         let mut rollups = HashMap::new();
+        let mut forget = vec![];
         for (_, marker) in markers {
             match marker {
                 DirtyMarker::MarkDirty {
@@ -502,7 +510,13 @@ impl DirtyMarker {
                         *initial_insertion_epoch_us,
                     );
                 }
+                DirtyMarker::Purge { collection_id } => {
+                    forget.push(*collection_id);
+                }
             }
+        }
+        for collection_id in forget {
+            rollups.remove(&collection_id);
         }
         Ok(rollups)
     }
@@ -620,9 +634,10 @@ impl LogService for LogServer {
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
         tracing::info!(
-            "Pulling logs for collection {} from offset {}",
+            "Pulling logs for collection {} from offset {} with batch size {}",
             collection_id,
-            pull_logs.start_from_offset
+            pull_logs.start_from_offset,
+            pull_logs.batch_size,
         );
         let prefix = storage_prefix_for_log(collection_id);
         let log_reader = LogReader::new(
@@ -871,6 +886,17 @@ impl LogService for LogServer {
         let collection_id = Uuid::parse_str(&request.collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+        let dirty_marker = DirtyMarker::Purge { collection_id };
+        let dirty_marker_json = serde_json::to_string(&dirty_marker)
+            .map_err(|err| {
+                tracing::error!("Failed to serialize dirty marker: {}", err);
+                wal3::Error::Internal
+            })
+            .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
+        self.dirty_log
+            .append(Vec::from(dirty_marker_json))
+            .await
+            .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
         Ok(Response::new(PurgeDirtyForCollectionResponse {}))
     }
 }
