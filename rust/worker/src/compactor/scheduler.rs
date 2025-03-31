@@ -146,6 +146,7 @@ impl Scheduler {
                         first_record_time: collection_info.first_log_ts,
                         offset,
                         collection_version: collection.version,
+                        collection_logical_size_bytes: collection.size_bytes_post_compaction,
                     });
                 }
                 Err(e) => match e {
