@@ -10,6 +10,10 @@ pub struct GrpcLogConfig {
     pub connect_timeout_ms: u64,
     #[serde(default = "GrpcLogConfig::default_request_timeout_ms")]
     pub request_timeout_ms: u64,
+    #[serde(default = "GrpcLogConfig::default_max_encoding_message_size")]
+    pub max_encoding_message_size: usize,
+    #[serde(default = "GrpcLogConfig::default_max_decoding_message_size")]
+    pub max_decoding_message_size: usize,
 }
 
 impl GrpcLogConfig {
@@ -28,6 +32,14 @@ impl GrpcLogConfig {
     fn default_request_timeout_ms() -> u64 {
         5000
     }
+
+    fn default_max_encoding_message_size() -> usize {
+        1 << 25
+    }
+
+    fn default_max_decoding_message_size() -> usize {
+        1 << 25
+    }
 }
 
 impl Default for GrpcLogConfig {
@@ -37,6 +49,8 @@ impl Default for GrpcLogConfig {
             port: GrpcLogConfig::default_port(),
             connect_timeout_ms: GrpcLogConfig::default_connect_timeout_ms(),
             request_timeout_ms: GrpcLogConfig::default_request_timeout_ms(),
+            max_encoding_message_size: GrpcLogConfig::default_max_encoding_message_size(),
+            max_decoding_message_size: GrpcLogConfig::default_max_decoding_message_size(),
         }
     }
 }
