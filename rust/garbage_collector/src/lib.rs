@@ -36,14 +36,11 @@ pub async fn garbage_collector_service_entrypoint() -> Result<(), Box<dyn std::e
     debug!("Configuration: {:?}", config);
 
     // Enable OTEL tracing.
-    info!("Initializing OTEL tracing");
     init_otel_tracing(&config.service_name, &config.otel_endpoint);
 
     let registry = chroma_config::registry::Registry::new();
-    info!("Created registry");
 
     // Setup the dispatcher and the pool of workers.
-    info!("Creating dispatcher");
     let dispatcher = Dispatcher::try_from_config(&config.dispatcher_config, &registry)
         .await
         .map_err(|e| {
@@ -52,14 +49,11 @@ pub async fn garbage_collector_service_entrypoint() -> Result<(), Box<dyn std::e
         })?;
 
     let system = System::new();
-    info!("Created system");
     let dispatcher_handle = system.start_component(dispatcher);
-    info!("Started dispatcher");
 
     // Start a background task to periodically check for garbage.
     // Garbage collector is a component that gets notified every
     // gc_interval_mins to check for garbage.
-    info!("Creating garbage collector component");
     let mut garbage_collector_component = GarbageCollector::try_from_config(&config, &registry)
         .await
         .map_err(|e| {
@@ -70,9 +64,7 @@ pub async fn garbage_collector_service_entrypoint() -> Result<(), Box<dyn std::e
     garbage_collector_component.set_dispatcher(dispatcher_handle);
     garbage_collector_component.set_system(system.clone());
 
-    info!("Starting garbage collector component");
     let _ = system.start_component(garbage_collector_component);
-    info!("Garbage collector service initialized successfully");
 
     // Keep the service running and handle shutdown signals
     let mut sigterm = signal(SignalKind::terminate())?;

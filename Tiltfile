@@ -141,14 +141,21 @@ else:
     target='compaction_service'
   )
 
-# For Garbage Collector
-docker_build(
-  'garbage-collector',
-  '.',
-  only=['rust/', 'idl/', 'Cargo.toml', 'Cargo.lock'],
-  dockerfile='./rust/garbage_collector/Dockerfile',
-  target='garbage_collector',
-)
+if config.tilt_subcommand == "ci":
+  custom_build(
+    'garbage-collector',
+    'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF --target garbage_collector -f ./rust/garbage_collector/Dockerfile . --load ',
+    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
+  )
+else:
+  docker_build(
+    'garbage-collector',
+    '.',
+    only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
+    dockerfile='./rust/garbage_collector/Dockerfile',
+    target='garbage_collector'
+  )
+
 
 # First install the CRD
 k8s_yaml(
