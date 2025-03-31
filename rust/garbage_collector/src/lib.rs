@@ -1,4 +1,6 @@
 use chroma_config::Configurable;
+use chroma_memberlist::memberlist_provider::CustomResourceMemberlistProvider;
+use chroma_memberlist::memberlist_provider::MemberlistProvider;
 use chroma_system::{Dispatcher, System};
 use config::GarbageCollectorConfig;
 use garbage_collector_component::GarbageCollector;
@@ -25,14 +27,26 @@ pub async fn garbage_collector_service_entrypoint() {
     init_otel_tracing(&config.service_name, &config.otel_endpoint);
 
     let registry = chroma_config::registry::Registry::new();
+    let system = System::new();
 
     // Setup the dispatcher and the pool of workers.
     let dispatcher = Dispatcher::try_from_config(&config.dispatcher_config, &registry)
         .await
         .expect("Failed to create dispatcher from config");
-
-    let system = System::new();
     let dispatcher_handle = system.start_component(dispatcher);
+
+    let mut memberlist = match CustomResourceMemberlistProvider::try_from_config(
+        &config.memberlist_provider,
+        &registry,
+    )
+    .await
+    {
+        Ok(memberlist) => memberlist,
+        Err(err) => {
+            tracing::error!("Failed to create memberlist component: {:?}", err);
+            return;
+        }
+    };
 
     // Start a background task to periodically check for garbage.
     // Garbage collector is a component that gets notified every
@@ -43,5 +57,6 @@ pub async fn garbage_collector_service_entrypoint() {
     garbage_collector_component.set_dispatcher(dispatcher_handle);
     garbage_collector_component.set_system(system.clone());
 
-    let _ = system.start_component(garbage_collector_component);
+    let garbage_collector_handle = system.start_component(garbage_collector_component);
+    memberlist.subscribe(garbage_collector_handle.receiver());
 }
