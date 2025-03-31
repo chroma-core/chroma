@@ -1,12 +1,17 @@
-use std::{collections::HashMap, io::Write, path::Path, sync::Arc};
+use std::{
+    collections::{BinaryHeap, HashMap},
+    io::Write,
+    path::Path,
+    sync::Arc,
+};
 
 use chroma_cache::Weighted;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::{HnswIndex, HnswIndexConfig, Index, IndexConfig, PersistentIndex};
 use chroma_sqlite::{db::SqliteDb, table::MaxSeqId};
 use chroma_types::{
-    operator::RecordDistance, Chunk, HnswParametersFromSegmentError, LogRecord, Operation,
-    OperationRecord, Segment, SegmentUuid, SingleNodeHnswParameters,
+    operator::RecordDistance, Chunk, Collection, HnswParametersFromSegmentError, LogRecord,
+    Operation, OperationRecord, Segment, SegmentUuid,
 };
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use sea_query::{Expr, OnConflict, Query, SqliteQueryBuilder};
@@ -35,6 +40,8 @@ pub enum LocalHnswSegmentReaderError {
     HnswIndexLoadError,
     #[error("Nothing found on disk")]
     UninitializedSegment,
+    #[error("Collection is missing HNSW configuration")]
+    MissingHnswConfiguration,
     #[error("Could not parse HNSW configuration: {0}")]
     InvalidHnswConfiguration(#[from] HnswParametersFromSegmentError),
     #[error("Error serializing path to string")]
@@ -56,6 +63,7 @@ impl ChromaError for LocalHnswSegmentReaderError {
             LocalHnswSegmentReaderError::PickleFileDeserializeError(_) => ErrorCodes::Internal,
             LocalHnswSegmentReaderError::HnswIndexLoadError => ErrorCodes::Internal,
             LocalHnswSegmentReaderError::UninitializedSegment => ErrorCodes::Internal,
+            LocalHnswSegmentReaderError::MissingHnswConfiguration => ErrorCodes::Internal,
             LocalHnswSegmentReaderError::InvalidHnswConfiguration(err) => err.code(),
             LocalHnswSegmentReaderError::PersistPathError => ErrorCodes::Internal,
             LocalHnswSegmentReaderError::IdNotFound => ErrorCodes::Internal,
@@ -91,11 +99,17 @@ impl LocalHnswSegmentReader {
     }
 
     pub async fn from_segment(
+        collection: &Collection,
         segment: &Segment,
         dimensionality: usize,
         persist_root: Option<String>,
         sql_db: SqliteDb,
     ) -> Result<Self, LocalHnswSegmentReaderError> {
+        let hnsw_configuration = collection
+            .config
+            .get_hnsw_config_with_legacy_fallback(segment)?
+            .ok_or(LocalHnswSegmentReaderError::MissingHnswConfiguration)?;
+
         match persist_root {
             Some(path_str) => {
                 let path = Path::new(&path_str);
@@ -117,14 +131,14 @@ impl LocalHnswSegmentReader {
                     let id_map: IdMap = serde_pickle::from_reader(file, DeOptions::new())?;
                     if !id_map.id_to_label.is_empty() {
                         // Load hnsw index.
-                        let hnsw_configuration = SingleNodeHnswParameters::try_from(segment)?;
                         let index_config = IndexConfig::new(
                             dimensionality as i32,
-                            hnsw_configuration.space.into(),
+                            hnsw_configuration.space.clone().into(),
                         );
                         let index = HnswIndex::load(
                             index_folder_str,
                             &index_config,
+                            hnsw_configuration.ef_search,
                             chroma_index::IndexUuid(segment.id.0),
                         )
                         .map_err(|_| LocalHnswSegmentReaderError::HnswIndexLoadError)?;
@@ -156,13 +170,14 @@ impl LocalHnswSegmentReader {
                 Err(LocalHnswSegmentReaderError::UninitializedSegment)
             }
             None => {
-                let hnsw_configuration = SingleNodeHnswParameters::try_from(segment)?;
-                let index_config =
-                    IndexConfig::new(dimensionality as i32, hnsw_configuration.space.into());
+                let index_config = IndexConfig::new(
+                    dimensionality as i32,
+                    hnsw_configuration.space.clone().into(),
+                );
                 let hnsw_config = HnswIndexConfig::new_ephemeral(
-                    hnsw_configuration.m,
-                    hnsw_configuration.construction_ef,
-                    hnsw_configuration.search_ef,
+                    hnsw_configuration.max_neighbors,
+                    hnsw_configuration.ef_construction,
+                    hnsw_configuration.ef_search,
                 );
 
                 // TODO(Sanket): HnswIndex init is not thread safe. We should not call it from multiple threads
@@ -264,22 +279,91 @@ impl LocalHnswSegmentReader {
         k: u32,
     ) -> Result<Vec<RecordDistance>, LocalHnswSegmentReaderError> {
         let guard = self.index.inner.read().await;
-        let allowed_ids = allowed_offset_ids
-            .iter()
-            .map(|oid| *oid as usize)
-            .collect::<Vec<_>>();
-        let (offset_ids, distances) = guard
-            .index
-            .query(&embedding, k as usize, allowed_ids.as_slice(), &[])
-            .map_err(|_| LocalHnswSegmentReaderError::QueryError)?;
-        Ok(offset_ids
-            .into_iter()
-            .zip(distances)
-            .map(|(offset_id, measure)| RecordDistance {
-                offset_id: offset_id as u32,
-                measure,
-            })
-            .collect())
+        let len_with_deleted = guard.index.len_with_deleted();
+        let actual_len = guard.index.len();
+
+        // Bail if the index is empty
+        if actual_len == 0 {
+            return Ok(Vec::new());
+        }
+
+        let delete_percentage = (len_with_deleted - actual_len) as f32 / len_with_deleted as f32;
+
+        // If the index is small and the delete percentage is high, its quite likely that the index is
+        // degraded, so we brute force the search
+        // Otherwise search the index normally
+        if delete_percentage > 0.2 && actual_len < 100 {
+            match guard.index.get_all_ids() {
+                Ok((valid_ids, _deleted_ids)) => {
+                    let mut max_heap = BinaryHeap::new();
+                    let allowed_ids_as_set = allowed_offset_ids
+                        .iter()
+                        .collect::<std::collections::HashSet<_>>();
+                    for curr_id in valid_ids.iter() {
+                        if !allowed_ids_as_set.is_empty()
+                            && !allowed_ids_as_set.contains(&(*curr_id as u32))
+                        {
+                            continue;
+                        }
+                        let curr_embedding = guard.index.get(*curr_id);
+                        match curr_embedding {
+                            Ok(Some(curr_embedding)) => {
+                                let curr_embedding = match guard.index.distance_function {
+                                    chroma_distance::DistanceFunction::Cosine => {
+                                        chroma_distance::normalize(&curr_embedding)
+                                    }
+                                    _ => curr_embedding,
+                                };
+                                let curr_distance = guard
+                                    .index
+                                    .distance_function
+                                    .distance(curr_embedding.as_slice(), embedding.as_slice());
+                                if max_heap.len() < k as usize {
+                                    max_heap.push(RecordDistance {
+                                        offset_id: *curr_id as u32,
+                                        measure: curr_distance,
+                                    });
+                                } else {
+                                    // SAFETY(hammadb): We are sure that the heap has at least one element
+                                    // because we insert until we have k elements.
+                                    let top = max_heap.peek().unwrap();
+                                    if top.measure < curr_distance {
+                                        max_heap.pop();
+                                        max_heap.push(RecordDistance {
+                                            offset_id: *curr_id as u32,
+                                            measure: curr_distance,
+                                        });
+                                    }
+                                }
+                            }
+                            _ => {
+                                return Err(LocalHnswSegmentReaderError::QueryError);
+                            }
+                        }
+                    }
+                    Ok(max_heap.into_sorted_vec())
+                }
+                Err(_) => Err(LocalHnswSegmentReaderError::QueryError),
+            }
+        } else {
+            let allowed_ids = allowed_offset_ids
+                .iter()
+                .map(|oid| *oid as usize)
+                .collect::<Vec<_>>();
+            let (offset_ids, distances) = guard
+                .index
+                .query(&embedding, k as usize, allowed_ids.as_slice(), &[])
+                .map_err(|_| LocalHnswSegmentReaderError::QueryError)?;
+
+            Ok(offset_ids
+                .into_iter()
+                .zip(distances)
+                .map(|(offset_id, measure)| RecordDistance {
+                    offset_id: offset_id as u32,
+                    measure,
+                })
+                .collect())
+        }
     }
 }
 
@@ -346,6 +430,8 @@ pub enum LocalHnswSegmentWriterError {
     HnswIndexLoadError,
     #[error("Nothing found on disk")]
     UninitializedSegment,
+    #[error("Collection is missing HNSW configuration")]
+    MissingHnswConfiguration,
     #[error("Could not parse HNSW configuration: {0}")]
     InvalidHnswConfiguration(#[from] HnswParametersFromSegmentError),
     #[error("Error creating hnsw index")]
@@ -376,6 +462,7 @@ impl ChromaError for LocalHnswSegmentWriterError {
             LocalHnswSegmentWriterError::PickleFileDeserializeError(_) => ErrorCodes::Internal,
             LocalHnswSegmentWriterError::HnswIndexLoadError => ErrorCodes::Internal,
             LocalHnswSegmentWriterError::UninitializedSegment => ErrorCodes::Internal,
+            LocalHnswSegmentWriterError::MissingHnswConfiguration => ErrorCodes::Internal,
             LocalHnswSegmentWriterError::InvalidHnswConfiguration(err) => err.code(),
             LocalHnswSegmentWriterError::HnswIndexInitError => ErrorCodes::Internal,
             LocalHnswSegmentWriterError::HnswIndexPersistError => ErrorCodes::Internal,
@@ -396,12 +483,17 @@ impl LocalHnswSegmentWriter {
     }
 
     pub async fn from_segment(
+        collection: &Collection,
         segment: &Segment,
         dimensionality: usize,
         persist_root: Option<String>,
         sql_db: SqliteDb,
     ) -> Result<Self, LocalHnswSegmentWriterError> {
-        let hnsw_configuration = SingleNodeHnswParameters::try_from(segment)?;
+        let hnsw_configuration = collection
+            .config
+            .get_hnsw_config_with_legacy_fallback(segment)?
+            .ok_or(LocalHnswSegmentWriterError::MissingHnswConfiguration)?;
+
         match persist_root {
             Some(path_str) => {
                 let path = Path::new(&path_str);
@@ -442,11 +534,12 @@ impl LocalHnswSegmentWriter {
                         // Load hnsw index.
                         let index_config = IndexConfig::new(
                             dimensionality as i32,
-                            hnsw_configuration.space.into(),
+                            hnsw_configuration.space.clone().into(),
                         );
                         let index = HnswIndex::load(
                             index_folder_str,
                             &index_config,
+                            hnsw_configuration.ef_search,
                             chroma_index::IndexUuid(segment.id.0),
                         )
                         .map_err(|_| LocalHnswSegmentWriterError::HnswIndexLoadError)?;
@@ -472,12 +565,14 @@ impl LocalHnswSegmentWriter {
                     }
                 }
                 // Initialize index.
-                let index_config =
-                    IndexConfig::new(dimensionality as i32, hnsw_configuration.space.into());
+                let index_config = IndexConfig::new(
+                    dimensionality as i32,
+                    hnsw_configuration.space.clone().into(),
+                );
                 let hnsw_config = HnswIndexConfig::new_persistent(
-                    hnsw_configuration.m,
-                    hnsw_configuration.construction_ef,
-                    hnsw_configuration.search_ef,
+                    hnsw_configuration.max_neighbors,
+                    hnsw_configuration.ef_construction,
+                    hnsw_configuration.ef_search,
                     &index_folder,
                 )?;
 
@@ -506,12 +601,14 @@ impl LocalHnswSegmentWriter {
                 })
             }
             None => {
-                let index_config =
-                    IndexConfig::new(dimensionality as i32, hnsw_configuration.space.into());
+                let index_config = IndexConfig::new(
+                    dimensionality as i32,
+                    hnsw_configuration.space.clone().into(),
+                );
                 let hnsw_config = HnswIndexConfig::new_ephemeral(
-                    hnsw_configuration.m,
-                    hnsw_configuration.construction_ef,
-                    hnsw_configuration.search_ef,
+                    hnsw_configuration.max_neighbors,
+                    hnsw_configuration.ef_construction,
+                    hnsw_configuration.ef_search,
                 );
 
                 // TODO(Sanket): HnswIndex init is not thread safe. We should not call it from multiple threads

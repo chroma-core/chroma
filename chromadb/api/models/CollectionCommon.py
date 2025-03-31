@@ -28,7 +28,6 @@ from chromadb.api.types import (
     Embeddings,
     FilterSet,
     GetRequest,
-    IncludeEnum,
     PyEmbedding,
     Embeddable,
     GetResult,
@@ -58,6 +57,12 @@ from chromadb.api.types import (
     validate_record_set_contains_any,
     validate_record_set_for_embedding,
     validate_filter_set,
+)
+from chromadb.api.collection_configuration import (
+    UpdateCollectionConfiguration,
+    overwrite_collection_configuration,
+    load_collection_configuration_from_json,
+    CollectionConfiguration,
 )
 
 # TODO: We should rename the types in chromadb.types to be Models where
@@ -121,7 +126,18 @@ class CollectionCommon(Generic[ClientT]):
         if embedding_function is not None:
             validate_embedding_function(embedding_function)
 
-        self._embedding_function = embedding_function
+        config_ef = self.configuration.get("embedding_function")
+        if config_ef is not None:
+            if embedding_function is not None and not isinstance(
+                embedding_function, ef.DefaultEmbeddingFunction
+            ):
+                if embedding_function.name() is not config_ef.name():
+                    raise ValueError(
+                        f"Embedding function name mismatch: {embedding_function.name()} != {config_ef.name()}"
+                    )
+            self._embedding_function = config_ef
+        else:
+            self._embedding_function = embedding_function
         self._data_loader = data_loader
 
     # Expose the model properties as read-only properties on the Collection class
@@ -133,6 +149,10 @@ class CollectionCommon(Generic[ClientT]):
     @property
     def name(self) -> str:
         return self._model.name
+
+    @property
+    def configuration(self) -> CollectionConfiguration:
+        return load_collection_configuration_from_json(self._model.configuration_json)
 
     @property
     def configuration_json(self) -> Dict[str, Any]:
@@ -239,9 +259,9 @@ class CollectionCommon(Generic[ClientT]):
             validate_ids(ids=unpacked_ids)
 
         validate_filter_set(filter_set=filters)
-        validate_include(include=include, dissalowed=[IncludeEnum.distances])
+        validate_include(include=include, dissalowed=["distances"])
 
-        if IncludeEnum.data in include and self._data_loader is None:
+        if "data" in include and self._data_loader is None:
             raise ValueError(
                 "You must set a data loader on the collection if loading from URIs."
             )
@@ -249,8 +269,8 @@ class CollectionCommon(Generic[ClientT]):
         # Prepare
         request_include = include
         # We need to include uris in the result from the API to load datas
-        if IncludeEnum.data in include and IncludeEnum.uris not in include:
-            request_include.append(IncludeEnum.uris)
+        if "data" in include and "uris" not in include:
+            request_include.append("uris")
 
         return GetRequest(
             ids=unpacked_ids,
@@ -308,7 +328,7 @@ class CollectionCommon(Generic[ClientT]):
         # We need to manually include uris in the result from the API to load datas
         request_include = include
         if "data" in request_include and "uris" not in request_include:
-            request_include.append(IncludeEnum.uris)
+            request_include.append("uris")
 
         return QueryRequest(
             embeddings=request_embeddings,
@@ -498,12 +518,21 @@ class CollectionCommon(Generic[ClientT]):
                 )
 
     def _update_model_after_modify_success(
-        self, name: Optional[str], metadata: Optional[CollectionMetadata]
+        self,
+        name: Optional[str],
+        metadata: Optional[CollectionMetadata],
+        configuration: Optional[UpdateCollectionConfiguration],
     ) -> None:
         if name:
             self._model["name"] = name
         if metadata:
             self._model["metadata"] = metadata
+        if configuration:
+            self._model.set_configuration(
+                overwrite_collection_configuration(
+                    self._model.get_configuration(), configuration
+                )
+            )
 
     def _embed_record_set(
         self, record_set: BaseRecordSet, embeddable_fields: Optional[Set[str]] = None

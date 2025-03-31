@@ -4,7 +4,6 @@ from chromadb.api.types import (
     URI,
     CollectionMetadata,
     Embedding,
-    IncludeEnum,
     PyEmbedding,
     Include,
     Metadata,
@@ -20,6 +19,7 @@ from chromadb.api.types import (
 )
 
 from chromadb.api.models.CollectionCommon import CollectionCommon
+from chromadb.api.collection_configuration import UpdateCollectionConfiguration
 
 if TYPE_CHECKING:
     from chromadb.api import AsyncServerAPI  # noqa: F401
@@ -100,7 +100,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = [IncludeEnum.metadatas, IncludeEnum.documents],
+        include: Include = ["metadatas", "documents"],
     ) -> GetResult:
         """Get embeddings and their associate data from the data store. If no ids or where filter is provided returns
         all embeddings up to limit starting at offset.
@@ -174,9 +174,9 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
         include: Include = [
-            IncludeEnum.metadatas,
-            IncludeEnum.documents,
-            IncludeEnum.distances,
+            "metadatas",
+            "documents",
+            "distances",
         ],
     ) -> QueryResult:
         """Get the n_results nearest neighbor embeddings for provided query_embeddings or query_texts.
@@ -228,7 +228,10 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         )
 
     async def modify(
-        self, name: Optional[str] = None, metadata: Optional[CollectionMetadata] = None
+        self,
+        name: Optional[str] = None,
+        metadata: Optional[CollectionMetadata] = None,
+        configuration: Optional[UpdateCollectionConfiguration] = None,
     ) -> None:
         """Modify the collection name or metadata
 
@@ -245,9 +248,14 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         # Note there is a race condition here where the metadata can be updated
         # but another thread sees the cached local metadata.
         # TODO: fixme
-        await self._client._modify(id=self.id, new_name=name, new_metadata=metadata)
+        await self._client._modify(
+            id=self.id,
+            new_name=name,
+            new_metadata=metadata,
+            new_configuration=configuration,
+        )
 
-        self._update_model_after_modify_success(name, metadata)
+        self._update_model_after_modify_success(name, metadata, configuration)
 
     async def update(
         self,

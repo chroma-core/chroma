@@ -1281,8 +1281,9 @@ def test_query_without_add(client: ClientAPI) -> None:
     fields: Include = ["documents", "metadatas", "embeddings", "distances"]  # type: ignore[list-item]
     N = np.random.randint(1, 2000)
     K = np.random.randint(1, 100)
+    query_embeddings = np.random.random((N, K)).tolist()
     results = coll.query(
-        query_embeddings=np.random.random((N, K)).tolist(), include=fields
+        query_embeddings=cast(Embeddings, query_embeddings), include=fields
     )
     for field in fields:
         field_results = results[field]  # type: ignore[literal-required]
@@ -1435,7 +1436,7 @@ def test_add_then_purge(client: ClientAPI) -> None:
         record_ids = [str(i) for i in record_id_vals]
         coll.add(
             ids=record_ids, embeddings=[[2 * i, 2 * i + 1] for i in record_id_vals]
-        )  # type: ignore[arg-type]
+        )
     if not NOT_CLUSTER_ONLY:
         wait_for_version_increase(
             client, coll.name, get_collection_version(client, coll.name), 240

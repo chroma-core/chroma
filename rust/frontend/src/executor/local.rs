@@ -15,7 +15,7 @@ use chroma_types::{
         Projection, ProjectionRecord, RecordDistance,
     },
     plan::{Count, Get, Knn},
-    CollectionAndSegments, CollectionUuid, ExecutorError, HnswSpace, SingleNodeHnswParameters,
+    CollectionAndSegments, CollectionUuid, ExecutorError, HnswSpace,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -102,6 +102,7 @@ impl LocalExecutor {
                 let hnsw_reader = self
                     .hnsw_manager
                     .get_hnsw_reader(
+                        &collection_and_segments.collection,
                         &collection_and_segments.vector_segment,
                         dimensionality as usize,
                     )
@@ -176,6 +177,7 @@ impl LocalExecutor {
         let hnsw_reader = self
             .hnsw_manager
             .get_hnsw_reader(
+                &collection_and_segments.collection,
                 &collection_and_segments.vector_segment,
                 dimensionality as usize,
             )
@@ -191,10 +193,18 @@ impl LocalExecutor {
             allowed_offset_ids.push(offset_id);
         }
 
-        let distance_function =
-            SingleNodeHnswParameters::try_from(&plan.scan.collection_and_segments.vector_segment)
-                .map_err(|err| ExecutorError::Internal(Box::new(err)))?
-                .space;
+        let distance_function = match collection_and_segments
+            .collection
+            .config
+            .get_hnsw_config_with_legacy_fallback(&plan.scan.collection_and_segments.vector_segment)
+        {
+            Ok(Some(config)) => config.space,
+            Ok(None) => return Err(ExecutorError::CollectionMissingHnswConfiguration),
+            Err(err) => {
+                return Err(ExecutorError::Internal(Box::new(err)));
+            }
+        };
+
         let mut results = Vec::new();
         let mut returned_user_ids = Vec::new();
         for embedding in plan.knn.embeddings {
@@ -313,13 +323,14 @@ impl Configurable<LocalExecutorConfig> for LocalExecutor {
 
 #[cfg(test)]
 mod tests {
-    use chroma_config::{registry::Registry, Configurable};
+    use chroma_config::registry::Registry;
+    use chroma_config::Configurable;
     use chroma_system::System;
     use chroma_types::{
         AddCollectionRecordsRequest, CreateCollectionRequest, IncludeList, QueryRequest,
     };
 
-    use crate::{frontend::Frontend, FrontendConfig};
+    use crate::{Frontend, FrontendConfig};
 
     #[tokio::test]
     async fn test_query() {

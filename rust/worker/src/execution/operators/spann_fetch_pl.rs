@@ -57,6 +57,7 @@ impl Operator<SpannFetchPlInput, SpannFetchPlOutput> for SpannFetchPlOperator {
             .reader_context
             .spann_provider
             .read(
+                &input.reader_context.collection,
                 &input.reader_context.segment,
                 input.reader_context.dimension,
             )

@@ -26,6 +26,7 @@ spec:
       labels:
         app: rust-log-service
     spec:
+      serviceAccountName: rust-log-service-serviceaccount
       containers:
         - name: rust-log-service
           {{ if .Values.rustLogService.command }}
@@ -69,9 +70,9 @@ spec:
       {{ end }}
       {{if .Values.rustLogService.configuration}}
       volumes:
-        - name: rust-frontend-service-config
+        - name: rust-log-service-config
           configMap:
-            name: rust-frontend-service-config
+            name: rust-log-service-config
       {{ end }}
 
 ---
@@ -87,8 +88,16 @@ spec:
       port: 50051
       targetPort: 50051
   selector:
-    app: rust-frontend-service
+    app: rust-log-service
   type: ClusterIP
 
+
+---
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: rust-log-service-serviceaccount
+  namespace: {{ .Values.namespace }}
 
 ---

@@ -1,6 +1,5 @@
 import numpy as np
 from chromadb.api import ClientAPI
-from chromadb.api.types import IncludeEnum
 
 
 def test_invalid_update(client: ClientAPI) -> None:
@@ -10,7 +9,7 @@ def test_invalid_update(client: ClientAPI) -> None:
     collection.update(ids=["foo"], embeddings=[[0.0, 0.0, 0.0]])
 
     collection.add(ids=["foo"], embeddings=[[1.0, 1.0, 1.0]])
-    result = collection.get(ids=["foo"], include=[IncludeEnum.embeddings])
+    result = collection.get(ids=["foo"], include=["embeddings"])
     # Embeddings should be the same as what was provided to .add()
     assert result["embeddings"] is not None
     assert np.allclose(result["embeddings"][0], np.array([1.0, 1.0, 1.0]))

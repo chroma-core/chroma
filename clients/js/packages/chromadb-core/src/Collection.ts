@@ -70,7 +70,7 @@ export class Collection {
   async add(params: AddRecordsParams): Promise<void> {
     await this.client.init();
 
-    await this.client.api.add(
+    await this.client.api.addV2(
       this.client.tenant,
       this.client.database,
       this.id,
@@ -78,7 +78,7 @@ export class Collection {
       (await prepareRecordRequest(
         params,
         this.embeddingFunction,
-      )) as GeneratedApi.AddRequest,
+      )) as GeneratedApi.AddV2Request,
       this.client.api.options,
     );
   }
@@ -105,7 +105,7 @@ export class Collection {
   async upsert(params: UpsertRecordsParams): Promise<void> {
     await this.client.init();
 
-    await this.client.api.upsert(
+    await this.client.api.upsertV2(
       this.client.tenant,
       this.client.database,
       this.id,
@@ -113,7 +113,7 @@ export class Collection {
       (await prepareRecordRequest(
         params,
         this.embeddingFunction,
-      )) as GeneratedApi.AddRequest,
+      )) as GeneratedApi.AddV2Request,
       this.client.api.options,
     );
   }
@@ -129,7 +129,7 @@ export class Collection {
    */
   async count(): Promise<number> {
     await this.client.init();
-    return (await this.client.api.count(
+    return (await this.client.api.countV2(
       this.client.tenant,
       this.client.database,
       this.id,
@@ -172,7 +172,7 @@ export class Collection {
 
     const idsArray = ids ? toArray(ids) : undefined;
 
-    const resp = (await this.client.api.aGet(
+    const resp = (await this.client.api.getV2(
       this.id,
       this.client.tenant,
       this.client.database,
@@ -212,7 +212,7 @@ export class Collection {
   async update(params: UpdateRecordsParams): Promise<void> {
     await this.client.init();
 
-    await this.client.api.update(
+    await this.client.api.updateV2(
       this.client.tenant,
       this.client.database,
       this.id,
@@ -262,32 +262,40 @@ export class Collection {
     queryTexts,
     queryEmbeddings,
   }: QueryRecordsParams): Promise<MultiQueryResponse> {
-    if ((queryTexts && queryEmbeddings) || (!queryTexts && !queryEmbeddings)) {
-      throw new Error(
-        "You must supply exactly one of queryTexts or queryEmbeddings.",
+    await this.client.init();
+
+    let embeddings: unknown[] = [];
+
+    // If queryEmbeddings is provided, use it
+    if (queryEmbeddings) {
+      embeddings = toArrayOfArrays(queryEmbeddings);
+    }
+    // If queryTexts is provided, use it to generate queryEmbeddings
+    else if (queryTexts) {
+      embeddings = await this.embeddingFunction.generate(toArray(queryTexts));
+    }
+
+    if (embeddings.length === 0) {
+      throw new TypeError(
+        "You must provide either queryEmbeddings or queryTexts",
       );
     }
 
-    await this.client.init();
-
-    const arrayQueryEmbeddings: Embeddings =
-      queryTexts !== undefined
-        ? await this.embeddingFunction.generate(toArray(queryTexts))
-        : toArrayOfArrays<number>(queryEmbeddings);
-
-    return (await this.client.api.getNearestNeighbors(
+    const resp = (await this.client.api.getNearestNeighborsV2(
       this.client.tenant,
       this.client.database,
       this.id,
       {
-        query_embeddings: arrayQueryEmbeddings,
-        where,
+        query_embeddings: embeddings,
         n_results: nResults,
+        where,
         where_document: whereDocument,
         include,
       },
       this.client.api.options,
     )) as MultiQueryResponse;
+
+    return resp;
   }
 
   /**
@@ -313,29 +321,27 @@ export class Collection {
     metadata?: CollectionMetadata;
   }): Promise<CollectionParams> {
     await this.client.init();
-    return this.client.api
-      .updateCollection(
-        this.client.tenant,
-        this.client.database,
-        this.id,
-        {
-          new_name: name,
-          new_metadata: metadata,
-        },
-        this.client.api.options,
-      )
-      .then(() => {
-        if (name !== undefined) {
-          this.name = name;
-        }
-        if (metadata !== undefined) {
-          this.metadata = metadata;
-        }
-        return {
-          name: this.name,
-          metadata: this.metadata,
-        } as CollectionParams;
-      });
+
+    const resp = (await this.client.api.updateCollectionV2(
+      this.client.tenant,
+      this.client.database,
+      this.id,
+      {
+        new_name: name,
+        new_metadata: metadata,
+      },
+      this.client.api.options,
+    )) as CollectionParams;
+
+    if (name) {
+      this.name = name;
+    }
+
+    if (metadata) {
+      this.metadata = metadata;
+    }
+
+    return resp;
   }
 
   /**
@@ -354,7 +360,7 @@ export class Collection {
    */
   async peek({ limit = 10 }: PeekParams = {}): Promise<MultiGetResponse> {
     await this.client.init();
-    return (await this.client.api.aGet(
+    return (await this.client.api.getV2(
       this.id,
       this.client.tenant,
       this.client.database,
@@ -389,13 +395,18 @@ export class Collection {
     whereDocument,
   }: DeleteParams = {}): Promise<void> {
     await this.client.init();
-    let idsArray = undefined;
-    if (ids !== undefined) idsArray = toArray(ids);
-    await this.client.api.aDelete(
+
+    const idsArray = ids ? toArray(ids) : undefined;
+
+    await this.client.api.deleteV2(
       this.id,
       this.client.tenant,
       this.client.database,
-      { ids: idsArray, where: where, where_document: whereDocument },
+      {
+        ids: idsArray,
+        where: where,
+        where_document: whereDocument,
+      },
       this.client.api.options,
     );
   }

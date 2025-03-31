@@ -20,6 +20,7 @@ pyo3 = { workspace = true, optional = true }
 validator = { workspace = true }
 regex = { workspace = true }
 utoipa = { workspace = true }
+
 # (Cross-crate testing dependencies)
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }

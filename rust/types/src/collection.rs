@@ -1,8 +1,7 @@
 use super::{Metadata, MetadataValueConversionError};
-use crate::{chroma_proto, test_segment, Segment, SegmentScope};
+use crate::{chroma_proto, test_segment, InternalCollectionConfiguration, Segment, SegmentScope};
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use thiserror::Error;
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -50,14 +49,23 @@ impl std::fmt::Display for CollectionUuid {
     }
 }
 
+const CONFIGURATION_JSON_STR: &str = r#"{"hnsw_configuration": {"space": "l2", "ef_construction": 100, "ef_search": 100, "num_threads": 16, "M": 16, "resize_factor": 1.2, "batch_size": 100, "sync_threshold": 1000, "_type": "HNSWConfigurationInternal"}, "_type": "CollectionConfigurationInternal"}"#;
+
+fn emit_legacy_config_json_str<S: serde::Serializer>(_: &(), s: S) -> Result<S::Ok, S::Error> {
+    serde_json::from_str::<serde_json::Value>(CONFIGURATION_JSON_STR)
+        .unwrap()
+        .serialize(s)
+        .map_err(serde::ser::Error::custom)
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct Collection {
-    #[serde(rename(serialize = "id"))]
+    #[serde(rename = "id")]
     pub collection_id: CollectionUuid,
     pub name: String,
-    #[serde(default, rename(deserialize = "configuration_json_str"))]
-    pub configuration_json: Value,
+    #[serde(skip, default = "InternalCollectionConfiguration::default_hnsw")]
+    pub config: InternalCollectionConfiguration,
     pub metadata: Option<Metadata>,
     pub dimension: Option<i32>,
     pub tenant: String,
@@ -70,6 +78,32 @@ pub struct Collection {
     pub size_bytes_post_compaction: u64,
     #[serde(skip)]
     pub last_compaction_time_secs: u64,
+    #[serde(
+        serialize_with = "emit_legacy_config_json_str",
+        skip_deserializing,
+        rename = "configuration_json"
+    )]
+    pub legacy_configuration_json: (),
+}
+
+impl Default for Collection {
+    fn default() -> Self {
+        Self {
+            collection_id: CollectionUuid::new(),
+            name: "".to_string(),
+            config: InternalCollectionConfiguration::default_hnsw(),
+            legacy_configuration_json: (),
+            metadata: None,
+            dimension: None,
+            tenant: "".to_string(),
+            database: "".to_string(),
+            log_position: 0,
+            version: 0,
+            total_records_post_compaction: 0,
+            size_bytes_post_compaction: 0,
+            last_compaction_time_secs: 0,
+        }
+    }
 }
 
 #[cfg(feature = "pyo3")]
@@ -88,10 +122,11 @@ impl Collection {
         &self,
         py: pyo3::Python<'py>,
     ) -> pyo3::PyResult<pyo3::Bound<'py, pyo3::PyAny>> {
-        let res = pyo3::prelude::PyModule::import(py, "chromadb.api")?
-            .getattr("CollectionConfigurationInternal")?
-            .getattr("from_json_str")?
-            .call1((self.configuration_json.to_string(),))?;
+        let config: crate::CollectionConfiguration = self.config.clone().into();
+        let config_json_str = serde_json::to_string(&config).unwrap();
+        let res = pyo3::prelude::PyModule::import(py, "json")?
+            .getattr("loads")?
+            .call1((config_json_str,))?;
         Ok(res)
     }
 
@@ -123,26 +158,19 @@ impl Collection {
 
 impl Collection {
     pub fn test_collection(dim: i32) -> Self {
-        Self {
-            collection_id: CollectionUuid::new(),
+        Collection {
             name: "test_collection".to_string(),
-            configuration_json: Value::Null,
-            metadata: None,
             dimension: Some(dim),
             tenant: "default_tenant".to_string(),
             database: "default_database".to_string(),
-            log_position: 0,
-            version: 0,
-            total_records_post_compaction: 0,
-            size_bytes_post_compaction: 0,
-            last_compaction_time_secs: 0,
+            ..Default::default()
         }
     }
 }
 
 #[derive(Error, Debug)]
 pub enum CollectionConversionError {
-    #[error("Invalid config")]
+    #[error("Invalid config: {0}")]
     InvalidConfig(#[from] serde_json::Error),
     #[error("Invalid UUID")]
     InvalidUuid,
@@ -179,7 +207,7 @@ impl TryFrom<chroma_proto::Collection> for Collection {
         Ok(Collection {
             collection_id,
             name: proto_collection.name,
-            configuration_json: serde_json::from_str(&proto_collection.configuration_json_str)?,
+            config: serde_json::from_str(&proto_collection.configuration_json_str)?,
             metadata: collection_metadata,
             dimension: proto_collection.dimension,
             tenant: proto_collection.tenant,
@@ -189,17 +217,33 @@ impl TryFrom<chroma_proto::Collection> for Collection {
             total_records_post_compaction: proto_collection.total_records_post_compaction,
             size_bytes_post_compaction: proto_collection.size_bytes_post_compaction,
             last_compaction_time_secs: proto_collection.last_compaction_time_secs,
+            legacy_configuration_json: (),
         })
     }
 }
 
-impl From<Collection> for chroma_proto::Collection {
-    fn from(value: Collection) -> Self {
-        Self {
+#[derive(Error, Debug)]
+pub enum CollectionToProtoError {
+    #[error("Could not serialize config: {0}")]
+    ConfigSerialization(#[from] serde_json::Error),
+}
+
+impl ChromaError for CollectionToProtoError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            CollectionToProtoError::ConfigSerialization(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
+impl TryFrom<Collection> for chroma_proto::Collection {
+    type Error = CollectionToProtoError;
+
+    fn try_from(value: Collection) -> Result<Self, Self::Error> {
+        Ok(Self {
             id: value.collection_id.0.to_string(),
             name: value.name,
-            configuration_json_str: serde_json::to_string(&value.configuration_json)
-                .unwrap_or("{}".to_string()),
+            configuration_json_str: serde_json::to_string(&value.config)?,
             metadata: value.metadata.map(Into::into),
             dimension: value.dimension,
             tenant: value.tenant,
@@ -209,7 +253,7 @@ impl From<Collection> for chroma_proto::Collection {
             total_records_post_compaction: value.total_records_post_compaction,
             size_bytes_post_compaction: value.size_bytes_post_compaction,
             last_compaction_time_secs: value.last_compaction_time_secs,
-        }
+        })
     }
 }
 

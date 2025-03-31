@@ -20,7 +20,7 @@ use chroma_types::{
 };
 use roaring::RoaringBitmap;
 use thiserror::Error;
-use tracing::{trace, Instrument, Span};
+use tracing::{Instrument, Span};
 
 /// The `FilterOperator` filters the collection with specified criteria
 ///
@@ -402,7 +402,7 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
     type Error = FilterError;
 
     async fn run(&self, input: &FilterInput) -> Result<FilterOutput, FilterError> {
-        trace!("[{}]: {:?}", self.get_name(), input);
+        tracing::debug!("[{}]: {:?}", self.get_name(), input);
 
         let record_segment_reader = match RecordSegmentReader::from_segment(
             &input.record_segment,

@@ -21,8 +21,7 @@ jobs:
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
         platform: [depot-ubuntu-24.04-4, depot-windows-2022-4]
-        test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
-                  "chromadb/test/auth/test_simple_rbac_authz.py",
+        test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*'",
                   "chromadb/test/property/test_add.py",
                   "chromadb/test/property/test_collections.py",
                   "chromadb/test/property/test_collections_with_database_tenant.py",
@@ -31,7 +30,6 @@ jobs:
                   "chromadb/test/property/test_embeddings.py",
                   "chromadb/test/property/test_filtering.py",
                   "chromadb/test/property/test_persist.py",
-                  "chromadb/test/property/test_sysdb.py",
                   "chromadb/test/property/test_restart_persist.py",
                   ]
     runs-on: ${{ matrix.platform }}
@@ -53,6 +51,14 @@ jobs:
       - name: Install built wheel
         shell: bash
         run: pip install --no-index --find-links target/wheels/ chromadb
+      - name: Configure pytest to upload results to Datadog
+        uses: datadog/test-visibility-github-action@v2
+        # This action currently fails on Windows (https://github.com/DataDog/test-visibility-github-action/issues/36)
+        if: ${{ !contains(matrix.platform, 'windows') }}
+        with:
+          languages: python
+          api_key: ${{ secrets.DD_API_KEY }}
+          site: ${{ vars.DD_SITE }}
       - name: Test
         run: python -m pytest ${{ matrix.test-globs }}
         shell: bash
@@ -68,7 +74,7 @@ jobs:
         # NOTE(hammadb): For some reason depot-windows fails so leaving default windows-latest
         # on chromadb/test/client/test_multiple_clients_concurrency.py::test_multiple_clients_concurrently
         platform: [depot-ubuntu-24.04, windows-latest]
-        test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore='chromadb/test/test_cli.py' --ignore-glob 'chromadb/test/distributed/*' --ignore='chromadb/test/auth/test_simple_rbac_authz.py'",
+        test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore='chromadb/test/test_cli.py' --ignore-glob 'chromadb/test/distributed/*'",
                     "chromadb/test/property/test_add.py",
                     "chromadb/test/property/test_collections.py",
                     "chromadb/test/property/test_collections_with_database_tenant.py",
@@ -76,7 +82,6 @@ jobs:
                     "chromadb/test/property/test_embeddings.py",
                     "chromadb/test/property/test_filtering.py",
                     "chromadb/test/property/test_persist.py",
-                    "chromadb/test/property/test_sysdb.py",
                     "chromadb/test/stress"]
         include:
           - platform: depot-ubuntu-24.04
@@ -91,6 +96,14 @@ jobs:
       uses: ./.github/actions/rust
       with:
           github-token: ${{ github.token }}
+    - name: Configure pytest to upload results to Datadog
+      uses: datadog/test-visibility-github-action@v2
+      # This action currently fails on Windows (https://github.com/DataDog/test-visibility-github-action/issues/36)
+      if: ${{ !contains(matrix.platform, 'windows') }}
+      with:
+        languages: python
+        api_key: ${{ secrets.DD_API_KEY }}
+        site: ${{ vars.DD_SITE }}
     - name: Rust Integration Test
       run: bin/rust-integration-test.sh ${{ matrix.test-globs }}
       shell: bash
@@ -107,8 +120,7 @@ jobs:
                     "chromadb/test/property/test_collections.py",
                     "chromadb/test/property/test_collections_with_database_tenant.py",
                     "chromadb/test/property/test_embeddings.py",
-                    "chromadb/test/property/test_filtering.py",
-                    "chromadb/test/property/test_sysdb.py"]
+                    "chromadb/test/property/test_filtering.py"]
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
@@ -120,6 +132,14 @@ jobs:
         uses: ./.github/actions/rust
         with:
           github-token: ${{ github.token }}
+      - name: Configure pytest to upload results to Datadog
+        uses: datadog/test-visibility-github-action@v2
+        # This action currently fails on Windows (https://github.com/DataDog/test-visibility-github-action/issues/36)
+        if: ${{ !contains(matrix.platform, 'windows') }}
+        with:
+          languages: python
+          api_key: ${{ secrets.DD_API_KEY }}
+          site: ${{ vars.DD_SITE }}
       - name: Test
         run: bin/rust-integration-test.sh ${{ matrix.test-globs }}
         shell: bash
@@ -135,7 +155,6 @@ jobs:
         python: ${{fromJson(inputs.python_versions)}}
         platform: ["depot-ubuntu-22.04-4"]
         test-globs: ["chromadb/test/api",
-                    "chromadb/test/db/test_system.py",
                     "chromadb/test/api/test_collection.py",
                     "chromadb/test/api/test_limit_offset.py",
                     "chromadb/test/property/test_collections.py",
@@ -144,9 +163,6 @@ jobs:
                     "chromadb/test/property/test_embeddings.py",
                     "chromadb/test/property/test_collections_with_database_tenant.py",
                     "chromadb/test/property/test_collections_with_database_tenant_overwrite.py",
-                    "chromadb/test/property/test_sysdb.py",
-                    "chromadb/test/test_logservice.py",
-                    "chromadb/test/segment/distributed/test_memberlist_provider.py",
                     "chromadb/test/distributed/test_sanity.py"]
     runs-on: ${{ matrix.platform }}
     # OIDC token auth for Depot & AWS
@@ -158,6 +174,12 @@ jobs:
       - uses: ./.github/actions/python
         with:
           python-version: ${{ matrix.python }}
+      - name: Configure pytest to upload results to Datadog
+        uses: datadog/test-visibility-github-action@v2
+        with:
+          languages: python
+          api_key: ${{ secrets.DD_API_KEY }}
+          site: ${{ vars.DD_SITE }}
       - uses: ./.github/actions/tilt
         with:
           depot-project-id: ${{ vars.DEPOT_PROJECT_ID }}
@@ -215,6 +237,14 @@ jobs:
       - name: Install built wheel
         shell: bash
         run: pip install --no-index --find-links target/wheels/ chromadb
+      - name: Configure pytest to upload results to Datadog
+        uses: datadog/test-visibility-github-action@v2
+        # This action currently fails on Windows (https://github.com/DataDog/test-visibility-github-action/issues/36)
+        if: ${{ !contains(matrix.platform, 'windows') }}
+        with:
+          languages: python
+          api_key: ${{ secrets.DD_API_KEY }}
+          site: ${{ vars.DD_SITE }}
       - name: Test
         run: python -m pytest ${{ matrix.test-globs }}
         shell: bash
@@ -252,6 +282,14 @@ jobs:
     - name: Install built wheel
       shell: bash
       run: pip install --no-index --find-links target/wheels/ chromadb
+    - name: Configure pytest to upload results to Datadog
+      uses: datadog/test-visibility-github-action@v2
+      # This action currently fails on Windows (https://github.com/DataDog/test-visibility-github-action/issues/36)
+      if: ${{ !contains(matrix.platform, 'windows') }}
+      with:
+        languages: python
+        api_key: ${{ secrets.DD_API_KEY }}
+        site: ${{ vars.DD_SITE }}
     - name: Integration Test
       run: bin/python-integration-test ${{ matrix.test-globs }}
       shell: bash

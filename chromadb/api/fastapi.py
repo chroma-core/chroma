@@ -7,8 +7,16 @@ import httpx
 import urllib.parse
 from overrides import override
 
+from chromadb.api.collection_configuration import (
+    CreateCollectionConfiguration,
+    UpdateCollectionConfiguration,
+    update_collection_configuration_to_json,
+    create_collection_configuration_to_json,
+    create_collection_configuration_from_legacy_metadata_dict,
+    populate_create_hnsw_defaults,
+    validate_create_hnsw_config,
+)
 from chromadb import __version__
-from chromadb.api.configuration import CollectionConfigurationInternal
 from chromadb.api.base_http_client import BaseHTTPClient
 from chromadb.types import Database, Tenant, Collection as CollectionModel
 from chromadb.api import ServerAPI
@@ -235,7 +243,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     def create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfigurationInternal] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
@@ -248,12 +256,32 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             json={
                 "name": name,
                 "metadata": metadata,
-                "configuration": configuration.to_json() if configuration else None,
+                "configuration": create_collection_configuration_to_json(configuration)
+                if configuration
+                else None,
                 "get_or_create": get_or_create,
             },
         )
-
         model = CollectionModel.from_json(resp_json)
+
+        # TODO: Remove this once server response contains configuration
+        if configuration is None or configuration.get("hnsw") is None:
+            if model.metadata is not None:
+                model.configuration_json = create_collection_configuration_to_json(
+                    create_collection_configuration_from_legacy_metadata_dict(
+                        model.metadata
+                    )
+                )
+        else:
+            # At this point we know configuration is not None and has hnsw
+            assert configuration is not None  # Help type checker
+            hnsw_config = configuration.get("hnsw")
+            assert hnsw_config is not None  # Help type checker
+            populate_create_hnsw_defaults(hnsw_config)
+            validate_create_hnsw_config(hnsw_config)
+            model.configuration_json = create_collection_configuration_to_json(
+                configuration
+            )
         return model
 
     @trace_method("FastAPI.get_collection", OpenTelemetryGranularity.OPERATION)
@@ -280,7 +308,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     def get_or_create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfigurationInternal] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -301,6 +329,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
+        new_configuration: Optional[UpdateCollectionConfiguration] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
@@ -308,7 +337,15 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         self._make_request(
             "put",
             f"/tenants/{tenant}/databases/{database}/collections/{id}",
-            json={"new_metadata": new_metadata, "new_name": new_name},
+            json={
+                "new_metadata": new_metadata,
+                "new_name": new_name,
+                "new_configuration": update_collection_configuration_to_json(
+                    new_configuration
+                )
+                if new_configuration
+                else None,
+            },
         )
 
     @trace_method("FastAPI.delete_collection", OpenTelemetryGranularity.OPERATION)

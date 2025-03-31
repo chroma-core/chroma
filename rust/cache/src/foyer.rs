@@ -354,6 +354,7 @@ where
         let builder = HybridCacheBuilder::<K, V>::new()
             .with_metrics_registry(otel_0_27_metrics)
             .with_tracing_options(tracing_options.clone())
+            .with_policy(foyer::HybridCachePolicy::WriteOnInsertion)
             .memory(config.mem)
             .with_shards(config.shards);
 
@@ -441,7 +442,8 @@ where
         })
     }
 
-    pub fn insert_to_disk(&self, key: K, value: V) {
+    #[allow(dead_code)]
+    fn insert_to_disk(&self, key: K, value: V) {
         self.cache.storage_writer(key).insert(value);
     }
 }
@@ -465,9 +467,7 @@ where
 
     async fn insert(&self, key: K, value: V) {
         let _stopwatch = Stopwatch::new(&self.insert_latency);
-        self.cache.insert(key.clone(), value.clone());
-        // Also insert to the disk cache.
-        self.insert_to_disk(key, value);
+        self.cache.insert(key, value);
     }
 
     async fn remove(&self, key: &K) {
@@ -709,6 +709,9 @@ mod test {
         .unwrap();
 
         cache.insert("key1".to_string(), "value1".to_string()).await;
+
+        // Wait for flush to disk
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         drop(cache);
 
         // Test that we can recover the cache from disk.
@@ -766,5 +769,32 @@ mod test {
             .expect("Expected to be able to get value")
             .expect("Value should not be None");
         assert_eq!(value, large_value);
+    }
+
+    #[tokio::test]
+    async fn test_inserted_key_immediately_available() {
+        let dir = tempfile::tempdir()
+            .expect("To be able to create temp path")
+            .path()
+            .to_str()
+            .expect("To be able to parse path")
+            .to_string();
+        let cache = FoyerCacheConfig {
+            dir: Some(dir.clone()),
+            flush: true,
+            ..Default::default()
+        }
+        .build_hybrid_test::<String, String>()
+        .await
+        .unwrap();
+
+        cache.insert("key1".to_string(), "foo".to_string()).await;
+
+        let value = cache
+            .get(&"key1".to_string())
+            .await
+            .expect("Expected to be able to get value")
+            .expect("Value should not be None");
+        assert_eq!(value, "foo");
     }
 }

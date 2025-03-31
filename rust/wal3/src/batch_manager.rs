@@ -36,11 +36,11 @@ impl ManagerState {
         if self.next_write > Instant::now() {
             return Ok(None);
         }
-        if self.writers_active > options.outstanding {
+        if self.writers_active > 0 {
             return Ok(None);
         }
         let (next_seq_no, log_position) = match manifest_manager.assign_timestamp(record_count) {
-            Some(log_position) => log_position,
+            Some((next_seq_no, log_position)) => (next_seq_no, log_position),
             None => {
                 return Err(Error::LogFull);
             }
@@ -67,9 +67,7 @@ pub struct BatchManager {
 }
 
 impl BatchManager {
-    pub fn new(mut options: ThrottleOptions) -> Option<Self> {
-        // NOTE(rescrv):  Once upon a time we allowed concurrency here.  Deny it for safety.
-        options.outstanding = 1;
+    pub fn new(options: ThrottleOptions) -> Option<Self> {
         let next_write = Instant::now();
         Some(Self {
             options,
@@ -153,11 +151,11 @@ impl BatchManager {
         for (batch, _) in state.enqueued.iter() {
             let cur_count = batch.len();
             let cur_bytes = batch.iter().map(|r| r.len()).sum::<usize>();
-            if acc_count + cur_count >= batch_size {
+            if split_off > 0 && acc_count + cur_count >= batch_size {
                 did_split = true;
                 break;
             }
-            if acc_bytes + cur_bytes >= self.options.batch_size_bytes {
+            if split_off > 0 && acc_bytes + cur_bytes >= self.options.batch_size_bytes {
                 did_split = true;
                 break;
             }
@@ -165,12 +163,6 @@ impl BatchManager {
             acc_bytes += cur_bytes;
             split_off += 1;
         }
-        let Some((fragment_seq_no, log_position)) =
-            state.select_for_write(&self.options, manifest_manager, acc_count)?
-        else {
-            // No fragment can be written at this time.
-            return Ok(None);
-        };
         // If we haven't waited the batch interval since last write, and we didn't break early, wait for more data.
         if !did_split
             && state.last_batch.elapsed()
@@ -181,6 +173,17 @@ impl BatchManager {
             self.write_finished.notify_one();
             return Ok(None);
         }
+        if split_off == 0 {
+            // No work to do.
+            self.write_finished.notify_one();
+            return Ok(None);
+        }
+        let Some((fragment_seq_no, log_position)) =
+            state.select_for_write(&self.options, manifest_manager, acc_count)?
+        else {
+            // No fragment can be written at this time.
+            return Ok(None);
+        };
         let mut work = std::mem::take(&mut state.enqueued);
         state.enqueued = work.split_off(split_off);
         state.last_batch = Instant::now();
@@ -221,7 +224,6 @@ mod tests {
         let batch_manager = BatchManager::new(ThrottleOptions {
             throughput: 100,
             headroom: 1,
-            outstanding: 1,
             batch_size_bytes: 4,
             batch_interval_us: 1_000_000,
         })

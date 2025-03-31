@@ -435,16 +435,12 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         join_all(futures).await;
     }
 
-    pub(crate) async fn load_blocks_for_keys(&self, prefixes: &[&str], keys: &[K]) {
-        let mut composite_keys = Vec::new();
-        let prefix_iter = prefixes.iter();
-        let mut key_iter = keys.iter();
-        for prefix in prefix_iter {
-            if let Some(key) = key_iter.next() {
-                let composite_key = CompositeKey::new(prefix.to_string(), key.clone());
-                composite_keys.push(composite_key);
-            }
-        }
+    pub(crate) async fn load_blocks_for_keys(&self, keys: impl IntoIterator<Item = (String, K)>) {
+        let composite_keys = keys
+            .into_iter()
+            .map(|(prefix, key)| CompositeKey::new(prefix, key))
+            .collect::<Vec<_>>();
+
         let target_block_ids = self
             .root
             .sparse_index

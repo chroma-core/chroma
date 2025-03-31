@@ -4,7 +4,9 @@ use axum::{
     Json,
 };
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::{GetCollectionError, UpdateCollectionError};
+use chroma_types::{
+    CollectionConfigurationToInternalConfigurationError, GetCollectionError, UpdateCollectionError,
+};
 use serde::Serialize;
 use std::fmt;
 use thiserror::Error;
@@ -24,6 +26,8 @@ pub enum ValidationError {
     UpdateCollection(#[from] UpdateCollectionError),
     #[error("SPANN is still in development. Not allowed to created spann indexes")]
     SpannNotImplemented,
+    #[error("Error parsing collection configuration: {0}")]
+    ParseCollectionConfiguration(#[from] CollectionConfigurationToInternalConfigurationError),
 }
 
 impl ChromaError for ValidationError {
@@ -35,6 +39,7 @@ impl ChromaError for ValidationError {
             ValidationError::GetCollection(err) => err.code(),
             ValidationError::UpdateCollection(err) => err.code(),
             ValidationError::SpannNotImplemented => ErrorCodes::Unimplemented,
+            ValidationError::ParseCollectionConfiguration(_) => ErrorCodes::InvalidArgument,
         }
     }
 }

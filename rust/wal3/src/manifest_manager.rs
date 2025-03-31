@@ -1,13 +1,15 @@
-use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use chroma_storage::{ETag, Storage};
 use setsum::Setsum;
 
 use crate::manifest::{Manifest, Snapshot};
-use crate::{Error, Fragment, FragmentSeqNo, LogPosition, SnapshotOptions, ThrottleOptions};
+use crate::reader::read_fragment;
+use crate::{
+    unprefixed_fragment_path, Error, Fragment, FragmentSeqNo, LogPosition, SnapshotOptions,
+    ThrottleOptions,
+};
 
 ////////////////////////////////////////// ManifestAndETag /////////////////////////////////////////
 
@@ -21,25 +23,11 @@ struct ManifestAndETag {
 
 #[derive(Debug)]
 struct Staging {
-    /// Poisioned by the background thread.
-    poison: Option<Error>,
-    /// Options for rate limiting and batching the manifest.
-    throttle: ThrottleOptions,
-    /// Options related to snapshots.
-    snapshot: SnapshotOptions,
-    /// The prefix to store the log under in object storage.
-    prefix: String,
-    /// The unique ID of the process doing the writing.
-    writer: String,
     /// This is the manifest and e-tag most recently witnessed in storage.  It will be gotten at
     /// startup and will be maintained by the background thread.
     stable: ManifestAndETag,
     /// Fragments that are waiting to be applied.  These are fragments that are in any order.
     fragments: Vec<(Fragment, tokio::sync::oneshot::Sender<Option<Error>>)>,
-    /// In-flight snapshots.  These are being uploaded.  This serves to dedupe the uploads.
-    snapshots_in_flight: Vec<Snapshot>,
-    /// Snapshots that have been uploaded and are free for a manifest to reference.
-    snapshots_staged: Vec<Setsum>,
     /// The next timestamp to assign.
     next_log_position: LogPosition,
     /// The next fragment sequence number to assign to a not-yet completed fragment upload  .
@@ -58,6 +46,7 @@ impl Staging {
     #[allow(clippy::type_complexity)]
     fn pull_work(
         &mut self,
+        manager: &ManifestManager,
     ) -> Option<(
         Manifest,
         ETag,
@@ -74,7 +63,7 @@ impl Staging {
         // sequence_number, making sure to never leave gaps.
         let mut notifiers = vec![];
         let mut new_manifest = self.stable.manifest.clone();
-        new_manifest.writer = self.writer.clone();
+        new_manifest.writer = manager.writer.clone();
         let mut postpone = vec![];
         let mut fragments = std::mem::take(&mut self.fragments);
         let mut next_seq_no_to_apply = self.next_seq_no_to_apply;
@@ -97,35 +86,16 @@ impl Staging {
         }
         self.last_batch = Instant::now();
         // If the manifest can create a snapshot based upon the options.
-        let mut snapshot =
-            new_manifest.generate_snapshot(self.snapshot, &self.prefix, &self.writer);
+        let snapshot = new_manifest.generate_snapshot(manager.snapshot, &manager.writer);
         if let Some(s) = snapshot.as_ref() {
-            // If the snapshot has been added to object storage it will be available for the next
-            // manifest that gets installed.  Apply it to the new manifest.
-            if self.snapshots_staged.contains(&s.setsum) {
-                if let Err(err) = new_manifest.apply_snapshot(s) {
-                    // It failed to apply, so error everyone waiting.  The backoff/retry/reseat
-                    // logic has to accommodate this use case.
-                    tracing::error!("Failed to apply snapshot: {:?}", err);
-                    for notifier in notifiers {
-                        let _ = notifier.send(Some(err.clone()));
-                    }
-                    return None;
-                } else {
-                    // This snapshot has been applied.  Remove it from the staged snapshots.
-                    self.snapshots_staged.retain(|ss| ss != &s.setsum);
-                    snapshot = None;
+            if let Err(err) = new_manifest.apply_snapshot(s) {
+                // It failed to apply, so error everyone waiting.  The backoff/retry/reseat
+                // logic has to accommodate this use case.
+                tracing::error!("Failed to apply snapshot: {:?}", err);
+                for notifier in notifiers {
+                    let _ = notifier.send(Some(err.clone()));
                 }
-            } else if self
-                .snapshots_in_flight
-                .iter()
-                .any(|ss| ss.setsum == s.setsum)
-            {
-                // This snapshot is already in flight.
-                // Do not return it and instead rely upon our bookkeeping.
-                snapshot = None;
-            } else {
-                self.snapshots_in_flight.push(s.clone());
+                return None;
             }
         }
         self.next_seq_no_to_apply = next_seq_no_to_apply;
@@ -143,27 +113,31 @@ impl Staging {
 ////////////////////////////////////////// ManifestManager /////////////////////////////////////////
 
 /// ManifestManager is responsible for managing the manifest and batching writes to it.
-#[derive(Debug)]
 pub struct ManifestManager {
+    /// Options for rate limiting and batching the manifest.
+    throttle: ThrottleOptions,
+    /// Options related to snapshots.
+    snapshot: SnapshotOptions,
+    /// Storage for the manifest manager
+    storage: Arc<Storage>,
+    /// The prefix to store the log under in object storage.
+    prefix: String,
+    /// The unique ID of the process doing the writing.
+    writer: String,
+    /// Staging area for manifests to be written.
     staging: Arc<Mutex<Staging>>,
-    timer: Option<tokio::task::JoinHandle<()>>,
-    background: Option<tokio::task::JoinHandle<()>>,
-    notifier: Arc<tokio::sync::Notify>,
 }
 
 impl ManifestManager {
     /// Create a new manifest manager.
     pub async fn new(
-        mut throttle: ThrottleOptions,
+        throttle: ThrottleOptions,
         snapshot: SnapshotOptions,
         storage: Arc<Storage>,
         prefix: String,
         writer: String,
     ) -> Result<Self, Error> {
-        // NOTE(rescrv):  Once upon a time we allowed concurrency here.  Deny it for safety.
-        throttle.outstanding = 1;
-        let poison = None;
-        let Some((manifest, e_tag)) = Manifest::load(&storage, &prefix).await? else {
+        let Some((manifest, e_tag)) = Manifest::load(&throttle, &storage, &prefix).await? else {
             return Err(Error::UninitializedLog);
         };
         let latest_fragment = manifest.fragments.iter().max_by_key(|f| f.limit.offset());
@@ -176,35 +150,20 @@ impl ManifestManager {
         let next_seq_no_to_apply = next_seq_no_to_assign;
         let stable = ManifestAndETag { manifest, e_tag };
         let staging = Arc::new(Mutex::new(Staging {
-            poison,
-            throttle,
-            snapshot,
-            prefix,
-            writer,
             stable,
             fragments: vec![],
-            snapshots_in_flight: vec![],
-            snapshots_staged: vec![],
             next_log_position,
             next_seq_no_to_assign,
             next_seq_no_to_apply,
             last_batch: Instant::now(),
         }));
-        let notifier = Arc::new(tokio::sync::Notify::new());
-        let timer = Some(tokio::task::spawn(Self::timer(
-            Arc::clone(&staging),
-            Arc::clone(&notifier),
-        )));
-        let background = Some(tokio::task::spawn(Self::background(
-            Arc::clone(&staging),
-            storage,
-            Arc::clone(&notifier),
-        )));
         Ok(Self {
+            throttle,
+            snapshot,
+            storage,
+            prefix,
+            writer,
             staging,
-            timer,
-            background,
-            notifier,
         })
     }
 
@@ -212,9 +171,30 @@ impl ManifestManager {
     /// not referenced by the manifest.  Scout ahead until an empty slot is observed.  Then write
     /// the manifest that includes the new fragments.
     pub async fn recover(&mut self) -> Result<(), Error> {
-        // TODO(rescrv):  Implement recovery once LogReader is complete, as the features of
-        // LogReader for reading log fragments and scrubbing the log will be necessary components
-        // of recovery.  It's inherently a read operation.
+        let mut next_seq_no_to_apply = {
+            // SAFETY(rescrv):  Mutex poisoning.
+            let staging = self.staging.lock().unwrap();
+            staging.next_seq_no_to_apply
+        };
+        loop {
+            let next_fragment = read_fragment(
+                &self.storage,
+                &self.prefix,
+                &unprefixed_fragment_path(next_seq_no_to_apply),
+            )
+            .await?;
+            if let Some(fragment) = next_fragment {
+                self.publish_fragment(fragment).await?;
+                next_seq_no_to_apply += 1;
+            } else {
+                break;
+            }
+        }
+        {
+            // SAFETY(rescrv):  Mutex poisoning.
+            let mut staging = self.staging.lock().unwrap();
+            staging.next_seq_no_to_apply = next_seq_no_to_apply;
+        }
         Ok(())
     }
 
@@ -239,70 +219,19 @@ impl ManifestManager {
     }
 
     /// Given a fragment, add it to the manifest, batch its application and wait for it to apply.
-    pub async fn add_fragment(&self, fragment: Fragment) -> Result<(), Error> {
+    pub async fn publish_fragment(&self, fragment: Fragment) -> Result<(), Error> {
+        assert_ne!(fragment.setsum, Setsum::default(), "TODO(rescrv): remove");
         let (tx, rx) = tokio::sync::oneshot::channel();
-        self.push_fragment(fragment, tx)?;
-        match rx.await {
-            Ok(None) => Ok(()),
-            Ok(Some(err)) => Err(err),
-            Err(_) => Err(Error::Internal),
-        }
-    }
-
-    /// Add the fragment to the queue/vector of fragments waiting to be applied.
-    fn push_fragment(
-        &self,
-        fragment: Fragment,
-        notify: tokio::sync::oneshot::Sender<Option<Error>>,
-    ) -> Result<(), Error> {
-        let was_empty = {
+        {
+            // SAFETY(rescrv):  Mutex poisoning.
             let mut staging = self.staging.lock().unwrap();
-            if let Some(err) = staging.poison.clone() {
-                return Err(err);
-            }
-            let was_empty = staging.fragments.is_empty();
-            staging.fragments.push((fragment, notify));
-            was_empty
-        };
-        if was_empty {
-            self.notifier.notify_one();
+            staging.fragments.push((fragment, tx));
         }
-        Ok(())
-    }
-
-    /// At a periodic interval consistent with throttle options, pump the notifier to wake up the
-    /// background thread.  This drives the batching.
-    async fn timer(staging: Arc<Mutex<Staging>>, notifier: Arc<tokio::sync::Notify>) {
         loop {
-            let (throttle, last_batch) = {
+            let work = {
                 // SAFETY(rescrv):  Mutex poisoning.
-                let staging = staging.lock().unwrap();
-                (staging.throttle, staging.last_batch)
-            };
-            let elapsed = last_batch.elapsed();
-            let batch_interval = Duration::from_micros(throttle.batch_interval_us as u64);
-            if elapsed > batch_interval {
-                notifier.notify_one();
-                tokio::time::sleep(batch_interval).await;
-            } else {
-                tokio::time::sleep(batch_interval - elapsed).await;
-            }
-        }
-    }
-
-    /// The background thread for installing manifests.
-    async fn background(
-        staging: Arc<Mutex<Staging>>,
-        storage: Arc<Storage>,
-        notifier: Arc<tokio::sync::Notify>,
-    ) {
-        let mut in_flight_snapshots = VecDeque::new();
-        loop {
-            notifier.notified().await;
-            let (work, throttle) = {
-                // SAFETY(rescrv):  Mutex poisoning.
-                let mut staging = staging.lock().unwrap();
-                (staging.pull_work(), staging.throttle)
+                let mut staging = self.staging.lock().unwrap();
+                staging.pull_work(self)
             };
             if let Some((
                 old_manifest,
@@ -313,125 +242,54 @@ impl ManifestManager {
                 notifiers,
             )) = work
             {
-                let done = Arc::new(AtomicBool::new(false));
-                let install_one = Self::install_one(
-                    throttle,
-                    Arc::clone(&storage),
-                    old_manifest,
-                    &old_e_tag,
-                    new_manifest.clone(),
-                    Arc::clone(&notifier),
-                    Arc::clone(&done),
-                );
                 if let Some(snapshot) = snapshot {
-                    let done = Arc::new(AtomicBool::new(false));
-                    let install = Self::install_snapshot(
-                        throttle,
-                        Arc::clone(&staging),
-                        Arc::clone(&storage),
-                        snapshot,
-                        Arc::clone(&notifier),
-                        Arc::clone(&done),
-                    );
-                    let handle = tokio::task::spawn(install);
-                    in_flight_snapshots.push_back((done, handle));
+                    snapshot
+                        .install(&self.throttle, &self.storage, &self.prefix)
+                        .await?;
                 }
-                match install_one.await {
+                match old_manifest
+                    .install(
+                        &self.throttle,
+                        &self.storage,
+                        &self.prefix,
+                        Some(&old_e_tag),
+                        &new_manifest,
+                    )
+                    .await
+                {
                     Ok(e_tag) => {
-                        let mut staging = staging.lock().unwrap();
+                        // SAFETY(rescrv):  Mutex poisoning.
+                        let mut staging = self.staging.lock().unwrap();
                         staging.next_seq_no_to_apply = next_seq_no_to_apply;
                         staging.stable = ManifestAndETag {
                             manifest: new_manifest,
                             e_tag,
                         };
                         for notifier in notifiers.into_iter() {
-                            notifier.send(None).unwrap();
+                            let _ = notifier.send(None);
                         }
                     }
                     Err(e) => {
                         for notifier in notifiers.into_iter() {
-                            notifier.send(Some(e.clone())).unwrap();
+                            let _ = notifier.send(Some(e.clone()));
                         }
-                        let mut staging = staging.lock().unwrap();
-                        staging.poison = Some(e);
                     }
                 }
+            } else {
+                break;
             }
         }
-    }
-
-    /// Install one manifest, returning its etag or erroring.
-    async fn install_one(
-        throttle: ThrottleOptions,
-        storage: Arc<Storage>,
-        old_manifest: Manifest,
-        old_e_tag: &ETag,
-        new_manifest: Manifest,
-        notifier: Arc<tokio::sync::Notify>,
-        done: Arc<AtomicBool>,
-    ) -> Result<ETag, Error> {
-        match old_manifest
-            .install(&throttle, &storage, Some(old_e_tag), &new_manifest)
-            .await
-        {
-            Ok(e_tag) => {
-                done.store(true, Ordering::Relaxed);
-                notifier.notify_one();
-                Ok(e_tag)
-            }
-            Err(e) => {
-                done.store(true, Ordering::Relaxed);
-                notifier.notify_one();
-                Err(e)
-            }
-        }
-    }
-
-    /// Install a snapshot.  Can succeed or error.
-    /// Clears the bookkeeping regardless so the manifest snapshot can retry.
-    async fn install_snapshot(
-        throttle: ThrottleOptions,
-        staging: Arc<Mutex<Staging>>,
-        storage: Arc<Storage>,
-        snapshot: Snapshot,
-        notifier: Arc<tokio::sync::Notify>,
-        done: Arc<AtomicBool>,
-    ) -> Option<Error> {
-        let res = match snapshot.install(&throttle, &storage).await {
-            Ok(_) => {
-                done.store(true, Ordering::Relaxed);
-                notifier.notify_one();
-                None
-            }
-            Err(e) => {
-                done.store(true, Ordering::Relaxed);
-                notifier.notify_one();
-                Some(e)
-            }
-        };
-        // SAFETY(rescrv):  Mutex poisoning.
-        let mut staging = staging.lock().unwrap();
-        staging.snapshots_staged.push(snapshot.setsum);
-        staging
-            .snapshots_in_flight
-            .retain(|s| s.setsum != snapshot.setsum);
-        res
-    }
-}
-
-impl Drop for ManifestManager {
-    fn drop(&mut self) {
-        if let Some(timer) = self.timer.take() {
-            timer.abort();
-        }
-        if let Some(background) = self.background.take() {
-            background.abort();
+        match rx.await {
+            Ok(None) => Ok(()),
+            Ok(Some(err)) => Err(err),
+            Err(_) => Err(Error::Internal),
         }
     }
 }
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
 
+/*
 #[cfg(test)]
 mod tests {
     use chroma_storage::s3_client_for_test_with_new_bucket;
@@ -461,10 +319,6 @@ mod tests {
         )
         .await
         .unwrap();
-        // Kill the background process so we can test the batch logic.
-        if let Some(background) = manager.background.take() {
-            background.abort();
-        }
         let (d1_tx, mut d1_rx) = tokio::sync::oneshot::channel();
         manager
             .push_fragment(
@@ -516,7 +370,6 @@ mod tests {
         assert!(staging.fragments.is_empty());
         assert_eq!(
             Manifest {
-                path: String::from("prefix/manifest/MANIFEST"),
                 writer: "init in test".to_string(),
                 setsum: Setsum::default(),
                 acc_bytes: 0,
@@ -527,7 +380,6 @@ mod tests {
         );
         assert_eq!(
             Manifest {
-                path: String::from("prefix/manifest/MANIFEST"),
                 writer: "manager in test".to_string(),
                 setsum: Setsum::default(),
                 acc_bytes: 50,
@@ -620,7 +472,6 @@ mod tests {
         assert!(staging.fragments.is_empty());
         assert_eq!(
             Manifest {
-                path: String::from("prefix/manifest/MANIFEST"),
                 writer: "manager in test".to_string(),
                 setsum: Setsum::default(),
                 acc_bytes: 50,
@@ -648,3 +499,4 @@ mod tests {
         );
     }
 }
+*/

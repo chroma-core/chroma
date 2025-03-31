@@ -17,7 +17,7 @@ use chroma_index::{
 };
 use chroma_storage::{local::LocalStorage, Storage};
 use chroma_system::Operator;
-use chroma_types::{CollectionUuid, DistributedSpannParameters};
+use chroma_types::{CollectionUuid, InternalSpannConfiguration};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use futures::StreamExt;
 use rand::seq::SliceRandom;
@@ -78,7 +78,8 @@ fn add_to_index_and_get_reader<'a>(
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 128;
-        let params = DistributedSpannParameters::default();
+        let params = InternalSpannConfiguration::default();
+        let ef_search = params.search_ef;
         let gc_context = GarbageCollectionContext::try_from_config(
             &(
                 PlGarbageCollectionConfig::default(),
@@ -137,6 +138,7 @@ fn add_to_index_and_get_reader<'a>(
                 &collection_id,
                 params.space.into(),
                 dimensionality,
+                ef_search,
                 Some(&paths.pl_id),
                 Some(&paths.versions_map_id),
                 &blockfile_provider,

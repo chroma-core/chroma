@@ -38,6 +38,7 @@ func TestCatalog_CreateCollection(t *testing.T) {
 		ID:       types.MustParse("00000000-0000-0000-0000-000000000001"),
 		Name:     "test_collection",
 		Metadata: metadata,
+		TenantID: "test_tenant",
 	}
 
 	// create a mock timestamp

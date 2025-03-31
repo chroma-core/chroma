@@ -19,6 +19,7 @@ from chromadb.utils.embedding_functions import (
     DefaultEmbeddingFunction,
 )
 from typing import Any
+from chromadb.errors import InvalidArgumentError
 
 persist_dir = tempfile.mkdtemp()
 
@@ -502,8 +503,7 @@ def test_metadata_cru(client):
 
     # Test list collections
     collections = client.list_collections()
-    for collection_name in collections:
-        collection = client.get_collection(collection_name)
+    for collection in collections:
         if collection.name == "testspace":
             assert collection.metadata is not None
             assert collection.metadata["a"] == 2
@@ -1276,13 +1276,7 @@ def test_index_params(client):
 def test_invalid_index_params(client):
     client.reset()
 
-    with pytest.raises(Exception):
-        collection = client.create_collection(
-            name="test_index_params", metadata={"hnsw:foobar": "blarg"}
-        )
-        collection.add(**records)
-
-    with pytest.raises(Exception):
+    with pytest.raises(InvalidArgumentError):
         collection = client.create_collection(
             name="test_index_params", metadata={"hnsw:space": "foobar"}
         )

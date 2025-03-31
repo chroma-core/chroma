@@ -298,6 +298,7 @@ func (tc *Catalog) createCollectionImpl(txCtx context.Context, createCollection 
 		Ts:                   ts,
 		LogPosition:          0,
 		VersionFileName:      versionFileName,
+		Tenant:               createCollection.TenantID,
 	}
 
 	err = tc.metaDomain.CollectionDb(txCtx).Insert(dbCollection)
@@ -322,7 +323,6 @@ func (tc *Catalog) createCollectionImpl(txCtx context.Context, createCollection 
 	}
 	result := convertCollectionToModel(collectionList)[0]
 	return result, true, nil
-
 }
 
 func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model.CreateCollection, ts types.Timestamp) (*model.Collection, bool, error) {
@@ -1074,7 +1074,7 @@ func (tc *Catalog) FlushCollectionCompaction(ctx context.Context, flushCollectio
 		}
 
 		// update collection log position and version
-		collectionVersion, err := tc.metaDomain.CollectionDb(txCtx).UpdateLogPositionVersionAndTotalRecords(flushCollectionCompaction.ID.String(), flushCollectionCompaction.LogPosition, flushCollectionCompaction.CurrentCollectionVersion, flushCollectionCompaction.TotalRecordsPostCompaction)
+		collectionVersion, err := tc.metaDomain.CollectionDb(txCtx).UpdateLogPositionVersionTotalRecordsAndLogicalSize(flushCollectionCompaction.ID.String(), flushCollectionCompaction.LogPosition, flushCollectionCompaction.CurrentCollectionVersion, flushCollectionCompaction.TotalRecordsPostCompaction, flushCollectionCompaction.SizeBytesPostCompaction, flushCollectionCompaction.TenantID)
 		if err != nil {
 			return err
 		}

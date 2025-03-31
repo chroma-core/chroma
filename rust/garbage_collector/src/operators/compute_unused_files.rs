@@ -55,6 +55,20 @@ impl ComputeUnusedFilesOperator {
             ComputeUnusedFilesError::VersionFileMissingContent(newer_version),
         )?;
 
+        // Print the older and newer segment info
+        tracing::debug!(
+            line = line!(),
+            "ComputeUnusedFilesOperator: older_version: {}, older_segment_info: \n{:?}",
+            older_version,
+            older_segment_info
+        );
+        tracing::debug!(
+            line = line!(),
+            "ComputeUnusedFilesOperator: newer_version: {}, newer_segment_info: \n{:?}",
+            newer_version,
+            newer_segment_info
+        );
+
         let mut older_si_ids = Vec::new();
         for segment_compaction_info in older_segment_info.segment_compaction_info.iter() {
             for (file_type, file_paths) in &segment_compaction_info.file_paths {
@@ -64,6 +78,12 @@ impl ComputeUnusedFilesOperator {
                     continue;
                 }
                 for file_path in &file_paths.paths {
+                    tracing::debug!(
+                        line = line!(),
+                        "ComputeUnusedFilesOperator: file_type: {:?}, file_path: {:?}",
+                        file_type,
+                        file_path
+                    );
                     older_si_ids.push(file_path.clone());
                 }
             }
@@ -97,7 +117,18 @@ impl ComputeUnusedFilesOperator {
         let older_set: HashSet<_> = s3_files_older_version.into_iter().collect();
         let newer_set: HashSet<_> = s3_files_newer_version.into_iter().collect();
 
+        tracing::debug!(
+            line = line!(),
+            "ComputeUnusedFilesOperator: older_set: \n{:?}\nnewer_set: \n{:?}",
+            older_set,
+            newer_set
+        );
         let unused = older_set.difference(&newer_set).cloned().collect();
+        tracing::debug!(
+            line = line!(),
+            "ComputeUnusedFilesOperator: unused: \n{:?}",
+            unused
+        );
         Ok(unused)
     }
 
@@ -120,6 +151,12 @@ impl ComputeUnusedFilesOperator {
                     return Err(ComputeUnusedFilesError::ParseError(si_id, e.to_string()));
                 }
             };
+            tracing::debug!(
+                line = line!(),
+                "ComputeUnusedFilesOperator: s3_files_in_version: si_id: {:?}, block_ids: {:?}",
+                si_id,
+                block_ids
+            );
             // TODO(rohitcp): Use const from the crate instead of hardcoding the prefix.
             s3_files.extend(block_ids.iter().map(|id| format!("block/{}", id)));
         }
@@ -182,11 +219,6 @@ impl Operator<ComputeUnusedFilesInput, ComputeUnusedFilesOutput> for ComputeUnus
         &self,
         input: &ComputeUnusedFilesInput,
     ) -> Result<ComputeUnusedFilesOutput, Self::Error> {
-        tracing::debug!(
-            collection_id = self.collection_id,
-            "Computing unused files for collection"
-        );
-
         let version_file = input.version_file.clone();
 
         let mut output = ComputeUnusedFilesOutput {
@@ -257,11 +289,13 @@ impl Operator<ComputeUnusedFilesInput, ComputeUnusedFilesOutput> for ComputeUnus
             output.unused_hnsw_prefixes.extend(unused_hnsw_prefixes);
         }
 
-        // Special case: Compare last version to be deleted with oldest version to keep
+        // Special case: Compare last version to be deleted with the next higher version.
+        // Note that the next higher version need not be the oldest version to keep.
+        // Eg: Oldest version to keep (due to min_versions_to_keep) is 4. Versions to delete are 1 and 2.
         let (unused_s3_files, unused_hnsw_prefixes) = self
             .compute_unused_between_successive_versions(
                 *versions.last().unwrap(),
-                input.oldest_version_to_keep,
+                *versions.last().unwrap() + 1,
                 version_to_segment_info.clone(),
             )
             .await?;

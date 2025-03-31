@@ -54,9 +54,9 @@ use chrono::{Duration, Utc};
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 
-use crate::operators::compute_unused_between_versions::{
-    ComputeUnusedBetweenVersionsError, ComputeUnusedBetweenVersionsInput,
-    ComputeUnusedBetweenVersionsOperator, ComputeUnusedBetweenVersionsOutput,
+use crate::operators::compute_unused_files::{
+    ComputeUnusedFilesError, ComputeUnusedFilesInput, ComputeUnusedFilesOperator,
+    ComputeUnusedFilesOutput,
 };
 use crate::operators::compute_versions_to_delete::{
     ComputeVersionsToDeleteError, ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOperator,
@@ -69,10 +69,6 @@ use crate::operators::delete_unused_files::{
 use crate::operators::delete_versions_at_sysdb::{
     DeleteVersionsAtSysDbError, DeleteVersionsAtSysDbInput, DeleteVersionsAtSysDbOperator,
     DeleteVersionsAtSysDbOutput,
-};
-use crate::operators::fetch_sparse_index_files::{
-    FetchSparseIndexFilesError, FetchSparseIndexFilesInput, FetchSparseIndexFilesOperator,
-    FetchSparseIndexFilesOutput,
 };
 use crate::operators::fetch_version_file::{
     FetchVersionFileError, FetchVersionFileInput, FetchVersionFileOperator, FetchVersionFileOutput,
@@ -87,7 +83,11 @@ use prost::Message;
 pub struct GarbageCollectorOrchestrator {
     collection_id: CollectionUuid,
     version_file_path: String,
+    // TODO(rohitcp): Remove this parameter.
     cutoff_time_hours: u32,
+    // Absolute cutoff time in seconds.
+    // Any version created before this time will be deleted unless retained by the min_versions_to_keep parameter.
+    cutoff_time_secs: u64,
     sysdb_client: SysDb,
     dispatcher: ComponentHandle<Dispatcher>,
     storage: Storage,
@@ -95,8 +95,9 @@ pub struct GarbageCollectorOrchestrator {
     pending_version_file: Option<CollectionVersionFile>,
     pending_versions_to_delete: Option<chroma_types::chroma_proto::VersionListForCollection>,
     pending_epoch_id: Option<i64>,
-    hnsw_prefixes_for_deletion: Vec<String>,
     num_versions_deleted: u32,
+    deletion_list: Vec<String>,
+    cleanup_mode: CleanupMode,
 }
 
 impl Debug for GarbageCollectorOrchestrator {
@@ -108,33 +109,39 @@ impl Debug for GarbageCollectorOrchestrator {
 #[allow(dead_code)]
 #[derive(Debug)]
 pub struct GarbageCollectorResponse {
-    collection_id: CollectionUuid,
-    version_file_path: String,
-    num_versions_deleted: u32,
+    pub collection_id: CollectionUuid,
+    pub version_file_path: String,
+    pub num_versions_deleted: u32,
+    pub deletion_list: Vec<String>,
 }
 
+#[allow(clippy::too_many_arguments)]
 impl GarbageCollectorOrchestrator {
     pub fn new(
         collection_id: CollectionUuid,
         version_file_path: String,
+        cutoff_time_secs: u64,
         cutoff_time_hours: u32,
         sysdb_client: SysDb,
         dispatcher: ComponentHandle<Dispatcher>,
         storage: Storage,
+        cleanup_mode: CleanupMode,
     ) -> Self {
         Self {
             collection_id,
             version_file_path,
             cutoff_time_hours,
+            cutoff_time_secs,
             sysdb_client,
             dispatcher,
             storage,
+            cleanup_mode,
             result_channel: None,
             pending_version_file: None,
             pending_versions_to_delete: None,
             pending_epoch_id: None,
-            hnsw_prefixes_for_deletion: Vec::new(),
             num_versions_deleted: 0,
+            deletion_list: Vec::new(),
         }
     }
 }
@@ -155,10 +162,8 @@ pub enum GarbageCollectorError {
     ComputeVersionsToDelete(#[from] ComputeVersionsToDeleteError),
     #[error("MarkVersionsAtSysDb error: {0}")]
     MarkVersionsAtSysDb(#[from] MarkVersionsAtSysDbError),
-    #[error("FetchSparseIndexFiles error: {0}")]
-    FetchSparseIndexFiles(#[from] FetchSparseIndexFilesError),
-    #[error("ComputeUnusedBetweenVersions error: {0}")]
-    ComputeUnusedBetweenVersions(#[from] ComputeUnusedBetweenVersionsError),
+    #[error("ComputeUnusedFiles error: {0}")]
+    ComputeUnusedFiles(#[from] ComputeUnusedFilesError),
     #[error("DeleteVersionsAtSysDb error: {0}")]
     DeleteVersionsAtSysDb(#[from] DeleteVersionsAtSysDbError),
     #[error("The task was aborted because resources were exhausted")]
@@ -283,6 +288,7 @@ impl Handler<TaskResult<FetchVersionFileOutput, FetchVersionFileError>>
             ComputeVersionsToDeleteInput {
                 version_file,
                 cutoff_time,
+                cutoff_time_secs: self.cutoff_time_secs,
                 min_versions_to_keep: 2,
             },
             ctx.receiver(),
@@ -322,6 +328,7 @@ impl Handler<TaskResult<ComputeVersionsToDeleteOutput, ComputeVersionsToDeleteEr
                 collection_id: self.collection_id,
                 version_file_path: self.version_file_path.clone(),
                 num_versions_deleted: 0,
+                deletion_list: Vec::new(),
             };
             tracing::info!(?response, "Garbage collection completed early");
             self.terminate_with_result(Ok(response), ctx);
@@ -330,6 +337,9 @@ impl Handler<TaskResult<ComputeVersionsToDeleteOutput, ComputeVersionsToDeleteEr
         }
 
         self.num_versions_deleted = output.versions_to_delete.versions.len() as u32;
+        self.pending_versions_to_delete = Some(output.versions_to_delete.clone());
+        self.pending_version_file = Some(output.version_file.clone());
+
         let mark_task = wrap(
             Box::new(MarkVersionsAtSysDbOperator {}),
             MarkVersionsAtSysDbInput {
@@ -361,66 +371,23 @@ impl Handler<TaskResult<MarkVersionsAtSysDbOutput, MarkVersionsAtSysDbError>>
         message: TaskResult<MarkVersionsAtSysDbOutput, MarkVersionsAtSysDbError>,
         ctx: &ComponentContext<GarbageCollectorOrchestrator>,
     ) {
-        // Stage 3: After marking versions, fetch their sparse index files
+        // Stage 3: After marking versions, compute unused files
         let output = match self.ok_or_terminate(message.into_inner(), ctx) {
             Some(output) => output,
             None => return,
-        };
-
-        let fetch_task = wrap(
-            Box::new(FetchSparseIndexFilesOperator {
-                storage: self.storage.clone(),
-            }),
-            FetchSparseIndexFilesInput {
-                version_file: output.version_file,
-                epoch_id: output.epoch_id,
-                sysdb_client: output.sysdb_client,
-                versions_to_delete: output.versions_to_delete,
-                oldest_version_to_keep: output.oldest_version_to_keep,
-            },
-            ctx.receiver(),
-        );
-
-        if let Err(e) = self.dispatcher().send(fetch_task, None).await {
-            self.terminate_with_result(Err(GarbageCollectorError::Channel(e)), ctx);
-            return;
-        }
-    }
-}
-
-#[async_trait]
-impl Handler<TaskResult<FetchSparseIndexFilesOutput, FetchSparseIndexFilesError>>
-    for GarbageCollectorOrchestrator
-{
-    type Result = ();
-
-    async fn handle(
-        &mut self,
-        message: TaskResult<FetchSparseIndexFilesOutput, FetchSparseIndexFilesError>,
-        ctx: &ComponentContext<GarbageCollectorOrchestrator>,
-    ) {
-        // Stage 4: Process fetched sparse index files and compute unused files
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
-            Some(output) => output,
-            None => return,
-        };
-
-        self.hnsw_prefixes_for_deletion
-            .extend(output.hnsw_prefixes_for_deletion.clone());
-        let input = ComputeUnusedBetweenVersionsInput {
-            version_file: output.version_file,
-            epoch_id: output.epoch_id,
-            sysdb_client: self.sysdb_client.clone(),
-            versions_to_delete: output.versions_to_delete,
-            version_to_content: output.version_to_content,
-            oldest_version_to_keep: output.oldest_version_to_keep,
         };
 
         let compute_task = wrap(
-            Box::new(ComputeUnusedBetweenVersionsOperator::new(
+            Box::new(ComputeUnusedFilesOperator::new(
+                self.collection_id.to_string(),
                 self.storage.clone(),
+                2, // min_versions_to_keep
             )),
-            input,
+            ComputeUnusedFilesInput {
+                version_file: output.version_file,
+                versions_to_delete: output.versions_to_delete,
+                oldest_version_to_keep: output.oldest_version_to_keep,
+            },
             ctx.receiver(),
         );
 
@@ -432,33 +399,32 @@ impl Handler<TaskResult<FetchSparseIndexFilesOutput, FetchSparseIndexFilesError>
 }
 
 #[async_trait]
-impl Handler<TaskResult<ComputeUnusedBetweenVersionsOutput, ComputeUnusedBetweenVersionsError>>
+impl Handler<TaskResult<ComputeUnusedFilesOutput, ComputeUnusedFilesError>>
     for GarbageCollectorOrchestrator
 {
     type Result = ();
 
     async fn handle(
         &mut self,
-        message: TaskResult<ComputeUnusedBetweenVersionsOutput, ComputeUnusedBetweenVersionsError>,
+        message: TaskResult<ComputeUnusedFilesOutput, ComputeUnusedFilesError>,
         ctx: &ComponentContext<GarbageCollectorOrchestrator>,
     ) {
-        // Stage 5: After identifying unused files, delete them
+        // Stage 4: After identifying unused files, delete them
         let output = match self.ok_or_terminate(message.into_inner(), ctx) {
             Some(output) => output,
             None => return,
         };
 
         let delete_task = wrap(
-            // TODO(rohit): The CleanupMode needs to be changed based on the config.
             Box::new(DeleteUnusedFilesOperator::new(
                 self.storage.clone(),
-                CleanupMode::Rename,
+                self.cleanup_mode,
                 self.collection_id.to_string(),
             )),
             DeleteUnusedFilesInput {
-                unused_s3_files: output.unused_s3_files.clone(),
-                epoch_id: output.epoch_id,
-                hnsw_prefixes_for_deletion: self.hnsw_prefixes_for_deletion.clone(),
+                unused_s3_files: output.unused_block_ids.into_iter().collect(),
+                epoch_id: 0,
+                hnsw_prefixes_for_deletion: output.unused_hnsw_prefixes,
             },
             ctx.receiver(),
         );
@@ -469,9 +435,7 @@ impl Handler<TaskResult<ComputeUnusedBetweenVersionsOutput, ComputeUnusedBetween
         }
 
         // Store state needed for final deletion
-        self.pending_version_file = Some(output.version_file);
-        self.pending_versions_to_delete = Some(output.versions_to_delete);
-        self.pending_epoch_id = Some(output.epoch_id);
+        self.pending_epoch_id = Some(0); // TODO: Get this from somewhere
     }
 }
 
@@ -507,16 +471,21 @@ impl Handler<TaskResult<DeleteUnusedFilesOutput, DeleteUnusedFilesError>>
             .expect("Epoch ID should be set");
 
         let delete_versions_task = wrap(
-            Box::new(DeleteVersionsAtSysDbOperator {}),
+            Box::new(DeleteVersionsAtSysDbOperator {
+                storage: self.storage.clone(),
+            }),
             DeleteVersionsAtSysDbInput {
                 version_file,
                 epoch_id,
                 sysdb_client: self.sysdb_client.clone(),
                 versions_to_delete,
-                unused_s3_files: output.deleted_files,
+                unused_s3_files: output.deleted_files.clone(),
             },
             ctx.receiver(),
         );
+
+        // Update the deletion list so that GarbageCollectorOrchestrator can use it in the final stage.
+        self.deletion_list = output.deleted_files.clone().into_iter().collect();
 
         if let Err(e) = self.dispatcher().send(delete_versions_task, None).await {
             self.terminate_with_result(Err(GarbageCollectorError::Channel(e)), ctx);
@@ -546,6 +515,7 @@ impl Handler<TaskResult<DeleteVersionsAtSysDbOutput, DeleteVersionsAtSysDbError>
             collection_id: self.collection_id,
             version_file_path: self.version_file_path.clone(),
             num_versions_deleted: self.num_versions_deleted,
+            deletion_list: self.deletion_list.clone(),
         };
 
         self.terminate_with_result(Ok(response), ctx);

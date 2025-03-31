@@ -3,11 +3,13 @@ from typing import Optional, Sequence
 from uuid import UUID
 from overrides import override
 
-from chromadb.api.models.Collection import CollectionName
 from chromadb.auth import UserIdentity
 from chromadb.auth.utils import maybe_set_tenant_and_database
 from chromadb.api import AsyncAdminAPI, AsyncClientAPI, AsyncServerAPI
-from chromadb.api.configuration import CollectionConfiguration
+from chromadb.api.collection_configuration import (
+    CreateCollectionConfiguration,
+    UpdateCollectionConfiguration,
+)
 from chromadb.api.models.AsyncCollection import AsyncCollection
 from chromadb.api.shared_system_client import SharedSystemClient
 from chromadb.api.types import (
@@ -154,11 +156,11 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     @override
     async def list_collections(
         self, limit: Optional[int] = None, offset: Optional[int] = None
-    ) -> Sequence[CollectionName]:
+    ) -> Sequence[AsyncCollection]:
         models = await self._server.list_collections(
             limit, offset, tenant=self.tenant, database=self.database
         )
-        return [CollectionName(model.name) for model in models]
+        return [AsyncCollection(client=self._server, model=model) for model in models]
 
     @override
     async def count_collections(self) -> int:
@@ -170,7 +172,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     async def create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfiguration] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
@@ -178,6 +180,10 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
     ) -> AsyncCollection:
+        if configuration is None:
+            configuration = {}
+            if embedding_function is not None:
+                configuration["embedding_function"] = embedding_function
         model = await self._server.create_collection(
             name=name,
             configuration=configuration,
@@ -218,13 +224,17 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     async def get_or_create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfiguration] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> AsyncCollection:
+        if configuration is None:
+            configuration = {}
+            if embedding_function is not None:
+                configuration["embedding_function"] = embedding_function
         model = await self._server.get_or_create_collection(
             name=name,
             configuration=configuration,
@@ -245,11 +255,13 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
+        new_configuration: Optional[UpdateCollectionConfiguration] = None,
     ) -> None:
         return await self._server._modify(
             id=id,
             new_name=new_name,
             new_metadata=new_metadata,
+            new_configuration=new_configuration,
             tenant=self.tenant,
             database=self.database,
         )

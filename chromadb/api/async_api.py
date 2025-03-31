@@ -3,9 +3,9 @@ from typing import Sequence, Optional
 from uuid import UUID
 
 from overrides import override
-from chromadb.api.configuration import (
-    CollectionConfiguration,
-    CollectionConfigurationInternal,
+from chromadb.api.collection_configuration import (
+    CreateCollectionConfiguration,
+    UpdateCollectionConfiguration,
 )
 from chromadb.auth import UserIdentity
 from chromadb.api.models.AsyncCollection import AsyncCollection
@@ -69,6 +69,7 @@ class AsyncBaseAPI(ABC):
         id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
+        new_configuration: Optional[UpdateCollectionConfiguration] = None,
     ) -> None:
         """[Internal] Modify a collection by UUID. Can update the name and/or metadata.
 
@@ -77,6 +78,8 @@ class AsyncBaseAPI(ABC):
             new_name: The new name of the collection.
                                 If None, the existing name will remain. Defaults to None.
             new_metadata: The new metadata to associate with the collection.
+                                      Defaults to None.
+            new_configuration: The new configuration to associate with the collection.
                                       Defaults to None.
         """
         pass
@@ -338,19 +341,19 @@ class AsyncClientAPI(AsyncBaseAPI, ABC):
         self,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
-    ) -> Sequence[str]:
+    ) -> Sequence[AsyncCollection]:
         """List all collections.
         Args:
             limit: The maximum number of entries to return. Defaults to None.
             offset: The number of entries to skip before returning. Defaults to None.
 
         Returns:
-            Sequence[str]: A list of collection names.
+            Sequence[AsyncCollection]: A list of collections.
 
         Examples:
             ```python
             await client.list_collections()
-            # ["my_collection"]
+            # [collection(name="my_collection", metadata={})]
             ```
         """
         pass
@@ -359,7 +362,7 @@ class AsyncClientAPI(AsyncBaseAPI, ABC):
     async def create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfiguration] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
@@ -428,7 +431,7 @@ class AsyncClientAPI(AsyncBaseAPI, ABC):
     async def get_or_create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfiguration] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
@@ -580,7 +583,7 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
     async def create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfigurationInternal] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
@@ -601,7 +604,7 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
     async def get_or_create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfigurationInternal] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -625,6 +628,7 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
         id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
+        new_configuration: Optional[UpdateCollectionConfiguration] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:

@@ -6,7 +6,7 @@ use chroma_index::{
     config::SpannProviderConfig, hnsw_provider::HnswIndexProvider,
     spann::types::GarbageCollectionContext,
 };
-use chroma_types::Segment;
+use chroma_types::{Collection, Segment};
 
 use crate::distributed_spann::{
     SpannSegmentReader, SpannSegmentReaderError, SpannSegmentWriter, SpannSegmentWriterError,
@@ -45,10 +45,12 @@ impl Configurable<(HnswIndexProvider, BlockfileProvider, SpannProviderConfig)> f
 impl SpannProvider {
     pub async fn read(
         &self,
+        collection: &Collection,
         segment: &Segment,
         dimensionality: usize,
     ) -> Result<SpannSegmentReader<'_>, SpannSegmentReaderError> {
         SpannSegmentReader::from_segment(
+            collection,
             segment,
             &self.blockfile_provider,
             &self.hnsw_provider,
@@ -59,6 +61,7 @@ impl SpannProvider {
 
     pub async fn write(
         &self,
+        collection: &Collection,
         segment: &Segment,
         dimensionality: usize,
     ) -> Result<SpannSegmentWriter, SpannSegmentWriterError> {
@@ -67,6 +70,7 @@ impl SpannProvider {
             .as_ref()
             .ok_or(SpannSegmentWriterError::InvalidArgument)?;
         SpannSegmentWriter::from_segment(
+            collection,
             segment,
             &self.blockfile_provider,
             &self.hnsw_provider,

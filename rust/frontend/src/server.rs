@@ -6,19 +6,20 @@ use axum::{
     Json, Router, ServiceExt,
 };
 use chroma_system::System;
+use chroma_types::RawWhereFields;
 use chroma_types::{
-    AddCollectionRecordsResponse, ChecklistResponse, Collection, CollectionMetadataUpdate,
-    CollectionUuid, CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
-    CreateCollectionRequest, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest,
-    CreateTenantResponse, DeleteCollectionRecordsResponse, DeleteDatabaseRequest,
-    DeleteDatabaseResponse, DistributedIndexType, GetCollectionRequest, GetDatabaseRequest,
-    GetDatabaseResponse, GetRequest, GetResponse, GetTenantRequest, GetTenantResponse,
-    GetUserIdentityResponse, HeartbeatResponse, IncludeList, ListCollectionsRequest,
-    ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest,
-    QueryResponse, UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateMetadata,
+    AddCollectionRecordsResponse, ChecklistResponse, Collection, CollectionConfiguration,
+    CollectionMetadataUpdate, CollectionUuid, CountCollectionsRequest, CountCollectionsResponse,
+    CountRequest, CountResponse, CreateCollectionRequest, CreateDatabaseRequest,
+    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
+    DeleteCollectionRecordsResponse, DeleteDatabaseRequest, DeleteDatabaseResponse,
+    GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
+    GetTenantRequest, GetTenantResponse, GetUserIdentityResponse, HeartbeatResponse, IncludeList,
+    ListCollectionsRequest, ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse,
+    Metadata, QueryRequest, QueryResponse, UpdateCollectionConfiguration,
+    UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateMetadata,
     UpsertCollectionRecordsResponse,
 };
-use chroma_types::{DistributedIndexTypeParam, RawWhereFields};
 use mdac::{Rule, Scorecard, ScorecardTicket};
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Meter};
@@ -42,11 +43,11 @@ use crate::{
     ac::AdmissionControlledService,
     auth::{AuthenticateAndAuthorize, AuthzAction, AuthzResource},
     config::FrontendServerConfig,
-    frontend::Frontend,
     quota::{Action, QuotaEnforcer, QuotaPayload},
     server_middleware::{always_json_errors_middleware, default_json_content_type_middleware},
     tower_tracing::add_tracing_middleware,
     types::errors::{ErrorResponse, ServerError, ValidationError},
+    Frontend,
 };
 
 struct ScorecardGuard {
@@ -198,6 +199,7 @@ impl FrontendServer {
                     .head(v1_deprecation_notice)
                     .options(v1_deprecation_notice),
             )
+            .route("/api/v2", get(heartbeat))
             .route("/api/v2/healthcheck", get(healthcheck))
             .route("/api/v2/heartbeat", get(heartbeat))
             .route("/api/v2/pre-flight-checks", get(pre_flight_checks))
@@ -520,8 +522,8 @@ async fn get_tenant(
 }
 
 #[derive(Deserialize, Serialize, ToSchema, Debug)]
-struct CreateDatabasePayload {
-    name: String,
+pub struct CreateDatabasePayload {
+    pub name: String,
 }
 
 /// Creates a new database for a given tenant.
@@ -809,7 +811,7 @@ async fn count_collections(
 #[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
 pub struct CreateCollectionPayload {
     pub name: String,
-    pub configuration: Option<serde_json::Value>,
+    pub configuration: Option<CollectionConfiguration>,
     pub metadata: Option<Metadata>,
     #[serde(default)]
     pub get_or_create: bool,
@@ -863,11 +865,13 @@ async fn create_collection(
         "op:create_collection",
         format!("tenant:{}", tenant).as_str(),
     ]);
-    let index_type = DistributedIndexTypeParam::try_from(&payload.metadata)?;
-    // spann index not allowed.
-    if index_type.index_type == DistributedIndexType::Spann && !server.config.enable_span_indexing {
-        return Err(ValidationError::SpannNotImplemented)?;
+
+    if let Some(configuration) = payload.configuration.as_ref() {
+        if configuration.spann.is_some() && !server.config.enable_span_indexing {
+            return Err(ValidationError::SpannNotImplemented)?;
+        }
     }
+
     let request = CreateCollectionRequest::try_new(
         tenant,
         database,
@@ -928,6 +932,7 @@ async fn get_collection(
 pub struct UpdateCollectionPayload {
     pub new_name: Option<String>,
     pub new_metadata: Option<UpdateMetadata>,
+    pub new_configuration: Option<UpdateCollectionConfiguration>,
 }
 
 /// Updates an existing collection's name or metadata.
@@ -993,6 +998,7 @@ async fn update_collection(
         payload
             .new_metadata
             .map(CollectionMetadataUpdate::UpdateMetadata),
+        payload.new_configuration,
     )?;
 
     server.frontend.update_collection(request).await?;
@@ -1679,7 +1685,7 @@ struct ApiDoc;
 
 #[cfg(test)]
 mod tests {
-    use crate::{config::FrontendServerConfig, frontend::Frontend, FrontendServer};
+    use crate::{config::FrontendServerConfig, Frontend, FrontendServer};
     use chroma_config::{registry::Registry, Configurable};
     use chroma_system::System;
     use std::sync::Arc;

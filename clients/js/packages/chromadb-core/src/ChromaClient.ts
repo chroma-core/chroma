@@ -126,7 +126,7 @@ export class ChromaClient {
    *
    */
   async getUserIdentity(): Promise<void> {
-    const user_identity = (await this.api.getUserIdentity(
+    const user_identity = (await this.api.getUserIdentityV2(
       this.api.options,
     )) as UserIdentity;
     const user_tenant = user_identity.tenant;
@@ -166,7 +166,7 @@ export class ChromaClient {
    */
   async reset(): Promise<boolean> {
     await this.init();
-    return await this.api.postV2Reset(this.api.options);
+    return await this.api.resetV2(this.api.options);
   }
 
   /**
@@ -180,7 +180,7 @@ export class ChromaClient {
    * ```
    */
   async version(): Promise<string> {
-    return await this.api.getV2Version(this.api.options);
+    return await this.api.versionV2(this.api.options);
   }
 
   /**
@@ -194,7 +194,7 @@ export class ChromaClient {
    * ```
    */
   async heartbeat(): Promise<number> {
-    const response = await this.api.getV2Heartbeat(this.api.options);
+    const response = await this.api.heartbeatV2(this.api.options);
     return response["nanosecond heartbeat"];
   }
 
@@ -226,7 +226,7 @@ export class ChromaClient {
     embeddingFunction = new DefaultEmbeddingFunction(),
   }: CreateCollectionParams): Promise<Collection> {
     await this.init();
-    const newCollection = (await this.api.createCollection(
+    const newCollection = (await this.api.createCollectionV2(
       this.tenant,
       this.database,
       {
@@ -273,7 +273,7 @@ export class ChromaClient {
     embeddingFunction = new DefaultEmbeddingFunction(),
   }: GetOrCreateCollectionParams): Promise<Collection> {
     await this.init();
-    const newCollection = (await this.api.createCollection(
+    const newCollection = (await this.api.createCollectionV2(
       this.tenant,
       this.database,
       {
@@ -314,14 +314,16 @@ export class ChromaClient {
     string[]
   > {
     await this.init();
-    const collections = (await this.api.listCollections(
+
+    const response = (await this.api.listCollectionsV2(
       this.tenant,
       this.database,
       limit,
       offset,
       this.api.options,
-    )) as Collection[];
-    return collections.map((collection) => collection.name);
+    )) as { name: string; tenant: string; database: string }[];
+
+    return response.map((collection) => collection.name);
   }
 
   /**
@@ -350,13 +352,15 @@ export class ChromaClient {
     }[]
   > {
     await this.init();
-    return (await this.api.listCollections(
+    const results = (await this.api.listCollectionsV2(
       this.tenant,
       this.database,
       limit,
       offset,
       this.api.options,
-    )) as CollectionParams[];
+    )) as { name: string; id: string; metadata?: CollectionMetadata }[];
+
+    return results ?? [];
   }
 
   /**
@@ -372,12 +376,13 @@ export class ChromaClient {
    */
   async countCollections(): Promise<number> {
     await this.init();
-
-    return (await this.api.countCollections(
+    const response = (await this.api.countCollectionsV2(
       this.tenant,
       this.database,
       this.api.options,
     )) as number;
+
+    return response;
   }
 
   /**
@@ -400,8 +405,7 @@ export class ChromaClient {
     embeddingFunction,
   }: GetCollectionParams): Promise<Collection> {
     await this.init();
-
-    const response = (await this.api.getCollection(
+    const response = (await this.api.getCollectionV2(
       this.tenant,
       this.database,
       name,
@@ -409,10 +413,13 @@ export class ChromaClient {
     )) as CollectionParams;
 
     return wrapCollection(this, {
-      name: response.name,
       id: response.id,
+      name: response.name,
       metadata: response.metadata,
-      embeddingFunction,
+      embeddingFunction:
+        embeddingFunction !== undefined
+          ? embeddingFunction
+          : new DefaultEmbeddingFunction(),
     });
   }
 
@@ -433,7 +440,7 @@ export class ChromaClient {
   async deleteCollection({ name }: DeleteCollectionParams): Promise<void> {
     await this.init();
 
-    await this.api.deleteCollection(
+    await this.api.deleteCollectionV2(
       name,
       this.tenant,
       this.database,

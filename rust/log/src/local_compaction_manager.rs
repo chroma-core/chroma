@@ -65,7 +65,7 @@ impl Component for LocalCompactionManager {
         1000
     }
 
-    async fn start(&mut self, _: &ComponentContext<Self>) -> () {}
+    async fn on_start(&mut self, _: &ComponentContext<Self>) -> () {}
 }
 
 impl Debug for LocalCompactionManager {
@@ -147,7 +147,11 @@ impl Handler<BackfillMessage> for LocalCompactionManager {
             .await?;
         let hnsw_reader = self
             .hnsw_segment_manager
-            .get_hnsw_reader(&collection_and_segments.vector_segment, dim as usize)
+            .get_hnsw_reader(
+                &collection_and_segments.collection,
+                &collection_and_segments.vector_segment,
+                dim as usize,
+            )
             .await;
         let hnsw_max_seq_id = match hnsw_reader {
             Ok(reader) => {
@@ -207,7 +211,11 @@ impl Handler<BackfillMessage> for LocalCompactionManager {
         // Next apply it to the hnsw writer.
         let mut hnsw_writer = self
             .hnsw_segment_manager
-            .get_hnsw_writer(&collection_and_segments.vector_segment, dim as usize)
+            .get_hnsw_writer(
+                &collection_and_segments.collection,
+                &collection_and_segments.vector_segment,
+                dim as usize,
+            )
             .await
             .map_err(|_| CompactionManagerError::GetHnswWriterFailed)?;
         hnsw_writer
@@ -242,7 +250,11 @@ impl Handler<PurgeLogsMessage> for LocalCompactionManager {
             .await?;
         let hnsw_reader = self
             .hnsw_segment_manager
-            .get_hnsw_reader(&collection_segments.vector_segment, dim as usize)
+            .get_hnsw_reader(
+                &collection_segments.collection,
+                &collection_segments.vector_segment,
+                dim as usize,
+            )
             .await;
         let hnsw_max_seq_id = match hnsw_reader {
             Ok(reader) => {

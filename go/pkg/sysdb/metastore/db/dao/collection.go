@@ -99,7 +99,8 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 		SizeBytesPostCompaction    uint64     `gorm:"column:size_bytes_post_compaction"`
 		LastCompactionTimeSecs     uint64     `gorm:"column:last_compaction_time_secs"`
 		DatabaseName               string     `gorm:"column:database_name"`
-		TenantID                   string     `gorm:"column:tenant_id"`
+		TenantID                   string     `gorm:"column:db_tenant_id"`
+		Tenant                     string     `gorm:"column:tenant"`
 		// Metadata fields
 		Key               *string    `gorm:"column:key"`
 		StrValue          *string    `gorm:"column:str_value"`
@@ -112,7 +113,7 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 	}
 
 	query := s.db.Table("collections").
-		Select("collections.id as collection_id, collections.name as collection_name, collections.configuration_json_str, collections.dimension, collections.database_id, collections.ts as collection_ts, collections.is_deleted, collections.created_at as collection_created_at, collections.updated_at as collection_updated_at, collections.log_position, collections.version, collections.version_file_name, collections.total_records_post_compaction, collections.size_bytes_post_compaction, collections.last_compaction_time_secs, databases.name as database_name, databases.tenant_id as tenant_id").
+		Select("collections.id as collection_id, collections.name as collection_name, collections.configuration_json_str, collections.dimension, collections.database_id, collections.ts as collection_ts, collections.is_deleted, collections.created_at as collection_created_at, collections.updated_at as collection_updated_at, collections.log_position, collections.version, collections.version_file_name, collections.total_records_post_compaction, collections.size_bytes_post_compaction, collections.last_compaction_time_secs, databases.name as database_name, databases.tenant_id as db_tenant_id, collections.tenant as tenant").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
 		Order("collections.created_at ASC")
 
@@ -176,6 +177,7 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 				TotalRecordsPostCompaction: r.TotalRecordsPostCompaction,
 				SizeBytesPostCompaction:    r.SizeBytesPostCompaction,
 				LastCompactionTimeSecs:     r.LastCompactionTimeSecs,
+				Tenant:                     r.Tenant,
 			}
 			if r.CollectionTs != nil {
 				col.Ts = *r.CollectionTs
@@ -388,7 +390,7 @@ func (s *collectionDb) UpdateLogPositionAndVersionInfo(
 	return result.RowsAffected, nil
 }
 
-func (s *collectionDb) UpdateLogPositionVersionAndTotalRecords(collectionID string, logPosition int64, currentCollectionVersion int32, totalRecordsPostCompaction uint64) (int32, error) {
+func (s *collectionDb) UpdateLogPositionVersionTotalRecordsAndLogicalSize(collectionID string, logPosition int64, currentCollectionVersion int32, totalRecordsPostCompaction uint64, sizeBytesPostCompaction uint64, tenant string) (int32, error) {
 	log.Info("update log position, version, and total records post compaction", zap.String("collectionID", collectionID), zap.Int64("logPosition", logPosition), zap.Int32("currentCollectionVersion", currentCollectionVersion), zap.Uint64("totalRecords", totalRecordsPostCompaction))
 	var collection dbmodel.Collection
 	// We use select for update to ensure no lost update happens even for isolation level read committed or below
@@ -409,7 +411,7 @@ func (s *collectionDb) UpdateLogPositionVersionAndTotalRecords(collectionID stri
 	}
 
 	version := currentCollectionVersion + 1
-	err = s.db.Model(&dbmodel.Collection{}).Where("id = ?", collectionID).Updates(map[string]interface{}{"log_position": logPosition, "version": version, "total_records_post_compaction": totalRecordsPostCompaction}).Error
+	err = s.db.Model(&dbmodel.Collection{}).Where("id = ?", collectionID).Updates(map[string]interface{}{"log_position": logPosition, "version": version, "total_records_post_compaction": totalRecordsPostCompaction, "size_bytes_post_compaction": sizeBytesPostCompaction, "tenant": tenant}).Error
 	if err != nil {
 		return 0, err
 	}
