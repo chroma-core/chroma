@@ -10,7 +10,7 @@ use chroma_types::{CollectionUuid, LogRecord, OperationRecord, RecordConversionE
 use std::fmt::Debug;
 use std::time::Duration;
 use thiserror::Error;
-use tonic::transport::{Channel, Endpoint};
+use tonic::transport::Endpoint;
 use tower::ServiceBuilder;
 use uuid::Uuid;
 
@@ -165,6 +165,7 @@ impl GrpcLog {
             Some(end_timestamp) => end_timestamp,
             None => i64::MAX,
         };
+        tracing::info!("pull_logs offset: {}, batch_size: {}", offset, batch_size);
         let request = self.client.pull_logs(chroma_proto::PullLogsRequest {
             // NOTE(rescrv):  Use the untyped string representation of the collection ID.
             collection_id: collection_id.0.to_string(),
