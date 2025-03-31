@@ -129,7 +129,7 @@ impl WorkerServer {
         FetchLogOperator {
             log_client: self.log.clone(),
             // TODO: Make this configurable
-            batch_size: 500,
+            batch_size: 1000,
             // The collection log position is inclusive, and we want to start from the next log
             // Note that we query using the incoming log position this is critical for correctness
             start_log_offset_id: collection_and_segments.collection.log_position as u32 + 1,

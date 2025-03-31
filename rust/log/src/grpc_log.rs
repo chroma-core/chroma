@@ -131,6 +131,8 @@ impl Configurable<GrpcLogConfig> for GrpcLog {
     ) -> Result<Self, Box<dyn ChromaError>> {
         let host = &my_config.host;
         let port = &my_config.port;
+        let max_encoding_message_size = my_config.max_encoding_message_size;
+        let max_decoding_message_size = my_config.max_decoding_message_size;
         tracing::info!("Connecting to log service at {}:{}", host, port);
         let connection_string = format!("http://{}:{}", host, port);
         let endpoint_res = match Endpoint::from_shared(connection_string) {
@@ -140,11 +142,14 @@ impl Configurable<GrpcLogConfig> for GrpcLog {
         let endpoint_res = endpoint_res
             .connect_timeout(Duration::from_millis(my_config.connect_timeout_ms))
             .timeout(Duration::from_millis(my_config.request_timeout_ms));
-        let client = endpoint_res.connect_lazy();
+        let channel = endpoint_res.connect_lazy();
         let channel = ServiceBuilder::new()
             .layer(chroma_tracing::GrpcTraceLayer)
-            .service(client);
-        return Ok(GrpcLog::new(LogServiceClient::new(channel)));
+            .service(channel);
+        let client = LogServiceClient::new(channel)
+            .max_encoding_message_size(max_encoding_message_size)
+            .max_decoding_message_size(max_decoding_message_size);
+        return Ok(GrpcLog::new(client));
     }
 }
 
