@@ -67,7 +67,7 @@ impl DeleteVersionsAtSysDbOperator {
             .iter()
             .filter(|v| versions_to_delete.contains(&v.version))
             .filter_map(|v| {
-                if !v.version_file_name.is_empty() {
+                if !v.version_file_name.is_empty() && v.marked_for_deletion {
                     Some(v.version_file_name.clone())
                 } else {
                     None
@@ -286,16 +286,19 @@ mod tests {
                     chroma_proto::CollectionVersionInfo {
                         version: 1,
                         version_file_name: "version_1".to_string(),
+                        marked_for_deletion: true,
                         ..Default::default()
                     },
                     chroma_proto::CollectionVersionInfo {
                         version: 2,
                         version_file_name: "version_2".to_string(),
+                        marked_for_deletion: true,
                         ..Default::default()
                     },
                     chroma_proto::CollectionVersionInfo {
                         version: 3,
                         version_file_name: "".to_string(), // Empty file name to test filtering
+                        marked_for_deletion: true,
                         ..Default::default()
                     },
                 ],
@@ -367,11 +370,13 @@ mod tests {
                     chroma_proto::CollectionVersionInfo {
                         version: 1,
                         version_file_name: "version_1".to_string(),
+                        marked_for_deletion: true,
                         ..Default::default()
                     },
                     chroma_proto::CollectionVersionInfo {
                         version: 2,
                         version_file_name: "version_2".to_string(),
+                        marked_for_deletion: true,
                         ..Default::default()
                     },
                 ],
@@ -415,5 +420,74 @@ mod tests {
         let output = result.unwrap();
         assert_eq!(output.version_file, version_file);
         assert_eq!(output.versions_to_delete, versions_to_delete);
+    }
+
+    #[tokio::test]
+    async fn test_only_deletes_files_marked_for_deletion() {
+        let tmp_dir = TempDir::new().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let sysdb = SysDb::Test(TestSysDb::new());
+
+        // Create test files in the temporary directory
+        let test_files = vec!["version_1", "version_2"];
+        for file in &test_files {
+            std::fs::write(tmp_dir.path().join(file), "test content").unwrap();
+        }
+
+        // Create version file with history
+        let version_file = CollectionVersionFile {
+            version_history: Some(chroma_proto::CollectionVersionHistory {
+                versions: vec![
+                    chroma_proto::CollectionVersionInfo {
+                        version: 1,
+                        version_file_name: "version_1".to_string(),
+                        marked_for_deletion: true,
+                        ..Default::default()
+                    },
+                    chroma_proto::CollectionVersionInfo {
+                        version: 2,
+                        version_file_name: "version_2".to_string(),
+                        marked_for_deletion: false,
+                        ..Default::default()
+                    },
+                ],
+            }),
+            ..Default::default()
+        };
+
+        let versions_to_delete = VersionListForCollection {
+            collection_id: "test_collection".to_string(),
+            database_id: "default".to_string(),
+            tenant_id: "default".to_string(),
+            versions: vec![1, 2],
+        };
+
+        let input = DeleteVersionsAtSysDbInput {
+            version_file: version_file.clone(),
+            versions_to_delete: versions_to_delete.clone(),
+            sysdb_client: sysdb,
+            epoch_id: 123,
+            unused_s3_files: HashSet::new(),
+        };
+
+        let operator = DeleteVersionsAtSysDbOperator {
+            storage: storage.clone(),
+        };
+
+        // Run the operator
+        let result = operator.run(&input).await;
+        assert!(result.is_ok());
+
+        // Verify only the file marked for deletion was deleted
+        // version_1 should be deleted
+        assert!(
+            !tmp_dir.path().join("version_1").exists(),
+            "File version_1 should have been deleted"
+        );
+        // version_2 should still exist since it was not marked for deletion
+        assert!(
+            tmp_dir.path().join("version_2").exists(),
+            "File version_2 should not have been deleted"
+        );
     }
 }
