@@ -94,8 +94,11 @@ def validation_context(name: str) -> Callable[[Callable[..., T]], Callable[..., 
             try:
                 return func(self, *args, **kwargs)
             except Exception as e:
-                msg = f"{str(e)} in {name}."
-                raise type(e)(msg).with_traceback(e.__traceback__)
+                if e.args:
+                    e.args = (f"{e.args[0]} in {name}.",) + e.args[1:]
+                else:
+                    e.args = (f"{type(e)} in {name}.",)
+                raise
 
         return wrapper
 
