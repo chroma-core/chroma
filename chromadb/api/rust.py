@@ -40,6 +40,9 @@ from overrides import override
 from uuid import UUID
 import json
 import platform
+from pathlib import Path
+import uuid
+import os
 
 if platform.system() != "Windows":
     import resource
@@ -103,11 +106,24 @@ class RustBindingsAPI(ServerAPI):
             url=sqlite_persist_path,
         )
 
+        # Determine telemetry user ID (moved from __init__ attempt)
+        user_id_path = str(Path.home() / ".cache" / "chroma" / "telemetry_user_id")
+        if os.path.exists(user_id_path):
+            with open(user_id_path, "r") as f:
+                telemetry_user_id = f.read()
+        else:
+            # Ensure the directory exists before writing
+            os.makedirs(os.path.dirname(user_id_path), exist_ok=True)
+            telemetry_user_id = str(uuid.uuid4())
+            with open(user_id_path, "w") as f:
+                f.write(telemetry_user_id)
+
         self.bindings = chromadb_rust_bindings.Bindings(
             allow_reset=self._system.settings.require("allow_reset"),
             sqlite_db_config=sqlite_config,
             persist_path=persist_path,
             hnsw_cache_size=self.hnsw_cache_size,
+            user_id=telemetry_user_id,  # Pass the user ID here
         )
 
     @override
@@ -316,7 +332,7 @@ class RustBindingsAPI(ServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> GetResult:
         return self._get(
-            str(collection_id),
+            collection_id,
             limit=n,
             tenant=tenant,
             database=database,
