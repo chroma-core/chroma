@@ -152,4 +152,49 @@ mod tests {
         let parsed_name = super::CursorName::from_path(&path).unwrap();
         assert_eq!(name.0, parsed_name.0);
     }
+
+    #[tokio::test]
+    async fn test_k8s_integration_save_and_load() {
+        let storage = Arc::new(chroma_storage::s3_client_for_test_with_new_bucket().await);
+        let store = CursorStore::new(
+            CursorStoreOptions::default(),
+            Arc::clone(&storage),
+            "prefix-for-save-and-load".to_string(),
+            "test-writer".to_string(),
+        );
+        store
+            .init(
+                CursorName::new("test_cursor").unwrap(),
+                Cursor {
+                    position: LogPosition::from_offset(42),
+                    epoch_us: 12345u64,
+                    writer: "test-writer".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        let witness = store
+            .load(CursorName::new("test_cursor").unwrap())
+            .await
+            .unwrap();
+        store
+            .save(
+                CursorName::new("test_cursor").unwrap(),
+                Cursor {
+                    position: LogPosition::from_offset(99),
+                    epoch_us: 54321u64,
+                    writer: "writer-test".to_string(),
+                },
+                witness,
+            )
+            .await
+            .unwrap();
+        let witness = store
+            .load(CursorName::new("test_cursor").unwrap())
+            .await
+            .unwrap();
+        assert_eq!(LogPosition::from_offset(99), witness.1.position);
+        assert_eq!(54321u64, witness.1.epoch_us);
+        assert_eq!("writer-test", witness.1.writer);
+    }
 }
