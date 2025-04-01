@@ -419,8 +419,10 @@ impl DirtyMarker {
         let compactable = compactable
             .into_iter()
             .filter_map(|collection_id| {
-                let (cursor, manifest) = cursors.get(collection_id)?.clone();
-                let cursor = cursor.unwrap_or(Witness::init());
+                let (witness, manifest) = cursors.get(collection_id)?.clone();
+                let cursor = witness.as_ref().map(|w| w.cursor());
+                let default = Cursor::default();
+                let cursor = cursor.unwrap_or(&default);
                 let manifest = match manifest {
                     Some(manifest) => manifest,
                     None => {
@@ -431,7 +433,6 @@ impl DirtyMarker {
                         return None;
                     }
                 };
-                let cursor = cursor.cursor();
                 match manifest.maximum_log_position().cmp(&cursor.position) {
                     Ordering::Equal => {
                         // Same as above.
@@ -710,15 +711,16 @@ impl LogService for LogServer {
             return Err(Status::unavailable("Failed to get dirty log cursors"));
         };
         let witness = match cursors.load(&STABLE_PREFIX).await {
-            Ok(Some(witness)) => witness,
-            Ok(None) => Witness::init(),
+            Ok(witness) => witness,
             Err(err) => {
                 return Err(Status::new(err.code().into(), err.to_string()));
             }
         };
+        let default = Cursor::default();
+        let cursor = witness.as_ref().map(|w| w.cursor()).unwrap_or(&default);
         let dirty_fragments = reader
             .scan(
-                witness.cursor().position,
+                cursor.position,
                 Limits {
                     max_files: Some(1_000_000),
                     max_bytes: Some(1_000_000_000),
@@ -807,11 +809,11 @@ impl LogService for LogServer {
                     .map_err(|err| Status::unavailable(err.to_string()))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let mut new_cursor = witness.cursor().clone();
-        if rollup.advance_to < witness.cursor().position {
+        let mut new_cursor = cursor.clone();
+        if rollup.advance_to < cursor.position {
             tracing::error!(
                 "advance_to went back in time: {:?} -> {:?}",
-                witness.cursor().position,
+                cursor.position,
                 rollup.advance_to
             );
             return Err(Status::aborted("Invalid advance_to"));
@@ -825,13 +827,20 @@ impl LogService for LogServer {
         new_cursor.position = rollup.advance_to;
         tracing::info!(
             "Advancing cursor {:?} -> {:?}",
-            witness.cursor().position,
+            cursor.position,
             new_cursor.position
         );
-        cursors
-            .save(&STABLE_PREFIX, &new_cursor, &witness)
-            .await
-            .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
+        if let Some(witness) = witness {
+            cursors
+                .save(&STABLE_PREFIX, &new_cursor, &witness)
+                .await
+                .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
+        } else {
+            cursors
+                .init(&STABLE_PREFIX, new_cursor)
+                .await
+                .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
+        }
         Ok(Response::new(GetAllCollectionInfoToCompactResponse {
             all_collection_info: rollup.compactable,
         }))
@@ -853,14 +862,12 @@ impl LogService for LogServer {
             storage_prefix_for_log(collection_id),
             "writer".to_string(),
         );
-        let witness = cursor_store
-            .load(cursor_name)
-            .await
-            .map_err(|err| {
-                Status::new(err.code().into(), format!("Failed to load cursor: {}", err))
-            })?
-            .unwrap_or(Witness::init());
-        if witness.cursor().position.offset() > request.log_offset as u64 {
+        let witness = cursor_store.load(cursor_name).await.map_err(|err| {
+            Status::new(err.code().into(), format!("Failed to load cursor: {}", err))
+        })?;
+        let default = Cursor::default();
+        let cursor = witness.as_ref().map(|w| w.cursor()).unwrap_or(&default);
+        if cursor.position.offset() > request.log_offset as u64 {
             return Err(Status::aborted("Invalid offset"));
         }
         let cursor = Cursor {
@@ -872,12 +879,21 @@ impl LogService for LogServer {
                 .as_micros() as u64,
             writer: "TODO".to_string(),
         };
-        cursor_store
-            .save(cursor_name, &cursor, &witness)
-            .await
-            .map_err(|err| {
-                Status::new(err.code().into(), format!("Failed to save cursor: {}", err))
-            })?;
+        if let Some(witness) = witness {
+            cursor_store
+                .save(cursor_name, &cursor, &witness)
+                .await
+                .map_err(|err| {
+                    Status::new(err.code().into(), format!("Failed to save cursor: {}", err))
+                })?;
+        } else {
+            cursor_store
+                .init(cursor_name, cursor)
+                .await
+                .map_err(|err| {
+                    Status::new(err.code().into(), format!("Failed to init cursor: {}", err))
+                })?;
+        }
         Ok(Response::new(UpdateCollectionLogOffsetResponse {}))
     }
 
@@ -1514,7 +1530,7 @@ mod tests {
                 if collection_id == collection_id_blocking_clone {
                     Ok(None)
                 } else if collection_id == collection_id_collected_clone {
-                    Ok(Some(Witness::from_cursor(Cursor {
+                    Ok(Some(Witness::default_etag_with_cursor(Cursor {
                         position: LogPosition::from_offset(101),
                         epoch_us: 0,
                         writer: "TODO".to_string(),
