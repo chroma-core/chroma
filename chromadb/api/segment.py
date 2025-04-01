@@ -56,14 +56,6 @@ from chromadb.api.types import (
     IncludeMetadataDocuments,
     IncludeMetadataDocumentsDistances,
 )
-from chromadb.telemetry.product.events import (
-    CollectionAddEvent,
-    CollectionDeleteEvent,
-    CollectionGetEvent,
-    CollectionUpdateEvent,
-    CollectionQueryEvent,
-    ClientCreateCollectionEvent,
-)
 
 import chromadb.types as t
 from typing import (
@@ -277,14 +269,6 @@ class SegmentAPI(ServerAPI):
                 f"Collection {name} already exists, returning existing collection."
             )
 
-        # TODO: This event doesn't capture the get_or_create case appropriately
-        # TODO: Re-enable embedding function tracking in create_collection
-        self._product_telemetry_client.capture(
-            ClientCreateCollectionEvent(
-                collection_uuid=str(id),
-                # embedding_function=embedding_function.__class__.__name__,
-            )
-        )
         add_attributes_to_current_span({"collection_uuid": str(id)})
 
         return coll
@@ -507,15 +491,6 @@ class SegmentAPI(ServerAPI):
 
         self._producer.submit_embeddings(collection_id, records_to_submit)
 
-        self._product_telemetry_client.capture(
-            CollectionAddEvent(
-                collection_uuid=str(collection_id),
-                add_amount=len(ids),
-                with_metadata=len(ids) if metadatas is not None else 0,
-                with_documents=len(ids) if documents is not None else 0,
-                with_uris=len(ids) if uris is not None else 0,
-            )
-        )
         return True
 
     @trace_method("SegmentAPI._update", OpenTelemetryGranularity.OPERATION)
@@ -561,17 +536,6 @@ class SegmentAPI(ServerAPI):
         )
 
         self._producer.submit_embeddings(collection_id, records_to_submit)
-
-        self._product_telemetry_client.capture(
-            CollectionUpdateEvent(
-                collection_uuid=str(collection_id),
-                update_amount=len(ids),
-                with_embeddings=len(embeddings) if embeddings else 0,
-                with_metadata=len(metadatas) if metadatas else 0,
-                with_documents=len(documents) if documents else 0,
-                with_uris=len(uris) if uris else 0,
-            )
-        )
 
         return True
 
@@ -668,18 +632,6 @@ class SegmentAPI(ServerAPI):
             limit=limit,
         )
 
-        ids_amount = len(ids) if ids else 0
-        self._product_telemetry_client.capture(
-            CollectionGetEvent(
-                collection_uuid=str(collection_id),
-                ids_count=ids_amount,
-                limit=limit if limit else 0,
-                include_metadata=ids_amount if "metadatas" in include else 0,
-                include_documents=ids_amount if "documents" in include else 0,
-                include_uris=ids_amount if "uris" in include else 0,
-            )
-        )
-
         return self._executor.get(
             GetPlan(
                 scan,
@@ -767,12 +719,6 @@ class SegmentAPI(ServerAPI):
         self._validate_embedding_record_set(scan.collection, records_to_submit)
         self._producer.submit_embeddings(collection_id, records_to_submit)
 
-        self._product_telemetry_client.capture(
-            CollectionDeleteEvent(
-                collection_uuid=str(collection_id), delete_amount=len(ids_to_delete)
-            )
-        )
-
     @trace_method("SegmentAPI._count", OpenTelemetryGranularity.OPERATION)
     @retry(  # type: ignore[misc]
         retry=retry_if_exception(lambda e: isinstance(e, VersionMismatchError)),
@@ -825,23 +771,6 @@ class SegmentAPI(ServerAPI):
                 "n_results": n_results,
                 "where": str(where),
             }
-        )
-
-        query_amount = len(query_embeddings)
-        ids_amount = len(ids) if ids else 0
-        self._product_telemetry_client.capture(
-            CollectionQueryEvent(
-                collection_uuid=str(collection_id),
-                query_amount=query_amount,
-                filtered_ids_amount=ids_amount,
-                n_results=n_results,
-                with_metadata_filter=query_amount if where is not None else 0,
-                with_document_filter=query_amount if where_document is not None else 0,
-                include_metadatas=query_amount if "metadatas" in include else 0,
-                include_documents=query_amount if "documents" in include else 0,
-                include_uris=query_amount if "uris" in include else 0,
-                include_distances=query_amount if "distances" in include else 0,
-            )
         )
 
         # TODO: Replace with unified validation

@@ -25,15 +25,6 @@ from chromadb.api.collection_configuration import (
 )
 from chromadb.auth import UserIdentity
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
-from chromadb.telemetry.product import ProductTelemetryClient
-from chromadb.telemetry.product.events import (
-    CollectionAddEvent,
-    CollectionDeleteEvent,
-    CollectionGetEvent,
-    CollectionUpdateEvent,
-    CollectionQueryEvent,
-    ClientCreateCollectionEvent,
-)
 
 from chromadb.api.types import (
     IncludeMetadataDocuments,
@@ -72,11 +63,9 @@ elif platform.system() == "Windows":
 class RustBindingsAPI(ServerAPI):
     bindings: chromadb_rust_bindings.Bindings
     hnsw_cache_size: int
-    product_telemetry_client: ProductTelemetryClient
 
     def __init__(self, system: System):
         super().__init__(system)
-        self.product_telemetry_client = self.require(ProductTelemetryClient)
 
         if platform.system() != "Windows":
             max_file_handles = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
@@ -118,10 +107,11 @@ class RustBindingsAPI(ServerAPI):
         )
 
         self.bindings = chromadb_rust_bindings.Bindings(
-            allow_reset=self._system.settings.require("allow_reset"),
-            sqlite_db_config=sqlite_config,
-            persist_path=persist_path,
-            hnsw_cache_size=self.hnsw_cache_size,
+            self._system.settings.require("allow_reset"),
+            sqlite_config,
+            self.hnsw_cache_size,
+            persist_path,
+            self._system.settings.anonymized_telemetry,
         )
 
     @override
@@ -219,14 +209,6 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
-        # TODO: This event doesn't capture the get_or_create case appropriately
-        # TODO: Re-enable embedding function tracking in create_collection
-        self.product_telemetry_client.capture(
-            ClientCreateCollectionEvent(
-                collection_uuid=str(id),
-                # embedding_function=embedding_function.__class__.__name__,
-            )
-        )
         if configuration:
             configuration_json_str = create_collection_configuration_to_json_str(
                 configuration, metadata
@@ -382,18 +364,6 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> GetResult:
-        ids_amount = len(ids) if ids else 0
-        self.product_telemetry_client.capture(
-            CollectionGetEvent(
-                collection_uuid=str(collection_id),
-                ids_count=ids_amount,
-                limit=limit if limit else 0,
-                include_metadata=ids_amount if "metadatas" in include else 0,
-                include_documents=ids_amount if "documents" in include else 0,
-                include_uris=ids_amount if "uris" in include else 0,
-            )
-        )
-
         rust_response = self.bindings.get(
             str(collection_id),
             ids,
@@ -428,16 +398,6 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
-        self.product_telemetry_client.capture(
-            CollectionAddEvent(
-                collection_uuid=str(collection_id),
-                add_amount=len(ids),
-                with_metadata=len(ids) if metadatas is not None else 0,
-                with_documents=len(ids) if documents is not None else 0,
-                with_uris=len(ids) if uris is not None else 0,
-            )
-        )
-
         return self.bindings.add(
             ids,
             str(collection_id),
@@ -461,17 +421,6 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
-        self.product_telemetry_client.capture(
-            CollectionUpdateEvent(
-                collection_uuid=str(collection_id),
-                update_amount=len(ids),
-                with_embeddings=len(embeddings) if embeddings else 0,
-                with_metadata=len(metadatas) if metadatas else 0,
-                with_documents=len(documents) if documents else 0,
-                with_uris=len(uris) if uris else 0,
-            )
-        )
-
         return self.bindings.update(
             str(collection_id),
             ids,
@@ -519,23 +468,6 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> QueryResult:
-        query_amount = len(query_embeddings)
-        filtered_ids_amount = len(ids) if ids else 0
-        self.product_telemetry_client.capture(
-            CollectionQueryEvent(
-                collection_uuid=str(collection_id),
-                query_amount=query_amount,
-                filtered_ids_amount=filtered_ids_amount,
-                n_results=n_results,
-                with_metadata_filter=query_amount if where is not None else 0,
-                with_document_filter=query_amount if where_document is not None else 0,
-                include_metadatas=query_amount if "metadatas" in include else 0,
-                include_documents=query_amount if "documents" in include else 0,
-                include_uris=query_amount if "uris" in include else 0,
-                include_distances=query_amount if "distances" in include else 0,
-            )
-        )
-
         rust_response = self.bindings.query(
             str(collection_id),
             ids,
@@ -569,15 +501,6 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
-        self.product_telemetry_client.capture(
-            CollectionDeleteEvent(
-                # NOTE: the delete amount is not observable from python
-                # TODO: Fix this when posthog is pushed into Rust frontend
-                collection_uuid=str(collection_id),
-                delete_amount=0,
-            )
-        )
-
         return self.bindings.delete(
             str(collection_id),
             ids,

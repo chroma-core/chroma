@@ -89,8 +89,6 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         self._admin_client = AsyncAdminClient.from_system(self._system)
         await self._validate_tenant_database(tenant=self.tenant, database=self.database)
 
-        self._submit_client_start_event()
-
         return self
 
     @classmethod

@@ -45,6 +45,7 @@ chroma-sysdb = { workspace = true }
 chroma-system = { workspace = true }
 chroma-tracing = { workspace = true, features = ["middleware"] }
 chroma-types = { workspace = true, features = ["utoipa"] }
+chroma-telemetry = { workspace = true }
 chroma-sqlite = { workspace = true }
 utoipa = { workspace = true }
 utoipa-axum = { version = "0.2.0", features = ["debug"] }

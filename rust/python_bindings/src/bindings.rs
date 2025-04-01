@@ -4,6 +4,7 @@ use chroma_cli::chroma_cli;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_frontend::{
     config::default_min_records_for_invocation,
+    config::TelemetryConfig,
     executor::config::{ExecutorConfig, LocalExecutorConfig},
     get_collection_with_segments_provider::{
         CacheInvalidationRetryConfig, CollectionsWithSegmentsProviderConfig,
@@ -25,9 +26,37 @@ use chroma_types::{
     UpdateCollectionConfiguration, UpdateCollectionRequest, UpdateMetadata, WrappedSerdeJsonError,
 };
 use pyo3::{exceptions::PyValueError, pyclass, pyfunction, pymethods, types::PyAnyMethods, Python};
-use std::time::SystemTime;
+use std::{fs, path::PathBuf, time::SystemTime};
 const DEFAULT_DATABASE: &str = "default_database";
 const DEFAULT_TENANT: &str = "default_tenant";
+const UNKNOWN_USER_ID: &str = "UNKNOWN";
+
+fn user_id_path() -> Option<PathBuf> {
+    dirs::home_dir().map(|home| home.join(".cache").join("chroma").join("telemetry_user_id"))
+}
+
+fn get_or_create_telemetry_user_id() -> String {
+    let Some(path) = user_id_path() else {
+        return UNKNOWN_USER_ID.to_string();
+    };
+
+    if let Ok(contents) = fs::read_to_string(&path) {
+        return contents;
+    }
+
+    if let Some(parent) = path.parent() {
+        if fs::create_dir_all(parent).is_err() {
+            return UNKNOWN_USER_ID.to_string();
+        }
+    }
+
+    let user_id = uuid::Uuid::new_v4().to_string();
+    if fs::write(&path, &user_id).is_err() {
+        return UNKNOWN_USER_ID.to_string();
+    }
+
+    user_id
+}
 
 #[pyclass]
 pub(crate) struct Bindings {
@@ -67,12 +96,13 @@ pub fn cli(py_args: Option<Vec<String>>) -> ChromaPyResult<()> {
 #[pymethods]
 impl Bindings {
     #[new]
-    #[pyo3(signature = (allow_reset, sqlite_db_config, hnsw_cache_size, persist_path=None))]
+    #[pyo3(signature = (allow_reset, sqlite_db_config, hnsw_cache_size, persist_path=None, anonymized_telemetry=true))]
     pub fn py_new(
         allow_reset: bool,
         sqlite_db_config: SqliteDBConfig,
         hnsw_cache_size: usize,
         persist_path: Option<String>,
+        anonymized_telemetry: bool,
     ) -> ChromaPyResult<Self> {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let _guard = runtime.enter();
@@ -80,6 +110,11 @@ impl Bindings {
         let registry = Registry::new();
 
         //////////////////////////// Frontend Setup ////////////////////////////
+
+        // get version from Cargo crate version, this has been 0.1.0 for a while
+        // TODO: discuss updating bindings versions to match python client
+        let version = env!("CARGO_PKG_VERSION").to_string();
+        let telemetry_user_id = get_or_create_telemetry_user_id();
 
         let cache_config = FoyerCacheConfig {
             capacity: hnsw_cache_size,
@@ -114,6 +149,13 @@ impl Bindings {
 
         let knn_index = KnnIndex::Hnsw;
         let enable_schema = true;
+        // Telemetry Configuration with anonymized_telemetry setting
+        let telemetry_config = TelemetryConfig {
+            user_id: Some(telemetry_user_id),
+            is_server: false,
+            chroma_version: Some(version),
+            anonymized_telemetry: Some(anonymized_telemetry),
+        };
 
         let frontend_config = FrontendConfig {
             allow_reset,
@@ -128,6 +170,7 @@ impl Bindings {
             tenants_to_migrate_immediately_threshold: None,
             enable_schema,
             min_records_for_invocation: default_min_records_for_invocation(),
+            telemetry: Some(telemetry_config),
         };
 
         let frontend = runtime.block_on(async {

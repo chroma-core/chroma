@@ -10,6 +10,7 @@ async-trait = "0.1"
 axum = { version = "0.8", features = ["macros"] }
 bytes = "1.10"
 chrono = { version = "0.4", features = ["serde"] }
+posthog-rs = "0.3.7"
 clap = { version = "4", features = ["derive"] }
 figment = { version = "0.10.12", features = ["env", "yaml", "test"] }
 flatbuffers = "25.2.10"
@@ -100,6 +101,7 @@ s3heap = { path = "rust/s3heap" }
 s3heap-service = { path = "rust/s3heap-service" }
 wal3 = { path = "rust/wal3" }
 worker = { path = "rust/worker" }
+chroma-telemetry = { path = "rust/telemetry" }
 
 # Dev dependencies
 bincode = "1.3.3"

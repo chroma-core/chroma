@@ -1116,3 +1116,15 @@ def mock_common_deps(monkeypatch: MonkeyPatch) -> MonkeyPatch:
         monkeypatch.setattr(path, mock, raising=False)
 
     return monkeypatch
+
+
+@pytest.fixture(autouse=True)
+def set_pytest_env_for_rust() -> Generator[None, None, None]:
+    original_value = os.environ.get("CHROMA_IN_PYTEST")
+    os.environ["CHROMA_IN_PYTEST"] = "1"
+    yield
+    # Restore original value or unset after test
+    if original_value is None:
+        del os.environ["CHROMA_IN_PYTEST"]
+    else:
+        os.environ["CHROMA_IN_PYTEST"] = original_value
