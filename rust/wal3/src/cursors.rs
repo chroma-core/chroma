@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
-use chroma_storage::{PutOptions, Storage, StorageError};
+use chroma_storage::{ETag, PutOptions, Storage, StorageError};
 
 use crate::{CursorStoreOptions, Error, LogPosition};
 
@@ -48,11 +48,13 @@ impl CursorName<'_> {
 ////////////////////////////////////////////// Witness /////////////////////////////////////////////
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
-pub struct Witness(PutOptions, pub Cursor);
+pub struct Witness(ETag, pub Cursor);
 
 impl Witness {
-    pub fn from_cursor(cursor: Cursor) -> Self {
-        Self(PutOptions::if_not_exists(), cursor)
+    /// This method constructs a witness that will likely fail, but that contains a new cursor.
+    /// Useful in tests and not much else.
+    pub fn default_etag_with_cursor(cursor: Cursor) -> Self {
+        Self(ETag("NO MATCH".to_string()), cursor)
     }
 
     pub fn cursor(&self) -> &Cursor {
@@ -60,19 +62,23 @@ impl Witness {
     }
 }
 
-impl Witness {
-    pub fn init() -> Self {
-        Self(PutOptions::if_not_exists(), Cursor::default())
-    }
-}
-
 ////////////////////////////////////////////// Cursor //////////////////////////////////////////////
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct Cursor {
     pub position: LogPosition,
     pub epoch_us: u64,
     pub writer: String,
+}
+
+impl Default for Cursor {
+    fn default() -> Self {
+        Self {
+            position: LogPosition::from_offset(1),
+            epoch_us: 1,
+            writer: "default-cursor".to_string(),
+        }
+    }
 }
 
 //////////////////////////////////////////// CursorStore ///////////////////////////////////////////
@@ -121,7 +127,7 @@ impl CursorStore {
         let cursor: Cursor = serde_json::from_slice(&data).map_err(|e| {
             Error::CorruptCursor(format!("Failed to deserialize cursor {}: {}", name.0, e))
         })?;
-        Ok(Some(Witness(PutOptions::if_matches(&e_tag), cursor)))
+        Ok(Some(Witness(e_tag, cursor)))
     }
 
     pub async fn init<'a>(&self, name: &CursorName<'a>, cursor: Cursor) -> Result<Witness, Error> {
@@ -137,7 +143,8 @@ impl CursorStore {
         witness: &Witness,
     ) -> Result<Witness, Error> {
         // Semaphore taken by put.
-        self.put(name, cursor.clone(), witness.0.clone()).await
+        let options = PutOptions::if_matches(&witness.0);
+        self.put(name, cursor.clone(), options).await
     }
 
     async fn put<'a>(
@@ -164,7 +171,7 @@ impl CursorStore {
                 name.0
             )));
         };
-        Ok(Witness(PutOptions::if_matches(&e_tag), cursor))
+        Ok(Witness(e_tag, cursor))
     }
 }
 
@@ -202,7 +209,7 @@ mod tests {
         );
         store
             .init(
-                CursorName::new("test_cursor").unwrap(),
+                &CursorName::new("test_cursor").unwrap(),
                 Cursor {
                     position: LogPosition::from_offset(42),
                     epoch_us: 12345u64,
@@ -212,24 +219,26 @@ mod tests {
             .await
             .unwrap();
         let witness = store
-            .load(CursorName::new("test_cursor").unwrap())
+            .load(&CursorName::new("test_cursor").unwrap())
             .await
+            .unwrap()
             .unwrap();
         store
             .save(
-                CursorName::new("test_cursor").unwrap(),
-                Cursor {
+                &CursorName::new("test_cursor").unwrap(),
+                &Cursor {
                     position: LogPosition::from_offset(99),
                     epoch_us: 54321u64,
                     writer: "writer-test".to_string(),
                 },
-                witness,
+                &witness,
             )
             .await
             .unwrap();
         let witness = store
-            .load(CursorName::new("test_cursor").unwrap())
+            .load(&CursorName::new("test_cursor").unwrap())
             .await
+            .unwrap()
             .unwrap();
         assert_eq!(LogPosition::from_offset(99), witness.1.position);
         assert_eq!(54321u64, witness.1.epoch_us);

@@ -16,7 +16,6 @@ rustFrontendService:
 
 
 frontendService:
-  logServiceHost: 'value: "rust-log-service.chroma"'
   otherEnvConfig: |
     - name: CHROMA_ALLOW_RESET
       value: "true"
