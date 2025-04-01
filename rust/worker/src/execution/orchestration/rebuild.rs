@@ -24,6 +24,8 @@ use crate::execution::operators::{
 
 #[derive(Debug, Error)]
 pub enum RebuildError {
+    #[error("Operation aborted")]
+    Aborted,
     #[error("Error sending message through channel: {0}")]
     Channel(#[from] ChannelError),
     #[error("Error getting collection and segments: {0}")]
@@ -34,8 +36,6 @@ pub enum RebuildError {
     PrefetchSegment(#[from] PrefetchSegmentError),
     #[error("Error receiving final result: {0}")]
     Result(#[from] RecvError),
-    #[error("Operation aborted")]
-    Aborted,
 }
 
 impl ChromaError for RebuildError {

@@ -54,6 +54,11 @@ impl Operator<GetCollectionAndSegmentsInput, GetCollectionAndSegmentsOutput>
         &self,
         _: &GetCollectionAndSegmentsInput,
     ) -> Result<GetCollectionAndSegmentsOutput, GetCollectionAndSegmentsError> {
+        tracing::trace!(
+            "[{}]: Collection ID {}",
+            self.get_name(),
+            self.collection_id.0
+        );
         Ok(self
             .sysdb
             .clone()
