@@ -58,6 +58,7 @@ impl CursorStore {
         prefix: String,
         writer: String,
     ) -> Self {
+        // This semaphore keeps the cursor store to a percentage of all traffic.
         let semaphore = tokio::sync::Semaphore::new(options.concurrency);
         Self {
             storage,

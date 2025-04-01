@@ -473,6 +473,8 @@ refer to something that was erroneously garbage collected.  This is a very hard 
 the general case.  In the specific case of wal3, we assume that the checksums over the log are
 sufficient to detect most corruption.
 
+Writes are always sequenced so that invariants are preserved.
+
 ## Faulty Garbage Collector
 
 The garbage collector is a separate process that runs in the background.  It is assumed to be move
@@ -617,3 +619,15 @@ then reinsert any that are not selected by this algorithm.
 Thus each wal3 log service will independently manage its own dirty log.  This allows us to scale
 because each log server will maintain its own independent dirty log.  This does raise the
 operational complexity of getting logs to compact.
+
+## Failure
+
+Failure to write the dirty log is not a problem because it will simply fail the write.
+
+## Scaling
+
+Changing the number of logs requires a hashing scheme that maps N compactor nodes onto M log service
+nodes.  Because the dirty log doesn't drop that a collection is dirty until it advances, it suffices
+to make every compactor pull from every log during times of change.
+
+I'd like to make it more efficient than that.
