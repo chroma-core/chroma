@@ -104,9 +104,9 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
                     continue;
                 }
 
-                if version.version > oldest_version_to_keep {
+                if version.version >= oldest_version_to_keep {
                     tracing::debug!(
-                        "Keeping version {} (created at {}) because it's greater than {}",
+                        "Keeping version {} (created at {}) because it's greater than or equal to {}",
                         version.version,
                         version.created_at_secs,
                         oldest_version_to_keep
@@ -114,7 +114,7 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
                     continue;
                 }
 
-                if version.created_at_secs > input.cutoff_time_secs as i64 {
+                if version.created_at_secs >= input.cutoff_time_secs as i64 {
                     tracing::debug!(
                         "Keeping version {} (created at {}) because it's newer than cutoff time",
                         version.version,

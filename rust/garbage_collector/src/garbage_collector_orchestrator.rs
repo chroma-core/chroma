@@ -851,7 +851,7 @@ mod tests {
 
         tracing::info!("Running orchestrator");
         let result = orchestrator.run(system).await.unwrap();
-        assert_eq!(result.num_versions_deleted, 2);
+        assert_eq!(result.num_versions_deleted, 1);
 
         // After running GC and waiting for result, verify versions were deleted
         let versions_after_gc = clients
@@ -904,26 +904,170 @@ mod tests {
 
     #[tokio::test]
     async fn test_k8s_integration_soft_delete() {
-        // // Verify that deleted files are renamed with the "deleted" prefix if using soft delete
-        // let deleted_hnsw_files: Vec<_> = storage
-        //     .list_prefix("deleted")
-        //     .await
-        //     .unwrap()
-        //     .into_iter()
-        //     .filter(|path| path.contains("deleted") && path.contains("header.bin"))
-        //     .collect();
+        let _ = tracing_subscriber::fmt::try_init();
 
-        // tracing::info!(
-        //     count = deleted_hnsw_files.len(),
-        //     files = ?deleted_hnsw_files,
-        //     "Soft-deleted HNSW header files"
-        // );
+        // Create storage config and storage client
+        let storage_config = StorageConfig::ObjectStore(ObjectStoreConfig {
+            bucket: ObjectStoreBucketConfig {
+                name: "chroma-storage".to_string(),
+                r#type: ObjectStoreType::Minio,
+            },
+            upload_part_size_bytes: 1024 * 1024,   // 1MB
+            download_part_size_bytes: 1024 * 1024, // 1MB
+            max_concurrent_requests: 10,
+        });
 
-        // // The number of deleted files should match the difference in versions
-        // assert_eq!(
-        //     deleted_hnsw_files.len(),
-        //     unique_versions_before_gc - unique_versions_after_gc,
-        //     "Expected deleted HNSW files to match the number of deleted unique versions"
-        // );
+        let registry = Registry::new();
+        let storage = Storage::try_from_config(&storage_config, &registry)
+            .await
+            .unwrap();
+
+        let deleted_hnsw_files_before_test: Vec<_> = storage
+            .list_prefix("gc")
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|path| path.contains("gc") && path.contains("header.bin"))
+            .collect();
+
+        let mut clients = ChromaGrpcClients::new().await.unwrap();
+        let (collection_id, tenant_id) = create_test_collection(&mut clients).await;
+
+        let hnsw_index_ids_before_gc = get_hnsw_index_ids(&storage).await;
+
+        // Get version count before GC
+        let versions_before_gc = clients
+            .list_collection_versions(
+                collection_id.to_string(),
+                tenant_id.clone(),
+                Some(100),
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        let unique_versions_before_gc = versions_before_gc
+            .versions
+            .iter()
+            .map(|v| v.version)
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+        assert_eq!(
+            unique_versions_before_gc, 4,
+            "Expected 4 unique versions before starting garbage collection"
+        );
+
+        // After creating versions and verifying records, start garbage collection:
+        tracing::info!("Starting garbage collection process");
+
+        let system = System::new();
+        let dispatcher = Dispatcher::new(chroma_system::DispatcherConfig::default());
+        let dispatcher_handle = system.start_component(dispatcher);
+        let sysdb_config = SysDbConfig::Grpc(GrpcSysDbConfig {
+            host: "localhost".to_string(),
+            port: 50051,
+            connect_timeout_ms: 5000,
+            request_timeout_ms: 10000,
+            num_channels: 1,
+        });
+        let mut sysdb = SysDb::try_from_config(&sysdb_config, &registry)
+            .await
+            .unwrap();
+
+        // Get collection info for GC from sysdb
+        let collections_to_gc = sysdb.get_collections_to_gc().await.unwrap();
+        let collection_info = collections_to_gc
+            .iter()
+            .find(|c| c.id == collection_id)
+            .expect("Collection should be available for GC");
+
+        // Create orchestrator with correct version file path
+        let orchestrator = GarbageCollectorOrchestrator::new(
+            collection_id,
+            collection_info.version_file_path.clone(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            0, // cutoff_time_hours: immediately expire versions
+            sysdb,
+            dispatcher_handle,
+            storage.clone(),
+            CleanupMode::Rename,
+        );
+
+        tracing::info!("Running orchestrator");
+        let result = orchestrator.run(system).await.unwrap();
+        assert_eq!(result.num_versions_deleted, 1);
+
+        // After running GC and waiting for result, verify versions were deleted
+        let versions_after_gc = clients
+            .list_collection_versions(
+                collection_id.to_string(),
+                tenant_id.clone(),
+                Some(100),
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        let unique_versions_after_gc = versions_after_gc
+            .versions
+            .iter()
+            .map(|v| v.version)
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+
+        tracing::info!(
+            before = unique_versions_before_gc,
+            after = unique_versions_after_gc,
+            "Unique version counts before and after GC"
+        );
+
+        assert!(
+            unique_versions_after_gc >= 2,
+            "Expected at least 2 unique versions to remain after garbage collection (min_versions_to_keep)"
+        );
+
+        // Check HNSW indices
+        let hnsw_index_ids_after_gc = get_hnsw_index_ids(&storage).await;
+        tracing::info!(
+            before = ?hnsw_index_ids_before_gc,
+            after = ?hnsw_index_ids_after_gc,
+            "HNSW index IDs before and after GC"
+        );
+
+        assert_eq!(
+            hnsw_index_ids_before_gc.len() - hnsw_index_ids_after_gc.len(),
+            result.num_versions_deleted as usize,
+            "Expected {} HNSW indices to be deleted after garbage collection",
+            result.num_versions_deleted
+        );
+
+        tracing::info!("Verifying records are still accessible after GC");
+        validate_test_collection(&mut clients, collection_id).await;
+
+        // Verify that "deleted" files are renamed with the "gc" prefix
+        let deleted_hnsw_files: Vec<_> = storage
+            .list_prefix("gc")
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|path| path.contains("gc") && path.contains("header.bin"))
+            .collect();
+
+        tracing::info!(
+            count = deleted_hnsw_files.len(),
+            files = ?deleted_hnsw_files,
+            "Soft-deleted HNSW header files"
+        );
+
+        // The number of moved files should match the difference in versions
+        assert_eq!(
+            deleted_hnsw_files.len() - deleted_hnsw_files_before_test.len(),
+            unique_versions_before_gc - unique_versions_after_gc,
+            "Expected renamed HNSW files to match the number of deleted unique versions"
+        );
     }
 }
