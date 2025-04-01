@@ -221,6 +221,9 @@ async fn get_log_from_handle<'a>(
 
 ////////////////////////////////////////////// Rollup //////////////////////////////////////////////
 
+/// A rollup is a summary of the dirty log.  It specifies a position that can be advanced to if and
+/// only if the given dirty markers are reinserted.  The compactable collection info is always
+/// compactable.
 #[derive(Debug, Default)]
 pub struct Rollup {
     pub advance_to: LogPosition,
@@ -230,6 +233,7 @@ pub struct Rollup {
 
 //////////////////////////////////////// RollupPerCollection ///////////////////////////////////////
 
+/// A summary of the data on the log for a single collection.
 #[derive(Debug)]
 struct RollupPerCollection {
     start_log_position: LogPosition,
