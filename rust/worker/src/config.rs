@@ -127,6 +127,8 @@ pub struct QueryServiceConfig {
     pub blockfile_provider: chroma_blockstore::config::BlockfileProviderConfig,
     #[serde(default)]
     pub hnsw_provider: chroma_index::config::HnswProviderConfig,
+    #[serde(default = "QueryServiceConfig::default_fetch_log_batch_size")]
+    pub fetch_log_batch_size: u32,
 }
 
 impl QueryServiceConfig {
@@ -144,6 +146,10 @@ impl QueryServiceConfig {
 
     fn default_my_port() -> u16 {
         50051
+    }
+
+    fn default_fetch_log_batch_size() -> u32 {
+        100
     }
 }
 
