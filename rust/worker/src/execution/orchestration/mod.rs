@@ -7,3 +7,4 @@ pub(crate) use count::*;
 pub mod get;
 pub mod knn;
 pub mod knn_filter;
+pub mod rebuild;
