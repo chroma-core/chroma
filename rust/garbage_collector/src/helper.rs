@@ -150,6 +150,7 @@ impl ChromaGrpcClients {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn query_collection(
         &mut self,
         collection_id: &str,
@@ -215,7 +216,7 @@ impl ChromaGrpcClients {
 
     pub async fn get_records(
         &mut self,
-        collection_id: &str,
+        collection_id: String,
         _ids: Option<Vec<String>>,
         include_embeddings: bool,
         include_metadatas: bool,
@@ -224,9 +225,7 @@ impl ChromaGrpcClients {
         // First get collection and its segments
         let collection_segments = self
             .sysdb
-            .get_collection_with_segments(GetCollectionWithSegmentsRequest {
-                id: collection_id.to_string(),
-            })
+            .get_collection_with_segments(GetCollectionWithSegmentsRequest { id: collection_id })
             .await?
             .into_inner();
 
@@ -344,21 +343,22 @@ impl ChromaGrpcClients {
         Ok(result)
     }
 
+    #[allow(dead_code)]
     pub fn sysdb_client(&mut self) -> &mut SysDbClient<Channel> {
         &mut self.sysdb
     }
 
     pub async fn list_collection_versions(
         &mut self,
-        collection_id: &str,
-        tenant_id: &str,
+        collection_id: String,
+        tenant_id: String,
         max_count: Option<i64>,
         versions_before: Option<i64>,
         versions_at_or_after: Option<i64>,
     ) -> Result<ListCollectionVersionsResponse, Box<dyn std::error::Error>> {
         let request = ListCollectionVersionsRequest {
-            collection_id: collection_id.to_string(),
-            tenant_id: tenant_id.to_string(),
+            collection_id,
+            tenant_id,
             max_count,
             versions_before,
             versions_at_or_after,

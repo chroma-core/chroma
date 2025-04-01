@@ -74,11 +74,6 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
         let mut oldest_version_to_keep = 0;
 
         if let Some(ref mut version_history) = version_file.version_history {
-            tracing::debug!(
-                "Processing {} versions in history",
-                version_history.versions.len()
-            );
-
             let mut unique_versions_seen = 0;
             let mut last_version = None;
 
@@ -95,26 +90,41 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
             }
 
             tracing::debug!(
-                "Oldest version to keep: {}, min versions to keep: {}, cutoff time: {}",
+                "Oldest version to keep: {}, min versions to keep: {}, cutoff time: {}, total versions: {}",
                 oldest_version_to_keep,
                 input.min_versions_to_keep,
-                input.cutoff_time_secs
+                input.cutoff_time_secs,
+                version_history.versions.len()
             );
 
             // Second pass: mark for deletion if older than oldest_version_to_keep AND before cutoff
             for version in version_history.versions.iter_mut() {
-                if version.version != 0
-                    && version.version < oldest_version_to_keep
-                    && version.created_at_secs < input.cutoff_time_secs as i64
-                {
+                if version.version == 0 {
+                    tracing::debug!("Skipping version 0");
+                    continue;
+                }
+
+                if version.version > oldest_version_to_keep {
                     tracing::debug!(
-                        "Marking version {} for deletion (created at {})",
+                        "Keeping version {} (created at {}) because it's greater than {}",
+                        version.version,
+                        version.created_at_secs,
+                        oldest_version_to_keep
+                    );
+                    continue;
+                }
+
+                if version.created_at_secs > input.cutoff_time_secs as i64 {
+                    tracing::debug!(
+                        "Keeping version {} (created at {}) because it's newer than cutoff time",
                         version.version,
                         version.created_at_secs
                     );
-                    version.marked_for_deletion = true;
-                    marked_versions.push(version.version);
+                    continue;
                 }
+
+                version.marked_for_deletion = true;
+                marked_versions.push(version.version);
             }
         } else {
             tracing::warn!("No version history found in version file");

@@ -10,7 +10,8 @@ use tracing::{debug, error, info};
 mod config;
 mod garbage_collector_component;
 pub mod garbage_collector_orchestrator;
-pub mod helper;
+#[cfg(test)]
+pub(crate) mod helper;
 mod opentelemetry_config;
 pub mod operators;
 pub mod types;

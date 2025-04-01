@@ -91,7 +91,11 @@ impl ComputeUnusedFilesOperator {
 
         let mut newer_si_ids = Vec::new();
         for segment_compaction_info in newer_segment_info.segment_compaction_info.iter() {
-            for file_paths in segment_compaction_info.file_paths.values() {
+            for (file_type, file_paths) in &segment_compaction_info.file_paths {
+                if file_type == "hnsw_index" {
+                    continue;
+                }
+
                 for file_path in &file_paths.paths {
                     newer_si_ids.push(file_path.clone());
                 }
