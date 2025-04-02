@@ -145,10 +145,10 @@ impl Configurable<GrpcLogConfig> for GrpcLog {
         let port = &my_config.port;
         let max_encoding_message_size = my_config.max_encoding_message_size;
         let max_decoding_message_size = my_config.max_decoding_message_size;
-        tracing::info!("Connecting to log service at {}:{}", host, port);
         let connection_string = format!("http://{}:{}", host, port);
         let client_for_conn_str =
             |connection_string: String| -> Result<LogServiceClient<_>, Box<dyn ChromaError>> {
+                tracing::info!("Connecting to log service at {}", connection_string);
                 let endpoint_res = match Endpoint::from_shared(connection_string) {
                     Ok(endpoint) => endpoint,
                     Err(e) => return Err(Box::new(GrpcLogError::FailedToConnect(e))),
@@ -168,6 +168,7 @@ impl Configurable<GrpcLogConfig> for GrpcLog {
         let client = client_for_conn_str(connection_string)?;
         let alt_client = if let Some(alt_host) = my_config.alt_host.as_ref() {
             let connection_string = format!("http://{}:{}", alt_host, port);
+            tracing::info!("connecting to alt host {connection_string}");
             Some(client_for_conn_str(connection_string)?)
         } else {
             None
@@ -186,6 +187,7 @@ impl GrpcLog {
             if self.config.use_alt_host_for_everything
                 || self.config.use_alt_for_collections.contains(&collection_id)
             {
+                tracing::info!("using alt client for {collection_id}");
                 return alt;
             }
         }

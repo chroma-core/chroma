@@ -112,12 +112,12 @@ impl Log {
         collection_id: CollectionUuid,
     ) -> Result<(), Box<dyn ChromaError>> {
         match self {
-            Log::Sqlite(_) => unimplemented!(),
+            Log::Sqlite(_) => unimplemented!("not implemented for sqlite"),
             Log::Grpc(log) => Ok(log
                 .purge_dirty_for_collection(collection_id)
                 .await
                 .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?),
-            Log::InMemory(_) => unimplemented!(),
+            Log::InMemory(_) => unimplemented!("not implemented for in memory"),
         }
     }
 

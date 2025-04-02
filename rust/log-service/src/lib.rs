@@ -442,17 +442,24 @@ impl DirtyMarker {
                     Ordering::Less => {
                         // We don't un-reinsert here because it'd snowball a bug.
                         tracing::error!(
-                            "compaction sees cursor ahead of manifest: {:?} > {:?}",
+                            "compaction sees cursor ahead of manifest: {:?} < {:?}",
+                            manifest.maximum_log_position(),
                             cursor.position,
-                            manifest.maximum_log_position()
                         );
                         None
                     }
-                    Ordering::Greater => Some(CollectionInfo {
-                        collection_id: collection_id.to_string(),
-                        first_log_offset: cursor.position.offset() as i64,
-                        first_log_ts: cursor.position.offset() as i64,
-                    }),
+                    Ordering::Greater => {
+                        tracing::info!(
+                            "{collection_id} has cursor={:?} manifest={:?}",
+                            manifest.maximum_log_position(),
+                            cursor.position
+                        );
+                        Some(CollectionInfo {
+                            collection_id: collection_id.to_string(),
+                            first_log_offset: cursor.position.offset() as i64,
+                            first_log_ts: cursor.position.offset() as i64,
+                        })
+                    }
                 }
             })
             .collect::<Vec<_>>();
@@ -906,6 +913,7 @@ impl LogService for LogServer {
         let collection_id = Uuid::parse_str(&request.collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+        tracing::info!("purge_dirty_for_collection {collection_id}");
         let dirty_marker = DirtyMarker::Purge { collection_id };
         let dirty_marker_json = serde_json::to_string(&dirty_marker)
             .map_err(|err| {
