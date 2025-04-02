@@ -369,6 +369,8 @@ func (s *collectionDb) UpdateLogPositionAndVersionInfo(
 	currentVersionFileName string,
 	newCollectionVersion int32,
 	newVersionFileName string,
+	totalRecordsPostCompaction uint64,
+	sizeBytesPostCompaction uint64,
 ) (int64, error) {
 	// TODO(rohitcp): Investigate if we need to hold the lock using "UPDATE"
 	// strength, or if we can use "SELECT FOR UPDATE" or some other less
@@ -380,9 +382,11 @@ func (s *collectionDb) UpdateLogPositionAndVersionInfo(
 			currentCollectionVersion,
 			currentVersionFileName).
 		Updates(map[string]interface{}{
-			"log_position":      logPosition,
-			"version":           newCollectionVersion,
-			"version_file_name": newVersionFileName,
+			"log_position":                  logPosition,
+			"version":                       newCollectionVersion,
+			"version_file_name":             newVersionFileName,
+			"total_records_post_compaction": totalRecordsPostCompaction,
+			"size_bytes_post_compaction":    sizeBytesPostCompaction,
 		})
 	if result.Error != nil {
 		return 0, result.Error
