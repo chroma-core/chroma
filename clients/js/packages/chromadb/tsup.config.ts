@@ -22,6 +22,11 @@ export default defineConfig((options: Options) => {
       'isomorphic-fetch',
       'cliui'
     ],
+    esbuildOptions: (options) => {
+      // Improve handling of dynamic imports
+      options.mainFields = ['module', 'main'];
+      options.conditions = ['import', 'module', 'require', 'default'];
+    },
     ...options,
   };
 
