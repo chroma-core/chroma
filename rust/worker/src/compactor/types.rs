@@ -11,9 +11,14 @@ pub(crate) struct CompactionJob {
 }
 
 #[derive(Clone, Debug)]
-pub struct ScheduledCompactionMessage {}
+pub struct ScheduledCompactMessage {}
 
 #[derive(Clone, Debug)]
-pub struct OneOffCompactionMessage {
+pub struct OneOffCompactMessage {
+    pub collection_ids: Vec<CollectionUuid>,
+}
+
+#[derive(Clone, Debug)]
+pub struct RebuildMessage {
     pub collection_ids: Vec<CollectionUuid>,
 }
