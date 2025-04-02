@@ -80,6 +80,7 @@ pub struct Metrics {
     pre_flight_checks: Counter<u64>,
     reset: Counter<u64>,
     version: Counter<u64>,
+    get_user_identity: Counter<u64>,
     create_tenant: Counter<u64>,
     get_tenant: Counter<u64>,
     list_databases: Counter<u64>,
@@ -109,6 +110,7 @@ impl Metrics {
             pre_flight_checks: meter.u64_counter("pre_flight_checks").build(),
             reset: meter.u64_counter("reset").build(),
             version: meter.u64_counter("version").build(),
+            get_user_identity: meter.u64_counter("get_user_identity").build(),
             create_tenant: meter.u64_counter("create_tenant").build(),
             get_tenant: meter.u64_counter("get_tenant").build(),
             list_databases: meter.u64_counter("list_databases").build(),
@@ -443,7 +445,7 @@ async fn get_user_identity(
     headers: HeaderMap,
     State(server): State<FrontendServer>,
 ) -> Result<Json<GetUserIdentityResponse>, ServerError> {
-    server.metrics.version.add(1, &[]);
+    server.metrics.get_user_identity.add(1, &[]);
     Ok(Json(server.auth.get_user_identity(&headers).await?))
 }
 
