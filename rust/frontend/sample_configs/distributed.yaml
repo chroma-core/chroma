@@ -23,6 +23,9 @@ log:
     port: 50051
     connect_timeout_ms: 5000
     request_timeout_ms: 5000
+    alt_host: "rust-log-service.chroma"
+    use_alt_host_for_everything: true
+
 executor:
   distributed:
     connections_per_node: 5
