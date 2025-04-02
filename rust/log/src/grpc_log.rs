@@ -96,16 +96,28 @@ impl ChromaError for GrpcPurgeDirtyForCollectionError {
 
 #[derive(Clone, Debug)]
 pub struct GrpcLog {
+    config: GrpcLogConfig,
     #[allow(clippy::type_complexity)]
     client: LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>,
+    #[allow(clippy::type_complexity)]
+    alt_client:
+        Option<LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>>,
 }
 
 impl GrpcLog {
     #[allow(clippy::type_complexity)]
     pub(crate) fn new(
+        config: GrpcLogConfig,
         client: LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>,
+        alt_client: Option<
+            LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>,
+        >,
     ) -> Self {
-        Self { client }
+        Self {
+            config,
+            client,
+            alt_client,
+        }
     }
 }
 
@@ -135,25 +147,51 @@ impl Configurable<GrpcLogConfig> for GrpcLog {
         let max_decoding_message_size = my_config.max_decoding_message_size;
         tracing::info!("Connecting to log service at {}:{}", host, port);
         let connection_string = format!("http://{}:{}", host, port);
-        let endpoint_res = match Endpoint::from_shared(connection_string) {
-            Ok(endpoint) => endpoint,
-            Err(e) => return Err(Box::new(GrpcLogError::FailedToConnect(e))),
+        let client_for_conn_str =
+            |connection_string: String| -> Result<LogServiceClient<_>, Box<dyn ChromaError>> {
+                let endpoint_res = match Endpoint::from_shared(connection_string) {
+                    Ok(endpoint) => endpoint,
+                    Err(e) => return Err(Box::new(GrpcLogError::FailedToConnect(e))),
+                };
+                let endpoint_res = endpoint_res
+                    .connect_timeout(Duration::from_millis(my_config.connect_timeout_ms))
+                    .timeout(Duration::from_millis(my_config.request_timeout_ms));
+                let channel = endpoint_res.connect_lazy();
+                let channel = ServiceBuilder::new()
+                    .layer(chroma_tracing::GrpcTraceLayer)
+                    .service(channel);
+                let client = LogServiceClient::new(channel)
+                    .max_encoding_message_size(max_encoding_message_size)
+                    .max_decoding_message_size(max_decoding_message_size);
+                Ok(client)
+            };
+        let client = client_for_conn_str(connection_string)?;
+        let alt_client = if let Some(alt_host) = my_config.alt_host.as_ref() {
+            let connection_string = format!("http://{}:{}", alt_host, port);
+            Some(client_for_conn_str(connection_string)?)
+        } else {
+            None
         };
-        let endpoint_res = endpoint_res
-            .connect_timeout(Duration::from_millis(my_config.connect_timeout_ms))
-            .timeout(Duration::from_millis(my_config.request_timeout_ms));
-        let channel = endpoint_res.connect_lazy();
-        let channel = ServiceBuilder::new()
-            .layer(chroma_tracing::GrpcTraceLayer)
-            .service(channel);
-        let client = LogServiceClient::new(channel)
-            .max_encoding_message_size(max_encoding_message_size)
-            .max_decoding_message_size(max_decoding_message_size);
-        return Ok(GrpcLog::new(client));
+        return Ok(GrpcLog::new(my_config.clone(), client, alt_client));
     }
 }
 
 impl GrpcLog {
+    fn client_for(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> &mut LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>> {
+        let collection_id = collection_id.to_string();
+        if let Some(alt) = self.alt_client.as_mut() {
+            if self.config.use_alt_host_for_everything
+                || self.config.use_alt_for_collections.contains(&collection_id)
+            {
+                return alt;
+            }
+        }
+        &mut self.client
+    }
+
     pub(super) async fn read(
         &mut self,
         collection_id: CollectionUuid,
@@ -166,13 +204,15 @@ impl GrpcLog {
             None => i64::MAX,
         };
         tracing::info!("pull_logs offset: {}, batch_size: {}", offset, batch_size);
-        let request = self.client.pull_logs(chroma_proto::PullLogsRequest {
-            // NOTE(rescrv):  Use the untyped string representation of the collection ID.
-            collection_id: collection_id.0.to_string(),
-            start_from_offset: offset,
-            batch_size,
-            end_timestamp,
-        });
+        let request = self
+            .client_for(collection_id)
+            .pull_logs(chroma_proto::PullLogsRequest {
+                // NOTE(rescrv):  Use the untyped string representation of the collection ID.
+                collection_id: collection_id.0.to_string(),
+                start_from_offset: offset,
+                batch_size,
+                end_timestamp,
+            });
         let response = request.await;
         match response {
             Ok(response) => {
@@ -213,23 +253,55 @@ impl GrpcLog {
                 >>()?,
         };
 
-        self.client.push_logs(request).await?;
+        self.client_for(collection_id).push_logs(request).await?;
 
         Ok(())
     }
 
-    pub(super) async fn get_collections_with_new_data(
+    pub(crate) async fn get_collections_with_new_data(
         &mut self,
         min_compaction_size: u64,
     ) -> Result<Vec<CollectionInfo>, GrpcGetCollectionsWithNewDataError> {
-        let response = self
-            .client
-            .get_all_collection_info_to_compact(
-                chroma_proto::GetAllCollectionInfoToCompactRequest {
-                    min_compaction_size,
-                },
-            )
-            .await;
+        let mut norm = self
+            ._get_collections_with_new_data(false, min_compaction_size)
+            .await?;
+        if self.config.use_alt_host_for_everything
+            || !self.config.use_alt_for_collections.is_empty()
+        {
+            let alt = self
+                ._get_collections_with_new_data(true, min_compaction_size)
+                .await?;
+            norm.extend(alt)
+        }
+        Ok(norm)
+    }
+
+    async fn _get_collections_with_new_data(
+        &mut self,
+        use_alt_log: bool,
+        min_compaction_size: u64,
+    ) -> Result<Vec<CollectionInfo>, GrpcGetCollectionsWithNewDataError> {
+        let response = if use_alt_log {
+            if let Some(alt_client) = self.alt_client.as_mut() {
+                alt_client
+                    .get_all_collection_info_to_compact(
+                        chroma_proto::GetAllCollectionInfoToCompactRequest {
+                            min_compaction_size,
+                        },
+                    )
+                    .await
+            } else {
+                return Ok(vec![]);
+            }
+        } else {
+            self.client
+                .get_all_collection_info_to_compact(
+                    chroma_proto::GetAllCollectionInfoToCompactRequest {
+                        min_compaction_size,
+                    },
+                )
+                .await
+        };
 
         match response {
             Ok(response) => {
@@ -267,7 +339,7 @@ impl GrpcLog {
         collection_id: CollectionUuid,
         new_offset: i64,
     ) -> Result<(), GrpcUpdateCollectionLogOffsetError> {
-        let request = self.client.update_collection_log_offset(
+        let request = self.client_for(collection_id).update_collection_log_offset(
             chroma_proto::UpdateCollectionLogOffsetRequest {
                 // NOTE(rescrv):  Use the untyped string representation of the collection ID.
                 collection_id: collection_id.0.to_string(),
@@ -285,12 +357,12 @@ impl GrpcLog {
         &mut self,
         collection_id: CollectionUuid,
     ) -> Result<(), GrpcPurgeDirtyForCollectionError> {
-        let request =
-            self.client
-                .purge_dirty_for_collection(chroma_proto::PurgeDirtyForCollectionRequest {
-                    // NOTE(rescrv):  Use the untyped string representation of the collection ID.
-                    collection_id: collection_id.0.to_string(),
-                });
+        let request = self.client_for(collection_id).purge_dirty_for_collection(
+            chroma_proto::PurgeDirtyForCollectionRequest {
+                // NOTE(rescrv):  Use the untyped string representation of the collection ID.
+                collection_id: collection_id.0.to_string(),
+            },
+        );
         let response = request.await;
         match response {
             Ok(_) => Ok(()),
