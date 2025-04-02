@@ -37,18 +37,6 @@ const InputBox: React.FC = () => {
         isHovered ? "ring ring-black" : ""
       }`}
     >
-      {/*{chatId && (*/}
-      {/*  <Link*/}
-      {/*    href={`https://www.trychroma.com/${process.env.NEXT_PUBLIC_CHROMA_TEAM}/${process.env.NEXT_PUBLIC_CHROMA_DATABASE}/collections/telemetry?embedding_model=openai-text-embedding-3-large&where=%7B"%24and"%3A%5B%7B"chat-id"%3A%7B"%24eq"%3A"${chatId}"%7D%7D%5D%7D`}*/}
-      {/*    target="_blank"*/}
-      {/*    rel="noopener noreferrer"*/}
-      {/*    className="block"*/}
-      {/*  >*/}
-      {/*    <div className="absolute -top-7 right-0 text-xs py-0.5 px-3 rounded-full border bg-white border-black cursor-pointer">*/}
-      {/*      Debug Conversation*/}
-      {/*    </div>*/}
-      {/*  </Link>*/}
-      {/*)}*/}
       <Input
         className="border-0 shadow-none rounded-none focus-visible:ring-0"
         value={inputValue}

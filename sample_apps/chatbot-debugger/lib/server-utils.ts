@@ -38,6 +38,10 @@ export const getChromaClient = async (): Promise<
     }
     chromaClient = new ChromaClient({
       ...appParamsResult.value.chromaClientParams,
+      fetchOptions: {
+        keepalive: true,
+        cache: "force-cache",
+      },
     });
   }
   return {
