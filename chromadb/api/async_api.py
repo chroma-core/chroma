@@ -341,19 +341,19 @@ class AsyncClientAPI(AsyncBaseAPI, ABC):
         self,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
-    ) -> Sequence[str]:
+    ) -> Sequence[AsyncCollection]:
         """List all collections.
         Args:
             limit: The maximum number of entries to return. Defaults to None.
             offset: The number of entries to skip before returning. Defaults to None.
 
         Returns:
-            Sequence[str]: A list of collection names.
+            Sequence[AsyncCollection]: A list of collections.
 
         Examples:
             ```python
             await client.list_collections()
-            # ["my_collection"]
+            # [collection(name="my_collection", metadata={})]
             ```
         """
         pass
