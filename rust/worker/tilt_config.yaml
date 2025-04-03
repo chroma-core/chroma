@@ -77,7 +77,7 @@ query_service:
             weighted_lru:
                 capacity: 8589934592 # 8GB
         permitted_parallelism: 180
-    fetch_log_batch_size: 8000
+    fetch_log_batch_size: 2000
 
 compaction_service:
     service_name: "compaction-service"
@@ -132,7 +132,7 @@ compaction_service:
         max_compaction_size: 10000
         max_partition_size: 5000
         disabled_collections: [] # uuids to disable compaction for
-        fetch_log_batch_size: 8000
+        fetch_log_batch_size: 2000
     blockfile_provider:
         arrow:
             block_manager_config:
