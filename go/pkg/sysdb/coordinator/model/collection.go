@@ -23,6 +23,7 @@ type Collection struct {
 
 type CollectionToGc struct {
 	ID              types.UniqueID
+	TenantID        string
 	Name            string
 	VersionFilePath string
 	LatestVersion   int64

@@ -50,7 +50,7 @@ use chroma_system::{
 };
 use chroma_types::chroma_proto::CollectionVersionFile;
 use chroma_types::CollectionUuid;
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Utc};
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 
@@ -83,11 +83,7 @@ use prost::Message;
 pub struct GarbageCollectorOrchestrator {
     collection_id: CollectionUuid,
     version_file_path: String,
-    // TODO(rohitcp): Remove this parameter.
-    cutoff_time_hours: u32,
-    // Absolute cutoff time in seconds.
-    // Any version created before this time will be deleted unless retained by the min_versions_to_keep parameter.
-    cutoff_time_secs: u64,
+    absolute_cutoff_time: DateTime<Utc>,
     sysdb_client: SysDb,
     dispatcher: ComponentHandle<Dispatcher>,
     storage: Storage,
@@ -120,8 +116,7 @@ impl GarbageCollectorOrchestrator {
     pub fn new(
         collection_id: CollectionUuid,
         version_file_path: String,
-        cutoff_time_secs: u64,
-        cutoff_time_hours: u32,
+        absolute_cutoff_time: DateTime<Utc>,
         sysdb_client: SysDb,
         dispatcher: ComponentHandle<Dispatcher>,
         storage: Storage,
@@ -130,8 +125,7 @@ impl GarbageCollectorOrchestrator {
         Self {
             collection_id,
             version_file_path,
-            cutoff_time_hours,
-            cutoff_time_secs,
+            absolute_cutoff_time,
             sysdb_client,
             dispatcher,
             storage,
@@ -260,12 +254,6 @@ impl Handler<TaskResult<FetchVersionFileOutput, FetchVersionFileError>>
             }
         };
 
-        let cutoff_time = Utc::now() - Duration::hours(self.cutoff_time_hours as i64);
-        tracing::info!(
-            cutoff_time = ?cutoff_time,
-            "Computed cutoff time for version deletion"
-        );
-
         let version_file = match CollectionVersionFile::decode(output.version_file_content()) {
             Ok(file) => {
                 tracing::info!("Successfully decoded version file");
@@ -287,8 +275,7 @@ impl Handler<TaskResult<FetchVersionFileOutput, FetchVersionFileError>>
             Box::new(ComputeVersionsToDeleteOperator {}),
             ComputeVersionsToDeleteInput {
                 version_file,
-                cutoff_time,
-                cutoff_time_secs: self.cutoff_time_secs,
+                cutoff_time: self.absolute_cutoff_time,
                 min_versions_to_keep: 2,
             },
             ctx.receiver(),
@@ -853,11 +840,7 @@ mod tests {
         let orchestrator = GarbageCollectorOrchestrator::new(
             collection_id,
             collection_info.version_file_path.clone(),
-            SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-            0, // cutoff_time_hours: immediately expire versions
+            SystemTime::now().into(), //  immediately expire versions
             sysdb,
             dispatcher_handle,
             storage.clone(),
@@ -1002,11 +985,7 @@ mod tests {
         let orchestrator = GarbageCollectorOrchestrator::new(
             collection_id,
             collection_info.version_file_path.clone(),
-            SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-            0, // cutoff_time_hours: immediately expire versions
+            SystemTime::now().into(), //  immediately expire versions
             sysdb,
             dispatcher_handle,
             storage.clone(),
@@ -1165,11 +1144,7 @@ mod tests {
         let orchestrator = GarbageCollectorOrchestrator::new(
             collection_id,
             collection_info.version_file_path.clone(),
-            SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-            0, // cutoff_time_hours: immediately expire versions
+            SystemTime::now().into(), //  immediately expire versions
             sysdb,
             dispatcher_handle,
             storage.clone(),
