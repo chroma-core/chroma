@@ -6,7 +6,6 @@ use axum::{
     Json, Router, ServiceExt,
 };
 use chroma_system::System;
-use chroma_types::RawWhereFields;
 use chroma_types::{
     AddCollectionRecordsResponse, ChecklistResponse, Collection, CollectionConfiguration,
     CollectionMetadataUpdate, CollectionUuid, CountCollectionsRequest, CountCollectionsResponse,
@@ -15,11 +14,12 @@ use chroma_types::{
     DeleteCollectionRecordsResponse, DeleteDatabaseRequest, DeleteDatabaseResponse,
     GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
     GetTenantRequest, GetTenantResponse, GetUserIdentityResponse, HeartbeatResponse, IncludeList,
-    ListCollectionsRequest, ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse,
-    Metadata, QueryRequest, QueryResponse, UpdateCollectionConfiguration,
-    UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateMetadata,
-    UpsertCollectionRecordsResponse,
+    InternalCollectionConfiguration, KnnIndex, ListCollectionsRequest, ListCollectionsResponse,
+    ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
+    UpdateCollectionConfiguration, UpdateCollectionRecordsResponse, UpdateCollectionResponse,
+    UpdateMetadata, UpsertCollectionRecordsResponse, VectorIndexConfiguration,
 };
+use chroma_types::{RawWhereFields, SegmentType};
 use mdac::{Rule, Scorecard, ScorecardTicket};
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Meter};
@@ -889,10 +889,32 @@ async fn create_collection(
         format!("tenant:{}", tenant).as_str(),
     ]);
 
-    if let Some(configuration) = payload.configuration.as_ref() {
-        if configuration.spann.is_some() && !server.config.enable_span_indexing {
+    let configuration = match payload.configuration {
+        Some(c) => Some(InternalCollectionConfiguration::try_from_config(
+            c,
+            server.config.frontend.default_knn_index,
+        )?),
+        None => None,
+    };
+
+    if let Some(config) = configuration.as_ref() {
+        if matches!(config.vector_index, VectorIndexConfiguration::Spann { .. })
+            && !server
+                .frontend
+                .get_supported_segment_types()
+                .contains(&SegmentType::Spann)
+        {
             return Err(ValidationError::SpannNotImplemented)?;
         }
+    }
+
+    if matches!(server.config.frontend.default_knn_index, KnnIndex::Spann)
+        && !server
+            .frontend
+            .get_supported_segment_types()
+            .contains(&SegmentType::Spann)
+    {
+        return Err(ValidationError::SpannNotImplemented)?;
     }
 
     let request = CreateCollectionRequest::try_new(
@@ -900,7 +922,7 @@ async fn create_collection(
         database,
         payload.name,
         payload.metadata,
-        payload.configuration,
+        configuration,
         payload.get_or_create,
     )?;
     let collection = server.frontend.create_collection(request).await?;
