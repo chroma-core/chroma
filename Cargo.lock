@@ -3291,16 +3291,14 @@ dependencies = [
  "chroma-storage",
  "chroma-sysdb",
  "chroma-system",
+ "chroma-tracing",
  "chroma-types",
  "chrono",
  "clap",
  "figment",
  "futures",
+ "humantime",
  "itertools 0.13.0",
- "opentelemetry",
- "opentelemetry-http",
- "opentelemetry-otlp",
- "opentelemetry_sdk",
  "proptest",
  "proptest-derive 0.3.0",
  "proptest-state-machine",
@@ -3314,9 +3312,7 @@ dependencies = [
  "tokio-test",
  "tonic",
  "tracing",
- "tracing-bunyan-formatter",
- "tracing-opentelemetry",
- "tracing-subscriber",
+ "tracing-test",
  "uuid",
 ]
 
@@ -3698,9 +3694,9 @@ checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 
 [[package]]
 name = "humantime"
-version = "2.1.0"
+version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a3a5bfb195931eeb336b2a7b4d761daec841b97f947d34394601737a7bba5e4"
+checksum = "9b112acc8b3adf4b107a8ec20977da0273a8c386765a3ec0229bd500a1443f9f"
 
 [[package]]
 name = "hyper"
@@ -8383,6 +8379,27 @@ dependencies = [
  "tracing",
  "tracing-core",
  "tracing-log 0.2.0",
+]
+
+[[package]]
+name = "tracing-test"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "557b891436fe0d5e0e363427fc7f217abf9ccd510d5136549847bdcbcd011d68"
+dependencies = [
+ "tracing-core",
+ "tracing-subscriber",
+ "tracing-test-macro",
+]
+
+[[package]]
+name = "tracing-test-macro"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "04659ddb06c87d233c566112c1c9c5b9e98256d9af50ec3bc9c8327f873a7568"
+dependencies = [
+ "quote 1.0.37",
+ "syn 2.0.89",
 ]
 
 [[package]]

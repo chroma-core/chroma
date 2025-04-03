@@ -1,8 +1,11 @@
 use chroma_config::Configurable;
 use chroma_system::{Dispatcher, System};
+use chroma_tracing::{
+    init_global_filter_layer, init_otel_layer, init_panic_tracing_hook, init_stdout_layer,
+    init_tracing,
+};
 use config::GarbageCollectorConfig;
 use garbage_collector_component::GarbageCollector;
-use opentelemetry_config::init_otel_tracing;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::time::{sleep, Duration};
 use tracing::{debug, error, info};
@@ -12,7 +15,6 @@ mod garbage_collector_component;
 pub mod garbage_collector_orchestrator;
 #[cfg(test)]
 pub(crate) mod helper;
-mod opentelemetry_config;
 pub mod operators;
 pub mod types;
 
@@ -33,11 +35,15 @@ pub async fn garbage_collector_service_entrypoint() -> Result<(), Box<dyn std::e
         }
     };
 
-    info!("Loaded configuration successfully");
-    debug!("Configuration: {:?}", config);
+    let tracing_layers = vec![
+        init_global_filter_layer(),
+        init_otel_layer(&config.service_name, &config.otel_endpoint),
+        init_stdout_layer(),
+    ];
+    init_tracing(tracing_layers);
+    init_panic_tracing_hook();
 
-    // Enable OTEL tracing.
-    init_otel_tracing(&config.service_name, &config.otel_endpoint);
+    info!("Loaded configuration successfully: {:#?}", config);
 
     let registry = chroma_config::registry::Registry::new();
 

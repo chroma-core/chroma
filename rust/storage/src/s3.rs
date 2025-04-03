@@ -41,7 +41,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::AsyncReadExt;
 use tracing::Instrument;
-use tracing::Span;
 
 #[derive(Clone)]
 pub struct S3Storage {
@@ -318,9 +317,9 @@ impl S3Storage {
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
         let (mut stream, e_tag) = self
             .get_stream_and_e_tag(key)
-            .instrument(tracing::trace_span!(parent: Span::current(), "S3 get stream"))
+            .instrument(tracing::trace_span!("S3 get stream"))
             .await?;
-        let read_block_span = tracing::trace_span!(parent: Span::current(), "S3 read bytes to end");
+        let read_block_span = tracing::trace_span!("S3 read bytes to end");
         let buf = read_block_span
             .in_scope(|| async {
                 let mut buf: Vec<u8> = Vec::new();
@@ -619,7 +618,7 @@ impl S3Storage {
     }
 
     pub async fn delete(&self, key: &str) -> Result<(), StorageError> {
-        tracing::info!(key = %key, "Deleting object from S3");
+        tracing::debug!(key = %key, "Deleting object from S3");
 
         match self
             .client
@@ -630,7 +629,7 @@ impl S3Storage {
             .await
         {
             Ok(_) => {
-                tracing::info!(key = %key, "Successfully deleted object from S3");
+                tracing::debug!(key = %key, "Successfully deleted object from S3");
                 Ok(())
             }
             Err(e) => {
