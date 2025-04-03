@@ -17,8 +17,7 @@ COPY rust/ rust/
 
 FROM builder AS log_service_builder
 # sharing=locked is necessary to prevent cargo build from running concurrently on the same mounted directory
-RUN --mount=type=cache,sharing=locked,target=/chroma/target/ \
-    --mount=type=cache,sharing=locked,target=/usr/local/cargo/registry/ \
+RUN \
     cd rust/log-service && \
     if [ "$RELEASE_MODE" = "1" ]; then cargo build --bin log_service --release; else cargo build --bin log_service; fi && \
     cd ../.. && \
