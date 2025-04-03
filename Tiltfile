@@ -10,7 +10,7 @@ docker_build(
 if config.tilt_subcommand == "ci":
   custom_build(
     'logservice',
-    'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF --target logservice -f ./go/Dockerfile . --load',
+    'docker build -t $EXPECTED_REF --target logservice -f ./go/Dockerfile .',
     ['./go/', './idl/']
   )
 else:
@@ -25,7 +25,7 @@ else:
 if config.tilt_subcommand == "ci":
   custom_build(
     'logservice-migration',
-    'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF --target logservice-migration -f ./go/Dockerfile.migration . --load',
+    'docker build -t $EXPECTED_REF --target logservice-migration -f ./go/Dockerfile.migration .',
     ['./go/']
   )
 else:
@@ -40,7 +40,7 @@ else:
 if config.tilt_subcommand == "ci":
   custom_build(
     'rust-log-service',
-    'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF  -f ./rust/log-service/Dockerfile . --load',
+    'docker build -t $EXPECTED_REF  -f ./rust/log-service/Dockerfile .',
     ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
   )
 else:
@@ -54,7 +54,7 @@ else:
 if config.tilt_subcommand == "ci":
   custom_build(
     'sysdb',
-    'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF --target sysdb -f ./go/Dockerfile . --load',
+    'docker build -t $EXPECTED_REF --target sysdb -f ./go/Dockerfile .',
     ['./go/', './idl/']
   )
 else:
@@ -69,7 +69,7 @@ else:
 if config.tilt_subcommand == "ci":
   custom_build(
     'sysdb-migration',
-    'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF --target sysdb-migration -f ./go/Dockerfile.migration . --load',
+    'docker build -t $EXPECTED_REF --target sysdb-migration -f ./go/Dockerfile.migration .',
     ['./go/']
   )
 else:
@@ -85,7 +85,7 @@ else:
 if config.tilt_subcommand == "ci":
   custom_build(
     'frontend-service',
-    'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF -f ./Dockerfile . --load',
+    'docker build -t $EXPECTED_REF -f ./Dockerfile . ',
     ['chromadb/', 'idl/', 'requirements.txt', 'bin/']
   )
 else:
@@ -100,7 +100,7 @@ else:
 if config.tilt_subcommand == "ci":
   custom_build(
     'rust-frontend-service',
-    'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF -f ./rust/cli/Dockerfile . --load',
+    'docker build -t $EXPECTED_REF -f ./rust/cli/Dockerfile . ',
     ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
   )
 else:
@@ -114,7 +114,7 @@ else:
 if config.tilt_subcommand == "ci":
   custom_build(
     'query-service',
-    'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF --target query_service -f ./rust/worker/Dockerfile . --load ',
+    'docker build -t $EXPECTED_REF --target query_service -f ./rust/worker/Dockerfile .',
     ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
   )
 else:
@@ -129,7 +129,7 @@ else:
 if config.tilt_subcommand == "ci":
   custom_build(
     'compaction-service',
-    'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF --target compaction_service -f ./rust/worker/Dockerfile . --load ',
+    'docker build -t $EXPECTED_REF --target compaction_service -f ./rust/worker/Dockerfile .',
     ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
   )
 else:
@@ -144,7 +144,7 @@ else:
 if config.tilt_subcommand == "ci":
   custom_build(
     'garbage-collector',
-    'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF --target garbage_collector -f ./rust/garbage_collector/Dockerfile . --load ',
+    'docker build -t $EXPECTED_REF --target garbage_collector -f ./rust/garbage_collector/Dockerfile .',
     ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
   )
 else:
