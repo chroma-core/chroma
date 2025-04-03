@@ -849,6 +849,39 @@ func TestUpdateCollectionConfiguration(t *testing.T) {
 			},
 		},
 		{
+			name: "Update SPANN configuration",
+			existingConfigJson: strPtr(`{
+				"vector_index": {
+					"type": "spann",
+					"spann": {
+						"search_nprobe": 10,
+						"write_nprobe": 5,
+						"space": "l2",
+						"ef_construction": 100,
+						"ef_search": 50,
+						"max_neighbors": 16
+					}
+				}
+			}`),
+			updateConfigJson: strPtr(`{
+				"vector_index": {
+					"type": "spann",
+					"spann": {
+						"ef_search": 75,
+						"search_nprobe": 15
+					}
+				}
+			}`),
+			expectedSpannConfig: &model.SpannConfiguration{
+				SearchNprobe:   15, // Updated
+				WriteNprobe:    5,
+				Space:          "l2",
+				EfConstruction: 100,
+				EfSearch:       75, // Updated
+				MaxNeighbors:   16,
+			},
+		},
+		{
 			name: "Convert from HNSW to SPANN",
 			existingConfigJson: strPtr(`{
 				"vector_index": {
@@ -869,24 +902,59 @@ func TestUpdateCollectionConfiguration(t *testing.T) {
 				"vector_index": {
 					"type": "spann",
 					"spann": {
-						"spann_config": {
-							"search_nprobe": 10,
-							"write_nprobe": 5,
-							"space": "l2",
-							"construction_ef": 100,
-							"search_ef": 50,
-							"m": 16
-						}
+						"search_nprobe": 10,
+						"write_nprobe": 5,
+						"space": "l2",
+						"ef_construction": 100,
+						"ef_search": 50,
+						"max_neighbors": 16
 					}
 				}
 			}`),
+			// Expect the original HNSW config because type change is ignored
+			expectedHnswConfig: &model.HnswConfiguration{
+				Space:          "l2",
+				EfConstruction: 100,
+				EfSearch:       100,
+				MaxNeighbors:   16,
+				NumThreads:     16,
+				ResizeFactor:   1.2,
+				BatchSize:      100,
+				SyncThreshold:  1000,
+			},
+		},
+		{
+			name: "Convert from SPANN to HNSW",
+			existingConfigJson: strPtr(`{
+				"vector_index": {
+					"type": "spann",
+					"spann": {
+						"search_nprobe": 10,
+						"write_nprobe": 5,
+						"space": "l2",
+						"ef_construction": 100,
+						"ef_search": 50,
+						"max_neighbors": 16
+					}
+				}
+			}`),
+			updateConfigJson: strPtr(`{
+				"vector_index": {
+					"type": "hnsw",
+					"hnsw": {
+						"ef_search": 20,
+						"num_threads": 4
+					}
+				}
+			}`),
+			// Expect the original SPANN config because type change is ignored
 			expectedSpannConfig: &model.SpannConfiguration{
 				SearchNprobe:   10,
 				WriteNprobe:    5,
 				Space:          "l2",
-				ConstructionEf: 100,
-				SearchEf:       50,
-				M:              16,
+				EfConstruction: 100,
+				EfSearch:       50,
+				MaxNeighbors:   16, // Corresponds to 'max_neighbors' in the input JSON
 			},
 		},
 		{

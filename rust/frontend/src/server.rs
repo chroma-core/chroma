@@ -15,10 +15,10 @@ use chroma_types::{
     DeleteCollectionRecordsResponse, DeleteDatabaseRequest, DeleteDatabaseResponse,
     GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
     GetTenantRequest, GetTenantResponse, GetUserIdentityResponse, HeartbeatResponse, IncludeList,
-    ListCollectionsRequest, ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse,
-    Metadata, QueryRequest, QueryResponse, UpdateCollectionConfiguration,
-    UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateMetadata,
-    UpsertCollectionRecordsResponse,
+    InternalCollectionConfiguration, ListCollectionsRequest, ListCollectionsResponse,
+    ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
+    UpdateCollectionConfiguration, UpdateCollectionRecordsResponse, UpdateCollectionResponse,
+    UpdateMetadata, UpsertCollectionRecordsResponse,
 };
 use mdac::{Rule, Scorecard, ScorecardTicket};
 use opentelemetry::global;
@@ -889,18 +889,20 @@ async fn create_collection(
         format!("tenant:{}", tenant).as_str(),
     ]);
 
-    if let Some(configuration) = payload.configuration.as_ref() {
-        if configuration.spann.is_some() && !server.config.enable_span_indexing {
-            return Err(ValidationError::SpannNotImplemented)?;
-        }
-    }
+    let configuration = match payload.configuration {
+        Some(c) => Some(InternalCollectionConfiguration::try_from_config(
+            c,
+            server.config.frontend.default_knn_index,
+        )?),
+        None => None,
+    };
 
     let request = CreateCollectionRequest::try_new(
         tenant,
         database,
         payload.name,
         payload.metadata,
-        payload.configuration,
+        configuration,
         payload.get_or_create,
     )?;
     let collection = server.frontend.create_collection(request).await?;

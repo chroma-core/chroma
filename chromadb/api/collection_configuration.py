@@ -7,7 +7,6 @@ from chromadb.api.types import (
     EmbeddingFunction,
 )
 from chromadb.utils.embedding_functions import (
-    DefaultEmbeddingFunction,
     known_embedding_functions,
     register_embedding_function,
 )
@@ -26,29 +25,22 @@ class HNSWConfiguration(TypedDict, total=False):
     resize_factor: float
 
 
-def default_hnsw_configuration() -> HNSWConfiguration:
-    return HNSWConfiguration(
-        space="l2",
-        ef_construction=100,
-        max_neighbors=16,
-        ef_search=100,
-        num_threads=cpu_count(),
-        batch_size=100,
-        sync_threshold=1000,
-        resize_factor=1.2,
-    )
+class SpannConfiguration(TypedDict, total=False):
+    search_nprobe: int
+    write_nprobe: int
+    space: Space
+    ef_construction: int
+    ef_search: int
+    max_neighbors: int
+    reassign_neighbor_count: int
+    split_threshold: int
+    merge_threshold: int
 
 
 class CollectionConfiguration(TypedDict, total=True):
     hnsw: Optional[HNSWConfiguration]
+    spann: Optional[SpannConfiguration]
     embedding_function: Optional[EmbeddingFunction]  # type: ignore
-
-
-def default_collection_configuration() -> CollectionConfiguration:
-    return CollectionConfiguration(
-        hnsw=default_hnsw_configuration(),
-        embedding_function=DefaultEmbeddingFunction(),
-    )
 
 
 def load_collection_configuration_from_json_str(
@@ -62,64 +54,48 @@ def load_collection_configuration_from_json_str(
 def load_collection_configuration_from_json(
     config_json_map: Dict[str, Any]
 ) -> CollectionConfiguration:
-    if config_json_map.get("hnsw") is None:
-        if config_json_map.get("embedding_function") is None:
-            return CollectionConfiguration(
-                hnsw=None,
-                embedding_function=None,
+    if (
+        config_json_map.get("spann") is not None
+        and config_json_map.get("hnsw") is not None
+    ):
+        raise ValueError("hnsw and spann cannot both be provided")
+
+    hnsw_config = None
+    spann_config = None
+    ef_config = None
+
+    # Process vector index configuration (HNSW or SPANN)
+    if config_json_map.get("hnsw") is not None:
+        hnsw_config = cast(HNSWConfiguration, config_json_map["hnsw"])
+    if config_json_map.get("spann") is not None:
+        spann_config = cast(SpannConfiguration, config_json_map["spann"])
+
+    # Process embedding function configuration
+    if config_json_map.get("embedding_function") is not None:
+        ef_config = config_json_map["embedding_function"]
+        if ef_config["type"] == "legacy":
+            warnings.warn(
+                "legacy embedding function config",
+                DeprecationWarning,
+                stacklevel=2,
             )
+            ef = None
         else:
-            ef_config = config_json_map["embedding_function"]
-            if ef_config["type"] == "legacy":
-                warnings.warn(
-                    "legacy embedding function config",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-                return CollectionConfiguration(
-                    hnsw=None,
-                    embedding_function=None,
-                )
-            else:
-                try:
-                    ef = known_embedding_functions[ef_config["name"]]
-                except KeyError:
-                    raise ValueError(
-                        f"Embedding function {ef_config['name']} not found. Add @register_embedding_function decorator to the class definition."
-                    )
-                return CollectionConfiguration(
-                    hnsw=None,
-                    embedding_function=ef.build_from_config(ef_config["config"]),
+            try:
+                ef = known_embedding_functions[ef_config["name"]]
+                ef = ef.build_from_config(ef_config["config"])  # type: ignore
+            except KeyError:
+                raise ValueError(
+                    f"Embedding function {ef_config['name']} not found. Add @register_embedding_function decorator to the class definition."
                 )
     else:
-        if config_json_map.get("embedding_function") is None:
-            return CollectionConfiguration(
-                hnsw=cast(HNSWConfiguration, config_json_map["hnsw"]),
-                embedding_function=None,
-            )
-        else:
-            ef_config = config_json_map["embedding_function"]
-            if ef_config["type"] == "legacy":
-                warnings.warn(
-                    "legacy embedding function config",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-                return CollectionConfiguration(
-                    hnsw=cast(HNSWConfiguration, config_json_map["hnsw"]),
-                    embedding_function=None,
-                )
-            else:
-                try:
-                    ef = known_embedding_functions[ef_config["name"]]
-                except KeyError:
-                    raise ValueError(
-                        f"Embedding function {ef_config['name']} not found. Add @register_embedding_function decorator to the class definition."
-                    )
-                return CollectionConfiguration(
-                    hnsw=cast(HNSWConfiguration, config_json_map["hnsw"]),
-                    embedding_function=ef.build_from_config(ef_config["config"]),
-                )
+        ef = None
+
+    return CollectionConfiguration(
+        hnsw=hnsw_config,
+        spann=spann_config,
+        embedding_function=ef,  # type: ignore
+    )
 
 
 def collection_configuration_to_json_str(config: CollectionConfiguration) -> str:
@@ -129,6 +105,7 @@ def collection_configuration_to_json_str(config: CollectionConfiguration) -> str
 def collection_configuration_to_json(config: CollectionConfiguration) -> Dict[str, Any]:
     if isinstance(config, dict):
         hnsw_config = config.get("hnsw")
+        spann_config = config.get("spann")
         ef = config.get("embedding_function")
     else:
         try:
@@ -136,22 +113,34 @@ def collection_configuration_to_json(config: CollectionConfiguration) -> Dict[st
         except ValueError:
             hnsw_config = None
         try:
+            spann_config = config.get_parameter("spann").value
+        except ValueError:
+            spann_config = None
+        try:
             ef = config.get_parameter("embedding_function").value
         except ValueError:
             ef = None
 
     ef_config: Dict[str, Any] | None = None
-    try:
-        hnsw_config = cast(CreateHNSWConfiguration, hnsw_config)
-    except Exception as e:
-        raise ValueError(f"not a valid hnsw config: {e}")
+    if hnsw_config is not None:
+        try:
+            hnsw_config = cast(HNSWConfiguration, hnsw_config)
+        except Exception as e:
+            raise ValueError(f"not a valid hnsw config: {e}")
+    if spann_config is not None:
+        try:
+            spann_config = cast(SpannConfiguration, spann_config)
+        except Exception as e:
+            raise ValueError(f"not a valid spann config: {e}")
 
     if ef is None:
         ef = None
         validate_create_hnsw_config(hnsw_config, ef)
+        validate_create_spann_config(spann_config, ef)
         ef_config = {"type": "legacy"}
         return {
             "hnsw": hnsw_config,
+            "spann": spann_config,
             "embedding_function": ef_config,
         }
 
@@ -176,9 +165,11 @@ def collection_configuration_to_json(config: CollectionConfiguration) -> Dict[st
             ef_config = {"type": "legacy"}
 
     validate_create_hnsw_config(hnsw_config, ef)
+    validate_create_spann_config(spann_config, ef)
 
     return {
         "hnsw": hnsw_config,
+        "spann": spann_config,
         "embedding_function": ef_config,
     }
 
@@ -221,8 +212,83 @@ def json_to_create_hnsw_configuration(
     return config
 
 
+class CreateSpannConfiguration(TypedDict, total=False):
+    search_nprobe: int
+    write_nprobe: int
+    space: Space
+    ef_construction: int
+    ef_search: int
+    max_neighbors: int
+    reassign_neighbor_count: int
+    split_threshold: int
+    merge_threshold: int
+
+
+def validate_create_spann_config(
+    config: Optional[CreateSpannConfiguration], ef: Optional[EmbeddingFunction] = None  # type: ignore
+) -> None:
+    """Validate a CreateSpann configuration"""
+    if config is None:
+        return
+    if "space" in config:
+        # Check if the space value is one of the string values of the Space literal
+        if config["space"] not in get_args(Space):
+            raise ValueError(f"space must be one of: {get_args(Space)}")
+        if ef is not None:
+            if config["space"] not in ef.supported_spaces():
+                raise ValueError("space must be supported by the embedding function")
+    if "search_nprobe" in config:
+        if config["search_nprobe"] <= 0:
+            raise ValueError("search_nprobe must be greater than 0")
+    if "write_nprobe" in config:
+        if config["write_nprobe"] <= 0:
+            raise ValueError("write_nprobe must be greater than 0")
+    if "ef_construction" in config:
+        if config["ef_construction"] <= 0:
+            raise ValueError("ef_construction must be greater than 0")
+    if "ef_search" in config:
+        if config["ef_search"] <= 0:
+            raise ValueError("ef_search must be greater than 0")
+    if "max_neighbors" in config:
+        if config["max_neighbors"] <= 0:
+            raise ValueError("max_neighbors must be greater than 0")
+    if "reassign_neighbor_count" in config:
+        if config["reassign_neighbor_count"] <= 0:
+            raise ValueError("reassign_neighbor_count must be greater than 0")
+    if "split_threshold" in config:
+        if config["split_threshold"] <= 0:
+            raise ValueError("split_threshold must be greater than 0")
+    if "merge_threshold" in config:
+        if config["merge_threshold"] <= 0:
+            raise ValueError("merge_threshold must be greater than 0")
+
+
+def json_to_create_spann_configuration(
+    json_map: Dict[str, Any]
+) -> CreateSpannConfiguration:
+    config: CreateSpannConfiguration = {}
+    if "search_nprobe" in json_map:
+        config["search_nprobe"] = json_map["search_nprobe"]
+    if "write_nprobe" in json_map:
+        config["write_nprobe"] = json_map["write_nprobe"]
+    if "space" in json_map:
+        space_value = json_map["space"]
+        if space_value in get_args(Space):
+            config["space"] = space_value
+        else:
+            raise ValueError(f"not a valid space: {space_value}")
+    if "ef_construction" in json_map:
+        config["ef_construction"] = json_map["ef_construction"]
+    if "ef_search" in json_map:
+        config["ef_search"] = json_map["ef_search"]
+    if "max_neighbors" in json_map:
+        config["max_neighbors"] = json_map["max_neighbors"]
+    return config
+
+
 class CreateCollectionConfiguration(TypedDict, total=False):
     hnsw: Optional[CreateHNSWConfiguration]
+    spann: Optional[CreateSpannConfiguration]
     embedding_function: Optional[EmbeddingFunction]  # type: ignore
 
 
@@ -231,6 +297,7 @@ def load_collection_configuration_from_create_collection_configuration(
 ) -> CollectionConfiguration:
     return CollectionConfiguration(
         hnsw=config.get("hnsw"),
+        spann=config.get("spann"),
         embedding_function=config.get("embedding_function"),
     )
 
@@ -267,22 +334,6 @@ def create_collection_configuration_from_legacy_metadata_dict(
     return CreateCollectionConfiguration(hnsw=hnsw_config)
 
 
-def legacy_create_collection_configuration_path(
-    embedding_function: Optional[EmbeddingFunction] = None,  # type: ignore
-    metadata: Optional[CollectionMetadata] = None,
-) -> CreateCollectionConfiguration:
-    configuration = CreateCollectionConfiguration()
-    if embedding_function is None:
-        configuration["embedding_function"] = DefaultEmbeddingFunction()
-    else:
-        configuration["embedding_function"] = embedding_function
-    if metadata is not None:
-        configuration = create_collection_configuration_from_legacy_collection_metadata(
-            metadata
-        )
-    return configuration
-
-
 def load_create_collection_configuration_from_json_str(
     json_str: str,
 ) -> CreateCollectionConfiguration:
@@ -294,55 +345,32 @@ def load_create_collection_configuration_from_json_str(
 def load_create_collection_configuration_from_json(
     json_map: Dict[str, Any]
 ) -> CreateCollectionConfiguration:
-    if json_map.get("hnsw") is None:
-        if json_map.get("embedding_function") is None:
-            return CreateCollectionConfiguration()
-        else:
-            ef_config = json_map["embedding_function"]
-            if ef_config["type"] == "legacy":
-                warnings.warn(
-                    "legacy embedding function config",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-                return CreateCollectionConfiguration()
-            else:
-                try:
-                    ef = known_embedding_functions[ef_config["name"]]
-                    return CreateCollectionConfiguration(
-                        embedding_function=ef.build_from_config(ef_config["config"])
-                    )
-                except KeyError:
-                    raise ValueError(
-                        f"Embedding function {ef_config['name']} not found. Add @register_embedding_function decorator to the class definition."
-                    )
-    else:
-        if json_map.get("embedding_function") is None:
-            return CreateCollectionConfiguration(
-                hnsw=json_to_create_hnsw_configuration(json_map["hnsw"])
+    if json_map.get("hnsw") is not None and json_map.get("spann") is not None:
+        raise ValueError("hnsw and spann cannot both be provided")
+
+    result = CreateCollectionConfiguration()
+
+    # Handle vector index configuration
+    if json_map.get("hnsw") is not None:
+        result["hnsw"] = json_to_create_hnsw_configuration(json_map["hnsw"])
+
+    if json_map.get("spann") is not None:
+        result["spann"] = json_to_create_spann_configuration(json_map["spann"])
+
+    # Handle embedding function configuration
+    if json_map.get("embedding_function") is not None:
+        ef_config = json_map["embedding_function"]
+        if ef_config["type"] == "legacy":
+            warnings.warn(
+                "legacy embedding function config",
+                DeprecationWarning,
+                stacklevel=2,
             )
         else:
-            ef_config = json_map["embedding_function"]
-            if ef_config["type"] == "legacy":
-                warnings.warn(
-                    "legacy embedding function config",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-                return CreateCollectionConfiguration(
-                    hnsw=json_to_create_hnsw_configuration(json_map["hnsw"])
-                )
-            else:
-                try:
-                    ef = known_embedding_functions[ef_config["name"]]
-                    return CreateCollectionConfiguration(
-                        hnsw=json_to_create_hnsw_configuration(json_map["hnsw"]),
-                        embedding_function=ef.build_from_config(ef_config["config"]),
-                    )
-                except KeyError:
-                    raise ValueError(
-                        f"Embedding function {ef_config['name']} not found. Add @register_embedding_function decorator to the class definition."
-                    )
+            ef = known_embedding_functions[ef_config["name"]]
+            result["embedding_function"] = ef.build_from_config(ef_config["config"])
+
+    return result
 
 
 def create_collection_configuration_to_json_str(
@@ -358,16 +386,30 @@ def create_collection_configuration_to_json(
 ) -> Dict[str, Any]:
     """Convert a CreateCollection configuration to a JSON-serializable dict"""
     ef_config: Dict[str, Any] | None = None
-    try:
-        hnsw_config = cast(CreateHNSWConfiguration, config.get("hnsw"))
-    except Exception as e:
-        raise ValueError(f"not a valid hnsw config: {e}")
+    hnsw_config = config.get("hnsw")
+    spann_config = config.get("spann")
+    if hnsw_config is not None:
+        try:
+            hnsw_config = cast(CreateHNSWConfiguration, hnsw_config)
+        except Exception as e:
+            raise ValueError(f"not a valid hnsw config: {e}")
+    if spann_config is not None:
+        try:
+            spann_config = cast(CreateSpannConfiguration, spann_config)
+        except Exception as e:
+            raise ValueError(f"not a valid spann config: {e}")
+
+    if hnsw_config is not None and spann_config is not None:
+        raise ValueError("hnsw and spann cannot both be provided")
+
     if config.get("embedding_function") is None:
         ef = None
         validate_create_hnsw_config(hnsw_config, ef)
+        validate_create_spann_config(spann_config, ef)
         ef_config = {"type": "legacy"}
         return {
             "hnsw": hnsw_config,
+            "spann": spann_config,
             "embedding_function": ef_config,
         }
 
@@ -392,9 +434,10 @@ def create_collection_configuration_to_json(
         ef_config = {"type": "legacy"}
 
     validate_create_hnsw_config(hnsw_config, ef)
-
+    validate_create_spann_config(spann_config, ef)
     return {
         "hnsw": hnsw_config,
+        "spann": spann_config,
         "embedding_function": ef_config,
     }
 
@@ -423,7 +466,7 @@ def populate_create_hnsw_defaults(
 
 
 def validate_create_hnsw_config(
-    config: CreateHNSWConfiguration, ef: Optional[EmbeddingFunction] = None  # type: ignore
+    config: Optional[CreateHNSWConfiguration], ef: Optional[EmbeddingFunction] = None  # type: ignore
 ) -> None:
     """Validate a CreateHNSW configuration"""
     if config is None:
@@ -506,8 +549,37 @@ def validate_update_hnsw_config(
             raise ValueError("resize_factor must be greater than 0")
 
 
+class UpdateSpannConfiguration(TypedDict, total=False):
+    search_nprobe: int
+    ef_search: int
+
+
+def json_to_update_spann_configuration(
+    json_map: Dict[str, Any]
+) -> UpdateSpannConfiguration:
+    config: UpdateSpannConfiguration = {}
+    if "search_nprobe" in json_map:
+        config["search_nprobe"] = json_map["search_nprobe"]
+    if "ef_search" in json_map:
+        config["ef_search"] = json_map["ef_search"]
+    return config
+
+
+def validate_update_spann_config(
+    config: UpdateSpannConfiguration,
+) -> None:
+    """Validate an UpdateSpann configuration"""
+    if "search_nprobe" in config:
+        if config["search_nprobe"] <= 0:
+            raise ValueError("search_nprobe must be greater than 0")
+    if "ef_search" in config:
+        if config["ef_search"] <= 0:
+            raise ValueError("ef_search must be greater than 0")
+
+
 class UpdateCollectionConfiguration(TypedDict, total=False):
     hnsw: Optional[UpdateHNSWConfiguration]
+    spann: Optional[UpdateSpannConfiguration]
     embedding_function: Optional[EmbeddingFunction]  # type: ignore
 
 
@@ -563,21 +635,32 @@ def update_collection_configuration_to_json(
     config: UpdateCollectionConfiguration,
 ) -> Dict[str, Any]:
     """Convert an UpdateCollectionConfiguration to a JSON-serializable dict"""
-    if config.get("hnsw") is None:
+    hnsw_config = config.get("hnsw")
+    spann_config = config.get("spann")
+    ef = config.get("embedding_function")
+    if hnsw_config is None and spann_config is None and ef is None:
         return {}
 
-    try:
-        hnsw_config = cast(UpdateHNSWConfiguration, config.get("hnsw"))
-    except Exception as e:
-        raise ValueError(f"not a valid hnsw config: {e}")
+    if hnsw_config is not None:
+        try:
+            hnsw_config = cast(UpdateHNSWConfiguration, hnsw_config)
+            validate_update_hnsw_config(hnsw_config)
+        except Exception as e:
+            raise ValueError(f"not a valid hnsw config: {e}")
 
-    validate_update_hnsw_config(hnsw_config)
+    if spann_config is not None:
+        try:
+            spann_config = cast(UpdateSpannConfiguration, spann_config)
+            validate_update_spann_config(spann_config)
+        except Exception as e:
+            raise ValueError(f"not a valid spann config: {e}")
+
     ef_config: Dict[str, Any] | None = None
-    ef = config.get("embedding_function")
     if ef is not None:
         if ef.is_legacy():
             ef_config = {"type": "legacy"}
         else:
+            ef.validate_config(ef.get_config())
             ef_config = {
                 "name": ef.name(),
                 "type": "known",
@@ -589,6 +672,7 @@ def update_collection_configuration_to_json(
 
     return {
         "hnsw": hnsw_config,
+        "spann": spann_config,
         "embedding_function": ef_config,
     }
 
@@ -604,61 +688,34 @@ def load_update_collection_configuration_from_json_str(
 def load_update_collection_configuration_from_json(
     json_map: Dict[str, Any]
 ) -> UpdateCollectionConfiguration:
-    if json_map.get("hnsw") is None:
-        if json_map.get("embedding_function") is None:
-            return UpdateCollectionConfiguration()
-        else:
-            if json_map["embedding_function"]["type"] == "legacy":
-                warnings.warn(
-                    "legacy embedding function config",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-                return UpdateCollectionConfiguration()
-            else:
-                try:
-                    ef = known_embedding_functions[
-                        json_map["embedding_function"]["name"]
-                    ]
-                    return UpdateCollectionConfiguration(
-                        embedding_function=ef.build_from_config(
-                            json_map["embedding_function"]["config"]
-                        )
-                    )
-                except KeyError:
-                    raise ValueError(
-                        f"embedding function {json_map['embedding_function']['name']} not found. add @register_embedding_function to the class definition."
-                    )
-    else:
-        if json_map.get("embedding_function") is None:
-            return UpdateCollectionConfiguration(
-                hnsw=json_to_update_hnsw_configuration(json_map["hnsw"])
+    """Convert a JSON dict to an UpdateCollectionConfiguration"""
+    if json_map.get("hnsw") is not None and json_map.get("spann") is not None:
+        raise ValueError("hnsw and spann cannot both be provided")
+
+    result = UpdateCollectionConfiguration()
+
+    # Handle vector index configurations
+    if json_map.get("hnsw") is not None:
+        result["hnsw"] = json_to_update_hnsw_configuration(json_map["hnsw"])
+
+    if json_map.get("spann") is not None:
+        result["spann"] = json_to_update_spann_configuration(json_map["spann"])
+
+    # Handle embedding function
+    if json_map.get("embedding_function") is not None:
+        if json_map["embedding_function"]["type"] == "legacy":
+            warnings.warn(
+                "legacy embedding function config",
+                DeprecationWarning,
+                stacklevel=2,
             )
         else:
-            if json_map["embedding_function"]["type"] == "legacy":
-                warnings.warn(
-                    "legacy embedding function config",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-                return UpdateCollectionConfiguration(
-                    hnsw=json_to_update_hnsw_configuration(json_map["hnsw"])
-                )
-            else:
-                try:
-                    ef = known_embedding_functions[
-                        json_map["embedding_function"]["name"]
-                    ]
-                    return UpdateCollectionConfiguration(
-                        hnsw=json_to_update_hnsw_configuration(json_map["hnsw"]),
-                        embedding_function=ef.build_from_config(
-                            json_map["embedding_function"]["config"]
-                        ),
-                    )
-                except KeyError:
-                    raise ValueError(
-                        f"embedding function {json_map['embedding_function']['name']} not found. add @register_embedding_function to the class definition."
-                    )
+            ef = known_embedding_functions[json_map["embedding_function"]["name"]]
+            result["embedding_function"] = ef.build_from_config(
+                json_map["embedding_function"]["config"]
+            )
+
+    return result
 
 
 def overwrite_hnsw_configuration(
@@ -680,6 +737,24 @@ def overwrite_hnsw_configuration(
             result[field] = update_hnsw_config[field]  # type: ignore
 
     return cast(HNSWConfiguration, result)
+
+
+def overwrite_spann_configuration(
+    existing_spann_config: SpannConfiguration,
+    update_spann_config: UpdateSpannConfiguration,
+) -> SpannConfiguration:
+    """Overwrite a SpannConfiguration with a new configuration"""
+    result = dict(existing_spann_config)
+    update_fields = [
+        "search_nprobe",
+        "ef_search",
+    ]
+
+    for field in update_fields:
+        if field in update_spann_config:
+            result[field] = update_spann_config[field]  # type: ignore
+
+    return cast(SpannConfiguration, result)
 
 
 # TODO: make warnings prettier and add link to migration docs
@@ -716,12 +791,24 @@ def overwrite_collection_configuration(
     update_config: UpdateCollectionConfiguration,
 ) -> CollectionConfiguration:
     """Overwrite a CollectionConfiguration with a new configuration"""
-    # Handle HNSW configuration update
-    updated_hnsw_config = existing_config.get("hnsw")
+    update_spann = update_config.get("spann")
     update_hnsw = update_config.get("hnsw")
+    if update_spann is not None and update_hnsw is not None:
+        raise ValueError("hnsw and spann cannot both be provided")
+
+    # Handle HNSW configuration update
+
+    updated_hnsw_config = existing_config.get("hnsw")
     if updated_hnsw_config is not None and update_hnsw is not None:
         updated_hnsw_config = overwrite_hnsw_configuration(
             updated_hnsw_config, update_hnsw
+        )
+
+    # Handle SPANN configuration update
+    updated_spann_config = existing_config.get("spann")
+    if updated_spann_config is not None and update_spann is not None:
+        updated_spann_config = overwrite_spann_configuration(
+            updated_spann_config, update_spann
         )
 
     # Handle embedding function update
@@ -736,7 +823,9 @@ def overwrite_collection_configuration(
             updated_embedding_function = update_ef
 
     return CollectionConfiguration(
-        hnsw=updated_hnsw_config, embedding_function=updated_embedding_function
+        hnsw=updated_hnsw_config,
+        spann=updated_spann_config,
+        embedding_function=updated_embedding_function,
     )
 
 

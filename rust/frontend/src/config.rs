@@ -6,6 +6,7 @@ use chroma_log::config::LogConfig;
 use chroma_segment::local_segment_manager::LocalSegmentManagerConfig;
 use chroma_sqlite::config::SqliteDBConfig;
 use chroma_sysdb::SysDbConfig;
+use chroma_types::{default_default_knn_index, KnnIndex};
 use figment::providers::{Env, Format, Yaml};
 use mdac::CircuitBreakerConfig;
 use rust_embed::Embed;
@@ -61,6 +62,8 @@ pub struct FrontendConfig {
     pub log: LogConfig,
     #[serde(default = "default_executor_config")]
     pub executor: ExecutorConfig,
+    #[serde(default = "default_default_knn_index")]
+    pub default_knn_index: KnnIndex,
 }
 
 impl FrontendConfig {
@@ -76,6 +79,7 @@ impl FrontendConfig {
             collections_with_segments_provider: Default::default(),
             log: default_log_config(),
             executor: default_executor_config(),
+            default_knn_index: default_default_knn_index(),
         }
     }
 }

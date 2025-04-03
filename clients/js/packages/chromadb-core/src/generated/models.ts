@@ -291,32 +291,50 @@ export namespace Api {
      * @memberof SpannConfiguration
      * minimum: 0
      */
-    construction_ef: number;
+    ef_construction?: number;
     /**
      * @type {number}
      * @memberof SpannConfiguration
      * minimum: 0
      */
-    m: number;
+    ef_search?: number;
     /**
      * @type {number}
      * @memberof SpannConfiguration
      * minimum: 0
      */
-    search_ef: number;
+    max_neighbors?: number;
     /**
      * @type {number}
      * @memberof SpannConfiguration
      * minimum: 0
      */
-    search_nprobe: number;
-    space: Api.HnswSpace;
+    merge_threshold?: number;
     /**
      * @type {number}
      * @memberof SpannConfiguration
      * minimum: 0
      */
-    write_nprobe: number;
+    reassign_neighbor_count?: number;
+    /**
+     * @type {number}
+     * @memberof SpannConfiguration
+     * minimum: 0
+     */
+    search_nprobe?: number;
+    space?: Api.HnswSpace;
+    /**
+     * @type {number}
+     * @memberof SpannConfiguration
+     * minimum: 0
+     */
+    split_threshold?: number;
+    /**
+     * @type {number}
+     * @memberof SpannConfiguration
+     * minimum: 0
+     */
+    write_nprobe?: number;
   }
 
   export interface UpdateCollectionConfiguration {
