@@ -45,11 +45,11 @@ impl GrpcLogConfig {
     }
 
     fn default_max_encoding_message_size() -> usize {
-        1 << 25
+        32_000_000
     }
 
     fn default_max_decoding_message_size() -> usize {
-        1 << 25
+        32_000_000
     }
 }
 
