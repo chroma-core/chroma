@@ -129,8 +129,6 @@ impl CompactionManager {
             Some(ref system) => {
                 let orchestrator = CompactOrchestrator::new(
                     compaction_job.clone(),
-                    compaction_job.collection_id,
-                    compaction_job.collection_logical_size_bytes as i64,
                     self.log.clone(),
                     self.sysdb.clone(),
                     self.blockfile_provider.clone(),
