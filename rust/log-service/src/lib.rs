@@ -489,7 +489,7 @@ impl DirtyMarker {
                     .find(|x| x.collection_id == collection_id)
                 {
                     if LogPosition::from_offset(compactable.first_log_offset as u64)
-                        <= *log_position + *num_records
+                        < *log_position + *num_records
                     {
                         break;
                     }
@@ -730,6 +730,7 @@ impl LogService for LogServer {
         };
         let default = Cursor::default();
         let cursor = witness.as_ref().map(|w| w.cursor()).unwrap_or(&default);
+        tracing::info!("cursoring from {cursor:?}");
         let dirty_fragments = reader
             .scan(
                 cursor.position,
@@ -745,7 +746,7 @@ impl LogService for LogServer {
                 all_collection_info: vec![],
             }));
         }
-        if dirty_fragments.len() >= 500_000 {
+        if dirty_fragments.len() >= 750_000 {
             tracing::error!("Too many dirty fragments: {}", dirty_fragments.len());
         }
         if dirty_fragments.len() >= 1_000_000 {
@@ -821,7 +822,6 @@ impl LogService for LogServer {
                     .map_err(|err| Status::unavailable(err.to_string()))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let mut new_cursor = cursor.clone();
         if rollup.advance_to < cursor.position {
             tracing::error!(
                 "advance_to went back in time: {:?} -> {:?}",
@@ -830,13 +830,14 @@ impl LogService for LogServer {
             );
             return Err(Status::aborted("Invalid advance_to"));
         }
+        let mut new_cursor = cursor.clone();
+        new_cursor.position = rollup.advance_to;
         if !reinsert_dirty_markers.is_empty() {
             self.dirty_log
                 .append_many(reinsert_dirty_markers)
                 .await
                 .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
         }
-        new_cursor.position = rollup.advance_to;
         tracing::info!(
             "Advancing cursor {:?} -> {:?}",
             cursor.position,

@@ -127,6 +127,7 @@ impl LogReader {
                 }
             }
         }
+        fragments.retain(|f| f.limit > from);
         fragments.sort_by_key(|f| f.start.offset());
         fragments.truncate(limits.max_files.unwrap_or(u64::MAX) as usize);
         while fragments.len() > 1
