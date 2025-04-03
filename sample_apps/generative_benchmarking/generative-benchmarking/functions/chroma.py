@@ -1,15 +1,16 @@
 from concurrent.futures import ThreadPoolExecutor
 import os
 import multiprocessing
-from typing import List, Any
+from typing import List, Any, Dict
 from tqdm import tqdm
+from chromadb import Collection
 
 def collection_add_in_batches(
-    collection: Any, 
+    collection: Collection, 
     ids: List[str], 
     texts: List[str], 
     embeddings: List[List[float]], 
-    metadatas: List[dict] = None
+    metadatas: List[Dict] = None
 ) -> None:
     BATCH_SIZE = 100
     LEN = len(embeddings)
@@ -38,8 +39,8 @@ def collection_add_in_batches(
     threadpool.shutdown(wait=True)
 
 def get_collection_items(
-        collection: Any,
-    ) -> dict:
+    collection: Collection,
+) -> Dict:
     BATCH_SIZE = 100
     collection_size = collection.count()
     items = collection.get(include=["metadatas"])
