@@ -433,7 +433,8 @@ impl DirtyMarker {
                         return None;
                     }
                 };
-                match manifest.maximum_log_position().cmp(&cursor.position) {
+                let maximum_log_position = manifest.maximum_log_position();
+                match maximum_log_position.cmp(&cursor.position) {
                     Ordering::Equal => {
                         // Same as above.
                         reinsert.retain(|x| x.collection_id() != *collection_id);
@@ -451,14 +452,18 @@ impl DirtyMarker {
                     Ordering::Greater => {
                         tracing::info!(
                             "{collection_id} has cursor={:?} manifest={:?}",
+                            cursor.position,
                             manifest.maximum_log_position(),
-                            cursor.position
                         );
-                        Some(CollectionInfo {
-                            collection_id: collection_id.to_string(),
-                            first_log_offset: cursor.position.offset() as i64,
-                            first_log_ts: cursor.position.offset() as i64,
-                        })
+                        if maximum_log_position - cursor.position >= record_count_threshold {
+                            Some(CollectionInfo {
+                                collection_id: collection_id.to_string(),
+                                first_log_offset: cursor.position.offset() as i64,
+                                first_log_ts: cursor.position.offset() as i64,
+                            })
+                        } else {
+                            None
+                        }
                     }
                 }
             })
@@ -862,11 +867,13 @@ impl LogService for LogServer {
         let collection_id = Uuid::parse_str(&request.collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+        tracing::info!("update_collection_log_offset for {collection_id}");
+        let storage_prefix = storage_prefix_for_log(collection_id);
         let cursor_name = &COMPACTION;
         let cursor_store = CursorStore::new(
             CursorStoreOptions::default(),
             Arc::clone(&self.storage),
-            storage_prefix_for_log(collection_id),
+            storage_prefix.clone(),
             "writer".to_string(),
         );
         let witness = cursor_store.load(cursor_name).await.map_err(|err| {
