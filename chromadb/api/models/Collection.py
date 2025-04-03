@@ -1,4 +1,3 @@
-import inspect
 from typing import TYPE_CHECKING, Optional, Union
 
 from chromadb.api.models.CollectionCommon import CollectionCommon
@@ -6,7 +5,6 @@ from chromadb.api.types import (
     URI,
     CollectionMetadata,
     Embedding,
-    IncludeEnum,
     PyEmbedding,
     Include,
     Metadata,
@@ -106,7 +104,7 @@ class Collection(CollectionCommon["ServerAPI"]):
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = [IncludeEnum.metadatas, IncludeEnum.documents],
+        include: Include = ["metadatas", "documents"],
     ) -> GetResult:
         """Get embeddings and their associate data from the data store. If no ids or where filter is provided returns
         all embeddings up to limit starting at offset.
@@ -179,9 +177,9 @@ class Collection(CollectionCommon["ServerAPI"]):
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
         include: Include = [
-            IncludeEnum.metadatas,
-            IncludeEnum.documents,
-            IncludeEnum.distances,
+            "metadatas",
+            "documents",
+            "distances",
         ],
     ) -> QueryResult:
         """Get the n_results nearest neighbor embeddings for provided query_embeddings or query_texts.
@@ -386,42 +384,3 @@ class Collection(CollectionCommon["ServerAPI"]):
             tenant=self.tenant,
             database=self.database,
         )
-
-
-class CollectionName(str):
-    """
-    A string wrapper to supply users with indicative message about list_collections only
-    returning collection names, in lieu of Collection object.
-
-    When a user will try to access an attribute on a CollectionName string, the __getattribute__ method
-    of str is invoked first. If a valid str method or property is found, it will be used. Otherwise, the fallback
-    __getattr__ defined here is invoked next. It will error if the requested attribute is a Collection
-    method or property.
-
-    For example:
-    collection_name = client.list_collections()[0] # collection_name = "test"
-
-    collection_name.startsWith("t") # Evaluates to True.
-    # __getattribute__ is invoked first, selecting startsWith from str.
-
-    collection_name.add(ids=[...], documents=[...]) # Raises the error defined below
-    # __getattribute__ is invoked first, not finding a match in str.
-    # __getattr__ from this class is invoked and raises an error
-
-    """
-
-    def __getattr__(self, item):  # type: ignore
-        collection_attributes_and_methods = [
-            member
-            for member, _ in inspect.getmembers(Collection)
-            if not member.startswith("_")
-        ]
-
-        if item in collection_attributes_and_methods:
-            raise NotImplementedError(
-                f"In Chroma v0.6.0, list_collections only returns collection names. "
-                f"Use Client.get_collection({str(self)}) to access {item}. "
-                f"See https://docs.trychroma.com/deployment/migration for more information."
-            )
-
-        raise AttributeError(f"'CollectionName' object has no attribute '{item}'")

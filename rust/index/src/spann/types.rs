@@ -22,13 +22,14 @@ use crate::{
         PlGarbageCollectionPolicyConfig, RandomSamplePolicyConfig,
     },
     hnsw_provider::{
-        HnswIndexProvider, HnswIndexProviderCreateError, HnswIndexProviderForkError, HnswIndexRef,
+        HnswIndexProvider, HnswIndexProviderCreateError, HnswIndexProviderFlushError,
+        HnswIndexProviderForkError, HnswIndexProviderOpenError, HnswIndexRef,
     },
     spann::utils::cluster,
     Index, IndexUuid,
 };
 
-use super::utils::{rng_query, KMeansAlgorithmInput, KMeansError};
+use super::utils::{rng_query, KMeansAlgorithmInput, KMeansError, RngQueryError};
 
 pub struct VersionsMapInner {
     pub versions_map: HashMap<u32, u32>,
@@ -119,8 +120,14 @@ impl Configurable<PlGarbageCollectionPolicyConfig> for PlGarbageCollectionPolicy
 }
 
 #[derive(Clone, Debug)]
+pub struct DeletePercentageThresholdPolicy {
+    pub threshold: f32,
+}
+
+#[derive(Clone, Debug)]
 pub enum HnswGarbageCollectionPolicy {
     FullRebuild,
+    DeletePercentage(DeletePercentageThresholdPolicy),
 }
 
 #[async_trait::async_trait]
@@ -133,6 +140,11 @@ impl Configurable<HnswGarbageCollectionPolicyConfig> for HnswGarbageCollectionPo
             HnswGarbageCollectionPolicyConfig::FullRebuild => {
                 Ok(HnswGarbageCollectionPolicy::FullRebuild)
             }
+            HnswGarbageCollectionPolicyConfig::DeletePercentage(policy_config) => Ok(
+                HnswGarbageCollectionPolicy::DeletePercentage(DeletePercentageThresholdPolicy {
+                    threshold: policy_config.threshold,
+                }),
+            ),
         }
     }
 }
@@ -176,57 +188,64 @@ pub struct SpannIndexWriter {
     pub collection_id: CollectionUuid,
 }
 
-// TODO(Sanket): Can compose errors whenever downstream returns Box<dyn ChromaError>.
 #[derive(Error, Debug)]
 pub enum SpannIndexWriterError {
     #[error("Error forking hnsw index {0}")]
-    HnswIndexForkError(#[from] HnswIndexProviderForkError),
+    HnswIndexForkError(#[source] HnswIndexProviderForkError),
     #[error("Error creating hnsw index {0}")]
-    HnswIndexCreateError(#[from] HnswIndexProviderCreateError),
-    #[error("Error opening reader for versions map blockfile {0}")]
-    VersionsMapOpenError(#[from] OpenError),
+    HnswIndexCreateError(#[source] HnswIndexProviderCreateError),
+    #[error("Error creating reader for versions map blockfile {0}")]
+    VersionsMapReaderCreateError(#[source] OpenError),
     #[error("Error creating/forking postings list writer {0}")]
-    PostingsListCreateError(#[from] CreateError),
-    #[error("Error loading version data from blockfile {0}")]
-    VersionsMapDataLoadError(#[from] Box<dyn ChromaError>),
-    #[error("Error reading max offset id for heads")]
-    MaxHeadOffsetIdBlockfileGetError,
-    #[error("Error resizing hnsw index")]
-    HnswIndexResizeError,
-    #[error("Error adding to hnsw index")]
-    HnswIndexAddError,
-    #[error("Error searching from hnsw")]
-    HnswIndexSearchError,
-    #[error("Error adding posting list for a head")]
-    PostingListSetError,
+    PostingsListWriterCreateError(#[source] CreateError),
+    #[error("Error loading data from versions map blockfile {0}")]
+    VersionsMapDataLoadError(#[source] Box<dyn ChromaError>),
+    #[error("Error reading max offset id for heads {0}")]
+    MaxHeadIdBlockfileGetError(#[source] Box<dyn ChromaError>),
+    #[error("Max Head Id not found")]
+    MaxHeadIdNotFound,
+    #[error("Error resizing hnsw index {0}")]
+    HnswIndexResizeError(#[source] Box<dyn ChromaError>),
+    #[error("Error adding to hnsw index {0}")]
+    HnswIndexMutateError(#[source] Box<dyn ChromaError>),
+    #[error("Error searching hnsw {0}")]
+    HnswIndexSearchError(#[source] Box<dyn ChromaError>),
+    #[error("Error rng querying hnsw {0}")]
+    RngQueryError(#[source] RngQueryError),
+    #[error("Head not found in Hnsw index")]
+    HeadNotFound,
+    #[error("Error adding posting list for a head {0}")]
+    PostingListSetError(#[source] Box<dyn ChromaError>),
     #[error("Error getting the posting list for a head")]
-    PostingListGetError,
+    PostingListGetError(#[source] Box<dyn ChromaError>),
+    #[error("Posting list not found for head")]
+    PostingListNotFound,
     #[error("Did not find the version for head id")]
     VersionNotFound,
-    #[error("Error committing postings list blockfile")]
-    PostingListCommitError,
-    #[error("Error creating blockfile writer for versions map")]
-    VersionsMapWriterCreateError,
-    #[error("Error writing data to versions map blockfile")]
-    VersionsMapSetError,
-    #[error("Error committing versions map blockfile")]
-    VersionsMapCommitError,
-    #[error("Error creating blockfile writer for max head id")]
-    MaxHeadIdWriterCreateError,
-    #[error("Error writing data to max head id blockfile")]
-    MaxHeadIdSetError,
-    #[error("Error committing max head id blockfile")]
-    MaxHeadIdCommitError,
-    #[error("Error committing hnsw index")]
-    HnswIndexCommitError,
-    #[error("Error flushing postings list blockfile")]
-    PostingListFlushError,
-    #[error("Error flushing versions map blockfile")]
-    VersionsMapFlushError,
-    #[error("Error flushing max head id blockfile")]
-    MaxHeadIdFlushError,
-    #[error("Error flushing hnsw index")]
-    HnswIndexFlushError,
+    #[error("Error committing postings list blockfile {0}")]
+    PostingListCommitError(#[source] Box<dyn ChromaError>),
+    #[error("Error creating blockfile writer for versions map {0}")]
+    VersionsMapWriterCreateError(#[source] CreateError),
+    #[error("Error writing data to versions map blockfile {0}")]
+    VersionsMapSetError(#[source] Box<dyn ChromaError>),
+    #[error("Error committing versions map blockfile {0}")]
+    VersionsMapCommitError(#[source] Box<dyn ChromaError>),
+    #[error("Error creating blockfile writer for max head id {0}")]
+    MaxHeadIdWriterCreateError(#[source] CreateError),
+    #[error("Error writing data to max head id blockfile {0}")]
+    MaxHeadIdSetError(#[source] Box<dyn ChromaError>),
+    #[error("Error committing max head id blockfile {0}")]
+    MaxHeadIdCommitError(#[source] Box<dyn ChromaError>),
+    #[error("Error committing hnsw index {0}")]
+    HnswIndexCommitError(#[source] Box<dyn ChromaError>),
+    #[error("Error flushing postings list blockfile {0}")]
+    PostingListFlushError(#[source] Box<dyn ChromaError>),
+    #[error("Error flushing versions map blockfile {0}")]
+    VersionsMapFlushError(#[source] Box<dyn ChromaError>),
+    #[error("Error flushing max head id blockfile {0}")]
+    MaxHeadIdFlushError(#[source] Box<dyn ChromaError>),
+    #[error("Error flushing hnsw index {0}")]
+    HnswIndexFlushError(#[source] HnswIndexProviderFlushError),
     #[error("Error kmeans clustering {0}")]
     KMeansClusteringError(#[from] KMeansError),
 }
@@ -236,28 +255,32 @@ impl ChromaError for SpannIndexWriterError {
         match self {
             Self::HnswIndexForkError(e) => e.code(),
             Self::HnswIndexCreateError(e) => e.code(),
-            Self::VersionsMapOpenError(e) => e.code(),
-            Self::PostingsListCreateError(e) => e.code(),
+            Self::VersionsMapReaderCreateError(e) => e.code(),
+            Self::PostingsListWriterCreateError(e) => e.code(),
             Self::VersionsMapDataLoadError(e) => e.code(),
-            Self::MaxHeadOffsetIdBlockfileGetError => ErrorCodes::Internal,
-            Self::HnswIndexResizeError => ErrorCodes::Internal,
-            Self::HnswIndexAddError => ErrorCodes::Internal,
-            Self::PostingListSetError => ErrorCodes::Internal,
-            Self::HnswIndexSearchError => ErrorCodes::Internal,
-            Self::PostingListGetError => ErrorCodes::Internal,
+            Self::MaxHeadIdBlockfileGetError(e) => e.code(),
+            Self::MaxHeadIdNotFound => ErrorCodes::Internal,
+            Self::HnswIndexResizeError(e) => e.code(),
+            Self::HnswIndexMutateError(e) => e.code(),
+            Self::PostingListSetError(e) => e.code(),
+            Self::HnswIndexSearchError(e) => e.code(),
+            Self::RngQueryError(e) => e.code(),
+            Self::HeadNotFound => ErrorCodes::Internal,
+            Self::PostingListGetError(e) => e.code(),
+            Self::PostingListNotFound => ErrorCodes::Internal,
             Self::VersionNotFound => ErrorCodes::Internal,
-            Self::PostingListCommitError => ErrorCodes::Internal,
-            Self::VersionsMapSetError => ErrorCodes::Internal,
-            Self::VersionsMapCommitError => ErrorCodes::Internal,
-            Self::MaxHeadIdSetError => ErrorCodes::Internal,
-            Self::MaxHeadIdCommitError => ErrorCodes::Internal,
-            Self::HnswIndexCommitError => ErrorCodes::Internal,
-            Self::PostingListFlushError => ErrorCodes::Internal,
-            Self::VersionsMapFlushError => ErrorCodes::Internal,
-            Self::MaxHeadIdFlushError => ErrorCodes::Internal,
-            Self::HnswIndexFlushError => ErrorCodes::Internal,
-            Self::VersionsMapWriterCreateError => ErrorCodes::Internal,
-            Self::MaxHeadIdWriterCreateError => ErrorCodes::Internal,
+            Self::PostingListCommitError(e) => e.code(),
+            Self::VersionsMapSetError(e) => e.code(),
+            Self::VersionsMapCommitError(e) => e.code(),
+            Self::MaxHeadIdSetError(e) => e.code(),
+            Self::MaxHeadIdCommitError(e) => e.code(),
+            Self::HnswIndexCommitError(e) => e.code(),
+            Self::PostingListFlushError(e) => e.code(),
+            Self::VersionsMapFlushError(e) => e.code(),
+            Self::MaxHeadIdFlushError(e) => e.code(),
+            Self::HnswIndexFlushError(e) => e.code(),
+            Self::VersionsMapWriterCreateError(e) => e.code(),
+            Self::MaxHeadIdWriterCreateError(e) => e.code(),
             Self::KMeansClusteringError(e) => e.code(),
         }
     }
@@ -300,13 +323,28 @@ impl SpannIndexWriter {
         collection_id: &CollectionUuid,
         distance_function: DistanceFunction,
         dimensionality: usize,
+        ef_search: usize,
     ) -> Result<HnswIndexRef, SpannIndexWriterError> {
         match hnsw_provider
-            .fork(id, collection_id, dimensionality as i32, distance_function)
+            .fork(
+                id,
+                collection_id,
+                dimensionality as i32,
+                distance_function,
+                ef_search,
+            )
             .await
         {
             Ok(index) => Ok(index),
-            Err(e) => Err(SpannIndexWriterError::HnswIndexForkError(*e)),
+            Err(e) => {
+                tracing::error!(
+                    "Error forking hnsw index from id {:?} for collection {:?}: {:?}",
+                    id,
+                    collection_id,
+                    e
+                );
+                Err(SpannIndexWriterError::HnswIndexForkError(*e))
+            }
         }
     }
 
@@ -331,7 +369,14 @@ impl SpannIndexWriter {
             .await
         {
             Ok(index) => Ok(index),
-            Err(e) => Err(SpannIndexWriterError::HnswIndexCreateError(*e)),
+            Err(e) => {
+                tracing::error!(
+                    "Error creating hnsw index for collection {:?}: {:?}",
+                    collection_id,
+                    e
+                );
+                Err(SpannIndexWriterError::HnswIndexCreateError(*e))
+            }
         }
     }
 
@@ -343,13 +388,24 @@ impl SpannIndexWriter {
         let mut versions_map = HashMap::new();
         let reader = match blockfile_provider.read::<u32, u32>(blockfile_id).await {
             Ok(reader) => reader,
-            Err(e) => return Err(SpannIndexWriterError::VersionsMapOpenError(*e)),
+            Err(e) => {
+                tracing::error!(
+                    "Error creating reader for versions map blockfile {:?}: {:?}",
+                    blockfile_id,
+                    e
+                );
+                return Err(SpannIndexWriterError::VersionsMapReaderCreateError(*e));
+            }
         };
         // Load data using the reader.
-        let versions_data = reader
-            .get_range(.., ..)
-            .await
-            .map_err(SpannIndexWriterError::VersionsMapDataLoadError)?;
+        let versions_data = reader.get_range(.., ..).await.map_err(|e| {
+            tracing::error!(
+                "Error performing get_range for versions map blockfile {:?}: {:?}",
+                blockfile_id,
+                e
+            );
+            SpannIndexWriterError::VersionsMapDataLoadError(e)
+        })?;
         versions_data.iter().for_each(|(key, value)| {
             versions_map.insert(*key, *value);
         });
@@ -368,7 +424,14 @@ impl SpannIndexWriter {
             .await
         {
             Ok(writer) => Ok(writer),
-            Err(e) => Err(SpannIndexWriterError::PostingsListCreateError(*e)),
+            Err(e) => {
+                tracing::error!(
+                    "Error forking postings list writer from blockfile {:?}: {:?}",
+                    blockfile_id,
+                    e
+                );
+                Err(SpannIndexWriterError::PostingsListWriterCreateError(*e))
+            }
         }
     }
 
@@ -382,7 +445,10 @@ impl SpannIndexWriter {
             .await
         {
             Ok(writer) => Ok(writer),
-            Err(e) => Err(SpannIndexWriterError::PostingsListCreateError(*e)),
+            Err(e) => {
+                tracing::error!("Error creating postings list writer: {:?}", e);
+                Err(SpannIndexWriterError::PostingsListWriterCreateError(*e))
+            }
         }
     }
 
@@ -409,6 +475,7 @@ impl SpannIndexWriter {
                     collection_id,
                     distance_function.clone(),
                     dimensionality,
+                    params.search_ef,
                 )
                 .await?
             }
@@ -451,8 +518,11 @@ impl SpannIndexWriter {
                     Ok(reader) => reader
                         .get("", MAX_HEAD_OFFSET_ID)
                         .await
-                        .map_err(|_| SpannIndexWriterError::MaxHeadOffsetIdBlockfileGetError)?
-                        .unwrap(),
+                        .map_err(|e| {
+                            tracing::error!("Error reading max offset id for heads: {:?}", e);
+                            SpannIndexWriterError::MaxHeadIdBlockfileGetError(e)
+                        })?
+                        .ok_or(SpannIndexWriterError::MaxHeadIdNotFound)?,
                     Err(_) => 1,
                 }
             }
@@ -493,7 +563,10 @@ impl SpannIndexWriter {
             true,
         )
         .await
-        .map_err(|_| SpannIndexWriterError::HnswIndexSearchError)
+        .map_err(|e| {
+            tracing::error!("Error rng querying hnsw for {:?}: {:?}", query, e);
+            SpannIndexWriterError::RngQueryError(e)
+        })
     }
 
     async fn is_outdated(
@@ -574,14 +647,24 @@ impl SpannIndexWriter {
         let disallowed_ids = vec![];
         let (nearest_ids, nearest_distances) = read_guard
             .query(head_embedding, k, &allowed_ids, &disallowed_ids)
-            .map_err(|_| SpannIndexWriterError::HnswIndexSearchError)?;
+            .map_err(|e| {
+                tracing::error!("Error querying hnsw for {:?}: {:?}", head_embedding, e);
+                SpannIndexWriterError::HnswIndexSearchError(e)
+            })?;
         // Get the embeddings also for distance computation.
         // TODO(Sanket): Don't consider heads that are farther away than the closest.
         for id in nearest_ids.iter() {
             let emb = read_guard
                 .get(*id)
-                .map_err(|_| SpannIndexWriterError::HnswIndexSearchError)?
-                .ok_or(SpannIndexWriterError::HnswIndexSearchError)?;
+                .map_err(|e| {
+                    tracing::error!(
+                        "Error getting embedding from hnsw index for id {}: {}",
+                        id,
+                        e
+                    );
+                    SpannIndexWriterError::HnswIndexSearchError(e)
+                })?
+                .ok_or(SpannIndexWriterError::HeadNotFound)?;
             nearest_embeddings.push(emb);
         }
         Ok((nearest_ids, nearest_distances, nearest_embeddings))
@@ -691,9 +774,9 @@ impl SpannIndexWriter {
                 .await
                 .map_err(|e| {
                     tracing::error!("Error getting posting list for head {}: {}", head_id, e);
-                    SpannIndexWriterError::PostingListGetError
+                    SpannIndexWriterError::PostingListGetError(e)
                 })?
-                .ok_or(SpannIndexWriterError::PostingListGetError)?;
+                .ok_or(SpannIndexWriterError::PostingListNotFound)?;
         }
         for (index, doc_offset_id) in doc_offset_ids.iter().enumerate() {
             if assigned_ids.contains(doc_offset_id)
@@ -821,9 +904,9 @@ impl SpannIndexWriter {
                 .await
                 .map_err(|e| {
                     tracing::error!("Error getting posting list for head {}: {}", head_id, e);
-                    SpannIndexWriterError::PostingListGetError
+                    SpannIndexWriterError::PostingListGetError(e)
                 })?
-                .ok_or(SpannIndexWriterError::PostingListGetError)?;
+                .ok_or(SpannIndexWriterError::PostingListNotFound)?;
             // Append the new point to the posting list.
             doc_offset_ids.reserve_exact(1);
             doc_versions.reserve_exact(1);
@@ -888,7 +971,10 @@ impl SpannIndexWriter {
                 write_guard
                     .set("", head_id, &posting_list)
                     .await
-                    .map_err(|_| SpannIndexWriterError::PostingListSetError)?;
+                    .map_err(|e| {
+                        tracing::error!("Error setting posting list for head {}: {}", head_id, e);
+                        SpannIndexWriterError::PostingListSetError(e)
+                    })?;
 
                 return Ok(());
             }
@@ -913,8 +999,10 @@ impl SpannIndexWriter {
                 self.params.space.clone().into(),
                 self.params.initial_lambda,
             );
-            clustering_output =
-                cluster(&mut kmeans_input).map_err(SpannIndexWriterError::KMeansClusteringError)?;
+            clustering_output = cluster(&mut kmeans_input).map_err(|e| {
+                tracing::error!("Error clustering posting list for head {}: {}", head_id, e);
+                SpannIndexWriterError::KMeansClusteringError(e)
+            })?;
             // TODO(Sanket): Not sure how this can happen. The reference implementation
             // just includes one point from the entire list in this case.
             // My guess is that this can happen only when the total number of points
@@ -947,7 +1035,10 @@ impl SpannIndexWriter {
                 write_guard
                     .set("", head_id, &single_posting_list)
                     .await
-                    .map_err(|_| SpannIndexWriterError::PostingListSetError)?;
+                    .map_err(|e| {
+                        tracing::error!("Error setting posting list for head {}: {}", head_id, e);
+                        SpannIndexWriterError::PostingListSetError(e)
+                    })?;
 
                 return Ok(());
             } else {
@@ -1005,7 +1096,7 @@ impl SpannIndexWriter {
                                     head_id,
                                     e
                                 );
-                                SpannIndexWriterError::PostingListSetError
+                                SpannIndexWriterError::PostingListSetError(e)
                             })?;
                         new_head_ids[k] = head_id as i32;
                         new_head_embeddings[k] = Some(&head_embedding);
@@ -1027,7 +1118,14 @@ impl SpannIndexWriter {
                         write_guard
                             .set("", next_id, &posting_list)
                             .await
-                            .map_err(|_| SpannIndexWriterError::PostingListSetError)?;
+                            .map_err(|e| {
+                                tracing::error!(
+                                    "Error setting posting list for head {}: {}",
+                                    head_id,
+                                    e
+                                );
+                                SpannIndexWriterError::PostingListSetError(e)
+                            })?;
                         new_head_ids[k] = next_id as i32;
                         new_head_embeddings[k] = Some(&clustering_output.cluster_centers[k]);
                         // Insert to hnsw now.
@@ -1036,9 +1134,14 @@ impl SpannIndexWriter {
                         let hnsw_capacity = hnsw_write_guard.capacity();
                         if hnsw_len + 1 > hnsw_capacity {
                             tracing::info!("Resizing hnsw index");
-                            hnsw_write_guard
-                                .resize(hnsw_capacity * 2)
-                                .map_err(|_| SpannIndexWriterError::HnswIndexResizeError)?;
+                            hnsw_write_guard.resize(hnsw_capacity * 2).map_err(|e| {
+                                tracing::error!(
+                                    "Error resizing hnsw index during append to {}: {}",
+                                    hnsw_capacity * 2,
+                                    e
+                                );
+                                SpannIndexWriterError::HnswIndexResizeError(e)
+                            })?;
                         }
                         hnsw_write_guard
                             .add(next_id as usize, &clustering_output.cluster_centers[k])
@@ -1048,7 +1151,7 @@ impl SpannIndexWriter {
                                     next_id,
                                     e
                                 );
-                                SpannIndexWriterError::HnswIndexAddError
+                                SpannIndexWriterError::HnswIndexMutateError(e)
                             })?;
                     }
                 }
@@ -1063,7 +1166,7 @@ impl SpannIndexWriter {
                     let hnsw_write_guard = self.hnsw_index.inner.write();
                     hnsw_write_guard.delete(head_id as usize).map_err(|e| {
                         tracing::error!("Error deleting head {} from hnsw index: {}", head_id, e);
-                        SpannIndexWriterError::HnswIndexAddError
+                        SpannIndexWriterError::HnswIndexMutateError(e)
                     })?;
                 }
             }
@@ -1123,7 +1226,10 @@ impl SpannIndexWriter {
                 write_guard
                     .set("", next_id, &posting_list)
                     .await
-                    .map_err(|_| SpannIndexWriterError::PostingListSetError)?;
+                    .map_err(|e| {
+                        tracing::error!("Error setting posting list for head {}: {}", next_id, e);
+                        SpannIndexWriterError::PostingListSetError(e)
+                    })?;
             }
             // Next add to hnsw.
             {
@@ -1131,14 +1237,19 @@ impl SpannIndexWriter {
                 let hnsw_len = write_guard.len_with_deleted();
                 let hnsw_capacity = write_guard.capacity();
                 if hnsw_len + 1 > hnsw_capacity {
-                    tracing::info!("Resizing hnsw index");
-                    write_guard
-                        .resize(hnsw_capacity * 2)
-                        .map_err(|_| SpannIndexWriterError::HnswIndexResizeError)?;
+                    tracing::info!("Resizing hnsw index to {}", hnsw_capacity * 2);
+                    write_guard.resize(hnsw_capacity * 2).map_err(|e| {
+                        tracing::error!(
+                            "Error resizing hnsw index during append to {}: {}",
+                            hnsw_capacity * 2,
+                            e
+                        );
+                        SpannIndexWriterError::HnswIndexResizeError(e)
+                    })?;
                 }
                 write_guard.add(next_id as usize, embeddings).map_err(|e| {
                     tracing::error!("Error adding new head {} to hnsw index: {}", next_id, e);
-                    SpannIndexWriterError::HnswIndexAddError
+                    SpannIndexWriterError::HnswIndexMutateError(e)
                 })?;
             }
             return Ok(());
@@ -1333,8 +1444,11 @@ impl SpannIndexWriter {
             (doc_offset_ids, doc_versions, doc_embeddings) = pl_guard
                 .get_owned::<u32, &SpannPostingList<'_>>("", head_id as u32)
                 .await
-                .map_err(|_| SpannIndexWriterError::PostingListGetError)?
-                .ok_or(SpannIndexWriterError::PostingListGetError)?;
+                .map_err(|e| {
+                    tracing::error!("Error getting posting list for head {}: {}", head_id, e);
+                    SpannIndexWriterError::PostingListGetError(e)
+                })?
+                .ok_or(SpannIndexWriterError::PostingListNotFound)?;
             (doc_offset_ids, doc_versions, doc_embeddings) = self
                 .remove_outdated_entries(doc_offset_ids, doc_versions, doc_embeddings)
                 .await?;
@@ -1349,7 +1463,10 @@ impl SpannIndexWriter {
                 pl_guard
                     .set("", head_id as u32, &posting_list)
                     .await
-                    .map_err(|_| SpannIndexWriterError::PostingListSetError)?;
+                    .map_err(|e| {
+                        tracing::error!("Error setting posting list for head {}: {}", head_id, e);
+                        SpannIndexWriterError::PostingListSetError(e)
+                    })?;
 
                 return Ok(());
             }
@@ -1357,9 +1474,10 @@ impl SpannIndexWriter {
                 tracing::info!("Posting list of {} is empty. Deleting from hnsw", head_id);
                 // Delete from hnsw.
                 let hnsw_write_guard = self.hnsw_index.inner.write();
-                hnsw_write_guard
-                    .delete(head_id)
-                    .map_err(|_| SpannIndexWriterError::HnswIndexAddError)?;
+                hnsw_write_guard.delete(head_id).map_err(|e| {
+                    tracing::error!("Error deleting head {} from hnsw index: {}", head_id, e);
+                    SpannIndexWriterError::HnswIndexMutateError(e)
+                })?;
                 return Ok(());
             }
             // Find candidates for merge.
@@ -1384,8 +1502,15 @@ impl SpannIndexWriter {
                 ) = pl_guard
                     .get_owned::<u32, &SpannPostingList<'_>>("", nearest_head_id as u32)
                     .await
-                    .map_err(|_| SpannIndexWriterError::PostingListGetError)?
-                    .ok_or(SpannIndexWriterError::PostingListGetError)?;
+                    .map_err(|e| {
+                        tracing::error!(
+                            "Error getting posting list for head {}: {}",
+                            nearest_head_id,
+                            e
+                        );
+                        SpannIndexWriterError::PostingListGetError(e)
+                    })?
+                    .ok_or(SpannIndexWriterError::PostingListNotFound)?;
                 target_cluster_len = self
                     .get_up_to_date_count(&nearest_head_doc_offset_ids, &nearest_head_doc_versions)
                     .await?;
@@ -1416,22 +1541,42 @@ impl SpannIndexWriter {
                     pl_guard
                         .set("", nearest_head_id as u32, &merged_posting_list)
                         .await
-                        .map_err(|_| SpannIndexWriterError::PostingListSetError)?;
+                        .map_err(|e| {
+                            tracing::error!(
+                                "Error setting posting list for head {}: {}",
+                                head_id,
+                                e
+                            );
+                            SpannIndexWriterError::PostingListSetError(e)
+                        })?;
                     // Delete from hnsw.
                     let hnsw_write_guard = self.hnsw_index.inner.write();
-                    hnsw_write_guard
-                        .delete(head_id)
-                        .map_err(|_| SpannIndexWriterError::HnswIndexAddError)?;
+                    hnsw_write_guard.delete(head_id).map_err(|e| {
+                        tracing::error!("Error deleting head {} from hnsw index: {}", head_id, e);
+                        SpannIndexWriterError::HnswIndexMutateError(e)
+                    })?;
                 } else {
                     pl_guard
                         .set("", head_id as u32, &merged_posting_list)
                         .await
-                        .map_err(|_| SpannIndexWriterError::PostingListSetError)?;
+                        .map_err(|e| {
+                            tracing::error!(
+                                "Error setting posting list for head {}: {}",
+                                head_id,
+                                e
+                            );
+                            SpannIndexWriterError::PostingListSetError(e)
+                        })?;
                     // Delete from hnsw.
                     let hnsw_write_guard = self.hnsw_index.inner.write();
-                    hnsw_write_guard
-                        .delete(nearest_head_id)
-                        .map_err(|_| SpannIndexWriterError::HnswIndexAddError)?;
+                    hnsw_write_guard.delete(nearest_head_id).map_err(|e| {
+                        tracing::error!(
+                            "Error deleting head {} from hnsw index: {}",
+                            nearest_head_id,
+                            e
+                        );
+                        SpannIndexWriterError::HnswIndexMutateError(e)
+                    })?;
                 }
                 // This center is now merged with a neighbor.
                 target_head = nearest_head_id;
@@ -1494,6 +1639,21 @@ impl SpannIndexWriter {
         Ok(())
     }
 
+    pub fn eligible_to_gc(&mut self, threshold: f32) -> bool {
+        let (len_with_deleted, len_without_deleted) = {
+            let hnsw_read_guard = self.hnsw_index.inner.read();
+            (hnsw_read_guard.len_with_deleted(), hnsw_read_guard.len())
+        };
+        if (len_with_deleted as f32) < ((1.0 + (threshold / 100.0)) * (len_without_deleted as f32))
+        {
+            tracing::info!(
+                "No need to garbage collect heads since delete count is within threshold"
+            );
+            return false;
+        }
+        true
+    }
+
     pub async fn garbage_collect_heads(&mut self) -> Result<(), SpannIndexWriterError> {
         tracing::info!("Garbage collecting all the heads");
         // Create a new hnsw index and add elements to it.
@@ -1515,27 +1675,52 @@ impl SpannIndexWriter {
         {
             let hnsw_read_guard = self.hnsw_index.inner.read();
             let mut clean_hnsw_write_guard = clean_hnsw.inner.write();
-            let (non_deleted_heads, _) = hnsw_read_guard
-                .get_all_ids()
-                .map_err(|_| SpannIndexWriterError::HnswIndexSearchError)?;
+            let (non_deleted_heads, _) = hnsw_read_guard.get_all_ids().map_err(|e| {
+                tracing::error!("Error getting all ids from hnsw index during gc: {}", e);
+                SpannIndexWriterError::HnswIndexSearchError(e)
+            })?;
+            clean_hnsw_write_guard
+                .resize(non_deleted_heads.len())
+                .map_err(|e| {
+                    tracing::error!(
+                        "Error resizing hnsw index during gc to {}: {}",
+                        non_deleted_heads.len(),
+                        e
+                    );
+                    SpannIndexWriterError::HnswIndexResizeError(e)
+                })?;
             for head in non_deleted_heads {
                 let head_embedding = hnsw_read_guard
                     .get(head)
-                    .map_err(|_| SpannIndexWriterError::HnswIndexSearchError)?
-                    .ok_or(SpannIndexWriterError::HnswIndexSearchError)?;
+                    .map_err(|e| {
+                        tracing::error!(
+                            "Error getting head {} from hnsw index during gc: {}",
+                            head,
+                            e
+                        );
+                        SpannIndexWriterError::HnswIndexSearchError(e)
+                    })?
+                    .ok_or(SpannIndexWriterError::HeadNotFound)?;
                 let hnsw_len = clean_hnsw_write_guard.len_with_deleted();
                 let hnsw_capacity = clean_hnsw_write_guard.capacity();
                 if hnsw_len + 1 > hnsw_capacity {
                     tracing::info!("Resizing hnsw index");
                     clean_hnsw_write_guard
                         .resize(hnsw_capacity * 2)
-                        .map_err(|_| SpannIndexWriterError::HnswIndexResizeError)?;
+                        .map_err(|e| {
+                            tracing::error!(
+                                "Error resizing hnsw index during gc to {}: {}",
+                                hnsw_capacity * 2,
+                                e
+                            );
+                            SpannIndexWriterError::HnswIndexResizeError(e)
+                        })?;
                 }
                 clean_hnsw_write_guard
                     .add(head, &head_embedding)
                     .map_err(|e| {
                         tracing::error!("Error adding head {} to clean hnsw index: {}", head, e);
-                        SpannIndexWriterError::HnswIndexAddError
+                        SpannIndexWriterError::HnswIndexMutateError(e)
                     })?;
             }
         }
@@ -1552,9 +1737,10 @@ impl SpannIndexWriter {
         let non_deleted_heads;
         {
             let hnsw_read_guard = self.hnsw_index.inner.read();
-            (non_deleted_heads, _) = hnsw_read_guard
-                .get_all_ids()
-                .map_err(|_| SpannIndexWriterError::HnswIndexSearchError)?;
+            (non_deleted_heads, _) = hnsw_read_guard.get_all_ids().map_err(|e| {
+                tracing::error!("Error getting all ids from hnsw index during gc: {}", e);
+                SpannIndexWriterError::HnswIndexSearchError(e)
+            })?;
         }
         // Randomly sample x% of heads for gc.
         let sampled_heads = non_deleted_heads.choose_multiple(
@@ -1571,8 +1757,15 @@ impl SpannIndexWriter {
                 .inner
                 .read()
                 .get(*head_id)
-                .map_err(|_| SpannIndexWriterError::HnswIndexSearchError)?
-                .ok_or(SpannIndexWriterError::HnswIndexSearchError)?;
+                .map_err(|e| {
+                    tracing::error!(
+                        "Error getting head {} from hnsw index during gc: {}",
+                        head_id,
+                        e
+                    );
+                    SpannIndexWriterError::HnswIndexSearchError(e)
+                })?
+                .ok_or(SpannIndexWriterError::HeadNotFound)?;
             tracing::info!("Garbage collecting head {}", head_id);
             self.garbage_collect_head(*head_id, &head_embedding).await?;
         }
@@ -1595,12 +1788,16 @@ impl SpannIndexWriter {
                 HnswGarbageCollectionPolicy::FullRebuild => {
                     self.garbage_collect_heads().await?;
                 }
+                HnswGarbageCollectionPolicy::DeletePercentage(policy) => {
+                    if self.eligible_to_gc(policy.threshold) {
+                        self.garbage_collect_heads().await?;
+                    }
+                }
             }
         }
         Ok(())
     }
 
-    // TODO(Sanket): Change the error types.
     pub async fn commit(self) -> Result<SpannIndexFlusher, SpannIndexWriterError> {
         // NOTE(Sanket): This is not the best way to drain the writer but the orchestrator keeps a
         // reference to the writer so cannot do an Arc::try_unwrap() here.
@@ -1611,7 +1808,7 @@ impl SpannIndexWriter {
             .await
             .map_err(|e| {
                 tracing::error!("Error committing posting list: {}", e);
-                SpannIndexWriterError::PostingListCommitError
+                SpannIndexWriterError::PostingListCommitError(e)
             })?;
         tracing::info!("Committed posting list");
         // Versions map. Create a writer, write all the data and commit.
@@ -1621,20 +1818,35 @@ impl SpannIndexWriter {
             .blockfile_provider
             .write::<u32, u32>(bf_options)
             .await
-            .map_err(|_| SpannIndexWriterError::VersionsMapWriterCreateError)?;
+            .map_err(|e| {
+                tracing::error!("Error creating versions map writer: {}", e);
+                SpannIndexWriterError::VersionsMapWriterCreateError(*e)
+            })?;
         {
             let mut version_map_guard = self.versions_map.write().await;
             for (doc_offset_id, doc_version) in version_map_guard.versions_map.drain() {
                 versions_map_bf_writer
                     .set("", doc_offset_id, doc_version)
                     .await
-                    .map_err(|_| SpannIndexWriterError::VersionsMapSetError)?;
+                    .map_err(|e| {
+                        tracing::error!(
+                            "Error setting version in versions map for {}, version {}: {}",
+                            doc_offset_id,
+                            doc_version,
+                            e
+                        );
+                        SpannIndexWriterError::VersionsMapSetError(e)
+                    })?;
             }
         }
-        let versions_map_flusher = versions_map_bf_writer
-            .commit::<u32, u32>()
-            .await
-            .map_err(|_| SpannIndexWriterError::VersionsMapCommitError)?;
+        let versions_map_flusher =
+            versions_map_bf_writer
+                .commit::<u32, u32>()
+                .await
+                .map_err(|e| {
+                    tracing::error!("Error committing versions map: {}", e);
+                    SpannIndexWriterError::VersionsMapCommitError(e)
+                })?;
         tracing::info!("Committed versions map");
         // Next head.
         let mut bf_options = BlockfileWriterOptions::new();
@@ -1643,16 +1855,22 @@ impl SpannIndexWriter {
             .blockfile_provider
             .write::<&str, u32>(bf_options)
             .await
-            .map_err(|_| SpannIndexWriterError::MaxHeadIdWriterCreateError)?;
+            .map_err(|e| {
+                tracing::error!("Error creating max head id writer: {}", e);
+                SpannIndexWriterError::MaxHeadIdWriterCreateError(*e)
+            })?;
         let max_head_oid = self.next_head_id.load(std::sync::atomic::Ordering::SeqCst);
         max_head_id_bf
             .set("", MAX_HEAD_OFFSET_ID, max_head_oid)
             .await
-            .map_err(|_| SpannIndexWriterError::MaxHeadIdSetError)?;
-        let max_head_id_flusher = max_head_id_bf
-            .commit::<&str, u32>()
-            .await
-            .map_err(|_| SpannIndexWriterError::MaxHeadIdCommitError)?;
+            .map_err(|e| {
+                tracing::error!("Error setting max head id: {}", e);
+                SpannIndexWriterError::MaxHeadIdSetError(e)
+            })?;
+        let max_head_id_flusher = max_head_id_bf.commit::<&str, u32>().await.map_err(|e| {
+            tracing::error!("Error committing max head id: {}", e);
+            SpannIndexWriterError::MaxHeadIdCommitError(e)
+        })?;
         tracing::info!("Committed max head id");
 
         // Hnsw.
@@ -1667,9 +1885,10 @@ impl SpannIndexWriter {
                 (index_id, self.hnsw_index)
             }
         };
-        self.hnsw_provider
-            .commit(hnsw_index)
-            .map_err(|_| SpannIndexWriterError::HnswIndexCommitError)?;
+        self.hnsw_provider.commit(hnsw_index).map_err(|e| {
+            tracing::error!("Error committing hnsw index: {}", e);
+            SpannIndexWriterError::HnswIndexCommitError(e)
+        })?;
         tracing::info!("Committed hnsw index");
 
         Ok(SpannIndexFlusher {
@@ -1709,35 +1928,52 @@ impl SpannIndexFlusher {
         self.pl_flusher
             .flush::<u32, &SpannPostingList<'_>>()
             .await
-            .map_err(|_| SpannIndexWriterError::PostingListFlushError)?;
+            .map_err(|e| {
+                tracing::error!("Error flushing posting list {}: {}", res.pl_id, e);
+                SpannIndexWriterError::PostingListFlushError(e)
+            })?;
         self.versions_map_flusher
             .flush::<u32, u32>()
             .await
-            .map_err(|_| SpannIndexWriterError::VersionsMapFlushError)?;
+            .map_err(|e| {
+                tracing::error!("Error flushing versions map {}: {}", res.versions_map_id, e);
+                SpannIndexWriterError::VersionsMapFlushError(e)
+            })?;
         self.max_head_id_flusher
             .flush::<&str, u32>()
             .await
-            .map_err(|_| SpannIndexWriterError::MaxHeadIdFlushError)?;
-        self.hnsw_flusher
-            .flush(&self.hnsw_id)
-            .await
-            .map_err(|_| SpannIndexWriterError::HnswIndexFlushError)?;
+            .map_err(|e| {
+                tracing::error!("Error flushing max head id {}: {}", res.max_head_id_id, e);
+                SpannIndexWriterError::MaxHeadIdFlushError(e)
+            })?;
+        self.hnsw_flusher.flush(&self.hnsw_id).await.map_err(|e| {
+            tracing::error!("Error flushing hnsw index {}: {}", res.hnsw_id, e);
+            SpannIndexWriterError::HnswIndexFlushError(*e)
+        })?;
         Ok(res)
     }
 }
 
 #[derive(Error, Debug)]
 pub enum SpannIndexReaderError {
-    #[error("Error creating/opening hnsw index")]
-    HnswIndexConstructionError,
-    #[error("Error creating/opening blockfile reader")]
-    BlockfileReaderConstructionError,
+    #[error("Error creating/opening hnsw index {0}")]
+    HnswIndexConstructionError(#[source] HnswIndexProviderOpenError),
+    #[error("Error creating/opening postings list reader {0}")]
+    PostingListReaderConstructionError(#[source] OpenError),
+    #[error("Error creating/opening versions map reader")]
+    VersionsMapReaderConstructionError(#[source] OpenError),
     #[error("Spann index uninitialized")]
     UninitializedIndex,
-    #[error("Error reading posting list")]
-    PostingListReadError,
-    #[error("Chroma error: {0}")]
-    ChromaError(#[from] Box<dyn ChromaError>),
+    #[error("Error reading posting list {0}")]
+    PostingListReadError(#[source] Box<dyn ChromaError>),
+    #[error("Posting list not found")]
+    PostingListNotFound,
+    #[error("Error reading versions map {0}")]
+    VersionsMapReadError(#[source] Box<dyn ChromaError>),
+    #[error("Versions map not found")]
+    VersionsMapNotFound,
+    #[error("Error scanning hnsw index {0}")]
+    ScanHnswError(#[source] Box<dyn ChromaError>),
     #[error("Data inconsistency error")]
     DataInconsistencyError,
 }
@@ -1745,11 +1981,15 @@ pub enum SpannIndexReaderError {
 impl ChromaError for SpannIndexReaderError {
     fn code(&self) -> ErrorCodes {
         match self {
-            Self::HnswIndexConstructionError => ErrorCodes::Internal,
-            Self::BlockfileReaderConstructionError => ErrorCodes::Internal,
+            Self::HnswIndexConstructionError(e) => e.code(),
+            Self::PostingListReaderConstructionError(e) => e.code(),
+            Self::VersionsMapReaderConstructionError(e) => e.code(),
             Self::UninitializedIndex => ErrorCodes::Internal,
-            Self::PostingListReadError => ErrorCodes::Internal,
-            Self::ChromaError(err) => err.code(),
+            Self::PostingListReadError(e) => e.code(),
+            Self::PostingListNotFound => ErrorCodes::NotFound,
+            Self::VersionsMapReadError(e) => e.code(),
+            Self::VersionsMapNotFound => ErrorCodes::NotFound,
+            Self::ScanHnswError(e) => e.code(),
             Self::DataInconsistencyError => ErrorCodes::Internal,
         }
     }
@@ -1776,16 +2016,26 @@ impl<'me> SpannIndexReader<'me> {
         cache_key: &CollectionUuid,
         distance_function: DistanceFunction,
         dimensionality: usize,
+        ef_search: usize,
     ) -> Result<HnswIndexRef, SpannIndexReaderError> {
         match hnsw_provider.get(id, cache_key).await {
             Some(index) => Ok(index),
             None => {
                 match hnsw_provider
-                    .open(id, cache_key, dimensionality as i32, distance_function)
+                    .open(
+                        id,
+                        cache_key,
+                        dimensionality as i32,
+                        distance_function,
+                        ef_search,
+                    )
                     .await
                 {
                     Ok(index) => Ok(index),
-                    Err(_) => Err(SpannIndexReaderError::HnswIndexConstructionError),
+                    Err(e) => {
+                        tracing::error!("Error opening hnsw index{}: {}", id, e);
+                        Err(SpannIndexReaderError::HnswIndexConstructionError(*e))
+                    }
                 }
             }
         }
@@ -1800,7 +2050,12 @@ impl<'me> SpannIndexReader<'me> {
             .await
         {
             Ok(reader) => Ok(reader),
-            Err(_) => Err(SpannIndexReaderError::BlockfileReaderConstructionError),
+            Err(e) => {
+                tracing::error!("Error opening posting list reader {}: {}", blockfile_id, e);
+                Err(SpannIndexReaderError::PostingListReaderConstructionError(
+                    *e,
+                ))
+            }
         }
     }
 
@@ -1810,7 +2065,12 @@ impl<'me> SpannIndexReader<'me> {
     ) -> Result<BlockfileReader<'me, u32, u32>, SpannIndexReaderError> {
         match blockfile_provider.read::<u32, u32>(blockfile_id).await {
             Ok(reader) => Ok(reader),
-            Err(_) => Err(SpannIndexReaderError::BlockfileReaderConstructionError),
+            Err(e) => {
+                tracing::error!("Error opening versions map reader {}: {}", blockfile_id, e);
+                Err(SpannIndexReaderError::VersionsMapReaderConstructionError(
+                    *e,
+                ))
+            }
         }
     }
 
@@ -1821,6 +2081,7 @@ impl<'me> SpannIndexReader<'me> {
         hnsw_cache_key: &CollectionUuid,
         distance_function: DistanceFunction,
         dimensionality: usize,
+        ef_search: usize,
         pl_blockfile_id: Option<&Uuid>,
         versions_map_blockfile_id: Option<&Uuid>,
         blockfile_provider: &BlockfileProvider,
@@ -1833,6 +2094,7 @@ impl<'me> SpannIndexReader<'me> {
                     hnsw_cache_key,
                     distance_function,
                     dimensionality,
+                    ef_search,
                 )
                 .await?
             }
@@ -1869,8 +2131,15 @@ impl<'me> SpannIndexReader<'me> {
             .versions_map
             .get("", doc_offset_id)
             .await
-            .map_err(|_| SpannIndexReaderError::PostingListReadError)?
-            .ok_or(SpannIndexReaderError::PostingListReadError)?;
+            .map_err(|e| {
+                tracing::error!(
+                    "Error getting version for doc offset id {}: {}",
+                    doc_offset_id,
+                    e
+                );
+                SpannIndexReaderError::VersionsMapReadError(e)
+            })?
+            .ok_or(SpannIndexReaderError::VersionsMapNotFound)?;
         Ok(actual_version == 0 || doc_version < actual_version)
     }
 
@@ -1882,8 +2151,11 @@ impl<'me> SpannIndexReader<'me> {
             .posting_lists
             .get("", head_id)
             .await
-            .map_err(|_| SpannIndexReaderError::PostingListReadError)?
-            .ok_or(SpannIndexReaderError::PostingListReadError)?;
+            .map_err(|e| {
+                tracing::error!("Error getting posting list for head {}: {}", head_id, e);
+                SpannIndexReaderError::PostingListReadError(e)
+            })?
+            .ok_or(SpannIndexReaderError::PostingListNotFound)?;
 
         let mut posting_lists = Vec::with_capacity(res.doc_offset_ids.len());
         let mut unique_ids = HashSet::new();
@@ -1913,15 +2185,21 @@ impl<'me> SpannIndexReader<'me> {
     // Intentionally dumb and not paginated.
     pub async fn scan(&self) -> Result<Vec<SpannPosting>, SpannIndexReaderError> {
         // Get all the heads.
-        let (non_deleted_heads, _) = self.hnsw_index.inner.read().get_all_ids()?;
+        let (non_deleted_heads, _) = self.hnsw_index.inner.read().get_all_ids().map_err(|e| {
+            tracing::error!("Error getting all ids from hnsw index during scan: {}", e);
+            SpannIndexReaderError::ScanHnswError(e)
+        })?;
         let mut postings_map: HashMap<u32, Vec<f32>> = HashMap::new();
         for head in non_deleted_heads {
             let res = self
                 .posting_lists
                 .get("", head as u32)
                 .await
-                .map_err(|_| SpannIndexReaderError::PostingListReadError)?
-                .ok_or(SpannIndexReaderError::PostingListReadError)?;
+                .map_err(|e| {
+                    tracing::error!("Error getting posting list for head {}: {}", head, e);
+                    SpannIndexReaderError::PostingListReadError(e)
+                })?
+                .ok_or(SpannIndexReaderError::PostingListNotFound)?;
             for (index, doc_offset_id) in res.doc_offset_ids.iter().enumerate() {
                 if self
                     .is_outdated(*doc_offset_id, res.doc_versions[index])
@@ -1940,8 +2218,15 @@ impl<'me> SpannIndexReader<'me> {
                             .versions_map
                             .get("", *doc_offset_id)
                             .await
-                            .map_err(|_| SpannIndexReaderError::PostingListReadError)?
-                            .ok_or(SpannIndexReaderError::PostingListReadError)?;
+                            .map_err(|e| {
+                                tracing::error!(
+                                    "Error getting version for doc offset id {}: {}",
+                                    doc_offset_id,
+                                    e
+                                );
+                                SpannIndexReaderError::VersionsMapReadError(e)
+                            })?
+                            .ok_or(SpannIndexReaderError::VersionsMapNotFound)?;
                         tracing::error!("Duplicate doc offset id {} at latest version {} with different embeddings", doc_offset_id, actual_version);
                         return Err(SpannIndexReaderError::DataInconsistencyError);
                     }
@@ -3216,6 +3501,7 @@ mod tests {
         let collection_id = CollectionUuid::new();
         let params = InternalSpannConfiguration::default();
         let distance_function = params.space.clone().into();
+        let ef_search = params.search_ef;
         let dimensionality = 1000;
         let gc_context = GarbageCollectionContext::try_from_config(
             &(
@@ -3272,6 +3558,7 @@ mod tests {
             &collection_id,
             distance_function,
             dimensionality,
+            ef_search,
             Some(&paths.pl_id),
             Some(&paths.versions_map_id),
             &blockfile_provider,
@@ -3313,6 +3600,7 @@ mod tests {
         let params = InternalSpannConfiguration::default();
         let distance_function = params.space.clone().into();
         let dimensionality = 1000;
+        let ef_search = params.search_ef;
         let gc_context = GarbageCollectionContext::try_from_config(
             &(
                 PlGarbageCollectionConfig::default(),
@@ -3390,6 +3678,7 @@ mod tests {
             &collection_id,
             distance_function,
             dimensionality,
+            ef_search,
             Some(&paths.pl_id),
             Some(&paths.versions_map_id),
             &blockfile_provider,
@@ -3432,6 +3721,7 @@ mod tests {
         .expect("Error converting config to gc context");
         let distance_function = params.space.clone().into();
         let dimensionality = 1000;
+        let ef_search = params.search_ef;
         let mut hnsw_path = None;
         let mut versions_map_path = None;
         let mut pl_path = None;
@@ -3496,6 +3786,7 @@ mod tests {
             &collection_id,
             distance_function,
             dimensionality,
+            ef_search,
             pl_path.as_ref(),
             versions_map_path.as_ref(),
             &blockfile_provider,
@@ -3543,6 +3834,7 @@ mod tests {
         let distance_function = params.space.clone().into();
         let collection_id = CollectionUuid::new();
         let dimensionality = 1000;
+        let ef_search = params.search_ef;
         let mut hnsw_path = None;
         let mut versions_map_path = None;
         let mut pl_path = None;
@@ -3629,6 +3921,7 @@ mod tests {
             &collection_id,
             distance_function,
             dimensionality,
+            ef_search,
             pl_path.as_ref(),
             versions_map_path.as_ref(),
             &blockfile_provider,
@@ -3687,6 +3980,7 @@ mod tests {
         let distance_function: DistanceFunction = params.space.clone().into();
         let collection_id = CollectionUuid::new();
         let dimensionality = 1000;
+        let ef_search = params.search_ef;
         let mut hnsw_path = None;
         let mut versions_map_path = None;
         let mut pl_path = None;
@@ -3904,6 +4198,7 @@ mod tests {
             &collection_id,
             distance_function.clone(),
             dimensionality,
+            ef_search,
             pl_path.as_ref(),
             versions_map_path.as_ref(),
             &blockfile_provider,
@@ -3974,6 +4269,7 @@ mod tests {
             &collection_id,
             distance_function.clone(),
             dimensionality,
+            ef_search,
             pl_path.as_ref(),
             versions_map_path.as_ref(),
             &blockfile_provider,

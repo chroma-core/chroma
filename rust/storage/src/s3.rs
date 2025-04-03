@@ -130,26 +130,24 @@ impl S3Storage {
                 ))
             }
             Err(e) => {
-                tracing::error!("error: {}", e);
                 match e {
                     SdkError::ServiceError(err) => {
                         let inner = err.into_err();
                         match &inner {
-                            aws_sdk_s3::operation::get_object::GetObjectError::NoSuchKey(msg) => {
-                                 tracing::error!("no such key: {}", msg);
+                            aws_sdk_s3::operation::get_object::GetObjectError::NoSuchKey(_) => {
                                 Err(StorageError::NotFound {
                                     path: key.to_string(),
                                     source: Arc::new(inner),
                                 })
                             }
                             aws_sdk_s3::operation::get_object::GetObjectError::InvalidObjectState(msg) => {
-                                 tracing::error!("invalid object state: {}", msg);
+                                tracing::error!("invalid object state: {}", msg);
                                 Err(StorageError::Generic {
                                     source: Arc::new(inner),
                                 })
                             }
                             _ => {
-                                 tracing::error!("error: {}", inner.to_string());
+                                tracing::error!("error: {}", inner.to_string());
                                 Err(StorageError::Generic {
                                     source: Arc::new(inner),
                                 })
@@ -761,6 +759,7 @@ pub async fn s3_client_for_test_with_new_bucket() -> crate::Storage {
         1024 * 1024 * 8,
         1024 * 1024 * 8,
     );
+    eprintln!("Creating bucket {}", storage.bucket);
     storage.create_bucket().await.unwrap();
     crate::Storage::S3(storage)
 }

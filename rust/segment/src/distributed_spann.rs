@@ -44,15 +44,14 @@ impl Debug for SpannSegmentWriter {
     }
 }
 
-// TODO(Sanket): Better error composability here.
 #[derive(Error, Debug)]
 pub enum SpannSegmentWriterError {
     #[error("Invalid argument")]
     InvalidArgument,
     #[error("Collection is missing a spann configuration")]
     MissingSpannConfiguration,
-    #[error("Error parsing index uuid from string")]
-    IndexIdParsingError,
+    #[error("Error parsing index uuid from string {0}")]
+    IndexIdParsingError(#[source] uuid::Error),
     #[error("Invalid file path for HNSW index")]
     HnswInvalidFilePath,
     #[error("Invalid file path for version map")]
@@ -61,36 +60,33 @@ pub enum SpannSegmentWriterError {
     PostingListInvalidFilePath,
     #[error("Invalid file path for max head id")]
     MaxHeadIdInvalidFilePath,
-    #[error("Error constructing spann index writer")]
-    SpannSegmentWriterCreateError,
-    #[error("Error adding record to spann index writer {0}")]
-    SpannSegmentWriterAddRecordError(#[from] SpannIndexWriterError),
-    #[error("Error committing spann index writer")]
-    SpannSegmentWriterCommitError,
-    #[error("Error flushing spann index writer")]
-    SpannSegmentWriterFlushError,
-    #[error("Not implemented")]
-    NotImplemented,
-    #[error("Error garbage collectin")]
-    GarbageCollectError,
+    #[error("Error constructing spann index writer {0}")]
+    SpannSegmentWriterCreateError(#[source] SpannIndexWriterError),
+    #[error("Error mutating record to spann index writer {0}")]
+    SpannSegmentWriterMutateRecordError(#[source] SpannIndexWriterError),
+    #[error("Error committing spann index writer {0}")]
+    SpannSegmentWriterCommitError(#[source] SpannIndexWriterError),
+    #[error("Error flushing spann index writer {0}")]
+    SpannSegmentWriterFlushError(#[source] SpannIndexWriterError),
+    #[error("Error garbage collecting {0}")]
+    GarbageCollectError(#[source] SpannIndexWriterError),
 }
 
 impl ChromaError for SpannSegmentWriterError {
     fn code(&self) -> ErrorCodes {
         match self {
             Self::InvalidArgument => ErrorCodes::InvalidArgument,
-            Self::IndexIdParsingError => ErrorCodes::Internal,
+            Self::IndexIdParsingError(_) => ErrorCodes::Internal,
             Self::HnswInvalidFilePath => ErrorCodes::Internal,
             Self::VersionMapInvalidFilePath => ErrorCodes::Internal,
             Self::PostingListInvalidFilePath => ErrorCodes::Internal,
-            Self::SpannSegmentWriterCreateError => ErrorCodes::Internal,
+            Self::SpannSegmentWriterCreateError(e) => e.code(),
             Self::MaxHeadIdInvalidFilePath => ErrorCodes::Internal,
-            Self::NotImplemented => ErrorCodes::Internal,
-            Self::SpannSegmentWriterCommitError => ErrorCodes::Internal,
-            Self::SpannSegmentWriterFlushError => ErrorCodes::Internal,
-            Self::SpannSegmentWriterAddRecordError(e) => e.code(),
+            Self::SpannSegmentWriterCommitError(e) => e.code(),
+            Self::SpannSegmentWriterFlushError(e) => e.code(),
+            Self::SpannSegmentWriterMutateRecordError(e) => e.code(),
             Self::MissingSpannConfiguration => ErrorCodes::Internal,
-            Self::GarbageCollectError => ErrorCodes::Internal,
+            Self::GarbageCollectError(e) => e.code(),
         }
     }
 }
@@ -117,8 +113,8 @@ impl SpannSegmentWriter {
                 Some(index_id) => {
                     let index_uuid = match Uuid::parse_str(index_id) {
                         Ok(uuid) => uuid,
-                        Err(_) => {
-                            return Err(SpannSegmentWriterError::IndexIdParsingError);
+                        Err(e) => {
+                            return Err(SpannSegmentWriterError::IndexIdParsingError(e));
                         }
                     };
                     Some(IndexUuid(index_uuid))
@@ -134,8 +130,8 @@ impl SpannSegmentWriter {
                 Some(version_map_id) => {
                     let version_map_uuid = match Uuid::parse_str(version_map_id) {
                         Ok(uuid) => uuid,
-                        Err(_) => {
-                            return Err(SpannSegmentWriterError::IndexIdParsingError);
+                        Err(e) => {
+                            return Err(SpannSegmentWriterError::IndexIdParsingError(e));
                         }
                     };
                     Some(version_map_uuid)
@@ -151,8 +147,8 @@ impl SpannSegmentWriter {
                 Some(posting_list_id) => {
                     let posting_list_uuid = match Uuid::parse_str(posting_list_id) {
                         Ok(uuid) => uuid,
-                        Err(_) => {
-                            return Err(SpannSegmentWriterError::IndexIdParsingError);
+                        Err(e) => {
+                            return Err(SpannSegmentWriterError::IndexIdParsingError(e));
                         }
                     };
                     Some(posting_list_uuid)
@@ -169,8 +165,8 @@ impl SpannSegmentWriter {
                 Some(max_head_id_bf_id) => {
                     let max_head_id_bf_uuid = match Uuid::parse_str(max_head_id_bf_id) {
                         Ok(uuid) => uuid,
-                        Err(_) => {
-                            return Err(SpannSegmentWriterError::IndexIdParsingError);
+                        Err(e) => {
+                            return Err(SpannSegmentWriterError::IndexIdParsingError(e));
                         }
                     };
                     Some(max_head_id_bf_uuid)
@@ -197,8 +193,9 @@ impl SpannSegmentWriter {
         .await
         {
             Ok(index_writer) => index_writer,
-            Err(_) => {
-                return Err(SpannSegmentWriterError::SpannSegmentWriterCreateError);
+            Err(e) => {
+                tracing::error!("Error creating spann index writer {:?}", e);
+                return Err(SpannSegmentWriterError::SpannSegmentWriterCreateError(e));
             }
         };
 
@@ -215,7 +212,10 @@ impl SpannSegmentWriter {
         self.index
             .add(record.get_offset_id(), record.merged_embeddings_ref())
             .await
-            .map_err(SpannSegmentWriterError::SpannSegmentWriterAddRecordError)
+            .map_err(|e| {
+                tracing::error!("Error adding record to spann index writer {:?}", e);
+                SpannSegmentWriterError::SpannSegmentWriterMutateRecordError(e)
+            })
     }
 
     async fn delete(
@@ -225,7 +225,10 @@ impl SpannSegmentWriter {
         self.index
             .delete(record.get_offset_id())
             .await
-            .map_err(SpannSegmentWriterError::SpannSegmentWriterAddRecordError)
+            .map_err(|e| {
+                tracing::error!("Error deleting record from spann index writer {:?}", e);
+                SpannSegmentWriterError::SpannSegmentWriterMutateRecordError(e)
+            })
     }
 
     async fn update(
@@ -235,7 +238,10 @@ impl SpannSegmentWriter {
         self.index
             .update(record.get_offset_id(), record.merged_embeddings_ref())
             .await
-            .map_err(SpannSegmentWriterError::SpannSegmentWriterAddRecordError)
+            .map_err(|e| {
+                tracing::error!("Error updating record in spann index writer {:?}", e);
+                SpannSegmentWriterError::SpannSegmentWriterMutateRecordError(e)
+            })
     }
 
     pub async fn apply_materialized_log_chunk(
@@ -254,9 +260,10 @@ impl SpannSegmentWriter {
                         .hydrate(record_segment_reader.as_ref())
                         .await
                         .map_err(ApplyMaterializedLogError::Materialization)?;
-                    self.add(&record)
-                        .await
-                        .map_err(ApplyMaterializedLogError::SpannSegmentError)?;
+                    self.add(&record).await.map_err(|e| {
+                        tracing::error!("Error adding record to spann index writer {:?}", e);
+                        ApplyMaterializedLogError::SpannSegmentError(e)
+                    })?;
                 }
                 MaterializedLogOperation::UpdateExisting
                 | MaterializedLogOperation::OverwriteExisting => {
@@ -264,14 +271,16 @@ impl SpannSegmentWriter {
                         .hydrate(record_segment_reader.as_ref())
                         .await
                         .map_err(ApplyMaterializedLogError::Materialization)?;
-                    self.update(&record)
-                        .await
-                        .map_err(|_| ApplyMaterializedLogError::BlockfileUpdate)?;
+                    self.update(&record).await.map_err(|e| {
+                        tracing::error!("Error updating record in spann index writer {:?}", e);
+                        ApplyMaterializedLogError::SpannSegmentError(e)
+                    })?;
                 }
                 MaterializedLogOperation::DeleteExisting => {
-                    self.delete(&record)
-                        .await
-                        .map_err(|_| ApplyMaterializedLogError::BlockfileDelete)?;
+                    self.delete(&record).await.map_err(|e| {
+                        tracing::error!("Error deleting record from spann index writer {:?}", e);
+                        ApplyMaterializedLogError::SpannSegmentError(e)
+                    })?;
                 }
                 MaterializedLogOperation::Initial => panic!(
                     "Invariant violation. Mat records should not contain logs in initial state"
@@ -286,11 +295,10 @@ impl SpannSegmentWriter {
     }
 
     pub async fn garbage_collect(&mut self) -> Result<(), Box<dyn ChromaError>> {
-        let r = self
-            .index
-            .garbage_collect()
-            .await
-            .map_err(|_| Box::new(SpannSegmentWriterError::GarbageCollectError));
+        let r = self.index.garbage_collect().await.map_err(|e| {
+            tracing::error!("Error garbage collecting spann index writer {:?}", e);
+            Box::new(SpannSegmentWriterError::GarbageCollectError(e))
+        });
         match r {
             Err(e) => Err(e),
             Ok(_) => Ok(()),
@@ -299,11 +307,10 @@ impl SpannSegmentWriter {
 
     pub async fn commit(self) -> Result<SpannSegmentFlusher, Box<dyn ChromaError>> {
         tracing::info!("Committing spann segment writer {}", self.id);
-        let index_flusher = self
-            .index
-            .commit()
-            .await
-            .map_err(|_| SpannSegmentWriterError::SpannSegmentWriterCommitError);
+        let index_flusher = self.index.commit().await.map_err(|e| {
+            tracing::error!("Error committing spann index writer {:?}", e);
+            SpannSegmentWriterError::SpannSegmentWriterCommitError(e)
+        });
         match index_flusher {
             Err(e) => Err(Box::new(e)),
             Ok(index_flusher) => Ok(SpannSegmentFlusher {
@@ -328,11 +335,10 @@ impl Debug for SpannSegmentFlusher {
 impl SpannSegmentFlusher {
     pub async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
         tracing::info!("Flushing spann segment flusher {}", self.id);
-        let index_flusher_res = self
-            .index_flusher
-            .flush()
-            .await
-            .map_err(|_| SpannSegmentWriterError::SpannSegmentWriterFlushError);
+        let index_flusher_res = self.index_flusher.flush().await.map_err(|e| {
+            tracing::error!("Error flushing spann index segment {}: {:?}", self.id, e);
+            SpannSegmentWriterError::SpannSegmentWriterFlushError(e)
+        });
         match index_flusher_res {
             Err(e) => Err(Box::new(e)),
             Ok(index_ids) => {
@@ -366,21 +372,21 @@ pub enum SpannSegmentReaderError {
     InvalidArgument,
     #[error("Collection is missing a spann configuration")]
     MissingSpannConfiguration,
-    #[error("Error parsing index uuid from string")]
-    IndexIdParsingError,
+    #[error("Error parsing index uuid from string {0}")]
+    IndexIdParsingError(#[source] uuid::Error),
     #[error("Invalid file path for HNSW index")]
     HnswInvalidFilePath,
     #[error("Invalid file path for version map")]
     VersionMapInvalidFilePath,
     #[error("Invalid file path for posting list")]
     PostingListInvalidFilePath,
-    #[error("Error constructing spann index reader")]
-    SpannSegmentReaderCreateError,
+    #[error("Error constructing spann index reader {0}")]
+    SpannSegmentReaderCreateError(#[source] SpannIndexReaderError),
     #[error("Spann segment is uninitialized")]
     UninitializedSegment,
-    #[error("Error reading key")]
-    KeyReadError,
-    #[error("Error doing rng {0}")]
+    #[error("Error fetching posting list for key {0}")]
+    KeyReadError(#[source] SpannIndexReaderError),
+    #[error("Error performing rng query {0}")]
     RngError(#[from] RngQueryError),
 }
 
@@ -388,13 +394,13 @@ impl ChromaError for SpannSegmentReaderError {
     fn code(&self) -> ErrorCodes {
         match self {
             Self::InvalidArgument => ErrorCodes::InvalidArgument,
-            Self::IndexIdParsingError => ErrorCodes::Internal,
+            Self::IndexIdParsingError(_) => ErrorCodes::Internal,
             Self::HnswInvalidFilePath => ErrorCodes::Internal,
             Self::VersionMapInvalidFilePath => ErrorCodes::Internal,
             Self::PostingListInvalidFilePath => ErrorCodes::Internal,
-            Self::SpannSegmentReaderCreateError => ErrorCodes::Internal,
+            Self::SpannSegmentReaderCreateError(e) => e.code(),
             Self::UninitializedSegment => ErrorCodes::Internal,
-            Self::KeyReadError => ErrorCodes::Internal,
+            Self::KeyReadError(e) => e.code(),
             Self::MissingSpannConfiguration => ErrorCodes::Internal,
             Self::RngError(e) => e.code(),
         }
@@ -438,8 +444,8 @@ impl<'me> SpannSegmentReader<'me> {
                 Some(index_id) => {
                     let index_uuid = match Uuid::parse_str(index_id) {
                         Ok(uuid) => uuid,
-                        Err(_) => {
-                            return Err(SpannSegmentReaderError::IndexIdParsingError);
+                        Err(e) => {
+                            return Err(SpannSegmentReaderError::IndexIdParsingError(e));
                         }
                     };
                     Some(IndexUuid(index_uuid))
@@ -455,8 +461,8 @@ impl<'me> SpannSegmentReader<'me> {
                 Some(version_map_id) => {
                     let version_map_uuid = match Uuid::parse_str(version_map_id) {
                         Ok(uuid) => uuid,
-                        Err(_) => {
-                            return Err(SpannSegmentReaderError::IndexIdParsingError);
+                        Err(e) => {
+                            return Err(SpannSegmentReaderError::IndexIdParsingError(e));
                         }
                     };
                     Some(version_map_uuid)
@@ -472,8 +478,8 @@ impl<'me> SpannSegmentReader<'me> {
                 Some(posting_list_id) => {
                     let posting_list_uuid = match Uuid::parse_str(posting_list_id) {
                         Ok(uuid) => uuid,
-                        Err(_) => {
-                            return Err(SpannSegmentReaderError::IndexIdParsingError);
+                        Err(e) => {
+                            return Err(SpannSegmentReaderError::IndexIdParsingError(e));
                         }
                     };
                     Some(posting_list_uuid)
@@ -491,6 +497,7 @@ impl<'me> SpannSegmentReader<'me> {
             &segment.collection,
             params.space.clone().into(),
             dimensionality,
+            params.search_ef,
             posting_list_id.as_ref(),
             versions_map_id.as_ref(),
             blockfile_provider,
@@ -503,7 +510,8 @@ impl<'me> SpannSegmentReader<'me> {
                     return Err(SpannSegmentReaderError::UninitializedSegment);
                 }
                 _ => {
-                    return Err(SpannSegmentReaderError::SpannSegmentReaderCreateError);
+                    tracing::error!("Error creating spann segment reader {:?}", e);
+                    return Err(SpannSegmentReaderError::SpannSegmentReaderCreateError(e));
                 }
             },
         };
@@ -522,7 +530,10 @@ impl<'me> SpannSegmentReader<'me> {
         self.index_reader
             .fetch_posting_list(head_id)
             .await
-            .map_err(|_| SpannSegmentReaderError::KeyReadError)
+            .map_err(|e| {
+                tracing::error!("Error fetching posting list for head {}:{:?}", head_id, e);
+                SpannSegmentReaderError::KeyReadError(e)
+            })
     }
 
     pub async fn rng_query(

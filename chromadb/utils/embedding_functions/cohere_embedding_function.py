@@ -57,26 +57,26 @@ class CohereEmbeddingFunction(EmbeddingFunction[Documents]):
 
     def default_space(self) -> Space:
         if self.model_name == "embed-multilingual-v2.0":
-            return Space.IP
-        return Space.COSINE
+            return "ip"
+        return "cosine"
 
     def supported_spaces(self) -> List[Space]:
         if self.model_name == "embed-english-v3.0":
-            return [Space.COSINE, Space.L2, Space.IP]
+            return ["cosine", "l2", "ip"]
         elif self.model_name == "embed-english-light-v3.0":
-            return [Space.COSINE, Space.IP, Space.L2]
+            return ["cosine", "ip", "l2"]
         elif self.model_name == "embed-english-v2.0":
-            return [Space.COSINE]
+            return ["cosine"]
         elif self.model_name == "embed-english-light-v2.0":
-            return [Space.COSINE]
+            return ["cosine"]
         elif self.model_name == "embed-multilingual-v3.0":
-            return [Space.COSINE, Space.L2, Space.IP]
+            return ["cosine", "l2", "ip"]
         elif self.model_name == "embed-multilingual-light-v3.0":
-            return [Space.COSINE, Space.L2, Space.IP]
+            return ["cosine", "l2", "ip"]
         elif self.model_name == "embed-multilingual-v2.0":
-            return [Space.IP]
+            return ["ip"]
         else:
-            return [Space.COSINE, Space.L2, Space.IP]
+            return ["cosine", "l2", "ip"]
 
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":

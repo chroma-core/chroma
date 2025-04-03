@@ -126,19 +126,11 @@ impl Configurable<GrpcLogConfig> for GrpcLog {
         let endpoint_res = endpoint_res
             .connect_timeout(Duration::from_millis(my_config.connect_timeout_ms))
             .timeout(Duration::from_millis(my_config.request_timeout_ms));
-        let client = endpoint_res.connect().await;
-        match client {
-            Ok(client) => {
-                let channel = ServiceBuilder::new()
-                    .layer(chroma_tracing::GrpcTraceLayer)
-                    .service(client);
-
-                return Ok(GrpcLog::new(LogServiceClient::new(channel)));
-            }
-            Err(e) => {
-                return Err(Box::new(GrpcLogError::FailedToConnect(e)));
-            }
-        }
+        let client = endpoint_res.connect_lazy();
+        let channel = ServiceBuilder::new()
+            .layer(chroma_tracing::GrpcTraceLayer)
+            .service(client);
+        return Ok(GrpcLog::new(LogServiceClient::new(channel)));
     }
 }
 

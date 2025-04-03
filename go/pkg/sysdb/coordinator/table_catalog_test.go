@@ -38,6 +38,7 @@ func TestCatalog_CreateCollection(t *testing.T) {
 		ID:       types.MustParse("00000000-0000-0000-0000-000000000001"),
 		Name:     "test_collection",
 		Metadata: metadata,
+		TenantID: "test_tenant",
 	}
 
 	// create a mock timestamp
@@ -256,6 +257,8 @@ func TestCatalog_FlushCollectionCompactionForVersionedCollection(t *testing.T) {
 		"version_1.pb",
 		currentVersion+1,
 		mock.Anything,
+		uint64(1),
+		uint64(1),
 	).Return(int64(1), nil)
 
 	mockTenantDb.On("UpdateTenantLastCompactionTime", tenantID, mock.Anything).Return(nil)
@@ -268,11 +271,13 @@ func TestCatalog_FlushCollectionCompactionForVersionedCollection(t *testing.T) {
 
 	// Create test input
 	flushRequest := &model.FlushCollectionCompaction{
-		ID:                       collectionID,
-		TenantID:                 tenantID,
-		CurrentCollectionVersion: currentVersion,
-		LogPosition:              logPosition,
-		FlushSegmentCompactions:  []*model.FlushSegmentCompaction{},
+		ID:                         collectionID,
+		TenantID:                   tenantID,
+		CurrentCollectionVersion:   currentVersion,
+		LogPosition:                logPosition,
+		FlushSegmentCompactions:    []*model.FlushSegmentCompaction{},
+		TotalRecordsPostCompaction: 1,
+		SizeBytesPostCompaction:    1,
 	}
 
 	// Execute test

@@ -13,15 +13,7 @@ export default defineConfig((options: Options) => {
     // Include core package and all embedding packages in the bundle for the thick client
     noExternal: [
       '@internal/chromadb-core',
-      '@google/generative-ai',
-      '@xenova/transformers',
       'chromadb-default-embed',
-      'cohere-ai',
-      'openai',
-      'voyageai',
-      'ollama',
-      'isomorphic-fetch',
-      'cliui'
     ],
     ...options,
   };

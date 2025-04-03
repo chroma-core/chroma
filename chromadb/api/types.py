@@ -1,8 +1,19 @@
-from typing import Optional, Set, Union, TypeVar, List, Dict, Any, Tuple, cast
+from typing import (
+    Optional,
+    Set,
+    Union,
+    TypeVar,
+    List,
+    Dict,
+    Any,
+    Tuple,
+    cast,
+    Literal,
+    get_args,
+)
 from numpy.typing import NDArray
 import numpy as np
 from typing_extensions import TypedDict, Protocol, runtime_checkable
-from enum import Enum
 from pydantic import Field
 import chromadb.errors as errors
 from chromadb.base_types import (
@@ -58,24 +69,7 @@ PyEmbeddings = List[PyEmbedding]
 Embedding = Vector
 Embeddings = List[Embedding]
 
-
-class Space(str, Enum):
-    COSINE = "cosine"
-    L2 = "l2"
-    IP = "ip"
-
-    def __str__(self) -> str:
-        return self.value
-
-    def to_json(self) -> str:
-        return self.value
-
-    @classmethod
-    def from_json(cls, value: str) -> "Space":
-        return cls(value)
-
-    def __repr__(self) -> str:
-        return f"Space.{self.name}"
+Space = Literal["cosine", "l2", "ip"]
 
 
 def normalize_embeddings(
@@ -329,19 +323,9 @@ def _validate_record_set_contains(
 
 Parameter = TypeVar("Parameter", Document, Image, Embedding, Metadata, ID)
 
-
-class IncludeEnum(str, Enum):
-    documents = "documents"
-    embeddings = "embeddings"
-    metadatas = "metadatas"
-    distances = "distances"
-    uris = "uris"
-    data = "data"
-
-
-# This should ust be List[Literal["documents", "embeddings", "metadatas", "distances"]]
-# However, this provokes an incompatibility with the Overrides library and Python 3.7
-Include = List[IncludeEnum]
+Include = List[
+    Literal["documents", "embeddings", "metadatas", "distances", "uris", "data"]
+]
 IncludeMetadataDocuments = Field(default=["metadatas", "documents"])
 IncludeMetadataDocumentsEmbeddings = Field(
     default=["metadatas", "documents", "embeddings"]
@@ -555,13 +539,13 @@ class EmbeddingFunction(Protocol[D]):
         """
         Return the default space for the embedding function.
         """
-        return Space.COSINE
+        return "cosine"
 
     def supported_spaces(self) -> List[Space]:
         """
         Return the supported spaces for the embedding function.
         """
-        return [Space.COSINE, Space.L2, Space.IP]
+        return ["cosine", "l2", "ip"]
 
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[D]":
@@ -614,6 +598,15 @@ class EmbeddingFunction(Protocol[D]):
         Validate the config.
         """
         return
+
+    def is_legacy(self) -> bool:
+        if (
+            self.name() is NotImplemented
+            or self.get_config() is NotImplemented
+            or self.build_from_config(self.get_config()) is NotImplemented
+        ):
+            return True
+        return False
 
 
 def validate_embedding_function(
@@ -866,9 +859,11 @@ def validate_include(include: Include, dissalowed: Optional[Include] = None) -> 
         if not isinstance(item, str):
             raise ValueError(f"Expected include item to be a str, got {item}")
 
-        if not any(item == e for e in IncludeEnum):
+        # Get the valid items from the Literal type inside the List
+        valid_items = get_args(get_args(Include)[0])
+        if item not in valid_items:
             raise ValueError(
-                f"Expected include item to be one of {', '.join(IncludeEnum)}, got {item}"
+                f"Expected include item to be one of {', '.join(valid_items)}, got {item}"
             )
 
         if dissalowed is not None and any(item == e for e in dissalowed):

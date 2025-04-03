@@ -339,7 +339,7 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
             .take()
             .expect("FetchLogOperator should have finished already");
 
-        let fetch_log_bytes = logs.iter().map(|(l, _)| l.size_byte()).sum();
+        let fetch_log_bytes = logs.iter().map(|(l, _)| l.size_bytes()).sum();
 
         let output = KnnFilterOutput {
             logs,
