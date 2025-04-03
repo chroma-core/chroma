@@ -867,7 +867,10 @@ impl LogService for LogServer {
         let collection_id = Uuid::parse_str(&request.collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
-        tracing::info!("update_collection_log_offset for {collection_id}");
+        tracing::info!(
+            "update_collection_log_offset for {collection_id} to {}",
+            request.log_offset
+        );
         let storage_prefix = storage_prefix_for_log(collection_id);
         let cursor_name = &COMPACTION;
         let cursor_store = CursorStore::new(
