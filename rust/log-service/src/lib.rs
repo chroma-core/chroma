@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use bytes::Bytes;
 use chroma_config::Configurable;
@@ -214,6 +214,8 @@ async fn get_log_from_handle<'a>(
 pub struct DirtyMarker {
     collection_id: CollectionUuid,
     log_position: LogPosition,
+    reinsert_count: u64,
+    initial_insertion_epoch_us: u64,
 }
 
 ///////////////////////////////////////////// MarkDirty ////////////////////////////////////////////
@@ -227,9 +229,15 @@ pub struct MarkDirty {
 #[async_trait::async_trait]
 impl wal3::MarkDirty for MarkDirty {
     async fn mark_dirty(&self, log_position: LogPosition) -> Result<(), wal3::Error> {
+        let initial_insertion_epoch_us = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|_| wal3::Error::Internal)?
+            .as_micros() as u64;
         let dirty_marker = DirtyMarker {
             collection_id: self.collection_id,
             log_position,
+            reinsert_count: 0,
+            initial_insertion_epoch_us,
         };
         let dirty_marker_json = serde_json::to_string(&dirty_marker).map_err(|err| {
             tracing::error!("Failed to serialize dirty marker: {}", err);
