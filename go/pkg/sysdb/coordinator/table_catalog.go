@@ -1276,6 +1276,8 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 				existingVersionFileName,
 				flushCollectionCompaction.CurrentCollectionVersion+1,
 				newVersionFileName,
+				flushCollectionCompaction.TotalRecordsPostCompaction,
+				flushCollectionCompaction.SizeBytesPostCompaction,
 			)
 			if err != nil {
 				return err
