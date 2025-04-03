@@ -15,7 +15,7 @@ use chroma_types::{
         Projection, ProjectionRecord, RecordDistance,
     },
     plan::{Count, Get, Knn},
-    CollectionAndSegments, CollectionUuid, ExecutorError, HnswSpace,
+    CollectionAndSegments, CollectionUuid, ExecutorError, HnswSpace, SegmentType,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -42,6 +42,14 @@ impl LocalExecutor {
             compactor_handle,
             backfilled_collections: Arc::new(parking_lot::Mutex::new(HashSet::new())),
         }
+    }
+
+    pub fn supported_segment_types(&self) -> Vec<SegmentType> {
+        vec![
+            SegmentType::HnswLocalMemory,
+            SegmentType::HnswLocalPersisted,
+            SegmentType::Sqlite,
+        ]
     }
 }
 

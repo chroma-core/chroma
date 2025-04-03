@@ -101,6 +101,10 @@ impl ServiceBasedFrontend {
         self.max_batch_size
     }
 
+    pub fn supported_segment_types(&self) -> Vec<SegmentType> {
+        self.executor.supported_segment_types()
+    }
+
     async fn get_collection_dimension(
         &mut self,
         collection_id: CollectionUuid,
@@ -432,6 +436,13 @@ impl ServiceBasedFrontend {
             ..
         }: UpdateCollectionRequest,
     ) -> Result<UpdateCollectionResponse, UpdateCollectionError> {
+        // Check if spann is requested with a local executor
+        if let (Some(config), Executor::Local(_)) = (new_configuration.as_ref(), &self.executor) {
+            if config.spann.is_some() {
+                return Err(UpdateCollectionError::SpannNotImplemented);
+            }
+        }
+
         self.sysdb_client
             .update_collection(
                 collection_id,

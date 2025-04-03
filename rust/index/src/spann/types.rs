@@ -848,9 +848,12 @@ impl SpannIndexWriter {
             )
             .await?;
         // Reassign neighbors of this center if applicable.
-        if self.params.reassign_nbr_count > 0 {
+        if self.params.reassign_neighbor_count > 0 {
             let (nearby_head_ids, _, nearby_head_embeddings) = self
-                .get_nearby_heads(old_head_embedding, self.params.reassign_nbr_count as usize)
+                .get_nearby_heads(
+                    old_head_embedding,
+                    self.params.reassign_neighbor_count as usize,
+                )
                 .await?;
             for (head_idx, head_id) in nearby_head_ids.iter().enumerate() {
                 // Skip the current split heads.

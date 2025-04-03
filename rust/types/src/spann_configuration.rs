@@ -111,7 +111,7 @@ pub struct InternalSpannConfiguration {
     pub initial_lambda: f32,
     #[serde(default = "default_reassign_nbr_count")]
     #[validate(range(max = 64))]
-    pub reassign_nbr_count: u32,
+    pub reassign_neighbor_count: u32,
     #[serde(default = "default_merge_threshold")]
     #[validate(range(min = 50, max = 100))]
     pub merge_threshold: u32,
@@ -156,6 +156,12 @@ pub struct SpannConfiguration {
     #[serde(default = "default_m_spann")]
     #[validate(range(max = 100))]
     pub max_neighbors: usize,
+    #[serde(default = "default_reassign_nbr_count")]
+    pub reassign_neighbor_count: u32,
+    #[serde(default = "default_split_threshold")]
+    pub split_threshold: u32,
+    #[serde(default = "default_merge_threshold")]
+    pub merge_threshold: u32,
 }
 
 impl From<InternalSpannConfiguration> for SpannConfiguration {
@@ -167,6 +173,9 @@ impl From<InternalSpannConfiguration> for SpannConfiguration {
             ef_construction: config.ef_construction,
             ef_search: config.ef_search,
             max_neighbors: config.max_neighbors,
+            reassign_neighbor_count: config.reassign_neighbor_count,
+            split_threshold: config.split_threshold,
+            merge_threshold: config.merge_threshold,
         }
     }
 }
@@ -180,6 +189,9 @@ impl From<SpannConfiguration> for InternalSpannConfiguration {
             ef_construction: config.ef_construction,
             ef_search: config.ef_search,
             max_neighbors: config.max_neighbors,
+            reassign_neighbor_count: config.reassign_neighbor_count,
+            split_threshold: config.split_threshold,
+            merge_threshold: config.merge_threshold,
             ..Default::default()
         }
     }

@@ -65,7 +65,7 @@ impl From<InternalSpannConfiguration> for VectorIndexConfiguration {
 }
 
 fn default_vector_index_config() -> VectorIndexConfiguration {
-    VectorIndexConfiguration::Hnsw(HnswConfiguration::default())
+    VectorIndexConfiguration::Spann(InternalSpannConfiguration::default())
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

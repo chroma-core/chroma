@@ -11,6 +11,7 @@ use chroma_memberlist::{
     memberlist_provider::{CustomResourceMemberlistProvider, MemberlistProvider},
 };
 use chroma_system::System;
+use chroma_types::SegmentType;
 use chroma_types::{
     chroma_proto::query_executor_client::QueryExecutorClient,
     operator::{CountResult, GetResult, KnnBatchResult},
@@ -83,6 +84,14 @@ impl Configurable<(config::DistributedExecutorConfig, System)> for DistributedEx
 }
 
 impl DistributedExecutor {
+    pub fn supported_segment_types(&self) -> Vec<SegmentType> {
+        vec![
+            SegmentType::BlockfileMetadata,
+            SegmentType::BlockfileRecord,
+            SegmentType::HnswDistributed,
+            SegmentType::Spann,
+        ]
+    }
     ///////////////////////// Plan Operations /////////////////////////
     pub async fn count(&mut self, plan: Count) -> Result<CountResult, ExecutorError> {
         let clients = self.clients(plan.scan.collection_and_segments.collection.collection_id)?;

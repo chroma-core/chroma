@@ -32,6 +32,9 @@ class SpannConfiguration(TypedDict, total=False):
     ef_construction: int
     ef_search: int
     max_neighbors: int
+    reassign_neighbor_count: int
+    split_threshold: int
+    merge_threshold: int
 
 
 class CollectionConfiguration(TypedDict, total=True):
@@ -78,14 +81,14 @@ def load_collection_configuration_from_json(
             ef = None
         else:
             ef = known_embedding_functions[ef_config["name"]]
-            ef = ef.build_from_config(ef_config["config"])
+            ef = ef.build_from_config(ef_config["config"])  # type: ignore
     else:
         ef = None
 
     return CollectionConfiguration(
         hnsw=hnsw_config,
         spann=spann_config,
-        embedding_function=ef,
+        embedding_function=ef,  # type: ignore
     )
 
 
@@ -210,11 +213,14 @@ class CreateSpannConfiguration(TypedDict, total=False):
     ef_construction: int
     ef_search: int
     max_neighbors: int
+    reassign_neighbor_count: int
+    split_threshold: int
+    merge_threshold: int
 
 
 def populate_create_spann_defaults(
     config: CreateSpannConfiguration, ef: Optional[EmbeddingFunction] = None  # type: ignore
-):
+) -> CreateSpannConfiguration:
     if config.get("space") is None:
         config["space"] = ef.default_space() if ef else "l2"
     if config.get("search_nprobe") is None:
@@ -227,6 +233,12 @@ def populate_create_spann_defaults(
         config["max_neighbors"] = 16
     if config.get("ef_search") is None:
         config["ef_search"] = 200
+    if config.get("reassign_neighbor_count") is None:
+        config["reassign_neighbor_count"] = 8
+    if config.get("split_threshold") is None:
+        config["split_threshold"] = 100
+    if config.get("merge_threshold") is None:
+        config["merge_threshold"] = 50
     return config
 
 
@@ -258,6 +270,15 @@ def validate_create_spann_config(
     if "max_neighbors" in config:
         if config["max_neighbors"] <= 0:
             raise ValueError("max_neighbors must be greater than 0")
+    if "reassign_neighbor_count" in config:
+        if config["reassign_neighbor_count"] <= 0:
+            raise ValueError("reassign_neighbor_count must be greater than 0")
+    if "split_threshold" in config:
+        if config["split_threshold"] <= 0:
+            raise ValueError("split_threshold must be greater than 0")
+    if "merge_threshold" in config:
+        if config["merge_threshold"] <= 0:
+            raise ValueError("merge_threshold must be greater than 0")
 
 
 def json_to_create_spann_configuration(
