@@ -120,7 +120,7 @@ mod tests {
         ObjectStoreBucketConfig, ObjectStoreConfig, ObjectStoreType, StorageConfig,
     };
     use chroma_storage::PutOptions;
-    use tracing_subscriber;
+    use tracing_test::traced_test;
 
     async fn setup_test_storage() -> Storage {
         // Create storage config for Minio
@@ -144,13 +144,8 @@ mod tests {
     }
 
     #[tokio::test]
+    #[traced_test]
     async fn test_k8s_integration_fetch_version_file() {
-        // Initialize tracing subscriber with more verbose output
-        let _subscriber = tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::DEBUG)
-            .with_test_writer()
-            .try_init();
-
         let storage = setup_test_storage().await;
         let test_content = vec![1, 2, 3, 4, 5];
         let test_file_path = "test_version_file.txt";
@@ -185,10 +180,8 @@ mod tests {
     }
 
     #[tokio::test]
+    #[traced_test]
     async fn test_k8s_integration_fetch_nonexistent_file() {
-        // Initialize tracing subscriber once at the start of the test
-        let _ = tracing_subscriber::fmt::try_init();
-
         let storage = setup_test_storage().await;
         let operator = FetchVersionFileOperator {};
         let input = FetchVersionFileInput {

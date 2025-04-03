@@ -520,7 +520,7 @@ impl Configurable<GrpcSysDbConfig> for GrpcSysDb {
     }
 }
 
-#[allow(dead_code)]
+#[derive(Debug)]
 pub struct CollectionToGcInfo {
     pub id: CollectionUuid,
     pub tenant: String,

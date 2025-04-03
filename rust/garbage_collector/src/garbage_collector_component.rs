@@ -184,11 +184,11 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
         while let Some(job) = jobs.next().await {
             match job {
                 Ok(result) => {
-                    tracing::info!("GC completed: {:?}", result);
+                    tracing::info!("Garbage collection completed. Deleted {} files over {} versions for collection {}.", result.deletion_list.len(), result.num_versions_deleted, result.collection_id);
                     num_completed_jobs += 1;
                 }
                 Err(e) => {
-                    tracing::info!("Compaction failed: {:?}", e);
+                    tracing::info!("Garbage collection failed: {:?}", e);
                     num_failed_jobs += 1;
                 }
             }
@@ -256,6 +256,7 @@ mod tests {
     };
     use chroma_sysdb::GrpcSysDbConfig;
     use chroma_system::{DispatcherConfig, System};
+    use tracing_test::traced_test;
 
     async fn wait_for_new_version(
         clients: &mut ChromaGrpcClients,
@@ -413,9 +414,8 @@ mod tests {
     }
 
     #[tokio::test]
+    #[traced_test]
     async fn test_k8s_integration_tenant_mode_override() {
-        let _ = tracing_subscriber::fmt::try_init();
-
         // Setup
         let tenant_id_for_delete_mode = format!("tenant-delete-mode-{}", Uuid::new_v4());
         let tenant_id_for_dry_run_mode = format!("tenant-dry-run-mode-{}", Uuid::new_v4());
