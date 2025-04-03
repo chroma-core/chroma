@@ -17,6 +17,7 @@ from chromadb.api.collection_configuration import (
     CreateHNSWConfiguration,
     UpdateHNSWConfiguration,
 )
+from chromadb.utils.embedding_functions import register_embedding_function
 
 
 class LegacyEmbeddingFunction(EmbeddingFunction[Embeddable]):
@@ -39,6 +40,7 @@ class LegacyEmbeddingFunctionWithName(EmbeddingFunction[Embeddable]):
         return "legacy_ef"
 
 
+@register_embedding_function
 class CustomEmbeddingFunction(EmbeddingFunction[Embeddable]):
     def __init__(self, dim: int = 3):
         self._dim = dim
