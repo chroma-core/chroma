@@ -557,7 +557,7 @@ impl Manifest {
     }
 
     /// Install a manifest to object storage.
-    #[tracing::instrument(skip(self, storage), err(Display))]
+    #[tracing::instrument(skip(self, storage, new), err(Display))]
     pub async fn install(
         &self,
         options: &ThrottleOptions,
