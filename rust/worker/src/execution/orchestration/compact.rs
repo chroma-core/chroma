@@ -656,7 +656,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         }
 
         // Prefetch segments
-        let prefetch_segments = match self.compaction_job.rebuild {
+        let prefetch_segments = match self.rebuild {
             true => vec![output.record_segment],
             false => vec![output.metadata_segment, output.record_segment],
         };
