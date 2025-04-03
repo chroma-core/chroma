@@ -31,12 +31,12 @@ def query_collection(
         )
 
         for idx, (query_id, query_embedding) in enumerate(zip(batch_ids, batch_embeddings)):
-            results[query_id] = {
-                "query_embedding": query_embedding,
-                "retrieved_corpus_ids": query_results["ids"][idx],
-                "retrieved_corpus_text": query_results["documents"][idx],
-                "all_scores": [1 - d for d in query_results["distances"][idx]]
-            }
+            results[query_id] = QueryResultItem(
+                query_embedding=query_embedding,
+                retrieved_corpus_ids=query_results["ids"][idx],
+                retrieved_corpus_text=query_results["documents"][idx],
+                all_scores=[1 - d for d in query_results["distances"][idx]]
+            )
 
     return QueryResults(
         doc_scores=results
@@ -44,7 +44,7 @@ def query_collection(
 
 def get_metrics(
     qrels: QueryRelevance, 
-    results: QueryResults, 
+    results: Dict[str, Dict[str, float]], 
     k_values: List[int]
 ) -> ResultMetrics:
     recall = dict()
@@ -52,7 +52,6 @@ def get_metrics(
     map = dict()
     ndcg = dict()
     qrels_relevances = qrels.doc_relevances
-    results_scores = results.doc_scores
 
     for k in k_values:
         recall[f"Recall@{k}"] = 0.0
@@ -67,7 +66,7 @@ def get_metrics(
 
     evaluator = pytrec_eval.RelevanceEvaluator(qrels_relevances, {map_string, ndcg_string, recall_string, precision_string})
     
-    scores = evaluator.evaluate(results_scores)
+    scores = evaluator.evaluate(results)
 
     for query_id in scores.keys():
         for k in k_values:
@@ -106,14 +105,12 @@ def evaluate(
     results = {}
     for query_id, query_data in results_dict.doc_scores.items():
         results[query_id] = {}
-        for doc_id, score in zip(query_data['retrieved_corpus_ids'], query_data['all_scores']):
+        for doc_id, score in zip(query_data.retrieved_corpus_ids, query_data.all_scores):
             results[query_id][doc_id] = score
 
-    results_scores = QueryResults(doc_scores=results)
-    
     result_metrics = get_metrics(
         qrels=qrels_relevances, 
-        results=results_scores, 
+        results=results, 
         k_values=k_values
     )
 
@@ -136,8 +133,8 @@ def run_benchmark(
 ) -> ResultMetricsDict:
     query_lookup = query_embeddings_lookup.lookup
     query_ids = list(query_lookup.keys())
-    queries = [query_lookup[query_id]["text"] for query_id in query_ids]
-    query_embeddings = [query_lookup[query_id]["embedding"] for query_id in query_ids]
+    queries = [query_lookup[query_id].text for query_id in query_ids]
+    query_embeddings = [query_lookup[query_id].embedding for query_id in query_ids]
 
     query_results = query_collection(
         collection=collection, 
@@ -160,9 +157,3 @@ def run_benchmark(
             print(f"{k}: {v}")
 
     return result_metrics.results
-
-def cosine_similarity(
-    vec1: List[float],
-    vec2: List[float]
-) -> float:
-    return np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2))

@@ -6,12 +6,24 @@ class QueryRelevance:
     doc_relevances: Dict[str, Dict[str, int]]
 
 @dataclass
+class QueryResultItem:
+    query_embedding: List[float]
+    retrieved_corpus_ids: List[str]
+    retrieved_corpus_text: List[str]
+    all_scores: List[float]
+
+@dataclass
 class QueryResults:
-    doc_scores: Dict[str, Dict[str, float]]
+    doc_scores: Dict[str, QueryResultItem]
+
+@dataclass
+class QueryItem:
+    text: str
+    embedding: List[float]
 
 @dataclass
 class QueryLookup:
-    lookup: Dict[str, Dict[str, float]]
+    lookup: Dict[str, QueryItem]
 
 @dataclass
 class ResultMetrics:
