@@ -78,3 +78,52 @@ impl Operator<SourceRecordSegmentInput, SourceRecordSegmentOutput> for SourceRec
         Ok(Chunk::new(logs.into()))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use chroma_log::test::{int_as_id, upsert_generator, LoadFromGenerator};
+    use chroma_segment::{blockfile_record::RecordSegmentReader, test::TestDistributedSegment};
+    use chroma_system::Operator;
+    use chroma_types::Operation;
+
+    use crate::execution::operators::source_record_segment::SourceRecordSegmentOperator;
+
+    use super::SourceRecordSegmentInput;
+
+    /// The unit tests for `SourceRecordSegmentOperator` uses the following test data
+    /// It generates 100 log records and compact them
+    async fn setup_source_input() -> SourceRecordSegmentInput {
+        let mut test_segment = TestDistributedSegment::default();
+        test_segment
+            .populate_with_generator(100, upsert_generator)
+            .await;
+        let reader = RecordSegmentReader::from_segment(
+            &test_segment.record_segment,
+            &test_segment.blockfile_provider,
+        )
+        .await
+        .expect("Record segment reader should be initialized");
+        SourceRecordSegmentInput {
+            record_segment_reader: Some(reader),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_source() {
+        let source_input = setup_source_input().await;
+
+        let source_operator = SourceRecordSegmentOperator {};
+
+        let source_output = source_operator
+            .run(&source_input)
+            .await
+            .expect("SourceOperator should not fail");
+
+        assert_eq!(source_output.len(), 100);
+        for (offset, (record, _)) in source_output.iter().enumerate() {
+            assert_eq!(record.log_offset, offset as i64 + 1);
+            assert_eq!(record.record.id, int_as_id(offset + 1));
+            assert_eq!(record.record.operation, Operation::Add);
+        }
+    }
+}

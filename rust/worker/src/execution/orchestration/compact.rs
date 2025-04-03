@@ -634,16 +634,18 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             return;
         }
 
-        // Prefetch metadata and record segment
-        let prefetch_tasks = [output.metadata_segment, output.record_segment].map(|segment| {
-            wrap(
+        // Prefetch segments
+        let prefetch_segments = match self.compaction_job.rebuild {
+            true => vec![output.record_segment],
+            false => vec![output.metadata_segment, output.record_segment],
+        };
+        for segment in prefetch_segments {
+            let prefetch_task = wrap(
                 Box::new(PrefetchSegmentOperator::new()),
                 PrefetchSegmentInput::new(segment, self.blockfile_provider.clone()),
                 ctx.receiver(),
-            )
-        });
-        for task in prefetch_tasks {
-            self.send(task, ctx).await;
+            );
+            self.send(prefetch_task, ctx).await;
         }
 
         let log_task = match self.compaction_job.rebuild {
