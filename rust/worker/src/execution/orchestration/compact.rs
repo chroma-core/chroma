@@ -25,7 +25,7 @@ use chroma_segment::{
 use chroma_sysdb::SysDb;
 use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
-    PanicError, ReceiverForMessage, TaskError, TaskMessage, TaskResult,
+    PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::{Chunk, LogRecord, SegmentFlushInfo, SegmentType, SegmentUuid};
 use thiserror::Error;
@@ -62,6 +62,10 @@ use crate::{
             PrefetchSegmentOutput,
         },
         register::{RegisterError, RegisterInput, RegisterOperator, RegisterOutput},
+        source_record_segment::{
+            SourceRecordSegmentError, SourceRecordSegmentInput, SourceRecordSegmentOperator,
+            SourceRecordSegmentOutput,
+        },
     },
 };
 
@@ -109,8 +113,6 @@ pub struct CompactOrchestrator {
     blockfile_provider: BlockfileProvider,
     hnsw_provider: HnswIndexProvider,
     spann_provider: SpannProvider,
-    // State we hold across the execution
-    pulled_log_offset: Option<i64>,
     // Dispatcher
     dispatcher: ComponentHandle<Dispatcher>,
     // Tracks the total remaining number of MaterializeLogs tasks
@@ -119,6 +121,8 @@ pub struct CompactOrchestrator {
     num_uncompleted_tasks_by_segment: HashMap<SegmentUuid, usize>,
     // Tracks the total collection size in number of bytes
     collection_logical_size_bytes: i64,
+    // Tracks the last log offset we have witnessed
+    pulled_log_offset: i64,
     // Result Channel
     result_channel: Option<Sender<Result<CompactionResponse, CompactionError>>>,
     max_compaction_size: usize,
@@ -174,6 +178,8 @@ pub enum CompactionError {
     Result(#[from] RecvError),
     #[error("Error creaitng spann writer: {0}")]
     SpannSegment(#[from] SpannSegmentWriterError),
+    #[error("Error sourcing record segment: {0}")]
+    SourceRecordSegment(#[from] SourceRecordSegmentError),
 }
 
 impl<E> From<TaskError<E>> for CompactionError
@@ -226,7 +232,7 @@ impl CompactOrchestrator {
             blockfile_provider,
             hnsw_provider,
             spann_provider,
-            pulled_log_offset: None,
+            pulled_log_offset: 0,
             dispatcher,
             num_uncompleted_materialization_tasks: 0,
             num_uncompleted_tasks_by_segment: HashMap::new(),
@@ -291,17 +297,35 @@ impl CompactOrchestrator {
     async fn dispatch_apply_log_to_segment_writer_tasks(
         &mut self,
         materialized_logs: MaterializeLogsResult,
-        self_address: Box<
-            dyn ReceiverForMessage<
-                TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOperatorError>,
-            >,
-        >,
         ctx: &ComponentContext<CompactOrchestrator>,
     ) {
         let writers = match self.ok_or_terminate(self.get_segment_writers(), ctx) {
             Some(writers) => writers,
             None => return,
         };
+
+        if !self.compaction_job.rebuild {
+            self.num_uncompleted_tasks_by_segment
+                .entry(writers.record_writer.id)
+                .and_modify(|v| {
+                    *v += 1;
+                })
+                .or_insert(1);
+
+            let writer = ChromaSegmentWriter::RecordSegment(writers.record_writer);
+            let span = self.get_segment_writer_span(&writer);
+            let operator = ApplyLogToSegmentWriterOperator::new();
+            let input = ApplyLogToSegmentWriterInput::new(
+                writer,
+                materialized_logs.clone(),
+                writers.record_reader.clone(),
+            );
+            let task = wrap(operator, input, ctx.receiver());
+            let res = self.dispatcher().send(task, Some(span)).await;
+            if self.ok_or_terminate(res, ctx).is_none() {
+                return;
+            }
+        }
 
         {
             self.num_uncompleted_tasks_by_segment
@@ -319,35 +343,10 @@ impl CompactOrchestrator {
                 materialized_logs.clone(),
                 writers.record_reader.clone(),
             );
-            let task = wrap(operator, input, self_address.clone());
+            let task = wrap(operator, input, ctx.receiver());
             let res = self.dispatcher().send(task, Some(span)).await;
-            match self.ok_or_terminate(res, ctx) {
-                Some(_) => (),
-                None => return,
-            }
-        }
-
-        {
-            self.num_uncompleted_tasks_by_segment
-                .entry(writers.record_writer.id)
-                .and_modify(|v| {
-                    *v += 1;
-                })
-                .or_insert(1);
-
-            let writer = ChromaSegmentWriter::RecordSegment(writers.record_writer);
-            let span = self.get_segment_writer_span(&writer);
-            let operator = ApplyLogToSegmentWriterOperator::new();
-            let input = ApplyLogToSegmentWriterInput::new(
-                writer,
-                materialized_logs.clone(),
-                writers.record_reader.clone(),
-            );
-            let task = wrap(operator, input, self_address.clone());
-            let res = self.dispatcher().send(task, Some(span)).await;
-            match self.ok_or_terminate(res, ctx) {
-                Some(_) => (),
-                None => return,
+            if self.ok_or_terminate(res, ctx).is_none() {
+                return;
             }
         }
 
@@ -364,7 +363,7 @@ impl CompactOrchestrator {
             let operator = ApplyLogToSegmentWriterOperator::new();
             let input =
                 ApplyLogToSegmentWriterInput::new(writer, materialized_logs, writers.record_reader);
-            let task = wrap(operator, input, self_address);
+            let task = wrap(operator, input, ctx.receiver());
             let res = self.dispatcher().send(task, Some(span)).await;
             self.ok_or_terminate(res, ctx);
         }
@@ -373,17 +372,12 @@ impl CompactOrchestrator {
     async fn dispatch_segment_writer_commit(
         &mut self,
         segment_writer: ChromaSegmentWriter<'static>,
-        self_address: Box<
-            dyn ReceiverForMessage<
-                TaskResult<CommitSegmentWriterOutput, CommitSegmentWriterOperatorError>,
-            >,
-        >,
         ctx: &ComponentContext<CompactOrchestrator>,
     ) {
         let span = self.get_segment_writer_span(&segment_writer);
         let operator = CommitSegmentWriterOperator::new();
         let input = CommitSegmentWriterInput::new(segment_writer);
-        let task = wrap(operator, input, self_address);
+        let task = wrap(operator, input, ctx.receiver());
         let res = self.dispatcher().send(task, Some(span)).await;
         self.ok_or_terminate(res, ctx);
     }
@@ -391,28 +385,23 @@ impl CompactOrchestrator {
     async fn dispatch_segment_flush(
         &mut self,
         segment_flusher: ChromaSegmentFlusher,
-        self_address: Box<
-            dyn ReceiverForMessage<
-                TaskResult<FlushSegmentWriterOutput, FlushSegmentWriterOperatorError>,
-            >,
-        >,
         ctx: &ComponentContext<CompactOrchestrator>,
     ) {
         let span = self.get_segment_flusher_span(&segment_flusher);
         let operator = FlushSegmentWriterOperator::new();
         let input = FlushSegmentWriterInput::new(segment_flusher);
-        let task = wrap(operator, input, self_address);
+        let task = wrap(operator, input, ctx.receiver());
         let res = self.dispatcher().send(task, Some(span)).await;
         self.ok_or_terminate(res, ctx);
     }
 
-    async fn register(&mut self, log_position: i64, ctx: &ComponentContext<CompactOrchestrator>) {
+    async fn register(&mut self, ctx: &ComponentContext<CompactOrchestrator>) {
         self.state = ExecutionState::Register;
         let operator = RegisterOperator::new();
         let input = RegisterInput::new(
             self.compaction_job.tenant_id.clone(),
             self.compaction_job.collection_id,
-            log_position,
+            self.pulled_log_offset,
             self.compaction_job.collection_version,
             self.flush_results.clone().into(),
             self.total_records_last_compaction,
@@ -557,6 +546,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             true => 0,
             false => collection.size_bytes_post_compaction as i64,
         };
+        self.pulled_log_offset = collection.log_position;
 
         let mut metadata_segment = output.metadata_segment.clone();
         let mut vector_segment = output.vector_segment.clone();
@@ -583,8 +573,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         ) {
             Some(reader) => reader,
             None => return,
-        }
-        .filter(|_| !self.compaction_job.rebuild);
+        };
         let record_writer = match self.ok_or_terminate(
             RecordSegmentWriter::from_segment(&output.record_segment, &self.blockfile_provider)
                 .await,
@@ -627,7 +616,9 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         };
 
         let writers = CompactWriters {
-            record_reader,
+            record_reader: record_reader
+                .clone()
+                .filter(|_| !self.compaction_job.rebuild),
             metadata_writer,
             record_writer,
             vector_writer,
@@ -655,20 +646,30 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             self.send(task, ctx).await;
         }
 
-        let fetch_log_task = wrap(
-            Box::new(FetchLogOperator {
-                log_client: self.log.clone(),
-                batch_size: self.fetch_log_batch_size,
-                // Here we do not need to be inclusive since the compaction job
-                // offset is the one after the last compaction offset
-                start_log_offset_id: self.compaction_job.offset as u32,
-                maximum_fetch_count: Some(self.max_compaction_size as u32),
-                collection_uuid: self.compaction_job.collection_id,
-            }),
-            (),
-            ctx.receiver(),
-        );
-        self.send(fetch_log_task, ctx).await;
+        let log_task = match self.compaction_job.rebuild {
+            true => wrap(
+                Box::new(SourceRecordSegmentOperator {}),
+                SourceRecordSegmentInput {
+                    record_segment_reader: record_reader,
+                },
+                ctx.receiver(),
+            ),
+            false => wrap(
+                Box::new(FetchLogOperator {
+                    log_client: self.log.clone(),
+                    batch_size: self.fetch_log_batch_size,
+                    // Here we do not need to be inclusive since the compaction job
+                    // offset is the one after the last compaction offset
+                    start_log_offset_id: self.compaction_job.offset as u32,
+                    maximum_fetch_count: Some(self.max_compaction_size as u32),
+                    collection_uuid: self.compaction_job.collection_id,
+                }),
+                (),
+                ctx.receiver(),
+            ),
+        };
+
+        self.send(log_task, ctx).await;
     }
 }
 
@@ -694,34 +695,50 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
         message: TaskResult<FetchLogOutput, FetchLogError>,
         ctx: &ComponentContext<CompactOrchestrator>,
     ) {
-        let records = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
             Some(recs) => recs,
             None => {
                 tracing::info!("cancelled fetch log task");
                 return;
             }
         };
-        tracing::info!("Pulled Records: {:?}", records.len());
-        let final_record_pulled = if !records.is_empty() {
-            records.get(records.len() - 1)
-        } else {
-            None
-        };
-        match final_record_pulled {
-            Some(record) => {
-                self.pulled_log_offset = Some(record.log_offset);
+        tracing::info!("Pulled Records: {}", output.len());
+        match output.iter().last() {
+            Some((rec, _)) => {
+                self.pulled_log_offset = rec.log_offset;
                 tracing::info!("Pulled Logs Up To Offset: {:?}", self.pulled_log_offset);
-                self.partition(records, ctx).await;
             }
             None => {
                 self.terminate_with_result(
                     Err(CompactionError::InvariantViolation(
-                        "No records pulled by compaction, this is a system invariant violation",
+                        "Logs should be present for compaction",
                     )),
                     ctx,
                 );
+                return;
             }
         }
+        self.partition(output, ctx).await;
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<SourceRecordSegmentOutput, SourceRecordSegmentError>>
+    for CompactOrchestrator
+{
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<SourceRecordSegmentOutput, SourceRecordSegmentError>,
+        ctx: &ComponentContext<CompactOrchestrator>,
+    ) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+            Some(output) => output,
+            None => return,
+        };
+        tracing::info!("Sourced Records: {}", output.len());
+        self.partition(output, ctx).await;
     }
 }
 
@@ -734,11 +751,11 @@ impl Handler<TaskResult<PartitionOutput, PartitionError>> for CompactOrchestrato
         message: TaskResult<PartitionOutput, PartitionError>,
         ctx: &ComponentContext<CompactOrchestrator>,
     ) {
-        let records = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
             Some(recs) => recs.records,
             None => todo!(),
         };
-        self.materialize_log(records, ctx).await;
+        self.materialize_log(output, ctx).await;
     }
 }
 
@@ -764,11 +781,11 @@ impl Handler<TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>>
                 && self.num_uncompleted_tasks_by_segment.is_empty()
             {
                 // There is nothing to flush, proceed to register
-                self.register(self.pulled_log_offset.unwrap(), ctx).await;
+                self.register(ctx).await;
             }
         } else {
             self.collection_logical_size_bytes += output.collection_logical_size_delta;
-            self.dispatch_apply_log_to_segment_writer_tasks(output.result, ctx.receiver(), ctx)
+            self.dispatch_apply_log_to_segment_writer_tasks(output.result, ctx)
                 .await;
         }
 
@@ -819,7 +836,7 @@ impl Handler<TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOp
                 None => return,
             };
 
-            self.dispatch_segment_writer_commit(segment_writer, ctx.receiver(), ctx)
+            self.dispatch_segment_writer_commit(segment_writer, ctx)
                 .await;
         }
     }
@@ -841,14 +858,12 @@ impl Handler<TaskResult<CommitSegmentWriterOutput, CommitSegmentWriterOperatorEr
             None => return,
         };
 
-        let flusher = message.flusher;
         // If the flusher recieved is a record segment flusher, get the number of keys for the blockfile and set it on the orchestrator
-        if let ChromaSegmentFlusher::RecordSegment(ref record_segment_flusher) = flusher {
+        if let ChromaSegmentFlusher::RecordSegment(record_segment_flusher) = &message.flusher {
             self.total_records_last_compaction = record_segment_flusher.count();
         }
 
-        self.dispatch_segment_flush(flusher, ctx.receiver(), ctx)
-            .await;
+        self.dispatch_segment_flush(message.flusher, ctx).await;
     }
 }
 
@@ -877,8 +892,7 @@ impl Handler<TaskResult<FlushSegmentWriterOutput, FlushSegmentWriterOperatorErro
         self.num_uncompleted_tasks_by_segment.remove(&segment_id);
 
         if self.num_uncompleted_tasks_by_segment.is_empty() {
-            // Unwrap should be safe here as we are guaranteed to have a value by construction
-            self.register(self.pulled_log_offset.expect("Invariant violation: pulled_log_offset should have been populated at this point."), ctx).await;
+            self.register(ctx).await;
         }
     }
 }
