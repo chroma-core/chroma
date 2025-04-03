@@ -703,7 +703,7 @@ impl LogService for LogServer {
         Ok(Response::new(PullLogsResponse { records }))
     }
 
-    #[tracing::instrument(skip(self, request), err(Display))]
+    #[tracing::instrument(info, skip(self, request), err(Display))]
     async fn get_all_collection_info_to_compact(
         &self,
         request: Request<GetAllCollectionInfoToCompactRequest>,

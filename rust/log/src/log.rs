@@ -27,6 +27,7 @@ pub enum Log {
 }
 
 impl Log {
+    #[tracing::instrument(skip(self))]
     pub async fn read(
         &mut self,
         collection_id: CollectionUuid,
@@ -49,6 +50,7 @@ impl Log {
         }
     }
 
+    #[tracing::instrument(skip(self, records))]
     pub async fn push_logs(
         &mut self,
         collection_id: CollectionUuid,
@@ -67,6 +69,7 @@ impl Log {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn get_collections_with_new_data(
         &mut self,
         min_compaction_size: u64,
@@ -84,6 +87,7 @@ impl Log {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn update_collection_log_offset(
         &mut self,
         collection_id: CollectionUuid,
@@ -107,6 +111,7 @@ impl Log {
     }
 
     /// Only supported in distributed. Sqlite has a different workflow.
+    #[tracing::instrument(skip(self))]
     pub async fn purge_dirty_for_collection(
         &mut self,
         collection_id: CollectionUuid,

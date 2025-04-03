@@ -129,7 +129,12 @@ pub fn init_stdout_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
                 .starts_with("chroma_cache")
                 && metadata.name() != "clear")
         }))
-        .with_filter(tracing_subscriber::filter::LevelFilter::INFO)
+        .with_filter(tracing_subscriber::filter::FilterFn::new(|metadata| {
+            metadata.module_path().unwrap_or("").starts_with("chroma")
+                || metadata.module_path().unwrap_or("").starts_with("wal3")
+                || metadata.module_path().unwrap_or("").starts_with("worker")
+        }))
+        .with_filter(tracing_subscriber::filter::LevelFilter::TRACE)
         .boxed()
 }
 
