@@ -27,45 +27,43 @@ use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
     PanicError, TaskError, TaskMessage, TaskResult,
 };
-use chroma_types::{Chunk, LogRecord, SegmentFlushInfo, SegmentType, SegmentUuid};
+use chroma_types::{
+    Chunk, Collection, CollectionUuid, LogRecord, SegmentFlushInfo, SegmentType, SegmentUuid,
+};
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 use tracing::Span;
 
-use crate::{
-    compactor::CompactionJob,
-    execution::operators::{
-        apply_log_to_segment_writer::{
-            ApplyLogToSegmentWriterInput, ApplyLogToSegmentWriterOperator,
-            ApplyLogToSegmentWriterOperatorError, ApplyLogToSegmentWriterOutput,
-        },
-        commit_segment_writer::{
-            CommitSegmentWriterInput, CommitSegmentWriterOperator,
-            CommitSegmentWriterOperatorError, CommitSegmentWriterOutput,
-        },
-        fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
-        flush_segment_writer::{
-            FlushSegmentWriterInput, FlushSegmentWriterOperator, FlushSegmentWriterOperatorError,
-            FlushSegmentWriterOutput,
-        },
-        get_collection_and_segments::{
-            GetCollectionAndSegmentsError, GetCollectionAndSegmentsOperator,
-            GetCollectionAndSegmentsOutput,
-        },
-        materialize_logs::{
-            MaterializeLogInput, MaterializeLogOperator, MaterializeLogOperatorError,
-            MaterializeLogOutput,
-        },
-        partition_log::{PartitionError, PartitionInput, PartitionOperator, PartitionOutput},
-        prefetch_segment::{
-            PrefetchSegmentError, PrefetchSegmentInput, PrefetchSegmentOperator,
-            PrefetchSegmentOutput,
-        },
-        register::{RegisterError, RegisterInput, RegisterOperator, RegisterOutput},
-        source_record_segment::{
-            SourceRecordSegmentError, SourceRecordSegmentInput, SourceRecordSegmentOperator,
-            SourceRecordSegmentOutput,
-        },
+use crate::execution::operators::{
+    apply_log_to_segment_writer::{
+        ApplyLogToSegmentWriterInput, ApplyLogToSegmentWriterOperator,
+        ApplyLogToSegmentWriterOperatorError, ApplyLogToSegmentWriterOutput,
+    },
+    commit_segment_writer::{
+        CommitSegmentWriterInput, CommitSegmentWriterOperator, CommitSegmentWriterOperatorError,
+        CommitSegmentWriterOutput,
+    },
+    fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
+    flush_segment_writer::{
+        FlushSegmentWriterInput, FlushSegmentWriterOperator, FlushSegmentWriterOperatorError,
+        FlushSegmentWriterOutput,
+    },
+    get_collection_and_segments::{
+        GetCollectionAndSegmentsError, GetCollectionAndSegmentsOperator,
+        GetCollectionAndSegmentsOutput,
+    },
+    materialize_logs::{
+        MaterializeLogInput, MaterializeLogOperator, MaterializeLogOperatorError,
+        MaterializeLogOutput,
+    },
+    partition_log::{PartitionError, PartitionInput, PartitionOperator, PartitionOutput},
+    prefetch_segment::{
+        PrefetchSegmentError, PrefetchSegmentInput, PrefetchSegmentOperator, PrefetchSegmentOutput,
+    },
+    register::{RegisterError, RegisterInput, RegisterOperator, RegisterOutput},
+    source_record_segment::{
+        SourceRecordSegmentError, SourceRecordSegmentInput, SourceRecordSegmentOperator,
+        SourceRecordSegmentOutput,
     },
 };
 
@@ -105,37 +103,37 @@ pub(crate) struct CompactWriters {
 
 #[derive(Debug)]
 pub struct CompactOrchestrator {
-    compaction_job: CompactionJob,
-    state: ExecutionState,
+    collection_id: CollectionUuid,
+    rebuild: bool,
+    fetch_log_batch_size: u32,
+    max_compaction_size: usize,
+    max_partition_size: usize,
+
     // Dependencies
+    dispatcher: ComponentHandle<Dispatcher>,
     log: Log,
     sysdb: SysDb,
     blockfile_provider: BlockfileProvider,
     hnsw_provider: HnswIndexProvider,
     spann_provider: SpannProvider,
-    // Dispatcher
-    dispatcher: ComponentHandle<Dispatcher>,
-    // Tracks the total remaining number of MaterializeLogs tasks
-    num_uncompleted_materialization_tasks: usize,
-    // Tracks the total remaining number of tasks per segment
-    num_uncompleted_tasks_by_segment: HashMap<SegmentUuid, usize>,
-    // Tracks the total collection size in number of bytes
-    collection_logical_size_bytes: i64,
-    // Tracks the last log offset we have witnessed
-    pulled_log_offset: i64,
-    // Result Channel
-    result_channel: Option<Sender<Result<CompactionResponse, CompactionError>>>,
-    max_compaction_size: usize,
-    max_partition_size: usize,
-    // Populated during the compaction process
+
+    collection: OnceCell<Collection>,
+    log_start_offset: u32,
     writers: OnceCell<CompactWriters>,
     flush_results: Vec<SegmentFlushInfo>,
+    result_channel: Option<Sender<Result<CompactionResponse, CompactionError>>>,
+    num_uncompleted_materialization_tasks: usize,
+    num_uncompleted_tasks_by_segment: HashMap<SegmentUuid, usize>,
+    collection_logical_size_bytes: i64,
+    pulled_log_offset: i64,
+    state: ExecutionState,
+
+    // Total number of records in the collection after the compaction
+    total_records_past_compaction: u64,
+
     // We track a parent span for each segment type so we can group all the spans for a given segment type (makes the resulting trace much easier to read)
     segment_spans: HashMap<SegmentUuid, Span>,
-    // Total number of records in the collection after the compaction
-    total_records_last_compaction: u64,
     // How much to pull from fetch_logs
-    fetch_log_batch_size: u32,
 }
 
 #[derive(Error, Debug)]
@@ -206,13 +204,17 @@ impl ChromaError for CompactionError {
 
 #[derive(Debug)]
 pub struct CompactionResponse {
-    pub(crate) compaction_job: CompactionJob,
+    pub(crate) collection_id: CollectionUuid,
 }
 
 impl CompactOrchestrator {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        compaction_job: CompactionJob,
+        collection_id: CollectionUuid,
+        rebuild: bool,
+        fetch_log_batch_size: u32,
+        max_compaction_size: usize,
+        max_partition_size: usize,
         log: Log,
         sysdb: SysDb,
         blockfile_provider: BlockfileProvider,
@@ -220,31 +222,31 @@ impl CompactOrchestrator {
         spann_provider: SpannProvider,
         dispatcher: ComponentHandle<Dispatcher>,
         result_channel: Option<Sender<Result<CompactionResponse, CompactionError>>>,
-        max_compaction_size: usize,
-        max_partition_size: usize,
-        fetch_log_batch_size: u32,
     ) -> Self {
         CompactOrchestrator {
-            compaction_job,
-            state: ExecutionState::Pending,
+            collection_id,
+            rebuild,
+            fetch_log_batch_size,
+            max_compaction_size,
+            max_partition_size,
+            dispatcher,
             log,
             sysdb,
             blockfile_provider,
             hnsw_provider,
             spann_provider,
-            pulled_log_offset: 0,
-            dispatcher,
+            collection: OnceCell::new(),
+            log_start_offset: 0,
+            writers: OnceCell::new(),
+            flush_results: Vec::new(),
+            result_channel,
             num_uncompleted_materialization_tasks: 0,
             num_uncompleted_tasks_by_segment: HashMap::new(),
             collection_logical_size_bytes: 0,
-            result_channel,
-            max_compaction_size,
-            max_partition_size,
-            writers: OnceCell::new(),
-            flush_results: Vec::new(),
+            pulled_log_offset: 0,
+            state: ExecutionState::Pending,
+            total_records_past_compaction: 0,
             segment_spans: HashMap::new(),
-            total_records_last_compaction: 0,
-            fetch_log_batch_size,
         }
     }
 
@@ -304,7 +306,7 @@ impl CompactOrchestrator {
             None => return,
         };
 
-        if !self.compaction_job.rebuild {
+        if !self.rebuild {
             self.num_uncompleted_tasks_by_segment
                 .entry(writers.record_writer.id)
                 .and_modify(|v| {
@@ -397,14 +399,25 @@ impl CompactOrchestrator {
 
     async fn register(&mut self, ctx: &ComponentContext<CompactOrchestrator>) {
         self.state = ExecutionState::Register;
+        let collection_cell =
+            self.collection
+                .get()
+                .cloned()
+                .ok_or(CompactionError::InvariantViolation(
+                    "Collection information should have been obtained",
+                ));
+        let collection = match self.ok_or_terminate(collection_cell, ctx) {
+            Some(collection) => collection,
+            None => return,
+        };
         let operator = RegisterOperator::new();
         let input = RegisterInput::new(
-            self.compaction_job.tenant_id.clone(),
-            self.compaction_job.collection_id,
+            collection.tenant,
+            collection.collection_id,
             self.pulled_log_offset,
-            self.compaction_job.collection_version,
+            collection.version,
             self.flush_results.clone().into(),
-            self.total_records_last_compaction,
+            self.total_records_past_compaction,
             // WARN: For legacy collections the logical size is initialized to zero, so the size after compaction might be negative
             // TODO: Backfill collection logical size
             u64::try_from(self.collection_logical_size_bytes).unwrap_or_default(),
@@ -493,7 +506,7 @@ impl Orchestrator for CompactOrchestrator {
         vec![wrap(
             Box::new(GetCollectionAndSegmentsOperator {
                 sysdb: self.sysdb.clone(),
-                collection_id: self.compaction_job.collection_id,
+                collection_id: self.collection_id,
             }),
             (),
             ctx.receiver(),
@@ -542,7 +555,17 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             }
         };
 
-        self.collection_logical_size_bytes = match self.compaction_job.rebuild {
+        if self.collection.set(collection.clone()).is_err() {
+            self.terminate_with_result(
+                Err(CompactionError::InvariantViolation(
+                    "Collection information should not have been initialized",
+                )),
+                ctx,
+            );
+            return;
+        };
+
+        self.collection_logical_size_bytes = match self.rebuild {
             true => 0,
             false => collection.size_bytes_post_compaction as i64,
         };
@@ -550,7 +573,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
 
         let mut metadata_segment = output.metadata_segment.clone();
         let mut vector_segment = output.vector_segment.clone();
-        if self.compaction_job.rebuild {
+        if self.rebuild {
             // Reset the metadata and vector segments by purging the file paths
             metadata_segment.file_path = Default::default();
             vector_segment.file_path = Default::default();
@@ -616,9 +639,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         };
 
         let writers = CompactWriters {
-            record_reader: record_reader
-                .clone()
-                .filter(|_| !self.compaction_job.rebuild),
+            record_reader: record_reader.clone().filter(|_| !self.rebuild),
             metadata_writer,
             record_writer,
             vector_writer,
@@ -648,7 +669,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             self.send(prefetch_task, ctx).await;
         }
 
-        let log_task = match self.compaction_job.rebuild {
+        let log_task = match self.rebuild {
             true => wrap(
                 Box::new(SourceRecordSegmentOperator {}),
                 SourceRecordSegmentInput {
@@ -662,9 +683,9 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                     batch_size: self.fetch_log_batch_size,
                     // Here we do not need to be inclusive since the compaction job
                     // offset is the one after the last compaction offset
-                    start_log_offset_id: self.compaction_job.offset as u32,
+                    start_log_offset_id: self.log_start_offset,
                     maximum_fetch_count: Some(self.max_compaction_size as u32),
-                    collection_uuid: self.compaction_job.collection_id,
+                    collection_uuid: self.collection_id,
                 }),
                 (),
                 ctx.receiver(),
@@ -862,7 +883,7 @@ impl Handler<TaskResult<CommitSegmentWriterOutput, CommitSegmentWriterOperatorEr
 
         // If the flusher recieved is a record segment flusher, get the number of keys for the blockfile and set it on the orchestrator
         if let ChromaSegmentFlusher::RecordSegment(record_segment_flusher) = &message.flusher {
-            self.total_records_last_compaction = record_segment_flusher.count();
+            self.total_records_past_compaction = record_segment_flusher.count();
         }
 
         self.dispatch_segment_flush(message.flusher, ctx).await;
@@ -913,7 +934,7 @@ impl Handler<TaskResult<RegisterOutput, RegisterError>> for CompactOrchestrator 
                 .into_inner()
                 .map_err(|e| e.into())
                 .map(|_| CompactionResponse {
-                    compaction_job: self.compaction_job.clone(),
+                    collection_id: self.collection_id,
                 }),
             ctx,
         );

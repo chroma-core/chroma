@@ -46,11 +46,6 @@ impl SchedulerPolicy for LasCompactionTimeSchedulerPolicy {
         for collection in &collections[0..number_tasks as usize] {
             tasks.push(CompactionJob {
                 collection_id: collection.collection_id,
-                tenant_id: collection.tenant_id.clone(),
-                offset: collection.offset,
-                collection_version: collection.collection_version,
-                collection_logical_size_bytes: collection.collection_logical_size_bytes,
-                rebuild: false,
             });
         }
         tasks

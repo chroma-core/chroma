@@ -2,11 +2,8 @@ use super::scheduler::Scheduler;
 use super::scheduler_policy::LasCompactionTimeSchedulerPolicy;
 use super::OneOffCompactMessage;
 use super::RebuildMessage;
-use crate::compactor::types::CompactionJob;
 use crate::compactor::types::ScheduledCompactMessage;
 use crate::config::CompactionServiceConfig;
-use crate::execution::orchestration::rebuild::RebuildOrchestrator;
-use crate::execution::orchestration::rebuild::RebuildOutput;
 use crate::execution::orchestration::CompactOrchestrator;
 use crate::execution::orchestration::CompactionResponse;
 use async_trait::async_trait;
@@ -118,7 +115,8 @@ impl CompactionManager {
     #[instrument(name = "CompactionManager::compact")]
     async fn compact(
         &self,
-        compaction_job: &CompactionJob,
+        collection_id: CollectionUuid,
+        rebuild: bool,
     ) -> Result<CompactionResponse, Box<dyn ChromaError>> {
         let dispatcher = match self.dispatcher {
             Some(ref dispatcher) => dispatcher.clone(),
@@ -131,7 +129,11 @@ impl CompactionManager {
         match self.system {
             Some(ref system) => {
                 let orchestrator = CompactOrchestrator::new(
-                    compaction_job.clone(),
+                    collection_id,
+                    rebuild,
+                    self.fetch_log_batch_size,
+                    self.max_compaction_size,
+                    self.max_partition_size,
                     self.log.clone(),
                     self.sysdb.clone(),
                     self.blockfile_provider.clone(),
@@ -139,9 +141,6 @@ impl CompactionManager {
                     self.spann_provider.clone(),
                     dispatcher,
                     None,
-                    self.max_compaction_size,
-                    self.max_partition_size,
-                    self.fetch_log_batch_size,
                 );
 
                 match orchestrator.run(system.clone()).await {
@@ -171,7 +170,7 @@ impl CompactionManager {
             .map(|job| {
                 let instrumented_span = span!(parent: None, tracing::Level::INFO, "Compacting job", collection_id = ?job.collection_id);
                 instrumented_span.follows_from(Span::current());
-                self.compact(job).instrument(instrumented_span)
+                self.compact(job.collection_id, false).instrument(instrumented_span)
             })
             .collect::<FuturesUnordered<_>>();
 
@@ -182,7 +181,7 @@ impl CompactionManager {
                 match result {
                     Ok(response) => {
                         tracing::info!("Compaction completed: {response:?}");
-                        Some(response.compaction_job.collection_id)
+                        Some(response.collection_id)
                     }
                     Err(err) => {
                         tracing::error!("Compaction failed {err}");
@@ -194,49 +193,11 @@ impl CompactionManager {
             .await
     }
 
-    #[instrument(name = "CompactionManager::rebuild")]
-    async fn rebuild(
-        &self,
-        collection_id: CollectionUuid,
-    ) -> Result<RebuildOutput, Box<dyn ChromaError>> {
-        let dispatcher = match &self.dispatcher {
-            Some(dispatcher) => dispatcher.clone(),
-            None => {
-                tracing::error!("No dispatcher found");
-                return Err(Box::new(CompactionError::FailedToCompact));
-            }
-        };
-
-        let system = match &self.system {
-            Some(system) => system.clone(),
-            None => {
-                tracing::error!("No system found");
-                return Err(Box::new(CompactionError::FailedToCompact));
-            }
-        };
-
-        let orchestrator = RebuildOrchestrator::new(
-            self.sysdb.clone(),
-            self.log.clone(),
-            self.blockfile_provider.clone(),
-            dispatcher,
-            self.hnsw_index_provider.clone(),
-            self.spann_provider.clone(),
-            1000,
-            collection_id,
-        );
-
-        orchestrator
-            .run(system.clone())
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)
-    }
-
     #[instrument(name = "CompactionManager::rebuild_batch")]
     pub(crate) async fn rebuild_batch(&mut self, collection_ids: Vec<CollectionUuid>) {
         let _ = collection_ids
             .iter()
-            .map(|id| self.rebuild(*id))
+            .map(|id| self.compact(*id, true))
             .collect::<FuturesUnordered<_>>()
             .collect::<Vec<_>>()
             .await;
