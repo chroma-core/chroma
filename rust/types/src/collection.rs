@@ -64,7 +64,6 @@ pub struct Collection {
     #[serde(rename = "id")]
     pub collection_id: CollectionUuid,
     pub name: String,
-    #[serde(skip, default = "InternalCollectionConfiguration::default_hnsw")]
     pub config: InternalCollectionConfiguration,
     pub metadata: Option<Metadata>,
     pub dimension: Option<i32>,
