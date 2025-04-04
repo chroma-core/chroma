@@ -9,3 +9,5 @@ voyageai
 openai
 anthropic
 pytrec_eval
+notebook
+dotenv
