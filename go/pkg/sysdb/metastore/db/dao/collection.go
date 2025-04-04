@@ -371,6 +371,7 @@ func (s *collectionDb) UpdateLogPositionAndVersionInfo(
 	newVersionFileName string,
 	totalRecordsPostCompaction uint64,
 	sizeBytesPostCompaction uint64,
+	lastCompactionTimeSecs int64,
 ) (int64, error) {
 	// TODO(rohitcp): Investigate if we need to hold the lock using "UPDATE"
 	// strength, or if we can use "SELECT FOR UPDATE" or some other less
@@ -387,6 +388,7 @@ func (s *collectionDb) UpdateLogPositionAndVersionInfo(
 			"version_file_name":             newVersionFileName,
 			"total_records_post_compaction": totalRecordsPostCompaction,
 			"size_bytes_post_compaction":    sizeBytesPostCompaction,
+			"last_compaction_time_secs":     lastCompactionTimeSecs,
 		})
 	if result.Error != nil {
 		return 0, result.Error
@@ -394,7 +396,7 @@ func (s *collectionDb) UpdateLogPositionAndVersionInfo(
 	return result.RowsAffected, nil
 }
 
-func (s *collectionDb) UpdateLogPositionVersionTotalRecordsAndLogicalSize(collectionID string, logPosition int64, currentCollectionVersion int32, totalRecordsPostCompaction uint64, sizeBytesPostCompaction uint64, tenant string) (int32, error) {
+func (s *collectionDb) UpdateLogPositionVersionTotalRecordsAndLogicalSize(collectionID string, logPosition int64, currentCollectionVersion int32, totalRecordsPostCompaction uint64, sizeBytesPostCompaction uint64, lastCompactionTimeSecs int64, tenant string) (int32, error) {
 	log.Info("update log position, version, and total records post compaction", zap.String("collectionID", collectionID), zap.Int64("logPosition", logPosition), zap.Int32("currentCollectionVersion", currentCollectionVersion), zap.Uint64("totalRecords", totalRecordsPostCompaction))
 	var collection dbmodel.Collection
 	// We use select for update to ensure no lost update happens even for isolation level read committed or below
@@ -415,7 +417,7 @@ func (s *collectionDb) UpdateLogPositionVersionTotalRecordsAndLogicalSize(collec
 	}
 
 	version := currentCollectionVersion + 1
-	err = s.db.Model(&dbmodel.Collection{}).Where("id = ?", collectionID).Updates(map[string]interface{}{"log_position": logPosition, "version": version, "total_records_post_compaction": totalRecordsPostCompaction, "size_bytes_post_compaction": sizeBytesPostCompaction, "tenant": tenant}).Error
+	err = s.db.Model(&dbmodel.Collection{}).Where("id = ?", collectionID).Updates(map[string]interface{}{"log_position": logPosition, "version": version, "total_records_post_compaction": totalRecordsPostCompaction, "size_bytes_post_compaction": sizeBytesPostCompaction, "last_compaction_time_secs": lastCompactionTimeSecs, "tenant": tenant}).Error
 	if err != nil {
 		return 0, err
 	}

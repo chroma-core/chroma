@@ -259,6 +259,7 @@ func TestCatalog_FlushCollectionCompactionForVersionedCollection(t *testing.T) {
 		mock.Anything,
 		uint64(1),
 		uint64(1),
+		mock.Anything,
 	).Return(int64(1), nil)
 
 	mockTenantDb.On("UpdateTenantLastCompactionTime", tenantID, mock.Anything).Return(nil)
