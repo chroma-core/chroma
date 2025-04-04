@@ -14,6 +14,7 @@ use chroma_types::SpannPostingList;
 use chroma_types::{CollectionUuid, InternalSpannConfiguration};
 use rand::seq::SliceRandom;
 use thiserror::Error;
+use tracing::{instrument, Instrument, Span};
 use uuid::Uuid;
 
 use crate::{
@@ -2122,6 +2123,7 @@ impl<'me> SpannIndexReader<'me> {
         })
     }
 
+    #[instrument(skip(self), name = "is_entry_outdated")]
     async fn is_outdated(
         &self,
         doc_offset_id: u32,
@@ -2150,6 +2152,7 @@ impl<'me> SpannIndexReader<'me> {
         let res = self
             .posting_lists
             .get("", head_id)
+            .instrument(tracing::trace_span!(parent: Span::current(), "Fetch head", head_id = head_id.to_string()))
             .await
             .map_err(|e| {
                 tracing::error!("Error getting posting list for head {}: {}", head_id, e);
@@ -2157,27 +2160,30 @@ impl<'me> SpannIndexReader<'me> {
             })?
             .ok_or(SpannIndexReaderError::PostingListNotFound)?;
 
-        let mut posting_lists = Vec::with_capacity(res.doc_offset_ids.len());
-        let mut unique_ids = HashSet::new();
-        for (index, doc_offset_id) in res.doc_offset_ids.iter().enumerate() {
-            if self
-                .is_outdated(*doc_offset_id, res.doc_versions[index])
-                .await?
-            {
-                continue;
+        async {
+            let mut posting_lists = Vec::with_capacity(res.doc_offset_ids.len());
+            let mut unique_ids = HashSet::new();
+            for (index, doc_offset_id) in res.doc_offset_ids.iter().enumerate() {
+                if self
+                    .is_outdated(*doc_offset_id, res.doc_versions[index])
+                    .await?
+                {
+                    continue;
+                }
+                if unique_ids.contains(doc_offset_id) {
+                    continue;
+                }
+                unique_ids.insert(*doc_offset_id);
+                posting_lists.push(SpannPosting {
+                    doc_offset_id: *doc_offset_id,
+                    doc_embedding: res.doc_embeddings
+                        [index * self.dimensionality..(index + 1) * self.dimensionality]
+                        .to_vec(),
+                });
             }
-            if unique_ids.contains(doc_offset_id) {
-                continue;
-            }
-            unique_ids.insert(*doc_offset_id);
-            posting_lists.push(SpannPosting {
-                doc_offset_id: *doc_offset_id,
-                doc_embedding: res.doc_embeddings
-                    [index * self.dimensionality..(index + 1) * self.dimensionality]
-                    .to_vec(),
-            });
-        }
-        Ok(posting_lists)
+            Ok(posting_lists)
+        }.instrument(tracing::trace_span!(parent: Span::current(), "Remove outdated entries from Pl", head_id = head_id.to_string()))
+        .await
     }
 
     // Only for testing purposes as of 5 March 2024.

@@ -31,6 +31,10 @@ func BuildInternalGrpcError(msg string) error {
 	return status.Error(codes.Internal, msg)
 }
 
+func BuildFailedPreconditionGrpcError(msg string) error {
+	return status.Error(codes.FailedPrecondition, msg)
+}
+
 func BuildAlreadyExistsGrpcError(msg string) error {
 	return status.Error(codes.AlreadyExists, msg)
 }

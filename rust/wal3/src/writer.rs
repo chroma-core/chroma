@@ -11,8 +11,9 @@ use setsum::Setsum;
 use tracing::instrument::Instrument;
 
 use crate::{
-    unprefixed_fragment_path, BatchManager, Error, ExponentialBackoff, Fragment, FragmentSeqNo,
-    LogPosition, LogWriterOptions, Manifest, ManifestManager,
+    unprefixed_fragment_path, BatchManager, CursorStore, CursorStoreOptions, Error,
+    ExponentialBackoff, Fragment, FragmentSeqNo, LogPosition, LogReader, LogReaderOptions,
+    LogWriterOptions, Manifest, ManifestManager,
 };
 
 /// The epoch writer is a counting writer.  Every epoch exists.  An epoch goes
@@ -29,12 +30,12 @@ pub struct EpochWriter {
 
 #[async_trait::async_trait]
 pub trait MarkDirty: Send + Sync + 'static {
-    async fn mark_dirty(&self, log_position: LogPosition) -> Result<(), Error>;
+    async fn mark_dirty(&self, log_position: LogPosition, num_records: usize) -> Result<(), Error>;
 }
 
 #[async_trait::async_trait]
 impl MarkDirty for () {
-    async fn mark_dirty(&self, _: LogPosition) -> Result<(), Error> {
+    async fn mark_dirty(&self, _: LogPosition, _: usize) -> Result<(), Error> {
         Ok(())
     }
 }
@@ -181,6 +182,31 @@ impl LogWriter {
             // This should never happen, so just be polite with an error.
             Err(Error::LogClosed)
         }
+    }
+
+    pub fn reader(&self, options: LogReaderOptions) -> Option<LogReader> {
+        // SAFETY(rescrv):  Mutex poisoning.
+        let inner = self.inner.lock().unwrap();
+        inner.as_ref().map(|inner| {
+            LogReader::new(
+                options,
+                Arc::clone(&inner.writer.storage),
+                inner.writer.prefix.clone(),
+            )
+        })
+    }
+
+    pub fn cursors(&self, options: CursorStoreOptions) -> Option<CursorStore> {
+        // SAFETY(rescrv):  Mutex poisoning.
+        let inner = self.inner.lock().unwrap();
+        inner.as_ref().map(|inner| {
+            CursorStore::new(
+                options,
+                Arc::clone(&inner.writer.storage),
+                inner.writer.prefix.clone(),
+                self.writer.clone(),
+            )
+        })
     }
 }
 
@@ -372,7 +398,9 @@ impl OnceLogWriter {
             log_position,
             messages,
         );
-        let fut2 = self.mark_dirty.mark_dirty(log_position + messages_len);
+        let fut2 = self
+            .mark_dirty
+            .mark_dirty(log_position + messages_len, messages_len);
         let (res1, res2) = futures::future::join(fut1, fut2).await;
         res2?;
         let (path, setsum, num_bytes) = res1?;
