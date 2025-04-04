@@ -3,13 +3,14 @@ channels:
   - defaults
   - conda-forge
 dependencies:
-  - python=3.9.6
+  - python>=3.9.6
   - pandas
   - numpy
   - tqdm
   - matplotlib
   - pip
   - notebook
+  - pytrec_eval
   - pip:
       - chromadb
       - datasets
@@ -17,5 +18,4 @@ dependencies:
       - voyageai
       - openai
       - anthropic
-      - pytrec_eval
       - dotenv
