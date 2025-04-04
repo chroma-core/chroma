@@ -337,7 +337,7 @@ pub fn test_storage() -> Storage {
     ))
 }
 
-#[derive(Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct PutOptions {
     if_not_exists: bool,
     if_match: Option<ETag>,
