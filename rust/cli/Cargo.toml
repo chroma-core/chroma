@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+axum = { workspace = true }
 arboard = "3.4.1"
 clap = { version = "4.5.28", features = ["derive"] }
 chroma-frontend = { workspace = true }
@@ -32,6 +33,8 @@ strum = "0.27.1"
 strum_macros = "0.27.1"
 semver = "1.0.26"
 regex = "1.11.1"
+urlencoding = "2.1.3"
+tower-http = {workspace = true}
 
 [dev-dependencies]
 assert_cmd = "2.0.16"

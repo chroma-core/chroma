@@ -5,16 +5,24 @@ use crate::utils::{
     read_config, read_profiles, validate_uri, write_config, write_profiles, CliError, Profile,
     Profiles, UtilsError, CHROMA_DIR, CREDENTIALS_FILE,
 };
+use axum::response::IntoResponse;
+use axum::routing::post;
+use axum::{Json, Router};
 use clap::Parser;
 use colored::Colorize;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{Input, Select};
 use rand::Rng;
+use reqwest::Method;
+use serde::Deserialize;
 use std::error::Error;
-use std::io::{Read, Write};
-use std::net::TcpListener;
-use std::time::Duration;
+use std::io::Write;
+use std::net::{SocketAddr, TcpListener};
+use std::sync::Arc;
 use thiserror::Error;
+use tokio::sync::{oneshot, Mutex};
+use tower_http::cors::{Any, CorsLayer};
+use urlencoding::encode;
 
 const CLI_QUERY_PARAMETER: &str = "cli_redirect";
 
@@ -40,6 +48,11 @@ pub enum LoginError {
     BrowserAuthFailed,
     #[error("Team {0} not found")]
     TeamNotFound(String),
+}
+
+#[derive(Deserialize)]
+struct SessionPayload {
+    session_id: String,
 }
 
 fn team_selection_prompt() -> String {
@@ -158,46 +171,73 @@ fn get_profile_from_team(team: &Team, profiles: &Profiles) -> Result<String, Cli
     }
 }
 
-fn browser_auth(frontend_url: &str) -> Result<String, Box<dyn Error>> {
+async fn handle_session(
+    session_tx: axum::extract::State<Arc<Mutex<Option<oneshot::Sender<String>>>>>,
+    Json(payload): Json<SessionPayload>,
+) -> impl IntoResponse {
+    let mut guard = session_tx.lock().await;
+    if let Some(tx) = guard.take() {
+        let _ = tx.send(payload.session_id.clone());
+    }
+}
+
+async fn get_session_id(port: u16) -> Result<String, Box<dyn Error>> {
+    let (tx, rx) = oneshot::channel::<String>();
+    let session_tx = Arc::new(Mutex::new(Some(tx)));
+
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods(vec![Method::POST, Method::OPTIONS])
+        .allow_headers(Any);
+
+    let app = Router::new()
+        .route("/session", post(handle_session))
+        .layer(cors)
+        .with_state(session_tx.clone());
+
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+
+    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+
+    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+
+    let server = tokio::spawn(async move {
+        let server = axum::serve(listener, app).with_graceful_shutdown(async {
+            shutdown_rx.await.ok();
+        });
+
+        server.await
+    });
+
+    let session_id = rx.await?;
+    let _ = shutdown_tx.send(());
+    let _ = server.await?;
+
+    Ok(session_id)
+}
+
+async fn browser_auth(frontend_url: &str) -> Result<String, Box<dyn Error>> {
     let port = find_random_available_port(8050, 9000, 100)?;
+
+    let redirect_params = format!("http://localhost:{}", port);
+    let encoded_params = encode(&redirect_params).to_string();
+
     let login_url = format!(
-        "{}/login?{}=http://localhost:{}",
-        frontend_url, CLI_QUERY_PARAMETER, port
+        "{}/cli?{}={}",
+        frontend_url, CLI_QUERY_PARAMETER, encoded_params
     );
 
     webbrowser::open(&login_url)?;
     println!("{}", waiting_for_cli_host_message());
 
-    let cli_host = format!("127.0.0.1:{}", port);
-    let listener = TcpListener::bind(&cli_host)?;
-
-    let (mut stream, _) = listener.accept()?;
-    stream.set_read_timeout(Some(Duration::from_secs(120)))?;
-
-    let mut buffer = [0; 1024];
-    let _ = stream.read(&mut buffer)?;
-    let request = String::from_utf8_lossy(&buffer[..]);
-
-    let cookies = request.lines().find(|line| line.starts_with("Cookie:"));
-    if cookies.is_none() {
-        return Err(LoginError::BrowserAuthFailed.into());
-    }
-    let cookies = cookies.unwrap().trim_start_matches("Cookie:").trim();
-
-    let redirect_url = format!("{}/cli", frontend_url);
-    let response = format!(
-        "HTTP/1.1 302 Found\r\nLocation: {}\r\nContent-Length: 0\r\n\r\n",
-        redirect_url
-    );
-    stream.write_all(response.as_bytes())?;
-
-    Ok(cookies.to_string())
+    get_session_id(port).await
 }
 
 pub async fn browser_login(args: LoginArgs) -> Result<(), CliError> {
     let dashboard_client = get_dashboard_client(args.dev);
-    let session_cookies =
-        browser_auth(&dashboard_client.frontend_url).map_err(|_| LoginError::BrowserAuthFailed)?;
+    let session_cookies = browser_auth(&dashboard_client.frontend_url)
+        .await
+        .map_err(|_| LoginError::BrowserAuthFailed)?;
     let teams = dashboard_client.get_teams(&session_cookies).await?;
 
     let (api_key, team) = match args.api_key {
