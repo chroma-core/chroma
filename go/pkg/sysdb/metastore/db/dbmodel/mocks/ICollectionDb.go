@@ -301,7 +301,7 @@ func (_m *ICollectionDb) UpdateLogPositionAndVersionInfo(collectionID string, lo
 }
 
 // UpdateLogPositionVersionTotalRecordsAndLogicalSize provides a mock function with given fields: collectionID, logPosition, currentCollectionVersion, totalRecordsPostCompaction, sizeBytesPostCompaction, lastCompactionTimeSecs, tenant
-func (_m *ICollectionDb) UpdateLogPositionVersionTotalRecordsAndLogicalSize(collectionID string, logPosition int64, currentCollectionVersion int32, totalRecordsPostCompaction uint64, sizeBytesPostCompaction uint64, lastCompactionTimeSecs int64, tenant string) (int32, error) {
+func (_m *ICollectionDb) UpdateLogPositionVersionTotalRecordsAndLogicalSize(collectionID string, logPosition int64, currentCollectionVersion int32, totalRecordsPostCompaction uint64, sizeBytesPostCompaction uint64, lastCompactionTimeSecs uint64, tenant string) (int32, error) {
 	ret := _m.Called(collectionID, logPosition, currentCollectionVersion, totalRecordsPostCompaction, sizeBytesPostCompaction, lastCompactionTimeSecs, tenant)
 
 	if len(ret) == 0 {
@@ -310,16 +310,16 @@ func (_m *ICollectionDb) UpdateLogPositionVersionTotalRecordsAndLogicalSize(coll
 
 	var r0 int32
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string, int64, int32, uint64, uint64, int64, string) (int32, error)); ok {
+	if rf, ok := ret.Get(0).(func(string, int64, int32, uint64, uint64, uint64, string) (int32, error)); ok {
 		return rf(collectionID, logPosition, currentCollectionVersion, totalRecordsPostCompaction, sizeBytesPostCompaction, lastCompactionTimeSecs, tenant)
 	}
-	if rf, ok := ret.Get(0).(func(string, int64, int32, uint64, uint64, int64, string) int32); ok {
+	if rf, ok := ret.Get(0).(func(string, int64, int32, uint64, uint64, uint64, string) int32); ok {
 		r0 = rf(collectionID, logPosition, currentCollectionVersion, totalRecordsPostCompaction, sizeBytesPostCompaction, lastCompactionTimeSecs, tenant)
 	} else {
 		r0 = ret.Get(0).(int32)
 	}
 
-	if rf, ok := ret.Get(1).(func(string, int64, int32, uint64, uint64, int64, string) error); ok {
+	if rf, ok := ret.Get(1).(func(string, int64, int32, uint64, uint64, uint64, string) error); ok {
 		r1 = rf(collectionID, logPosition, currentCollectionVersion, totalRecordsPostCompaction, sizeBytesPostCompaction, lastCompactionTimeSecs, tenant)
 	} else {
 		r1 = ret.Error(1)
