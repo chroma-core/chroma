@@ -22,3 +22,4 @@ pub mod partition_log;
 pub mod prefetch_record;
 pub mod prefetch_segment;
 pub mod projection;
+pub mod source_record_segment;

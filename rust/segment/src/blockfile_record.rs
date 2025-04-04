@@ -827,6 +827,15 @@ impl RecordSegmentReader<'_> {
             .map(|vec| vec.into_iter().map(|(_, data)| data).collect())
     }
 
+    pub async fn get_data_stream<'me>(
+        &'me self,
+        offset_range: impl RangeBounds<u32> + Clone + Send + 'me,
+    ) -> impl Stream<Item = Result<DataRecord<'me>, Box<dyn ChromaError>>> + 'me {
+        self.id_to_data
+            .get_range_stream(""..="", offset_range)
+            .map(|res| res.map(|(_, rec)| rec))
+    }
+
     /// Get a stream of offset ids from the smallest to the largest in the given range
     pub fn get_offset_stream<'me>(
         &'me self,
