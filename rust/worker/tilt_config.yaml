@@ -1,10 +1,7 @@
-# Default configuration for query and compaction service
+# Tiltfile configuration for query and compaction service
 # In the long term, every service should have an entry in this file
 # and this can become the global configuration file for Chroma
 # for now we nest it in the worker directory
-#
-# NOTE:  This file is NOT currently used by tilt, but instead shipped as the defaults.
-# See the adjacent tilt_config.yaml for tilt.
 
 query_service:
     service_name: "query-service"
@@ -43,6 +40,8 @@ query_service:
             port: 50051
             connect_timeout_ms: 5000
             request_timeout_ms: 5000
+            alt_host: "rust-log-service.chroma"
+            use_alt_host_for_everything: true
     dispatcher:
         num_worker_threads: 4
         dispatcher_queue_size: 100
@@ -78,6 +77,7 @@ query_service:
             weighted_lru:
                 capacity: 8589934592 # 8GB
         permitted_parallelism: 180
+    fetch_log_batch_size: 8000
 
 compaction_service:
     service_name: "compaction-service"
@@ -116,6 +116,8 @@ compaction_service:
             port: 50051
             connect_timeout_ms: 5000
             request_timeout_ms: 5000
+            alt_host: "rust-log-service.chroma"
+            use_alt_host_for_everything: true
     dispatcher:
         num_worker_threads: 4
         dispatcher_queue_size: 100
@@ -130,6 +132,7 @@ compaction_service:
         max_compaction_size: 10000
         max_partition_size: 5000
         disabled_collections: [] # uuids to disable compaction for
+        fetch_log_batch_size: 8000
     blockfile_provider:
         arrow:
             block_manager_config:
