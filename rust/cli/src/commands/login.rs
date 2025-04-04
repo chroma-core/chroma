@@ -16,7 +16,6 @@ use rand::Rng;
 use reqwest::Method;
 use serde::Deserialize;
 use std::error::Error;
-use std::io::Write;
 use std::net::{SocketAddr, TcpListener};
 use std::sync::Arc;
 use thiserror::Error;
