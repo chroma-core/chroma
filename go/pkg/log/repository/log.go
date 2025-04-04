@@ -175,6 +175,7 @@ func (r *LogRepository) GarbageCollection(ctx context.Context) error {
 		trace_log.Error("Error in getting collections to compact", zap.Error(err))
 		return err
 	}
+	trace_log.Info("Obtained collections to compact", zap.Int("collectionCount", len(collectionToCompact)))
 	if collectionToCompact == nil {
 		return nil
 	}
@@ -184,6 +185,7 @@ func (r *LogRepository) GarbageCollection(ctx context.Context) error {
 	for i := 0; i < len(collectionToCompact); i += batchSize {
 		end := min(len(collectionToCompact), i+batchSize)
 		exists, err := r.sysDb.CheckCollections(ctx, collectionToCompact[i:end])
+		trace_log.Info("Checking collections in sysdb", zap.Int("collectionCount", len(collectionToCompact[i:end])))
 		if err != nil {
 			trace_log.Error("Error in checking collection in sysdb", zap.Error(err))
 			continue
@@ -194,6 +196,7 @@ func (r *LogRepository) GarbageCollection(ctx context.Context) error {
 			}
 		}
 	}
+	trace_log.Info("Obtained collections to GC", zap.Int("collectionCount", len(collectionsToGC)))
 	if len(collectionsToGC) > 0 {
 		var tx pgx.Tx
 		tx, err = r.conn.BeginTx(ctx, pgx.TxOptions{})
