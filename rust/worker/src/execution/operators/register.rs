@@ -90,6 +90,8 @@ pub enum RegisterError {
     FlushCompactionError(#[from] FlushCompactionError),
     #[error("Update log offset error: {0}")]
     UpdateLogOffsetError(#[from] Box<dyn ChromaError>),
+    #[error("Collection was soft deleted")]
+    CollectionSoftDeleted,
 }
 
 impl ChromaError for RegisterError {
@@ -97,6 +99,7 @@ impl ChromaError for RegisterError {
         match self {
             RegisterError::FlushCompactionError(e) => e.code(),
             RegisterError::UpdateLogOffsetError(e) => e.code(),
+            RegisterError::CollectionSoftDeleted => ErrorCodes::FailedPrecondition,
         }
     }
 }
@@ -129,7 +132,12 @@ impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
         // the we may lose data in compaction.
         let sysdb_registration_result = match result {
             Ok(response) => response,
-            Err(error) => return Err(RegisterError::FlushCompactionError(error)),
+            Err(error) => match error {
+                FlushCompactionError::CollectionSoftDeleted => {
+                    return Err(RegisterError::CollectionSoftDeleted);
+                }
+                _ => return Err(RegisterError::FlushCompactionError(error)),
+            },
         };
 
         let result = log

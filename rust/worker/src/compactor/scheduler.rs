@@ -99,26 +99,17 @@ impl Scheduler {
                 );
                 continue;
             }
-            let collection_id = Some(collection_info.collection_id);
             // TODO: add a cache to avoid fetching the same collection multiple times
             let result = self
                 .sysdb
-                .get_collections(collection_id, None, None, None, None, 0)
+                .get_collection(collection_info.collection_id, None, None, None)
                 .await;
 
             match result {
                 Ok(collection) => {
-                    if collection.is_empty() {
-                        tracing::error!(
-                            "Collection not found: {:?}",
-                            collection_info.collection_id
-                        );
-                        continue;
-                    }
-
                     // TODO: make querying the last compaction time in batch
-                    let log_position_in_collecion = collection[0].log_position;
-                    let tenant_ids = vec![collection[0].tenant.clone()];
+                    let log_position_in_collecion = collection.log_position;
+                    let tenant_ids = vec![collection.tenant.clone()];
                     let tenant = self.sysdb.get_last_compaction_time(tenant_ids).await;
 
                     let last_compaction_time = match tenant {
@@ -149,18 +140,29 @@ impl Scheduler {
                     }
 
                     collection_records.push(CollectionRecord {
-                        collection_id: collection[0].collection_id,
-                        tenant_id: collection[0].tenant.clone(),
+                        collection_id: collection.collection_id,
+                        tenant_id: collection.tenant.clone(),
                         last_compaction_time,
                         first_record_time: collection_info.first_log_ts,
                         offset,
-                        collection_version: collection[0].version,
-                        collection_logical_size_bytes: collection[0].size_bytes_post_compaction,
+                        collection_version: collection.version,
+                        collection_logical_size_bytes: collection.size_bytes_post_compaction,
                     });
                 }
-                Err(e) => {
-                    tracing::error!("Error: {:?}", e);
-                }
+                Err(e) => match e {
+                    chroma_types::GetCollectionError::SoftDeleted(_) => {
+                        tracing::info!(
+                            "Collection was soft deleted: {:?}",
+                            collection_info.collection_id
+                        );
+                    }
+                    _ => {
+                        tracing::error!(
+                            "Error in GetCollection inside verify_and_enrich_collections: {:?}",
+                            e
+                        );
+                    }
+                },
             }
         }
         collection_records
