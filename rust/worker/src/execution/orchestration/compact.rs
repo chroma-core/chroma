@@ -304,7 +304,7 @@ impl CompactOrchestrator {
             None => return,
         };
 
-        if !self.rebuild {
+        {
             self.num_uncompleted_tasks_by_segment
                 .entry(writers.record_writer.id)
                 .and_modify(|v| {
@@ -570,10 +570,12 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         self.pulled_log_offset = collection.log_position;
 
         let mut metadata_segment = output.metadata_segment.clone();
+        let mut record_segment = output.record_segment.clone();
         let mut vector_segment = output.vector_segment.clone();
         if self.rebuild {
             // Reset the metadata and vector segments by purging the file paths
             metadata_segment.file_path = Default::default();
+            record_segment.file_path = Default::default();
             vector_segment.file_path = Default::default();
         }
 
@@ -596,8 +598,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             None => return,
         };
         let record_writer = match self.ok_or_terminate(
-            RecordSegmentWriter::from_segment(&output.record_segment, &self.blockfile_provider)
-                .await,
+            RecordSegmentWriter::from_segment(&record_segment, &self.blockfile_provider).await,
             ctx,
         ) {
             Some(writer) => writer,
@@ -1135,7 +1136,7 @@ mod tests {
             new_cas.metadata_segment.file_path,
             old_cas.metadata_segment.file_path
         );
-        assert_eq!(
+        assert_ne!(
             new_cas.record_segment.file_path,
             old_cas.record_segment.file_path
         );
