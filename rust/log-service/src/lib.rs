@@ -1095,6 +1095,16 @@ impl RootConfig {
     /// Values in the envionment variables take precedence over values in the YAML file.
     // NOTE:  Copied to ../load/src/config.rs.
     pub fn load_from_path(path: &str) -> Self {
+        println!("loading config from {path}");
+        println!(
+            r#"Full config is:
+================================================================================
+{}
+================================================================================
+"#,
+            std::fs::read_to_string(path)
+                .expect("should be able to open and read config to string")
+        );
         // Unfortunately, figment doesn't support environment variables with underscores. So we have to map and replace them.
         // Excluding our own environment variables, which are prefixed with CHROMA_.
         let mut f = figment::Figment::from(Env::prefixed("CHROMA_").map(|k| match k {
