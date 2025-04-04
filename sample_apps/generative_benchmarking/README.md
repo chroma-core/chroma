@@ -22,3 +22,27 @@ The main functionality is contained within the `generative-benchmarking` folder,
 
 - **`compare.ipynb`**  
   A framework for comparing results, which is useful when evaluating different embedding models or configurations
+
+## Installation
+
+The environment configuration files are located in the `generative-benchmarking` folder. You can install the dependencies using one of the following methods:
+
+### pip
+
+```bash
+pip install -r generative-benchmarking/requirements.txt
+jupyter notebook
+```
+
+### poetry
+```bash
+poetry install --with notebooks
+poetry run jupyter notebook
+```
+
+### conda
+```bash
+conda env create -f requirements/environment.yml
+conda activate notebook-env
+jupyter notebook
+```
