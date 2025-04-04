@@ -50,6 +50,7 @@ impl SchedulerPolicy for LasCompactionTimeSchedulerPolicy {
                 offset: collection.offset,
                 collection_version: collection.collection_version,
                 collection_logical_size_bytes: collection.collection_logical_size_bytes,
+                rebuild: false,
             });
         }
         tasks

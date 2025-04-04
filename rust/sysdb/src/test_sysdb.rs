@@ -1,7 +1,7 @@
 use chroma_types::{
-    Collection, CollectionUuid, Database, FlushCompactionResponse, GetCollectionSizeError,
-    GetSegmentsError, ListDatabasesError, ListDatabasesResponse, Segment, SegmentFlushInfo,
-    SegmentScope, SegmentType, Tenant,
+    Collection, CollectionAndSegments, CollectionUuid, Database, FlushCompactionResponse,
+    GetCollectionSizeError, GetCollectionWithSegmentsError, GetSegmentsError, ListDatabasesError,
+    ListDatabasesResponse, Segment, SegmentFlushInfo, SegmentScope, SegmentType, Tenant,
 };
 use chroma_types::{GetCollectionsError, SegmentUuid};
 use parking_lot::Mutex;
@@ -135,9 +135,7 @@ impl TestSysDb {
         }
         true
     }
-}
 
-impl TestSysDb {
     pub(crate) async fn get_collections(
         &mut self,
         collection_id: Option<CollectionUuid>,
@@ -493,5 +491,54 @@ impl TestSysDb {
                 "Collection not found".to_string(),
             )),
         }
+    }
+
+    pub(crate) async fn get_collection_with_segments(
+        &self,
+        collection_id: CollectionUuid,
+    ) -> Result<CollectionAndSegments, GetCollectionWithSegmentsError> {
+        let inner = self.inner.lock();
+        let collection = inner.collections.get(&collection_id).cloned().ok_or(
+            GetCollectionWithSegmentsError::NotFound(
+                "Collection not found in TestSysDB".to_string(),
+            ),
+        )?;
+        let segments = inner
+            .segments
+            .values()
+            .filter_map(|seg| {
+                (seg.collection == collection_id).then_some((seg.r#type, seg.clone()))
+            })
+            .collect::<HashMap<_, _>>();
+        let record_segment = segments
+            .get(&SegmentType::BlockfileRecord)
+            .or(segments.get(&SegmentType::Sqlite))
+            .cloned()
+            .ok_or(GetCollectionWithSegmentsError::NotFound(
+                "Record segment not found in TestSysDB".to_string(),
+            ))?;
+        let metadata_segment = segments
+            .get(&SegmentType::BlockfileMetadata)
+            .or(segments.get(&SegmentType::Sqlite))
+            .cloned()
+            .ok_or(GetCollectionWithSegmentsError::NotFound(
+                "Metadata segment not found in TestSysDB".to_string(),
+            ))?;
+        let vector_segment = segments
+            .get(&SegmentType::HnswDistributed)
+            .or(segments.get(&SegmentType::HnswLocalMemory))
+            .or(segments.get(&SegmentType::HnswLocalPersisted))
+            .or(segments.get(&SegmentType::Spann))
+            .cloned()
+            .ok_or(GetCollectionWithSegmentsError::NotFound(
+                "Vector segment not found in TestSysDB".to_string(),
+            ))?;
+
+        Ok(CollectionAndSegments {
+            collection,
+            metadata_segment,
+            record_segment,
+            vector_segment,
+        })
     }
 }

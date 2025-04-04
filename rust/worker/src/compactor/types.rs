@@ -7,6 +7,7 @@ pub(crate) struct CompactionJob {
     pub(crate) offset: i64,
     pub(crate) collection_version: i32,
     pub(crate) collection_logical_size_bytes: u64,
+    pub(crate) rebuild: bool,
 }
 
 #[derive(Clone, Debug)]
