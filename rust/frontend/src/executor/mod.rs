@@ -1,7 +1,7 @@
 use chroma_types::{
     operator::{CountResult, GetResult, KnnBatchResult},
     plan::{Count, Get, Knn},
-    ExecutorError,
+    ExecutorError, SegmentType,
 };
 use distributed::DistributedExecutor;
 use local::LocalExecutor;
@@ -52,6 +52,14 @@ impl Executor {
                 .reset()
                 .await
                 .map_err(ExecutorError::Internal),
+        }
+    }
+    pub fn supported_segment_types(&self) -> Vec<SegmentType> {
+        match self {
+            Executor::Distributed(distributed_executor) => {
+                distributed_executor.supported_segment_types()
+            }
+            Executor::Local(local_executor) => local_executor.supported_segment_types(),
         }
     }
 }

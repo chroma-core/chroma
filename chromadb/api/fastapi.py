@@ -15,6 +15,9 @@ from chromadb.api.collection_configuration import (
     create_collection_configuration_from_legacy_metadata_dict,
     populate_create_hnsw_defaults,
     validate_create_hnsw_config,
+    populate_create_spann_defaults,
+    validate_create_spann_config,
+    CreateHNSWConfiguration,
 )
 from chromadb import __version__
 from chromadb.api.base_http_client import BaseHTTPClient
@@ -264,24 +267,53 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         )
         model = CollectionModel.from_json(resp_json)
 
-        # TODO: Remove this once server response contains configuration
-        if configuration is None or configuration.get("hnsw") is None:
+        # TODO: @jai Remove this once server response contains configuration
+        hnsw = None
+        spann = None
+        if configuration is not None:
+            hnsw = configuration.get("hnsw")
+            spann = configuration.get("spann")
+
+        # if neither are specified, use the legacy metadata to populate the configuration
+        if hnsw is None and spann is None:
             if model.metadata is not None:
-                model.configuration_json = create_collection_configuration_to_json(
+                # update the configuration with the legacy metadata
+                configuration = (
                     create_collection_configuration_from_legacy_metadata_dict(
                         model.metadata
                     )
                 )
+                hnsw = configuration.get("hnsw")
+                spann = configuration.get("spann")
+
         else:
-            # At this point we know configuration is not None and has hnsw
-            assert configuration is not None  # Help type checker
-            hnsw_config = configuration.get("hnsw")
-            assert hnsw_config is not None  # Help type checker
-            populate_create_hnsw_defaults(hnsw_config)
-            validate_create_hnsw_config(hnsw_config)
-            model.configuration_json = create_collection_configuration_to_json(
-                configuration
-            )
+            # At this point we know at least one of hnsw or spann is not None
+            if hnsw is not None:
+                populate_create_hnsw_defaults(hnsw)
+                validate_create_hnsw_config(hnsw)
+            if spann is not None:
+                populate_create_spann_defaults(spann)
+                validate_create_spann_config(spann)
+
+            assert configuration is not None
+            configuration["hnsw"] = hnsw
+            configuration["spann"] = spann
+
+        # if hnsw and spann are both still None, it was neither specified in config nor in legacy metadata
+        # in this case, rfe will take care of defaults, so we just need to populate the hnsw config
+        if hnsw is None and spann is None:
+            hnsw = CreateHNSWConfiguration()
+            populate_create_hnsw_defaults(hnsw)
+            validate_create_hnsw_config(hnsw)
+            if configuration is not None:
+                configuration["hnsw"] = hnsw
+            else:
+                configuration = CreateCollectionConfiguration(hnsw=hnsw)
+
+        assert configuration is not None
+        model.configuration_json = create_collection_configuration_to_json(
+            configuration
+        )
         return model
 
     @trace_method("FastAPI.get_collection", OpenTelemetryGranularity.OPERATION)
@@ -393,7 +425,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
                 tenant=tenant,
                 database=database,
                 limit=n,
-                include=["embeddings", "documents", "metadatas"],  # type: ignore[list-item]
+                include=["embeddings", "documents", "metadatas"],
             ),
         )
 
@@ -410,7 +442,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         page: Optional[int] = None,
         page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = ["metadatas", "documents"],  # type: ignore[list-item]
+        include: Include = ["metadatas", "documents"],
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> GetResult:
@@ -599,7 +631,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = ["metadatas", "documents", "distances"],  # type: ignore[list-item]
+        include: Include = ["metadatas", "documents", "distances"],
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> QueryResult:

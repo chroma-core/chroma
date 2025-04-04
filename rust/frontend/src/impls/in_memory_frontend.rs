@@ -5,8 +5,9 @@ use chroma_segment::test::TestReferenceSegment;
 use chroma_types::operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan};
 use chroma_types::plan::{Count, Get, Knn};
 use chroma_types::{
-    test_segment, Collection, CollectionAndSegments, Database, Include, IncludeList,
-    InternalCollectionConfiguration, Segment,
+    test_segment, Collection, CollectionAndSegments, CreateCollectionError, Database, Include,
+    IncludeList, InternalCollectionConfiguration, Segment, UpdateCollectionError,
+    VectorIndexConfiguration,
 };
 use std::collections::HashSet;
 
@@ -229,6 +230,14 @@ impl InMemoryFrontend {
             ..Default::default()
         };
 
+        // Prevent SPANN usage in InMemoryFrontend
+        if matches!(
+            collection.config.vector_index,
+            VectorIndexConfiguration::Spann(_)
+        ) {
+            return Err(CreateCollectionError::SpannNotImplemented);
+        }
+
         let metadata_segment = test_segment(
             collection.collection_id,
             chroma_types::SegmentScope::METADATA,
@@ -258,6 +267,12 @@ impl InMemoryFrontend {
         &mut self,
         _request: chroma_types::UpdateCollectionRequest,
     ) -> Result<chroma_types::UpdateCollectionResponse, chroma_types::UpdateCollectionError> {
+        // Prevent SPANN usage in InMemoryFrontend
+        if let Some(config) = &_request.new_configuration {
+            if config.spann.is_some() {
+                return Err(UpdateCollectionError::SpannNotImplemented);
+            }
+        }
         unimplemented!()
     }
 
