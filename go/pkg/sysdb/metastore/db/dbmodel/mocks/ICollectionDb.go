@@ -88,6 +88,36 @@ func (_m *ICollectionDb) DeleteCollectionByID(collectionID string) (int, error) 
 	return r0, r1
 }
 
+// GetCollectionEntries provides a mock function with given fields: id, name, tenantID, databaseName, limit, offset
+func (_m *ICollectionDb) GetCollectionEntries(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*dbmodel.CollectionAndMetadata, error) {
+	ret := _m.Called(id, name, tenantID, databaseName, limit, offset)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetCollectionEntries")
+	}
+
+	var r0 []*dbmodel.CollectionAndMetadata
+	var r1 error
+	if rf, ok := ret.Get(0).(func(*string, *string, string, string, *int32, *int32) ([]*dbmodel.CollectionAndMetadata, error)); ok {
+		return rf(id, name, tenantID, databaseName, limit, offset)
+	}
+	if rf, ok := ret.Get(0).(func(*string, *string, string, string, *int32, *int32) []*dbmodel.CollectionAndMetadata); ok {
+		r0 = rf(id, name, tenantID, databaseName, limit, offset)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*dbmodel.CollectionAndMetadata)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(*string, *string, string, string, *int32, *int32) error); ok {
+		r1 = rf(id, name, tenantID, databaseName, limit, offset)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetCollectionEntry provides a mock function with given fields: collectionID, databaseName
 func (_m *ICollectionDb) GetCollectionEntry(collectionID *string, databaseName *string) (*dbmodel.Collection, error) {
 	ret := _m.Called(collectionID, databaseName)

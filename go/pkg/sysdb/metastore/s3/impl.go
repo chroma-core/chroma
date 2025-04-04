@@ -19,9 +19,9 @@ import (
 
 // Path to Version Files in S3.
 // Example:
-// s3://<bucket-name>/<sysdbPathPrefix>/<tenant_id>/collections/<collection_id>/versionfiles/file_name
+// s3://<bucket-name>/<sysdbPathPrefix>/<tenant_id>/databases/<database_id>/collections/<collection_id>/versionfiles/file_name
 const (
-	versionFilesPathFormat = "%s/%s/collections/%s/versionfiles/%s"
+	versionFilesPathFormat = "%s/%s/databases/%s/collections/%s/versionfiles/%s"
 	minioEndpoint          = "minio:9000"
 	minioAccessKeyID       = "minio"
 	minioSecretAccessKey   = "minio123"
@@ -50,9 +50,9 @@ type S3MetaStoreConfig struct {
 
 type S3MetaStoreInterface interface {
 	GetVersionFile(tenantID, collectionID string, version int64, fileName string) (*coordinatorpb.CollectionVersionFile, error)
-	PutVersionFile(tenantID, collectionID, fileName string, file *coordinatorpb.CollectionVersionFile) (string, error)
+	PutVersionFile(tenantID, databaseID, collectionID, fileName string, file *coordinatorpb.CollectionVersionFile) (string, error)
 	HasObjectWithPrefix(ctx context.Context, prefix string) (bool, error)
-	DeleteVersionFile(tenantID, collectionID, fileName string) error
+	DeleteVersionFile(tenantID, databaseID, collectionID, fileName string) error
 }
 
 // S3MetaStore wraps the S3 connection and related parameters for the metadata store.
@@ -165,8 +165,8 @@ func (store *S3MetaStore) GetVersionFile(tenantID, collectionID string, version 
 }
 
 // Put the version file to S3. Serialize the protobuf to bytes.
-func (store *S3MetaStore) PutVersionFile(tenantID, collectionID string, versionFileName string, versionFile *coordinatorpb.CollectionVersionFile) (string, error) {
-	path := store.GetVersionFilePath(tenantID, collectionID, versionFileName)
+func (store *S3MetaStore) PutVersionFile(tenantID, databaseID, collectionID string, versionFileName string, versionFile *coordinatorpb.CollectionVersionFile) (string, error) {
+	path := store.GetVersionFilePath(tenantID, databaseID, collectionID, versionFileName)
 
 	data, err := proto.Marshal(versionFile)
 	if err != nil {
@@ -196,9 +196,9 @@ func (store *S3MetaStore) PutVersionFile(tenantID, collectionID string, versionF
 }
 
 // GetVersionFilePath constructs the S3 path for a version file
-func (store *S3MetaStore) GetVersionFilePath(tenantID, collectionID, versionFileName string) string {
+func (store *S3MetaStore) GetVersionFilePath(tenantID, databaseID, collectionID, versionFileName string) string {
 	return fmt.Sprintf(versionFilesPathFormat,
-		store.BasePathSysDB, tenantID, collectionID, versionFileName)
+		store.BasePathSysDB, tenantID, databaseID, collectionID, versionFileName)
 }
 
 // DeleteOldVersionFiles removes version files older than the specified version
@@ -207,8 +207,8 @@ func (store *S3MetaStore) DeleteOldVersionFiles(tenantID, collectionID string, o
 	return errors.New("not implemented")
 }
 
-func (store *S3MetaStore) DeleteVersionFile(tenantID, collectionID, fileName string) error {
-	path := store.GetVersionFilePath(tenantID, collectionID, fileName)
+func (store *S3MetaStore) DeleteVersionFile(tenantID, databaseID, collectionID, fileName string) error {
+	path := store.GetVersionFilePath(tenantID, databaseID, collectionID, fileName)
 
 	input := &s3.DeleteObjectInput{
 		Bucket: aws.String(store.BucketName),

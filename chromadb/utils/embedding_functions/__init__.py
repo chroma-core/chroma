@@ -139,15 +139,36 @@ known_embedding_functions: Dict[str, Type[EmbeddingFunction]] = {  # type: ignor
 }
 
 
-# Function to register custom embedding functions
-def register_embedding_function(ef_class: Type[EmbeddingFunction]) -> None:  # type: ignore
+def register_embedding_function(ef_class=None):  # type: ignore
     """Register a custom embedding function.
+
+    Can be used as a decorator:
+        @register_embedding_function
+        class MyEmbedding(EmbeddingFunction):
+            @classmethod
+            def name(cls): return "my_embedding"
+
+    Or directly:
+        register_embedding_function(MyEmbedding)
 
     Args:
         ef_class: The embedding function class to register.
     """
-    name = ef_class.name()
-    known_embedding_functions[name] = ef_class
+
+    def _register(cls):  # type: ignore
+        try:
+            name = cls.name()
+            known_embedding_functions[name] = cls
+        except Exception as e:
+            raise ValueError(f"Failed to register embedding function: {e}")
+        return cls  # Return the class unchanged
+
+    # If called with a class, register it immediately
+    if ef_class is not None:
+        return _register(ef_class)  # type: ignore
+
+    # If called without arguments, return a decorator
+    return _register
 
 
 # Function to convert config to embedding function

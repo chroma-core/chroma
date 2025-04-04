@@ -49,7 +49,9 @@ message Collection {
   string configuration_json_str = 3;
   optional UpdateMetadata metadata = 4;
   optional int32 dimension = 5;
+  // This is the tenant id of the collection.
   string tenant = 6;
+  // This is the database name of the collection.
   string database = 7;
   int64 log_position = 8;
   int32 version = 9;

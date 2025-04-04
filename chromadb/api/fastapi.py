@@ -264,7 +264,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         )
         model = CollectionModel.from_json(resp_json)
 
-        # TODO: Remove this once server response contains configuration
+        # TODO @jai: Remove this once server response contains configuration
         if configuration is None or configuration.get("hnsw") is None:
             if model.metadata is not None:
                 model.configuration_json = create_collection_configuration_to_json(
@@ -393,7 +393,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
                 tenant=tenant,
                 database=database,
                 limit=n,
-                include=["embeddings", "documents", "metadatas"],  # type: ignore[list-item]
+                include=["embeddings", "documents", "metadatas"],
             ),
         )
 
@@ -410,7 +410,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         page: Optional[int] = None,
         page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = ["metadatas", "documents"],  # type: ignore[list-item]
+        include: Include = ["metadatas", "documents"],
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> GetResult:
@@ -599,7 +599,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = ["metadatas", "documents", "distances"],  # type: ignore[list-item]
+        include: Include = ["metadatas", "documents", "distances"],
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> QueryResult:

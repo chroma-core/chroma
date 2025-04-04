@@ -30,7 +30,7 @@ func (s *collectionDb) DeleteAll() error {
 func (s *collectionDb) GetCollectionEntry(collectionID *string, databaseName *string) (*dbmodel.Collection, error) {
 	var collections []*dbmodel.Collection
 	query := s.db.Table("collections").
-		Select("collections.id, collections.name, collections.database_id, collections.is_deleted, databases.name, databases.tenant_id, collections.version, collections.version_file_name").
+		Select("collections.id, collections.name, collections.database_id, collections.is_deleted, databases.tenant_id, collections.version, collections.version_file_name").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
 		Where("collections.id = ?", collectionID)
 
@@ -46,6 +46,10 @@ func (s *collectionDb) GetCollectionEntry(collectionID *string, databaseName *st
 		return nil, nil
 	}
 	return collections[0], nil
+}
+
+func (s *collectionDb) GetCollectionEntries(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*dbmodel.CollectionAndMetadata, error) {
+	return s.getCollections(id, name, tenantID, databaseName, limit, offset, true)
 }
 
 func (s *collectionDb) GetCollections(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*dbmodel.CollectionAndMetadata, error) {

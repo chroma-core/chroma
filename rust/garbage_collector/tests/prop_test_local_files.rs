@@ -559,7 +559,7 @@ impl GcTest {
     // 2. Prepare to call flush compaction.
     // 3. Call FlushCompaction on TestSysDb.
     // 4. Update the version file in storage since SysDb does not do this.
-    fn add_version(
+    async fn add_version(
         mut self,
         id: String,
         _version: u64,
@@ -573,11 +573,10 @@ impl GcTest {
 
         // 1. Get version file name and current version from sysdb
         let collection_id = CollectionUuid::from_str(&id).unwrap();
-        let collections =
-            block_on(
-                self.sysdb
-                    .get_collections(Some(collection_id), None, None, None, None, 0),
-            )
+        let collections = self
+            .sysdb
+            .get_collections(Some(collection_id), None, None, None, None, 0)
+            .await
             .unwrap();
 
         let collection = match collections.first() {
@@ -594,11 +593,12 @@ impl GcTest {
             .unwrap()
             .clone();
         // Create sparse index for record segment
-        let sparse_index_id = block_on(create_test_sparse_index(
+        let sparse_index_id = create_test_sparse_index(
             &self.storage,
             record_segment_info.block_ids.clone(),
             Some("test_si_rec_".to_string()),
-        ))
+        )
+        .await
         .unwrap();
         // Create segment info for this version
         let record_segment_id = record_segment_info.segment_id;
@@ -620,11 +620,12 @@ impl GcTest {
             .find(|sbi| sbi.segment_type == SegmentType::BlockfileMetadata)
             .unwrap()
             .clone();
-        let sparse_index_id_metadata = block_on(create_test_sparse_index(
+        let sparse_index_id_metadata = create_test_sparse_index(
             &self.storage,
             metadata_segment_info.block_ids.clone(),
             Some("test_si_meta_".to_string()),
-        ))
+        )
+        .await
         .unwrap();
         // Create segment info for this version
         let metadata_segment_id = metadata_segment_info.segment_id;
@@ -644,12 +645,14 @@ impl GcTest {
         let metadata_segment_id = SegmentUuid::from_str(&metadata_segment_info.segment_id).unwrap();
 
         // Handle flush_compaction errors
-        match block_on(
-            self.sysdb.clone().flush_compaction(
+        match self
+            .sysdb
+            .clone()
+            .flush_compaction(
                 "tenant".to_string(),
                 collection_id,
                 0, // log_position
-                current_version as i32,
+                current_version,
                 Arc::new([
                     SegmentFlushInfo {
                         segment_id: record_segment_id,
@@ -670,8 +673,9 @@ impl GcTest {
                 ]),
                 0, // total_records_post_compaction
                 0, // size_bytes_post_compaction
-            ),
-        ) {
+            )
+            .await
+        {
             Ok(_) => (),
             Err(e) => {
                 panic!("Failed to flush compaction: {:?}", e);
@@ -681,7 +685,7 @@ impl GcTest {
         self
     }
 
-    fn create_collection(
+    async fn create_collection(
         mut self,
         id: String,
         segments: Vec<Segment>,
@@ -693,17 +697,20 @@ impl GcTest {
         }
 
         let collection_id = CollectionUuid::from_str(&id).unwrap();
-        let result = block_on(self.sysdb.create_collection(
-            "tenant".to_string(),
-            "database".to_string(),
-            collection_id,
-            "collection".to_string(),
-            segments,
-            None,
-            None,
-            None,
-            false,
-        ));
+        let result = self
+            .sysdb
+            .create_collection(
+                "tenant".to_string(),
+                "database".to_string(),
+                collection_id,
+                "collection".to_string(),
+                segments,
+                None,
+                None,
+                None,
+                false,
+            )
+            .await;
         assert!(
             result.is_ok(),
             "Failed to create collection: {:?}",
@@ -712,7 +719,7 @@ impl GcTest {
         self
     }
 
-    async fn cleanup_versions_async(mut self, id: String, cutoff_time: u64) -> Self {
+    async fn cleanup_versions(mut self, id: String, cutoff_time: u64) -> Self {
         let mut sysdb = self.sysdb.clone();
         let storage = self.storage.clone();
 
@@ -760,7 +767,6 @@ impl GcTest {
         self.last_cleanup_files = Vec::new();
         match orchestrator.run(system.clone()).await {
             Ok(response) => {
-                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
                 self.last_cleanup_files = response.deletion_list.clone();
                 tracing::info!(
                     line = line!(),
@@ -786,14 +792,6 @@ impl GcTest {
         dispatcher_handle.join().await.unwrap();
 
         self
-    }
-
-    fn cleanup_versions(self, id: String, cutoff_time: u64) -> Self {
-        tokio::task::block_in_place(|| {
-            // Get the current runtime handle.
-            let handle = tokio::runtime::Handle::current();
-            handle.block_on(self.cleanup_versions_async(id, cutoff_time))
-        })
     }
 }
 
@@ -824,19 +822,19 @@ impl StateMachineTest for GcTest {
                 to_remove_block_ids: _,
                 creation_time_secs,
                 segment_block_ids,
-            } => state.add_version(
+            } => block_on(state.add_version(
                 id.clone(),
                 ref_state.get_current_version(id.clone()) + 1,
                 creation_time_secs,
                 segment_block_ids.clone(),
-            ),
+            )),
             Transition::CreateCollection {
                 id,
                 segments,
                 creation_time_secs,
-            } => state.create_collection(id, segments, creation_time_secs),
+            } => block_on(state.create_collection(id, segments, creation_time_secs)),
             Transition::CleanupVersions { id, cutoff_time } => {
-                state.cleanup_versions(id, cutoff_time)
+                block_on(state.cleanup_versions(id, cutoff_time))
             }
         }
     }
@@ -949,11 +947,9 @@ fn blocks_ids_for_next_version(block_ids: Vec<Uuid>) -> (Vec<Uuid>, Vec<Uuid>) {
 }
 
 prop_state_machine! {
-    #![proptest_config(ProptestConfig::with_cases(20))]
-    // #[test]
     fn run_gc_test(
         sequential
-        1..20
+        1..50
         =>
         GcTest
     );
