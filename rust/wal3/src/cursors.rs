@@ -242,6 +242,6 @@ mod tests {
             .unwrap();
         assert_eq!(LogPosition::from_offset(99), witness.1.position);
         assert_eq!(54321u64, witness.1.epoch_us);
-        assert_eq!("writer-test", witness.1.writer);
+        assert_eq!("test-writer", witness.1.writer);
     }
 }
