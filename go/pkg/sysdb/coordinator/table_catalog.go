@@ -366,6 +366,35 @@ func (tc *Catalog) CheckCollection(ctx context.Context, collectionID types.Uniqu
 	return false, nil
 }
 
+func (tc *Catalog) GetCollection(ctx context.Context, collectionID types.UniqueID, collectionName *string, tenantID string, databaseName string) (*model.Collection, error) {
+	tracer := otel.Tracer
+	if tracer != nil {
+		_, span := tracer.Start(ctx, "Catalog.GetCollection")
+		defer span.End()
+	}
+
+	// Get collection and metadata.
+	// NOTE: Choosing to use GetCollectionEntries instead of GetCollections so that we can check if the collection is soft deleted.
+	// Also, choosing to use a function that returns a list to avoid creating a new function.
+	collectionAndMetadataList, err := tc.metaDomain.CollectionDb(ctx).GetCollectionEntries(types.FromUniqueID(collectionID), collectionName, tenantID, databaseName, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	// Collection not found.
+	if len(collectionAndMetadataList) == 0 {
+		return nil, common.ErrCollectionNotFound
+	}
+	// Check if the entry is soft deleted.
+	collectionWithMetdata := collectionAndMetadataList[0].Collection
+	if collectionWithMetdata.IsDeleted {
+		return nil, common.ErrCollectionSoftDeleted
+	}
+	// Convert to model.
+	collection := convertCollectionToModel(collectionAndMetadataList)
+	// CollectionID is primary key, so there should be only one collection.
+	return collection[0], nil
+}
+
 func (tc *Catalog) GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*model.Collection, error) {
 	tracer := otel.Tracer
 	if tracer != nil {
@@ -1074,7 +1103,8 @@ func (tc *Catalog) FlushCollectionCompaction(ctx context.Context, flushCollectio
 		}
 
 		// update collection log position and version
-		collectionVersion, err := tc.metaDomain.CollectionDb(txCtx).UpdateLogPositionVersionTotalRecordsAndLogicalSize(flushCollectionCompaction.ID.String(), flushCollectionCompaction.LogPosition, flushCollectionCompaction.CurrentCollectionVersion, flushCollectionCompaction.TotalRecordsPostCompaction, flushCollectionCompaction.SizeBytesPostCompaction, flushCollectionCompaction.TenantID)
+		lastCompactionTime := time.Now().Unix()
+		collectionVersion, err := tc.metaDomain.CollectionDb(txCtx).UpdateLogPositionVersionTotalRecordsAndLogicalSize(flushCollectionCompaction.ID.String(), flushCollectionCompaction.LogPosition, flushCollectionCompaction.CurrentCollectionVersion, flushCollectionCompaction.TotalRecordsPostCompaction, flushCollectionCompaction.SizeBytesPostCompaction, uint64(lastCompactionTime), flushCollectionCompaction.TenantID)
 		if err != nil {
 			return err
 		}
@@ -1083,7 +1113,6 @@ func (tc *Catalog) FlushCollectionCompaction(ctx context.Context, flushCollectio
 		// update tenant last compaction time
 		// TODO: add a system configuration to disable
 		// since this might cause resource contention if one tenant has a lot of collection compactions at the same time
-		lastCompactionTime := time.Now().Unix()
 		err = tc.metaDomain.TenantDb(txCtx).UpdateTenantLastCompactionTime(flushCollectionCompaction.TenantID, lastCompactionTime)
 		if err != nil {
 			return err
@@ -1247,6 +1276,11 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 				existingVersionFileName,
 				flushCollectionCompaction.CurrentCollectionVersion+1,
 				newVersionFileName,
+				flushCollectionCompaction.TotalRecordsPostCompaction,
+				flushCollectionCompaction.SizeBytesPostCompaction,
+				// SAFETY(hammadb): This int64 to uint64 conversion is ok because we always are in post-epoch time.
+				// and the value is always positive.
+				uint64(lastCompactionTime),
 			)
 			if err != nil {
 				return err

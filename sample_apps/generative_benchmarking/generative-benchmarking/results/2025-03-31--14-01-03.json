@@ -1,0 +1,1 @@
+{"model": "text-embedding-3-small", "results": {"NDCG": {"NDCG@1": 0.5, "NDCG@3": 0.59892, "NDCG@5": 0.60917, "NDCG@10": 0.64652}, "MAP": {"MAP@1": 0.5, "MAP@3": 0.5754, "MAP@5": 0.58135, "MAP@10": 0.59613}, "Recall": {"Recall@1": 0.5, "Recall@3": 0.66667, "Recall@5": 0.69048, "Recall@10": 0.80952}, "Precision": {"P@1": 0.5, "P@3": 0.22222, "P@5": 0.1381, "P@10": 0.08095}}}

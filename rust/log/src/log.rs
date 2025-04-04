@@ -27,6 +27,7 @@ pub enum Log {
 }
 
 impl Log {
+    #[tracing::instrument(skip(self))]
     pub async fn read(
         &mut self,
         collection_id: CollectionUuid,
@@ -49,6 +50,7 @@ impl Log {
         }
     }
 
+    #[tracing::instrument(skip(self, records))]
     pub async fn push_logs(
         &mut self,
         collection_id: CollectionUuid,
@@ -67,6 +69,7 @@ impl Log {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn get_collections_with_new_data(
         &mut self,
         min_compaction_size: u64,
@@ -84,6 +87,7 @@ impl Log {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn update_collection_log_offset(
         &mut self,
         collection_id: CollectionUuid,
@@ -106,7 +110,23 @@ impl Log {
         }
     }
 
-    // Only supported in sqlite. Distributed has a different workflow.
+    /// Only supported in distributed. Sqlite has a different workflow.
+    #[tracing::instrument(skip(self))]
+    pub async fn purge_dirty_for_collection(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<(), Box<dyn ChromaError>> {
+        match self {
+            Log::Sqlite(_) => unimplemented!("not implemented for sqlite"),
+            Log::Grpc(log) => Ok(log
+                .purge_dirty_for_collection(collection_id)
+                .await
+                .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?),
+            Log::InMemory(_) => unimplemented!("not implemented for in memory"),
+        }
+    }
+
+    /// Only supported in sqlite. Distributed has a different workflow.
     pub async fn purge_logs(
         &mut self,
         collection_id: CollectionUuid,

@@ -24,6 +24,7 @@ pub fn init_global_filter_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
                 "chroma-distance",
                 "chroma-error",
                 "chroma-log",
+                "chroma-log-service",
                 "chroma-frontend",
                 "chroma-index",
                 "chroma-storage",
@@ -35,6 +36,7 @@ pub fn init_global_filter_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
                 "hosted-frontend",
                 "metadata_filtering",
                 "query_service",
+                "wal3",
                 "worker",
             ]
             .into_iter()
@@ -126,6 +128,11 @@ pub fn init_stdout_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
                 .unwrap_or("")
                 .starts_with("chroma_cache")
                 && metadata.name() != "clear")
+        }))
+        .with_filter(tracing_subscriber::filter::FilterFn::new(|metadata| {
+            metadata.module_path().unwrap_or("").starts_with("chroma")
+                || metadata.module_path().unwrap_or("").starts_with("wal3")
+                || metadata.module_path().unwrap_or("").starts_with("worker")
         }))
         .with_filter(tracing_subscriber::filter::LevelFilter::INFO)
         .boxed()

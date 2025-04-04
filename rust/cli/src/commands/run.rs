@@ -9,7 +9,7 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum RunError {
-    #[error("Config file {0} does not exists")]
+    #[error("Config file {0} does not exist")]
     ConfigFileNotFound(String),
     #[error("Address {0}:{1} is not available")]
     AddressUnavailable(String, u16),
@@ -97,6 +97,15 @@ pub fn run(args: RunArgs) -> Result<(), CliError> {
     let config = match &args.config_path {
         Some(config_path) => {
             if !std::path::Path::new(config_path).exists() {
+                eprintln!(
+                    "Could not find {config_path:?} in {:?}",
+                    std::env::current_dir()
+                        .map(
+                            |p| String::from_utf8_lossy(p.as_os_str().as_encoded_bytes())
+                                .to_string()
+                        )
+                        .unwrap_or("<unknown>".to_string())
+                );
                 return Err(RunError::ConfigFileNotFound(config_path.to_string()).into());
             }
             FrontendServerConfig::load_from_path(config_path)

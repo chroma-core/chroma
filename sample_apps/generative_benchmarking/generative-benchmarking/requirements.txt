@@ -1,0 +1,13 @@
+chromadb
+pandas
+numpy
+tqdm
+matplotlib
+datasets
+sentence-transformers
+voyageai
+openai
+anthropic
+pytrec_eval
+notebook
+dotenv

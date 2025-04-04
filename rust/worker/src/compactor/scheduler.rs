@@ -109,10 +109,21 @@ impl Scheduler {
             match result {
                 Ok(collection) => {
                     if collection.is_empty() {
-                        tracing::error!(
-                            "Collection not found: {:?}",
+                        tracing::info!(
+                            "Collection not found, purging: {:?}",
                             collection_info.collection_id
                         );
+                        if let Err(err) = self
+                            .log
+                            .purge_dirty_for_collection(collection_info.collection_id)
+                            .await
+                        {
+                            tracing::error!(
+                                "Error purging dirty records for collection: {:?}, error: {:?}",
+                                collection_info.collection_id,
+                                err
+                            );
+                        }
                         continue;
                     }
 

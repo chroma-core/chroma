@@ -36,6 +36,8 @@ RUN --mount=type=cache,sharing=locked,target=/chroma/target/ \
 FROM debian:bookworm-slim AS runner
 RUN apt-get update && apt-get install -y libssl-dev ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /chroma/rust/worker/chroma_config.yaml .
+# NOTE(rescrv): We need the tilt config in the docker file.  This is temporary.
+COPY --from=builder /chroma/rust/worker/tilt_config.yaml .
 
 FROM runner AS query_service
 COPY --from=query_service_builder /chroma/query_service .

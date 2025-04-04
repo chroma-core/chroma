@@ -57,6 +57,7 @@ pub(crate) struct CompactionManager {
     min_compaction_size: usize,
     max_compaction_size: usize,
     max_partition_size: usize,
+    fetch_log_batch_size: u32,
     on_next_memberlist_signal: Option<oneshot::Sender<()>>,
 }
 
@@ -89,6 +90,7 @@ impl CompactionManager {
         min_compaction_size: usize,
         max_compaction_size: usize,
         max_partition_size: usize,
+        fetch_log_batch_size: u32,
     ) -> Self {
         CompactionManager {
             system: None,
@@ -106,6 +108,7 @@ impl CompactionManager {
             max_compaction_size,
             max_partition_size,
             on_next_memberlist_signal: None,
+            fetch_log_batch_size,
         }
     }
 
@@ -137,6 +140,7 @@ impl CompactionManager {
                     None,
                     self.max_compaction_size,
                     self.max_partition_size,
+                    self.fetch_log_batch_size,
                 );
 
                 match orchestrator.run(system.clone()).await {
@@ -234,6 +238,7 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
         let min_compaction_size = config.compactor.min_compaction_size;
         let max_compaction_size = config.compactor.max_compaction_size;
         let max_partition_size = config.compactor.max_partition_size;
+        let fetch_log_batch_size = config.compactor.fetch_log_batch_size;
         let mut disabled_collections =
             HashSet::with_capacity(config.compactor.disabled_collections.len());
         for collection_id_str in &config.compactor.disabled_collections {
@@ -290,6 +295,7 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
             min_compaction_size,
             max_compaction_size,
             max_partition_size,
+            fetch_log_batch_size,
         ))
     }
 }
@@ -589,6 +595,7 @@ mod tests {
         let min_compaction_size = 0;
         let max_compaction_size = 1000;
         let max_partition_size = 1000;
+        let fetch_log_batch_size = 100;
 
         // Set assignment policy
         let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
@@ -651,6 +658,7 @@ mod tests {
             min_compaction_size,
             max_compaction_size,
             max_partition_size,
+            fetch_log_batch_size,
         );
 
         let system = System::new();

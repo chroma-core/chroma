@@ -81,8 +81,14 @@ pub async fn query_service_entrypoint() {
 pub async fn compaction_service_entrypoint() {
     // Check if the config path is set in the env var
     let config = match std::env::var(CONFIG_PATH_ENV_VAR) {
-        Ok(config_path) => config::RootConfig::load_from_path(&config_path),
-        Err(_) => config::RootConfig::load(),
+        Ok(config_path) => {
+            eprintln!("loading from {config_path}");
+            config::RootConfig::load_from_path(&config_path)
+        }
+        Err(err) => {
+            eprintln!("loading from default path because {err}");
+            config::RootConfig::load()
+        }
     };
 
     let config = config.compaction_service;

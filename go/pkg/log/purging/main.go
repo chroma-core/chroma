@@ -18,6 +18,11 @@ func PerformPurgingLoop(ctx context.Context, lg *repository.LogRepository) {
 	defer purgeTicker.Stop()
 	defer gcTicker.Stop()
 
+	// Run gc at boot
+	if err := lg.GarbageCollection(ctx); err != nil {
+		log.Error("failed to garbage collect", zap.Error(err))
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
