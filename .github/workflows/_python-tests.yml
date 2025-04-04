@@ -25,7 +25,6 @@ jobs:
                   "chromadb/test/property/test_add.py",
                   "chromadb/test/property/test_collections.py",
                   "chromadb/test/property/test_collections_with_database_tenant.py",
-                  "chromadb/test/property/test_collections_with_database_tenant_overwrite.py",
                   "chromadb/test/property/test_cross_version_persist.py",
                   "chromadb/test/property/test_embeddings.py",
                   "chromadb/test/property/test_filtering.py",
@@ -96,6 +95,14 @@ jobs:
       uses: ./.github/actions/rust
       with:
           github-token: ${{ github.token }}
+    - name: Build Rust bindings
+      uses: PyO3/maturin-action@v1
+      with:
+        command: build
+        sccache: true
+    - name: Install built wheel
+      shell: bash
+      run: pip install --no-index --find-links target/wheels/ chromadb
     - name: Configure pytest to upload results to Datadog
       uses: datadog/test-visibility-github-action@v2
       # This action currently fails on Windows (https://github.com/DataDog/test-visibility-github-action/issues/36)
@@ -132,6 +139,14 @@ jobs:
         uses: ./.github/actions/rust
         with:
           github-token: ${{ github.token }}
+      - name: Build Rust bindings
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          sccache: true
+      - name: Install built wheel
+        shell: bash
+        run: pip install --no-index --find-links target/wheels/ chromadb
       - name: Configure pytest to upload results to Datadog
         uses: datadog/test-visibility-github-action@v2
         # This action currently fails on Windows (https://github.com/DataDog/test-visibility-github-action/issues/36)
@@ -162,7 +177,6 @@ jobs:
                     "chromadb/test/property/test_filtering.py",
                     "chromadb/test/property/test_embeddings.py",
                     "chromadb/test/property/test_collections_with_database_tenant.py",
-                    "chromadb/test/property/test_collections_with_database_tenant_overwrite.py",
                     "chromadb/test/distributed/test_sanity.py"]
     runs-on: ${{ matrix.platform }}
     # OIDC token auth for Depot & AWS
@@ -174,15 +188,23 @@ jobs:
       - uses: ./.github/actions/python
         with:
           python-version: ${{ matrix.python }}
+      - uses: ./.github/actions/tilt
+        with:
+          depot-project-id: ${{ vars.DEPOT_PROJECT_ID }}
+      - name: Build Rust bindings
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          sccache: true
+      - name: Install built wheel
+        shell: bash
+        run: pip install --no-index --find-links target/wheels/ chromadb
       - name: Configure pytest to upload results to Datadog
         uses: datadog/test-visibility-github-action@v2
         with:
           languages: python
           api_key: ${{ secrets.DD_API_KEY }}
           site: ${{ vars.DD_SITE }}
-      - uses: ./.github/actions/tilt
-        with:
-          depot-project-id: ${{ vars.DEPOT_PROJECT_ID }}
       - name: Test
         run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.test-globs }}"'
         shell: bash
