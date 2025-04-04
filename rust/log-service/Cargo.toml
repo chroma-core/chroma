@@ -14,6 +14,7 @@ bytes = { workspace = true }
 parquet = { workspace = true }
 prost = { workspace = true }
 figment = { workspace = true }
+setsum = { workspace = true }
 # Used by tracing
 opentelemetry = { workspace = true }
 rand = { workspace = true }

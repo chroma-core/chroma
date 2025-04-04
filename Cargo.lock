@@ -1437,6 +1437,7 @@ version = "0.1.0"
 dependencies = [
  "arboard",
  "assert_cmd",
+ "axum 0.8.1",
  "chroma-config",
  "chroma-frontend",
  "chroma-log",
@@ -1464,6 +1465,8 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "toml",
+ "tower-http 0.6.2",
+ "urlencoding",
  "webbrowser",
 ]
 
@@ -1681,6 +1684,7 @@ dependencies = [
  "rand 0.8.5",
  "serde",
  "serde_json",
+ "setsum",
  "sqlx",
  "tempfile",
  "thiserror 1.0.69",

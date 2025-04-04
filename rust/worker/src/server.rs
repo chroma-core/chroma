@@ -48,6 +48,8 @@ pub struct WorkerServer {
     hnsw_index_provider: HnswIndexProvider,
     blockfile_provider: BlockfileProvider,
     port: u16,
+    // config
+    fetch_log_batch_size: u32,
 }
 
 #[async_trait]
@@ -77,6 +79,7 @@ impl Configurable<QueryServiceConfig> for WorkerServer {
             hnsw_index_provider,
             blockfile_provider,
             port: config.my_port,
+            fetch_log_batch_size: config.fetch_log_batch_size,
         })
     }
 }
@@ -125,11 +128,14 @@ impl WorkerServer {
         self.system = Some(system);
     }
 
-    fn fetch_log(&self, collection_and_segments: &CollectionAndSegments) -> FetchLogOperator {
+    fn fetch_log(
+        &self,
+        collection_and_segments: &CollectionAndSegments,
+        batch_size: u32,
+    ) -> FetchLogOperator {
         FetchLogOperator {
             log_client: self.log.clone(),
-            // TODO: Make this configurable
-            batch_size: 100,
+            batch_size,
             // The collection log position is inclusive, and we want to start from the next log
             // Note that we query using the incoming log position this is critical for correctness
             start_log_offset_id: collection_and_segments.collection.log_position as u32 + 1,
@@ -148,7 +154,7 @@ impl WorkerServer {
             .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
 
         let collection_and_segments = Scan::try_from(scan)?.collection_and_segments;
-        let fetch_log = self.fetch_log(&collection_and_segments);
+        let fetch_log = self.fetch_log(&collection_and_segments, self.fetch_log_batch_size);
 
         let count_orchestrator = CountOrchestrator::new(
             self.blockfile_provider.clone(),
@@ -175,7 +181,7 @@ impl WorkerServer {
             .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
 
         let collection_and_segments = Scan::try_from(scan)?.collection_and_segments;
-        let fetch_log = self.fetch_log(&collection_and_segments);
+        let fetch_log = self.fetch_log(&collection_and_segments, self.fetch_log_batch_size);
 
         let filter = get_inner
             .filter
@@ -229,7 +235,7 @@ impl WorkerServer {
 
         let collection_and_segments = Scan::try_from(scan)?.collection_and_segments;
 
-        let fetch_log = self.fetch_log(&collection_and_segments);
+        let fetch_log = self.fetch_log(&collection_and_segments, self.fetch_log_batch_size);
 
         let filter = knn_inner
             .filter
@@ -467,6 +473,7 @@ mod tests {
             hnsw_index_provider: test_hnsw_index_provider(),
             blockfile_provider: segments.blockfile_provider,
             port,
+            fetch_log_batch_size: 100,
         };
 
         let system: system::System = system::System::new();

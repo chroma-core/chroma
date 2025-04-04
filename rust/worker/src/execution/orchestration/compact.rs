@@ -65,7 +65,6 @@ use chroma_types::GetSegmentsError;
 use chroma_types::SegmentScope;
 use chroma_types::SegmentUuid;
 use chroma_types::{CollectionUuid, LogRecord, Segment, SegmentFlushInfo, SegmentType};
-use core::panic;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
@@ -143,6 +142,8 @@ pub struct CompactOrchestrator {
     segment_spans: HashMap<SegmentUuid, Span>,
     // Total number of records in the collection after the compaction
     total_records_last_compaction: u64,
+    // How much to pull from fetch_logs
+    fetch_log_batch_size: u32,
 }
 
 #[derive(Error, Debug)]
@@ -257,6 +258,7 @@ impl CompactOrchestrator {
         result_channel: Option<Sender<Result<CompactionResponse, CompactionError>>>,
         max_compaction_size: usize,
         max_partition_size: usize,
+        fetch_log_batch_size: u32,
     ) -> Self {
         CompactOrchestrator {
             id: Uuid::new_v4(),
@@ -281,6 +283,7 @@ impl CompactOrchestrator {
             flush_results: Vec::new(),
             segment_spans: HashMap::new(),
             total_records_last_compaction: 0,
+            fetch_log_batch_size,
         }
     }
 
@@ -750,7 +753,7 @@ impl Orchestrator for CompactOrchestrator {
         vec![wrap(
             Box::new(FetchLogOperator {
                 log_client: self.log.clone(),
-                batch_size: 100,
+                batch_size: self.fetch_log_batch_size,
                 // Here we do not need to be inclusive since the compaction job
                 // offset is the one after the last compaction offset
                 start_log_offset_id: self.compaction_job.offset as u32,
@@ -791,7 +794,11 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
             }
         };
         tracing::info!("Pulled Records: {:?}", records.len());
-        let final_record_pulled = records.get(records.len() - 1);
+        let final_record_pulled = if !records.is_empty() {
+            records.get(records.len() - 1)
+        } else {
+            None
+        };
         match final_record_pulled {
             Some(record) => {
                 self.pulled_log_offset = Some(record.log_offset);
@@ -799,10 +806,12 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
                 self.partition(records, ctx).await;
             }
             None => {
-                tracing::error!(
-                    "No records pulled by compaction, this is a system invariant violation"
+                self.terminate_with_result(
+                    Err(CompactionError::InvariantViolation(
+                        "No records pulled by compaction, this is a system invariant violation",
+                    )),
+                    ctx,
                 );
-                panic!("No records pulled by compaction, this is a system invariant violation");
             }
         }
     }
