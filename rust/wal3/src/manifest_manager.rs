@@ -6,6 +6,7 @@ use setsum::Setsum;
 
 use crate::manifest::{Manifest, Snapshot};
 use crate::reader::read_fragment;
+use crate::writer::MarkDirty;
 use crate::{
     unprefixed_fragment_path, Error, Fragment, FragmentSeqNo, LogPosition, SnapshotOptions,
     ThrottleOptions,
@@ -170,7 +171,7 @@ impl ManifestManager {
     /// Recover from a fault in writing.  It is possible that fragments have been written that are
     /// not referenced by the manifest.  Scout ahead until an empty slot is observed.  Then write
     /// the manifest that includes the new fragments.
-    pub async fn recover(&mut self) -> Result<(), Error> {
+    pub async fn recover(&mut self, mark_dirty: &dyn MarkDirty) -> Result<(), Error> {
         let mut next_seq_no_to_apply = {
             // SAFETY(rescrv):  Mutex poisoning.
             let staging = self.staging.lock().unwrap();
@@ -184,6 +185,9 @@ impl ManifestManager {
             )
             .await?;
             if let Some(fragment) = next_fragment {
+                mark_dirty
+                    .mark_dirty(fragment.start, (fragment.limit - fragment.start) as usize)
+                    .await?;
                 self.publish_fragment(fragment).await?;
                 next_seq_no_to_apply += 1;
             } else {
