@@ -81,7 +81,12 @@ def load_collection_configuration_from_json(
                     embedding_function=None,
                 )
             else:
-                ef = known_embedding_functions[ef_config["name"]]
+                try:
+                    ef = known_embedding_functions[ef_config["name"]]
+                except KeyError:
+                    raise ValueError(
+                        f"Embedding function {ef_config['name']} not found. Add @register_embedding_function decorator to the class definition."
+                    )
                 return CollectionConfiguration(
                     hnsw=None,
                     embedding_function=ef.build_from_config(ef_config["config"]),
@@ -105,7 +110,12 @@ def load_collection_configuration_from_json(
                     embedding_function=None,
                 )
             else:
-                ef = known_embedding_functions[ef_config["name"]]
+                try:
+                    ef = known_embedding_functions[ef_config["name"]]
+                except KeyError:
+                    raise ValueError(
+                        f"Embedding function {ef_config['name']} not found. Add @register_embedding_function decorator to the class definition."
+                    )
                 return CollectionConfiguration(
                     hnsw=cast(HNSWConfiguration, json_map["hnsw"]),
                     embedding_function=ef.build_from_config(ef_config["config"]),
@@ -155,7 +165,7 @@ def collection_configuration_to_json(config: CollectionConfiguration) -> Dict[st
                     "type": "known",
                     "config": ef.get_config(),
                 }
-                register_embedding_function(type(ef))
+                register_embedding_function(type(ef))  # type: ignore
         except Exception as e:
             warnings.warn(
                 f"legacy embedding function config: {e}",
@@ -297,10 +307,15 @@ def load_create_collection_configuration_from_json(
                 )
                 return CreateCollectionConfiguration()
             else:
-                ef = known_embedding_functions[ef_config["name"]]
-                return CreateCollectionConfiguration(
-                    embedding_function=ef.build_from_config(ef_config["config"])
-                )
+                try:
+                    ef = known_embedding_functions[ef_config["name"]]
+                    return CreateCollectionConfiguration(
+                        embedding_function=ef.build_from_config(ef_config["config"])
+                    )
+                except KeyError:
+                    raise ValueError(
+                        f"Embedding function {ef_config['name']} not found. Add @register_embedding_function decorator to the class definition."
+                    )
     else:
         if json_map.get("embedding_function") is None:
             return CreateCollectionConfiguration(
@@ -318,11 +333,16 @@ def load_create_collection_configuration_from_json(
                     hnsw=json_to_create_hnsw_configuration(json_map["hnsw"])
                 )
             else:
-                ef = known_embedding_functions[ef_config["name"]]
-                return CreateCollectionConfiguration(
-                    hnsw=json_to_create_hnsw_configuration(json_map["hnsw"]),
-                    embedding_function=ef.build_from_config(ef_config["config"]),
-                )
+                try:
+                    ef = known_embedding_functions[ef_config["name"]]
+                    return CreateCollectionConfiguration(
+                        hnsw=json_to_create_hnsw_configuration(json_map["hnsw"]),
+                        embedding_function=ef.build_from_config(ef_config["config"]),
+                    )
+                except KeyError:
+                    raise ValueError(
+                        f"Embedding function {ef_config['name']} not found. Add @register_embedding_function decorator to the class definition."
+                    )
 
 
 def create_collection_configuration_to_json_str(
@@ -361,7 +381,7 @@ def create_collection_configuration_to_json(
                 "type": "known",
                 "config": ef.get_config(),
             }
-            register_embedding_function(type(ef))
+            register_embedding_function(type(ef))  # type: ignore
     except Exception as e:
         warnings.warn(
             f"legacy embedding function config: {e}",
@@ -563,7 +583,7 @@ def update_collection_configuration_to_json(
                 "type": "known",
                 "config": ef.get_config(),
             }
-            register_embedding_function(type(ef))
+            register_embedding_function(type(ef))  # type: ignore
     else:
         ef_config = None
 
@@ -596,12 +616,19 @@ def load_update_collection_configuration_from_json(
                 )
                 return UpdateCollectionConfiguration()
             else:
-                ef = known_embedding_functions[json_map["embedding_function"]["name"]]
-                return UpdateCollectionConfiguration(
-                    embedding_function=ef.build_from_config(
-                        json_map["embedding_function"]["config"]
+                try:
+                    ef = known_embedding_functions[
+                        json_map["embedding_function"]["name"]
+                    ]
+                    return UpdateCollectionConfiguration(
+                        embedding_function=ef.build_from_config(
+                            json_map["embedding_function"]["config"]
+                        )
                     )
-                )
+                except KeyError:
+                    raise ValueError(
+                        f"embedding function {json_map['embedding_function']['name']} not found. add @register_embedding_function to the class definition."
+                    )
     else:
         if json_map.get("embedding_function") is None:
             return UpdateCollectionConfiguration(
@@ -618,13 +645,20 @@ def load_update_collection_configuration_from_json(
                     hnsw=json_to_update_hnsw_configuration(json_map["hnsw"])
                 )
             else:
-                ef = known_embedding_functions[json_map["embedding_function"]["name"]]
-                return UpdateCollectionConfiguration(
-                    hnsw=json_to_update_hnsw_configuration(json_map["hnsw"]),
-                    embedding_function=ef.build_from_config(
-                        json_map["embedding_function"]["config"]
-                    ),
-                )
+                try:
+                    ef = known_embedding_functions[
+                        json_map["embedding_function"]["name"]
+                    ]
+                    return UpdateCollectionConfiguration(
+                        hnsw=json_to_update_hnsw_configuration(json_map["hnsw"]),
+                        embedding_function=ef.build_from_config(
+                            json_map["embedding_function"]["config"]
+                        ),
+                    )
+                except KeyError:
+                    raise ValueError(
+                        f"embedding function {json_map['embedding_function']['name']} not found. add @register_embedding_function to the class definition."
+                    )
 
 
 def overwrite_hnsw_configuration(

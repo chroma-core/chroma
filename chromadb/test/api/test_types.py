@@ -1,7 +1,10 @@
 import pytest
 from typing import List, cast, Dict, Any
 from chromadb.api.types import Documents, Image, Document, Embeddings
-from chromadb.utils.embedding_functions import EmbeddingFunction
+from chromadb.utils.embedding_functions import (
+    EmbeddingFunction,
+    register_embedding_function,
+)
 import numpy as np
 
 
@@ -22,6 +25,7 @@ def random_documents() -> List[Document]:
 def test_embedding_function_results_format_when_response_is_valid() -> None:
     valid_embeddings = random_embeddings()
 
+    @register_embedding_function
     class TestEmbeddingFunction(EmbeddingFunction[Documents]):
         def __init__(self) -> None:
             pass
@@ -40,7 +44,8 @@ def test_embedding_function_results_format_when_response_is_valid() -> None:
         def __call__(self, input: Documents) -> Embeddings:
             return valid_embeddings
 
-        def validate_config(self, config: Dict[str, Any]) -> None:
+        @staticmethod
+        def validate_config(config: Dict[str, Any]) -> None:
             pass
 
         def validate_config_update(
@@ -58,6 +63,7 @@ def test_embedding_function_results_format_when_response_is_valid() -> None:
 def test_embedding_function_results_format_when_response_is_invalid() -> None:
     invalid_embedding = {"error": "test"}
 
+    @register_embedding_function
     class TestEmbeddingFunction(EmbeddingFunction[Documents]):
         def __init__(self) -> None:
             pass
@@ -73,7 +79,8 @@ def test_embedding_function_results_format_when_response_is_invalid() -> None:
         def get_config(self) -> Dict[str, Any]:
             return {}
 
-        def validate_config(self, config: Dict[str, Any]) -> None:
+        @staticmethod
+        def validate_config(config: Dict[str, Any]) -> None:
             pass
 
         def validate_config_update(
