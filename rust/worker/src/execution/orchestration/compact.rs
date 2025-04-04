@@ -271,7 +271,7 @@ impl CompactOrchestrator {
             writers
                 .record_reader
                 .as_ref()
-                .map(|reader| AtomicU32::new(reader.get_max_offset_id()))
+                .map(|reader| AtomicU32::new(reader.get_max_offset_id() + 1))
                 .unwrap_or_default(),
         );
 
