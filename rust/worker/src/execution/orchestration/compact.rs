@@ -118,7 +118,6 @@ pub struct CompactOrchestrator {
     spann_provider: SpannProvider,
 
     collection: OnceCell<Collection>,
-    log_start_offset: u32,
     writers: OnceCell<CompactWriters>,
     flush_results: Vec<SegmentFlushInfo>,
     result_channel: Option<Sender<Result<CompactionResponse, CompactionError>>>,
@@ -236,7 +235,6 @@ impl CompactOrchestrator {
             hnsw_provider,
             spann_provider,
             collection: OnceCell::new(),
-            log_start_offset: 0,
             writers: OnceCell::new(),
             flush_results: Vec::new(),
             result_channel,
@@ -681,9 +679,8 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                 Box::new(FetchLogOperator {
                     log_client: self.log.clone(),
                     batch_size: self.fetch_log_batch_size,
-                    // Here we do not need to be inclusive since the compaction job
-                    // offset is the one after the last compaction offset
-                    start_log_offset_id: self.log_start_offset,
+                    // We need to start fetching from the first log that has not been compacted
+                    start_log_offset_id: collection.log_position as u32 + 1,
                     maximum_fetch_count: Some(self.max_compaction_size as u32),
                     collection_uuid: self.collection_id,
                 }),
@@ -995,8 +992,9 @@ mod tests {
         let orchestrator = CompactOrchestrator::new(
             test_segments.collection.collection_id,
             true,
-            1000,
+            5000,
             10000,
+            1000,
             log,
             sysdb.clone(),
             test_segments.blockfile_provider.clone(),
