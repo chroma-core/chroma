@@ -138,7 +138,8 @@ impl WorkerServer {
             batch_size,
             // The collection log position is inclusive, and we want to start from the next log
             // Note that we query using the incoming log position this is critical for correctness
-            start_log_offset_id: collection_and_segments.collection.log_position as u32 + 1,
+            start_log_offset_id: u64::try_from(collection_and_segments.collection.log_position + 1)
+                .unwrap_or_default(),
             maximum_fetch_count: None,
             collection_uuid: collection_and_segments.collection.collection_id,
         }

@@ -681,7 +681,8 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                     log_client: self.log.clone(),
                     batch_size: self.fetch_log_batch_size,
                     // We need to start fetching from the first log that has not been compacted
-                    start_log_offset_id: collection.log_position as u32 + 1,
+                    start_log_offset_id: u64::try_from(collection.log_position + 1)
+                        .unwrap_or_default(),
                     maximum_fetch_count: Some(self.max_compaction_size as u32),
                     collection_uuid: self.collection_id,
                 }),
@@ -1057,7 +1058,8 @@ mod tests {
         let fetch_log = FetchLogOperator {
             log_client: log.clone(),
             batch_size: 50,
-            start_log_offset_id: old_cas.collection.log_position as u32 + 1,
+            start_log_offset_id: u64::try_from(old_cas.collection.log_position + 1)
+                .unwrap_or_default(),
             maximum_fetch_count: None,
             collection_uuid: collection_id,
         };
