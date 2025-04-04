@@ -79,10 +79,7 @@ impl DeleteVersionsAtSysDbOperator {
             return;
         }
 
-        tracing::info!(
-            files = ?version_files_to_delete,
-            "Deleting version files"
-        );
+        tracing::info!("Deleting version files");
 
         let mut futures = Vec::new();
         for file_path in &version_files_to_delete {
@@ -141,7 +138,6 @@ impl Operator<DeleteVersionsAtSysDbInput, DeleteVersionsAtSysDbOutput>
 
         tracing::info!(
             unused_files_count = input.unused_s3_files.len(),
-            unused_files = ?input.unused_s3_files,
             "Unused S3 files that will be cleaned up after version deletion"
         );
 

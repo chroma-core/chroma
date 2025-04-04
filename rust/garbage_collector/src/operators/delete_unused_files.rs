@@ -234,22 +234,16 @@ impl Operator<DeleteUnusedFilesInput, DeleteUnusedFilesOutput> for DeleteUnusedF
             }
             CleanupMode::Rename => {
                 // Soft delete - rename the file
-                let mut futures = Vec::new();
-                for file_path in &all_files {
-                    let new_path = self.get_rename_path(file_path, input.epoch_id);
-                    futures.push(self.rename_with_path(file_path.clone(), new_path));
-                }
-
-                let num_futures = futures.len();
-                if num_futures > 0 {
-                    let results: Vec<Result<(), FileOperationError>> =
-                        futures::stream::iter(futures)
-                            .buffer_unordered(num_futures)
-                            .collect()
-                            .await;
+                if !all_files.is_empty() {
+                    let mut rename_stream = futures::stream::iter(all_files.clone())
+                        .map(move |file_path| {
+                            let new_path = self.get_rename_path(&file_path, input.epoch_id);
+                            self.rename_with_path(file_path, new_path)
+                        })
+                        .buffer_unordered(100);
 
                     // Process any errors that occurred
-                    for result in results {
+                    while let Some(result) = rename_stream.next().await {
                         if let Err(e) = result {
                             file_operation_errors.push(format!("{}: {}", e.path, e.error));
                         }
@@ -258,21 +252,13 @@ impl Operator<DeleteUnusedFilesInput, DeleteUnusedFilesOutput> for DeleteUnusedF
             }
             CleanupMode::Delete => {
                 // Hard delete - remove the file
-                let mut futures = Vec::new();
-                for file_path in &all_files {
-                    futures.push(self.delete_with_path(file_path.clone()));
-                }
-
-                let num_futures = futures.len();
-                if num_futures > 0 {
-                    let results: Vec<Result<(), FileOperationError>> =
-                        futures::stream::iter(futures)
-                            .buffer_unordered(num_futures)
-                            .collect()
-                            .await;
+                if !all_files.is_empty() {
+                    let mut delete_stream = futures::stream::iter(all_files.clone())
+                        .map(move |file_path| self.delete_with_path(file_path))
+                        .buffer_unordered(100);
 
                     // Process any errors that occurred
-                    for result in results {
+                    while let Some(result) = delete_stream.next().await {
                         if let Err(e) = result {
                             file_operation_errors.push(format!("{}: {}", e.path, e.error));
                         }
