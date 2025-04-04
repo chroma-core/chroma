@@ -371,7 +371,7 @@ func (s *collectionDb) UpdateLogPositionAndVersionInfo(
 	newVersionFileName string,
 	totalRecordsPostCompaction uint64,
 	sizeBytesPostCompaction uint64,
-	lastCompactionTimeSecs int64,
+	lastCompactionTimeSecs uint64,
 ) (int64, error) {
 	// TODO(rohitcp): Investigate if we need to hold the lock using "UPDATE"
 	// strength, or if we can use "SELECT FOR UPDATE" or some other less
@@ -396,7 +396,7 @@ func (s *collectionDb) UpdateLogPositionAndVersionInfo(
 	return result.RowsAffected, nil
 }
 
-func (s *collectionDb) UpdateLogPositionVersionTotalRecordsAndLogicalSize(collectionID string, logPosition int64, currentCollectionVersion int32, totalRecordsPostCompaction uint64, sizeBytesPostCompaction uint64, lastCompactionTimeSecs int64, tenant string) (int32, error) {
+func (s *collectionDb) UpdateLogPositionVersionTotalRecordsAndLogicalSize(collectionID string, logPosition int64, currentCollectionVersion int32, totalRecordsPostCompaction uint64, sizeBytesPostCompaction uint64, lastCompactionTimeSecs uint64, tenant string) (int32, error) {
 	log.Info("update log position, version, and total records post compaction", zap.String("collectionID", collectionID), zap.Int64("logPosition", logPosition), zap.Int32("currentCollectionVersion", currentCollectionVersion), zap.Uint64("totalRecords", totalRecordsPostCompaction))
 	var collection dbmodel.Collection
 	// We use select for update to ensure no lost update happens even for isolation level read committed or below

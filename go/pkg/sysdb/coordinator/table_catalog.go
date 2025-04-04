@@ -1075,7 +1075,7 @@ func (tc *Catalog) FlushCollectionCompaction(ctx context.Context, flushCollectio
 
 		// update collection log position and version
 		lastCompactionTime := time.Now().Unix()
-		collectionVersion, err := tc.metaDomain.CollectionDb(txCtx).UpdateLogPositionVersionTotalRecordsAndLogicalSize(flushCollectionCompaction.ID.String(), flushCollectionCompaction.LogPosition, flushCollectionCompaction.CurrentCollectionVersion, flushCollectionCompaction.TotalRecordsPostCompaction, flushCollectionCompaction.SizeBytesPostCompaction, lastCompactionTime, flushCollectionCompaction.TenantID)
+		collectionVersion, err := tc.metaDomain.CollectionDb(txCtx).UpdateLogPositionVersionTotalRecordsAndLogicalSize(flushCollectionCompaction.ID.String(), flushCollectionCompaction.LogPosition, flushCollectionCompaction.CurrentCollectionVersion, flushCollectionCompaction.TotalRecordsPostCompaction, flushCollectionCompaction.SizeBytesPostCompaction, uint64(lastCompactionTime), flushCollectionCompaction.TenantID)
 		if err != nil {
 			return err
 		}
@@ -1249,7 +1249,9 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 				newVersionFileName,
 				flushCollectionCompaction.TotalRecordsPostCompaction,
 				flushCollectionCompaction.SizeBytesPostCompaction,
-				lastCompactionTime,
+				// SAFETY(hammadb): This int64 to uint64 conversion is ok because we always are in post-epoch time.
+				// and the value is always positive.
+				uint64(lastCompactionTime),
 			)
 			if err != nil {
 				return err

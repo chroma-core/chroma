@@ -56,9 +56,9 @@ type ICollectionDb interface {
 	Insert(in *Collection) error
 	Update(in *Collection) error
 	DeleteAll() error
-	UpdateLogPositionVersionTotalRecordsAndLogicalSize(collectionID string, logPosition int64, currentCollectionVersion int32, totalRecordsPostCompaction uint64, sizeBytesPostCompaction uint64, lastCompactionTimeSecs int64, tenant string) (int32, error)
+	UpdateLogPositionVersionTotalRecordsAndLogicalSize(collectionID string, logPosition int64, currentCollectionVersion int32, totalRecordsPostCompaction uint64, sizeBytesPostCompaction uint64, lastCompactionTimeSecs uint64, tenant string) (int32, error)
 	UpdateLogPositionAndVersionInfo(collectionID string, logPosition int64, currentCollectionVersion int32, currentVersionFileName string, newCollectionVersion int32, newVersionFileName string, totalRecordsPostCompaction uint64,
-		sizeBytesPostCompaction uint64, lastCompactionTimeSecs int64) (int64, error)
+		sizeBytesPostCompaction uint64, lastCompactionTimeSecs uint64) (int64, error)
 	GetCollectionEntry(collectionID *string, databaseName *string) (*Collection, error)
 	GetCollectionSize(collectionID string) (uint64, error)
 	ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64) ([]*CollectionToGc, error)
