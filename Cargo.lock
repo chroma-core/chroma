@@ -3299,6 +3299,7 @@ dependencies = [
  "futures",
  "humantime",
  "itertools 0.13.0",
+ "opentelemetry",
  "proptest",
  "proptest-derive 0.3.0",
  "proptest-state-machine",
