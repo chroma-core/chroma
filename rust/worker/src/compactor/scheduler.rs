@@ -216,11 +216,6 @@ impl Scheduler {
                 );
                 self.job_queue.push(CompactionJob {
                     collection_id: record.collection_id,
-                    tenant_id: record.tenant_id,
-                    offset: record.offset,
-                    collection_version: record.collection_version,
-                    collection_logical_size_bytes: record.collection_logical_size_bytes,
-                    rebuild: false,
                 });
                 self.oneoff_collections.remove(&record.collection_id);
                 if self.job_queue.len() == self.max_concurrent_jobs {

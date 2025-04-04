@@ -1,8 +1,8 @@
 use super::scheduler::Scheduler;
 use super::scheduler_policy::LasCompactionTimeSchedulerPolicy;
-use super::OneOffCompactionMessage;
-use crate::compactor::types::CompactionJob;
-use crate::compactor::types::ScheduledCompactionMessage;
+use super::OneOffCompactMessage;
+use super::RebuildMessage;
+use crate::compactor::types::ScheduledCompactMessage;
 use crate::config::CompactionServiceConfig;
 use crate::execution::orchestration::CompactOrchestrator;
 use crate::execution::orchestration::CompactionResponse;
@@ -115,7 +115,8 @@ impl CompactionManager {
     #[instrument(name = "CompactionManager::compact")]
     async fn compact(
         &self,
-        compaction_job: &CompactionJob,
+        collection_id: CollectionUuid,
+        rebuild: bool,
     ) -> Result<CompactionResponse, Box<dyn ChromaError>> {
         let dispatcher = match self.dispatcher {
             Some(ref dispatcher) => dispatcher.clone(),
@@ -128,7 +129,11 @@ impl CompactionManager {
         match self.system {
             Some(ref system) => {
                 let orchestrator = CompactOrchestrator::new(
-                    compaction_job.clone(),
+                    collection_id,
+                    rebuild,
+                    self.fetch_log_batch_size,
+                    self.max_compaction_size,
+                    self.max_partition_size,
                     self.log.clone(),
                     self.sysdb.clone(),
                     self.blockfile_provider.clone(),
@@ -136,9 +141,6 @@ impl CompactionManager {
                     self.spann_provider.clone(),
                     dispatcher,
                     None,
-                    self.max_compaction_size,
-                    self.max_partition_size,
-                    self.fetch_log_batch_size,
                 );
 
                 match orchestrator.run(system.clone()).await {
@@ -168,7 +170,7 @@ impl CompactionManager {
             .map(|job| {
                 let instrumented_span = span!(parent: None, tracing::Level::INFO, "Compacting job", collection_id = ?job.collection_id);
                 instrumented_span.follows_from(Span::current());
-                self.compact(job).instrument(instrumented_span)
+                self.compact(job.collection_id, false).instrument(instrumented_span)
             })
             .collect::<FuturesUnordered<_>>();
 
@@ -179,7 +181,7 @@ impl CompactionManager {
                 match result {
                     Ok(response) => {
                         tracing::info!("Compaction completed: {response:?}");
-                        Some(response.compaction_job.collection_id)
+                        Some(response.collection_id)
                     }
                     Err(err) => {
                         tracing::error!("Compaction failed {err}");
@@ -189,6 +191,16 @@ impl CompactionManager {
             })
             .collect()
             .await
+    }
+
+    #[instrument(name = "CompactionManager::rebuild_batch")]
+    pub(crate) async fn rebuild_batch(&mut self, collection_ids: Vec<CollectionUuid>) {
+        let _ = collection_ids
+            .iter()
+            .map(|id| self.compact(*id, true))
+            .collect::<FuturesUnordered<_>>()
+            .collect::<Vec<_>>()
+            .await;
     }
 
     pub(crate) fn set_dispatcher(&mut self, dispatcher: ComponentHandle<Dispatcher>) {
@@ -312,7 +324,7 @@ impl Component for CompactionManager {
     async fn on_start(&mut self, ctx: &ComponentContext<Self>) -> () {
         tracing::info!("Starting CompactionManager");
         ctx.scheduler.schedule(
-            ScheduledCompactionMessage {},
+            ScheduledCompactMessage {},
             self.compaction_interval,
             ctx,
             || Some(span!(parent: None, tracing::Level::INFO, "Scheduled compaction")),
@@ -328,12 +340,12 @@ impl Debug for CompactionManager {
 
 // ============== Handlers ==============
 #[async_trait]
-impl Handler<ScheduledCompactionMessage> for CompactionManager {
+impl Handler<ScheduledCompactMessage> for CompactionManager {
     type Result = ();
 
     async fn handle(
         &mut self,
-        _message: ScheduledCompactionMessage,
+        _message: ScheduledCompactMessage,
         ctx: &ComponentContext<CompactionManager>,
     ) {
         tracing::info!("CompactionManager: Performing scheduled compaction");
@@ -342,7 +354,7 @@ impl Handler<ScheduledCompactionMessage> for CompactionManager {
 
         // Compaction is done, schedule the next compaction
         ctx.scheduler.schedule(
-            ScheduledCompactionMessage {},
+            ScheduledCompactMessage {},
             self.compaction_interval,
             ctx,
             || Some(span!(parent: None, tracing::Level::INFO, "Scheduled compaction")),
@@ -351,11 +363,11 @@ impl Handler<ScheduledCompactionMessage> for CompactionManager {
 }
 
 #[async_trait]
-impl Handler<OneOffCompactionMessage> for CompactionManager {
+impl Handler<OneOffCompactMessage> for CompactionManager {
     type Result = ();
     async fn handle(
         &mut self,
-        message: OneOffCompactionMessage,
+        message: OneOffCompactMessage,
         _ctx: &ComponentContext<CompactionManager>,
     ) {
         self.scheduler
@@ -364,6 +376,22 @@ impl Handler<OneOffCompactionMessage> for CompactionManager {
             "One-off collections queued: {:?}",
             self.scheduler.get_oneoff_collections()
         );
+    }
+}
+
+#[async_trait]
+impl Handler<RebuildMessage> for CompactionManager {
+    type Result = ();
+    async fn handle(
+        &mut self,
+        message: RebuildMessage,
+        _ctx: &ComponentContext<CompactionManager>,
+    ) {
+        tracing::info!(
+            "Rebuild started for collections: {:?}",
+            message.collection_ids
+        );
+        self.rebuild_batch(message.collection_ids).await;
     }
 }
 

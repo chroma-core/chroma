@@ -46,7 +46,7 @@ pub struct ProjectionInput {
     pub offset_ids: Vec<u32>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ProjectionRecord {
     pub id: String,
     pub document: Option<String>,
@@ -54,7 +54,9 @@ pub struct ProjectionRecord {
     pub metadata: Option<Metadata>,
 }
 
-#[derive(Debug)]
+impl Eq for ProjectionRecord {}
+
+#[derive(Debug, PartialEq, Eq)]
 pub struct ProjectionOutput {
     pub records: Vec<ProjectionRecord>,
 }
