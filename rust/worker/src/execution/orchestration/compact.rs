@@ -940,3 +940,124 @@ impl Handler<TaskResult<RegisterOutput, RegisterError>> for CompactOrchestrator 
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use chroma_blockstore::key::KeyWrapper;
+    use chroma_config::{registry::Registry, Configurable};
+    use chroma_log::{
+        in_memory_log::InMemoryLog,
+        test::{upsert_generator, LoadFromGenerator},
+        Log,
+    };
+    use chroma_segment::{blockfile_metadata::MetadataSegmentReader, test::TestDistributedSegment};
+    use chroma_sysdb::{SysDb, TestSysDb};
+    use chroma_system::{Dispatcher, Orchestrator, System};
+
+    use crate::config::RootConfig;
+
+    use super::CompactOrchestrator;
+
+    #[tokio::test]
+    async fn test_rebuild() {
+        let config = RootConfig::default();
+        let system = System::default();
+        let registry = Registry::new();
+        let dispatcher = Dispatcher::try_from_config(&config.query_service.dispatcher, &registry)
+            .await
+            .expect("Should be able to initialize dispatcher");
+        let dispatcher_handle = system.start_component(dispatcher);
+        let mut sysdb = SysDb::Test(TestSysDb::new());
+        let log = Log::InMemory(InMemoryLog::new());
+        let mut test_segments = TestDistributedSegment::default();
+        test_segments
+            .populate_with_generator(100, upsert_generator)
+            .await;
+        sysdb
+            .create_collection(
+                test_segments.collection.tenant,
+                test_segments.collection.database,
+                test_segments.collection.collection_id,
+                test_segments.collection.name,
+                vec![
+                    test_segments.record_segment.clone(),
+                    test_segments.metadata_segment.clone(),
+                    test_segments.vector_segment.clone(),
+                ],
+                None,
+                None,
+                test_segments.collection.dimension,
+                false,
+            )
+            .await
+            .expect("Colleciton create should be successful");
+
+        let orchestrator = CompactOrchestrator::new(
+            test_segments.collection.collection_id,
+            true,
+            1000,
+            10000,
+            log,
+            sysdb.clone(),
+            test_segments.blockfile_provider.clone(),
+            test_segments.hnsw_provider.clone(),
+            test_segments.spann_provider.clone(),
+            dispatcher_handle,
+            None,
+        );
+
+        assert!(orchestrator.run(system).await.is_ok());
+
+        let new_cas = sysdb
+            .get_collection_with_segments(test_segments.collection.collection_id)
+            .await
+            .expect("Collection and segment information should be present");
+
+        assert_eq!(
+            new_cas.metadata_segment.id,
+            test_segments.metadata_segment.id
+        );
+        assert_eq!(
+            new_cas.record_segment.file_path,
+            test_segments.record_segment.file_path
+        );
+        assert_eq!(new_cas.vector_segment.id, test_segments.vector_segment.id);
+        assert_ne!(
+            new_cas.metadata_segment.file_path,
+            test_segments.metadata_segment.file_path
+        );
+        assert_eq!(new_cas.record_segment.id, test_segments.record_segment.id);
+        assert_ne!(
+            new_cas.vector_segment.file_path,
+            test_segments.vector_segment.file_path
+        );
+
+        let old_metadata_reader = MetadataSegmentReader::from_segment(
+            &test_segments.metadata_segment,
+            &test_segments.blockfile_provider,
+        )
+        .await
+        .expect("Should be able to initialize metadata segment reader");
+        let new_metadata_reader = MetadataSegmentReader::from_segment(
+            &new_cas.metadata_segment,
+            &test_segments.blockfile_provider,
+        )
+        .await
+        .expect("Should be able to initialize metadata segment reader");
+
+        let old_vals = old_metadata_reader
+            .u32_metadata_index_reader
+            .expect("Int reader should exist")
+            .gte("modulo_3", &KeyWrapper::Uint32(0))
+            .await
+            .expect("Metadata should be readable");
+        assert!(!old_vals.is_empty());
+        let new_vals = new_metadata_reader
+            .u32_metadata_index_reader
+            .expect("Int reader should exist")
+            .gte("modulo_3", &KeyWrapper::Uint32(0))
+            .await
+            .expect("Metadata should be readable");
+        assert_eq!(new_vals, old_vals);
+    }
+}
