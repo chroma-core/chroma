@@ -268,14 +268,14 @@ impl CompactOrchestrator {
     ) {
         self.state = ExecutionState::MaterializeApplyCommitFlush;
 
-        let writers = match self.ok_or_terminate(self.get_segment_writers(), ctx) {
-            Some(writers) => writers,
-            None => return,
-        };
+        // NOTE: We allow writers no be uninitialized for the case when the materialized logs are empty
+        let record_reader = self
+            .get_segment_writers()
+            .ok()
+            .and_then(|writers| writers.record_reader);
 
         let next_max_offset_id = Arc::new(
-            writers
-                .record_reader
+            record_reader
                 .as_ref()
                 .map(|reader| AtomicU32::new(reader.get_max_offset_id() + 1))
                 .unwrap_or_default(),
@@ -286,7 +286,7 @@ impl CompactOrchestrator {
             let operator = MaterializeLogOperator::new();
             let input = MaterializeLogInput::new(
                 partition.clone(),
-                writers.record_reader.as_ref().cloned(),
+                record_reader.clone(),
                 next_max_offset_id.clone(),
             );
             let task = wrap(operator, input, ctx.receiver());
@@ -540,19 +540,6 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         };
 
         let collection = output.collection.clone();
-        let dimension = match collection.dimension {
-            Some(dim) => dim as usize,
-            None => {
-                self.terminate_with_result(
-                    Err(CompactionError::InvariantViolation(
-                        "Collection version should have been populated before compaction",
-                    )),
-                    ctx,
-                );
-                return;
-            }
-        };
-
         if self.collection.set(collection.clone()).is_err() {
             self.terminate_with_result(
                 Err(CompactionError::InvariantViolation(
@@ -568,16 +555,6 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             false => collection.size_bytes_post_compaction as i64,
         };
         self.pulled_log_offset = collection.log_position;
-
-        let mut metadata_segment = output.metadata_segment.clone();
-        let mut record_segment = output.record_segment.clone();
-        let mut vector_segment = output.vector_segment.clone();
-        if self.rebuild {
-            // Reset the metadata and vector segments by purging the file paths
-            metadata_segment.file_path = Default::default();
-            record_segment.file_path = Default::default();
-            vector_segment.file_path = Default::default();
-        }
 
         let record_reader = match self.ok_or_terminate(
             match RecordSegmentReader::from_segment(
@@ -597,6 +574,50 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             Some(reader) => reader,
             None => return,
         };
+
+        let log_task = match self.rebuild {
+            true => wrap(
+                Box::new(SourceRecordSegmentOperator {}),
+                SourceRecordSegmentInput {
+                    record_segment_reader: record_reader.clone(),
+                },
+                ctx.receiver(),
+            ),
+            false => wrap(
+                Box::new(FetchLogOperator {
+                    log_client: self.log.clone(),
+                    batch_size: self.fetch_log_batch_size,
+                    // We need to start fetching from the first log that has not been compacted
+                    start_log_offset_id: u64::try_from(collection.log_position + 1)
+                        .unwrap_or_default(),
+                    maximum_fetch_count: Some(self.max_compaction_size as u32),
+                    collection_uuid: self.collection_id,
+                }),
+                (),
+                ctx.receiver(),
+            ),
+        };
+
+        let dimension = match collection.dimension {
+            Some(dim) => dim as usize,
+            None => {
+                // Collection is not yet initialized, there is no need to initialize the writers
+                // Future handlers should return early on empty materialized logs without using writers
+                self.send(log_task, ctx).await;
+                return;
+            }
+        };
+
+        let mut metadata_segment = output.metadata_segment.clone();
+        let mut record_segment = output.record_segment.clone();
+        let mut vector_segment = output.vector_segment.clone();
+        if self.rebuild {
+            // Reset the metadata and vector segments by purging the file paths
+            metadata_segment.file_path = Default::default();
+            record_segment.file_path = Default::default();
+            vector_segment.file_path = Default::default();
+        }
+
         let record_writer = match self.ok_or_terminate(
             RecordSegmentWriter::from_segment(&record_segment, &self.blockfile_provider).await,
             ctx,
@@ -667,29 +688,6 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             );
             self.send(prefetch_task, ctx).await;
         }
-
-        let log_task = match self.rebuild {
-            true => wrap(
-                Box::new(SourceRecordSegmentOperator {}),
-                SourceRecordSegmentInput {
-                    record_segment_reader: record_reader,
-                },
-                ctx.receiver(),
-            ),
-            false => wrap(
-                Box::new(FetchLogOperator {
-                    log_client: self.log.clone(),
-                    batch_size: self.fetch_log_batch_size,
-                    // We need to start fetching from the first log that has not been compacted
-                    start_log_offset_id: u64::try_from(collection.log_position + 1)
-                        .unwrap_or_default(),
-                    maximum_fetch_count: Some(self.max_compaction_size as u32),
-                    collection_uuid: self.collection_id,
-                }),
-                (),
-                ctx.receiver(),
-            ),
-        };
 
         self.send(log_task, ctx).await;
     }
@@ -794,7 +792,7 @@ impl Handler<TaskResult<PartitionOutput, PartitionError>> for CompactOrchestrato
     ) {
         let output = match self.ok_or_terminate(message.into_inner(), ctx) {
             Some(recs) => recs.records,
-            None => todo!(),
+            None => return,
         };
         self.materialize_log(output, ctx).await;
     }
