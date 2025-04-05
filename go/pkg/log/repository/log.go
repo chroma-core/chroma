@@ -215,8 +215,14 @@ func (r *LogRepository) GarbageCollection(ctx context.Context) error {
 			tx.Rollback(ctx)
 			continue
 		}
-		batchSize := min(int(minMax.MaxOffset-minMax.MinOffset), 100)
-		for offset := minMax.MinOffset; offset < minMax.MaxOffset; offset += int64(batchSize) {
+		trace_log.Info("Obtained minimum and maximum offset for collection", zap.String("collectionId", collectionId), zap.Int64("minOffset", minMax.MinOffset), zap.Int64("maxOffset", minMax.MaxOffset))
+		minOffset := minMax.MinOffset
+		if minOffset == 1 {
+			minOffset = 0
+		}
+		maxOffset := minMax.MaxOffset
+		batchSize := min(int(maxOffset-minOffset), 100)
+		for offset := minOffset; offset < maxOffset; offset += int64(batchSize) {
 			err = queriesWithTx.DeleteRecordsRange(ctx, log.DeleteRecordsRangeParams{
 				CollectionID: collectionId,
 				MinOffset:    offset,
@@ -227,7 +233,6 @@ func (r *LogRepository) GarbageCollection(ctx context.Context) error {
 				tx.Rollback(ctx)
 				continue
 			}
-			trace_log.Info("Deleted records for collection", zap.String("collectionId", collectionId), zap.Int64("minOffset", offset), zap.Int64("maxOffset", offset+int64(batchSize)))
 		}
 
 		if err != nil {
