@@ -64,13 +64,13 @@ embeddings = np.random.randn(50000, 2048).astype(np.float32).tolist()
 ```
 
 we set up two Chroma collections:
-* The first is configured with `hnsw:ef_search: 10`. When querying using a specific embedding from the set (with `id = 1`), the query takes `0.00529` seconds, and we get back embeddings with distances:
+* The first is configured with `hnsw:search_ef: 10`. When querying using a specific embedding from the set (with `id = 1`), the query takes `0.00529` seconds, and we get back embeddings with distances:
 
 ```
 [3629.019775390625, 3666.576904296875, 3684.57080078125]
 ``` 
 
-* The second collection is configured with `hnsw:ef_search: 100` and `hnsw:ef_construction:1000`. When issuing the same query, this time it takes `0.00753` seconds (about 42% slower), but with better results as measured by their distance:
+* The second collection is configured with `hnsw:search_ef: 100` and `hnsw:construction_ef:1000`. When issuing the same query, this time it takes `0.00753` seconds (about 42% slower), but with better results as measured by their distance:
 
 ```
 [0.0, 3620.593994140625, 3623.275390625]
