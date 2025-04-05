@@ -350,7 +350,11 @@ impl SysDb {
                     .await
             }
             SysDb::Sqlite(sqlite) => sqlite.get_collection_with_segments(collection_id).await,
-            SysDb::Test(_test_sys_db) => todo!(),
+            SysDb::Test(test_sys_db) => {
+                test_sys_db
+                    .get_collection_with_segments(collection_id)
+                    .await
+            }
         }
     }
 
