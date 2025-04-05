@@ -150,7 +150,7 @@ export class AdminClient {
    * ```
    */
   public async createTenant({ name }: { name: string }): Promise<Tenant> {
-    await this.api.createTenantV2({ name }, this.api.options);
+    await this.api.createTenant({ name }, this.api.options);
 
     return { name };
   }
@@ -172,7 +172,7 @@ export class AdminClient {
    * ```
    */
   public async getTenant({ name }: { name: string }): Promise<Tenant> {
-    const getTenant = (await this.api.getTenantV2(
+    const getTenant = (await this.api.getTenant(
       name,
       this.api.options,
     )) as Tenant;
@@ -205,7 +205,7 @@ export class AdminClient {
     name: string;
     tenantName: string;
   }): Promise<{ name: string }> {
-    await this.api.createDatabaseV2(tenantName, { name }, this.api.options);
+    await this.api.createDatabase(tenantName, { name }, this.api.options);
 
     return { name };
   }
@@ -235,9 +235,9 @@ export class AdminClient {
     name: string;
     tenantName: string;
   }): Promise<Database> {
-    const result = (await this.api.getDatabaseV2(
-      name,
+    const result = (await this.api.getDatabase(
       tenantName,
+      name,
       this.api.options,
     )) as Database;
 
@@ -261,7 +261,7 @@ export class AdminClient {
     name: string;
     tenantName: string;
   }): Promise<void> {
-    await this.api.deleteDatabaseV2(name, tenantName, this.api.options);
+    await this.api.deleteDatabase(tenantName, name, this.api.options);
     return;
   }
 
@@ -284,7 +284,7 @@ export class AdminClient {
     offset?: number;
     tenantName: string;
   }): Promise<Database[]> {
-    const response = await this.api.listDatabasesV2(
+    const response = await this.api.listDatabases(
       tenantName,
       limit,
       offset,
