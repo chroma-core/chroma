@@ -37,8 +37,13 @@ DELETE FROM record_log r using collection c where r.collection_id = c.id and r.o
 -- name: GetTotalUncompactedRecordsCount :one
 SELECT CAST(COALESCE(SUM(record_enumeration_offset_position - record_compaction_offset_position), 0) AS bigint) AS total_uncompacted_depth FROM collection;
 
--- name: DeleteRecords :exec
-DELETE FROM record_log r where r.collection_id = ANY(@collection_ids::text[]);
+-- name: DeleteRecordsRange :exec
+DELETE FROM record_log r where r.collection_id = ANY(@collection_ids::text[]) and r.offset >= sqlc.arg(min_offset) and r.offset <= sqlc.arg(max_offset);
+
+-- name: GetMinimumMaximumOffsetForCollection :one
+SELECT CAST(COALESCE(MIN(r.offset), 0) as bigint) AS min_offset, CAST(COALESCE(MAX(r.offset), 0) as bigint) AS max_offset
+FROM record_log r
+WHERE r.collection_id = $1;
 
 -- name: DeleteCollection :exec
 DELETE FROM collection c where c.id = ANY(@collection_ids::text[]);
