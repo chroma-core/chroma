@@ -28,6 +28,7 @@ members = [
     "rust/sqlite",
     "rust/cli",
     "rust/wal3",
+    "rust/js_bindings"
 ]
 
 [workspace.dependencies]
