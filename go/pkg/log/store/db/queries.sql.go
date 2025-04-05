@@ -19,17 +19,17 @@ func (q *Queries) DeleteCollection(ctx context.Context, collectionIds []string) 
 }
 
 const deleteRecordsRange = `-- name: DeleteRecordsRange :exec
-DELETE FROM record_log r where r.collection_id = ANY($1::text[]) and r.offset >= $2 and r.offset <= $3
+DELETE FROM record_log r where r.collection_id = $1 and r.offset >= $2 and r.offset <= $3
 `
 
 type DeleteRecordsRangeParams struct {
-	CollectionIds []string
-	MinOffset     int64
-	MaxOffset     int64
+	CollectionID string
+	MinOffset    int64
+	MaxOffset    int64
 }
 
 func (q *Queries) DeleteRecordsRange(ctx context.Context, arg DeleteRecordsRangeParams) error {
-	_, err := q.db.Exec(ctx, deleteRecordsRange, arg.CollectionIds, arg.MinOffset, arg.MaxOffset)
+	_, err := q.db.Exec(ctx, deleteRecordsRange, arg.CollectionID, arg.MinOffset, arg.MaxOffset)
 	return err
 }
 

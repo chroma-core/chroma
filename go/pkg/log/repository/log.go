@@ -223,9 +223,9 @@ func (r *LogRepository) GarbageCollection(ctx context.Context) error {
 			batchSize := min(int(minMax.MaxOffset-minMax.MinOffset), 100)
 			for offset := minMax.MinOffset; offset < minMax.MaxOffset; offset += int64(batchSize) {
 				err = queriesWithTx.DeleteRecordsRange(ctx, log.DeleteRecordsRangeParams{
-					CollectionIds: []string{collectionId},
-					MinOffset:     offset,
-					MaxOffset:     offset + int64(batchSize),
+					CollectionID: collectionId,
+					MinOffset:    offset,
+					MaxOffset:    offset + int64(batchSize),
 				})
 				if err != nil {
 					trace_log.Error("Error in deleting records for collection", zap.Error(err), zap.String("collectionId", collectionId))
