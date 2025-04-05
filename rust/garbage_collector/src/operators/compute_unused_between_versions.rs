@@ -87,7 +87,6 @@ impl ComputeUnusedBetweenVersionsOperator {
             tracing::info!(
                 file_path = %file_path,
                 num_paths = s3_paths.len(),
-                paths = ?s3_paths,
                 "Found S3 paths for sparse index file"
             );
             all_s3_files.extend(s3_paths);
@@ -95,7 +94,6 @@ impl ComputeUnusedBetweenVersionsOperator {
 
         tracing::info!(
             total_s3_files = all_s3_files.len(),
-            all_files = ?all_s3_files,
             "Completed extracting all S3 files from version"
         );
         Ok(all_s3_files)
@@ -128,7 +126,6 @@ impl ComputeUnusedBetweenVersionsOperator {
 
         tracing::info!(
             unused_count = unused.len(),
-            unused_files = ?unused,
             "Found unused files between versions"
         );
         unused

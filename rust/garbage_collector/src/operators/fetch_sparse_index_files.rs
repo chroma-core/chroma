@@ -115,7 +115,6 @@ impl Operator<FetchSparseIndexFilesInput, FetchSparseIndexFilesOutput>
                             );
                             // Skip hnsw_index files
                             if file_type == "hnsw_index" {
-                                tracing::info!("Added prefix: {:?}", file_paths.paths);
                                 if *version == input.oldest_version_to_keep {
                                     continue;
                                 }
