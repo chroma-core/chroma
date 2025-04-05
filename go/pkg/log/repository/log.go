@@ -180,7 +180,7 @@ func (r *LogRepository) GarbageCollection(ctx context.Context) error {
 		return nil
 	}
 	collectionsToGC := make([]string, 0)
-	// TODO(Sanket): Make batch size configurable.
+	// TODO(Sanket): Make batch size configurable
 	batchSize := 5000
 	for i := 0; i < len(collectionToCompact); i += batchSize {
 		end := min(len(collectionToCompact), i+batchSize)
@@ -192,7 +192,7 @@ func (r *LogRepository) GarbageCollection(ctx context.Context) error {
 		}
 		for offset, exist := range exists {
 			if !exist {
-				collectionsToGC = append(collectionsToGC, collectionToCompact[i+offset])
+				collectionsToGC = append(collectionsToGC, collectionToCompact[offset+i])
 			}
 		}
 	}
@@ -221,12 +221,12 @@ func (r *LogRepository) GarbageCollection(ctx context.Context) error {
 			minOffset = 0
 		}
 		maxOffset := minMax.MaxOffset
-		batchSize := min(int(maxOffset-minOffset), 100)
-		for offset := minOffset; offset < maxOffset; offset += int64(batchSize) {
+		batchSize := max(1, min(int(maxOffset-minOffset), 100))
+		for offset := minOffset; offset <= maxOffset; offset += int64(batchSize) {
 			err = queriesWithTx.DeleteRecordsRange(ctx, log.DeleteRecordsRangeParams{
 				CollectionID: collectionId,
-				MinOffset:    offset,
-				MaxOffset:    offset + int64(batchSize),
+				MinOffset:    minOffset,
+				MaxOffset:    min(offset+int64(batchSize), maxOffset+1),
 			})
 			if err != nil {
 				trace_log.Error("Error in deleting records for collection", zap.Error(err), zap.String("collectionId", collectionId))
