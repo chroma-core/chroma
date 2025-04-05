@@ -46,6 +46,7 @@ func convertCollectionToGcToModel(collectionToGc []*dbmodel.CollectionToGc) []*m
 			Name:            collectionInfo.Name,
 			VersionFilePath: collectionInfo.VersionFileName,
 			LatestVersion:   int64(collectionInfo.Version),
+			TenantID:        collectionInfo.TenantID,
 		}
 		collections = append(collections, &collection)
 	}

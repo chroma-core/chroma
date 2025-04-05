@@ -12,8 +12,6 @@ pub struct ComputeVersionsToDeleteOperator {}
 pub struct ComputeVersionsToDeleteInput {
     pub version_file: CollectionVersionFile,
     pub cutoff_time: DateTime<Utc>,
-    // Absolute cutoff time in seconds.
-    pub cutoff_time_secs: u64,
     pub min_versions_to_keep: u32,
 }
 
@@ -93,7 +91,7 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
                 "Oldest version to keep: {}, min versions to keep: {}, cutoff time: {}, total versions: {}",
                 oldest_version_to_keep,
                 input.min_versions_to_keep,
-                input.cutoff_time_secs,
+                input.cutoff_time,
                 version_history.versions.len()
             );
 
@@ -114,7 +112,7 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
                     continue;
                 }
 
-                if version.created_at_secs >= input.cutoff_time_secs as i64 {
+                if version.created_at_secs >= input.cutoff_time.timestamp() {
                     tracing::debug!(
                         "Keeping version {} (created at {}) because it's newer than cutoff time",
                         version.version,
@@ -208,7 +206,6 @@ mod tests {
         let input = ComputeVersionsToDeleteInput {
             version_file,
             cutoff_time: now - Duration::hours(20),
-            cutoff_time_secs: (now - Duration::hours(20)).timestamp() as u64,
             min_versions_to_keep: 2,
         };
 

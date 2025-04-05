@@ -60,7 +60,8 @@ func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64
 	var collections []*dbmodel.CollectionToGc
 	// Use the read replica for this so as to not overwhelm the writer.
 	query := s.read_db.Table("collections").
-		Select("id, name, version, version_file_name, oldest_version_ts, num_versions").
+		Select("collections.id, collections.name, collections.version, collections.version_file_name, collections.oldest_version_ts, collections.num_versions, databases.tenant_id").
+		Joins("INNER JOIN databases ON collections.database_id = databases.id").
 		Where("version > 0")
 
 	// Apply cutoff time filter only if provided

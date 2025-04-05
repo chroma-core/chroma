@@ -29,6 +29,7 @@ type Collection struct {
 
 type CollectionToGc struct {
 	ID              string    `gorm:"id;primaryKey"`
+	TenantID        string    `gorm:"tenant_id;not null;index:idx_tenant_id"`
 	Name            string    `gorm:"name;not null;index:idx_name,unique;"`
 	Version         int32     `gorm:"version;default:0"`
 	VersionFileName string    `gorm:"version_file_name"`

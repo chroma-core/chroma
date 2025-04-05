@@ -446,6 +446,7 @@ func (s *Server) ListCollectionsToGc(ctx context.Context, req *coordinatorpb.Lis
 			Id:              collectionToGc.ID.String(),
 			Name:            collectionToGc.Name,
 			VersionFilePath: collectionToGc.VersionFilePath,
+			TenantId:        collectionToGc.TenantID,
 		})
 	}
 	return res, nil

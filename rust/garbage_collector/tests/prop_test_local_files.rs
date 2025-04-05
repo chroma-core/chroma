@@ -48,6 +48,7 @@ use chroma_types::SegmentFlushInfo;
 use chroma_types::SegmentScope;
 use chroma_types::SegmentType;
 use chroma_types::{CollectionUuid, SegmentUuid};
+use chrono::DateTime;
 use futures::executor::block_on;
 use garbage_collector_library::garbage_collector_orchestrator::GarbageCollectorOrchestrator;
 use garbage_collector_library::types::CleanupMode;
@@ -756,8 +757,7 @@ impl GcTest {
         let orchestrator = GarbageCollectorOrchestrator::new(
             collection.collection_id,
             version_file_name,
-            cutoff_time,
-            0,
+            DateTime::from_timestamp(cutoff_time as i64, 0).unwrap(),
             sysdb,
             dispatcher_handle.clone(),
             storage,
