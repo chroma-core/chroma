@@ -985,6 +985,7 @@ func (tc *Catalog) ListCollectionVersions(ctx context.Context,
 	maxCount *int64,
 	versionsBefore *int64,
 	versionsAtOrAfter *int64,
+	includeMarkedForDeletion bool,
 ) ([]*coordinatorpb.CollectionVersionInfo, error) {
 	// Get collection entry to get version file name
 	collectionEntry, err := tc.metaDomain.CollectionDb(ctx).GetCollectionEntry(types.FromUniqueID(collectionID), nil)
@@ -1019,7 +1020,7 @@ func (tc *Catalog) ListCollectionVersions(ctx context.Context,
 
 	for _, version := range versions {
 		// Skip versions marked for deletion
-		if version.MarkedForDeletion {
+		if version.MarkedForDeletion && !includeMarkedForDeletion {
 			continue
 		}
 

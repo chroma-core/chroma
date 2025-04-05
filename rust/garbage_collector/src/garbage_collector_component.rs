@@ -217,7 +217,7 @@ impl Configurable<GarbageCollectorConfig> for GarbageCollector {
             disabled_collections,
             sysdb_client,
             storage,
-            CleanupMode::ListOnly,
+            CleanupMode::DryRun,
         ))
     }
 }

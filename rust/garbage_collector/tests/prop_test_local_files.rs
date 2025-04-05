@@ -761,7 +761,7 @@ impl GcTest {
             sysdb,
             dispatcher_handle.clone(),
             storage,
-            CleanupMode::ListOnly,
+            CleanupMode::Delete,
         );
 
         self.last_cleanup_files = Vec::new();

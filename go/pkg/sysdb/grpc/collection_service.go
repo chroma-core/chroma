@@ -365,7 +365,12 @@ func (s *Server) ListCollectionVersions(ctx context.Context, req *coordinatorpb.
 		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 
-	versions, err := s.coordinator.ListCollectionVersions(ctx, collectionID, req.TenantId, req.MaxCount, req.VersionsBefore, req.VersionsAtOrAfter)
+	markedForDeletion := false
+	if req.IncludeMarkedForDeletion != nil {
+		markedForDeletion = *req.IncludeMarkedForDeletion
+	}
+
+	versions, err := s.coordinator.ListCollectionVersions(ctx, collectionID, req.TenantId, req.MaxCount, req.VersionsBefore, req.VersionsAtOrAfter, markedForDeletion)
 	if err != nil {
 		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
