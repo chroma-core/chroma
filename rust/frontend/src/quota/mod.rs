@@ -1,4 +1,5 @@
 use std::{
+    fmt,
     future::{ready, Future},
     pin::Pin,
 };
@@ -19,6 +20,23 @@ pub enum Action {
     Update,
     Upsert,
     Query,
+}
+
+impl fmt::Display for Action {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Action::CreateDatabase => write!(f, "Create Database"),
+            Action::CreateCollection => write!(f, "Create Collection"),
+            Action::ListCollections => write!(f, "List Collections"),
+            Action::UpdateCollection => write!(f, "Update Collection"),
+            Action::Add => write!(f, "Add"),
+            Action::Get => write!(f, "Get"),
+            Action::Delete => write!(f, "Delete"),
+            Action::Update => write!(f, "Update"),
+            Action::Upsert => write!(f, "Upsert"),
+            Action::Query => write!(f, "Query"),
+        }
+    }
 }
 
 impl TryFrom<&str> for Action {
@@ -216,6 +234,36 @@ pub enum UsageType {
     NumDatabases,          // Total number of databases for a tenant
 }
 
+impl fmt::Display for UsageType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            UsageType::MetadataKeySizeBytes => write!(f, "Size of metadata dictionary key (bytes)"),
+            UsageType::MetadataValueSizeBytes => {
+                write!(f, "Size of metadata dictionary value (bytes)")
+            }
+            UsageType::NumMetadataKeys => write!(f, "Number of metadata dictionary keys"),
+            UsageType::NumWherePredicates => write!(f, "Number of where clause predicates"),
+            UsageType::WhereValueSizeBytes => write!(f, "Size of where clause value (bytes)"),
+            UsageType::NumWhereDocumentPredicates => {
+                write!(f, "Number of where document predicates")
+            }
+            UsageType::WhereDocumentValueLength => write!(f, "Length of where document value"),
+            UsageType::NumRecords => write!(f, "Number of records"),
+            UsageType::EmbeddingDimensions => write!(f, "Embedding dimension"),
+            UsageType::DocumentSizeBytes => write!(f, "Document size (bytes)"),
+            UsageType::UriSizeBytes => write!(f, "URI size (bytes)"),
+            UsageType::IdSizeBytes => write!(f, "ID size (bytes)"),
+            UsageType::NameSizeBytes => write!(f, "Name size (bytes)"),
+            UsageType::LimitValue => write!(f, "Limit value"),
+            UsageType::NumResults => write!(f, "Number of results"),
+            UsageType::NumQueryEmbeddings => write!(f, "Number of query embeddings"),
+            UsageType::CollectionSizeRecords => write!(f, "Collection size (records)"),
+            UsageType::NumCollections => write!(f, "Number of collections"),
+            UsageType::NumDatabases => write!(f, "Number of databases"),
+        }
+    }
+}
+
 impl TryFrom<&str> for UsageType {
     type Error = String;
 
@@ -279,9 +327,19 @@ pub struct QuotaExceededError {
     pub limit: usize,
 }
 
+impl fmt::Display for QuotaExceededError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "'{}' exceeded quota limit for action '{}': current usage of {} exceeds limit of {}",
+            self.usage_type, self.action, self.usage, self.limit
+        )
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum QuotaEnforcerError {
-    #[error("Quota exceeded {0:?}")]
+    #[error("Quota exceeded: {0}")]
     QuotaExceeded(QuotaExceededError),
     #[error("Missing API key in the request header")]
     ApiKeyMissing,
@@ -289,14 +347,14 @@ pub enum QuotaEnforcerError {
     Unauthorized,
     #[error("Initialization failed")]
     InitializationFailed,
-    #[error("{0:?}")]
+    #[error("{0}")]
     GenericQuotaError(String),
 }
 
 impl ChromaError for QuotaEnforcerError {
     fn code(&self) -> chroma_error::ErrorCodes {
         match self {
-            QuotaEnforcerError::QuotaExceeded(_) => chroma_error::ErrorCodes::ResourceExhausted,
+            QuotaEnforcerError::QuotaExceeded(_) => chroma_error::ErrorCodes::UnprocessableEntity,
             QuotaEnforcerError::ApiKeyMissing => chroma_error::ErrorCodes::InvalidArgument,
             QuotaEnforcerError::Unauthorized => chroma_error::ErrorCodes::PermissionDenied,
             QuotaEnforcerError::InitializationFailed => chroma_error::ErrorCodes::Internal,
