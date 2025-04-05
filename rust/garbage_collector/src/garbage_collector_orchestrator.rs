@@ -53,6 +53,7 @@ use chroma_types::CollectionUuid;
 use chrono::{DateTime, Utc};
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
+use tracing::Span;
 
 use crate::operators::compute_unused_files::{
     ComputeUnusedFilesError, ComputeUnusedFilesInput, ComputeUnusedFilesOperator,
@@ -282,7 +283,11 @@ impl Handler<TaskResult<FetchVersionFileOutput, FetchVersionFileError>>
         );
 
         tracing::info!("Sending compute versions task to dispatcher");
-        if let Err(e) = self.dispatcher().send(compute_task, None).await {
+        if let Err(e) = self
+            .dispatcher()
+            .send(compute_task, Some(Span::current()))
+            .await
+        {
             tracing::error!(error = ?e, "Failed to send compute task to dispatcher");
             self.terminate_with_result(Err(GarbageCollectorError::Channel(e)), ctx);
             return;
@@ -339,7 +344,11 @@ impl Handler<TaskResult<ComputeVersionsToDeleteOutput, ComputeVersionsToDeleteEr
             ctx.receiver(),
         );
 
-        if let Err(e) = self.dispatcher().send(mark_task, None).await {
+        if let Err(e) = self
+            .dispatcher()
+            .send(mark_task, Some(Span::current()))
+            .await
+        {
             self.terminate_with_result(Err(GarbageCollectorError::Channel(e)), ctx);
             // Signal the dispatcher to shut down
             return;
@@ -378,7 +387,11 @@ impl Handler<TaskResult<MarkVersionsAtSysDbOutput, MarkVersionsAtSysDbError>>
             ctx.receiver(),
         );
 
-        if let Err(e) = self.dispatcher().send(compute_task, None).await {
+        if let Err(e) = self
+            .dispatcher()
+            .send(compute_task, Some(Span::current()))
+            .await
+        {
             self.terminate_with_result(Err(GarbageCollectorError::Channel(e)), ctx);
             return;
         }
@@ -416,7 +429,11 @@ impl Handler<TaskResult<ComputeUnusedFilesOutput, ComputeUnusedFilesError>>
             ctx.receiver(),
         );
 
-        if let Err(e) = self.dispatcher().send(delete_task, None).await {
+        if let Err(e) = self
+            .dispatcher()
+            .send(delete_task, Some(Span::current()))
+            .await
+        {
             self.terminate_with_result(Err(GarbageCollectorError::Channel(e)), ctx);
             return;
         }
@@ -486,7 +503,11 @@ impl Handler<TaskResult<DeleteUnusedFilesOutput, DeleteUnusedFilesError>>
         // Update the deletion list so that GarbageCollectorOrchestrator can use it in the final stage.
         self.deletion_list = output.deleted_files.clone().into_iter().collect();
 
-        if let Err(e) = self.dispatcher().send(delete_versions_task, None).await {
+        if let Err(e) = self
+            .dispatcher()
+            .send(delete_versions_task, Some(Span::current()))
+            .await
+        {
             self.terminate_with_result(Err(GarbageCollectorError::Channel(e)), ctx);
             return;
         }
@@ -534,7 +555,7 @@ mod tests {
     use chroma_system::System;
     use std::str::FromStr;
     use std::time::{Duration, SystemTime};
-    use tracing_subscriber;
+    use tracing_test::traced_test;
     use uuid::Uuid;
 
     #[allow(dead_code)]
@@ -765,9 +786,8 @@ mod tests {
     }
 
     #[tokio::test]
+    #[traced_test]
     async fn test_k8s_integration_check_end_to_end() {
-        let _ = tracing_subscriber::fmt::try_init();
-
         // Create storage config and storage client
         let storage_config = StorageConfig::ObjectStore(ObjectStoreConfig {
             bucket: ObjectStoreBucketConfig {
@@ -902,9 +922,8 @@ mod tests {
     }
 
     #[tokio::test]
+    #[traced_test]
     async fn test_k8s_integration_soft_delete() {
-        let _ = tracing_subscriber::fmt::try_init();
-
         // Create storage config and storage client
         let storage_config = StorageConfig::ObjectStore(ObjectStoreConfig {
             bucket: ObjectStoreBucketConfig {
@@ -1069,9 +1088,8 @@ mod tests {
     }
 
     #[tokio::test]
+    #[traced_test]
     async fn test_k8s_integration_dry_run() {
-        let _ = tracing_subscriber::fmt::try_init();
-
         // Create storage config and storage client
         let storage_config = StorageConfig::ObjectStore(ObjectStoreConfig {
             bucket: ObjectStoreBucketConfig {

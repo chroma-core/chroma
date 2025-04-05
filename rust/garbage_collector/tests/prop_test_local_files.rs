@@ -61,6 +61,7 @@ use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use tracing_test::traced_test;
 use uuid::Uuid;
 
 // SegmentBlockIdInfo is used to keep track of the segment block ids for a version.
@@ -956,12 +957,8 @@ prop_state_machine! {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[traced_test]
 async fn run_gc_test_ext() {
-    // Initialize tracing
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .try_init();
-
     INVARIANT_CHECK_COUNT.store(0, Ordering::SeqCst);
     run_gc_test();
     let checks = INVARIANT_CHECK_COUNT.load(Ordering::SeqCst);
