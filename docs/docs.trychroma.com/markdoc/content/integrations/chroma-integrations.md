@@ -43,3 +43,4 @@ We welcome pull requests to add new Integrations to the community.
 | [Haystack](./frameworks/haystack)       | ✓      | -            |
 | [OpenLIT](./frameworks/openlit)         | ✓      | Coming Soon! |
 | [Anthropic MCP](./frameworks/anthropic-mcp) | ✓ | Coming Soon! |
+| [Lovable.dev](./frameworks/lovable) | -      | ✓          |
