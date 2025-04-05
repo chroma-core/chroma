@@ -61,6 +61,18 @@ pub struct FrontendConfig {
     pub log: LogConfig,
     #[serde(default = "default_executor_config")]
     pub executor: ExecutorConfig,
+
+    // Telemetry Config (optional)
+    #[serde(default)]
+    pub telemetry: Option<TelemetryConfig>,
+}
+
+// Define TelemetryConfig struct
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct TelemetryConfig {
+    pub user_id: Option<String>,
+    pub is_server: bool,
+    pub chroma_version: Option<String>,
 }
 
 impl FrontendConfig {
@@ -76,6 +88,7 @@ impl FrontendConfig {
             collections_with_segments_provider: Default::default(),
             log: default_log_config(),
             executor: default_executor_config(),
+            telemetry: None,
         }
     }
 }
