@@ -24,8 +24,9 @@
     "dist"
   ],
   "scripts": {
-    "prebuild": "rimraf dist",
-    "build": "NODE_OPTIONS=--enable-source-maps tsup",
+    "prebuild": "rimraf dist && cd ../../../../rust/js_bindings && npm install && npm run build && cd -",
+    "build": "CHROMADB_VERSION=$npm_package_version NODE_OPTIONS=--enable-source-maps tsup",
+    "postbuild": "mkdir -p ./node_modules/chroma-rust-bindings && cp ../../../../rust/js_bindings/*.node ./node_modules/chroma-rust-bindings/",
     "watch": "NODE_OPTIONS=--enable-source-maps tsup --watch",
     "test": "jest --runInBand"
   },
@@ -33,15 +34,18 @@
     "@google/generative-ai": "^0.1.1",
     "@xenova/transformers": "^2.17.2",
     "chromadb-default-embed": "^2.14.0",
+    "chromadb-rust-bindings": "file:../../../../rust/js_bindings/",
     "cliui": "^8.0.1",
     "cohere-ai": "^7.0.0",
     "isomorphic-fetch": "^3.0.0",
-    "openai": "^4.0.0",
     "ollama": "^0.5.0",
+    "openai": "^4.0.0",
+    "semver": "^7.7.1",
     "voyageai": "^0.0.3-1"
   },
   "devDependencies": {
     "@internal/chromadb-core": "workspace:*",
+    "@types/semver": "^7.7.0",
     "jest": "^29.5.0",
     "rimraf": "^5.0.0",
     "ts-jest": "^29.1.0",
@@ -50,5 +54,8 @@
   },
   "engines": {
     "node": ">=14.17.0"
+  },
+  "bin": {
+    "chroma": "dist/cli.mjs"
   }
 }

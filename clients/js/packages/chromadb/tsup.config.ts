@@ -5,6 +5,7 @@ export default defineConfig((options: Options) => {
   const commonOptions: Partial<Options> = {
     entry: {
       chromadb: "src/index.ts",
+      cli: "src/cli.ts"
     },
     sourcemap: true,
     dts: true,
