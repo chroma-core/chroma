@@ -9,6 +9,12 @@ use crate::commands::vacuum::VacuumError;
 use crate::dashboard_client::DashboardClientError;
 use arboard::Clipboard;
 use colored::Colorize;
+use crossterm::{
+    cursor,
+    event::{self, Event, KeyCode, KeyEvent},
+    terminal::{disable_raw_mode, enable_raw_mode},
+    ExecutableCommand,
+};
 use regex::Regex;
 use reqwest::header::HeaderMap;
 use reqwest::{Client, Method};
@@ -16,11 +22,9 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
-use std::fs;
-use std::io::{stdin, stdout, Write};
+use std::io::{stdout, Write};
 use std::path::PathBuf;
-use termion::input::TermRead;
-use termion::raw::IntoRawMode;
+use std::{fs, io};
 use thiserror::Error;
 
 pub const LOGO: &str = "
@@ -341,36 +345,41 @@ where
     Ok(parsed_response)
 }
 
-pub fn read_secret(prompt: &str) -> Result<String, std::io::Error> {
-    let mut stdout = stdout().into_raw_mode()?;
-    let stdin = stdin();
+pub fn read_secret(prompt: &str) -> io::Result<String> {
+    let mut stdout = stdout();
     let mut password = String::new();
 
-    write!(stdout, "{}: ", prompt)?;
+    stdout.write_all(prompt.as_bytes())?;
+    stdout.write_all(b": ")?;
     stdout.flush()?;
 
-    for c in stdin.keys() {
-        match c? {
-            termion::event::Key::Char('\n') => break,
-            termion::event::Key::Char(c) => {
-                password.push(c);
-                write!(stdout, "*")?;
-            }
-            termion::event::Key::Backspace => {
-                if !password.is_empty() {
-                    password.pop();
-                    write!(
-                        stdout,
-                        "{} {}",
-                        termion::cursor::Left(1),
-                        termion::cursor::Left(1)
-                    )?;
+    enable_raw_mode()?;
+
+    loop {
+        if let Event::Key(KeyEvent { code, .. }) = event::read()? {
+            match code {
+                KeyCode::Enter => break,
+                KeyCode::Char(c) => {
+                    password.push(c);
+                    stdout.write_all(b"*")?;
                 }
+                KeyCode::Backspace => {
+                    if !password.is_empty() {
+                        password.pop();
+                        stdout.execute(cursor::MoveLeft(1))?;
+                        stdout.write_all(b" ")?;
+                        stdout.execute(cursor::MoveLeft(1))?;
+                    }
+                }
+                _ => {}
             }
-            _ => {}
+            stdout.flush()?;
         }
-        stdout.flush()?;
     }
+
+    disable_raw_mode()?;
+    stdout.write_all(b"\n")?;
+    stdout.flush()?;
 
     Ok(password)
 }
