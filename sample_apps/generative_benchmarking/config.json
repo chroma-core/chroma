@@ -1,6 +1,12 @@
 {
-	"required_env_variables": ["OPENAI_API_KEY"],
-    "optional_env_variables": ["JINA_API_KEY", "VOYAGE_API_KEY", "ANTHROPIC_API_KEY"],
+	"required_env_variables": [
+		{ "name": "OPENAI_API_KEY", "secret": true }
+	],
+    "optional_env_variables": [
+    	{ "name": "JINA_API_KEY", "secret": true },
+    	{ "name": "VOYAGE_API_KEY", "secret": true },
+    	{ "name": "ANTHROPIC_API_KEY", "secret": true }
+    ],
     "startup_commands": {
     	"pip": "pip install -r requirements.txt",
     	"poetry": "poetry install",
