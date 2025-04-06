@@ -1,14 +1,12 @@
 use std::collections::HashMap;
 use std::error::Error;
-use std::fmt::format;
-use std::{fmt, fs};
 use std::fs::{create_dir_all, File};
 use std::io::Write;
 use std::path::Path;
 use std::process::Command;
-use clap::{Parser, ValueEnum};
+use clap::Parser;
 use colored::Colorize;
-use dialoguer::{Input, Password, Select};
+use dialoguer::{Password, Select};
 use dialoguer::theme::ColorfulTheme;
 use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::Client;
@@ -20,10 +18,8 @@ use thiserror::Error;
 use zip_extract::extract;
 use crate::commands::db::DbError;
 use crate::commands::install::InstallError::{GithubDownloadFailed, InstallFailed, NoSuchApp, VersionMismatch};
-use crate::commands::install::LlmProvider::OpenAI;
 use crate::utils::{CliError, UtilsError};
 
-// Skip installing
 #[derive(Debug, Error)]
 pub enum InstallError {
     #[error("Failed to install sample app {0}")]
@@ -42,7 +38,7 @@ pub struct InstallArgs {
         index = 1,
         help = "The name of the sample app to install",
     )]
-    name: String,
+    name: Option<String>,
     #[clap(long, hide = true)]
     dev: Option<String>,
 }
@@ -70,42 +66,13 @@ struct AppListing {
     url: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum LlmProvider {
-    Anthropic,
-    Gemini,
-    Ollama,
-    OpenAI,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[serde(rename_all = "camelCase")]
-pub enum PackageManager {
-    Npm,
-    Pnpm,
-    Yarn,
-    Bun,
-    Pip,
-    Poetry,
-}
-
-impl fmt::Display for PackageManager {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let lowercase_name = format!("{:?}", self).to_lowercase();
-        write!(f, "{}", lowercase_name)
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SampleAppConfig {
-    package_managers: Vec<PackageManager>,
     name: String,
     cli_version: String,
     app_version: String,
-    llm_providers: Vec<LlmProvider>,
-    startup_commands: HashMap<PackageManager, String>,
+    startup_commands: HashMap<String, String>,
 }
 
 async fn download_repo_files(
