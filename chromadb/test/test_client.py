@@ -12,6 +12,8 @@ import os
 
 @pytest.fixture
 def ephemeral_api() -> Generator[ClientAPI, None, None]:
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
+        pytest.skip("Integration test only")
     client = chromadb.EphemeralClient()
     yield client
     client.clear_system_cache()
@@ -19,6 +21,8 @@ def ephemeral_api() -> Generator[ClientAPI, None, None]:
 
 @pytest.fixture
 def persistent_api() -> Generator[ClientAPI, None, None]:
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
+        pytest.skip("Integration test only")
     client = chromadb.PersistentClient(
         path=tempfile.gettempdir() + "/test_server",
     )

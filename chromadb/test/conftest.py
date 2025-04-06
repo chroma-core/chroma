@@ -550,7 +550,22 @@ def integration() -> Generator[System, None, None]:
     """Fixture generator for returning a client configured via environmenet
     variables, intended for externally configured integration tests
     """
-    settings = Settings(allow_reset=True)
+    settings = Settings(
+        allow_reset=True, chroma_api_impl="chromadb.api.fastapi.FastAPI"
+    )
+    system = System(settings)
+    system.start()
+    yield system
+    system.stop()
+
+
+def async_integration() -> Generator[System, None, None]:
+    """Fixture generator for returning a client configured via environmenet
+    variables, intended for externally configured integration tests
+    """
+    settings = Settings(
+        allow_reset=True, chroma_api_impl="chromadb.api.async_fastapi.AsyncFastAPI"
+    )
     system = System(settings)
     system.start()
     yield system
@@ -670,8 +685,9 @@ def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
     ]
     if "CHROMA_INTEGRATION_TEST" in os.environ:
         fixtures.append(integration)
+        fixtures.append(async_integration)
     if "CHROMA_INTEGRATION_TEST_ONLY" in os.environ:
-        fixtures = [integration]
+        fixtures = [integration, async_integration]
     if "CHROMA_CLUSTER_TEST_ONLY" in os.environ:
         fixtures = [basic_http_client]
     if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ:
@@ -865,10 +881,12 @@ def client(system: System) -> Generator[ClientAPI, None, None]:
 
     if system.settings.chroma_api_impl == "chromadb.api.async_fastapi.AsyncFastAPI":
         client = cast(Any, AsyncClientCreatorSync.from_system_async(system))
+        client.reset()
         yield client
         client.clear_system_cache()
     else:
         client = ClientCreator.from_system(system)
+        client.reset()
         yield client
         client.clear_system_cache()
 

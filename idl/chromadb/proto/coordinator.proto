@@ -370,6 +370,7 @@ message ListCollectionVersionsRequest {
   // Only return versions at or after this timestamp.
   // Together with versions_before, this forms an inclusive range.
   optional int64 versions_at_or_after = 5;
+  optional bool include_marked_for_deletion = 6;
 }
 
 // Response to ListCollectionVersionsRequest.

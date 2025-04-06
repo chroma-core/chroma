@@ -6,7 +6,7 @@ use chroma_types::{
 };
 
 use crate::{
-    compactor::OneOffCompactionMessage,
+    compactor::{OneOffCompactMessage, RebuildMessage},
     execution::operators::{
         filter::FilterOperator,
         knn::KnnOperator,
@@ -148,10 +148,27 @@ pub fn to_proto_knn_batch_result(
     })
 }
 
-impl TryFrom<chroma_proto::CompactionRequest> for OneOffCompactionMessage {
+impl TryFrom<chroma_proto::CompactRequest> for OneOffCompactMessage {
     type Error = ConversionError;
 
-    fn try_from(value: chroma_proto::CompactionRequest) -> Result<Self, ConversionError> {
+    fn try_from(value: chroma_proto::CompactRequest) -> Result<Self, ConversionError> {
+        Ok(Self {
+            collection_ids: value
+                .ids
+                .ok_or(ConversionError::DecodeError)?
+                .ids
+                .into_iter()
+                .map(|id| CollectionUuid::from_str(&id))
+                .collect::<Result<_, _>>()
+                .map_err(|_| ConversionError::DecodeError)?,
+        })
+    }
+}
+
+impl TryFrom<chroma_proto::RebuildRequest> for RebuildMessage {
+    type Error = ConversionError;
+
+    fn try_from(value: chroma_proto::RebuildRequest) -> Result<Self, ConversionError> {
         Ok(Self {
             collection_ids: value
                 .ids
