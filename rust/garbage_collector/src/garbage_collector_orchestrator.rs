@@ -220,7 +220,7 @@ impl Orchestrator for GarbageCollectorOrchestrator {
         &mut self,
         sender: Sender<Result<GarbageCollectorResponse, GarbageCollectorError>>,
     ) {
-        self.result_channel = Some(sender)
+        self.result_channel = Some(sender);
     }
 
     fn take_result_channel(
@@ -456,6 +456,18 @@ impl Handler<TaskResult<DeleteUnusedFilesOutput, DeleteUnusedFilesError>>
             None => return,
         };
 
+        if self.cleanup_mode == CleanupMode::DryRun {
+            tracing::info!("Dry run mode, skipping actual deletion");
+            let response = GarbageCollectorResponse {
+                collection_id: self.collection_id,
+                version_file_path: self.version_file_path.clone(),
+                num_versions_deleted: 0,
+                deletion_list: Vec::new(),
+            };
+            self.terminate_with_result(Ok(response), ctx);
+            return;
+        }
+
         // Get stored state
         let version_file = self
             .pending_version_file
@@ -524,14 +536,25 @@ impl Handler<TaskResult<DeleteVersionsAtSysDbOutput, DeleteVersionsAtSysDbError>
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::helper::ChromaGrpcClients;
-    use std::time::Duration;
+    use chroma_config::registry::Registry;
+    use chroma_config::Configurable;
+    use chroma_storage::config::{
+        ObjectStoreBucketConfig, ObjectStoreConfig, ObjectStoreType, StorageConfig,
+    };
+    use chroma_sysdb::{GrpcSysDbConfig, SysDbConfig};
+    use chroma_system::System;
+    use std::str::FromStr;
+    use std::time::{Duration, SystemTime};
+    use tracing_subscriber;
+    use uuid::Uuid;
 
     #[allow(dead_code)]
     async fn wait_for_new_version(
         clients: &mut ChromaGrpcClients,
-        collection_id: &str,
-        tenant_id: &str,
+        collection_id: String,
+        tenant_id: String,
         current_version_count: usize,
         max_attempts: usize,
     ) -> Result<(), Box<dyn std::error::Error>> {
@@ -545,7 +568,14 @@ mod tests {
             tokio::time::sleep(Duration::from_secs(2)).await;
 
             let versions = clients
-                .list_collection_versions(collection_id, tenant_id, Some(100), None, None)
+                .list_collection_versions(
+                    collection_id.clone(),
+                    tenant_id.clone(),
+                    Some(100),
+                    None,
+                    None,
+                    None,
+                )
                 .await?;
 
             if versions.versions.len() > current_version_count {
@@ -561,546 +591,646 @@ mod tests {
         Err("Timeout waiting for new version to be created".into())
     }
 
-    // NOTE(hammadb): This test was added without consideration as to how to handle
-    // the required configuration for the test. It expects configuration to be ON
-    // for the sysdb that should not be on by default. I am disabling it until
-    // we properly handle the config.
-
-    // #[tokio::test]
-    // async fn test_k8s_integration_check_end_to_end() -> Result<(), Box<dyn std::error::Error>> {
-    //     // Initialize tracing subscriber once at the start of the test
-    //     let _ = tracing_subscriber::fmt::try_init();
-
-    //     tracing::info!("Starting direct service calls test");
-
-    //     // Create storage config and storage client
-    //     let storage_config = StorageConfig::ObjectStore(ObjectStoreConfig {
-    //         bucket: ObjectStoreBucketConfig {
-    //             name: "chroma-storage".to_string(),
-    //             r#type: ObjectStoreType::Minio,
-    //         },
-    //         upload_part_size_bytes: 1024 * 1024,   // 1MB
-    //         download_part_size_bytes: 1024 * 1024, // 1MB
-    //         max_concurrent_requests: 10,
-    //     });
-    //     // Create registry for configuration
-    //     let registry = Registry::new();
-    //     // Initialize storage using config and registry
-    //     let storage = Storage::try_from_config(&storage_config, &registry).await?;
-    //     // Add check for HNSW prefixes before Tests.
-    //     let hnsw_prefixes_before_tests: Vec<String> = storage
-    //         .list_prefix("hnsw")
-    //         .await?
-    //         .into_iter()
-    //         .filter(|path| path.contains("hnsw/"))
-    //         .map(|path| {
-    //             path.split("/")
-    //                 .nth(1) // Get the prefix part after "hnsw/"
-    //                 .unwrap_or("")
-    //                 .to_string()
-    //         })
-    //         .collect::<std::collections::HashSet<_>>() // Collect into HashSet first
-    //         .into_iter() // Convert HashSet back to iterator
-    //         .collect(); // Collect into final Vec
-
-    //     println!(
-    //         "HNSW prefixes before Tests: {:?}",
-    //         hnsw_prefixes_before_tests
-    //     );
-    //     let deleted_hnsw_files_before_tests: Vec<_> = storage
-    //         .list_prefix("deleted")
-    //         .await?
-    //         .into_iter()
-    //         .filter(|path| path.contains("deleted") && path.contains("header.bin"))
-    //         .collect();
-
-    //     let mut clients = ChromaGrpcClients::new().await.map_err(|e| {
-    //         tracing::error!(error = ?e, "Failed to create ChromaGrpcClients");
-    //         e
-    //     })?;
-
-    //     // Create unique identifiers for tenant and database
-    //     let test_uuid = uuid::Uuid::new_v4();
-    //     let tenant_id = format!("test_tenant_{}", test_uuid);
-    //     let database_name = format!("test_db_{}", test_uuid);
-    //     let collection_name = format!("test_collection_{}", test_uuid);
-
-    //     tracing::info!(
-    //         tenant_id = %tenant_id,
-    //         database = %database_name,
-    //         collection = %collection_name,
-    //         "Starting test with resources"
-    //     );
-
-    //     let collection_id = clients
-    //         .create_database_and_collection(&tenant_id, &database_name, &collection_name)
-    //         .await
-    //         .map_err(|e| {
-    //             tracing::error!(
-    //                 error = ?e,
-    //                 tenant_id = %tenant_id,
-    //                 database = %database_name,
-    //                 collection = %collection_name,
-    //                 "Failed to create database and collection"
-    //             );
-    //             e
-    //         })?;
-
-    //     tracing::info!(collection_id = %collection_id, "Created collection");
-    //     println!("Created collection: {}", collection_id);
-
-    //     // Create 33 records
-    //     let mut embeddings = Vec::with_capacity(33);
-    //     let mut ids = Vec::with_capacity(33);
-
-    //     for i in 0..33 {
-    //         let mut embedding = vec![0.0; 3];
-    //         embedding[i % 3] = 1.0;
-    //         embeddings.push(embedding);
-    //         ids.push(format!("id{}", i));
-    //     }
-
-    //     // Get initial version count
-    //     let initial_versions = clients
-    //         .list_collection_versions(&collection_id, &tenant_id, Some(100), None, None)
-    //         .await?;
-    //     let initial_version_count = initial_versions.versions.len();
-
-    //     tracing::info!(
-    //         initial_count = initial_version_count,
-    //         "Initial version count"
-    //     );
-
-    //     // Add first batch of 11 records
-    //     tracing::info!("Adding first batch of embeddings");
-    //     clients
-    //         .add_embeddings(
-    //             &collection_id,
-    //             embeddings[..11].to_vec(),
-    //             ids[..11].to_vec(),
-    //         )
-    //         .await?;
-
-    //     // Wait for new version after first batch
-    //     wait_for_new_version(
-    //         &mut clients,
-    //         &collection_id,
-    //         &tenant_id,
-    //         initial_version_count,
-    //         10,
-    //     )
-    //     .await?;
-
-    //     // Add second batch of 11 records
-    //     tracing::info!("Adding second batch of embeddings");
-    //     clients
-    //         .add_embeddings(
-    //             &collection_id,
-    //             embeddings[11..22].to_vec(),
-    //             ids[11..22].to_vec(),
-    //         )
-    //         .await?;
-    //     // Wait for new version after first batch
-    //     wait_for_new_version(
-    //         &mut clients,
-    //         &collection_id,
-    //         &tenant_id,
-    //         initial_version_count + 1,
-    //         10,
-    //     )
-    //     .await?;
-
-    //     // After adding second batch and waiting for version, add a third batch
-    //     tracing::info!("Adding third batch of embeddings (modified records)");
-    //     clients
-    //         .add_embeddings(
-    //             &collection_id,
-    //             embeddings[22..].to_vec(),
-    //             ids[22..].to_vec(),
-    //         )
-    //         .await?;
-
-    //     wait_for_new_version(
-    //         &mut clients,
-    //         &collection_id,
-    //         &tenant_id,
-    //         initial_version_count + 2,
-    //         10,
-    //     )
-    //     .await?;
-
-    //     // Get version count before GC
-    //     let versions_before_gc = clients
-    //         .list_collection_versions(&collection_id, &tenant_id, Some(100), None, None)
-    //         .await?;
-    //     let unique_versions_before_gc = versions_before_gc
-    //         .versions
-    //         .iter()
-    //         .map(|v| v.version)
-    //         .collect::<std::collections::HashSet<_>>()
-    //         .len();
-    //     tracing::info!(
-    //         count = unique_versions_before_gc,
-    //         "Unique version count before GC"
-    //     );
-
-    //     // Get records from the collection
-    //     tracing::info!(collection_id = %collection_id, "Getting records from collection");
-
-    //     let results = clients
-    //         .get_records(
-    //             &collection_id,
-    //             None,
-    //             true,
-    //             false,
-    //             false,
-    //         )
-    //         .await
-    //         .map_err(|e| {
-    //             tracing::error!(error = ?e, collection_id = %collection_id, "Failed to get records");
-    //             e
-    //         })?;
-
-    //     // Verify results
-    //     tracing::info!(
-    //         num_results = results.ids.len(),
-    //         "Get records results received"
-    //     );
-    //     assert_eq!(results.ids.len(), 33, "Expected 33 results");
-
-    //     // Verify all IDs are present
-    //     for i in 0..33 {
-    //         let expected_id = format!("id{}", i);
-    //         assert!(
-    //             results.ids.contains(&expected_id),
-    //             "Expected to find {}",
-    //             expected_id
-    //         );
-    //     }
-
-    //     // Verify embeddings
-    //     if let Some(returned_embeddings) = results.embeddings {
-    //         assert_eq!(returned_embeddings.len(), 33, "Expected 33 embeddings");
-
-    //         for (i, embedding) in returned_embeddings.iter().enumerate() {
-    //             let expected_index = ids
-    //                 .iter()
-    //                 .position(|id| id == &format!("id{}", i))
-    //                 .expect("ID should exist");
-    //             assert_eq!(
-    //                 embedding, &embeddings[expected_index],
-    //                 "Embedding mismatch for id{}",
-    //                 i
-    //             );
-    //         }
-    //     } else {
-    //         panic!("Expected embeddings in results");
-    //     }
-
-    //     // Get final versions
-    //     tracing::info!(collection_id = %collection_id, "Requesting final collection versions");
-
-    //     let versions_response = clients
-    //         .list_collection_versions(&collection_id, &tenant_id, Some(10), None, None)
-    //         .await?;
-
-    //     tracing::info!("Collection versions:");
-    //     let mut oldest_version_num = 0;
-    //     let mut youngest_version_num = 0;
-    //     for version_info in versions_response.versions.iter() {
-    //         if version_info.version > oldest_version_num {
-    //             oldest_version_num = version_info.version;
-    //         }
-    //         if version_info.version < youngest_version_num {
-    //             youngest_version_num = version_info.version;
-    //         }
-    //     }
-    //     println!(
-    //         "Oldest version: {}, youngest version: {}",
-    //         oldest_version_num, youngest_version_num
-    //     );
-
-    //     for version in versions_response.versions {
-    //         tracing::info!(
-    //             version = version.version,
-    //             created_at = version.created_at_secs,
-    //             change_reason = ?version.version_change_reason,
-    //             marked_for_deletion = version.marked_for_deletion,
-    //             "Version info"
-    //         );
-
-    //         if let Some(collection_info) = version.collection_info_mutable {
-    //             tracing::info!(
-    //                 log_position = collection_info.current_log_position,
-    //                 collection_version = collection_info.current_collection_version,
-    //                 last_compaction = collection_info.last_compaction_time_secs,
-    //                 dimension = collection_info.dimension,
-    //                 "Collection mutable info"
-    //             );
-    //         }
-    //         println!("For Version: {}", version.version);
-    //         if let Some(segment_info) = version.segment_info {
-    //             println!(
-    //                 "Segment info - Number of segments: {}",
-    //                 segment_info.segment_compaction_info.len()
-    //             );
-    //             tracing::info!(
-    //                 num_segments = segment_info.segment_compaction_info.len(),
-    //                 "Segment info"
-    //             );
-
-    //             // Print detailed information for each segment
-    //             for (idx, segment) in segment_info.segment_compaction_info.iter().enumerate() {
-    //                 println!("Segment #{} - ID: {}", idx, segment.segment_id);
-    //                 tracing::info!(
-    //                     segment_number = idx,
-    //                     segment_id = %segment.segment_id,
-    //                     "Segment details"
-    //                 );
-
-    //                 // Log file paths for the segment
-    //                 if !segment.file_paths.is_empty() {
-    //                     println!(
-    //                         "Segment #{} - ID: {} - File paths: {:?}",
-    //                         idx, segment.segment_id, segment.file_paths
-    //                     );
-    //                     tracing::info!(
-    //                         segment_number = idx,
-    //                         segment_id = %segment.segment_id,
-    //                         file_paths = ?segment.file_paths,
-    //                         "Segment file paths"
-    //                     );
-    //                 }
-    //             }
-    //         }
-    //     }
-
-    //     tracing::info!(
-    //         is_truncated = versions_response.list_is_truncated,
-    //         "Version list complete"
-    //     );
-
-    //     // After creating versions and verifying records, add garbage collection:
-    //     tracing::info!("Starting garbage collection process");
-
-    //     // Create system first
-    //     let system = System::new();
-
-    //     // Create dispatcher and handle
-    //     let dispatcher = Dispatcher::new(chroma_system::DispatcherConfig::default());
-    //     let dispatcher_handle = system.start_component(dispatcher);
-
-    //     // Create sysdb config and client
-    //     let sysdb_config = SysDbConfig::Grpc(GrpcSysDbConfig {
-    //         host: "localhost".to_string(),
-    //         port: 50051,
-    //         connect_timeout_ms: 5000,
-    //         request_timeout_ms: 10000,
-    //         num_channels: 1,
-    //     });
-
-    //     // Initialize sysdb client using config and registry
-    //     let mut sysdb = SysDb::try_from_config(&sysdb_config, &registry).await?;
-
-    //     // Get collection info for GC from sysdb
-    //     let collections_to_gc = sysdb.get_collections_to_gc().await?;
-    //     let collection_info = collections_to_gc
-    //         .iter()
-    //         .find(|c| c.id.0.to_string() == collection_id)
-    //         .expect("Collection should be available for GC");
-
-    //     tracing::info!(
-    //         "Collection info: {:?} {:?}",
-    //         collection_info.id,
-    //         collection_info.version_file_path
-    //     );
-
-    //     // Verify the version file exists before proceeding by attempting to get it
-    //     let version_file_exists = storage
-    //         .get(&collection_info.version_file_path)
-    //         .await
-    //         .is_ok();
-
-    //     if !version_file_exists {
-    //         tracing::error!(
-    //             path = ?collection_info.version_file_path,
-    //             "Version file does not exist"
-    //         );
-    //         return Err("Version file not found".into());
-    //     }
-
-    //     // Create orchestrator with correct version file path
-    //     let mut orchestrator = GarbageCollectorOrchestrator::new(
-    //         CollectionUuid::from_str(&collection_id)?,
-    //         collection_info.version_file_path.clone(),
-    //         0,     // cutoff_time_hours: immediately expire versions
-    //         sysdb, // sysdb is already a SysDb, will be boxed by new()
-    //         dispatcher_handle,
-    //         storage.clone(), // Clone storage since we'll use it again
-    //     );
-
-    //     // Create channel for receiving result
-    //     let (sender, _receiver) = oneshot::channel();
-    //     orchestrator.set_result_channel(sender);
-
-    //     tracing::info!("Running orchestrator");
-    //     // Run orchestrator with system
-    //     orchestrator.run(system).await?;
-    //     // let gc_result = receiver.await?; // Waiting here is giving error.
-
-    //     // After running GC and waiting for result, verify versions were deleted
-    //     tokio::time::sleep(Duration::from_secs(5)).await; // Give some time for GC to complete
-
-    //     let versions_after_gc = clients
-    //         .list_collection_versions(&collection_id, &tenant_id, Some(100), None, None)
-    //         .await?;
-
-    //     let unique_versions_after_gc = versions_after_gc
-    //         .versions
-    //         .iter()
-    //         .map(|v| v.version)
-    //         .collect::<std::collections::HashSet<_>>()
-    //         .len();
-    //     println!(
-    //         "versions after GC: {:?}",
-    //         versions_after_gc
-    //             .versions
-    //             .iter()
-    //             .map(|v| v.version)
-    //             .collect::<std::collections::HashSet<_>>()
-    //     );
-
-    //     tracing::info!(
-    //         before = unique_versions_before_gc,
-    //         after = unique_versions_after_gc,
-    //         "Unique version counts before and after GC"
-    //     );
-    //     println!(
-    //         "Unique version counts before and after GC: {} {}",
-    //         unique_versions_before_gc, unique_versions_after_gc
-    //     );
-
-    //     // Add check for HNSW files
-    //     // let hnsw_files_after_gc: Vec<_> = storage
-    //     //     .list_prefix("hnsw")
-    //     //     .await?
-    //     //     .into_iter()
-    //     //     .filter(|path| path.ends_with("header.bin"))
-    //     //     .collect();
-    //     let hnsw_prefixes_after_gc: Vec<String> = storage
-    //         .list_prefix("hnsw")
-    //         .await?
-    //         .into_iter()
-    //         .filter(|path| path.contains("hnsw/"))
-    //         .map(|path| {
-    //             path.split("/")
-    //                 .nth(1) // Get the prefix part after "hnsw/"
-    //                 .unwrap_or("")
-    //                 .to_string()
-    //         })
-    //         .collect::<std::collections::HashSet<_>>() // Collect into HashSet first
-    //         .into_iter() // Convert HashSet back to iterator
-    //         .collect(); // Collect into final Vec
-
-    //     tracing::info!(
-    //         count = hnsw_prefixes_after_gc.len(),
-    //         files = ?hnsw_prefixes_after_gc,
-    //         "HNSW header files after GC"
-    //     );
-
-    //     assert_eq!(
-    //         hnsw_prefixes_after_gc.len() - hnsw_prefixes_before_tests.len(),
-    //         unique_versions_after_gc - 1, // unique_versions_before_gc - unique_versions_after_gc, //
-    //         "Increase in HNSW prefixes should match the number of versions left behind after GC"
-    //     );
-
-    //     // Wait a bit for GC to complete
-    //     tokio::time::sleep(Duration::from_secs(2)).await;
-
-    //     // Verify that deleted files are renamed with the "deleted" prefix if using soft delete
-    //     let deleted_hnsw_files: Vec<_> = storage
-    //         .list_prefix("deleted")
-    //         .await?
-    //         .into_iter()
-    //         .filter(|path| path.contains("deleted") && path.contains("header.bin"))
-    //         .collect();
-
-    //     tracing::info!(
-    //         count = deleted_hnsw_files.len(),
-    //         files = ?deleted_hnsw_files,
-    //         "Soft-deleted HNSW header files"
-    //     );
-
-    //     // The number of deleted files should match the difference in versions
-    //     assert_eq!(
-    //         deleted_hnsw_files.len() - deleted_hnsw_files_before_tests.len(),
-    //         unique_versions_before_gc - unique_versions_after_gc,
-    //         "Expected deleted HNSW files to match the number of deleted unique versions"
-    //     );
-
-    //     assert!(
-    //         unique_versions_after_gc >= 2,
-    //         "Expected at least 2 unique versions to remain after garbage collection (min_versions_to_keep)"
-    //     );
-
-    //     tracing::info!("Verifying records are still accessible after GC");
-    //     let results_after_gc = clients
-    //         .get_records(
-    //             &collection_id,
-    //             None,
-    //             true,  // include embeddings
-    //             false, // include metadata
-    //             false, // include documents
-    //         )
-    //         .await
-    //         .map_err(|e| {
-    //             tracing::error!(error = ?e, collection_id = %collection_id, "Failed to get records after GC");
-    //             e
-    //         })?;
-
-    //     // Verify results count matches pre-GC
-    //     assert_eq!(
-    //         results_after_gc.ids.len(),
-    //         results.ids.len(),
-    //         "Expected same number of results after GC"
-    //     );
-
-    //     // Verify all IDs are still present
-    //     for i in 0..33 {
-    //         let expected_id = format!("id{}", i);
-    //         assert!(
-    //             results_after_gc.ids.contains(&expected_id),
-    //             "Expected to find {} after GC",
-    //             expected_id
-    //         );
-    //     }
-
-    //     // Verify embeddings are unchanged
-    //     if let Some(returned_embeddings) = results_after_gc.embeddings {
-    //         assert_eq!(
-    //             returned_embeddings.len(),
-    //             33,
-    //             "Expected 33 embeddings after GC"
-    //         );
-
-    //         // Compare with original embeddings
-    //         for (i, embedding) in returned_embeddings.iter().enumerate() {
-    //             let expected_index = ids
-    //                 .iter()
-    //                 .position(|id| id == &format!("id{}", i))
-    //                 .expect("ID should exist");
-    //             assert_eq!(
-    //                 embedding, &embeddings[expected_index],
-    //                 "Embedding mismatch for id{} after GC",
-    //                 i
-    //             );
-    //         }
-    //     } else {
-    //         panic!("Expected embeddings in results after GC");
-    //     }
-
-    //     tracing::info!("Successfully verified all records are accessible after GC");
-
-    //     Ok(())
-    // }
+    const TEST_COLLECTIONS_SIZE: usize = 33;
+
+    async fn validate_test_collection(
+        clients: &mut ChromaGrpcClients,
+        collection_id: CollectionUuid,
+    ) {
+        let results = clients
+            .get_records(collection_id.to_string(), None, true, false, false)
+            .await
+            .unwrap();
+
+        // Verify all IDs are still present
+        for i in 0..TEST_COLLECTIONS_SIZE {
+            let expected_id = format!("id{}", i);
+            assert!(
+                results.ids.contains(&expected_id),
+                "Expected to find {}",
+                expected_id
+            );
+        }
+
+        // Verify embeddings are unchanged
+        if let Some(returned_embeddings) = results.embeddings {
+            assert_eq!(
+                returned_embeddings.len(),
+                TEST_COLLECTIONS_SIZE,
+                "Expected {} embeddings",
+                TEST_COLLECTIONS_SIZE
+            );
+
+            // Compare with expected embeddings
+            for (i, embedding) in returned_embeddings.iter().enumerate() {
+                let mut expected_embedding = vec![0.0; 3];
+                expected_embedding[i % 3] = 1.0;
+                assert_eq!(
+                    embedding, &expected_embedding,
+                    "Expected embedding for ID {} to be {:?}",
+                    i, expected_embedding
+                );
+            }
+        } else {
+            panic!("Expected embeddings in results");
+        }
+    }
+
+    async fn create_test_collection(clients: &mut ChromaGrpcClients) -> (CollectionUuid, String) {
+        // Create unique identifiers for tenant and database
+        let test_uuid = uuid::Uuid::new_v4();
+        let tenant_id = format!("test_tenant_{}", test_uuid);
+        let database_name = format!("test_db_{}", test_uuid);
+        let collection_name = format!("test_collection_{}", test_uuid);
+
+        tracing::info!(
+            tenant_id = %tenant_id,
+            database = %database_name,
+            collection = %collection_name,
+            "Starting test with resources"
+        );
+
+        let collection_id = clients
+            .create_database_and_collection(&tenant_id, &database_name, &collection_name)
+            .await
+            .unwrap();
+
+        tracing::info!(collection_id = %collection_id, "Created collection");
+
+        let mut embeddings = vec![];
+        let mut ids = vec![];
+
+        for i in 0..TEST_COLLECTIONS_SIZE {
+            let mut embedding = vec![0.0; 3];
+            embedding[i % 3] = 1.0;
+            embeddings.push(embedding);
+            ids.push(format!("id{}", i));
+        }
+
+        // Get initial version count
+        let initial_versions = clients
+            .list_collection_versions(
+                collection_id.clone(),
+                tenant_id.clone(),
+                Some(100),
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        let initial_version_count = initial_versions.versions.len();
+
+        tracing::info!(
+            initial_count = initial_version_count,
+            "Initial version count"
+        );
+
+        // Add first batch of 11 records
+        tracing::info!("Adding first batch of embeddings");
+        clients
+            .add_embeddings(
+                &collection_id,
+                embeddings[..11].to_vec(),
+                ids[..11].to_vec(),
+            )
+            .await
+            .unwrap();
+
+        // Wait for new version after first batch
+        wait_for_new_version(
+            clients,
+            collection_id.clone(),
+            tenant_id.clone(),
+            initial_version_count,
+            10,
+        )
+        .await
+        .unwrap();
+
+        // Add second batch of 11 records
+        tracing::info!("Adding second batch of embeddings");
+        clients
+            .add_embeddings(
+                &collection_id,
+                embeddings[11..22].to_vec(),
+                ids[11..22].to_vec(),
+            )
+            .await
+            .unwrap();
+        // Wait for new version after first batch
+        wait_for_new_version(
+            clients,
+            collection_id.clone(),
+            tenant_id.clone(),
+            initial_version_count + 1,
+            10,
+        )
+        .await
+        .unwrap();
+
+        // After adding second batch and waiting for version, add a third batch
+        tracing::info!("Adding third batch of embeddings (modified records)");
+        clients
+            .add_embeddings(
+                &collection_id,
+                embeddings[22..].to_vec(),
+                ids[22..].to_vec(),
+            )
+            .await
+            .unwrap();
+
+        wait_for_new_version(
+            clients,
+            collection_id.clone(),
+            tenant_id.clone(),
+            initial_version_count + 2,
+            10,
+        )
+        .await
+        .unwrap();
+
+        let collection_id = CollectionUuid::from_str(&collection_id).unwrap();
+
+        validate_test_collection(clients, collection_id).await;
+
+        (collection_id, tenant_id)
+    }
+
+    async fn get_hnsw_index_ids(storage: &Storage) -> Vec<Uuid> {
+        storage
+            .list_prefix("hnsw")
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|path| path.contains("hnsw/"))
+            .map(|path| {
+                Uuid::from_str(
+                    path.split("/")
+                        .nth(1) // Get the prefix part after "hnsw/"
+                        .unwrap(),
+                )
+                .unwrap()
+            })
+            .collect::<std::collections::HashSet<_>>() // de-dupe
+            .into_iter()
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_check_end_to_end() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        // Create storage config and storage client
+        let storage_config = StorageConfig::ObjectStore(ObjectStoreConfig {
+            bucket: ObjectStoreBucketConfig {
+                name: "chroma-storage".to_string(),
+                r#type: ObjectStoreType::Minio,
+            },
+            upload_part_size_bytes: 1024 * 1024,   // 1MB
+            download_part_size_bytes: 1024 * 1024, // 1MB
+            max_concurrent_requests: 10,
+        });
+
+        let registry = Registry::new();
+        let storage = Storage::try_from_config(&storage_config, &registry)
+            .await
+            .unwrap();
+
+        let mut clients = ChromaGrpcClients::new().await.unwrap();
+        let (collection_id, tenant_id) = create_test_collection(&mut clients).await;
+
+        let hnsw_index_ids_before_gc = get_hnsw_index_ids(&storage).await;
+
+        // Get version count before GC
+        let versions_before_gc = clients
+            .list_collection_versions(
+                collection_id.to_string(),
+                tenant_id.clone(),
+                Some(100),
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        let unique_versions_before_gc = versions_before_gc
+            .versions
+            .iter()
+            .map(|v| v.version)
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+        assert_eq!(
+            unique_versions_before_gc, 4,
+            "Expected 4 unique versions before starting garbage collection"
+        );
+
+        // After creating versions and verifying records, start garbage collection:
+        tracing::info!("Starting garbage collection process");
+
+        let system = System::new();
+        let dispatcher = Dispatcher::new(chroma_system::DispatcherConfig::default());
+        let dispatcher_handle = system.start_component(dispatcher);
+        let sysdb_config = SysDbConfig::Grpc(GrpcSysDbConfig {
+            host: "localhost".to_string(),
+            port: 50051,
+            connect_timeout_ms: 5000,
+            request_timeout_ms: 10000,
+            num_channels: 1,
+        });
+        let mut sysdb = SysDb::try_from_config(&sysdb_config, &registry)
+            .await
+            .unwrap();
+
+        // Get collection info for GC from sysdb
+        let collections_to_gc = sysdb.get_collections_to_gc().await.unwrap();
+        let collection_info = collections_to_gc
+            .iter()
+            .find(|c| c.id == collection_id)
+            .expect("Collection should be available for GC");
+
+        // Create orchestrator with correct version file path
+        let orchestrator = GarbageCollectorOrchestrator::new(
+            collection_id,
+            collection_info.version_file_path.clone(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            0, // cutoff_time_hours: immediately expire versions
+            sysdb,
+            dispatcher_handle,
+            storage.clone(),
+            CleanupMode::Delete,
+        );
+
+        tracing::info!("Running orchestrator");
+        let result = orchestrator.run(system).await.unwrap();
+        assert_eq!(result.num_versions_deleted, 1);
+
+        // After running GC and waiting for result, verify versions were deleted
+        let versions_after_gc = clients
+            .list_collection_versions(
+                collection_id.to_string(),
+                tenant_id.clone(),
+                Some(100),
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        let unique_versions_after_gc = versions_after_gc
+            .versions
+            .iter()
+            .map(|v| v.version)
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+
+        tracing::info!(
+            before = unique_versions_before_gc,
+            after = unique_versions_after_gc,
+            "Unique version counts before and after GC"
+        );
+
+        assert!(
+            unique_versions_after_gc >= 2,
+            "Expected at least 2 unique versions to remain after garbage collection (min_versions_to_keep)"
+        );
+
+        // Check HNSW indices
+        let hnsw_index_ids_after_gc = get_hnsw_index_ids(&storage).await;
+        tracing::info!(
+            before = ?hnsw_index_ids_before_gc,
+            after = ?hnsw_index_ids_after_gc,
+            "HNSW index IDs before and after GC"
+        );
+
+        assert_eq!(
+            hnsw_index_ids_before_gc.len() - hnsw_index_ids_after_gc.len(),
+            result.num_versions_deleted as usize,
+            "Expected {} HNSW indices to be deleted after garbage collection",
+            result.num_versions_deleted
+        );
+
+        tracing::info!("Verifying records are still accessible after GC");
+        validate_test_collection(&mut clients, collection_id).await;
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_soft_delete() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        // Create storage config and storage client
+        let storage_config = StorageConfig::ObjectStore(ObjectStoreConfig {
+            bucket: ObjectStoreBucketConfig {
+                name: "chroma-storage".to_string(),
+                r#type: ObjectStoreType::Minio,
+            },
+            upload_part_size_bytes: 1024 * 1024,   // 1MB
+            download_part_size_bytes: 1024 * 1024, // 1MB
+            max_concurrent_requests: 10,
+        });
+
+        let registry = Registry::new();
+        let storage = Storage::try_from_config(&storage_config, &registry)
+            .await
+            .unwrap();
+
+        let deleted_hnsw_files_before_test: Vec<_> = storage
+            .list_prefix("gc")
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|path| path.contains("gc") && path.contains("header.bin"))
+            .collect();
+
+        let mut clients = ChromaGrpcClients::new().await.unwrap();
+        let (collection_id, tenant_id) = create_test_collection(&mut clients).await;
+
+        let hnsw_index_ids_before_gc = get_hnsw_index_ids(&storage).await;
+
+        // Get version count before GC
+        let versions_before_gc = clients
+            .list_collection_versions(
+                collection_id.to_string(),
+                tenant_id.clone(),
+                Some(100),
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        let unique_versions_before_gc = versions_before_gc
+            .versions
+            .iter()
+            .map(|v| v.version)
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+        assert_eq!(
+            unique_versions_before_gc, 4,
+            "Expected 4 unique versions before starting garbage collection"
+        );
+
+        // After creating versions and verifying records, start garbage collection:
+        tracing::info!("Starting garbage collection process");
+
+        let system = System::new();
+        let dispatcher = Dispatcher::new(chroma_system::DispatcherConfig::default());
+        let dispatcher_handle = system.start_component(dispatcher);
+        let sysdb_config = SysDbConfig::Grpc(GrpcSysDbConfig {
+            host: "localhost".to_string(),
+            port: 50051,
+            connect_timeout_ms: 5000,
+            request_timeout_ms: 10000,
+            num_channels: 1,
+        });
+        let mut sysdb = SysDb::try_from_config(&sysdb_config, &registry)
+            .await
+            .unwrap();
+
+        // Get collection info for GC from sysdb
+        let collections_to_gc = sysdb.get_collections_to_gc().await.unwrap();
+        let collection_info = collections_to_gc
+            .iter()
+            .find(|c| c.id == collection_id)
+            .expect("Collection should be available for GC");
+
+        // Create orchestrator with correct version file path
+        let orchestrator = GarbageCollectorOrchestrator::new(
+            collection_id,
+            collection_info.version_file_path.clone(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            0, // cutoff_time_hours: immediately expire versions
+            sysdb,
+            dispatcher_handle,
+            storage.clone(),
+            CleanupMode::Rename,
+        );
+
+        tracing::info!("Running orchestrator");
+        let result = orchestrator.run(system).await.unwrap();
+        assert_eq!(result.num_versions_deleted, 1);
+
+        // After running GC and waiting for result, verify versions were deleted
+        let versions_after_gc = clients
+            .list_collection_versions(
+                collection_id.to_string(),
+                tenant_id.clone(),
+                Some(100),
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        let unique_versions_after_gc = versions_after_gc
+            .versions
+            .iter()
+            .map(|v| v.version)
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+
+        tracing::info!(
+            before = unique_versions_before_gc,
+            after = unique_versions_after_gc,
+            "Unique version counts before and after GC"
+        );
+
+        assert!(
+            unique_versions_after_gc >= 2,
+            "Expected at least 2 unique versions to remain after garbage collection (min_versions_to_keep)"
+        );
+
+        // Check HNSW indices
+        let hnsw_index_ids_after_gc = get_hnsw_index_ids(&storage).await;
+        tracing::info!(
+            before = ?hnsw_index_ids_before_gc,
+            after = ?hnsw_index_ids_after_gc,
+            "HNSW index IDs before and after GC"
+        );
+
+        assert_eq!(
+            hnsw_index_ids_before_gc.len() - hnsw_index_ids_after_gc.len(),
+            result.num_versions_deleted as usize,
+            "Expected {} HNSW indices to be deleted after garbage collection",
+            result.num_versions_deleted
+        );
+
+        tracing::info!("Verifying records are still accessible after GC");
+        validate_test_collection(&mut clients, collection_id).await;
+
+        // Verify that "deleted" files are renamed with the "gc" prefix
+        let deleted_hnsw_files: Vec<_> = storage
+            .list_prefix("gc")
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|path| path.contains("gc") && path.contains("header.bin"))
+            .collect();
+
+        tracing::info!(
+            count = deleted_hnsw_files.len(),
+            files = ?deleted_hnsw_files,
+            "Soft-deleted HNSW header files"
+        );
+
+        // The number of moved files should match the difference in versions
+        assert_eq!(
+            deleted_hnsw_files.len() - deleted_hnsw_files_before_test.len(),
+            unique_versions_before_gc - unique_versions_after_gc,
+            "Expected renamed HNSW files to match the number of deleted unique versions"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_dry_run() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        // Create storage config and storage client
+        let storage_config = StorageConfig::ObjectStore(ObjectStoreConfig {
+            bucket: ObjectStoreBucketConfig {
+                name: "chroma-storage".to_string(),
+                r#type: ObjectStoreType::Minio,
+            },
+            upload_part_size_bytes: 1024 * 1024,   // 1MB
+            download_part_size_bytes: 1024 * 1024, // 1MB
+            max_concurrent_requests: 10,
+        });
+
+        let registry = Registry::new();
+        let storage = Storage::try_from_config(&storage_config, &registry)
+            .await
+            .unwrap();
+
+        let mut clients = ChromaGrpcClients::new().await.unwrap();
+        let (collection_id, tenant_id) = create_test_collection(&mut clients).await;
+
+        let hnsw_index_ids_before_gc = get_hnsw_index_ids(&storage).await;
+
+        // Get version count before GC
+        let versions_before_gc = clients
+            .list_collection_versions(
+                collection_id.to_string(),
+                tenant_id.clone(),
+                Some(100),
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        let unique_versions_before_gc = versions_before_gc
+            .versions
+            .iter()
+            .map(|v| v.version)
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+        assert_eq!(
+            unique_versions_before_gc, 4,
+            "Expected 4 unique versions before starting garbage collection"
+        );
+
+        // After creating versions and verifying records, start garbage collection:
+        tracing::info!("Starting garbage collection process");
+
+        let system = System::new();
+        let dispatcher = Dispatcher::new(chroma_system::DispatcherConfig::default());
+        let dispatcher_handle = system.start_component(dispatcher);
+        let sysdb_config = SysDbConfig::Grpc(GrpcSysDbConfig {
+            host: "localhost".to_string(),
+            port: 50051,
+            connect_timeout_ms: 5000,
+            request_timeout_ms: 10000,
+            num_channels: 1,
+        });
+        let mut sysdb = SysDb::try_from_config(&sysdb_config, &registry)
+            .await
+            .unwrap();
+
+        // Get collection info for GC from sysdb
+        let collections_to_gc = sysdb.get_collections_to_gc().await.unwrap();
+        let collection_info = collections_to_gc
+            .iter()
+            .find(|c| c.id == collection_id)
+            .expect("Collection should be available for GC");
+
+        // Create orchestrator with correct version file path
+        let orchestrator = GarbageCollectorOrchestrator::new(
+            collection_id,
+            collection_info.version_file_path.clone(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            0, // cutoff_time_hours: immediately expire versions
+            sysdb,
+            dispatcher_handle,
+            storage.clone(),
+            CleanupMode::DryRun,
+        );
+
+        tracing::info!("Running orchestrator");
+        let result = orchestrator.run(system).await.unwrap();
+        assert_eq!(result.num_versions_deleted, 0);
+
+        // After running GC and waiting for result, verify versions were deleted
+        let versions_after_gc = clients
+            .list_collection_versions(
+                collection_id.to_string(),
+                tenant_id.clone(),
+                Some(100),
+                None,
+                None,
+                Some(true), // include versions marked for deletion
+            )
+            .await
+            .unwrap();
+
+        // Expect 2 versions to be marked for deletion, but not actually deleted
+        let num_versions_marked_for_deletion = versions_after_gc
+            .versions
+            .iter()
+            .filter(|v| v.marked_for_deletion)
+            .count();
+        assert_eq!(
+            num_versions_marked_for_deletion, 1,
+            "Expected 1 version to be marked for deletion in dry run mode"
+        );
+
+        let unique_versions_after_gc = versions_after_gc
+            .versions
+            .iter()
+            .map(|v| v.version)
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+
+        assert_eq!(
+            unique_versions_after_gc, unique_versions_before_gc,
+            "Expected no versions to be deleted in dry run mode"
+        );
+
+        // Check HNSW indices
+        let hnsw_index_ids_after_gc = get_hnsw_index_ids(&storage).await;
+        tracing::info!(
+            before = ?hnsw_index_ids_before_gc,
+            after = ?hnsw_index_ids_after_gc,
+            "HNSW index IDs before and after GC"
+        );
+
+        assert_eq!(
+            hnsw_index_ids_before_gc.len(),
+            hnsw_index_ids_after_gc.len(),
+            "Expected no HNSW indices to be deleted after garbage collection"
+        );
+
+        tracing::info!("Verifying records are still accessible after GC");
+        validate_test_collection(&mut clients, collection_id).await;
+    }
 }
