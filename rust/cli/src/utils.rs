@@ -37,6 +37,7 @@ pub const LOGO: &str = "
 pub const CHROMA_DIR: &str = ".chroma";
 pub const CREDENTIALS_FILE: &str = "credentials";
 const CONFIG_FILE: &str = "config.json";
+pub const SELECTION_LIMIT: usize = 5;
 
 #[derive(Debug, Error)]
 pub enum CliError {
@@ -108,9 +109,31 @@ impl Profile {
     }
 }
 
+fn default_show_updates() -> bool {
+    true
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SampleAppsConfig {
+    #[serde(default = "default_show_updates")]
+    pub show_updates: bool,
+    #[serde(default)]
+    pub installed: HashMap<String, String>,
+}
+
+impl Default for SampleAppsConfig {
+    fn default() -> Self {
+        Self {
+            show_updates: default_show_updates(),
+            installed: HashMap::new(),
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CliConfig {
     pub current_profile: String,
+    pub sample_apps: SampleAppsConfig
 }
 
 #[derive(Debug, Deserialize)]
@@ -187,6 +210,7 @@ fn get_credentials_file_path() -> Result<PathBuf, CliError> {
 fn create_config_file(config_path: &PathBuf) -> Result<(), Box<dyn Error>> {
     let default_config = CliConfig {
         current_profile: String::new(),
+        sample_apps: SampleAppsConfig::default(),
     };
     let json_str = serde_json::to_string_pretty(&default_config)?;
     fs::write(config_path, json_str)?;

@@ -3,10 +3,9 @@ use std::error::Error;
 use std::fs::{create_dir_all, File};
 use std::io::Write;
 use std::path::Path;
-use std::process::Command;
 use clap::Parser;
 use colored::Colorize;
-use dialoguer::{Password, Select};
+use dialoguer::{Input, Select};
 use dialoguer::theme::ColorfulTheme;
 use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::Client;
@@ -16,9 +15,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use zip_extract::extract;
-use crate::commands::db::DbError;
-use crate::commands::install::InstallError::{GithubDownloadFailed, InstallFailed, NoSuchApp, VersionMismatch};
-use crate::utils::{CliError, UtilsError};
+use crate::utils::{read_config, CliError, UtilsError, SELECTION_LIMIT};
 
 #[derive(Debug, Error)]
 pub enum InstallError {
@@ -30,6 +27,10 @@ pub enum InstallError {
     NoSuchApp(String),
     #[error("Sample app {0} requires Chroma CLI with version {1}. Please update your CLI using `chroma update`")]
     VersionMismatch(String, String),
+    #[error("Failed to get sample apps listings")]
+    ListingsDownloadFailed,
+    #[error("Failed to list sample apps")]
+    ListingFailed,
 }
 
 #[derive(Parser, Debug)]
@@ -39,6 +40,8 @@ pub struct InstallArgs {
         help = "The name of the sample app to install",
     )]
     name: Option<String>,
+    #[clap(long, conflicts_with_all = ["name"])]
+    list: bool,
     #[clap(long, hide = true)]
     dev: Option<String>,
 }
@@ -63,16 +66,24 @@ struct RepoContent {
 struct AppListing {
     name: String,
     description: String,
-    url: String,
+    version: String,
+    cli_version: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SampleAppConfig {
-    name: String,
-    cli_version: String,
-    app_version: String,
+    required_env_variables: Vec<String>,
+    optional_env_variables: Vec<String>,
     startup_commands: HashMap<String, String>,
+}
+
+fn show_apps_message() -> String {
+    "Available sample apps:".to_string()
+}
+
+fn prompt_app_name_message() -> String {
+    "Which sample app would you like to install?".to_string()
 }
 
 async fn download_repo_files(
@@ -135,10 +146,10 @@ where
     Ok(deserialized)
 }
 
-async fn download_github_file<T: DeserializeOwned>(name: &str, branch: Option<String>,) -> Result<T, Box<dyn Error>> {
+async fn download_github_file<T: DeserializeOwned>(name: &str) -> Result<T, Box<dyn Error>> {
     let owner = "chroma-core";
     let repo = "chroma";
-    let branch_name = branch.unwrap_or("main".to_string());
+    let branch_name = "main".to_string();
     let file_path = name;
 
     let url = format!(
@@ -149,29 +160,10 @@ async fn download_github_file<T: DeserializeOwned>(name: &str, branch: Option<St
     Ok(file)
 }
 
-fn check_version_compatibility(app_name: &str, app_config: &SampleAppConfig) -> Result<(), Box<dyn Error>> {
-    let cli_version = env!("CARGO_PKG_VERSION");
-    let app_version = &app_config.app_version;
-
-    let cli_semver = Version::parse(cli_version)?;
-    let app_semver = Version::parse(app_version)?;
-
-    if app_semver > cli_semver {
-        return Err(VersionMismatch(app_name.to_string(), app_version.to_string()).into());
-    }
-
-    Ok(())
-}
-
-async fn download_sample_app(name: &String, path: &String, branch: Option<String>) -> Result<(), Box<dyn Error>> {
-    let branch_ref = match branch {
-        Some(branch) => format!("?ref={}", branch),
-        None => String::new(),
-    };
+async fn download_sample_app(name: &String, path: &String) -> Result<(), Box<dyn Error>> {
     let url = format!(
-        "https://api.github.com/repos/chroma-core/chroma/contents/sample_apps/{}{}",
+        "https://api.github.com/repos/chroma-core/chroma/contents/sample_apps/{}",
         name,
-        branch_ref
     );
     let app_path = format!("{}/{}", path, name);
     create_dir_all(&app_path)?;
@@ -213,7 +205,7 @@ async fn download_s3_file(url: &str, path: &str) -> Result<(), Box<dyn std::erro
 
     // Create directory if it doesn't exist
     if let Some(parent) = Path::new(path).parent() {
-        fs::create_dir_all(parent)?;
+        create_dir_all(parent)?;
     }
 
     // Create the file and download
@@ -248,31 +240,6 @@ fn extract_zip_file(zip_file_path: &str, output_dir_path: &str) -> Result<(), Bo
     Ok(())
 }
 
-fn install_dependencies(
-    path: &String,
-    package_manager: PackageManager,
-) -> Result<(), Box<dyn Error>> {
-    println!("\n{}", "Installing dependencies".bold());
-
-    let (command, arg) = match package_manager {
-        PackageManager::Npm => ("npm", "install"),
-        PackageManager::Pnpm => ("pnpm", "install"),
-        PackageManager::Yarn => ("yarn", "install"),
-        PackageManager::Bun => ("bun", "install"),
-        PackageManager::Pip => ("pip", "install -r requirements.txt"),
-        PackageManager::Poetry => ("poetry", "install"),
-    };
-
-    let status = Command::new(command).arg(arg).current_dir(path).status()?;
-
-    if status.success() {
-        println!("{}\n", "Installed app dependencies".bold());
-        Ok(())
-    } else {
-        Err("Failed to install dependencies".into())
-    }
-}
-
 fn write_env_file(path: &str, key: &str) -> std::io::Result<()> {
     let env_content = format!(r#"CHROMA_HOST=http://localhost:8000
 CHROMA_TENANT=default_tenant
@@ -285,66 +252,125 @@ OPENAI_API_KEY={}"#, key);
     Ok(())
 }
 
-async fn install_sample_app(name: String, branch: Option<String>) -> Result<(), CliError> {
-    // Get all apps manifest to verify app name
-    let apps = download_github_file::<Vec<AppListing>>("sample_apps/config.json", branch.clone()).await.map_err(|_| GithubDownloadFailed)?;
-    if !apps.iter().any(|app| app.name == name) {
-        return Err(NoSuchApp(name.clone()))?
-    }
-
-    // Get app manifest and build config
-    let config_url = format!("sample_apps/{}/app_config.json", name);
-    let app_config = download_github_file::<SampleAppConfig>(&config_url, branch.clone()).await.map_err(|e| {
-        println!("Downloading sample app config failed: {}", e);
-        GithubDownloadFailed
-    })?;
-
-    // Verify CLI version compat
-    check_version_compatibility(&name, &app_config).map_err(|_| VersionMismatch(name.clone(), app_config.app_version.clone()))?;
-
-    // Download files
-    // download_sample_app(&name, &".".to_string(), branch).await.map_err(|e| {
-    //     println!("Downloading sample app failed: {}", e);
-    //     GithubDownloadFailed
-    // })?;
-    // 
-    // // Download Chroma from S3
-    // println!("\n{}", "Downloading your Chroma DB".bold());
-    // let url = "https://s3.us-east-1.amazonaws.com/public.trychroma.com/sample_apps/chatbot/chroma_data.zip";
-    // let download_path = format!("./{}/chroma_data.zip", name);
-    // download_s3_file(url, &download_path).await.map_err(|_e| InstallFailed(name.clone()))?;
-    // 
-    // let zip_path = format!("./{}/chroma_data.zip", name);
-    // let output = format!("./{}", name);
-    // extract_zip_file(zip_path.as_str(), output.as_str()).map_err(|_e| InstallFailed(name.clone()))?;
-    // println!("{}\n", "Download complete!".bold());
-
-    println!("{}", "This app requires an OpenAI key in the .env file. Input it here if you want the installer to set it for you, or hit Return to set it later.".bold().blue());
-    let key: String = Password::with_theme(&ColorfulTheme::default())
-        .allow_empty_password(true)
-        .report(true)
-        .interact()
-        .map_err(|_| UtilsError::UserInputFailed)?;
-
-    // Set env variables
-    write_env_file(&format!("./{}/.env", name), &key).map_err(|_e| InstallFailed(name.clone()))?;
-    
-    println!("\n");
-
-    // Ask for installer
-    println!(
-        "{}",
-        "Which package manager do you want to use?".blue().bold()
-    );
+fn select_app(apps: &[AppListing]) -> Result<String, CliError> {
+    let app_names: Vec<String> = get_display_app_names(apps)?;
     let selection = Select::with_theme(&ColorfulTheme::default())
-        .items(&app_config.package_managers)
+        .items(&app_names)
         .default(0)
         .interact()
-        .unwrap();
-    let package_manager = app_config.package_managers[selection].clone();
+        .map_err(|_| UtilsError::UserInputFailed)?;
+    let name = app_names[selection].clone();
+    println!("{}\n", name);
+    Ok(name)
+}
 
-    // Run installer
-    install_dependencies(&format!("./{}", name), package_manager.clone()).map_err(|_| InstallFailed(name.clone()))?;
+fn get_display_app_names(apps: &[AppListing]) -> Result<Vec<String>, CliError> {
+    let config = read_config()?;
+    let installed = config.sample_apps.installed;
+    let cli_version = Version::parse(env!("CARGO_PKG_VERSION")).map_err(|_| InstallError::ListingFailed)?;
+    apps.into_iter().map(|app| {
+        let mut listing = app.name.clone();
+
+        let app_version =  Version::parse(&app.version).map_err(|_| InstallError::ListingFailed)?;
+        let requires_update = app_version > cli_version;
+
+        if installed.contains_key(&app.name) {
+            let installed_version  = Version::parse(installed.get(&app.name).unwrap()).unwrap();
+            if installed_version < app_version {
+                listing = match requires_update {
+                    true => format!("{} (new version available! Requires CLI update)", listing),
+                    false => format!("{} (new version available!)", listing)
+                }
+            };
+        } else if requires_update {
+            listing = format!("{} (requires CLI update)", listing);
+        }
+        Ok(listing)
+    }).collect()
+}
+
+fn prompt_app_name(apps: &[AppListing], prompt: &str) -> Result<String, CliError> {
+    println!("{}", prompt.blue().bold());
+    let name = match apps.len() {
+        0..=SELECTION_LIMIT => select_app(apps),
+        _ => {
+            let input = Input::with_theme(&ColorfulTheme::default())
+                .interact_text()
+                .map_err(|_| UtilsError::UserInputFailed)?;
+            Ok(input)
+        },
+    }?;
+   Ok(name)
+}
+
+async fn get_app_name(name: Option<String>) -> Result<String, CliError> {
+    let apps = download_github_file::<Vec<AppListing>>("sample_apps/config.json").await.map_err(|_| InstallError::ListingsDownloadFailed)?;
+
+    let app_name = match name {
+        Some(app_name) => Ok(app_name),
+        None => prompt_app_name(&apps, &prompt_app_name_message())
+    }?;
+    
+    let app = apps.iter().find(|app| app.name == app_name).ok_or(InstallError::NoSuchApp(app_name.clone()))?;
+    let app_cli_version = Version::parse(&app.cli_version).map_err(|_| InstallError::ListingFailed)?;
+    let cli_version = Version::parse(env!("CARGO_PKG_VERSION")).map_err(|_| InstallError::ListingFailed)?;
+    if app_cli_version < cli_version {
+        return Err(InstallError::VersionMismatch(app_name.clone(), app_cli_version.to_string()).into());
+    }
+    
+    Ok(app_name)
+}
+
+fn show_apps(apps: &[AppListing]) -> Result<(), CliError> {
+    let app_listings = get_display_app_names(apps)?;
+    println!("{}", show_apps_message().blue().bold());
+    app_listings.iter().for_each(|listing| {
+        println!("{} {}", ">".yellow(), listing);
+    });
+    Ok(())
+}
+
+async fn install_sample_app(args: InstallArgs) -> Result<(), CliError> {
+    let apps = download_github_file::<Vec<AppListing>>("sample_apps/config.json").await.map_err(|_| InstallError::ListingsDownloadFailed)?;
+    if args.list {
+        show_apps(&apps)?;
+        return Ok(());
+    }
+    
+    let app_name = get_app_name(args.name).await?;
+    
+    // Download files
+    download_sample_app(&app_name, &".".to_string()).await.map_err(|e| InstallError::GithubDownloadFailed)?;
+    
+    // Get app config
+    
+
+    // println!("{}", "This app requires an OpenAI key in the .env file. Input it here if you want the installer to set it for you, or hit Return to set it later.".bold().blue());
+    // let key: String = Password::with_theme(&ColorfulTheme::default())
+    //     .allow_empty_password(true)
+    //     .report(true)
+    //     .interact()
+    //     .map_err(|_| UtilsError::UserInputFailed)?;
+    // 
+    // // Set env variables
+    // write_env_file(&format!("./{}/.env", name), &key).map_err(|_e| InstallFailed(name.clone()))?;
+    // 
+    // println!("\n");
+    // 
+    // // Ask for installer
+    // println!(
+    //     "{}",
+    //     "Which package manager do you want to use?".blue().bold()
+    // );
+    // let selection = Select::with_theme(&ColorfulTheme::default())
+    //     .items(&app_config.package_managers)
+    //     .default(0)
+    //     .interact()
+    //     .unwrap();
+    // let package_manager = app_config.package_managers[selection].clone();
+    // 
+    // // Run installer
+    // install_dependencies(&format!("./{}", name), package_manager.clone()).map_err(|_| InstallFailed(name.clone()))?;
 
     // Output run instructions
 
