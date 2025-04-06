@@ -23,7 +23,7 @@ impl ChromaGrpcClients {
         let sysdb_channel = Channel::from_static("http://localhost:50051")
             .connect()
             .await?;
-        let logservice_channel = Channel::from_static("http://localhost:50054")
+        let logservice_channel = Channel::from_static("http://localhost:50052")
             .connect()
             .await?;
         let queryservice_channel = Channel::from_static("http://localhost:50053")
@@ -355,6 +355,7 @@ impl ChromaGrpcClients {
         max_count: Option<i64>,
         versions_before: Option<i64>,
         versions_at_or_after: Option<i64>,
+        include_marked_for_deletion: Option<bool>,
     ) -> Result<ListCollectionVersionsResponse, Box<dyn std::error::Error>> {
         let request = ListCollectionVersionsRequest {
             collection_id,
@@ -362,6 +363,7 @@ impl ChromaGrpcClients {
             max_count,
             versions_before,
             versions_at_or_after,
+            include_marked_for_deletion,
         };
 
         let response = self.sysdb.list_collection_versions(request).await?;

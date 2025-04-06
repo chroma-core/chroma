@@ -229,7 +229,7 @@ impl Operator<DeleteUnusedFilesInput, DeleteUnusedFilesOutput> for DeleteUnusedF
         // did not finish successfully (i.e. crashed before committing the work to SysDb).
         let mut file_operation_errors = Vec::new();
         match self.cleanup_mode {
-            CleanupMode::ListOnly => {
+            CleanupMode::DryRun => {
                 // Do nothing here. List is written to S3 for all modes later in this function.
             }
             CleanupMode::Rename => {
@@ -337,7 +337,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_list_only_mode() {
+    async fn test_dry_run_mode() {
         let tmp_dir = TempDir::new().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let (test_files, hnsw_files) = setup_test_files(&storage).await;
@@ -347,7 +347,7 @@ mod tests {
 
         let operator = DeleteUnusedFilesOperator::new(
             storage.clone(),
-            CleanupMode::ListOnly,
+            CleanupMode::DryRun,
             "test_collection".to_string(),
         );
         let input = DeleteUnusedFilesInput {
@@ -554,10 +554,10 @@ mod tests {
         assert!(content.contains("Failed files:"));
         assert!(content.contains("nonexistent.txt"));
 
-        // Test ListOnly mode with nonexistent files (should succeed)
+        // Test DryRun mode with nonexistent files (should succeed)
         let list_operator = DeleteUnusedFilesOperator::new(
             storage,
-            CleanupMode::ListOnly,
+            CleanupMode::DryRun,
             "test_collection".to_string(),
         );
         let result = list_operator

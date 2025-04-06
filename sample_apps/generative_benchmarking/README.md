@@ -1,6 +1,6 @@
 # Generative Benchmarking
 
-This project provides a comprehensive toolkit for generating custom benchmarks and replicating the results outlined in our (link technical report here).
+This project provides a comprehensive toolkit for generating custom benchmarks and replicating the results outlined in our [technical report](https://research.trychroma.com/generative-benchmarking).
 
 ## Motivation
 
@@ -15,7 +15,6 @@ This repository offers tools to:
 - **Compare Results:** Compare metrics from your generated benchmark
 
 ## Repository Structure
-The main functionality is contained within the `generative-benchmarking` folder, which includes the following:
 
 - **`generate_benchmark.ipynb`**  
   A comprehensive guide to generating a custom benchmark based on your data
@@ -23,26 +22,32 @@ The main functionality is contained within the `generative-benchmarking` folder,
 - **`compare.ipynb`**  
   A framework for comparing results, which is useful when evaluating different embedding models or configurations
 
-## Installation
+- **`data/`**  
+  Example data to immediately test out the notebooks with
 
-The environment configuration files are located in the `generative-benchmarking` folder. You can install the dependencies using one of the following methods:
+- **`functions/`**  
+  Functions used to run notebooks, includes various embedding functions and llm prompts
+
+- **`results/`**  
+  Folder for saving benchmark results, includes results produced from example data
+
+
+
+## Installation
 
 ### pip
 
 ```bash
-pip install -r generative-benchmarking/requirements.txt
-jupyter notebook
+pip install -r requirements.txt
 ```
 
 ### poetry
 ```bash
-poetry install --with notebooks
-poetry run jupyter notebook
+poetry install
 ```
 
 ### conda
 ```bash
-conda env create -f requirements/environment.yml
-conda activate notebook-env
-jupyter notebook
+conda env create -f environment.yml
+conda activate generative-benchmarking-env
 ```
