@@ -1,6 +1,6 @@
 use crate::utils::UtilsError::UserInputFailed;
 use crate::utils::{
-    read_config, read_secret, write_config, CliConfig, CliError, UtilsError, SELECTION_LIMIT,
+    read_config, read_secret, write_config, CliConfig, CliError, SELECTION_LIMIT,
 };
 use clap::Parser;
 use colored::Colorize;
@@ -23,8 +23,6 @@ use zip_extract::extract;
 
 #[derive(Debug, Error)]
 pub enum InstallError {
-    #[error("Failed to install sample app {0}")]
-    InstallFailed(String),
     #[error("Failed to download files from Github")]
     GithubDownloadFailed,
     #[error("No such app {0}")]
@@ -63,6 +61,7 @@ enum ContentType {
 #[derive(Debug, Deserialize)]
 struct RepoContent {
     name: String,
+    #[allow(dead_code)]
     path: String,
     #[serde(rename = "type")]
     content_type: ContentType,
@@ -241,6 +240,7 @@ async fn download_sample_app(name: &String, path: &String) -> Result<(), Box<dyn
     Ok(())
 }
 
+#[allow(dead_code)]
 async fn download_s3_file(url: &str, path: &str) -> Result<(), Box<dyn std::error::Error>> {
     let client = Client::new();
 
@@ -289,6 +289,7 @@ async fn download_s3_file(url: &str, path: &str) -> Result<(), Box<dyn std::erro
     Ok(())
 }
 
+#[allow(dead_code)]
 fn extract_zip_file(
     zip_file_path: &str,
     output_dir_path: &str,
