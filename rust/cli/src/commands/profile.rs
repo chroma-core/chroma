@@ -258,9 +258,7 @@ mod tests {
         current_profile_set_message, no_current_profile_message, no_profiles_found_message,
         profile_delete_success_message, ProfileError,
     };
-    use crate::utils::{
-        read_config, read_profiles, write_config, write_profiles, CliConfig, Profile,
-    };
+    use crate::utils::{read_config, read_profiles, write_config, write_profiles, CliConfig, Profile, SampleAppsConfig};
     use assert_cmd::Command;
     use predicates::str::contains;
     use std::collections::HashMap;
@@ -289,6 +287,7 @@ mod tests {
 
         let config = CliConfig {
             current_profile: "profile1".to_string(),
+            sample_apps: SampleAppsConfig::default(),
         };
 
         write_profiles(&profiles).unwrap();

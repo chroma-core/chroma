@@ -1,6 +1,8 @@
 use std::collections::HashMap;
+use std::env;
 use std::error::Error;
-use std::fs::{create_dir_all, File};
+use std::fmt::format;
+use std::fs::{create_dir_all, read_to_string, File};
 use std::io::Write;
 use std::path::Path;
 use clap::Parser;
@@ -31,6 +33,10 @@ pub enum InstallError {
     ListingsDownloadFailed,
     #[error("Failed to list sample apps")]
     ListingFailed,
+    #[error("Failed to read sample app config")]
+    AppConfigReadFailed,
+    #[error("Failed to get runtime for installation")]
+    RuntimeError,
 }
 
 #[derive(Parser, Debug)]
@@ -71,10 +77,15 @@ struct AppListing {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+struct EnvVariable {
+    name: String,
+    secret: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct SampleAppConfig {
-    required_env_variables: Vec<String>,
-    optional_env_variables: Vec<String>,
+    required_env_variables: Vec<EnvVariable>,
+    optional_env_variables: Vec<EnvVariable>,
     startup_commands: HashMap<String, String>,
 }
 
@@ -268,9 +279,12 @@ fn get_display_app_names(apps: &[AppListing]) -> Result<Vec<String>, CliError> {
     let config = read_config()?;
     let installed = config.sample_apps.installed;
     let cli_version = Version::parse(env!("CARGO_PKG_VERSION")).map_err(|_| InstallError::ListingFailed)?;
-    apps.into_iter().map(|app| {
-        let mut listing = app.name.clone();
-
+    let sample_apps_url = "https://github.com/chroma-core/chroma/tree/main/sample_apps";
+    
+    apps.iter().map(|app| {
+        let url = format!("{}/{}", sample_apps_url, app.name);
+        let mut listing = format!("\x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\", url, app.name);
+        
         let app_version =  Version::parse(&app.version).map_err(|_| InstallError::ListingFailed)?;
         let requires_update = app_version > cli_version;
 
@@ -285,6 +299,9 @@ fn get_display_app_names(apps: &[AppListing]) -> Result<Vec<String>, CliError> {
         } else if requires_update {
             listing = format!("{} (requires CLI update)", listing);
         }
+        
+        listing = format!("{}: {}", listing, app.description);
+        
         Ok(listing)
     }).collect()
 }
@@ -325,9 +342,20 @@ fn show_apps(apps: &[AppListing]) -> Result<(), CliError> {
     let app_listings = get_display_app_names(apps)?;
     println!("{}", show_apps_message().blue().bold());
     app_listings.iter().for_each(|listing| {
-        println!("{} {}", ">".yellow(), listing);
+        println!("{} {}", ">".yellow(), listing, );
     });
     Ok(())
+}
+
+fn read_app_config(app_name: &str) -> Result<SampleAppConfig, Box<dyn Error>> {
+    let mut path = env::current_dir()?;
+    path.push(app_name);
+    path.push("config.json");
+
+    let contents = read_to_string(path)?;
+    let config: SampleAppConfig = serde_json::from_str(&contents)?;
+
+    Ok(config)
 }
 
 async fn install_sample_app(args: InstallArgs) -> Result<(), CliError> {
@@ -343,7 +371,7 @@ async fn install_sample_app(args: InstallArgs) -> Result<(), CliError> {
     download_sample_app(&app_name, &".".to_string()).await.map_err(|e| InstallError::GithubDownloadFailed)?;
     
     // Get app config
-    
+    let app_config = read_app_config(app_name.as_str()).map_err(|_| InstallError::AppConfigReadFailed)?;
 
     // println!("{}", "This app requires an OpenAI key in the .env file. Input it here if you want the installer to set it for you, or hit Return to set it later.".bold().blue());
     // let key: String = Password::with_theme(&ColorfulTheme::default())
@@ -380,9 +408,9 @@ async fn install_sample_app(args: InstallArgs) -> Result<(), CliError> {
 
 pub fn install(args: InstallArgs) -> Result<(), CliError> {
 
-    let runtime = tokio::runtime::Runtime::new().map_err(|_| DbError::RuntimeError)?;
+    let runtime = tokio::runtime::Runtime::new().map_err(|_| InstallError::RuntimeError)?;
     runtime.block_on(async {
-        install_sample_app(args.name, args.dev).await
+        install_sample_app(args).await
     })?;
     Ok(())
 }
