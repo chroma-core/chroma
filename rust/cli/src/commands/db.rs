@@ -1,5 +1,7 @@
 use crate::client::get_chroma_client;
-use crate::utils::{copy_to_clipboard, get_current_profile, CliError, Profile, UtilsError, SELECTION_LIMIT};
+use crate::utils::{
+    copy_to_clipboard, get_current_profile, CliError, Profile, UtilsError, SELECTION_LIMIT,
+};
 use chroma_types::Database;
 use clap::{Args, Subcommand, ValueEnum};
 use colored::Colorize;
@@ -441,7 +443,10 @@ mod tests {
         get_python_connection,
     };
     use crate::commands::profile::ProfileError::NoActiveProfile;
-    use crate::utils::{get_current_profile, write_config, write_profiles, AddressBook, CliConfig, Profile, SampleAppsConfig};
+    use crate::utils::{
+        get_current_profile, write_config, write_profiles, AddressBook, CliConfig, Profile,
+        SampleAppsConfig,
+    };
     use assert_cmd::Command;
     use predicates::str::contains;
     use std::collections::HashMap;

@@ -4,6 +4,7 @@ mod dashboard_client;
 mod utils;
 
 use crate::commands::db::{db_command, DbCommand};
+use crate::commands::install::{install, InstallArgs};
 use crate::commands::login::{login, LoginArgs};
 use crate::commands::profile::{profile_command, ProfileCommand};
 use crate::commands::run::{run, RunArgs};
@@ -13,7 +14,6 @@ use clap::{Parser, Subcommand};
 use colored::Colorize;
 use utils::CliError;
 use utils::UtilsError;
-use crate::commands::install::{install, InstallArgs};
 
 #[derive(Subcommand, Debug)]
 enum Command {

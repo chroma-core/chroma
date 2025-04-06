@@ -1,5 +1,6 @@
 use crate::client::ChromaClientError;
 use crate::commands::db::DbError;
+use crate::commands::install::InstallError;
 use crate::commands::login::LoginError;
 use crate::commands::profile::ProfileError;
 use crate::commands::run::RunError;
@@ -16,9 +17,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
+use std::io::{stdin, stdout, Write};
 use std::path::PathBuf;
+use termion::input::TermRead;
+use termion::raw::IntoRawMode;
 use thiserror::Error;
-use crate::commands::install::InstallError;
 
 pub const LOGO: &str = "
                 \x1b[38;5;069m(((((((((    \x1b[38;5;203m(((((\x1b[38;5;220m####
@@ -133,7 +136,7 @@ impl Default for SampleAppsConfig {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CliConfig {
     pub current_profile: String,
-    pub sample_apps: SampleAppsConfig
+    pub sample_apps: SampleAppsConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -336,4 +339,38 @@ where
     let response = request_builder.send().await?.error_for_status()?;
     let parsed_response = response.json::<R>().await?;
     Ok(parsed_response)
+}
+
+pub fn read_secret(prompt: &str) -> Result<String, std::io::Error> {
+    let mut stdout = stdout().into_raw_mode()?;
+    let stdin = stdin();
+    let mut password = String::new();
+
+    write!(stdout, "{}: ", prompt)?;
+    stdout.flush()?;
+
+    for c in stdin.keys() {
+        match c? {
+            termion::event::Key::Char('\n') => break,
+            termion::event::Key::Char(c) => {
+                password.push(c);
+                write!(stdout, "*")?;
+            }
+            termion::event::Key::Backspace => {
+                if !password.is_empty() {
+                    password.pop();
+                    write!(
+                        stdout,
+                        "{} {}",
+                        termion::cursor::Left(1),
+                        termion::cursor::Left(1)
+                    )?;
+                }
+            }
+            _ => {}
+        }
+        stdout.flush()?;
+    }
+
+    Ok(password)
 }
