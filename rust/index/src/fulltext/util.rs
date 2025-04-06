@@ -68,6 +68,7 @@ fn unpack_trigram(u: u64) -> String {
 
         // Set the correct length after writing
         let total_bytes = bytes_written_c0 + bytes_written_c1 + bytes_written_c2;
+        assert!(total_bytes <= 12);
         v.set_len(len0 + total_bytes);
     }
 

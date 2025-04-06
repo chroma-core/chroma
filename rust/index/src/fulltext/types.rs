@@ -98,12 +98,22 @@ impl FullTextIndexWriter {
                     old_document,
                     new_document,
                 } => {
+                    if String::from_utf8_lossy(old_document.as_bytes()) != old_document {
+                        panic!("invariants violated on old_document");
+                    }
+                    if String::from_utf8_lossy(new_document.as_bytes()) != new_document {
+                        panic!("invariants violated on old_document");
+                    }
                     // Remove old version
                     let mut trigrams_to_delete = HashSet::new(); // (need to filter out duplicates, each trigram may appear multiple times in a document)
                     self.tokenizer
                         .clone()
                         .token_stream(old_document)
                         .process(&mut |token| {
+                            if String::from_utf8_lossy(token.text.as_bytes()) != token.text.as_str()
+                            {
+                                panic!("invariants violated on old_document");
+                            }
                             trigrams_to_delete.insert(TokenInstance::encode(
                                 token.text.as_str(),
                                 offset_id,

@@ -175,5 +175,5 @@ pub fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
         init_stdout_layer(),
     ];
     init_tracing(layers);
-    init_panic_tracing_hook();
+    //init_panic_tracing_hook();
 }
