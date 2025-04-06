@@ -1,5 +1,7 @@
 use crate::utils::UtilsError::UserInputFailed;
-use crate::utils::{read_config, read_secret, write_config, CliConfig, CliError, UtilsError, SELECTION_LIMIT};
+use crate::utils::{
+    read_config, read_secret, write_config, CliConfig, CliError, UtilsError, SELECTION_LIMIT,
+};
 use clap::Parser;
 use colored::Colorize;
 use dialoguer::theme::ColorfulTheme;
@@ -315,7 +317,10 @@ fn select_app(apps: &[AppListing], cli_config: &CliConfig) -> Result<String, Cli
     Ok(name)
 }
 
-fn get_display_app_names(apps: &[AppListing], cli_config: &CliConfig) -> Result<Vec<String>, CliError> {
+fn get_display_app_names(
+    apps: &[AppListing],
+    cli_config: &CliConfig,
+) -> Result<Vec<String>, CliError> {
     let installed = &cli_config.sample_apps.installed;
     let cli_version =
         Version::parse(env!("CARGO_PKG_VERSION")).map_err(|_| InstallError::ListingFailed)?;
@@ -349,7 +354,11 @@ fn get_display_app_names(apps: &[AppListing], cli_config: &CliConfig) -> Result<
         .collect()
 }
 
-fn prompt_app_name(apps: &[AppListing], prompt: &str, cli_config: &CliConfig) -> Result<String, CliError> {
+fn prompt_app_name(
+    apps: &[AppListing],
+    prompt: &str,
+    cli_config: &CliConfig,
+) -> Result<String, CliError> {
     println!("{}", prompt.blue().bold());
     let name = match apps.len() {
         0..=SELECTION_LIMIT => select_app(apps, cli_config),
@@ -363,8 +372,11 @@ fn prompt_app_name(apps: &[AppListing], prompt: &str, cli_config: &CliConfig) ->
     Ok(name)
 }
 
-async fn get_app(apps: &[AppListing], name: Option<String>, cli_config: &CliConfig) -> Result<(String, String), CliError> {
-    
+async fn get_app(
+    apps: &[AppListing],
+    name: Option<String>,
+    cli_config: &CliConfig,
+) -> Result<(String, String), CliError> {
     let app_name = match name {
         Some(app_name) => Ok(app_name),
         None => prompt_app_name(apps, &prompt_app_name_message(), cli_config),
@@ -466,10 +478,17 @@ fn get_app_env_variables(app_config: &SampleAppConfig) -> Result<SampleAppEnvVar
 }
 
 fn display_run_instructions(app_config: SampleAppConfig) {
-    let instructions = app_config.startup_commands.iter().map(|(key, value)| {
-        format!("{}\n{}", key.underline(), value)
-    }).collect::<Vec<String>>().join("\n\n");
-    println!("\n\n{}\n{}","Installation completed!".bold().blue(), instructions);
+    let instructions = app_config
+        .startup_commands
+        .iter()
+        .map(|(key, value)| format!("{}\n{}", key.underline(), value))
+        .collect::<Vec<String>>()
+        .join("\n\n");
+    println!(
+        "\n\n{}\n{}",
+        "Installation completed!".bold().blue(),
+        instructions
+    );
 }
 
 async fn install_sample_app(args: InstallArgs) -> Result<(), CliError> {
@@ -494,15 +513,19 @@ async fn install_sample_app(args: InstallArgs) -> Result<(), CliError> {
         read_app_config(app_name.as_str()).map_err(|_| InstallError::AppConfigReadFailed)?;
 
     let env_variables = get_app_env_variables(&app_config)?;
-    write_env_file(env_variables, format!("./{}/.env", app_name)).map_err(|_| InstallError::EnvFileWriteFailed)?;
-    
+    write_env_file(env_variables, format!("./{}/.env", app_name))
+        .map_err(|_| InstallError::EnvFileWriteFailed)?;
+
     // Add app to CLI config with version
-    cli_config.sample_apps.installed.insert(app_name, app_version);
+    cli_config
+        .sample_apps
+        .installed
+        .insert(app_name, app_version);
     write_config(&cli_config)?;
 
     // Output run instructions
     display_run_instructions(app_config);
-    
+
     Ok(())
 }
 
