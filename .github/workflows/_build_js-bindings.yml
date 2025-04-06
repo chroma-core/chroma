@@ -7,22 +7,6 @@ permissions:
   contents: write
   id-token: write
 'on':
-  push:
-    branches:
-      - main
-    tags-ignore:
-      - '**'
-    paths:
-      - 'rust/js_bindings/**'
-    paths-ignore:
-      - '**/*.md'
-      - LICENSE
-      - '**/*.gitignore'
-      - .editorconfig
-      - docs/**
-  pull_request:
-    paths:
-      - 'rust/js_bindings/**'
   workflow_dispatch: {}
   workflow_call: {}
 jobs:
