@@ -1,10 +1,9 @@
 use async_trait::async_trait;
-use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::ChromaError;
 use chroma_segment::blockfile_record::{RecordSegmentReader, RecordSegmentReaderCreationError};
 use chroma_segment::types::{materialize_logs, LogMaterializerError, MaterializeLogsResult};
 use chroma_system::Operator;
-use chroma_types::{Chunk, LogRecord, Segment};
+use chroma_types::{Chunk, LogRecord};
 use futures::TryFutureExt;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
@@ -39,22 +38,19 @@ impl MaterializeLogOperator {
 #[derive(Debug)]
 pub struct MaterializeLogInput {
     logs: Chunk<LogRecord>,
-    provider: BlockfileProvider,
-    record_segment: Segment,
+    record_reader: Option<RecordSegmentReader<'static>>,
     offset_id: Arc<AtomicU32>,
 }
 
 impl MaterializeLogInput {
     pub fn new(
         logs: Chunk<LogRecord>,
-        provider: BlockfileProvider,
-        record_segment: Segment,
+        record_reader: Option<RecordSegmentReader<'static>>,
         offset_id: Arc<AtomicU32>,
     ) -> Self {
         MaterializeLogInput {
             logs,
-            provider,
-            record_segment,
+            record_reader,
             offset_id,
         }
     }
@@ -73,26 +69,8 @@ impl Operator<MaterializeLogInput, MaterializeLogOutput> for MaterializeLogOpera
     async fn run(&self, input: &MaterializeLogInput) -> Result<MaterializeLogOutput, Self::Error> {
         tracing::debug!("Materializing {} log entries", input.logs.total_len());
 
-        let record_segment_reader =
-            match RecordSegmentReader::from_segment(&input.record_segment, &input.provider).await {
-                Ok(reader) => Some(reader),
-                Err(e) => {
-                    match *e {
-                        // Uninitialized segment is fine and means that the record
-                        // segment is not yet initialized in storage.
-                        RecordSegmentReaderCreationError::UninitializedSegment => None,
-                        err => {
-                            tracing::error!("Error creating record segment reader: {:?}", err);
-                            return Err(
-                                MaterializeLogOperatorError::RecordSegmentReaderCreationFailed(err),
-                            );
-                        }
-                    }
-                }
-            };
-
         let result = materialize_logs(
-            &record_segment_reader,
+            &input.record_reader.as_ref().cloned(),
             input.logs.clone(),
             Some(input.offset_id.clone()),
         )
@@ -102,7 +80,7 @@ impl Operator<MaterializeLogInput, MaterializeLogOutput> for MaterializeLogOpera
         let mut collection_logical_size_delta = 0;
         for record in &result {
             collection_logical_size_delta += record
-                .hydrate(record_segment_reader.as_ref())
+                .hydrate(input.record_reader.as_ref())
                 .await?
                 .compute_logical_size_delta_bytes();
         }

@@ -109,10 +109,21 @@ impl Scheduler {
             match result {
                 Ok(collection) => {
                     if collection.is_empty() {
-                        tracing::error!(
-                            "Collection not found: {:?}",
+                        tracing::info!(
+                            "Collection not found, purging: {:?}",
                             collection_info.collection_id
                         );
+                        if let Err(err) = self
+                            .log
+                            .purge_dirty_for_collection(collection_info.collection_id)
+                            .await
+                        {
+                            tracing::error!(
+                                "Error purging dirty records for collection: {:?}, error: {:?}",
+                                collection_info.collection_id,
+                                err
+                            );
+                        }
                         continue;
                     }
 
@@ -205,10 +216,6 @@ impl Scheduler {
                 );
                 self.job_queue.push(CompactionJob {
                     collection_id: record.collection_id,
-                    tenant_id: record.tenant_id,
-                    offset: record.offset,
-                    collection_version: record.collection_version,
-                    collection_logical_size_bytes: record.collection_logical_size_bytes,
                 });
                 self.oneoff_collections.remove(&record.collection_id);
                 if self.job_queue.len() == self.max_concurrent_jobs {
