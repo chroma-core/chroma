@@ -130,7 +130,6 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             where=get_request["where"],
             where_document=get_request["where_document"],
             include=get_request["include"],
-            sort=None,
             limit=limit,
             offset=offset,
             tenant=self.tenant,

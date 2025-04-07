@@ -42,7 +42,6 @@ class GetEmbedding(BaseModel):
     ids: Optional[List[str]] = None
     where: Optional[Dict[Any, Any]] = None
     where_document: Optional[Dict[Any, Any]] = None
-    sort: Optional[str] = None
     limit: Optional[int] = None
     offset: Optional[int] = None
     include: Include = IncludeMetadataDocuments
