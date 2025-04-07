@@ -119,11 +119,17 @@ jobs:
               export PATH="/usr/local/zig:$PATH"
             fi
             
+            # Set environment variable for proto3 optional fields
+            export PROTOC_OPTS="--experimental_allow_proto3_optional"
+            
             rustup target add ${{ matrix.settings.target }}
             ${{ matrix.settings.build }}
       - name: Build
         if: ${{ !matrix.settings.docker }}
-        run: ${{ matrix.settings.build }}
+        run: |
+          # Set environment variable for proto3 optional fields
+          export PROTOC_OPTS="--experimental_allow_proto3_optional"
+          ${{ matrix.settings.build }}
         shell: bash
       - name: Upload artifact
         uses: actions/upload-artifact@v4
