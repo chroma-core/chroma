@@ -154,7 +154,7 @@ const sidebarConfig: AppSection[] = [
   {
     id: "cli",
     name: "CLI",
-    default: "install-and-run",
+    default: "install",
     icon: SquareTerminalIcon,
     pages: [
       { id: "install", name: "Installing the CLI" },
