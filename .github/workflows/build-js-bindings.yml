@@ -119,16 +119,39 @@ jobs:
               export PATH="/usr/local/zig:$PATH"
             fi
             
-            # Set environment variable for proto3 optional fields
-            export PROTOC_OPTS="--experimental_allow_proto3_optional"
+            # Modify system protoc configuration to allow proto3 optional fields
+            mkdir -p /usr/local/bin/protoc-wrapper
+            echo '#!/bin/bash' > /usr/local/bin/protoc-wrapper/protoc
+            echo 'exec /usr/bin/protoc --experimental_allow_proto3_optional "$@"' >> /usr/local/bin/protoc-wrapper/protoc
+            chmod +x /usr/local/bin/protoc-wrapper/protoc
+            export PATH="/usr/local/bin/protoc-wrapper:$PATH"
             
             rustup target add ${{ matrix.settings.target }}
             ${{ matrix.settings.build }}
       - name: Build
         if: ${{ !matrix.settings.docker }}
         run: |
-          # Set environment variable for proto3 optional fields
-          export PROTOC_OPTS="--experimental_allow_proto3_optional"
+          # Create a protoc wrapper for non-Docker builds
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            sudo mkdir -p /usr/local/bin/protoc-wrapper
+            echo '#!/bin/bash' | sudo tee /usr/local/bin/protoc-wrapper/protoc > /dev/null
+            echo 'exec /usr/bin/protoc --experimental_allow_proto3_optional "$@"' | sudo tee -a /usr/local/bin/protoc-wrapper/protoc > /dev/null
+            sudo chmod +x /usr/local/bin/protoc-wrapper/protoc
+            export PATH="/usr/local/bin/protoc-wrapper:$PATH"
+          elif [ "${{ runner.os }}" = "macOS" ]; then
+            mkdir -p ~/protoc-wrapper
+            echo '#!/bin/bash' > ~/protoc-wrapper/protoc
+            echo 'exec /usr/local/bin/protoc --experimental_allow_proto3_optional "$@"' >> ~/protoc-wrapper/protoc
+            chmod +x ~/protoc-wrapper/protoc
+            export PATH="$HOME/protoc-wrapper:$PATH"
+          elif [ "${{ runner.os }}" = "Windows" ]; then
+            # For Windows, use PowerShell to create wrapper
+            mkdir -p $HOME/protoc-wrapper
+            echo '@echo off' > $HOME/protoc-wrapper/protoc.cmd
+            echo 'protoc.exe --experimental_allow_proto3_optional %*' >> $HOME/protoc-wrapper/protoc.cmd
+            export PATH="$HOME/protoc-wrapper:$PATH"
+          fi
+          
           ${{ matrix.settings.build }}
         shell: bash
       - name: Upload artifact
