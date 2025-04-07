@@ -15,6 +15,6 @@ jobs:
       - name: Remove lockfile
         run: rm -f clients/js/pnpm-lock.yaml
       - name: Install dependencies
-        run: cd clients/js && pnpm install
+        run: cd clients/js && pnpm install --no-optional
       - name: Test
         run: bin/ts-integration-test.sh
