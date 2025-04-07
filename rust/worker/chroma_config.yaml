@@ -2,6 +2,9 @@
 # In the long term, every service should have an entry in this file
 # and this can become the global configuration file for Chroma
 # for now we nest it in the worker directory
+#
+# NOTE:  This file is NOT currently used by tilt, but instead shipped as the defaults.
+# See the adjacent tilt_config.yaml for tilt.
 
 query_service:
     service_name: "query-service"

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 const DEFAULT_CONFIG_PATH: &str = "./chroma_config.yaml";
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Debug)]
 /// # Description
 /// The RootConfig for all chroma services this is a YAML file that
 /// is shared between all services, and secondarily, fields can be
@@ -99,6 +99,7 @@ impl Default for RootConfig {
 /// For example, to set my_ip, you would set CHROMA_WORKER__MY_IP.
 /// Each submodule that needs to be configured from the config object should implement the Configurable trait and
 /// have its own field in this struct for its Config struct.
+#[derive(Debug)]
 pub struct QueryServiceConfig {
     #[serde(default = "QueryServiceConfig::default_service_name")]
     pub service_name: String,
@@ -127,6 +128,8 @@ pub struct QueryServiceConfig {
     pub blockfile_provider: chroma_blockstore::config::BlockfileProviderConfig,
     #[serde(default)]
     pub hnsw_provider: chroma_index::config::HnswProviderConfig,
+    #[serde(default = "QueryServiceConfig::default_fetch_log_batch_size")]
+    pub fetch_log_batch_size: u32,
 }
 
 impl QueryServiceConfig {
@@ -145,9 +148,13 @@ impl QueryServiceConfig {
     fn default_my_port() -> u16 {
         50051
     }
+
+    fn default_fetch_log_batch_size() -> u32 {
+        100
+    }
 }
 
-#[derive(Default, Deserialize, Serialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 /// # Description
 /// The primary config for the compaction service.
 /// ## Description of parameters

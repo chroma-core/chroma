@@ -4,6 +4,7 @@ mod dashboard_client;
 mod utils;
 
 use crate::commands::db::{db_command, DbCommand};
+use crate::commands::install::{install, InstallArgs};
 use crate::commands::login::{login, LoginArgs};
 use crate::commands::profile::{profile_command, ProfileCommand};
 use crate::commands::run::{run, RunArgs};
@@ -16,11 +17,13 @@ use utils::UtilsError;
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    #[command(subcommand)]
+    #[command(subcommand, hide = true)]
     Db(DbCommand),
     Docs,
+    Install(InstallArgs),
+    #[command(hide = true)]
     Login(LoginArgs),
-    #[command(subcommand)]
+    #[command(subcommand, hide = true)]
     Profile(ProfileCommand),
     Run(RunArgs),
     Support,
@@ -54,6 +57,7 @@ pub fn chroma_cli(args: Vec<String>) {
             let url = "https://docs.trychroma.com";
             open_browser(url)
         }
+        Command::Install(args) => install(args),
         Command::Login(args) => login(args),
         Command::Profile(profile_subcommand) => profile_command(profile_subcommand),
         Command::Run(args) => run(args),

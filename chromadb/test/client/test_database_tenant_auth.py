@@ -57,6 +57,7 @@ def test_tenant_and_database_passed_from_client() -> None:
         port = int(os.environ.get("CHROMA_SERVER_HTTP_PORT", 0))
 
         settings = Settings()
+        settings.chroma_api_impl = "chromadb.api.fastapi.FastAPI"
         settings.chroma_server_http_port = port
         settings.chroma_server_host = host
         admin_client = chromadb.AdminClient(settings)

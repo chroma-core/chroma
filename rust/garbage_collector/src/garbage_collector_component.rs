@@ -106,11 +106,13 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
         _ctx: &ComponentContext<Self>,
     ) -> Self::Result {
         // Get all collections to gc and create gc orchestrator for each.
+        tracing::info!("Getting collections to gc");
         let collections_to_gc = self
             .sysdb_client
             .get_collections_to_gc()
             .await
             .expect("Failed to get collections to gc");
+        tracing::info!("Got {} collections to gc", collections_to_gc.len());
         let mut jobs = FuturesUnordered::new();
         for collection in collections_to_gc {
             if self.disabled_collections.contains(&collection.id) {
@@ -120,6 +122,7 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
                 );
                 continue;
             }
+            tracing::info!("Creating gc orchestrator for collection: {}", collection.id);
             let dispatcher = match self.dispatcher {
                 Some(ref dispatcher) => dispatcher.clone(),
                 None => {
@@ -214,7 +217,7 @@ impl Configurable<GarbageCollectorConfig> for GarbageCollector {
             disabled_collections,
             sysdb_client,
             storage,
-            CleanupMode::ListOnly,
+            CleanupMode::DryRun,
         ))
     }
 }

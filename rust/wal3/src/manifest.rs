@@ -150,6 +150,7 @@ impl Snapshot {
         })
     }
 
+    #[tracing::instrument(skip(storage), err(Display))]
     pub async fn load(
         options: &ThrottleOptions,
         storage: &Storage,
@@ -185,6 +186,7 @@ impl Snapshot {
         }
     }
 
+    #[tracing::instrument(skip(self, storage), err(Display))]
     pub async fn install(
         &self,
         options: &ThrottleOptions,
@@ -487,6 +489,7 @@ impl Manifest {
     }
 
     /// Initialize the log with an empty manifest.
+    #[tracing::instrument(skip(storage), err(Display))]
     pub async fn initialize(
         _: &LogWriterOptions,
         storage: &Storage,
@@ -512,6 +515,7 @@ impl Manifest {
     }
 
     /// Load the latest manifest from object storage.
+    #[tracing::instrument(skip(storage), err(Display))]
     pub async fn load(
         options: &ThrottleOptions,
         storage: &Storage,
@@ -553,6 +557,7 @@ impl Manifest {
     }
 
     /// Install a manifest to object storage.
+    #[tracing::instrument(skip(self, storage, new), err(Display))]
     pub async fn install(
         &self,
         options: &ThrottleOptions,
@@ -602,6 +607,28 @@ impl Manifest {
                     tokio::time::sleep(backoff).await;
                 }
             }
+        }
+    }
+
+    /// Return the lowest addressable offset in the log.
+    pub fn maximum_log_position(&self) -> LogPosition {
+        let frags = self
+            .fragments
+            .iter()
+            .map(|f| f.limit)
+            .max_by_key(|p| p.offset());
+        let snaps = self
+            .snapshots
+            .iter()
+            .map(|s| s.limit)
+            .max_by_key(|p| p.offset());
+        match (frags, snaps) {
+            (Some(f), Some(s)) => LogPosition {
+                offset: std::cmp::max(f.offset, s.offset),
+            },
+            (Some(f), None) => f,
+            (None, Some(s)) => s,
+            (None, None) => LogPosition::default(),
         }
     }
 

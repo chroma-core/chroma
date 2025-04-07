@@ -101,10 +101,8 @@ pub(crate) enum CollectionsWithSegmentsProviderError {
 impl ChromaError for CollectionsWithSegmentsProviderError {
     fn code(&self) -> ErrorCodes {
         match self {
-            CollectionsWithSegmentsProviderError::Cache(cache_error) => cache_error.code(),
-            CollectionsWithSegmentsProviderError::SysDB(get_collection_with_segments_error) => {
-                get_collection_with_segments_error.code()
-            }
+            CollectionsWithSegmentsProviderError::Cache(e) => e.code(),
+            CollectionsWithSegmentsProviderError::SysDB(e) => e.code(),
         }
     }
 }

@@ -122,6 +122,33 @@ func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.Create
 	return res, nil
 }
 
+func (s *Server) GetCollection(ctx context.Context, req *coordinatorpb.GetCollectionRequest) (*coordinatorpb.GetCollectionResponse, error) {
+	collectionID := req.Id
+	tenantID := req.Tenant
+	databaseName := req.Database
+
+	res := &coordinatorpb.GetCollectionResponse{}
+
+	parsedCollectionID, err := types.ToUniqueID(&collectionID)
+	if err != nil {
+		log.Error("GetCollection failed. collection id format error", zap.Error(err), zap.Stringp("collection_id", &collectionID), zap.Stringp("collection_name", req.Name))
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	collection, err := s.coordinator.GetCollection(ctx, parsedCollectionID, req.Name, *tenantID, *databaseName)
+	if err != nil {
+		if err == common.ErrCollectionSoftDeleted {
+			return res, grpcutils.BuildFailedPreconditionGrpcError(err.Error())
+		}
+
+		log.Error("GetCollection failed. ", zap.Error(err), zap.Stringp("collection_id", &collectionID), zap.Stringp("collection_name", req.Name))
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	res.Collection = convertCollectionToProto(collection)
+	return res, nil
+}
+
 func (s *Server) GetCollections(ctx context.Context, req *coordinatorpb.GetCollectionsRequest) (*coordinatorpb.GetCollectionsResponse, error) {
 	collectionID := req.Id
 	collectionName := req.Name
@@ -338,7 +365,12 @@ func (s *Server) ListCollectionVersions(ctx context.Context, req *coordinatorpb.
 		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 
-	versions, err := s.coordinator.ListCollectionVersions(ctx, collectionID, req.TenantId, req.MaxCount, req.VersionsBefore, req.VersionsAtOrAfter)
+	markedForDeletion := false
+	if req.IncludeMarkedForDeletion != nil {
+		markedForDeletion = *req.IncludeMarkedForDeletion
+	}
+
+	versions, err := s.coordinator.ListCollectionVersions(ctx, collectionID, req.TenantId, req.MaxCount, req.VersionsBefore, req.VersionsAtOrAfter, markedForDeletion)
 	if err != nil {
 		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
@@ -388,6 +420,9 @@ func (s *Server) FlushCollectionCompaction(ctx context.Context, req *coordinator
 	flushCollectionInfo, err := s.coordinator.FlushCollectionCompaction(ctx, FlushCollectionCompaction)
 	if err != nil {
 		log.Error("FlushCollectionCompaction failed", zap.Error(err), zap.String("collection_id", req.CollectionId), zap.Int32("collection_version", req.CollectionVersion), zap.Int64("log_position", req.LogPosition))
+		if err == common.ErrCollectionSoftDeleted {
+			return nil, grpcutils.BuildFailedPreconditionGrpcError(err.Error())
+		}
 		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	res := &coordinatorpb.FlushCollectionCompactionResponse{
