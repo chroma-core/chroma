@@ -147,12 +147,8 @@ jobs:
         uses: arduino/setup-protoc@v2
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Add targets
-        run: |
-          rustup target add x86_64-unknown-linux-gnu
-          rustup target add aarch64-unknown-linux-gnu
-      - name: Install ARM64 cross-compilation tools
-        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+      - name: Add target
+        run: rustup target add x86_64-unknown-linux-gnu
       - name: Cache cargo
         uses: actions/cache@v4
         with:
@@ -168,20 +164,11 @@ jobs:
       - name: Build x86_64
         run: yarn build --target x86_64-unknown-linux-gnu
         shell: bash
-      - name: Build ARM64
-        run: yarn build --target aarch64-unknown-linux-gnu
-        shell: bash
       - name: Upload x86_64 artifact
         uses: actions/upload-artifact@v4
         with:
           name: bindings-x86_64-unknown-linux-gnu
           path: rust/js_bindings/chromadb-js-bindings.linux-x64-gnu.node
-          if-no-files-found: error
-      - name: Upload ARM64 artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: bindings-aarch64-unknown-linux-gnu
-          path: rust/js_bindings/chromadb-js-bindings.linux-arm64-gnu.node
           if-no-files-found: error
   publish:
     name: Publish
