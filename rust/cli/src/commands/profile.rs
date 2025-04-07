@@ -260,6 +260,7 @@ mod tests {
     };
     use crate::utils::{
         read_config, read_profiles, write_config, write_profiles, CliConfig, Profile,
+        SampleAppsConfig,
     };
     use assert_cmd::Command;
     use predicates::str::contains;
@@ -289,6 +290,7 @@ mod tests {
 
         let config = CliConfig {
             current_profile: "profile1".to_string(),
+            sample_apps: SampleAppsConfig::default(),
         };
 
         write_profiles(&profiles).unwrap();

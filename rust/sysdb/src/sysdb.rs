@@ -520,9 +520,10 @@ impl Configurable<GrpcSysDbConfig> for GrpcSysDb {
     }
 }
 
-#[allow(dead_code)]
+#[derive(Debug)]
 pub struct CollectionToGcInfo {
     pub id: CollectionUuid,
+    pub tenant: String,
     pub name: String,
     pub version_file_path: String,
     pub latest_version: i64,
@@ -556,6 +557,7 @@ impl TryFrom<chroma_proto::CollectionToGcInfo> for CollectionToGcInfo {
         let collection_id = CollectionUuid(collection_uuid);
         Ok(CollectionToGcInfo {
             id: collection_id,
+            tenant: value.tenant_id,
             name: value.name,
             version_file_path: value.version_file_path,
             latest_version: value.latest_version,

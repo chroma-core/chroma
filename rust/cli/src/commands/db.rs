@@ -1,5 +1,7 @@
 use crate::client::get_chroma_client;
-use crate::utils::{copy_to_clipboard, get_current_profile, CliError, Profile, UtilsError};
+use crate::utils::{
+    copy_to_clipboard, get_current_profile, CliError, Profile, UtilsError, SELECTION_LIMIT,
+};
 use chroma_types::Database;
 use clap::{Args, Subcommand, ValueEnum};
 use colored::Colorize;
@@ -9,8 +11,6 @@ use std::fmt;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use thiserror::Error;
-
-const LIST_DB_SELECTION_LIMIT: usize = 5;
 
 #[derive(Debug, Error)]
 pub enum DbError {
@@ -285,7 +285,7 @@ fn get_db_name(dbs: &[Database], prompt: &str) -> Result<String, CliError> {
 
     println!("{}", prompt.blue().bold());
     let name = match dbs.len() {
-        0..=LIST_DB_SELECTION_LIMIT => select_db(dbs),
+        0..=SELECTION_LIMIT => select_db(dbs),
         _ => prompt_db_name(prompt),
     }?;
 
@@ -445,6 +445,7 @@ mod tests {
     use crate::commands::profile::ProfileError::NoActiveProfile;
     use crate::utils::{
         get_current_profile, write_config, write_profiles, AddressBook, CliConfig, Profile,
+        SampleAppsConfig,
     };
     use assert_cmd::Command;
     use predicates::str::contains;
@@ -467,6 +468,7 @@ mod tests {
 
         let config = CliConfig {
             current_profile: "profile".to_string(),
+            sample_apps: SampleAppsConfig::default(),
         };
 
         write_profiles(&profiles).unwrap();
