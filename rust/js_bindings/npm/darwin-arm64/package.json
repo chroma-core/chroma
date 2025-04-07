@@ -1,6 +1,6 @@
 {
   "name": "chromadb-js-bindings-darwin-arm64",
-  "version": "0.0.0",
+  "version": "0.0.2",
   "os": [
     "darwin"
   ],
