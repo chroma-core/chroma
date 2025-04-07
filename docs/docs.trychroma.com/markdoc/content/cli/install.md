@@ -8,13 +8,13 @@ If you don't use one of our packages, you can still install the CLI as a standal
 
 ## Python
 
-You can install Chroma in your environment using `pip`:
+You can install Chroma using `pip`:
 
 ```terminal
 pip install chromadb
 ```
 
-Or install the Chroma CLI globally with `pipx`
+If you're machine does not allow for global `pip` installs, you can get the Chroma CLI with `pipx`. 
 
 ```terminal
 pipx install chromadb
