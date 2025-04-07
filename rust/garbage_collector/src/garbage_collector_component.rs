@@ -1,33 +1,35 @@
-use std::{
-    collections::{HashMap, HashSet},
-    fmt::{Debug, Formatter},
-    str::FromStr,
-    time::{Duration, SystemTime},
+use crate::{
+    config::GarbageCollectorConfig, garbage_collector_orchestrator::GarbageCollectorOrchestrator,
 };
-
-use crate::types::CleanupMode;
+use crate::{
+    garbage_collector_orchestrator::{GarbageCollectorError, GarbageCollectorResponse},
+    types::CleanupMode,
+};
 use async_trait::async_trait;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
 use chroma_storage::Storage;
-use chroma_sysdb::{SysDb, SysDbConfig};
+use chroma_sysdb::{CollectionToGcInfo, SysDb, SysDbConfig};
 use chroma_system::{
     Component, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
 };
 use chroma_types::CollectionUuid;
 use chrono::{DateTime, Utc};
 use futures::{stream::FuturesUnordered, StreamExt};
-use tracing::{span, Instrument, Span};
-use uuid::Uuid;
-
-use crate::{
-    config::GarbageCollectorConfig, garbage_collector_orchestrator::GarbageCollectorOrchestrator,
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::{Debug, Formatter},
+    str::FromStr,
+    time::{Duration, SystemTime},
 };
+use thiserror::Error;
+use tracing::{instrument, span, Instrument, Span};
+use uuid::Uuid;
 
 #[allow(dead_code)]
 pub(crate) struct GarbageCollector {
     gc_interval_mins: u64,
-    absolute_cutoff_time: DateTime<Utc>,
+    relative_cutoff_time: Duration,
     max_collections_to_gc: u32,
     disabled_collections: HashSet<CollectionUuid>,
     sysdb_client: SysDb,
@@ -44,11 +46,19 @@ impl Debug for GarbageCollector {
     }
 }
 
+#[derive(Debug, Error)]
+enum GarbageCollectCollectionError {
+    #[error("Uninitialized: missing dispatcher or system")]
+    Uninitialized,
+    #[error("Failed to run garbage collection orchestrator: {0}")]
+    OrchestratorError(#[from] GarbageCollectorError),
+}
+
 #[allow(clippy::too_many_arguments)]
 impl GarbageCollector {
     pub fn new(
         gc_interval_mins: u64,
-        absolute_cutoff_time: DateTime<Utc>,
+        relative_cutoff_time: Duration,
         max_collections_to_gc: u32,
         disabled_collections: HashSet<CollectionUuid>,
         sysdb_client: SysDb,
@@ -58,7 +68,7 @@ impl GarbageCollector {
     ) -> Self {
         Self {
             gc_interval_mins,
-            absolute_cutoff_time,
+            relative_cutoff_time,
             max_collections_to_gc,
             disabled_collections,
             sysdb_client,
@@ -76,6 +86,32 @@ impl GarbageCollector {
 
     pub(crate) fn set_system(&mut self, system: chroma_system::System) {
         self.system = Some(system);
+    }
+
+    #[instrument]
+    async fn garbage_collect_collection(
+        &self,
+        absolute_cutoff_time: DateTime<Utc>,
+        collection: CollectionToGcInfo,
+        cleanup_mode: CleanupMode,
+    ) -> Result<GarbageCollectorResponse, GarbageCollectCollectionError> {
+        if let Some(dispatcher) = self.dispatcher.as_ref() {
+            let orchestrator = GarbageCollectorOrchestrator::new(
+                collection.id,
+                collection.version_file_path,
+                absolute_cutoff_time,
+                self.sysdb_client.clone(),
+                dispatcher.clone(),
+                self.storage.clone(),
+                cleanup_mode,
+            );
+
+            if let Some(system) = self.system.as_ref() {
+                return Ok(orchestrator.run(system.clone()).await?);
+            }
+        }
+
+        Err(GarbageCollectCollectionError::Uninitialized)
     }
 }
 
@@ -119,6 +155,15 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
             .await
             .expect("Failed to get collections to gc");
         tracing::info!("Got {} collections to gc", collections_to_gc.len());
+
+        let absolute_cutoff_time =
+            DateTime::<Utc>::from(SystemTime::now() - self.relative_cutoff_time);
+        tracing::info!(
+            "Using absolute cutoff time: {} (relative cutoff time: {:?})",
+            absolute_cutoff_time,
+            self.relative_cutoff_time
+        );
+
         let mut jobs = FuturesUnordered::new();
         for collection in collections_to_gc {
             if self.disabled_collections.contains(&collection.id) {
@@ -146,37 +191,14 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
             };
 
             tracing::info!("Creating gc orchestrator for collection: {}", collection.id);
-            let dispatcher = match self.dispatcher {
-                Some(ref dispatcher) => dispatcher.clone(),
-                None => {
-                    // TODO(Sanket): Error handling.
-                    panic!("No dispatcher found");
-                }
-            };
+
             let instrumented_span = span!(parent: None, tracing::Level::INFO, "Garbage collection job", collection_id = ?collection.id, tenant_id = %collection.tenant, cleanup_mode = ?cleanup_mode);
             instrumented_span.follows_from(Span::current());
-            match self.system {
-                Some(ref system) => {
-                    let orchestrator = GarbageCollectorOrchestrator::new(
-                        collection.id,
-                        collection.version_file_path,
-                        self.absolute_cutoff_time,
-                        self.sysdb_client.clone(),
-                        dispatcher,
-                        self.storage.clone(),
-                        cleanup_mode,
-                    );
 
-                    jobs.push(
-                        orchestrator
-                            .run(system.clone())
-                            .instrument(instrumented_span),
-                    );
-                }
-                None => {
-                    panic!("No system found");
-                }
-            };
+            jobs.push(
+                self.garbage_collect_collection(absolute_cutoff_time, collection, cleanup_mode)
+                    .instrument(instrumented_span),
+            );
         }
         tracing::info!("GC {} jobs", jobs.len());
         let mut num_completed_jobs = 0;
@@ -232,11 +254,9 @@ impl Configurable<GarbageCollectorConfig> for GarbageCollector {
             disabled_collections.insert(collection_id);
         }
 
-        let absolute_cutoff_time = SystemTime::now() - config.relative_cutoff_time;
-
         Ok(GarbageCollector::new(
             config.gc_interval_mins as u64,
-            absolute_cutoff_time.into(),
+            config.relative_cutoff_time,
             config.max_collections_to_gc,
             disabled_collections,
             sysdb_client,
