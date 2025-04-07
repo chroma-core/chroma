@@ -21,6 +21,8 @@ pub struct GrpcSysDbConfig {
     pub request_timeout_ms: u64,
     #[serde(default = "GrpcSysDbConfig::default_num_channels")]
     pub num_channels: usize,
+    #[serde(default = "GrpcSysDbConfig::default_max_decoding_message_size")]
+    pub max_decoding_message_size: usize,
 }
 
 impl GrpcSysDbConfig {
@@ -43,6 +45,10 @@ impl GrpcSysDbConfig {
     fn default_num_channels() -> usize {
         5
     }
+
+    fn default_max_decoding_message_size() -> usize {
+        32_000_000 // 32 MB
+    }
 }
 
 impl Default for GrpcSysDbConfig {
@@ -53,6 +59,7 @@ impl Default for GrpcSysDbConfig {
             connect_timeout_ms: GrpcSysDbConfig::default_connect_timeout_ms(),
             request_timeout_ms: GrpcSysDbConfig::default_request_timeout_ms(),
             num_channels: GrpcSysDbConfig::default_num_channels(),
+            max_decoding_message_size: GrpcSysDbConfig::default_max_decoding_message_size(),
         }
     }
 }
