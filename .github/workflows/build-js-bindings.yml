@@ -1,12 +1,12 @@
 name: JS Bindings CI
 env:
   DEBUG: napi:*
-  APP_NAME: "chromadb-js-bindings"
+  APP_NAME: "@chroma/chromadb-js-bindings"
   MACOSX_DEPLOYMENT_TARGET: '10.13'
 permissions:
   contents: write
   id-token: write
-on:
+'on':
   workflow_dispatch: {}
   workflow_call: {}
 jobs:
@@ -19,18 +19,16 @@ jobs:
             target: x86_64-apple-darwin
             build: yarn build --target x86_64-apple-darwin
           - host: windows-latest
-            target: x86_64-pc-windows-msvc
             build: yarn build --target x86_64-pc-windows-msvc
-          - host: ubuntu-latest
+            target: x86_64-pc-windows-msvc
+          - host: depot-ubuntu-22.04-16
             target: x86_64-unknown-linux-gnu
-            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian
             build: yarn build --target x86_64-unknown-linux-gnu
           - host: macos-latest
             target: aarch64-apple-darwin
             build: yarn build --target aarch64-apple-darwin
-          - host: ubuntu-latest
+          - host: depot-ubuntu-22.04-16
             target: aarch64-unknown-linux-gnu
-            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian-aarch64
             build: yarn build --target aarch64-unknown-linux-gnu
           - host: windows-latest
             target: aarch64-pc-windows-msvc
@@ -43,14 +41,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Setup node
-        if: ${{ !matrix.settings.docker }}
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: yarn
           cache-dependency-path: rust/js_bindings/yarn.lock
-      - name: Setup Rust toolchain
-        if: ${{ !matrix.settings.docker }}
+      - name: Install
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
@@ -69,90 +65,10 @@ jobs:
         if: ${{ matrix.settings.target == 'armv7-unknown-linux-gnueabihf' || matrix.settings.target == 'armv7-unknown-linux-musleabihf' }}
         with:
           version: 0.13.0
-      - name: Setup toolchain
-        if: ${{ matrix.settings.setup }}
-        run: ${{ matrix.settings.setup }}
-        shell: bash
-      - name: Setup node x86
-        if: matrix.settings.target == 'i686-pc-windows-msvc'
-        run: yarn config set supportedArchitectures.cpu "ia32"
-        shell: bash
       - name: Install dependencies
         run: yarn install
-      - name: Setup node x86 (if needed)
-        if: matrix.settings.target == 'i686-pc-windows-msvc'
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: yarn
-          cache-dependency-path: rust/js_bindings/yarn.lock
-          architecture: x86
-      - name: Install Rust target
-        if: ${{ !matrix.settings.docker }}
-        run: rustup target add ${{ matrix.settings.target }}
-        
-      - name: Install Protobuf compiler (Linux)
-        if: ${{ !matrix.settings.docker && runner.os == 'Linux' }}
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-        
-      - name: Install Protobuf compiler (macOS)
-        if: ${{ !matrix.settings.docker && runner.os == 'macOS' }}
-        run: brew install protobuf
-        
-      - name: Install Protobuf compiler (Windows)
-        if: ${{ !matrix.settings.docker && runner.os == 'Windows' }}
-        run: choco install protoc
-      - name: Build in docker
-        if: ${{ matrix.settings.docker }}
-        uses: addnab/docker-run-action@v3
-        with:
-          image: ${{ matrix.settings.docker }}
-          options: '--user 0:0 -v ${{ github.workspace }}/rust/js_bindings/.cargo-cache/git/db:/usr/local/cargo/git/db -v ${{ github.workspace }}/rust/js_bindings/.cargo/registry/cache:/usr/local/cargo/registry/cache -v ${{ github.workspace }}/rust/js_bindings/.cargo/registry/index:/usr/local/cargo/registry/index -v ${{ github.workspace }}:/build -w /build/rust/js_bindings'
-          run: |
-            apt-get update && apt-get install -y protobuf-compiler curl xz-utils
-            
-            if [[ "${{ matrix.settings.target }}" == "aarch64-unknown-linux-gnu" ]]; then
-              # Install Zig for cross-compilation
-              curl -L https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz -o zig.tar.xz
-              tar -xf zig.tar.xz
-              mv zig-linux-x86_64-0.13.0 /usr/local/zig
-              export PATH="/usr/local/zig:$PATH"
-            fi
-            
-            # Modify system protoc configuration to allow proto3 optional fields
-            mkdir -p /usr/local/bin/protoc-wrapper
-            echo '#!/bin/bash' > /usr/local/bin/protoc-wrapper/protoc
-            echo 'exec /usr/bin/protoc --experimental_allow_proto3_optional "$@"' >> /usr/local/bin/protoc-wrapper/protoc
-            chmod +x /usr/local/bin/protoc-wrapper/protoc
-            export PATH="/usr/local/bin/protoc-wrapper:$PATH"
-            
-            rustup target add ${{ matrix.settings.target }}
-            ${{ matrix.settings.build }}
       - name: Build
-        if: ${{ !matrix.settings.docker }}
-        run: |
-          # Create a protoc wrapper for non-Docker builds
-          if [ "${{ runner.os }}" = "Linux" ]; then
-            sudo mkdir -p /usr/local/bin/protoc-wrapper
-            echo '#!/bin/bash' | sudo tee /usr/local/bin/protoc-wrapper/protoc > /dev/null
-            echo 'exec /usr/bin/protoc --experimental_allow_proto3_optional "$@"' | sudo tee -a /usr/local/bin/protoc-wrapper/protoc > /dev/null
-            sudo chmod +x /usr/local/bin/protoc-wrapper/protoc
-            export PATH="/usr/local/bin/protoc-wrapper:$PATH"
-          elif [ "${{ runner.os }}" = "macOS" ]; then
-            mkdir -p ~/protoc-wrapper
-            echo '#!/bin/bash' > ~/protoc-wrapper/protoc
-            echo 'exec /usr/local/bin/protoc --experimental_allow_proto3_optional "$@"' >> ~/protoc-wrapper/protoc
-            chmod +x ~/protoc-wrapper/protoc
-            export PATH="$HOME/protoc-wrapper:$PATH"
-          elif [ "${{ runner.os }}" = "Windows" ]; then
-            # For Windows, use PowerShell to create wrapper
-            mkdir -p $HOME/protoc-wrapper
-            echo '@echo off' > $HOME/protoc-wrapper/protoc.cmd
-            echo 'protoc.exe --experimental_allow_proto3_optional %*' >> $HOME/protoc-wrapper/protoc.cmd
-            export PATH="$HOME/protoc-wrapper:$PATH"
-          fi
-          
-          ${{ matrix.settings.build }}
+        run: ${{ matrix.settings.build }}
         shell: bash
       - name: Upload artifact
         uses: actions/upload-artifact@v4
