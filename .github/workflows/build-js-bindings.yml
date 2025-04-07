@@ -110,7 +110,10 @@ jobs:
         run: yarn build --target x86_64-pc-windows-msvc
         shell: bash
       - name: Build ARM64
-        run: yarn build --target aarch64-pc-windows-msvc
+        run: |
+          # Add extra environment variable to help with the generator crate
+          export RUSTFLAGS="--cfg no_asm"
+          yarn build --target aarch64-pc-windows-msvc
         shell: bash
       - name: Upload x86_64 artifact
         uses: actions/upload-artifact@v4
@@ -147,8 +150,17 @@ jobs:
         uses: arduino/setup-protoc@v2
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Add target
-        run: rustup target add x86_64-unknown-linux-gnu
+      - name: Add targets
+        run: |
+          rustup target add x86_64-unknown-linux-gnu
+          rustup target add aarch64-unknown-linux-gnu
+      - name: Install ARM64 cross-compilation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gcc-aarch64-linux-gnu \
+            g++-aarch64-linux-gnu \
+            libc6-dev-arm64-cross
       - name: Cache cargo
         uses: actions/cache@v4
         with:
@@ -164,11 +176,28 @@ jobs:
       - name: Build x86_64
         run: yarn build --target x86_64-unknown-linux-gnu
         shell: bash
+      - name: Build ARM64
+        run: |
+          # Set linker and compiler environment variables
+          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
+          export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++
+          # Add no_asm flag to avoid assembly issues
+          export RUSTFLAGS="--cfg no_asm"
+          # Build with the correct environment
+          yarn build --target aarch64-unknown-linux-gnu
+        shell: bash
       - name: Upload x86_64 artifact
         uses: actions/upload-artifact@v4
         with:
           name: bindings-x86_64-unknown-linux-gnu
           path: rust/js_bindings/chromadb-js-bindings.linux-x64-gnu.node
+          if-no-files-found: error
+      - name: Upload ARM64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-aarch64-unknown-linux-gnu
+          path: rust/js_bindings/chromadb-js-bindings.linux-arm64-gnu.node
           if-no-files-found: error
   publish:
     name: Publish
