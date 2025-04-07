@@ -17,12 +17,13 @@ use utils::UtilsError;
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    #[command(subcommand)]
+    #[command(subcommand, hide = true)]
     Db(DbCommand),
     Docs,
     Install(InstallArgs),
+    #[command(hide = true)]
     Login(LoginArgs),
-    #[command(subcommand)]
+    #[command(subcommand, hide = true)]
     Profile(ProfileCommand),
     Run(RunArgs),
     Support,
