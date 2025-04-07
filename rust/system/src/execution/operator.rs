@@ -141,9 +141,7 @@ where
             return;
         }
         self.task_state = TaskState::Running;
-        let result = AssertUnwindSafe(self.operator.run(&self.input))
-            .catch_unwind()
-            .await;
+        let result = Ok(self.operator.run(&self.input).await);
 
         match result {
             Ok(result) => {

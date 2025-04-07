@@ -472,6 +472,32 @@ impl<'me> MetadataSegmentWriter<'me> {
 
         let mut full_text_writer_batch = vec![];
         for record in materialized {
+            for mutation in full_text_writer_batch.iter() {
+                match mutation {
+                    DocumentMutation::Create {
+                        offset_id: _,
+                        new_document: _,
+                    } => {}
+                    DocumentMutation::Update {
+                        offset_id: _,
+                        old_document,
+                        new_document: _,
+                    } => {
+                        if String::from_utf8_lossy(old_document.as_bytes()) != *old_document {
+                            panic!("invariants violated on old_document");
+                        }
+                    }
+                    DocumentMutation::Delete {
+                        offset_id: _,
+                        old_document,
+                    } => {
+                        if String::from_utf8_lossy(old_document.as_bytes()) != *old_document {
+                            panic!("invariants violated on old_document");
+                        }
+                    }
+                }
+            }
+
             let record = record
                 .hydrate(record_segment_reader.as_ref())
                 .await
@@ -479,6 +505,11 @@ impl<'me> MetadataSegmentWriter<'me> {
             let offset_id = record.get_offset_id();
             let old_document = record.document_ref_from_segment();
             let new_document = record.document_ref_from_log();
+            if let Some(old_document) = old_document {
+                if String::from_utf8_lossy(old_document.as_bytes()) != old_document {
+                    panic!("invariants violated on old_document");
+                }
+            }
 
             if matches!(
                 record.get_operation(),
@@ -491,6 +522,10 @@ impl<'me> MetadataSegmentWriter<'me> {
             match (old_document, new_document) {
                 (None, None) => continue,
                 (Some(old_document), Some(new_document)) => {
+                    if String::from_utf8_lossy(old_document.as_bytes()) != old_document {
+                        panic!("invariants violated on old_document");
+                    }
+
                     full_text_writer_batch.push(DocumentMutation::Update {
                         offset_id,
                         old_document,
@@ -504,10 +539,40 @@ impl<'me> MetadataSegmentWriter<'me> {
                     })
                 }
                 (Some(old_document), None) => {
+                    if String::from_utf8_lossy(old_document.as_bytes()) != old_document {
+                        panic!("invariants violated on old_document");
+                    }
+
                     full_text_writer_batch.push(DocumentMutation::Delete {
                         offset_id,
                         old_document,
                     })
+                }
+            }
+        }
+
+        for mutation in full_text_writer_batch.iter() {
+            match mutation {
+                DocumentMutation::Create {
+                    offset_id: _,
+                    new_document: _,
+                } => {}
+                DocumentMutation::Update {
+                    offset_id: _,
+                    old_document,
+                    new_document: _,
+                } => {
+                    if String::from_utf8_lossy(old_document.as_bytes()) != *old_document {
+                        panic!("invariants violated on old_document");
+                    }
+                }
+                DocumentMutation::Delete {
+                    offset_id: _,
+                    old_document,
+                } => {
+                    if String::from_utf8_lossy(old_document.as_bytes()) != *old_document {
+                        panic!("invariants violated on old_document");
+                    }
                 }
             }
         }
