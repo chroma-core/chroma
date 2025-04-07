@@ -48,23 +48,23 @@ jobs:
           key: macos-cargo
       - name: Install dependencies
         run: yarn install
-      - name: Build x86_64
-        run: yarn build --target x86_64-apple-darwin
-        shell: bash
       - name: Build ARM64
         run: yarn build --target aarch64-apple-darwin
         shell: bash
-      - name: Upload x86_64 artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: bindings-x86_64-apple-darwin
-          path: rust/js_bindings/chromadb-js-bindings.darwin-x64.node
-          if-no-files-found: error
+      - name: Build x86_64
+        run: yarn build --target x86_64-apple-darwin
+        shell: bash
       - name: Upload ARM64 artifact
         uses: actions/upload-artifact@v4
         with:
           name: bindings-aarch64-apple-darwin
           path: rust/js_bindings/chromadb-js-bindings.darwin-arm64.node
+          if-no-files-found: error
+      - name: Upload x86_64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-x86_64-apple-darwin
+          path: rust/js_bindings/chromadb-js-bindings.darwin-x64.node
           if-no-files-found: error
           
   build-windows:
@@ -106,26 +106,36 @@ jobs:
           key: windows-cargo
       - name: Install dependencies
         run: yarn install
+      - name: Create .cargo/config.toml with generator patch
+        run: |
+          mkdir -p .cargo
+          cat > .cargo/config.toml << 'EOF'
+          [target.aarch64-pc-windows-msvc]
+          rustflags = ["--cfg", "no_asm"]
+
+          [patch.crates-io]
+          generator = { git = "https://github.com/Xudong-Huang/generator-rs.git", branch = "master" }
+          EOF
+        shell: bash
+        working-directory: rust/js_bindings
+        
+      - name: Build ARM64
+        run: yarn build --target aarch64-pc-windows-msvc
+        shell: bash
       - name: Build x86_64
         run: yarn build --target x86_64-pc-windows-msvc
         shell: bash
-      - name: Build ARM64
-        run: |
-          # Add extra environment variable to help with the generator crate
-          export RUSTFLAGS="--cfg no_asm"
-          yarn build --target aarch64-pc-windows-msvc
-        shell: bash
-      - name: Upload x86_64 artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: bindings-x86_64-pc-windows-msvc
-          path: rust/js_bindings/chromadb-js-bindings.win32-x64-msvc.node
-          if-no-files-found: error
       - name: Upload ARM64 artifact
         uses: actions/upload-artifact@v4
         with:
           name: bindings-aarch64-pc-windows-msvc
           path: rust/js_bindings/chromadb-js-bindings.win32-arm64-msvc.node
+          if-no-files-found: error
+      - name: Upload x86_64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-x86_64-pc-windows-msvc
+          path: rust/js_bindings/chromadb-js-bindings.win32-x64-msvc.node
           if-no-files-found: error
           
   build-linux:
@@ -173,9 +183,6 @@ jobs:
           key: linux-cargo
       - name: Install dependencies
         run: yarn install
-      - name: Build x86_64
-        run: yarn build --target x86_64-unknown-linux-gnu
-        shell: bash
       - name: Build ARM64
         run: |
           # Set linker and compiler environment variables
@@ -187,17 +194,20 @@ jobs:
           # Build with the correct environment
           yarn build --target aarch64-unknown-linux-gnu
         shell: bash
-      - name: Upload x86_64 artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: bindings-x86_64-unknown-linux-gnu
-          path: rust/js_bindings/chromadb-js-bindings.linux-x64-gnu.node
-          if-no-files-found: error
+      - name: Build x86_64
+        run: yarn build --target x86_64-unknown-linux-gnu
+        shell: bash
       - name: Upload ARM64 artifact
         uses: actions/upload-artifact@v4
         with:
           name: bindings-aarch64-unknown-linux-gnu
           path: rust/js_bindings/chromadb-js-bindings.linux-arm64-gnu.node
+          if-no-files-found: error
+      - name: Upload x86_64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-x86_64-unknown-linux-gnu
+          path: rust/js_bindings/chromadb-js-bindings.linux-x64-gnu.node
           if-no-files-found: error
   publish:
     name: Publish
