@@ -14,7 +14,7 @@ You can install Chroma using `pip`:
 pip install chromadb
 ```
 
-If you're machine does not allow for global `pip` installs, you can get the Chroma CLI with `pipx`. 
+If you're machine does not allow for global `pip` installs, you can get the Chroma CLI with `pipx`:
 
 ```terminal
 pipx install chromadb
