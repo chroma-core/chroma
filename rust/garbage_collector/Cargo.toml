@@ -31,6 +31,7 @@ tempfile = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 humantime = { workspace = true }
+opentelemetry = { workspace = true }
 
 chroma-config = { workspace = true }
 chroma-error = { workspace = true }
