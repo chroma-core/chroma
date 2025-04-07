@@ -1,6 +1,5 @@
 // NOTE:  This is file is copied to files of the same name in the
 // load/src/opentelemetry_config.rs file
-// and garbage_collector/src/opentelemetry_config.rs file.
 // Keep them in-sync manually.
 
 use std::borrow::Cow;
@@ -38,6 +37,7 @@ pub fn init_global_filter_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
                 "query_service",
                 "wal3",
                 "worker",
+                "garbage_collector",
             ]
             .into_iter()
             .map(|s| s.to_string() + "=trace")

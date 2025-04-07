@@ -28,17 +28,9 @@ uuid = { workspace = true }
 futures = { workspace = true }
 tonic = { workspace = true }
 tempfile = { workspace = true }
-
 tracing = { workspace = true }
-tracing-bunyan-formatter = { workspace = true }
-tracing-opentelemetry = { workspace = true }
-tracing-subscriber = { workspace = true }
-opentelemetry = { workspace = true }
-opentelemetry-otlp = { workspace = true }
-opentelemetry-http = { workspace = true }
-opentelemetry_sdk = { workspace = true }
 thiserror = { workspace = true }
-proptest = { workspace = true }
+humantime = { workspace = true }
 
 chroma-config = { workspace = true }
 chroma-error = { workspace = true }
@@ -48,8 +40,9 @@ chroma-sysdb = { workspace = true }
 chroma-storage = { workspace = true }
 chroma-blockstore = { workspace = true }
 chroma-cache = { workspace = true }
-chroma-index = {workspace = true}
+chroma-index = { workspace = true }
 chroma-segment = { workspace = true }
+chroma-tracing = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
@@ -58,3 +51,4 @@ proptest-derive = "0.3"
 tokio-test = "0.4"
 rand = { workspace = true }
 itertools = { workspace = true }
+tracing-test = { version = "0.2.5" }
