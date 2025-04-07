@@ -12,5 +12,9 @@ jobs:
       - uses: pnpm/action-setup@v3
         with:
           version: "9"
+      - name: Remove lockfile
+        run: rm -f clients/js/pnpm-lock.yaml
+      - name: Install dependencies
+        run: cd clients/js && pnpm install
       - name: Test
         run: bin/ts-integration-test.sh
