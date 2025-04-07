@@ -90,6 +90,18 @@ jobs:
       - name: Install Rust target
         if: ${{ !matrix.settings.docker }}
         run: rustup target add ${{ matrix.settings.target }}
+        
+      - name: Install Protobuf compiler (Linux)
+        if: ${{ !matrix.settings.docker && runner.os == 'Linux' }}
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+        
+      - name: Install Protobuf compiler (macOS)
+        if: ${{ !matrix.settings.docker && runner.os == 'macOS' }}
+        run: brew install protobuf
+        
+      - name: Install Protobuf compiler (Windows)
+        if: ${{ !matrix.settings.docker && runner.os == 'Windows' }}
+        run: choco install protoc
       - name: Build in docker
         if: ${{ matrix.settings.docker }}
         uses: addnab/docker-run-action@v3
@@ -97,14 +109,17 @@ jobs:
           image: ${{ matrix.settings.docker }}
           options: '--user 0:0 -v ${{ github.workspace }}/rust/js_bindings/.cargo-cache/git/db:/usr/local/cargo/git/db -v ${{ github.workspace }}/rust/js_bindings/.cargo/registry/cache:/usr/local/cargo/registry/cache -v ${{ github.workspace }}/rust/js_bindings/.cargo/registry/index:/usr/local/cargo/registry/index -v ${{ github.workspace }}:/build -w /build/rust/js_bindings'
           run: |
+            apt-get update && apt-get install -y protobuf-compiler curl xz-utils
+            
             if [[ "${{ matrix.settings.target }}" == "aarch64-unknown-linux-gnu" ]]; then
-              apt-get update && apt-get install -y curl unzip
+              # Install Zig for cross-compilation
               curl -L https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz -o zig.tar.xz
               tar -xf zig.tar.xz
               mv zig-linux-x86_64-0.13.0 /usr/local/zig
               export PATH="/usr/local/zig:$PATH"
-              rustup target add aarch64-unknown-linux-gnu
             fi
+            
+            rustup target add ${{ matrix.settings.target }}
             ${{ matrix.settings.build }}
       - name: Build
         if: ${{ !matrix.settings.docker }}
