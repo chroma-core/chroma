@@ -1,0 +1,18 @@
+{
+  "name": "chromadb-js-bindings-darwin-x64",
+  "version": "0.0.2",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "main": "chromadb-js-bindings.darwin-x64.node",
+  "files": [
+    "chromadb-js-bindings.darwin-x64.node"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">= 10"
+  }
+}
