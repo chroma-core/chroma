@@ -1,5 +1,6 @@
 use crate::client::get_chroma_client;
 use crate::commands::db::DbError;
+use crate::commands::login::LoginError::BrowserAuthFailed;
 use crate::dashboard_client::{get_dashboard_client, DashboardClient, DashboardClientError, Team};
 use crate::utils::{
     read_config, read_profiles, validate_uri, write_config, write_profiles, CliError, Profile,
@@ -10,11 +11,9 @@ use colored::Colorize;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{Input, Select};
 use std::error::Error;
-use std::fmt::format;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::time::sleep;
-use crate::commands::login::LoginError::BrowserAuthFailed;
 
 #[derive(Parser, Debug)]
 pub struct LoginArgs {
@@ -139,7 +138,10 @@ fn get_profile_from_team(team: &Team, profiles: &Profiles) -> Result<String, Cli
     }
 }
 
-async fn verify_token(dashboard_client: &DashboardClient, token: String) -> Result<Option<String>, DashboardClientError> {
+async fn verify_token(
+    dashboard_client: &DashboardClient,
+    token: String,
+) -> Result<Option<String>, DashboardClientError> {
     let timeout = Duration::from_secs(120); // 2 minutes
     let interval = Duration::from_secs(1);
     let start = tokio::time::Instant::now();
@@ -157,27 +159,29 @@ async fn verify_token(dashboard_client: &DashboardClient, token: String) -> Resu
 
 async fn browser_auth(dashboard_client: &DashboardClient) -> Result<String, Box<dyn Error>> {
     let token = dashboard_client.get_cli_token().await?;
-    
-    let login_url = format!("{}/cli?cli_redirect={}", dashboard_client.frontend_url, token);
+
+    let login_url = format!(
+        "{}/cli?cli_redirect={}",
+        dashboard_client.frontend_url, token
+    );
     webbrowser::open(&login_url)?;
-    
+
     println!("Waiting for browser authentication...\nCtrl+C to quit\n");
-    
+
     let session_id = verify_token(dashboard_client, token).await?;
     match session_id {
         Some(session_id) => Ok(session_id),
         None => Err(BrowserAuthFailed.into()),
     }
-    
 }
 
 pub async fn browser_login(args: LoginArgs) -> Result<(), CliError> {
     let dashboard_client = get_dashboard_client(args.dev);
-    
+
     let session_id = browser_auth(&dashboard_client)
         .await
         .map_err(|_| BrowserAuthFailed)?;
-    
+
     let teams = dashboard_client.get_teams(&session_id).await?;
 
     let (api_key, team) = match args.api_key {

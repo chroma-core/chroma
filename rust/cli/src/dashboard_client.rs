@@ -13,9 +13,9 @@ pub enum DashboardClientError {
     #[error("Failed to fetch teams")]
     TeamFetch(String),
     #[error("Failed to get CLI token")]
-    CliToken, 
+    CliToken,
     #[error("Failed to verify CLI token")]
-    CliTokenVerification
+    CliTokenVerification,
 }
 
 #[derive(Deserialize, Debug)]
@@ -107,25 +107,23 @@ impl DashboardClient {
             None,
         )
         .await
-        .map_err(|_| 
-            DashboardClientError::TeamFetch(session_id.to_string())
-        )?;
+        .map_err(|_| DashboardClientError::TeamFetch(session_id.to_string()))?;
         Ok(response)
     }
-    
+
     pub async fn get_cli_token(&self) -> Result<String, DashboardClientError> {
         let route = "/api/v1/cli-login";
-        let response = send_request::<(), CliLoginResponse>(
-            &self.api_url,
-            Method::GET,
-            route,
-            None,
-            None,
-        ).await.map_err(|_| DashboardClientError::CliToken)?;
+        let response =
+            send_request::<(), CliLoginResponse>(&self.api_url, Method::GET, route, None, None)
+                .await
+                .map_err(|_| DashboardClientError::CliToken)?;
         Ok(response.token)
     }
-    
-    pub async fn verify_cli_token(&self, token: String) -> Result<CliVerifyResponse, DashboardClientError> {
+
+    pub async fn verify_cli_token(
+        &self,
+        token: String,
+    ) -> Result<CliVerifyResponse, DashboardClientError> {
         let route = "/api/v1/cli-login/verify-token";
         let body = CliVerifyRequest { token };
         let response = send_request::<CliVerifyRequest, CliVerifyResponse>(
@@ -134,7 +132,9 @@ impl DashboardClient {
             route,
             None,
             Some(&body),
-        ).await.map_err(|_| DashboardClientError::CliTokenVerification)?;
+        )
+        .await
+        .map_err(|_| DashboardClientError::CliTokenVerification)?;
         Ok(response)
     }
 }
