@@ -89,10 +89,8 @@ jobs:
         uses: arduino/setup-protoc@v2
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Add targets
-        run: |
-          rustup target add x86_64-pc-windows-msvc
-          rustup target add aarch64-pc-windows-msvc
+      - name: Add target
+        run: rustup target add x86_64-pc-windows-msvc
         shell: bash
       - name: Cache cargo
         uses: actions/cache@v4
@@ -106,31 +104,9 @@ jobs:
           key: windows-cargo
       - name: Install dependencies
         run: yarn install
-      - name: Create .cargo/config.toml with generator patch
-        run: |
-          mkdir -p .cargo
-          cat > .cargo/config.toml << 'EOF'
-          [target.aarch64-pc-windows-msvc]
-          rustflags = ["--cfg", "no_asm"]
-
-          [patch.crates-io]
-          generator = { git = "https://github.com/Xudong-Huang/generator-rs.git", branch = "master" }
-          EOF
-        shell: bash
-        working-directory: rust/js_bindings
-        
-      - name: Build ARM64
-        run: yarn build --target aarch64-pc-windows-msvc
-        shell: bash
       - name: Build x86_64
         run: yarn build --target x86_64-pc-windows-msvc
         shell: bash
-      - name: Upload ARM64 artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: bindings-aarch64-pc-windows-msvc
-          path: rust/js_bindings/chromadb-js-bindings.win32-arm64-msvc.node
-          if-no-files-found: error
       - name: Upload x86_64 artifact
         uses: actions/upload-artifact@v4
         with:
