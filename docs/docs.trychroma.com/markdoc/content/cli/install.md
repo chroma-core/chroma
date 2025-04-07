@@ -8,39 +8,69 @@ If you don't use one of our packages, you can still install the CLI as a standal
 
 ## Python
 
+You can install Chroma in your environment using `pip`:
+
+```terminal
+pip install chromadb
+```
+
+Or install the Chroma CLI globally with `pipx`
+
 ```terminal
 pipx install chromadb
 ```
 
-## JavaScript
+[//]: # (## JavaScript)
 
-{% TabbedUseCaseCodeBlock language="Terminal" %}
+[//]: # ()
+[//]: # ({% TabbedUseCaseCodeBlock language="Terminal" %})
 
-{% Tab label="yarn" %}
-```terminal
-yarn global add chromadb 
-```
-{% /Tab %}
+[//]: # ()
+[//]: # ({% Tab label="yarn" %})
 
-{% Tab label="npm" %}
-```terminal
-npm install -g chromadb
-```
-{% /Tab %}
+[//]: # (```terminal)
 
-{% Tab label="pnpm" %}
-```terminal
-pnpm add -g chromadb 
-```
-{% /Tab %}
+[//]: # (yarn global add chromadb )
 
-{% Tab label="bun" %}
-```terminal
-bun add -g chromadb 
-```
-{% /Tab %}
+[//]: # (```)
 
-{% /TabbedUseCaseCodeBlock %}
+[//]: # ({% /Tab %})
+
+[//]: # ()
+[//]: # ({% Tab label="npm" %})
+
+[//]: # (```terminal)
+
+[//]: # (npm install -g chromadb)
+
+[//]: # (```)
+
+[//]: # ({% /Tab %})
+
+[//]: # ()
+[//]: # ({% Tab label="pnpm" %})
+
+[//]: # (```terminal)
+
+[//]: # (pnpm add -g chromadb )
+
+[//]: # (```)
+
+[//]: # ({% /Tab %})
+
+[//]: # ()
+[//]: # ({% Tab label="bun" %})
+
+[//]: # (```terminal)
+
+[//]: # (bun add -g chromadb )
+
+[//]: # (```)
+
+[//]: # ({% /Tab %})
+
+[//]: # ()
+[//]: # ({% /TabbedUseCaseCodeBlock %})
 
 ## Install Globally
 
