@@ -76,9 +76,7 @@ where
 {
     async fn handle_and_reply(&mut self, component: &mut C, ctx: &ComponentContext<C>) -> () {
         if let Some(message) = self.take() {
-            let result = AssertUnwindSafe(component.handle(message.message, ctx))
-                .catch_unwind()
-                .await;
+            let result = Ok(component.handle(message.message, ctx).await);
 
             match result {
                 Ok(result) => {
