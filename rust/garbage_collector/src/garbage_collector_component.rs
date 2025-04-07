@@ -16,6 +16,7 @@ use chroma_system::{
 use chroma_types::CollectionUuid;
 use chrono::{DateTime, Utc};
 use futures::{stream::FuturesUnordered, StreamExt};
+use opentelemetry::metrics::{Counter, Histogram};
 use std::{
     collections::{HashMap, HashSet},
     fmt::{Debug, Formatter},
@@ -38,6 +39,10 @@ pub(crate) struct GarbageCollector {
     system: Option<chroma_system::System>,
     default_cleanup_mode: CleanupMode,
     tenant_mode_overrides: Option<HashMap<String, CleanupMode>>,
+    total_jobs_metric: Counter<u64>,
+    job_duration_ms_metric: Histogram<u64>,
+    total_files_deleted_metric: Counter<u64>,
+    total_versions_deleted_metric: Counter<u64>,
 }
 
 impl Debug for GarbageCollector {
@@ -66,6 +71,8 @@ impl GarbageCollector {
         default_cleanup_mode: CleanupMode,
         tenant_mode_overrides: Option<HashMap<String, CleanupMode>>,
     ) -> Self {
+        let meter = opentelemetry::global::meter("chroma");
+
         Self {
             gc_interval_mins,
             relative_cutoff_time,
@@ -77,6 +84,23 @@ impl GarbageCollector {
             system: None,
             default_cleanup_mode,
             tenant_mode_overrides,
+            total_jobs_metric: meter
+                .u64_counter("garbage_collector.total_jobs")
+                .with_description("Total number of garbage collection jobs executed")
+                .build(),
+            job_duration_ms_metric: meter
+                .u64_histogram("garbage_collector.job_duration_ms")
+                .with_description("Duration of garbage collection jobs in milliseconds")
+                .with_unit("ms")
+                .build(),
+            total_files_deleted_metric: meter
+                .u64_counter("garbage_collector.total_files_deleted")
+                .with_description("Total number of files deleted during garbage collection")
+                .build(),
+            total_versions_deleted_metric: meter
+                .u64_counter("garbage_collector.total_versions_deleted")
+                .with_description("Total number of versions deleted during garbage collection")
+                .build(),
         }
     }
 
@@ -107,7 +131,28 @@ impl GarbageCollector {
             );
 
             if let Some(system) = self.system.as_ref() {
-                return Ok(orchestrator.run(system.clone()).await?);
+                let started_at = SystemTime::now();
+                let result = orchestrator.run(system.clone()).await?;
+                let duration_ms = started_at
+                    .elapsed()
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0);
+                self.job_duration_ms_metric.record(duration_ms, &[]);
+                self.total_files_deleted_metric.add(
+                    result.deletion_list.len() as u64,
+                    &[opentelemetry::KeyValue::new(
+                        "cleanup_mode",
+                        format!("{:?}", cleanup_mode),
+                    )],
+                );
+                self.total_versions_deleted_metric.add(
+                    result.num_versions_deleted as u64,
+                    &[opentelemetry::KeyValue::new(
+                        "cleanup_mode",
+                        format!("{:?}", cleanup_mode),
+                    )],
+                );
+                return Ok(result);
             }
         }
 
@@ -219,6 +264,15 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
             "Completed {} jobs, failed {} jobs",
             num_completed_jobs,
             num_failed_jobs
+        );
+
+        self.total_jobs_metric.add(
+            num_completed_jobs as u64,
+            &[opentelemetry::KeyValue::new("status", "success")],
+        );
+        self.total_jobs_metric.add(
+            num_failed_jobs as u64,
+            &[opentelemetry::KeyValue::new("status", "failure")],
         );
 
         // Schedule next run
