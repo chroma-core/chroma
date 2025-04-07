@@ -96,7 +96,10 @@ jobs:
         with:
           image: ${{ matrix.settings.docker }}
           options: '--user 0:0 -v ${{ github.workspace }}/rust/js_bindings/.cargo-cache/git/db:/usr/local/cargo/git/db -v ${{ github.workspace }}/rust/js_bindings/.cargo/registry/cache:/usr/local/cargo/registry/cache -v ${{ github.workspace }}/rust/js_bindings/.cargo/registry/index:/usr/local/cargo/registry/index -v ${{ github.workspace }}:/build -w /build/rust/js_bindings'
-          run: ${{ matrix.settings.build }}
+          run: |
+            rustup target add ${{ matrix.settings.target }}
+            apt-get update && apt-get install -y zig
+            ${{ matrix.settings.build }}
       - name: Build
         if: ${{ !matrix.settings.docker }}
         run: ${{ matrix.settings.build }}
