@@ -8,6 +8,7 @@ import (
 	"io"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
@@ -25,13 +26,14 @@ const (
 )
 
 type S3MetaStoreConfig struct {
-	BucketName      string
-	Region          string
-	BasePathSysDB   string
-	Endpoint        string
-	AccessKeyID     string
-	SecretAccessKey string
-	ForcePathStyle  bool
+	CreateBucketIfNotExists bool
+	BucketName              string
+	Region                  string
+	BasePathSysDB           string
+	Endpoint                string
+	AccessKeyID             string
+	SecretAccessKey         string
+	ForcePathStyle          bool
 }
 
 type S3MetaStoreInterface interface {
@@ -96,6 +98,18 @@ func NewS3MetaStore(config S3MetaStoreConfig) (*S3MetaStore, error) {
 	}
 
 	s3Client := s3.New(sess)
+
+	if config.CreateBucketIfNotExists {
+		_, err = s3Client.CreateBucket(&s3.CreateBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err != nil {
+			if err.(awserr.Error).Code() != s3.ErrCodeBucketAlreadyOwnedByYou {
+				return nil, fmt.Errorf("unable to create bucket %s: %w", bucketName, err)
+			}
+			log.Info("Bucket already exists, continuing", zap.String("bucket", bucketName))
+		}
+	}
 
 	// Verify we have access to the bucket
 	_, err = s3Client.HeadBucket(&s3.HeadBucketInput{

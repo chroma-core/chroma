@@ -11,6 +11,7 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/sysdb/coordinator/model"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dao"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbcore"
+	s3metastore "github.com/chroma-core/chroma/go/pkg/sysdb/metastore/s3"
 	"github.com/chroma-core/chroma/go/pkg/types"
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/suite"
@@ -38,7 +39,15 @@ func (suite *CleanupTestSuite) SetupSuite() {
 		SoftDeleteMaxAge:           0,
 		SoftDeleteCleanupBatchSize: 10,
 		Testing:                    true,
-		BlockStoreProvider:         "none",
+		MetaStoreConfig: s3metastore.S3MetaStoreConfig{
+			BucketName:              "test-bucket",
+			Region:                  "us-east-1",
+			Endpoint:                "http://localhost:9000",
+			AccessKeyID:             "minio",
+			SecretAccessKey:         "minio123",
+			ForcePathStyle:          true,
+			CreateBucketIfNotExists: true,
+		},
 	}, grpcutils.Default)
 	if err != nil {
 		suite.T().Fatalf("error creating server: %v", err)
