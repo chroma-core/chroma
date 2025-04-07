@@ -418,7 +418,7 @@ impl DirtyMarker {
             .into_iter()
             .flat_map(Result::ok)
             .collect::<HashMap<_, _>>();
-        let compactable = compactable
+        let mut compactable = compactable
             .into_iter()
             .filter_map(|collection_id| {
                 let (witness, manifest) = cursors.get(collection_id)?.clone();
@@ -470,6 +470,8 @@ impl DirtyMarker {
                 }
             })
             .collect::<Vec<_>>();
+        compactable.sort_by_key(|x| (x.collection_id.clone(), x.first_log_offset));
+        compactable.dedup_by_key(|x| x.collection_id.clone());
         let mut advance_to = markers
             .iter()
             .map(|(log_position, _)| *log_position + 1u64)
