@@ -10,33 +10,9 @@ permissions:
   workflow_dispatch: {}
   workflow_call: {}
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        settings:
-          - host: macos-latest
-            target: x86_64-apple-darwin
-            build: yarn build --target x86_64-apple-darwin
-          - host: windows-latest
-            build: yarn build --target x86_64-pc-windows-msvc
-            target: x86_64-pc-windows-msvc
-          - host: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian
-            build: yarn build --target x86_64-unknown-linux-gnu
-          - host: macos-latest
-            target: aarch64-apple-darwin
-            build: yarn build --target aarch64-apple-darwin
-          - host: ubuntu-latest
-            target: aarch64-unknown-linux-gnu
-            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian-aarch64
-            build: yarn build --target aarch64-unknown-linux-gnu
-          - host: windows-latest
-            target: aarch64-pc-windows-msvc
-            build: yarn build --target aarch64-pc-windows-msvc
-    name: stable - ${{ matrix.settings.target }} - node@20
-    runs-on: ${{ matrix.settings.host }}
+  build-macos:
+    name: Build macOS bindings
+    runs-on: macos-latest
     defaults:
       run:
         working-directory: rust/js_bindings
@@ -44,17 +20,22 @@ jobs:
       - uses: actions/checkout@v4
       - name: Setup node
         uses: actions/setup-node@v4
-        if: ${{ !matrix.settings.docker }}
         with:
           node-version: 20
           cache: yarn
           cache-dependency-path: rust/js_bindings/yarn.lock
-      - name: Install
+      - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
-        if: ${{ !matrix.settings.docker }}
         with:
           toolchain: stable
-          targets: ${{ matrix.settings.target }}
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v2
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Add targets
+        run: |
+          rustup target add x86_64-apple-darwin
+          rustup target add aarch64-apple-darwin
       - name: Cache cargo
         uses: actions/cache@v4
         with:
@@ -64,45 +45,145 @@ jobs:
             ~/.cargo/git/db/
             rust/js_bindings/.cargo-cache
             rust/js_bindings/target/
-          key: ${{ matrix.settings.target }}-cargo-${{ matrix.settings.host }}
-      - uses: goto-bus-stop/setup-zig@v2
-        if: ${{ matrix.settings.target == 'armv7-unknown-linux-gnueabihf' || matrix.settings.target == 'armv7-unknown-linux-musleabihf' }}
-        with:
-          version: 0.13.0
-      - name: Setup toolchain
-        run: ${{ matrix.settings.setup }}
-        if: ${{ matrix.settings.setup }}
-        shell: bash
-      - name: Setup node x86
-        if: matrix.settings.target == 'i686-pc-windows-msvc'
-        run: yarn config set supportedArchitectures.cpu "ia32"
-        shell: bash
+          key: macos-cargo
       - name: Install dependencies
         run: yarn install
-      - name: Setup node x86
+      - name: Build ARM64
+        run: yarn build --target aarch64-apple-darwin
+        shell: bash
+      - name: Build x86_64
+        run: yarn build --target x86_64-apple-darwin
+        shell: bash
+      - name: Upload ARM64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-aarch64-apple-darwin
+          path: rust/js_bindings/chromadb-js-bindings.darwin-arm64.node
+          if-no-files-found: error
+      - name: Upload x86_64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-x86_64-apple-darwin
+          path: rust/js_bindings/chromadb-js-bindings.darwin-x64.node
+          if-no-files-found: error
+          
+  build-windows:
+    name: Build Windows bindings
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: rust/js_bindings
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup node
         uses: actions/setup-node@v4
-        if: matrix.settings.target == 'i686-pc-windows-msvc'
         with:
           node-version: 20
           cache: yarn
           cache-dependency-path: rust/js_bindings/yarn.lock
-          architecture: x86
-      - name: Build in docker
-        uses: addnab/docker-run-action@v3
-        if: ${{ matrix.settings.docker }}
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
-          image: ${{ matrix.settings.docker }}
-          options: '--user 0:0 -v ${{ github.workspace }}/rust/js_bindings/.cargo-cache/git/db:/usr/local/cargo/git/db -v ${{ github.workspace }}/rust/js_bindings/.cargo/registry/cache:/usr/local/cargo/registry/cache -v ${{ github.workspace }}/rust/js_bindings/.cargo/registry/index:/usr/local/cargo/registry/index -v ${{ github.workspace }}:/build -w /build/rust/js_bindings'
-          run: ${{ matrix.settings.build }}
-      - name: Build
-        run: ${{ matrix.settings.build }}
-        if: ${{ !matrix.settings.docker }}
+          toolchain: stable
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v2
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Add target
+        run: rustup target add x86_64-pc-windows-msvc
         shell: bash
-      - name: Upload artifact
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            rust/js_bindings/.cargo-cache
+            rust/js_bindings/target/
+          key: windows-cargo
+      - name: Install dependencies
+        run: yarn install
+      - name: Build x86_64
+        run: yarn build --target x86_64-pc-windows-msvc
+        shell: bash
+      - name: Upload x86_64 artifact
         uses: actions/upload-artifact@v4
         with:
-          name: bindings-${{ matrix.settings.target }}
-          path: rust/js_bindings/chromadb-js-bindings.*.node
+          name: bindings-x86_64-pc-windows-msvc
+          path: rust/js_bindings/chromadb-js-bindings.win32-x64-msvc.node
+          if-no-files-found: error
+          
+  build-linux:
+    name: Build Linux bindings
+    runs-on: depot-ubuntu-22.04-16
+    defaults:
+      run:
+        working-directory: rust/js_bindings
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: yarn
+          cache-dependency-path: rust/js_bindings/yarn.lock
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v2
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Add targets
+        run: |
+          rustup target add x86_64-unknown-linux-gnu
+          rustup target add aarch64-unknown-linux-gnu
+      - name: Install ARM64 cross-compilation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gcc-aarch64-linux-gnu \
+            g++-aarch64-linux-gnu \
+            libc6-dev-arm64-cross
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            rust/js_bindings/.cargo-cache
+            rust/js_bindings/target/
+          key: linux-cargo
+      - name: Install dependencies
+        run: yarn install
+      - name: Build ARM64
+        run: |
+          # Set linker and compiler environment variables
+          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
+          export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++
+          # Add no_asm flag to avoid assembly issues
+          export RUSTFLAGS="--cfg no_asm"
+          # Build with the correct environment
+          yarn build --target aarch64-unknown-linux-gnu
+        shell: bash
+      - name: Build x86_64
+        run: yarn build --target x86_64-unknown-linux-gnu
+        shell: bash
+      - name: Upload ARM64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-aarch64-unknown-linux-gnu
+          path: rust/js_bindings/chromadb-js-bindings.linux-arm64-gnu.node
+          if-no-files-found: error
+      - name: Upload x86_64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-x86_64-unknown-linux-gnu
+          path: rust/js_bindings/chromadb-js-bindings.linux-x64-gnu.node
           if-no-files-found: error
   publish:
     name: Publish
@@ -111,7 +192,9 @@ jobs:
       run:
         working-directory: rust/js_bindings
     needs:
-      - build
+      - build-macos
+      - build-windows
+      - build-linux
     steps:
       - uses: actions/checkout@v4
       - name: Setup node
