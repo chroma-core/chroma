@@ -88,9 +88,9 @@ pub enum CompactionManagerError {
     GetCollectionWithSegmentsError(#[from] GetCollectionWithSegmentsError),
     #[error("Error reading from metadata segment reader")]
     MetadataReaderError(#[from] SqliteMetadataError),
-    #[error("Error reading from hnsw segment reader")]
+    #[error("Error reading from hnsw segment reader: {0}")]
     HnswReaderError(#[from] LocalHnswSegmentReaderError),
-    #[error("Error constructing hnsw segment reader")]
+    #[error("Error constructing hnsw segment reader: {0}")]
     HnswReaderConstructionError(#[from] LocalSegmentManagerError),
     #[error("Error purging logs")]
     PurgeLogsFailure,
