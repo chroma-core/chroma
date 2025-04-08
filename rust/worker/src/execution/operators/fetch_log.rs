@@ -74,8 +74,10 @@ impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
             self.get_name(),
         );
 
-        let mut fetched = Vec::new();
         let mut log_client = self.log_client.clone();
+        let limit_offset = log_client.scout_logs(self.collection_uuid).await?;
+
+        let mut fetched = Vec::new();
         let mut offset = self.start_log_offset_id as i64;
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos() as i64;
         loop {
