@@ -308,9 +308,13 @@ impl CompactOrchestrator {
             self.num_uncompleted_tasks_by_segment
                 .entry(writers.record_writer.id)
                 .and_modify(|v| {
+                    tracing::info!("and_modify {}", writers.record_writer.id);
                     *v += 1;
                 })
-                .or_insert(1);
+                .or_insert_with(|| {
+                    tracing::info!("or_insert_with {}", writers.record_writer.id);
+                    1
+                });
 
             let writer = ChromaSegmentWriter::RecordSegment(writers.record_writer);
             let span = self.get_segment_writer_span(&writer);
@@ -331,6 +335,7 @@ impl CompactOrchestrator {
             self.num_uncompleted_tasks_by_segment
                 .entry(writers.metadata_writer.id)
                 .and_modify(|v| {
+                    tracing::info!("and_modify", writers.metadata_writer.id);
                     *v += 1;
                 })
                 .or_insert(1);
@@ -354,6 +359,7 @@ impl CompactOrchestrator {
             self.num_uncompleted_tasks_by_segment
                 .entry(writers.vector_writer.get_id())
                 .and_modify(|v| {
+                    tracing::info!("and_modify", writers.vector_writer.get_id());
                     *v += 1;
                 })
                 .or_insert(1);
@@ -851,6 +857,7 @@ impl Handler<TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOp
         self.num_uncompleted_tasks_by_segment
             .entry(message.segment_id)
             .and_modify(|v| {
+                tracing::info!("and_modify {}", message.segment_id);
                 *v -= 1;
             });
 
@@ -864,7 +871,10 @@ impl Handler<TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOp
                 .cloned();
             match self.ok_or_terminate(num_tasks_left, ctx) {
                 Some(num_tasks_left) => num_tasks_left,
-                None => return,
+                None => {
+                    tracing::error!("failed to find message.segment_id={}", message.segment_id);
+                    return;
+                }
             }
         };
 
@@ -928,6 +938,7 @@ impl Handler<TaskResult<FlushSegmentWriterOutput, FlushSegmentWriterOperatorErro
         let _ = self.segment_spans.remove(&segment_id);
 
         self.flush_results.push(message.flush_info);
+        tracing::info!("remove {}", segment_id);
         self.num_uncompleted_tasks_by_segment.remove(&segment_id);
 
         if self.num_uncompleted_tasks_by_segment.is_empty() {
