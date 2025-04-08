@@ -14,5 +14,9 @@
   "license": "MIT",
   "engines": {
     "node": ">= 10"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chroma-core/chroma"
   }
 }
