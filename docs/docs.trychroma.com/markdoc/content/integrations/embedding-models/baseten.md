@@ -13,9 +13,7 @@ Chroma provides a convenient integration with any OpenAI-compatible embedding mo
 Get started easily with an embedding model from Baseten's model library, like [Mixedbread Embed Large](https://www.baseten.co/library/mixedbread-embed-large-v1/).
 {% /Banner %}
 
-{% Tabs %}
-
-{% Tab label="python" %}
+## Using Baseten models with Chroma
 
 This embedding function relies on the `openai` python package, which you can install with `pip install openai`.
 
@@ -32,7 +30,3 @@ baseten_ef = embedding_functions.BasetenEmbeddingFunction(
 
 baseten_ef(input=["This is my first text to embed", "This is my second document"])
 ```
-
-{% /Tab %}
-
-{% /Tabs %}
