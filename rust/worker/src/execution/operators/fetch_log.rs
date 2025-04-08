@@ -75,7 +75,9 @@ impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
         );
 
         let mut log_client = self.log_client.clone();
-        let limit_offset = log_client.scout_logs(self.collection_uuid).await?;
+        let limit_offset = log_client
+            .scout_logs(self.collection_uuid, self.start_log_offset_id)
+            .await?;
 
         let mut fetched = Vec::new();
         let mut offset = self.start_log_offset_id as i64;
