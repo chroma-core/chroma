@@ -27,6 +27,8 @@ pub enum SqlitePullLogsError {
     InvalidEmbedding(bytemuck::PodCastError),
     #[error("Failed to parse metadata: {0}")]
     InvalidMetadata(#[from] serde_json::Error),
+    #[error("Method {0} is not implemented")]
+    NotImplemented(String),
 }
 
 impl ChromaError for SqlitePullLogsError {
@@ -36,6 +38,7 @@ impl ChromaError for SqlitePullLogsError {
             SqlitePullLogsError::InvalidEncoding(_) => ErrorCodes::InvalidArgument,
             SqlitePullLogsError::InvalidEmbedding(_) => ErrorCodes::InvalidArgument,
             SqlitePullLogsError::InvalidMetadata(_) => ErrorCodes::InvalidArgument,
+            SqlitePullLogsError::NotImplemented(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -160,6 +163,16 @@ impl SqliteLog {
         self.compactor_handle
             .set(compactor_handle)
             .map_err(|_| SqlitePushLogsError::CompactorHandleSetError)
+    }
+
+    pub(super) async fn scout_logs(
+        &mut self,
+        _collection_id: CollectionUuid,
+        _starting_offset: i64,
+    ) -> Result<u64, SqlitePullLogsError> {
+        Err(SqlitePullLogsError::NotImplemented(
+            "scout_logs".to_string(),
+        ))
     }
 
     pub(super) async fn read(

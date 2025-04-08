@@ -15,8 +15,8 @@ use chroma_types::chroma_proto::{
     log_service_server::LogService, CollectionInfo, GetAllCollectionInfoToCompactRequest,
     GetAllCollectionInfoToCompactResponse, LogRecord, OperationRecord, PullLogsRequest,
     PullLogsResponse, PurgeDirtyForCollectionRequest, PurgeDirtyForCollectionResponse,
-    PushLogsRequest, PushLogsResponse, UpdateCollectionLogOffsetRequest,
-    UpdateCollectionLogOffsetResponse,
+    PushLogsRequest, PushLogsResponse, ScoutLogsRequest, ScoutLogsResponse,
+    UpdateCollectionLogOffsetRequest, UpdateCollectionLogOffsetResponse,
 };
 use chroma_types::CollectionUuid;
 use figment::providers::{Env, Format, Yaml};
@@ -641,6 +641,34 @@ impl LogService for LogServer {
             .await
             .map_err(|err| Status::unknown(err.to_string()))?;
         Ok(Response::new(PushLogsResponse { record_count }))
+    }
+
+    #[tracing::instrument(skip(self, request), err(Display))]
+    async fn scout_logs(
+        &self,
+        request: Request<ScoutLogsRequest>,
+    ) -> Result<Response<ScoutLogsResponse>, Status> {
+        let scout_logs = request.into_inner();
+        let collection_id = Uuid::parse_str(&scout_logs.collection_id)
+            .map(CollectionUuid)
+            .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+        tracing::info!(
+            "Scouting logs for collection {} from offset {}",
+            collection_id,
+            scout_logs.start_from_offset,
+        );
+        let prefix = storage_prefix_for_log(collection_id);
+        let log_reader = LogReader::new(
+            self.config.reader.clone(),
+            Arc::clone(&self.storage),
+            prefix,
+        );
+        let limit_position = log_reader
+            .maximum_log_position()
+            .await
+            .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
+        let limit_offset = limit_position.offset() as i64;
+        Ok(Response::new(ScoutLogsResponse { limit_offset }))
     }
 
     #[tracing::instrument(skip(self, request), err(Display))]

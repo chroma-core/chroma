@@ -169,6 +169,32 @@ func (r *LogRepository) GetLastCompactedOffsetForCollection(ctx context.Context,
 	return
 }
 
+func (r *LogRepository) GetMinimumMaximumOffsetForCollection(ctx context.Context, collectionId string) (start, limit int64, err error) {
+	var tx pgx.Tx
+	tx, err = r.conn.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		trace_log.Error("Error in begin transaction for garbage collection", zap.Error(err))
+		tx.Rollback(ctx)
+		return
+	}
+	queriesWithTx := r.queries.WithTx(tx)
+	minMax, err := queriesWithTx.GetMinimumMaximumOffsetForCollection(ctx, collectionId)
+	if err != nil {
+		trace_log.Error("Error in getting minimum and maximum offset for collection", zap.Error(err), zap.String("collectionId", collectionId))
+		tx.Rollback(ctx)
+		return
+	}
+	minOffset := minMax.MinOffset
+	if minOffset == 1 {
+		minOffset = 0
+	}
+	maxOffset := minMax.MaxOffset
+	start = minOffset
+	limit = maxOffset
+	err = nil
+	return
+}
+
 func (r *LogRepository) GarbageCollection(ctx context.Context) error {
 	collectionToCompact, err := r.queries.GetAllCollections(ctx)
 	if err != nil {

@@ -44,6 +44,25 @@ func (s *logServer) PushLogs(ctx context.Context, req *logservicepb.PushLogsRequ
 	return
 }
 
+func (s *logServer) ScoutLogs(ctx context.Context, req *logservicepb.ScoutLogsRequest) (res *logservicepb.ScoutLogsResponse, err error) {
+	var collectionID types.UniqueID
+	collectionID, err = types.ToUniqueID(&req.CollectionId)
+	if err != nil {
+		// TODO HANDLE ERROR
+		return
+	}
+	var limit int64
+	_, limit, err = s.lr.GetMinimumMaximumOffsetForCollection(ctx, collectionID.String())
+	if err != nil {
+		// TODO HANDLE ERROR
+		return
+	}
+	res = &logservicepb.ScoutLogsResponse {
+		LimitOffset: int64(limit),
+	}
+	return
+}
+
 func (s *logServer) PullLogs(ctx context.Context, req *logservicepb.PullLogsRequest) (res *logservicepb.PullLogsResponse, err error) {
 	var collectionID types.UniqueID
 	collectionID, err = types.ToUniqueID(&req.CollectionId)
