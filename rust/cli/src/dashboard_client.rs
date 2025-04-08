@@ -12,6 +12,10 @@ pub enum DashboardClientError {
     ApiKeyFetch(String),
     #[error("Failed to fetch teams")]
     TeamFetch(String),
+    #[error("Failed to get CLI token")]
+    CliToken,
+    #[error("Failed to verify CLI token")]
+    CliTokenVerification,
 }
 
 #[derive(Deserialize, Debug)]
@@ -29,6 +33,23 @@ struct CreateApiKeyRequest {
 #[derive(Deserialize, Debug, Default)]
 struct CreateApiKeyResponse {
     key: String,
+}
+
+#[derive(Deserialize, Debug, Default)]
+struct CliLoginResponse {
+    token: String,
+}
+
+#[derive(Serialize, Debug)]
+struct CliVerifyRequest {
+    token: String,
+}
+
+#[derive(Deserialize, Debug, Default)]
+pub struct CliVerifyResponse {
+    pub success: bool,
+    #[serde(rename = "sessionId")]
+    pub session_id: String,
 }
 
 #[derive(Default, Debug, Clone)]
@@ -87,6 +108,33 @@ impl DashboardClient {
         )
         .await
         .map_err(|_| DashboardClientError::TeamFetch(session_id.to_string()))?;
+        Ok(response)
+    }
+
+    pub async fn get_cli_token(&self) -> Result<String, DashboardClientError> {
+        let route = "/api/v1/cli-login";
+        let response =
+            send_request::<(), CliLoginResponse>(&self.api_url, Method::GET, route, None, None)
+                .await
+                .map_err(|_| DashboardClientError::CliToken)?;
+        Ok(response.token)
+    }
+
+    pub async fn verify_cli_token(
+        &self,
+        token: String,
+    ) -> Result<CliVerifyResponse, DashboardClientError> {
+        let route = "/api/v1/cli-login/verify-token";
+        let body = CliVerifyRequest { token };
+        let response = send_request::<CliVerifyRequest, CliVerifyResponse>(
+            &self.api_url,
+            Method::POST,
+            route,
+            None,
+            Some(&body),
+        )
+        .await
+        .map_err(|_| DashboardClientError::CliTokenVerification)?;
         Ok(response)
     }
 }

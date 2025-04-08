@@ -66,6 +66,7 @@ func init() {
 	Cmd.Flags().StringVar(&conf.CompactionServicePodLabel, "compaction-pod-label", "compaction-service", "Compaction pod label")
 
 	// S3 config
+	Cmd.Flags().BoolVar(&conf.MetaStoreConfig.CreateBucketIfNotExists, "create-bucket-if-not-exists", false, "Create bucket if not exists")
 	Cmd.Flags().StringVar(&conf.MetaStoreConfig.BucketName, "bucket-name", "chroma-storage", "Bucket name")
 	Cmd.Flags().StringVar(&conf.MetaStoreConfig.Region, "s3-region", "us-east-1", "Region")
 	Cmd.Flags().StringVar(&conf.MetaStoreConfig.Endpoint, "s3-endpoint", "", "S3 endpoint")
