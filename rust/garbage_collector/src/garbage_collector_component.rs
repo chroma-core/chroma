@@ -197,7 +197,7 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
         let collections_to_gc = self
             .sysdb_client
             // NOTE: We limit the number of collections to GC at a time for performance and GRPC payload size limitation
-            .get_collections_to_gc(None, Some(1000))
+            .get_collections_to_gc(Some(self.relative_cutoff_time.as_secs()), Some(1000))
             .await
             .expect("Failed to get collections to gc");
         tracing::info!("Got {} collections to gc", collections_to_gc.len());
