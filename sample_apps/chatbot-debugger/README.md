@@ -30,5 +30,13 @@ The collection names are defined in constants in `lib/utils.ts`. If you choose t
 ### Scripts
 
 We provide two simple scripts to help you modify this app with your own data. You can find them in the `scripts` directory.
-- `ingest` - is the code we used to generate the `-data` and `-summaries` collections. You can provide it a path on your local machine to get the same collections using your own files. Note that for simplicity we process file by file. You can get much better performance by processing data chunks in batches.
-- `copy-to-cloud` - if you change the environment variables to match your Chroma Cloud connection credentials, you can use this script to copy your local Chroma DB to you Chroma Cloud account. This should make it much easier to debug conversations and experiment with your data on the Dashboard.
+- `ingest` - is the code we used to generate the `-data` and `-summaries` collections. You can provide it a path on your local machine to get the same collections using your own files. Note that for simplicity we process file by file. You can get much better performance by processing data chunks in batches. For example, here is the command we ran to generate the Chroma DB over the Chroma docs and code from our open-source repo:
+
+```shell
+npm run ingest -- --collection chroma-docs --root ./chroma --extensions .md .py --directories docs/docs.trychroma.com chromadb/utils/embedding_functions
+```
+- `copy-to-cloud` - if you change the environment variables to match your Chroma Cloud connection credentials, you can use this script to copy your local Chroma DB to you Chroma Cloud account. This should make it much easier to debug conversations and experiment with your data on the Dashboard. For example, if you did not customize the host, tenant, and DB of your local Chroma server (most users don't), after setting your Cloud credentials in the environment variables, use the `chroma run` command to start your local Chroma server, and simply run:
+```shell
+npm run copy-to-cloud
+```
+

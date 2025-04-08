@@ -14,17 +14,18 @@ import {
   Role,
 } from "@/lib/types";
 import {
-  CHATS_COLLECTION,
-  DATA_COLLECTION,
   getAppParams,
   recordsToObject,
-  RETRIEVED_CHUNKS_COLLECTION,
-  SUMMARIES_COLLECTION,
-  TELEMETRY_COLLECTION,
 } from "@/lib/utils";
 import { ChromaClient, Collection } from "chromadb";
 import { v4 as uuidv4 } from "uuid";
 import { embed } from "@/lib/retrieval";
+import {
+  CHATS_COLLECTION, DATA_COLLECTION,
+  RETRIEVED_CHUNKS_COLLECTION,
+  SUMMARIES_COLLECTION,
+  TELEMETRY_COLLECTION
+} from "@/lib/constants";
 
 let chromaClient: ChromaClient;
 
@@ -123,6 +124,14 @@ export const getChats = async (
   }
 };
 
+/**
+ * We record every message in our chat-app in Chroma collections, that will allow us to both
+ * persist data that we want to display, and our app's performance using Chroma's search capabilities.
+ * For example, for every AI (assistant) response, we record what chunks were retrieved for it as context.
+ * This can allow us to see which user questions got bad responses from the assistant, and how our own
+ * data influenced the quality of the response.
+ * @param input All the components making up a message in our application: chatId, content, role, and chunks.
+ */
 export const addTelemetry = async (
   input: NewMessageRequest,
 ): Promise<Result<Message, AppError>> => {
@@ -235,6 +244,12 @@ export const addChatRecord = async (
   }
 };
 
+/**
+ * We use the data we persist in our Chroma collections to display previous chats in the app.
+ * Every message in a chat is available in the 'telemetry' collection. For every message, we can
+ * get the chunks retrieved for it, and their summaries.
+ * @param chatId
+ */
 export const getChatMessages = async (
   chatId: string,
 ): Promise<Result<Message[], AppError>> => {

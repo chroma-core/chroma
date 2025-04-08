@@ -1,14 +1,18 @@
 "use server";
 
 import {
-  DATA_COLLECTION,
   recordsToObject,
-  SUMMARIES_COLLECTION,
 } from "@/lib/utils";
 import { getChromaClient, getChromaCollection } from "@/lib/server-utils";
 import { AppError, Chunk, chunkMappingConfig, Result } from "@/lib/types";
 import { getOpenAIEF } from "@/lib/ai-utils";
+import {DATA_COLLECTION, SUMMARIES_COLLECTION} from "@/lib/constants";
 
+/**
+ *
+ * @param texts An array of strings to embed using the OpenAIEmbeddingFunction
+ * @return An array of embeddings for the input array
+ */
 export const embed = async (
   texts: string[],
 ): Promise<Result<number[][], AppError>> => {
@@ -27,6 +31,13 @@ export const embed = async (
   }
 };
 
+/**
+ * Retrieves documents relevant to the user message from your 'data' collection. For each
+ * retrieved document, we also get its summary from the 'summaries' collection. This will allow
+ * us to show users what data was used as context for their query, as the raw documents form the
+ * 'data' collection can be chopped code or documentation texts.
+ * @param messageContent The user message
+ */
 export const retrieveChunks = async (
   messageContent: string,
 ): Promise<Result<Chunk[], AppError>> => {
@@ -51,6 +62,8 @@ export const retrieveChunks = async (
     return summariesCollectionResult;
   }
 
+  // Alternatively, you can send the message directly to the 'query' function using the
+  // 'queryTexts' argument.
   const queryEmbeddingResult = await embed([messageContent]);
   if (!queryEmbeddingResult.ok) {
     return queryEmbeddingResult;
