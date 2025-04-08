@@ -248,6 +248,7 @@ collection_st: st.SearchStrategy[strategies.Collection] = st.shared(
     embeddings_strategy=strategies.recordsets(collection_st, max_size=200),
 )
 @settings(deadline=None)
+@pytest.mark.xdist_group(name="test_cycle_versions")
 def test_cycle_versions(
     version_settings: Tuple[str, Settings],
     collection_strategy: strategies.Collection,
