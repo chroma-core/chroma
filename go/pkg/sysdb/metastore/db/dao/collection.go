@@ -62,7 +62,9 @@ func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64
 	query := s.read_db.Table("collections").
 		Select("collections.id, collections.name, collections.version, collections.version_file_name, collections.oldest_version_ts, collections.num_versions, databases.tenant_id").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
-		Where("version > 0")
+		Where("version > 0").
+		Where("version_file_name IS NOT NULL").
+		Where("version_file_name != ''")
 
 	// Apply cutoff time filter only if provided
 	if cutoffTimeSecs != nil {
