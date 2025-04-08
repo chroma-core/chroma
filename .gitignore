@@ -45,6 +45,3 @@ target/
 
 # Rapid test data
 testdata
-
-# Python version
-.python-version
