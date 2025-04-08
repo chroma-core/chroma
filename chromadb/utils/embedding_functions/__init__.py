@@ -52,6 +52,9 @@ from chromadb.utils.embedding_functions.amazon_bedrock_embedding_function import
 from chromadb.utils.embedding_functions.chroma_langchain_embedding_function import (
     ChromaLangchainEmbeddingFunction,
 )
+from chromadb.utils.embedding_functions.baseten_embedding_function import (
+    BasetenEmbeddingFunction,
+)
 
 try:
     from chromadb.is_thin_client import is_thin_client
@@ -78,6 +81,7 @@ _all_classes: Set[str] = {
     "Text2VecEmbeddingFunction",
     "AmazonBedrockEmbeddingFunction",
     "ChromaLangchainEmbeddingFunction",
+    "BasetenEmbeddingFunction",
     "DefaultEmbeddingFunction",
 }
 
@@ -135,6 +139,7 @@ known_embedding_functions: Dict[str, Type[EmbeddingFunction]] = {  # type: ignor
     "text2vec": Text2VecEmbeddingFunction,
     "amazon_bedrock": AmazonBedrockEmbeddingFunction,
     "chroma_langchain": ChromaLangchainEmbeddingFunction,
+    "baseten": BasetenEmbeddingFunction,
     "default": DefaultEmbeddingFunction,
 }
 
@@ -201,6 +206,7 @@ __all__ = [
     "DefaultEmbeddingFunction",
     "CohereEmbeddingFunction",
     "OpenAIEmbeddingFunction",
+    "BasetenEmbeddingFunction",
     "HuggingFaceEmbeddingFunction",
     "HuggingFaceEmbeddingServer",
     "SentenceTransformerEmbeddingFunction",
