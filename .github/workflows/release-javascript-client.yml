@@ -13,7 +13,10 @@ on:
 env:
   PNPM_CACHE_FOLDER: .cache/pnpm
 jobs:
+  release-js-bindings:
+    uses: ./.github/workflows/_build_js_binding.yml
   release:
+    needs: release-js-bindings
     strategy:
       fail-fast: false
       matrix:
