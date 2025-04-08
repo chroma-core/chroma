@@ -261,6 +261,7 @@ impl CompactOrchestrator {
         self.send(task, ctx).await;
     }
 
+    #[tracing::instrument(skip(self, partitions, ctx))]
     async fn materialize_log(
         &mut self,
         partitions: Vec<Chunk<LogRecord>>,
@@ -294,6 +295,7 @@ impl CompactOrchestrator {
         }
     }
 
+    #[tracing::instrument(skip(self, materialized_logs, ctx))]
     async fn dispatch_apply_log_to_segment_writer_tasks(
         &mut self,
         materialized_logs: MaterializeLogsResult,
@@ -381,6 +383,7 @@ impl CompactOrchestrator {
         }
     }
 
+    #[tracing::instrument(skip(self, segment_writer, ctx))]
     async fn dispatch_segment_writer_commit(
         &mut self,
         segment_writer: ChromaSegmentWriter<'static>,
@@ -394,6 +397,7 @@ impl CompactOrchestrator {
         self.ok_or_terminate(res, ctx);
     }
 
+    #[tracing::instrument(skip(self, segment_flusher, ctx))]
     async fn dispatch_segment_flush(
         &mut self,
         segment_flusher: ChromaSegmentFlusher,
@@ -407,6 +411,7 @@ impl CompactOrchestrator {
         self.ok_or_terminate(res, ctx);
     }
 
+    #[tracing::instrument(skip(self, ctx))]
     async fn register(&mut self, ctx: &ComponentContext<CompactOrchestrator>) {
         self.state = ExecutionState::Register;
         let collection_cell =
@@ -827,6 +832,7 @@ impl Handler<TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>>
         };
 
         if output.result.is_empty() {
+            tracing::info!("FINDME");
             // We check the number of remaining materialization tasks to prevent a race condition
             if self.num_uncompleted_materialization_tasks == 1
                 && self.num_uncompleted_tasks_by_segment.is_empty()
