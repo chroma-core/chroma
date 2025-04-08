@@ -45,7 +45,7 @@ runs:
       with:
         repo-token: ${{ inputs.github-token }}
     - name: Use sccache
-      uses: mozilla-actions/sccache-action@v0.0.7
+      uses: mozilla-actions/sccache-action@v0.0.9
     - name: Enable sccache
       shell: bash
       run: |
