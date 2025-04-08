@@ -74,11 +74,11 @@ impl Configurable<LocalSegmentManagerConfig> for LocalSegmentManager {
 
 #[derive(Error, Debug)]
 pub enum LocalSegmentManagerError {
-    #[error("Error creating hnsw segment reader")]
+    #[error("Error creating hnsw segment reader: {0}")]
     LocalHnswSegmentReaderError(#[from] LocalHnswSegmentReaderError),
-    #[error("Error reading hnsw pool cache")]
+    #[error("Error reading hnsw pool cache: {0}")]
     PoolCacheError(#[from] CacheError),
-    #[error("Error creating hnsw segment writer")]
+    #[error("Error creating hnsw segment writer: {0}")]
     LocalHnswSegmentWriterError(#[from] LocalHnswSegmentWriterError),
 }
 

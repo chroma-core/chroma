@@ -32,9 +32,9 @@ pub struct LocalHnswSegmentReader {
 
 #[derive(Error, Debug)]
 pub enum LocalHnswSegmentReaderError {
-    #[error("Error opening pickle file")]
+    #[error("Error opening pickle file: {0}")]
     PickleFileOpenError(#[from] std::io::Error),
-    #[error("Error deserializing pickle file")]
+    #[error("Error deserializing pickle file: {0}")]
     PickleFileDeserializeError(#[from] serde_pickle::Error),
     #[error("Error loading hnsw index")]
     HnswIndexLoadError,
@@ -52,7 +52,7 @@ pub enum LocalHnswSegmentReaderError {
     GetEmbeddingError,
     #[error("Error querying knn")]
     QueryError,
-    #[error("Error reading from sqlite")]
+    #[error("Error reading from sqlite: {0}")]
     SqliteError(#[from] sqlx::error::Error),
 }
 
