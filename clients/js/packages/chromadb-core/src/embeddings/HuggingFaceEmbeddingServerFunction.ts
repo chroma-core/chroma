@@ -3,17 +3,20 @@ import { IEmbeddingFunction } from "./IEmbeddingFunction";
 
 type StoredConfig = {
   url: string;
+  apiKey?: string;
 };
 
 export class HuggingFaceEmbeddingServerFunction implements IEmbeddingFunction {
   name = "huggingface_server";
 
   private url: string;
+  private apiKey?: string;
 
-  constructor({ url }: { url: string }) {
+  constructor({ url, apiKey }: { url: string, apiKey?: string }) {
     // we used to construct the client here, but we need to async import the types
     // for the openai npm package, and the constructor can not be async
     this.url = url;
+    this.apiKey = apiKey;
   }
 
   public async generate(texts: string[]) {
@@ -21,6 +24,7 @@ export class HuggingFaceEmbeddingServerFunction implements IEmbeddingFunction {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        ...(this.apiKey && { "Authorization": `Bearer ${this.apiKey}` })
       },
       body: JSON.stringify({ inputs: texts }),
     });
@@ -40,6 +44,7 @@ export class HuggingFaceEmbeddingServerFunction implements IEmbeddingFunction {
   getConfig(): StoredConfig {
     return {
       url: this.url,
+      apiKey: this.apiKey
     };
   }
 
