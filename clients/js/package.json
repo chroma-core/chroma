@@ -67,13 +67,6 @@
     "cliui": "^8.0.1",
     "isomorphic-fetch": "^3.0.0"
   },
-  "optionalDependencies": {
-    "chromadb-js-bindings-darwin-arm64": "^0.0.1",
-    "chromadb-js-bindings-darwin-x64": "^0.0.1",
-    "chromadb-js-bindings-linux-arm64-gnu": "^0.0.1",
-    "chromadb-js-bindings-linux-x64-gnu": "^0.0.1",
-    "chromadb-js-bindings-win32-x64-msvc": "^0.0.1"
-  },
   "peerDependencies": {
     "@google/generative-ai": "^0.1.1",
     "cohere-ai": "^5.0.0 || ^6.0.0 || ^7.0.0",

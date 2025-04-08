@@ -1,7 +1,7 @@
 name: JS Bindings CI
 env:
   DEBUG: napi:*
-  APP_NAME: "@chroma/chromadb-js-bindings"
+  APP_NAME: "chromadb-js-bindings"
   MACOSX_DEPLOYMENT_TARGET: '10.13'
 permissions:
   contents: write
@@ -18,18 +18,24 @@ jobs:
         working-directory: rust/js_bindings
     steps:
       - uses: actions/checkout@v4
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
       - name: Setup node
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: yarn
-          cache-dependency-path: rust/js_bindings/yarn.lock
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+          cache: pnpm
+          cache-dependency-path: rust/js_bindings/pnpm-lock.yaml
+      - name: Set up Rust toolchain
+        uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
+          override: true
       - name: Install Protoc
-        uses: arduino/setup-protoc@v2
+        uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Add targets
@@ -47,12 +53,12 @@ jobs:
             rust/js_bindings/target/
           key: macos-cargo
       - name: Install dependencies
-        run: yarn install
+        run: pnpm install
       - name: Build ARM64
-        run: yarn build --target aarch64-apple-darwin
+        run: pnpm build --target aarch64-apple-darwin
         shell: bash
       - name: Build x86_64
-        run: yarn build --target x86_64-apple-darwin
+        run: pnpm build --target x86_64-apple-darwin
         shell: bash
       - name: Upload ARM64 artifact
         uses: actions/upload-artifact@v4
@@ -75,16 +81,22 @@ jobs:
         working-directory: rust/js_bindings
     steps:
       - uses: actions/checkout@v4
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
       - name: Setup node
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: yarn
-          cache-dependency-path: rust/js_bindings/yarn.lock
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+          cache: pnpm
+          cache-dependency-path: rust/js_bindings/pnpm-lock.yaml
+      - name: Set up Rust toolchain
+        uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
+          override: true
       - name: Install Protoc
         uses: arduino/setup-protoc@v2
         with:
@@ -103,9 +115,9 @@ jobs:
             rust/js_bindings/target/
           key: windows-cargo
       - name: Install dependencies
-        run: yarn install
+        run: pnpm install
       - name: Build x86_64
-        run: yarn build --target x86_64-pc-windows-msvc
+        run: pnpm build --target x86_64-pc-windows-msvc
         shell: bash
       - name: Upload x86_64 artifact
         uses: actions/upload-artifact@v4
@@ -122,16 +134,22 @@ jobs:
         working-directory: rust/js_bindings
     steps:
       - uses: actions/checkout@v4
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
       - name: Setup node
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: yarn
-          cache-dependency-path: rust/js_bindings/yarn.lock
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+          cache: pnpm
+          cache-dependency-path: rust/js_bindings/pnpm-lock.yaml
+      - name: Set up Rust toolchain
+        uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
+          override: true
       - name: Install Protoc
         uses: arduino/setup-protoc@v2
         with:
@@ -158,7 +176,7 @@ jobs:
             rust/js_bindings/target/
           key: linux-cargo
       - name: Install dependencies
-        run: yarn install
+        run: pnpm install
       - name: Build ARM64
         run: |
           # Set linker and compiler environment variables
@@ -168,10 +186,10 @@ jobs:
           # Add no_asm flag to avoid assembly issues
           export RUSTFLAGS="--cfg no_asm"
           # Build with the correct environment
-          yarn build --target aarch64-unknown-linux-gnu
+          pnpm build --target aarch64-unknown-linux-gnu
         shell: bash
       - name: Build x86_64
-        run: yarn build --target x86_64-unknown-linux-gnu
+        run: pnpm build --target x86_64-unknown-linux-gnu
         shell: bash
       - name: Upload ARM64 artifact
         uses: actions/upload-artifact@v4
@@ -197,20 +215,25 @@ jobs:
       - build-linux
     steps:
       - uses: actions/checkout@v4
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
       - name: Setup node
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: yarn
-          cache-dependency-path: rust/js_bindings/yarn.lock
+          cache: pnpm
+          cache-dependency-path: rust/js_bindings/pnpm-lock.yaml
       - name: Install dependencies
-        run: yarn install
+        run: pnpm install
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
       - name: Move artifacts
-        run: yarn artifacts
+        run: pnpm artifacts
       - name: List packages
         run: ls -R ./npm
         shell: bash
