@@ -58,10 +58,7 @@ type Config struct {
 	// Config for testing
 	Testing bool
 
-	// Block store provider
-	// In production, this should be set to "s3".
-	// For local testing, this can be set to "minio".
-	BlockStoreProvider string
+	MetaStoreConfig s3metastore.S3MetaStoreConfig
 
 	// VersionFileEnabled is used to enable/disable version file.
 	VersionFileEnabled bool
@@ -80,9 +77,6 @@ type Server struct {
 }
 
 func New(config Config) (*Server, error) {
-	if config.VersionFileEnabled == true && config.BlockStoreProvider == "none" {
-		return nil, errors.New("version file enabled is true but block store provider is none")
-	}
 	if config.SystemCatalogProvider == "memory" {
 		return NewWithGrpcProvider(config, grpcutils.Default)
 	} else if config.SystemCatalogProvider == "database" {
@@ -111,15 +105,7 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider) (*Serve
 		deleteMode = coordinator.HardDelete
 	}
 
-	blockStoreProvider := s3metastore.BlockStoreProviderType(config.BlockStoreProvider)
-	if !blockStoreProvider.IsValid() {
-		log.Error("invalid block store provider", zap.String("provider", string(blockStoreProvider)))
-		return nil, errors.New("invalid block store provider")
-	}
-
-	s3MetaStore, err := s3metastore.NewS3MetaStore(s3metastore.S3MetaStoreConfig{
-		BlockStoreProvider: blockStoreProvider,
-	})
+	s3MetaStore, err := s3metastore.NewS3MetaStore(config.MetaStoreConfig)
 	if err != nil {
 		return nil, err
 	}
