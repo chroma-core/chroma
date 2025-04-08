@@ -8,6 +8,7 @@ import (
 	"io"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
@@ -22,30 +23,17 @@ import (
 // s3://<bucket-name>/<sysdbPathPrefix>/<tenant_id>/databases/<database_id>/collections/<collection_id>/versionfiles/file_name
 const (
 	versionFilesPathFormat = "%s/%s/databases/%s/collections/%s/versionfiles/%s"
-	minioEndpoint          = "minio:9000"
-	minioAccessKeyID       = "minio"
-	minioSecretAccessKey   = "minio123"
 )
-
-// BlockStoreProviderType represents the type of block store provider
-type BlockStoreProviderType string
-
-const (
-	BlockStoreProviderNone  BlockStoreProviderType = "none"
-	BlockStoreProviderS3    BlockStoreProviderType = "s3"
-	BlockStoreProviderMinio BlockStoreProviderType = "minio"
-)
-
-func (t BlockStoreProviderType) IsValid() bool {
-	return t == BlockStoreProviderS3 || t == BlockStoreProviderMinio || t == BlockStoreProviderNone
-}
 
 type S3MetaStoreConfig struct {
-	BucketName         string
-	Region             string
-	BasePathSysDB      string
-	Endpoint           string
-	BlockStoreProvider BlockStoreProviderType
+	CreateBucketIfNotExists bool
+	BucketName              string
+	Region                  string
+	BasePathSysDB           string
+	Endpoint                string
+	AccessKeyID             string
+	SecretAccessKey         string
+	ForcePathStyle          bool
 }
 
 type S3MetaStoreInterface interface {
@@ -87,37 +75,52 @@ func NewS3MetaStoreForTesting(bucketName, region, basePathSysDB, endpoint, acces
 
 // NewS3MetaStore constructs and returns an S3MetaStore.
 func NewS3MetaStore(config S3MetaStoreConfig) (*S3MetaStore, error) {
-	var sess *session.Session
-	var err error
 	bucketName := config.BucketName
 
-	if config.BlockStoreProvider == BlockStoreProviderNone {
-		// TODO(rohit): Remove this once the feature is enabled.
-		// This is valid till the feature is not enabled.
-		return nil, nil
+	aws_config := aws.Config{
+		Region:           aws.String("us-east-1"),
+		S3ForcePathStyle: aws.Bool(config.ForcePathStyle),
 	}
 
-	if config.BlockStoreProvider == BlockStoreProviderMinio {
-		sess, err = session.NewSession(&aws.Config{
-			Credentials:      credentials.NewStaticCredentials(minioAccessKeyID, minioSecretAccessKey, ""),
-			Endpoint:         aws.String(minioEndpoint),
-			Region:           aws.String("us-east-1"),
-			DisableSSL:       aws.Bool(true),
-			S3ForcePathStyle: aws.Bool(true),
-		})
-		bucketName = "chroma-storage"
-	} else {
-		sess, err = session.NewSession(&aws.Config{
-			Region: aws.String(config.Region),
-		})
+	if config.Region != "" {
+		aws_config.Region = aws.String(config.Region)
+	}
+	if config.Endpoint != "" {
+		aws_config.Endpoint = aws.String(config.Endpoint)
+	}
+	if config.AccessKeyID != "" && config.SecretAccessKey != "" {
+		aws_config.Credentials = credentials.NewStaticCredentials(config.AccessKeyID, config.SecretAccessKey, "")
 	}
 
+	sess, err := session.NewSession(&aws_config)
 	if err != nil {
 		return nil, err
 	}
 
+	s3Client := s3.New(sess)
+
+	if config.CreateBucketIfNotExists {
+		_, err = s3Client.CreateBucket(&s3.CreateBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err != nil {
+			if err.(awserr.Error).Code() != s3.ErrCodeBucketAlreadyOwnedByYou {
+				return nil, fmt.Errorf("unable to create bucket %s: %w", bucketName, err)
+			}
+			log.Info("Bucket already exists, continuing", zap.String("bucket", bucketName))
+		}
+	}
+
+	// Verify we have access to the bucket
+	_, err = s3Client.HeadBucket(&s3.HeadBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("unable to access bucket %s: %w", bucketName, err)
+	}
+
 	return &S3MetaStore{
-		S3:            s3.New(sess),
+		S3:            s3Client,
 		BucketName:    bucketName,
 		Region:        config.Region,
 		BasePathSysDB: config.BasePathSysDB,
