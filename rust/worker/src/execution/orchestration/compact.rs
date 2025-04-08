@@ -268,7 +268,7 @@ impl CompactOrchestrator {
     ) {
         self.state = ExecutionState::MaterializeApplyCommitFlush;
 
-        // NOTE: We allow writers no be uninitialized for the case when the materialized logs are empty
+        // NOTE: We allow writers to be uninitialized for the case when the materialized logs are empty
         let record_reader = self
             .get_segment_writers()
             .ok()
