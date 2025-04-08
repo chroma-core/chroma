@@ -335,10 +335,13 @@ impl CompactOrchestrator {
             self.num_uncompleted_tasks_by_segment
                 .entry(writers.metadata_writer.id)
                 .and_modify(|v| {
-                    tracing::info!("and_modify", writers.metadata_writer.id);
+                    tracing::info!("and_modify {}", writers.metadata_writer.id);
                     *v += 1;
                 })
-                .or_insert(1);
+                .or_insert_with(|| {
+                    tracing::info!("or_insert_with {}", writers.metadata_writer.id);
+                    1
+                });
 
             let writer = ChromaSegmentWriter::MetadataSegment(writers.metadata_writer);
             let span = self.get_segment_writer_span(&writer);
@@ -359,10 +362,13 @@ impl CompactOrchestrator {
             self.num_uncompleted_tasks_by_segment
                 .entry(writers.vector_writer.get_id())
                 .and_modify(|v| {
-                    tracing::info!("and_modify", writers.vector_writer.get_id());
+                    tracing::info!("and_modify {}", writers.vector_writer.get_id());
                     *v += 1;
                 })
-                .or_insert(1);
+                .or_insert_with(|| {
+                    tracing::info!("or_insert_with {}", writers.vector_writer.get_id());
+                    1
+                });
 
             let writer = ChromaSegmentWriter::VectorSegment(writers.vector_writer);
             let span = self.get_segment_writer_span(&writer);
