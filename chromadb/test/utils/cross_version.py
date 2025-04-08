@@ -51,7 +51,7 @@ def install(pkg: str, path: str, dep_overrides: Dict[str, str]) -> int:
     # -q -q to suppress pip output to ERROR level
     # https://pip.pypa.io/en/stable/cli/pip/#quiet
     print("Purging pip cache")
-    subprocess.check_call(
+    subprocess.call(
         [
             sys.executable,
             "-m",
