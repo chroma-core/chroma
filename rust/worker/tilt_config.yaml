@@ -41,7 +41,7 @@ query_service:
             connect_timeout_ms: 5000
             request_timeout_ms: 5000
             alt_host: "rust-log-service.chroma"
-            use_alt_host_for_everything: true
+            #use_alt_host_for_everything: true
     dispatcher:
         num_worker_threads: 4
         dispatcher_queue_size: 100
@@ -117,7 +117,7 @@ compaction_service:
             connect_timeout_ms: 5000
             request_timeout_ms: 5000
             alt_host: "rust-log-service.chroma"
-            use_alt_host_for_everything: true
+            #use_alt_host_for_everything: true
     dispatcher:
         num_worker_threads: 4
         dispatcher_queue_size: 100
