@@ -187,6 +187,9 @@ impl BatchManager {
         let mut work = std::mem::take(&mut state.enqueued);
         state.enqueued = work.split_off(split_off);
         state.last_batch = Instant::now();
+        if !state.enqueued.is_empty() {
+            self.write_finished.notify_one();
+        }
         Ok(Some((fragment_seq_no, log_position, work)))
     }
 
