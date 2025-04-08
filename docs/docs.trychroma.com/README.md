@@ -14,7 +14,7 @@ It also incldues [Shadcn](https://ui.shadcn.com/) with [Tailwind](https://tailwi
 - [ ] bring in codgen and make it easy
 - [ ] swag element in light/dark mode. eg the graphic on the index route
 - [ ] turn on algolia once indexed
-- [x] turn back on "edit on github" button when public
+- [ ] turn back on "edit on github" button when public
 
 # Content todo
 - [ ] add more examples
