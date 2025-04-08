@@ -317,10 +317,12 @@ impl SysDb {
 
     pub async fn get_collections_to_gc(
         &mut self,
+        cutoff_time_secs: Option<u64>,
+        limit: Option<u64>,
     ) -> Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError> {
         match self {
-            SysDb::Grpc(grpc) => grpc.get_collections_to_gc().await,
-            SysDb::Sqlite(_) => todo!(),
+            SysDb::Grpc(grpc) => grpc.get_collections_to_gc(cutoff_time_secs, limit).await,
+            SysDb::Sqlite(_) => unimplemented!("Garbage collection does not work for local chroma"),
             SysDb::Test(_) => todo!(),
         }
     }
@@ -892,12 +894,14 @@ impl GrpcSysDb {
 
     pub async fn get_collections_to_gc(
         &mut self,
+        cutoff_time_secs: Option<u64>,
+        limit: Option<u64>,
     ) -> Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError> {
         let res = self
             .client
             .list_collections_to_gc(chroma_proto::ListCollectionsToGcRequest {
-                cutoff_time_secs: None,
-                limit: None,
+                cutoff_time_secs,
+                limit,
             })
             .await;
 
