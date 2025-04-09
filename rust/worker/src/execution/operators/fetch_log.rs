@@ -81,7 +81,7 @@ impl FetchLogOperator {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos() as i64;
 
         if let Some(mut limit_offset) = limit_offset {
-            tracing::info!(
+            tracing::debug!(
                 "taking new code path with range [{}, {})",
                 self.start_log_offset_id,
                 limit_offset
