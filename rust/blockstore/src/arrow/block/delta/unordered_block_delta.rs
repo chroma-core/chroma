@@ -138,11 +138,13 @@ mod test {
     use crate::arrow::{
         block::{delta::UnorderedBlockDelta, Block},
         config::TEST_MAX_BLOCK_SIZE_BYTES,
-        provider::BlockManager,
+        provider::{BlockGetRequest, BlockManager},
     };
     #[cfg(test)]
     use chroma_cache::new_cache_for_test;
-    use chroma_storage::{local::LocalStorage, Storage};
+    use chroma_storage::{
+        admissioncontrolleds3::StorageRequestPriority, local::LocalStorage, Storage,
+    };
     use chroma_types::{DataRecord, MetadataValue};
     use rand::{random, Rng};
     use roaring::RoaringBitmap;
@@ -194,7 +196,11 @@ mod test {
             values_before_flush.push(read.to_vec());
         }
         block_manager.flush(&block).await.unwrap();
-        let block = block_manager.get(&block.clone().id).await.unwrap().unwrap();
+        let block_get_request = BlockGetRequest {
+            id: block.id,
+            priority: StorageRequestPriority::High,
+        };
+        let block = block_manager.get(block_get_request).await.unwrap().unwrap();
         #[allow(clippy::needless_range_loop)]
         for i in 0..n {
             let key = format!("key{}", i);
@@ -234,7 +240,11 @@ mod test {
         }
         block_manager.flush(&block).await.unwrap();
 
-        let block = block_manager.get(&delta_id).await.unwrap().unwrap();
+        let block_get_request = BlockGetRequest {
+            id: delta_id,
+            priority: StorageRequestPriority::High,
+        };
+        let block = block_manager.get(block_get_request).await.unwrap().unwrap();
 
         assert_eq!(size, block.get_size());
         #[allow(clippy::needless_range_loop)]
@@ -261,7 +271,11 @@ mod test {
         let new_id = forked_block.id;
         let block = block_manager.commit::<&str, String>(forked_block).await;
         block_manager.flush(&block).await.unwrap();
-        let forked_block = block_manager.get(&new_id).await.unwrap().unwrap();
+        let block_get_request = BlockGetRequest {
+            id: new_id,
+            priority: StorageRequestPriority::High,
+        };
+        let forked_block = block_manager.get(block_get_request).await.unwrap().unwrap();
         for i in 0..n {
             let key = format!("key{}", i);
             let read = forked_block.get::<&str, &str>("prefix", &key);
@@ -296,7 +310,11 @@ mod test {
             values_before_flush.push(read);
         }
         block_manager.flush(&block).await.unwrap();
-        let block = block_manager.get(&delta_id).await.unwrap().unwrap();
+        let block_get_request = BlockGetRequest {
+            id: delta_id,
+            priority: StorageRequestPriority::High,
+        };
+        let block = block_manager.get(block_get_request).await.unwrap().unwrap();
         assert_eq!(size, block.get_size());
         #[allow(clippy::needless_range_loop)]
         for i in 0..n {
@@ -329,7 +347,11 @@ mod test {
         let delta_id = delta.id;
         let block = block_manager.commit::<&str, RoaringBitmap>(delta).await;
         block_manager.flush(&block).await.unwrap();
-        let block = block_manager.get(&delta_id).await.unwrap().unwrap();
+        let block_get_request = BlockGetRequest {
+            id: delta_id,
+            priority: StorageRequestPriority::High,
+        };
+        let block = block_manager.get(block_get_request).await.unwrap().unwrap();
 
         assert_eq!(size, block.get_size());
 
@@ -394,7 +416,11 @@ mod test {
         let delta_id = delta.id;
         let block = block_manager.commit::<&str, &DataRecord>(delta).await;
         block_manager.flush(&block).await.unwrap();
-        let block = block_manager.get(&delta_id).await.unwrap().unwrap();
+        let block_get_request = BlockGetRequest {
+            id: delta_id,
+            priority: StorageRequestPriority::High,
+        };
+        let block = block_manager.get(block_get_request).await.unwrap().unwrap();
         for i in 0..3 {
             let read = block.get::<&str, DataRecord>("", ids[i]).unwrap();
             assert_eq!(read.id, ids[i]);
@@ -429,7 +455,11 @@ mod test {
         let delta_id = delta.id;
         let block = block_manager.commit::<u32, String>(delta).await;
         block_manager.flush(&block).await.unwrap();
-        let block = block_manager.get(&delta_id).await.unwrap().unwrap();
+        let block_get_request = BlockGetRequest {
+            id: delta_id,
+            priority: StorageRequestPriority::High,
+        };
+        let block = block_manager.get(block_get_request).await.unwrap().unwrap();
         assert_eq!(size, block.get_size());
 
         // test save/load
@@ -465,7 +495,11 @@ mod test {
         }
         block_manager.flush(&block).await.unwrap();
 
-        let block = block_manager.get(&delta_id).await.unwrap().unwrap();
+        let block_get_request = BlockGetRequest {
+            id: delta_id,
+            priority: StorageRequestPriority::High,
+        };
+        let block = block_manager.get(block_get_request).await.unwrap().unwrap();
 
         assert_eq!(size, block.get_size());
         #[allow(clippy::needless_range_loop)]
@@ -492,7 +526,11 @@ mod test {
         let new_id = forked_block.id;
         let block = block_manager.commit::<u32, u32>(forked_block).await;
         block_manager.flush(&block).await.unwrap();
-        let forked_block = block_manager.get(&new_id).await.unwrap().unwrap();
+        let block_get_request = BlockGetRequest {
+            id: new_id,
+            priority: StorageRequestPriority::High,
+        };
+        let forked_block = block_manager.get(block_get_request).await.unwrap().unwrap();
         #[allow(clippy::needless_range_loop)]
         for i in 0..n {
             let key = i as u32;

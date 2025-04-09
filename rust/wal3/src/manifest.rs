@@ -8,7 +8,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use chroma_storage::{ETag, PutOptions, Storage, StorageError};
+use chroma_storage::{
+    admissioncontrolleds3::{StorageRequest, StorageRequestPriority}, ETag, PutOptions, Storage, StorageError,
+};
 use setsum::Setsum;
 
 use crate::{
@@ -164,7 +166,15 @@ impl Snapshot {
         let mut retries = 0;
         let path = format!("{}/{}", prefix, pointer.path_to_snapshot);
         loop {
-            match storage.get_with_e_tag(&path).await.map_err(Arc::new) {
+            let storage_request = StorageRequest {
+                key: path.clone(),
+                priority: StorageRequestPriority::High,
+            };
+            match storage
+                .get_with_e_tag(storage_request)
+                .await
+                .map_err(Arc::new)
+            {
                 Ok((ref snapshot, _)) => {
                     let snapshot: Snapshot = serde_json::from_slice(snapshot).map_err(|e| {
                         Error::CorruptManifest(format!("could not decode JSON snapshot: {e:?}"))
@@ -205,7 +215,11 @@ impl Snapshot {
                 })?
                 .into_bytes();
             let options = PutOptions::if_not_exists();
-            match storage.put_bytes(&path, payload, options).await {
+            let storage_request = StorageRequest {
+                key: path.clone(),
+                priority: StorageRequestPriority::High,
+            };
+            match storage.put_bytes(storage_request, payload, options).await {
                 Ok(_) => {
                     return Ok(());
                 }
@@ -507,8 +521,12 @@ impl Manifest {
         let payload = serde_json::to_string(&initial)
             .map_err(|e| Error::CorruptManifest(format!("could not encode JSON manifest: {e:?}")))?
             .into_bytes();
+        let storage_request = StorageRequest {
+            key: manifest_path(prefix),
+            priority: StorageRequestPriority::High,
+        };
         storage
-            .put_bytes(&manifest_path(prefix), payload, PutOptions::if_not_exists())
+            .put_bytes(storage_request, payload, PutOptions::if_not_exists())
             .await
             .map_err(Arc::new)?;
         Ok(())
@@ -528,7 +546,15 @@ impl Manifest {
         let mut retries = 0;
         let path = manifest_path(prefix);
         loop {
-            match storage.get_with_e_tag(&path).await.map_err(Arc::new) {
+            let storage_request = StorageRequest {
+                key: path.clone(),
+                priority: StorageRequestPriority::High,
+            };
+            match storage
+                .get_with_e_tag(storage_request)
+                .await
+                .map_err(Arc::new)
+            {
                 Ok((ref manifest, e_tag)) => {
                     let Some(e_tag) = e_tag else {
                         return Err(Error::CorruptManifest(format!(
@@ -581,10 +607,11 @@ impl Manifest {
             } else {
                 PutOptions::if_not_exists()
             };
-            match storage
-                .put_bytes(&manifest_path(prefix), payload, options)
-                .await
-            {
+            let storage_request = StorageRequest {
+                key: manifest_path(prefix),
+                priority: StorageRequestPriority::High,
+            };
+            match storage.put_bytes(storage_request, payload, options).await {
                 Ok(Some(e_tag)) => {
                     return Ok(e_tag);
                 }

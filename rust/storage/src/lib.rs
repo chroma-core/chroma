@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use self::config::StorageConfig;
+use admissioncontrolleds3::StorageRequest;
 use async_trait::async_trait;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
@@ -208,64 +209,71 @@ impl ChromaError for StorageConfigError {
 }
 
 impl Storage {
-    pub async fn get(&self, key: &str) -> Result<Arc<Vec<u8>>, StorageError> {
+    pub async fn get(&self, request: StorageRequest) -> Result<Arc<Vec<u8>>, StorageError> {
         match self {
-            Storage::ObjectStore(object_store) => Ok(object_store.get(key).await?),
-            Storage::S3(s3) => s3.get(key).await,
-            Storage::Local(local) => local.get(key).await,
+            Storage::ObjectStore(object_store) => Ok(object_store.get(&request.key).await?),
+            Storage::S3(s3) => s3.get(&request.key).await,
+            Storage::Local(local) => local.get(&request.key).await,
             Storage::AdmissionControlledS3(admission_controlled_storage) => {
-                admission_controlled_storage.get(key).await
+                admission_controlled_storage.get(request).await
             }
         }
     }
 
     pub async fn get_with_e_tag(
         &self,
-        key: &str,
+        request: StorageRequest,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
         match self {
-            Storage::ObjectStore(object_store) => object_store.get_with_e_tag(key).await,
-            Storage::S3(s3) => s3.get_with_e_tag(key).await,
-            Storage::Local(local) => local.get_with_e_tag(key).await,
+            Storage::ObjectStore(object_store) => object_store.get_with_e_tag(&request.key).await,
+            Storage::S3(s3) => s3.get_with_e_tag(&request.key).await,
+            Storage::Local(local) => local.get_with_e_tag(&request.key).await,
             Storage::AdmissionControlledS3(admission_controlled_storage) => {
-                admission_controlled_storage.get_with_e_tag(key).await
+                admission_controlled_storage.get_with_e_tag(request).await
             }
         }
     }
 
-    pub async fn get_parallel(&self, key: &str) -> Result<Arc<Vec<u8>>, StorageError> {
+    pub async fn get_parallel(
+        &self,
+        request: StorageRequest,
+    ) -> Result<Arc<Vec<u8>>, StorageError> {
         match self {
-            Storage::ObjectStore(object_store) => object_store.get_parallel(key).await,
-            Storage::S3(s3) => s3.get_parallel(key).await.map(|res| res.0),
-            Storage::Local(local) => local.get(key).await,
+            Storage::ObjectStore(object_store) => object_store.get_parallel(&request.key).await,
+            Storage::S3(s3) => s3.get_parallel(&request.key).await.map(|res| res.0),
+            Storage::Local(local) => local.get(&request.key).await,
             Storage::AdmissionControlledS3(admission_controlled_storage) => {
-                admission_controlled_storage
-                    .get_parallel(key.to_string())
-                    .await
+                admission_controlled_storage.get_parallel(request).await
             }
         }
     }
 
-    pub async fn put_file(&self, key: &str, path: &str) -> Result<Option<ETag>, StorageError> {
+    pub async fn put_file(
+        &self,
+        request: StorageRequest,
+        path: &str,
+    ) -> Result<Option<ETag>, StorageError> {
         match self {
-            Storage::ObjectStore(object_store) => object_store.put_file(key, path).await,
-            Storage::S3(s3) => s3.put_file(key, path).await,
-            Storage::Local(local) => local.put_file(key, path).await,
-            Storage::AdmissionControlledS3(as3) => as3.put_file(key, path).await,
+            Storage::ObjectStore(object_store) => object_store.put_file(&request.key, path).await,
+            Storage::S3(s3) => s3.put_file(&request.key, path).await,
+            Storage::Local(local) => local.put_file(&request.key, path).await,
+            Storage::AdmissionControlledS3(as3) => as3.put_file(request, path).await,
         }
     }
 
     pub async fn put_bytes(
         &self,
-        key: &str,
+        request: StorageRequest,
         bytes: Vec<u8>,
         options: PutOptions,
     ) -> Result<Option<ETag>, StorageError> {
         match self {
-            Storage::ObjectStore(object_store) => object_store.put_bytes(key, bytes, options).await,
-            Storage::S3(s3) => s3.put_bytes(key, bytes, options).await,
-            Storage::Local(local) => local.put_bytes(key, &bytes, options).await,
-            Storage::AdmissionControlledS3(as3) => as3.put_bytes(key, bytes, options).await,
+            Storage::ObjectStore(object_store) => {
+                object_store.put_bytes(&request.key, bytes, options).await
+            }
+            Storage::S3(s3) => s3.put_bytes(&request.key, bytes, options).await,
+            Storage::Local(local) => local.put_bytes(&request.key, &bytes, options).await,
+            Storage::AdmissionControlledS3(as3) => as3.put_bytes(request, bytes, options).await,
         }
     }
 

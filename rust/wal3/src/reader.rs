@@ -8,7 +8,7 @@ use bytes::Bytes;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use setsum::Setsum;
 
-use chroma_storage::{Storage, StorageError};
+use chroma_storage::{admissioncontrolleds3::{StorageRequest, StorageRequestPriority}, Storage, StorageError};
 
 use crate::{
     parse_fragment_path, Error, Fragment, LogPosition, LogReaderOptions, Manifest, ScrubError,
@@ -145,9 +145,13 @@ impl LogReader {
     #[tracing::instrument(skip(self))]
     pub async fn fetch(&self, fragment: &Fragment) -> Result<Arc<Vec<u8>>, Error> {
         let path = format!("{}/{}", self.prefix, fragment.path);
+        let storage_request = StorageRequest {
+            key: path.clone(),
+            priority: StorageRequestPriority::High,
+        };
         Ok(self
             .storage
-            .get_with_e_tag(&path)
+            .get_with_e_tag(storage_request)
             .await
             .map_err(Arc::new)?
             .0)
@@ -295,10 +299,12 @@ pub async fn read_parquet(
     prefix: &str,
     path: &str,
 ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64), Error> {
-    let parquet = storage
-        .get(&format!("{prefix}/{path}"))
-        .await
-        .map_err(Arc::new)?;
+    let path = format!("{prefix}/{path}");
+    let storage_request = StorageRequest {
+        key: path.clone(),
+        priority: StorageRequestPriority::High,
+    };
+    let parquet = storage.get(storage_request).await.map_err(Arc::new)?;
     let num_bytes = parquet.len() as u64;
     let builder = ParquetRecordBatchReaderBuilder::try_new(Bytes::from_owner(parquet.to_vec()))
         .map_err(Arc::new)?;

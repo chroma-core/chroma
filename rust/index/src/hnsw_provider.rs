@@ -11,6 +11,7 @@ use chroma_config::Configurable;
 use chroma_distance::DistanceFunction;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
+use chroma_storage::admissioncontrolleds3::{StorageRequest, StorageRequestPriority};
 use chroma_storage::Storage;
 use chroma_types::CollectionUuid;
 use parking_lot::RwLock;
@@ -283,7 +284,11 @@ impl HnswIndexProvider {
                 .in_scope(|| async {
                     let key = self.format_key(source_id, file);
                     tracing::info!("Loading hnsw index file: {} into directory", key);
-                    let bytes_res = self.storage.get_parallel(&key).await;
+                    let storage_request = StorageRequest {
+                        key: key.clone(),
+                        priority: StorageRequestPriority::High,
+                    };
+                    let bytes_res = self.storage.get_parallel(storage_request).await;
                     let bytes_read;
                     let buf = match bytes_res {
                         Ok(buf) => {
@@ -446,9 +451,13 @@ impl HnswIndexProvider {
         for file in FILES.iter() {
             let file_path = index_storage_path.join(file);
             let key = self.format_key(id, file);
+            let storage_request = StorageRequest {
+                key: key.clone(),
+                priority: StorageRequestPriority::High,
+            };
             let res = self
                 .storage
-                .put_file(&key, file_path.to_str().unwrap())
+                .put_file(storage_request, file_path.to_str().unwrap())
                 .await;
             match res {
                 Ok(_) => {

@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_storage::admissioncontrolleds3::{StorageRequest, StorageRequestPriority};
 use chroma_storage::{Storage, StorageError};
 use chroma_system::{Operator, OperatorType};
 use thiserror::Error;
@@ -87,18 +88,18 @@ impl Operator<FetchVersionFileInput, FetchVersionFileOutput> for FetchVersionFil
             "Starting to fetch version file"
         );
 
-        let content = input
-            .storage
-            .get(&input.version_file_path)
-            .await
-            .map_err(|e| {
-                tracing::error!(
-                    error = ?e,
-                    path = %input.version_file_path,
-                    "Failed to fetch version file"
-                );
-                FetchVersionFileError::StorageError(e)
-            })?;
+        let storage_request = StorageRequest {
+            key: input.version_file_path.clone(),
+            priority: StorageRequestPriority::High,
+        };
+        let content = input.storage.get(storage_request).await.map_err(|e| {
+            tracing::error!(
+                error = ?e,
+                path = %input.version_file_path,
+                "Failed to fetch version file"
+            );
+            FetchVersionFileError::StorageError(e)
+        })?;
 
         tracing::info!(
             path = %input.version_file_path,
@@ -150,9 +151,13 @@ mod tests {
         let test_content = vec![1, 2, 3, 4, 5];
         let test_file_path = "test_version_file.txt";
 
+        let storage_request = StorageRequest {
+            key: test_file_path.to_string(),
+            priority: StorageRequestPriority::High,
+        };
         // Add more detailed error handling for the put operation
         match storage
-            .put_bytes(test_file_path, test_content.clone(), PutOptions::default())
+            .put_bytes(storage_request, test_content.clone(), PutOptions::default())
             .await
         {
             Ok(_) => tracing::info!("Successfully wrote test file"),

@@ -1,11 +1,12 @@
 use std::collections::HashSet;
 
 use super::{
-    provider::BlockManager,
+    provider::{BlockGetRequest, BlockManager},
     root::{RootWriter, Version},
     sparse_index::SetCountError,
 };
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -50,7 +51,11 @@ async fn migrate_v1_to_v1_1(
                 .collect::<Vec<Uuid>>();
         }
         for block_id in block_ids.iter() {
-            let block = block_manager.get(block_id).await;
+            let block_get_request = BlockGetRequest {
+                id: *block_id,
+                priority: StorageRequestPriority::High,
+            };
+            let block = block_manager.get(block_get_request).await;
             match block {
                 Ok(Some(block)) => {
                     match root.sparse_index.set_count(*block_id, block.len() as u32) {

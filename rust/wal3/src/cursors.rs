@@ -1,7 +1,9 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
-use chroma_storage::{ETag, PutOptions, Storage, StorageError};
+use chroma_storage::{
+    admissioncontrolleds3::{StorageRequest, StorageRequestPriority}, ETag, PutOptions, Storage, StorageError,
+};
 
 use crate::{CursorStoreOptions, Error, LogPosition};
 
@@ -111,7 +113,16 @@ impl CursorStore {
         // SAFETY(rescrv):  Semaphore poisoning.
         let _permit = self.semaphore.acquire().await.unwrap();
         let path = format!("{}/{}", self.prefix, name.path());
-        let (data, e_tag) = match self.storage.get_with_e_tag(&path).await.map_err(Arc::new) {
+        let storage_request = StorageRequest {
+            key: path.clone(),
+            priority: StorageRequestPriority::High,
+        };
+        let (data, e_tag) = match self
+            .storage
+            .get_with_e_tag(storage_request)
+            .await
+            .map_err(Arc::new)
+        {
             Ok((data, e_tag)) => (data, e_tag),
             Err(err) => match &*err {
                 StorageError::NotFound { path: _, source: _ } => return Ok(None),
@@ -160,9 +171,13 @@ impl CursorStore {
         let data = serde_json::to_vec(&cursor).map_err(|err| {
             Error::CorruptCursor(format!("Failed to serialize cursor {}: {}", name.0, err))
         })?;
+        let storage_request = StorageRequest {
+            key: path.clone(),
+            priority: StorageRequestPriority::High,
+        };
         let e_tag = self
             .storage
-            .put_bytes(&path, data, options)
+            .put_bytes(storage_request, data, options)
             .await
             .map_err(Arc::new)?;
         let Some(e_tag) = e_tag else {

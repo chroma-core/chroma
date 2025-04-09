@@ -3,6 +3,7 @@ use crate::types::{DELETE_LIST_FILE_PREFIX, RENAMED_FILE_PREFIX};
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::HNSW_INDEX_S3_PREFIX;
+use chroma_storage::admissioncontrolleds3::{StorageRequest, StorageRequestPriority};
 use chroma_storage::Storage;
 use chroma_system::{Operator, OperatorType};
 use futures::stream::StreamExt;
@@ -111,8 +112,16 @@ impl DeleteUnusedFilesOperator {
             "Writing deletion list to S3"
         );
 
+        let storage_request = StorageRequest {
+            key: path.clone(),
+            priority: StorageRequestPriority::High,
+        };
         self.storage
-            .put_bytes(&path, final_content.into_bytes(), Default::default())
+            .put_bytes(
+                storage_request,
+                final_content.into_bytes(),
+                Default::default(),
+            )
             .await
             .map_err(|e| DeleteUnusedFilesError::WriteListError {
                 path: path.clone(),
@@ -292,8 +301,12 @@ mod tests {
     use tempfile::TempDir;
 
     async fn create_test_file(storage: &Storage, path: &str, content: &[u8]) {
+        let storage_request = StorageRequest {
+            key: path.to_string(),
+            priority: StorageRequestPriority::High,
+        };
         storage
-            .put_bytes(path, content.to_vec(), PutOptions::default())
+            .put_bytes(storage_request, content.to_vec(), PutOptions::default())
             .await
             .unwrap();
     }
