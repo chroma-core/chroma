@@ -396,6 +396,7 @@ class GetResult(TypedDict):
 
 class QueryRequest(TypedDict):
     embeddings: Embeddings
+    ids: Optional[IDs]
     where: Optional[Where]
     where_document: Optional[WhereDocument]
     include: Include

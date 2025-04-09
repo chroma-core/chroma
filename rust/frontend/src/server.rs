@@ -1808,6 +1808,9 @@ async fn collection_query(
     if let Some(n_results) = payload.n_results {
         quota_payload = quota_payload.with_n_results(n_results);
     }
+    if let Some(ids) = &payload.ids {
+        quota_payload = quota_payload.with_query_ids(ids);
+    }
     server.quota_enforcer.enforce(&quota_payload).await?;
     tracing::info!(
         "Querying records from collection [{collection_id}] in database [{database}] for tenant [{tenant}]",

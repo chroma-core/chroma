@@ -615,12 +615,13 @@ impl Bindings {
     }
 
     #[pyo3(
-        signature = (collection_id, query_embeddings, n_results, r#where = None, where_document = None, include = ["metadatas".to_string(), "documents".to_string()].to_vec(), tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
+        signature = (collection_id, ids, query_embeddings, n_results, r#where = None, where_document = None, include = ["metadatas".to_string(), "documents".to_string()].to_vec(), tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
     )]
     #[allow(clippy::too_many_arguments)]
     fn query(
         &self,
         collection_id: String,
+        ids: Option<Vec<String>>,
         query_embeddings: Vec<Vec<f32>>,
         n_results: u32,
         r#where: Option<String>,
@@ -646,7 +647,7 @@ impl Bindings {
             tenant,
             database,
             collection_id,
-            None,
+            ids,
             r#where,
             query_embeddings,
             n_results,
