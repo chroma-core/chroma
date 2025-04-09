@@ -169,7 +169,7 @@ func (r *LogRepository) GetLastCompactedOffsetForCollection(ctx context.Context,
 	return
 }
 
-func (r *LogRepository) GetMinimumMaximumOffsetForCollection(ctx context.Context, collectionId string) (start, limit int64, err error) {
+func (r *LogRepository) GetBoundsForCollection(ctx context.Context, collectionId string) (start, limit int64, err error) {
 	var tx pgx.Tx
 	tx, err = r.conn.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -178,17 +178,15 @@ func (r *LogRepository) GetMinimumMaximumOffsetForCollection(ctx context.Context
 		return
 	}
 	queriesWithTx := r.queries.WithTx(tx)
-	minMax, err := queriesWithTx.GetMinimumMaximumOffsetForCollection(ctx, collectionId)
+	bounds, err := queriesWithTx.GetBoundsForCollection(ctx, collectionId)
 	if err != nil {
 		trace_log.Error("Error in getting minimum and maximum offset for collection", zap.Error(err), zap.String("collectionId", collectionId))
 		tx.Rollback(ctx)
 		return
 	}
 	tx.Commit(ctx)
-	minOffset := minMax.MinOffset
-	maxOffset := minMax.MaxOffset
-	start = minOffset
-	limit = maxOffset + 1
+	start = bounds.RecordCompactionOffsetPosition
+	limit = bounds.RecordEnumerationOffsetPosition + 1
 	err = nil
 	return
 }

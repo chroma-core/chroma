@@ -52,7 +52,7 @@ func (s *logServer) ScoutLogs(ctx context.Context, req *logservicepb.ScoutLogsRe
 		return
 	}
 	var limit int64
-	_, limit, err = s.lr.GetMinimumMaximumOffsetForCollection(ctx, collectionID.String())
+	_, limit, err = s.lr.GetBoundsForCollection(ctx, collectionID.String())
 	if err != nil {
 		// TODO HANDLE ERROR
 		return

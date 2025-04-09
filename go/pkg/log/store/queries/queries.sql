@@ -45,6 +45,13 @@ SELECT CAST(COALESCE(MIN(r.offset), 0) as bigint) AS min_offset, CAST(COALESCE(M
 FROM record_log r
 WHERE r.collection_id = $1;
 
+-- name: GetBoundsForCollection :one
+SELECT
+	COALESCE(record_compaction_offset_position, 0) AS record_compaction_offset_position,
+	COALESCE(record_enumeration_offset_position, 0) AS record_enumeration_offset_position
+FROM collection
+WHERE id = $1;
+
 -- name: DeleteCollection :exec
 DELETE FROM collection c where c.id = ANY(@collection_ids::text[]);
 
