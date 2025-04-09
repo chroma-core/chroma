@@ -80,18 +80,15 @@ impl FetchLogOperator {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos() as i64;
 
         if let Some(mut limit_offset) = limit_offset {
-            if limit_offset > self.start_log_offset_id + self.batch_size as u64 {
-                limit_offset = self.start_log_offset_id + self.batch_size as u64;
-            }
             tracing::info!(
                 "taking new code path with range [{}, {})",
                 self.start_log_offset_id,
                 limit_offset
             );
-            const WINDOW_SIZE: usize = 100;
+            let window_size: usize = self.batch_size as usize;
             let ranges = (self.start_log_offset_id..limit_offset)
-                .step_by(WINDOW_SIZE)
-                .map(|x| (x, std::cmp::min(x + WINDOW_SIZE as u64, limit_offset)))
+                .step_by(window_size)
+                .map(|x| (x, std::cmp::min(x + window_size as u64, limit_offset)))
                 .collect::<Vec<_>>();
             tracing::info!("Pulling ranges {ranges:?}");
             let batch_readers = ranges
