@@ -58,6 +58,10 @@ spec:
           - name: CONFIG_PATH
             value: /config/config.yaml
           {{ end }}
+          {{ range .Values.garbageCollector.env }}
+          - name: {{ .name }}
+{{ .value | nindent 12 }}
+          {{ end }}
 
 ---
 apiVersion: v1
