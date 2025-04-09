@@ -109,7 +109,7 @@ impl FetchLogOperator {
                     async move {
                         let _permit = sema.acquire().await.unwrap();
                         log_client
-                            .read(collection_uuid, start, num_records, Some(timestamp))
+                            .read(collection_uuid, start, num_records, None)
                             .await
                     }
                 })
