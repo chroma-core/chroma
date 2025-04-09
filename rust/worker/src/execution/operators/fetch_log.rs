@@ -80,10 +80,15 @@ impl FetchLogOperator {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos() as i64;
 
         if let Some(mut limit_offset) = limit_offset {
-            const WINDOW_SIZE: usize = 100;
             if limit_offset > self.start_log_offset_id + self.batch_size as u64 {
                 limit_offset = self.start_log_offset_id + self.batch_size as u64;
             }
+            tracing::info!(
+                "taking new code path with range [{}, {})",
+                self.start_log_offset_id,
+                limit_offset
+            );
+            const WINDOW_SIZE: usize = 100;
             let ranges = (self.start_log_offset_id..limit_offset)
                 .step_by(WINDOW_SIZE)
                 .map(|x| (x, std::cmp::min(x + WINDOW_SIZE as u64, limit_offset)))
@@ -98,7 +103,7 @@ impl FetchLogOperator {
                     let start = start as i64;
                     async move {
                         log_client
-                            .read(collection_uuid, start, num_records, Some(timestamp))
+                            .read(collection_uuid, start, num_records, None)
                             .await
                     }
                 })
@@ -109,6 +114,10 @@ impl FetchLogOperator {
                     Ok(batch) => fetched.extend(batch),
                     Err(err) => {
                         if err.code() == chroma_error::ErrorCodes::NotFound && attempt > 0 {
+                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                            tracing::warn!(
+                                "Encountered a case where logs were not found; retrying."
+                            );
                             return Box::pin(self.recursive_run(input, attempt - 1)).await;
                         } else {
                             return Err(FetchLogError::PullLog(Box::new(err)));
