@@ -57,12 +57,15 @@ impl ChromaError for FetchLogError {
     }
 }
 
-impl FetchLogOperator {
-    async fn recursive_run(
-        &self,
-        input: &FetchLogInput,
-        attempt: usize,
-    ) -> Result<FetchLogOutput, FetchLogError> {
+#[async_trait]
+impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
+    type Error = FetchLogError;
+
+    fn get_type(&self) -> OperatorType {
+        OperatorType::IO
+    }
+
+    async fn run(&self, _: &FetchLogInput) -> Result<FetchLogOutput, FetchLogError> {
         tracing::debug!(
             batch_size = self.batch_size,
             start_log_offset_id = self.start_log_offset_id,
@@ -119,15 +122,7 @@ impl FetchLogOperator {
                 match batch {
                     Ok(batch) => fetched.extend(batch),
                     Err(err) => {
-                        if err.code() == chroma_error::ErrorCodes::NotFound && attempt > 0 {
-                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                            tracing::warn!(
-                                "Encountered a case where logs were not found; retrying."
-                            );
-                            return Box::pin(self.recursive_run(input, attempt - 1)).await;
-                        } else {
-                            return Err(FetchLogError::PullLog(Box::new(err)));
-                        }
+                        return Err(FetchLogError::PullLog(Box::new(err)));
                     }
                 }
             }
@@ -167,19 +162,6 @@ impl FetchLogOperator {
             tracing::info!(name: "Fetched log records", num_records = fetched.len());
             Ok(Chunk::new(fetched.into()))
         }
-    }
-}
-
-#[async_trait]
-impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
-    type Error = FetchLogError;
-
-    fn get_type(&self) -> OperatorType {
-        OperatorType::IO
-    }
-
-    async fn run(&self, input: &FetchLogInput) -> Result<FetchLogOutput, FetchLogError> {
-        self.recursive_run(input, 3).await
     }
 }
 
