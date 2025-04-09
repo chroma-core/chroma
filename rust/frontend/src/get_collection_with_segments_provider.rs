@@ -163,7 +163,7 @@ impl CollectionsWithSegmentsProvider {
             .await?
         {
             if collection_and_segments_with_ttl.expires_at
-                >= SystemTime::now()
+                > SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .expect("Do not deploy before UNIX epoch")
             {
