@@ -135,6 +135,10 @@ pub fn init_stdout_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
             metadata.module_path().unwrap_or("").starts_with("chroma")
                 || metadata.module_path().unwrap_or("").starts_with("wal3")
                 || metadata.module_path().unwrap_or("").starts_with("worker")
+                || metadata
+                    .module_path()
+                    .unwrap_or("")
+                    .starts_with("garbage_collector")
         }))
         .with_filter(tracing_subscriber::filter::LevelFilter::INFO)
         .boxed()
