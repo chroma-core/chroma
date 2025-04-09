@@ -15,7 +15,7 @@
 New to Chroma? Check out the [getting started guide](./getting-started)
 {% /Banner %}
 
-![Chroma Computer](/computer.svg)
+![Chroma Computer](/computer.png)
 
 Chroma gives you everything you need for retrieval:
 
@@ -44,7 +44,7 @@ In JavaScript, use the Chroma JS/TS Client to connect to a Chroma server. Instal
 
 {% Tab label="yarn" %}
 ```terminal
-yarn add chromadb chromadb-default-embed 
+yarn add chromadb chromadb-default-embed
 ```
 {% /Tab %}
 
@@ -56,7 +56,7 @@ npm install --save chromadb chromadb-default-embed
 
 {% Tab label="pnpm" %}
 ```terminal
-pnpm install chromadb chromadb-default-embed 
+pnpm install chromadb chromadb-default-embed
 ```
 {% /Tab %}
 
