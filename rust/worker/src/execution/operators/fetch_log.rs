@@ -77,42 +77,74 @@ impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
         let mut log_client = self.log_client.clone();
         let limit_offset = log_client
             .scout_logs(self.collection_uuid, self.start_log_offset_id)
-            .await?;
-
+            .await
+            .ok();
         let mut fetched = Vec::new();
-        let mut offset = self.start_log_offset_id as i64;
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos() as i64;
-        loop {
-            let mut log_batch = log_client
-                .read(
-                    self.collection_uuid,
-                    offset,
-                    self.batch_size as i32,
-                    Some(timestamp),
-                )
-                .await?;
 
-            let retrieve_count = log_batch.len();
+        if let Some(mut limit_offset) = limit_offset {
+            const WINDOW_SIZE: usize = 100;
+            if limit_offset > self.start_log_offset_id + self.batch_size as u64 {
+                limit_offset = self.start_log_offset_id + self.batch_size as u64;
+            }
+            let ranges = (self.start_log_offset_id..limit_offset)
+                .step_by(WINDOW_SIZE)
+                .map(|x| (x, std::cmp::min(x + WINDOW_SIZE as u64, limit_offset)))
+                .collect::<Vec<_>>();
+            tracing::info!("Pulling ranges {ranges:?}");
+            let batch_readers = ranges
+                .into_iter()
+                .map(|(start, limit)| {
+                    let mut log_client = log_client.clone();
+                    let collection_uuid = self.collection_uuid;
+                    let num_records = (limit - start) as i32;
+                    let start = start as i64;
+                    async move {
+                        log_client
+                            .read(collection_uuid, start, num_records, Some(timestamp))
+                            .await
+                    }
+                })
+                .collect::<Vec<_>>();
+            let batches = futures::future::try_join_all(batch_readers).await?;
+            for batch in batches {
+                fetched.extend(batch)
+            }
+            Ok(Chunk::new(fetched.into()))
+        } else {
+            let mut offset = self.start_log_offset_id as i64;
+            loop {
+                let mut log_batch = log_client
+                    .read(
+                        self.collection_uuid,
+                        offset,
+                        self.batch_size as i32,
+                        Some(timestamp),
+                    )
+                    .await?;
 
-            if let Some(last_log) = log_batch.last() {
-                offset = last_log.log_offset + 1;
-                fetched.append(&mut log_batch);
-                if let Some(limit) = self.maximum_fetch_count {
-                    if fetched.len() >= limit as usize {
-                        // Enough logs have been fetched
-                        fetched.truncate(limit as usize);
-                        break;
+                let retrieve_count = log_batch.len();
+
+                if let Some(last_log) = log_batch.last() {
+                    offset = last_log.log_offset + 1;
+                    fetched.append(&mut log_batch);
+                    if let Some(limit) = self.maximum_fetch_count {
+                        if fetched.len() >= limit as usize {
+                            // Enough logs have been fetched
+                            fetched.truncate(limit as usize);
+                            break;
+                        }
                     }
                 }
-            }
 
-            if retrieve_count < self.batch_size as usize {
-                // No more logs to fetch
-                break;
+                if retrieve_count < self.batch_size as usize {
+                    // No more logs to fetch
+                    break;
+                }
             }
+            tracing::info!(name: "Fetched log records", num_records = fetched.len());
+            Ok(Chunk::new(fetched.into()))
         }
-        tracing::info!(name: "Fetched log records", num_records = fetched.len());
-        Ok(Chunk::new(fetched.into()))
     }
 }
 

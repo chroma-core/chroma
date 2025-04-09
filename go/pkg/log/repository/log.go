@@ -184,13 +184,11 @@ func (r *LogRepository) GetMinimumMaximumOffsetForCollection(ctx context.Context
 		tx.Rollback(ctx)
 		return
 	}
+	tx.Commit(ctx)
 	minOffset := minMax.MinOffset
-	if minOffset == 1 {
-		minOffset = 0
-	}
 	maxOffset := minMax.MaxOffset
 	start = minOffset
-	limit = maxOffset
+	limit = maxOffset + 1
 	err = nil
 	return
 }
