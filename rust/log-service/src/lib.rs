@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::future::Future;

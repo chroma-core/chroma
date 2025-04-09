@@ -178,6 +178,11 @@ impl Component for GarbageCollector {
             || Some(span!(parent: None, tracing::Level::INFO, "Scheduled garbage collection")),
         );
     }
+
+    fn on_stop_timeout(&self) -> Duration {
+        // NOTE: Increased timeout for remaining jobs to finish
+        Duration::from_secs(60)
+    }
 }
 
 #[derive(Debug)]
@@ -192,15 +197,6 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
         _message: GarbageCollectMessage,
         ctx: &ComponentContext<Self>,
     ) -> Self::Result {
-        // Get all collections to gc and create gc orchestrator for each.
-        tracing::info!("Getting collections to gc");
-        let collections_to_gc = self
-            .sysdb_client
-            .get_collections_to_gc()
-            .await
-            .expect("Failed to get collections to gc");
-        tracing::info!("Got {} collections to gc", collections_to_gc.len());
-
         let absolute_cutoff_time =
             DateTime::<Utc>::from(SystemTime::now() - self.relative_cutoff_time);
         tracing::info!(
@@ -208,6 +204,18 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
             absolute_cutoff_time,
             self.relative_cutoff_time
         );
+
+        // Get all collections to gc and create gc orchestrator for each.
+        tracing::info!("Getting collections to gc");
+        let collections_to_gc = self
+            .sysdb_client
+            .get_collections_to_gc(
+                Some(absolute_cutoff_time.into()),
+                Some(self.max_collections_to_gc.into()),
+            )
+            .await
+            .expect("Failed to get collections to gc");
+        tracing::info!("Got {} collections to gc", collections_to_gc.len());
 
         let mut jobs = FuturesUnordered::new();
         for collection in collections_to_gc {

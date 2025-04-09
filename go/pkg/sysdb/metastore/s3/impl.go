@@ -22,7 +22,7 @@ import (
 // Example:
 // s3://<bucket-name>/<sysdbPathPrefix>/<tenant_id>/databases/<database_id>/collections/<collection_id>/versionfiles/file_name
 const (
-	versionFilesPathFormat = "%s/%s/databases/%s/collections/%s/versionfiles/%s"
+	versionFilesPathFormat = "%s/databases/%s/collections/%s/versionfiles/%s"
 )
 
 type S3MetaStoreConfig struct {
@@ -201,7 +201,7 @@ func (store *S3MetaStore) PutVersionFile(tenantID, databaseID, collectionID stri
 // GetVersionFilePath constructs the S3 path for a version file
 func (store *S3MetaStore) GetVersionFilePath(tenantID, databaseID, collectionID, versionFileName string) string {
 	return fmt.Sprintf(versionFilesPathFormat,
-		store.BasePathSysDB, tenantID, databaseID, collectionID, versionFileName)
+		tenantID, databaseID, collectionID, versionFileName)
 }
 
 // DeleteOldVersionFiles removes version files older than the specified version
