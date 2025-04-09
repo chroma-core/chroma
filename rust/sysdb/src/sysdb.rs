@@ -25,7 +25,7 @@ use chroma_types::{
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use thiserror::Error;
 use tonic::transport::{Channel, Endpoint};
 use tonic::Code;
@@ -317,11 +317,11 @@ impl SysDb {
 
     pub async fn get_collections_to_gc(
         &mut self,
-        cutoff_time_secs: Option<u64>,
+        cutoff_time: Option<SystemTime>,
         limit: Option<u64>,
     ) -> Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError> {
         match self {
-            SysDb::Grpc(grpc) => grpc.get_collections_to_gc(cutoff_time_secs, limit).await,
+            SysDb::Grpc(grpc) => grpc.get_collections_to_gc(cutoff_time, limit).await,
             SysDb::Sqlite(_) => unimplemented!("Garbage collection does not work for local chroma"),
             SysDb::Test(_) => todo!(),
         }
@@ -894,13 +894,13 @@ impl GrpcSysDb {
 
     pub async fn get_collections_to_gc(
         &mut self,
-        cutoff_time_secs: Option<u64>,
+        cutoff_time: Option<SystemTime>,
         limit: Option<u64>,
     ) -> Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError> {
         let res = self
             .client
             .list_collections_to_gc(chroma_proto::ListCollectionsToGcRequest {
-                cutoff_time_secs,
+                cutoff_time: cutoff_time.map(|t| t.into()),
                 limit,
             })
             .await;

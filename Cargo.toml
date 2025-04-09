@@ -52,7 +52,7 @@ opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
 parking_lot = { version = "0.12.3", features = ["serde"] }
 parquet = "52"
 prost = "0.13"
-prost-types = "0.12"
+prost-types = "0.13.5"
 roaring = "0.10.6"
 sea-query = "0.32"
 sea-query-binder = "0.7"
