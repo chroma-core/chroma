@@ -70,7 +70,7 @@ pub async fn garbage_collector_service_entrypoint() -> Result<(), Box<dyn std::e
     garbage_collector_component.set_dispatcher(dispatcher_handle.clone());
     garbage_collector_component.set_system(system.clone());
 
-    let _ = system.start_component(garbage_collector_component);
+    let mut garbage_collector_handle = system.start_component(garbage_collector_component);
 
     // Keep the service running and handle shutdown signals
     let mut sigterm = signal(SignalKind::terminate())?;
@@ -86,11 +86,18 @@ pub async fn garbage_collector_service_entrypoint() -> Result<(), Box<dyn std::e
         }
     }
     info!("Starting graceful shutdown, waiting for in-progress tasks");
+    // NOTE: We should first stop the garbage collector. The garbage collector will finish the remaining jobs before shutdown.
+    // We cannot directly shutdown the dispatcher and system because that will fail remaining jobs.
+    garbage_collector_handle.stop();
+    garbage_collector_handle
+        .join()
+        .await
+        .expect("Garbage collector should be stoppable");
     dispatcher_handle.stop();
     dispatcher_handle
         .join()
         .await
-        .expect("Dispatcher should not fail to stop");
+        .expect("Dispatcher should be stoppable");
     system.stop().await;
     system.join().await;
 

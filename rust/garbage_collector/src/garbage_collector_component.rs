@@ -178,6 +178,11 @@ impl Component for GarbageCollector {
             || Some(span!(parent: None, tracing::Level::INFO, "Scheduled garbage collection")),
         );
     }
+
+    fn on_stop_timeout(&self) -> Duration {
+        // NOTE: Increased timeout for remaining jobs to finish
+        Duration::from_secs(60)
+    }
 }
 
 #[derive(Debug)]
