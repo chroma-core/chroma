@@ -105,6 +105,11 @@ func (s *logServer) UpdateCollectionLogOffset(ctx context.Context, req *logservi
 	return
 }
 
+func (s *logServer) PurgeDirtyForCollection(ctx context.Context, req *logservicepb.PurgeDirtyForCollectionRequest) (res *logservicepb.PurgeDirtyForCollectionResponse, err error) {
+	// no-op for now
+	return
+}
+
 func NewLogServer(lr *repository.LogRepository) logservicepb.LogServiceServer {
 	return &logServer{
 		lr: lr,
