@@ -7,7 +7,6 @@ use chroma_tracing::{
 use config::GarbageCollectorConfig;
 use garbage_collector_component::GarbageCollector;
 use tokio::signal::unix::{signal, SignalKind};
-use tokio::time::{sleep, Duration};
 use tracing::{debug, error, info};
 
 mod config;
@@ -56,7 +55,7 @@ pub async fn garbage_collector_service_entrypoint() -> Result<(), Box<dyn std::e
         })?;
 
     let system = System::new();
-    let dispatcher_handle = system.start_component(dispatcher);
+    let mut dispatcher_handle = system.start_component(dispatcher);
 
     // Start a background task to periodically check for garbage.
     // Garbage collector is a component that gets notified every
@@ -68,36 +67,40 @@ pub async fn garbage_collector_service_entrypoint() -> Result<(), Box<dyn std::e
             e
         })?;
 
-    garbage_collector_component.set_dispatcher(dispatcher_handle);
+    garbage_collector_component.set_dispatcher(dispatcher_handle.clone());
     garbage_collector_component.set_system(system.clone());
 
-    let _ = system.start_component(garbage_collector_component);
+    let mut garbage_collector_handle = system.start_component(garbage_collector_component);
 
     // Keep the service running and handle shutdown signals
     let mut sigterm = signal(SignalKind::terminate())?;
     let mut sigint = signal(SignalKind::interrupt())?;
 
     info!("Service running, waiting for signals");
-    loop {
-        tokio::select! {
-            _ = sigterm.recv() => {
-                info!("Received SIGTERM signal");
-                break;
-            }
-            _ = sigint.recv() => {
-                info!("Received SIGINT signal");
-                break;
-            }
-            _ = sleep(Duration::from_secs(1)) => {
-                // Keep the service running
-                continue;
-            }
+    tokio::select! {
+        _ = sigterm.recv() => {
+            info!("Received SIGTERM signal");
+        }
+        _ = sigint.recv() => {
+            info!("Received SIGINT signal");
         }
     }
-
-    // Give some time for any in-progress garbage collection to complete
     info!("Starting graceful shutdown, waiting for in-progress tasks");
-    sleep(Duration::from_secs(5)).await;
+    // NOTE: We should first stop the garbage collector. The garbage collector will finish the remaining jobs before shutdown.
+    // We cannot directly shutdown the dispatcher and system because that will fail remaining jobs.
+    garbage_collector_handle.stop();
+    garbage_collector_handle
+        .join()
+        .await
+        .expect("Garbage collector should be stoppable");
+    dispatcher_handle.stop();
+    dispatcher_handle
+        .join()
+        .await
+        .expect("Dispatcher should be stoppable");
+    system.stop().await;
+    system.join().await;
+
     info!("Shutting down garbage collector service");
     Ok(())
 }
