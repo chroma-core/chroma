@@ -106,6 +106,7 @@ impl Bindings {
             cache_invalidation_retry_policy: CacheInvalidationRetryConfig::new(0, 0),
             permitted_parallelism: 32,
             cache: chroma_cache::CacheConfig::Nop,
+            cache_ttl_secs: 60,
         };
 
         let executor_config = ExecutorConfig::Local(LocalExecutorConfig {});
