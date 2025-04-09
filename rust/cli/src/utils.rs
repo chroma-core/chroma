@@ -1,5 +1,6 @@
 use crate::client::ChromaClientError;
 use crate::commands::db::DbError;
+use crate::commands::install::InstallError;
 use crate::commands::login::LoginError;
 use crate::commands::profile::ProfileError;
 use crate::commands::run::RunError;
@@ -8,6 +9,12 @@ use crate::commands::vacuum::VacuumError;
 use crate::dashboard_client::DashboardClientError;
 use arboard::Clipboard;
 use colored::Colorize;
+use crossterm::{
+    cursor,
+    event::{self, Event, KeyCode, KeyEvent},
+    terminal::{disable_raw_mode, enable_raw_mode},
+    ExecutableCommand,
+};
 use regex::Regex;
 use reqwest::header::HeaderMap;
 use reqwest::{Client, Method};
@@ -15,8 +22,9 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
-use std::fs;
+use std::io::{stdout, Write};
 use std::path::PathBuf;
+use std::{fs, io};
 use thiserror::Error;
 
 pub const LOGO: &str = "
@@ -36,6 +44,7 @@ pub const LOGO: &str = "
 pub const CHROMA_DIR: &str = ".chroma";
 pub const CREDENTIALS_FILE: &str = "credentials";
 const CONFIG_FILE: &str = "config.json";
+pub const SELECTION_LIMIT: usize = 5;
 
 #[derive(Debug, Error)]
 pub enum CliError {
@@ -57,6 +66,8 @@ pub enum CliError {
     Login(#[from] LoginError),
     #[error("{0}")]
     DashboardClient(#[from] DashboardClientError),
+    #[error("{0}")]
+    Install(#[from] InstallError),
 }
 
 #[derive(Debug, Error)]
@@ -105,9 +116,31 @@ impl Profile {
     }
 }
 
+fn default_show_updates() -> bool {
+    true
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SampleAppsConfig {
+    #[serde(default = "default_show_updates")]
+    pub show_updates: bool,
+    #[serde(default)]
+    pub installed: HashMap<String, String>,
+}
+
+impl Default for SampleAppsConfig {
+    fn default() -> Self {
+        Self {
+            show_updates: default_show_updates(),
+            installed: HashMap::new(),
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CliConfig {
     pub current_profile: String,
+    pub sample_apps: SampleAppsConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -184,6 +217,7 @@ fn get_credentials_file_path() -> Result<PathBuf, CliError> {
 fn create_config_file(config_path: &PathBuf) -> Result<(), Box<dyn Error>> {
     let default_config = CliConfig {
         current_profile: String::new(),
+        sample_apps: SampleAppsConfig::default(),
     };
     let json_str = serde_json::to_string_pretty(&default_config)?;
     fs::write(config_path, json_str)?;
@@ -309,4 +343,43 @@ where
     let response = request_builder.send().await?.error_for_status()?;
     let parsed_response = response.json::<R>().await?;
     Ok(parsed_response)
+}
+
+pub fn read_secret(prompt: &str) -> io::Result<String> {
+    let mut stdout = stdout();
+    let mut password = String::new();
+
+    stdout.write_all(prompt.as_bytes())?;
+    stdout.write_all(b": ")?;
+    stdout.flush()?;
+
+    enable_raw_mode()?;
+
+    loop {
+        if let Event::Key(KeyEvent { code, .. }) = event::read()? {
+            match code {
+                KeyCode::Enter => break,
+                KeyCode::Char(c) => {
+                    password.push(c);
+                    stdout.write_all(b"*")?;
+                }
+                KeyCode::Backspace => {
+                    if !password.is_empty() {
+                        password.pop();
+                        stdout.execute(cursor::MoveLeft(1))?;
+                        stdout.write_all(b" ")?;
+                        stdout.execute(cursor::MoveLeft(1))?;
+                    }
+                }
+                _ => {}
+            }
+            stdout.flush()?;
+        }
+    }
+
+    disable_raw_mode()?;
+    stdout.write_all(b"\n")?;
+    stdout.flush()?;
+
+    Ok(password)
 }

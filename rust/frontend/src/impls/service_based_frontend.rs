@@ -1081,7 +1081,7 @@ impl ServiceBasedFrontend {
         self.validate_embedding(
             request.collection_id,
             Some(&request.embeddings),
-            true,
+            false,
             |embedding| Some(embedding.len()),
         )
         .await

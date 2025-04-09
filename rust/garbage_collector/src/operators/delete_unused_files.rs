@@ -229,27 +229,21 @@ impl Operator<DeleteUnusedFilesInput, DeleteUnusedFilesOutput> for DeleteUnusedF
         // did not finish successfully (i.e. crashed before committing the work to SysDb).
         let mut file_operation_errors = Vec::new();
         match self.cleanup_mode {
-            CleanupMode::ListOnly => {
+            CleanupMode::DryRun => {
                 // Do nothing here. List is written to S3 for all modes later in this function.
             }
             CleanupMode::Rename => {
                 // Soft delete - rename the file
-                let mut futures = Vec::new();
-                for file_path in &all_files {
-                    let new_path = self.get_rename_path(file_path, input.epoch_id);
-                    futures.push(self.rename_with_path(file_path.clone(), new_path));
-                }
-
-                let num_futures = futures.len();
-                if num_futures > 0 {
-                    let results: Vec<Result<(), FileOperationError>> =
-                        futures::stream::iter(futures)
-                            .buffer_unordered(num_futures)
-                            .collect()
-                            .await;
+                if !all_files.is_empty() {
+                    let mut rename_stream = futures::stream::iter(all_files.clone())
+                        .map(move |file_path| {
+                            let new_path = self.get_rename_path(&file_path, input.epoch_id);
+                            self.rename_with_path(file_path, new_path)
+                        })
+                        .buffer_unordered(100);
 
                     // Process any errors that occurred
-                    for result in results {
+                    while let Some(result) = rename_stream.next().await {
                         if let Err(e) = result {
                             file_operation_errors.push(format!("{}: {}", e.path, e.error));
                         }
@@ -258,21 +252,13 @@ impl Operator<DeleteUnusedFilesInput, DeleteUnusedFilesOutput> for DeleteUnusedF
             }
             CleanupMode::Delete => {
                 // Hard delete - remove the file
-                let mut futures = Vec::new();
-                for file_path in &all_files {
-                    futures.push(self.delete_with_path(file_path.clone()));
-                }
-
-                let num_futures = futures.len();
-                if num_futures > 0 {
-                    let results: Vec<Result<(), FileOperationError>> =
-                        futures::stream::iter(futures)
-                            .buffer_unordered(num_futures)
-                            .collect()
-                            .await;
+                if !all_files.is_empty() {
+                    let mut delete_stream = futures::stream::iter(all_files.clone())
+                        .map(move |file_path| self.delete_with_path(file_path))
+                        .buffer_unordered(100);
 
                     // Process any errors that occurred
-                    for result in results {
+                    while let Some(result) = delete_stream.next().await {
                         if let Err(e) = result {
                             file_operation_errors.push(format!("{}: {}", e.path, e.error));
                         }
@@ -337,7 +323,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_list_only_mode() {
+    async fn test_dry_run_mode() {
         let tmp_dir = TempDir::new().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let (test_files, hnsw_files) = setup_test_files(&storage).await;
@@ -347,7 +333,7 @@ mod tests {
 
         let operator = DeleteUnusedFilesOperator::new(
             storage.clone(),
-            CleanupMode::ListOnly,
+            CleanupMode::DryRun,
             "test_collection".to_string(),
         );
         let input = DeleteUnusedFilesInput {
@@ -554,10 +540,10 @@ mod tests {
         assert!(content.contains("Failed files:"));
         assert!(content.contains("nonexistent.txt"));
 
-        // Test ListOnly mode with nonexistent files (should succeed)
+        // Test DryRun mode with nonexistent files (should succeed)
         let list_operator = DeleteUnusedFilesOperator::new(
             storage,
-            CleanupMode::ListOnly,
+            CleanupMode::DryRun,
             "test_collection".to_string(),
         );
         let result = list_operator

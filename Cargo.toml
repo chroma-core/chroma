@@ -28,6 +28,7 @@ members = [
     "rust/sqlite",
     "rust/cli",
     "rust/wal3",
+    "rust/js_bindings"
 ]
 
 [workspace.dependencies]
@@ -87,6 +88,7 @@ hnswlib = { version = "0.8.1", git = "https://github.com/chroma-core/hnswlib.git
 reqwest = { version = "0.12.9",  features = ["rustls-tls-native-roots", "http2"], default-features = false }
 random-port = "0.1.1"
 ndarray = { version = "0.16.1", features = ["approx"] }
+humantime = { version = "2.2.0" }
 
 chroma-benchmark = { path = "rust/benchmark" }
 chroma-blockstore = { path = "rust/blockstore" }

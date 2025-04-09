@@ -114,6 +114,10 @@ func (s *Coordinator) CreateCollection(ctx context.Context, createCollection *mo
 	return collection, created, nil
 }
 
+func (s *Coordinator) GetCollection(ctx context.Context, collectionID types.UniqueID, collectionName *string, tenantID string, databaseName string) (*model.Collection, error) {
+	return s.catalog.GetCollection(ctx, collectionID, collectionName, tenantID, databaseName)
+}
+
 func (s *Coordinator) GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*model.Collection, error) {
 	return s.catalog.GetCollections(ctx, collectionID, collectionName, tenantID, databaseName, limit, offset)
 }
@@ -239,8 +243,8 @@ func (s *Coordinator) ListCollectionsToGc(ctx context.Context, cutoffTimeSecs *u
 	return s.catalog.ListCollectionsToGc(ctx, cutoffTimeSecs, limit)
 }
 
-func (s *Coordinator) ListCollectionVersions(ctx context.Context, collectionID types.UniqueID, tenantID string, maxCount *int64, versionsBefore *int64, versionsAtOrAfter *int64) ([]*coordinatorpb.CollectionVersionInfo, error) {
-	return s.catalog.ListCollectionVersions(ctx, collectionID, tenantID, maxCount, versionsBefore, versionsAtOrAfter)
+func (s *Coordinator) ListCollectionVersions(ctx context.Context, collectionID types.UniqueID, tenantID string, maxCount *int64, versionsBefore *int64, versionsAtOrAfter *int64, includeMarkedForDeletion bool) ([]*coordinatorpb.CollectionVersionInfo, error) {
+	return s.catalog.ListCollectionVersions(ctx, collectionID, tenantID, maxCount, versionsBefore, versionsAtOrAfter, includeMarkedForDeletion)
 }
 
 func (s *Coordinator) MarkVersionForDeletion(ctx context.Context, req *coordinatorpb.MarkVersionForDeletionRequest) (*coordinatorpb.MarkVersionForDeletionResponse, error) {
@@ -249,4 +253,9 @@ func (s *Coordinator) MarkVersionForDeletion(ctx context.Context, req *coordinat
 
 func (s *Coordinator) DeleteCollectionVersion(ctx context.Context, req *coordinatorpb.DeleteCollectionVersionRequest) (*coordinatorpb.DeleteCollectionVersionResponse, error) {
 	return s.catalog.DeleteCollectionVersion(ctx, req)
+}
+
+// SetDeleteMode sets the delete mode for testing
+func (c *Coordinator) SetDeleteMode(mode DeleteMode) {
+	c.deleteMode = mode
 }

@@ -6,10 +6,11 @@ docker_build(
   dockerfile='./k8s/test/postgres/Dockerfile'
 )
 
+
 if config.tilt_subcommand == "ci":
   custom_build(
     'logservice',
-    'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF --target logservice -f ./go/Dockerfile . --load',
+    'docker build -t $EXPECTED_REF --target logservice -f ./go/Dockerfile .',
     ['./go/', './idl/']
   )
 else:
@@ -24,7 +25,7 @@ else:
 if config.tilt_subcommand == "ci":
   custom_build(
     'logservice-migration',
-    'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF --target logservice-migration -f ./go/Dockerfile.migration . --load',
+    'docker build -t $EXPECTED_REF --target logservice-migration -f ./go/Dockerfile.migration .',
     ['./go/']
   )
 else:
@@ -39,7 +40,7 @@ else:
 if config.tilt_subcommand == "ci":
   custom_build(
     'rust-log-service',
-    'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF  -f ./rust/log-service/Dockerfile . --load',
+    'docker build -t $EXPECTED_REF  -f ./rust/log-service/Dockerfile .',
     ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
   )
 else:
@@ -53,7 +54,7 @@ else:
 if config.tilt_subcommand == "ci":
   custom_build(
     'sysdb',
-    'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF --target sysdb -f ./go/Dockerfile . --load',
+    'docker build -t $EXPECTED_REF --target sysdb -f ./go/Dockerfile .',
     ['./go/', './idl/']
   )
 else:
@@ -68,7 +69,7 @@ else:
 if config.tilt_subcommand == "ci":
   custom_build(
     'sysdb-migration',
-    'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF --target sysdb-migration -f ./go/Dockerfile.migration . --load',
+    'docker build -t $EXPECTED_REF --target sysdb-migration -f ./go/Dockerfile.migration .',
     ['./go/']
   )
 else:
@@ -84,7 +85,7 @@ else:
 if config.tilt_subcommand == "ci":
   custom_build(
     'frontend-service',
-    'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF -f ./Dockerfile . --load',
+    'docker build -t $EXPECTED_REF -f ./Dockerfile . ',
     ['chromadb/', 'idl/', 'requirements.txt', 'bin/']
   )
 else:
@@ -99,7 +100,7 @@ else:
 if config.tilt_subcommand == "ci":
   custom_build(
     'rust-frontend-service',
-    'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF -f ./rust/cli/Dockerfile . --load',
+    'docker build -t $EXPECTED_REF -f ./rust/cli/Dockerfile . ',
     ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
   )
 else:
@@ -113,7 +114,7 @@ else:
 if config.tilt_subcommand == "ci":
   custom_build(
     'query-service',
-    'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF --target query_service -f ./rust/worker/Dockerfile . --load ',
+    'docker build -t $EXPECTED_REF --target query_service -f ./rust/worker/Dockerfile .',
     ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
   )
 else:
@@ -128,7 +129,7 @@ else:
 if config.tilt_subcommand == "ci":
   custom_build(
     'compaction-service',
-    'depot build --project $DEPOT_PROJECT_ID -t $EXPECTED_REF --target compaction_service -f ./rust/worker/Dockerfile . --load ',
+    'docker build -t $EXPECTED_REF --target compaction_service -f ./rust/worker/Dockerfile .',
     ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
   )
 else:
@@ -138,6 +139,21 @@ else:
     only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
     dockerfile='./rust/worker/Dockerfile',
     target='compaction_service'
+  )
+
+if config.tilt_subcommand == "ci":
+  custom_build(
+    'garbage-collector',
+    'docker build -t $EXPECTED_REF --target garbage_collector -f ./rust/garbage_collector/Dockerfile .',
+    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
+  )
+else:
+  docker_build(
+    'garbage-collector',
+    '.',
+    only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
+    dockerfile='./rust/garbage_collector/Dockerfile',
+    target='garbage_collector'
   )
 
 
@@ -150,11 +166,12 @@ k8s_yaml(
 # We manually call helm template so we can call set-file
 k8s_yaml(
   local(
-    'helm template --set-file rustFrontendService.configuration=rust/frontend/sample_configs/distributed.yaml --set-file rustLogService.configuration=rust/worker/chroma_config.yaml --values k8s/distributed-chroma/values.yaml,k8s/distributed-chroma/values.dev.yaml k8s/distributed-chroma'
+    'helm template --set-file rustFrontendService.configuration=rust/frontend/sample_configs/distributed.yaml,rustLogService.configuration=rust/worker/tilt_config.yaml,compaction_service.configuration=rust/worker/tilt_config.yaml,query_service.configuration=rust/worker/tilt_config.yaml --values k8s/distributed-chroma/values.yaml,k8s/distributed-chroma/values.dev.yaml k8s/distributed-chroma'
   ),
 )
 watch_file('rust/frontend/sample_configs/distributed.yaml')
 watch_file('rust/worker/chroma_config.yaml')
+watch_file('rust/worker/tilt_config.yaml')
 watch_file('k8s/distributed-chroma/values.yaml')
 watch_file('k8s/distributed-chroma/values.dev.yaml')
 watch_file('k8s/distributed-chroma/*.yaml')
@@ -228,6 +245,6 @@ k8s_resource('jaeger', resource_deps=['k8s_setup'], labels=["observability"])
 k8s_resource('grafana', resource_deps=['k8s_setup'], labels=["observability"])
 k8s_resource('prometheus', resource_deps=['k8s_setup'], labels=["observability"])
 k8s_resource('otel-collector', resource_deps=['k8s_setup'], labels=["observability"])
-
+k8s_resource('garbage-collector', resource_deps=['k8s_setup'], labels=["chroma"])
 # Local S3
 k8s_resource('minio-deployment', resource_deps=['k8s_setup'], labels=["debug"], port_forwards=['9000:9000', '9005:9005'])

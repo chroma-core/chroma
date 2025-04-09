@@ -169,17 +169,6 @@ class not_implemented_ef(EmbeddingFunction[Documents]):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         pass
 
-    @staticmethod
-    def name() -> str:
-        return "not_implemented_ef"
-
-    @staticmethod
-    def build_from_config(config: dict[str, Any]) -> "EmbeddingFunction[Documents]":
-        return not_implemented_ef()
-
-    def get_config(self) -> dict[str, Any]:
-        return {}
-
 
 def persist_generated_data_with_old_version(
     version: str,

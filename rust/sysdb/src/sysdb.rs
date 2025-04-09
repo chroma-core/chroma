@@ -317,10 +317,12 @@ impl SysDb {
 
     pub async fn get_collections_to_gc(
         &mut self,
+        cutoff_time_secs: Option<u64>,
+        limit: Option<u64>,
     ) -> Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError> {
         match self {
-            SysDb::Grpc(grpc) => grpc.get_collections_to_gc().await,
-            SysDb::Sqlite(_) => todo!(),
+            SysDb::Grpc(grpc) => grpc.get_collections_to_gc(cutoff_time_secs, limit).await,
+            SysDb::Sqlite(_) => unimplemented!("Garbage collection does not work for local chroma"),
             SysDb::Test(_) => todo!(),
         }
     }
@@ -350,7 +352,11 @@ impl SysDb {
                     .await
             }
             SysDb::Sqlite(sqlite) => sqlite.get_collection_with_segments(collection_id).await,
-            SysDb::Test(_test_sys_db) => todo!(),
+            SysDb::Test(test_sys_db) => {
+                test_sys_db
+                    .get_collection_with_segments(collection_id)
+                    .await
+            }
         }
     }
 
@@ -516,9 +522,10 @@ impl Configurable<GrpcSysDbConfig> for GrpcSysDb {
     }
 }
 
-#[allow(dead_code)]
+#[derive(Debug)]
 pub struct CollectionToGcInfo {
     pub id: CollectionUuid,
+    pub tenant: String,
     pub name: String,
     pub version_file_path: String,
     pub latest_version: i64,
@@ -552,6 +559,7 @@ impl TryFrom<chroma_proto::CollectionToGcInfo> for CollectionToGcInfo {
         let collection_id = CollectionUuid(collection_uuid);
         Ok(CollectionToGcInfo {
             id: collection_id,
+            tenant: value.tenant_id,
             name: value.name,
             version_file_path: value.version_file_path,
             latest_version: value.latest_version,
@@ -886,12 +894,14 @@ impl GrpcSysDb {
 
     pub async fn get_collections_to_gc(
         &mut self,
+        cutoff_time_secs: Option<u64>,
+        limit: Option<u64>,
     ) -> Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError> {
         let res = self
             .client
             .list_collections_to_gc(chroma_proto::ListCollectionsToGcRequest {
-                cutoff_time_secs: None,
-                limit: None,
+                cutoff_time_secs,
+                limit,
             })
             .await;
 

@@ -1,5 +1,7 @@
 use crate::client::get_chroma_client;
-use crate::utils::{copy_to_clipboard, get_current_profile, CliError, Profile, UtilsError};
+use crate::utils::{
+    copy_to_clipboard, get_current_profile, CliError, Profile, UtilsError, SELECTION_LIMIT,
+};
 use chroma_types::Database;
 use clap::{Args, Subcommand, ValueEnum};
 use colored::Colorize;
@@ -9,8 +11,6 @@ use std::fmt;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use thiserror::Error;
-
-const LIST_DB_SELECTION_LIMIT: usize = 5;
 
 #[derive(Debug, Error)]
 pub enum DbError {
@@ -285,7 +285,7 @@ fn get_db_name(dbs: &[Database], prompt: &str) -> Result<String, CliError> {
 
     println!("{}", prompt.blue().bold());
     let name = match dbs.len() {
-        0..=LIST_DB_SELECTION_LIMIT => select_db(dbs),
+        0..=SELECTION_LIMIT => select_db(dbs),
         _ => prompt_db_name(prompt),
     }?;
 
@@ -432,215 +432,4 @@ pub fn db_command(command: DbCommand) -> Result<(), CliError> {
         }
     })?;
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::client::ChromaClient;
-    use crate::commands::db::DbError::{DbNotFound, InvalidDbName};
-    use crate::commands::db::{
-        create_db_already_exists_message, create_db_success_message, db_delete_success_message,
-        get_python_connection,
-    };
-    use crate::commands::profile::ProfileError::NoActiveProfile;
-    use crate::utils::{
-        get_current_profile, write_config, write_profiles, AddressBook, CliConfig, Profile,
-    };
-    use assert_cmd::Command;
-    use predicates::str::contains;
-    use std::collections::HashMap;
-    use std::env;
-    use tempfile::TempDir;
-
-    fn simple_test_setup() -> TempDir {
-        let temp_home = tempfile::tempdir().expect("Failed to create temp home dir");
-        env::set_var("HOME", temp_home.path());
-
-        let mut profiles: HashMap<String, Profile> = HashMap::new();
-        profiles.insert(
-            "profile".to_string(),
-            Profile {
-                api_key: "key".to_string(),
-                tenant_id: "default_tenant".to_string(),
-            },
-        );
-
-        let config = CliConfig {
-            current_profile: "profile".to_string(),
-        };
-
-        write_profiles(&profiles).unwrap();
-        write_config(&config).unwrap();
-
-        temp_home
-    }
-
-    #[tokio::test]
-    async fn test_k8s_integration_list_success() {
-        let _temp_dir = simple_test_setup();
-
-        let mut cmd = Command::cargo_bin("chroma").unwrap();
-
-        cmd.arg("db")
-            .arg("list")
-            .arg("--dev")
-            .assert()
-            .success()
-            .stdout(contains("Listing"))
-            .stdout(contains("default_database"));
-    }
-
-    #[tokio::test]
-    async fn test_k8s_integration_create_db() {
-        let _temp_dir = simple_test_setup();
-        let db_name = "test_db1";
-
-        let mut cmd = Command::cargo_bin("chroma").unwrap();
-
-        cmd.arg("db")
-            .arg("create")
-            .arg(db_name)
-            .arg("--dev")
-            .assert()
-            .success()
-            .stdout(contains(create_db_success_message(db_name)));
-
-        let chroma_client = ChromaClient::local_default();
-        let dbs = chroma_client.list_databases().await.unwrap();
-        let db_names = dbs
-            .iter()
-            .filter(|db| db.name.eq(db_name))
-            .collect::<Vec<_>>();
-        assert_eq!(db_names.len(), 1);
-    }
-
-    #[tokio::test]
-    async fn test_k8s_integration_create_already_exists() {
-        let _temp_dir = simple_test_setup();
-        let db_name = "test_db";
-
-        let chroma_client = ChromaClient::local_default();
-        chroma_client
-            .create_database(db_name.to_string())
-            .await
-            .unwrap();
-
-        let mut cmd = Command::cargo_bin("chroma").unwrap();
-
-        cmd.arg("db")
-            .arg("create")
-            .arg(db_name)
-            .arg("--dev")
-            .assert()
-            .success()
-            .stdout(contains(create_db_already_exists_message(db_name)));
-    }
-
-    #[test]
-    fn test_k8s_integration_create_bad_name() {
-        let _temp_dir = simple_test_setup();
-        let db_name = "test db";
-
-        let mut cmd = Command::cargo_bin("chroma").unwrap();
-
-        cmd.arg("db")
-            .arg("create")
-            .arg(db_name)
-            .arg("--dev")
-            .assert()
-            .success()
-            .stderr(contains(InvalidDbName.to_string()));
-    }
-
-    #[test]
-    fn test_no_active_profile() {
-        let temp_home = tempfile::tempdir().expect("Failed to create temp home dir");
-        env::set_var("HOME", temp_home.path());
-        let mut cmd = Command::cargo_bin("chroma").unwrap();
-
-        cmd.arg("db")
-            .arg("list")
-            .arg("--dev")
-            .assert()
-            .success()
-            .stderr(contains(NoActiveProfile.to_string()));
-    }
-
-    #[test]
-    fn test_k8s_integration_connect() {
-        let _temp_dir = simple_test_setup();
-        let mut cmd = Command::cargo_bin("chroma").unwrap();
-
-        let (_profile_name, profile) = get_current_profile().unwrap();
-        let chroma_client = ChromaClient::from_profile(&profile, AddressBook::local().frontend_url);
-        let db_name = "default_database".to_string();
-
-        cmd.arg("db")
-            .arg("connect")
-            .arg(&db_name)
-            .arg("--language")
-            .arg("python")
-            .arg("--dev")
-            .assert()
-            .success()
-            .stdout(contains(get_python_connection(
-                chroma_client.api_url,
-                profile.tenant_id,
-                db_name,
-                profile.api_key,
-            )));
-    }
-
-    #[tokio::test]
-    async fn test_k8s_integration_delete_db() {
-        let _temp_dir = simple_test_setup();
-        let db_name = "db_to_delete";
-
-        let chroma_client = ChromaClient::local_default();
-        chroma_client
-            .create_database(db_name.to_string())
-            .await
-            .unwrap();
-
-        let mut dbs = chroma_client.list_databases().await.unwrap();
-        let db_names = dbs
-            .iter()
-            .filter(|db| db.name.eq(db_name))
-            .collect::<Vec<_>>();
-        assert_eq!(db_names.len(), 1);
-
-        let mut cmd = Command::cargo_bin("chroma").unwrap();
-
-        cmd.arg("db")
-            .arg("delete")
-            .arg(db_name)
-            .arg("--force")
-            .arg("--dev")
-            .assert()
-            .success()
-            .stdout(contains(db_delete_success_message(db_name)));
-
-        dbs = chroma_client.list_databases().await.unwrap();
-        let db_names = dbs
-            .iter()
-            .filter(|db| db.name.eq(db_name))
-            .collect::<Vec<_>>();
-        assert_eq!(db_names.len(), 0);
-    }
-
-    #[tokio::test]
-    async fn test_k8s_integration_delete_not_exists() {
-        let _temp_dir = simple_test_setup();
-        let db_name = "does_not_exist";
-
-        let mut cmd = Command::cargo_bin("chroma").unwrap();
-
-        cmd.arg("db")
-            .arg("delete")
-            .arg(db_name)
-            .arg("--dev")
-            .assert()
-            .success()
-            .stderr(contains(DbNotFound(db_name.to_string()).to_string()));
-    }
 }

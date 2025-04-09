@@ -30,7 +30,7 @@ use thiserror::Error;
 pub struct FetchLogOperator {
     pub log_client: Log,
     pub batch_size: u32,
-    pub start_log_offset_id: u32,
+    pub start_log_offset_id: u64,
     pub maximum_fetch_count: Option<u32>,
     pub collection_uuid: CollectionUuid,
 }

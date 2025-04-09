@@ -8,11 +8,11 @@ use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
 use setsum::Setsum;
-use tracing::instrument::Instrument;
 
 use crate::{
-    unprefixed_fragment_path, BatchManager, Error, ExponentialBackoff, Fragment, FragmentSeqNo,
-    LogPosition, LogWriterOptions, Manifest, ManifestManager,
+    unprefixed_fragment_path, BatchManager, CursorStore, CursorStoreOptions, Error,
+    ExponentialBackoff, Fragment, FragmentSeqNo, LogPosition, LogReader, LogReaderOptions,
+    LogWriterOptions, Manifest, ManifestManager,
 };
 
 /// The epoch writer is a counting writer.  Every epoch exists.  An epoch goes
@@ -29,12 +29,12 @@ pub struct EpochWriter {
 
 #[async_trait::async_trait]
 pub trait MarkDirty: Send + Sync + 'static {
-    async fn mark_dirty(&self, log_position: LogPosition) -> Result<(), Error>;
+    async fn mark_dirty(&self, log_position: LogPosition, num_records: usize) -> Result<(), Error>;
 }
 
 #[async_trait::async_trait]
 impl MarkDirty for () {
-    async fn mark_dirty(&self, _: LogPosition) -> Result<(), Error> {
+    async fn mark_dirty(&self, _: LogPosition, _: usize) -> Result<(), Error> {
         Ok(())
     }
 }
@@ -102,7 +102,6 @@ impl LogWriter {
             writer.to_string(),
             Arc::clone(&mark_dirty),
         )
-        .instrument(tracing::info_span!("open_or_initialize"))
         .await
         {
             Ok(writer) => writer,
@@ -147,6 +146,7 @@ impl LogWriter {
         self.append_many(vec![message]).await
     }
 
+    #[tracing::instrument(skip(self, messages))]
     pub async fn append_many(&self, messages: Vec<Vec<u8>>) -> Result<LogPosition, Error> {
         // SAFETY(rescrv):  Mutex poisoning.
         let inner = { self.inner.lock().unwrap().clone() };
@@ -181,6 +181,31 @@ impl LogWriter {
             // This should never happen, so just be polite with an error.
             Err(Error::LogClosed)
         }
+    }
+
+    pub fn reader(&self, options: LogReaderOptions) -> Option<LogReader> {
+        // SAFETY(rescrv):  Mutex poisoning.
+        let inner = self.inner.lock().unwrap();
+        inner.as_ref().map(|inner| {
+            LogReader::new(
+                options,
+                Arc::clone(&inner.writer.storage),
+                inner.writer.prefix.clone(),
+            )
+        })
+    }
+
+    pub fn cursors(&self, options: CursorStoreOptions) -> Option<CursorStore> {
+        // SAFETY(rescrv):  Mutex poisoning.
+        let inner = self.inner.lock().unwrap();
+        inner.as_ref().map(|inner| {
+            CursorStore::new(
+                options,
+                Arc::clone(&inner.writer.storage),
+                inner.writer.prefix.clone(),
+                self.writer.clone(),
+            )
+        })
     }
 }
 
@@ -299,6 +324,7 @@ impl OnceLogWriter {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self, messages))]
     async fn append(self: &Arc<Self>, messages: Vec<Vec<u8>>) -> Result<LogPosition, Error> {
         if messages.is_empty() {
             return Err(Error::EmptyBatch);
@@ -314,6 +340,7 @@ impl OnceLogWriter {
         rx.await.map_err(|_| Error::Internal)?
     }
 
+    #[tracing::instrument(skip(self, work))]
     #[allow(clippy::type_complexity)]
     async fn append_batch(
         self: Arc<Self>,
@@ -356,6 +383,7 @@ impl OnceLogWriter {
         }
     }
 
+    #[tracing::instrument(skip(self, messages))]
     async fn append_batch_internal(
         &self,
         fragment_seq_no: FragmentSeqNo,
@@ -372,7 +400,9 @@ impl OnceLogWriter {
             log_position,
             messages,
         );
-        let fut2 = self.mark_dirty.mark_dirty(log_position + messages_len);
+        let fut2 = self
+            .mark_dirty
+            .mark_dirty(log_position + messages_len, messages_len);
         let (res1, res2) = futures::future::join(fut1, fut2).await;
         res2?;
         let (path, setsum, num_bytes) = res1?;
@@ -443,6 +473,7 @@ pub fn construct_parquet(
     Ok((buffer, setsum))
 }
 
+#[tracing::instrument(skip(options, storage, messages))]
 pub async fn upload_parquet(
     options: &LogWriterOptions,
     storage: &Storage,

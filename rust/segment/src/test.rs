@@ -1,3 +1,5 @@
+use crate::spann_provider::SpannProvider;
+
 use super::{
     blockfile_metadata::MetadataSegmentWriter, blockfile_record::RecordSegmentWriter,
     distributed_hnsw::DistributedHNSWSegmentWriter, types::materialize_logs,
@@ -30,6 +32,7 @@ use thiserror::Error;
 pub struct TestDistributedSegment {
     pub blockfile_provider: BlockfileProvider,
     pub hnsw_provider: HnswIndexProvider,
+    pub spann_provider: SpannProvider,
     pub collection: Collection,
     pub metadata_segment: Segment,
     pub record_segment: Segment,
@@ -40,9 +43,17 @@ impl TestDistributedSegment {
     pub fn new_with_dimension(dimension: usize) -> Self {
         let collection = Collection::test_collection(dimension as i32);
         let collection_uuid = collection.collection_id;
+        let blockfile_provider = test_arrow_blockfile_provider(2 << 22);
+        let hnsw_provider = test_hnsw_index_provider();
+
         Self {
-            blockfile_provider: test_arrow_blockfile_provider(2 << 22),
-            hnsw_provider: test_hnsw_index_provider(),
+            blockfile_provider: blockfile_provider.clone(),
+            hnsw_provider: hnsw_provider.clone(),
+            spann_provider: SpannProvider {
+                hnsw_provider,
+                blockfile_provider,
+                garbage_collection_context: None,
+            },
             collection,
             metadata_segment: test_segment(collection_uuid, SegmentScope::METADATA),
             record_segment: test_segment(collection_uuid, SegmentScope::RECORD),
@@ -176,7 +187,6 @@ impl TestReferenceSegment {
         } else {
             (HashSet::new(), None)
         };
-        let new_meta = new_meta.and_then(|meta| if meta.is_empty() { None } else { Some(meta) });
         match (old_meta, new_meta) {
             (None, None) => None,
             (None, Some(m)) | (Some(m), None) => Some(m),

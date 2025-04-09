@@ -1,16 +1,30 @@
+use std::{collections::HashMap, time::Duration};
+
 use chroma_storage::config::StorageConfig;
 use chroma_system::DispatcherConfig;
 use figment::providers::{Env, Format, Yaml};
 
+use crate::types::CleanupMode;
+
 const DEFAULT_CONFIG_PATH: &str = "./garbage_collector_config.yaml";
 
-#[allow(dead_code)]
+fn deserialize_duration_from_seconds<'de, D>(d: D) -> Result<Duration, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let secs: u64 = serde::Deserialize::deserialize(d)?;
+    Ok(Duration::from_secs(secs))
+}
+
 #[derive(Debug, serde::Deserialize)]
-// TODO(Sanket):  Remove this dead code annotation.
 pub(super) struct GarbageCollectorConfig {
     pub(super) service_name: String,
     pub(super) otel_endpoint: String,
-    pub(super) cutoff_time_hours: u32,
+    #[serde(
+        rename = "relative_cutoff_time_seconds",
+        deserialize_with = "deserialize_duration_from_seconds"
+    )]
+    pub(super) relative_cutoff_time: Duration,
     pub(super) max_collections_to_gc: u32,
     pub(super) gc_interval_mins: u32,
     pub(super) disallow_collections: Vec<String>,
@@ -18,6 +32,9 @@ pub(super) struct GarbageCollectorConfig {
     pub(super) dispatcher_config: DispatcherConfig,
     pub(super) storage_config: StorageConfig,
     #[serde(default)]
+    pub(super) default_mode: CleanupMode,
+    #[serde(default)]
+    pub(super) tenant_mode_overrides: Option<HashMap<String, CleanupMode>>,
     pub(super) assignment_policy: chroma_config::assignment::config::AssignmentPolicyConfig,
     #[serde(default)]
     pub(super) memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig,
@@ -57,7 +74,10 @@ mod tests {
         let config = GarbageCollectorConfig::load();
         assert_eq!(config.service_name, "garbage-collector");
         assert_eq!(config.otel_endpoint, "http://otel-collector:4317");
-        assert_eq!(config.cutoff_time_hours, 12);
+        assert_eq!(
+            config.relative_cutoff_time,
+            Duration::from_secs(12 * 60 * 60)
+        ); // 12 hours
         assert_eq!(config.max_collections_to_gc, 1000);
         assert_eq!(config.gc_interval_mins, 120);
         let empty_vec: Vec<String> = vec![];

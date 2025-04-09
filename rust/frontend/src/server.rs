@@ -80,6 +80,7 @@ pub struct Metrics {
     pre_flight_checks: Counter<u64>,
     reset: Counter<u64>,
     version: Counter<u64>,
+    get_user_identity: Counter<u64>,
     create_tenant: Counter<u64>,
     get_tenant: Counter<u64>,
     list_databases: Counter<u64>,
@@ -109,6 +110,7 @@ impl Metrics {
             pre_flight_checks: meter.u64_counter("pre_flight_checks").build(),
             reset: meter.u64_counter("reset").build(),
             version: meter.u64_counter("version").build(),
+            get_user_identity: meter.u64_counter("get_user_identity").build(),
             create_tenant: meter.u64_counter("create_tenant").build(),
             get_tenant: meter.u64_counter("get_tenant").build(),
             list_databases: meter.u64_counter("list_databases").build(),
@@ -443,7 +445,7 @@ async fn get_user_identity(
     headers: HeaderMap,
     State(server): State<FrontendServer>,
 ) -> Result<Json<GetUserIdentityResponse>, ServerError> {
-    server.metrics.version.add(1, &[]);
+    server.metrics.get_user_identity.add(1, &[]);
     Ok(Json(server.auth.get_user_identity(&headers).await?))
 }
 
@@ -546,7 +548,10 @@ async fn create_database(
     State(mut server): State<FrontendServer>,
     Json(CreateDatabasePayload { name }): Json<CreateDatabasePayload>,
 ) -> Result<Json<CreateDatabaseResponse>, ServerError> {
-    server.metrics.create_database.add(1, &[]);
+    server
+        .metrics
+        .create_database
+        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
     tracing::info!("Creating database [{}] for tenant [{}]", name, tenant);
     server
         .authenticate_and_authorize(
@@ -605,7 +610,10 @@ async fn list_databases(
     Query(ListDatabasesParams { limit, offset }): Query<ListDatabasesParams>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<ListDatabasesResponse>, ServerError> {
-    server.metrics.list_databases.add(1, &[]);
+    server
+        .metrics
+        .list_databases
+        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
     tracing::info!("Listing database for tenant [{}]", tenant);
     server
         .authenticate_and_authorize(
@@ -645,7 +653,10 @@ async fn get_database(
     Path((tenant, database)): Path<(String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<GetDatabaseResponse>, ServerError> {
-    server.metrics.get_database.add(1, &[]);
+    server
+        .metrics
+        .get_database
+        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
     tracing::info!("Getting database [{}] for tenant [{}]", database, tenant);
     server
         .authenticate_and_authorize(
@@ -685,7 +696,10 @@ async fn delete_database(
     Path((tenant, database)): Path<(String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<DeleteDatabaseResponse>, ServerError> {
-    server.metrics.delete_database.add(1, &[]);
+    server
+        .metrics
+        .delete_database
+        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
     tracing::info!("Deleting database [{}] for tenant [{}]", database, tenant);
     server
         .authenticate_and_authorize(
@@ -733,7 +747,10 @@ async fn list_collections(
     Query(ListCollectionsParams { limit, offset }): Query<ListCollectionsParams>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<ListCollectionsResponse>, ServerError> {
-    server.metrics.list_collections.add(1, &[]);
+    server
+        .metrics
+        .list_collections
+        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
     tracing::info!(
         "Listing collections in database [{}] for tenant [{}] with limit [{:?}] and offset [{:?}]",
         database,
@@ -786,7 +803,10 @@ async fn count_collections(
     Path((tenant, database)): Path<(String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<CountCollectionsResponse>, ServerError> {
-    server.metrics.count_collections.add(1, &[]);
+    server
+        .metrics
+        .count_collections
+        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
     tracing::info!("Counting number of collections in database [{database}] for tenant [{tenant}]",);
     server
         .authenticate_and_authorize(
@@ -838,7 +858,10 @@ async fn create_collection(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<CreateCollectionPayload>,
 ) -> Result<Json<Collection>, ServerError> {
-    server.metrics.create_collection.add(1, &[]);
+    server
+        .metrics
+        .create_collection
+        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
     tracing::info!("Creating collection in database [{database}] for tenant [{tenant}]");
     server
         .authenticate_and_authorize(
@@ -906,7 +929,10 @@ async fn get_collection(
     Path((tenant, database, collection_name)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<Collection>, ServerError> {
-    server.metrics.get_collection.add(1, &[]);
+    server
+        .metrics
+        .get_collection
+        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
     tracing::info!(
         "Getting collection [{collection_name}] in database [{database}] for tenant [{tenant}]"
     );
@@ -958,7 +984,13 @@ async fn update_collection(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<UpdateCollectionPayload>,
 ) -> Result<Json<UpdateCollectionResponse>, ServerError> {
-    server.metrics.update_collection.add(1, &[]);
+    server.metrics.update_collection.add(
+        1,
+        &[
+            KeyValue::new("tenant", tenant.clone()),
+            KeyValue::new("collection_id", collection_id.clone()),
+        ],
+    );
     tracing::info!(
         "Updating collection [{collection_id}] in database [{database}] for tenant [{tenant}]"
     );
@@ -1027,7 +1059,10 @@ async fn delete_collection(
     Path((tenant, database, collection_name)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<UpdateCollectionResponse>, ServerError> {
-    server.metrics.delete_collection.add(1, &[]);
+    server
+        .metrics
+        .delete_collection
+        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
     tracing::info!(
         "Deleting collection [{collection_name}] in database [{database}] for tenant [{tenant}]"
     );
@@ -1078,7 +1113,13 @@ async fn collection_add(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<AddCollectionRecordsPayload>,
 ) -> Result<(StatusCode, Json<AddCollectionRecordsResponse>), ServerError> {
-    server.metrics.collection_add.add(1, &[]);
+    server.metrics.collection_add.add(
+        1,
+        &[
+            KeyValue::new("tenant", tenant.clone()),
+            KeyValue::new("collection_id", collection_id.clone()),
+        ],
+    );
     server
         .authenticate_and_authorize(
             &headers,
@@ -1159,7 +1200,13 @@ async fn collection_update(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<UpdateCollectionRecordsPayload>,
 ) -> Result<Json<UpdateCollectionRecordsResponse>, ServerError> {
-    server.metrics.collection_update.add(1, &[]);
+    server.metrics.collection_update.add(
+        1,
+        &[
+            KeyValue::new("tenant", tenant.clone()),
+            KeyValue::new("collection_id", collection_id.clone()),
+        ],
+    );
     server
         .authenticate_and_authorize(
             &headers,
@@ -1244,7 +1291,13 @@ async fn collection_upsert(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<UpsertCollectionRecordsPayload>,
 ) -> Result<Json<UpsertCollectionRecordsResponse>, ServerError> {
-    server.metrics.collection_upsert.add(1, &[]);
+    server.metrics.collection_upsert.add(
+        1,
+        &[
+            KeyValue::new("tenant", tenant.clone()),
+            KeyValue::new("collection_id", collection_id.clone()),
+        ],
+    );
     server
         .authenticate_and_authorize(
             &headers,
@@ -1328,7 +1381,13 @@ async fn collection_delete(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<DeleteCollectionRecordsPayload>,
 ) -> Result<Json<DeleteCollectionRecordsResponse>, ServerError> {
-    server.metrics.collection_delete.add(1, &[]);
+    server.metrics.collection_delete.add(
+        1,
+        &[
+            KeyValue::new("tenant", tenant.clone()),
+            KeyValue::new("collection_id", collection_id.clone()),
+        ],
+    );
     server
         .authenticate_and_authorize(
             &headers,
@@ -1399,7 +1458,6 @@ async fn collection_count(
         1,
         &[
             KeyValue::new("tenant", tenant.clone()),
-            KeyValue::new("database", database.clone()),
             KeyValue::new("collection_id", collection_id.clone()),
         ],
     );

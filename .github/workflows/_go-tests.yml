@@ -4,37 +4,6 @@ on:
   workflow_call:
 
 jobs:
-  test:
-    strategy:
-      matrix:
-        platform: [depot-ubuntu-22.04]
-    runs-on: ${{ matrix.platform }}
-    services:
-      postgres:
-        image: postgres
-        env:
-          POSTGRES_USER: chroma
-          POSTGRES_PASSWORD: chroma
-          POSTGRES_DB: chroma
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Setup
-        uses: ./.github/actions/go
-      - name: Build and test
-        run: make test
-        env:
-          POSTGRES_HOST: localhost
-          POSTGRES_PORT: 5432
-        working-directory: go
-
   cluster-test:
     runs-on: "depot-ubuntu-22.04-16"
     # OIDC token auth for Depot & AWS
@@ -49,7 +18,7 @@ jobs:
       - uses: ./.github/actions/tilt
         with:
           depot-project-id: ${{ vars.DEPOT_PROJECT_ID }}
-      - run: bin/cluster-test.sh bash -c 'cd go && go test -timeout 30s -run ^TestNodeWatcher$ github.com/chroma-core/chroma/go/pkg/memberlist_manager'
+      - run: bin/cluster-test.sh bash -c 'cd go && make test'
       - name: Save service logs to artifact
         if: always()
         uses: ./.github/actions/export-tilt-logs

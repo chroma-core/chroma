@@ -405,7 +405,10 @@ def log_size_below_max(
     sqlite = system.instance(SqliteDB)
 
     # Ephemeral Rust client is using its own sqlite impl, which cannot be accessed from Python
-    if not system.settings.is_persistent and system.settings.chroma_api_impl == "chromadb.api.rust.RustBindingsAPI":
+    if (
+        not system.settings.is_persistent
+        and system.settings.chroma_api_impl == "chromadb.api.rust.RustBindingsAPI"
+    ):
         return
 
     if has_collection_mutated:
@@ -426,14 +429,15 @@ def log_size_below_max(
             for collection in collections
         )
 
-        limit = sync_threshold_sum if system.settings.chroma_api_impl == "chromadb.api.rust.RustBindingsAPI" else sync_threshold_sum + batch_size_sum
+        limit = (
+            sync_threshold_sum
+            if system.settings.chroma_api_impl == "chromadb.api.rust.RustBindingsAPI"
+            else sync_threshold_sum + batch_size_sum
+        )
 
         # -1 is used because the queue is always at least 1 entry long, so deletion stops before the max ack'ed sequence ID.
         # And for python impl if the batch_size != sync_threshold, the queue can have up to batch_size more entries.
-        assert (
-            _total_embedding_queue_log_size(sqlite) - 1
-            <= limit
-        )
+        assert _total_embedding_queue_log_size(sqlite) - 1 <= limit
     else:
         assert _total_embedding_queue_log_size(sqlite) == 0
 
@@ -469,7 +473,7 @@ def log_size_for_collections_match_expected(
     if system.settings.chroma_api_impl == "chromadb.api.rust.RustBindingsAPI":
         # The rust impl does not use batch size
         return
-    
+
     sqlite = system.instance(SqliteDB)
 
     if has_collection_mutated:
@@ -503,7 +507,8 @@ def log_size_for_collections_match_expected(
 @contextmanager
 def collection_deleted(client: ClientAPI, collection_name: str):
     # Invariant checks before deletion
-    assert collection_name in client.list_collections()
+    collection_names = [c.name for c in client.list_collections()]
+    assert collection_name in collection_names
     collection = client.get_collection(collection_name)
     segments = []
     if isinstance(client._server, SegmentAPI):  # type: ignore
@@ -536,7 +541,8 @@ def collection_deleted(client: ClientAPI, collection_name: str):
     yield
 
     # Invariant checks after deletion
-    assert collection_name not in client.list_collections()
+    collection_names = [c.name for c in client.list_collections()]
+    assert collection_name not in collection_names
     if len(segments) > 0:
         sysdb: SysDB = client._server._sysdb  # type: ignore
         segments_after = sysdb.get_segments(collection=collection.id)
