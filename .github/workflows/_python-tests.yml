@@ -61,6 +61,7 @@ jobs:
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
           CHROMA_RUST_BINDINGS_TEST_ONLY: "1"
+          RUST_BACKTRACE: 1
 
   test-rust-single-node-integration:
     strategy:
