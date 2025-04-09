@@ -198,6 +198,7 @@ k8s_resource(
     'memberlists.chroma.cluster:CustomResourceDefinition',
     'query-service-memberlist:MemberList',
     'compaction-service-memberlist:MemberList',
+    'garbage-collection-service-memberlist:MemberList',
 
     'sysdb-serviceaccount:serviceaccount',
     'sysdb-serviceaccount-rolebinding:RoleBinding',
@@ -245,6 +246,6 @@ k8s_resource('jaeger', resource_deps=['k8s_setup'], labels=["observability"])
 k8s_resource('grafana', resource_deps=['k8s_setup'], labels=["observability"])
 k8s_resource('prometheus', resource_deps=['k8s_setup'], labels=["observability"])
 k8s_resource('otel-collector', resource_deps=['k8s_setup'], labels=["observability"])
-k8s_resource('garbage-collector', resource_deps=['k8s_setup'], labels=["chroma"])
+k8s_resource('garbage-collector', resource_deps=['k8s_setup', 'minio-deployment'], labels=["chroma"])
 # Local S3
 k8s_resource('minio-deployment', resource_deps=['k8s_setup'], labels=["debug"], port_forwards=['9000:9000', '9005:9005'])

@@ -75,6 +75,7 @@ pub async fn garbage_collector_service_entrypoint() -> Result<(), Box<dyn std::e
 
     let garbage_collector_handle = system.start_component(garbage_collector_component);
     memberlist.subscribe(garbage_collector_handle.receiver());
+    let _memberlist_handle = system.start_component(memberlist);
 
     // Keep the service running and handle shutdown signals
     let mut sigterm = signal(SignalKind::terminate())?;

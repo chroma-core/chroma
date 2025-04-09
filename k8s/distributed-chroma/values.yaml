@@ -137,31 +137,3 @@ garbageCollector:
     requests:
       cpu: '100m'
       memory: '128Mi'
-  configuration: |
-    service_name: "garbage-collector"
-    otel_endpoint: "http://otel-collector:4317"
-    relative_cutoff_time_seconds: 43200 # GC all versions created at time < now() - relative_cutoff_time_seconds (12 hours)
-    max_collections_to_gc: 1000
-    gc_interval_mins: 120
-    disallow_collections: []
-    sysdb_config:
-      host: "sysdb.chroma"
-      port: 50051
-      connect_timeout_ms: 60000
-      request_timeout_ms: 60000
-    dispatcher_config:
-      num_worker_threads: 4
-      dispatcher_queue_size: 100
-      worker_queue_size: 100
-    storage_config:
-      s3:
-        bucket: "chroma-storage"
-      # object_store:
-      #   bucket:
-      #     name: "chroma-storage"
-      #     type: "minio"
-      #   credentials: "Minio"
-      #   connect_timeout_ms: 5000
-      #   request_timeout_ms: 30000
-      #   upload_part_size_bytes: 536870912
-      #   download_part_size_bytes: 8388608

@@ -262,7 +262,12 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
             )
             .await
             .expect("Failed to get collections to gc");
-        tracing::info!("Got {} collections to gc", collections_to_gc.len());
+        tracing::info!("Got {} total collections", collections_to_gc.len());
+        let collections_to_gc = self.filter_collections(collections_to_gc);
+        tracing::info!(
+            "Filtered to {} collections to garbage collect",
+            collections_to_gc.len()
+        );
 
         let absolute_cutoff_time =
             DateTime::<Utc>::from(SystemTime::now() - self.relative_cutoff_time);

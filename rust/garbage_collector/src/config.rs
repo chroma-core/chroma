@@ -36,7 +36,6 @@ pub(super) struct GarbageCollectorConfig {
     #[serde(default)]
     pub(super) tenant_mode_overrides: Option<HashMap<String, CleanupMode>>,
     pub(super) assignment_policy: chroma_config::assignment::config::AssignmentPolicyConfig,
-    #[serde(default)]
     pub(super) memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig,
     pub my_member_id: String,
 }
