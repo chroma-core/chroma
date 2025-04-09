@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::{SystemTime, SystemTimeError, UNIX_EPOCH};
 
 use async_trait::async_trait;
@@ -96,7 +97,7 @@ impl FetchLogOperator {
                 .step_by(window_size)
                 .map(|x| (x, std::cmp::min(x + window_size as u64, limit_offset)))
                 .collect::<Vec<_>>();
-            tracing::info!("Pulling ranges {ranges:?}");
+            let sema = Arc::new(tokio::sync::Semaphore::new(10));
             let batch_readers = ranges
                 .into_iter()
                 .map(|(start, limit)| {
@@ -104,7 +105,9 @@ impl FetchLogOperator {
                     let collection_uuid = self.collection_uuid;
                     let num_records = (limit - start) as i32;
                     let start = start as i64;
+                    let sema = Arc::clone(&sema);
                     async move {
+                        let _permit = sema.acquire().await.unwrap();
                         log_client
                             .read(collection_uuid, start, num_records, Some(timestamp))
                             .await

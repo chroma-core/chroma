@@ -170,23 +170,33 @@ func (r *LogRepository) GetLastCompactedOffsetForCollection(ctx context.Context,
 }
 
 func (r *LogRepository) GetBoundsForCollection(ctx context.Context, collectionId string) (start, limit int64, err error) {
+	rollback := true
 	var tx pgx.Tx
 	tx, err = r.conn.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		trace_log.Error("Error in begin transaction for garbage collection", zap.Error(err))
-		tx.Rollback(ctx)
 		return
 	}
+	defer func() {
+		if rollback {
+			tx.Rollback(ctx)
+		}
+	}()
 	queriesWithTx := r.queries.WithTx(tx)
 	bounds, err := queriesWithTx.GetBoundsForCollection(ctx, collectionId)
 	if err != nil {
 		trace_log.Error("Error in getting minimum and maximum offset for collection", zap.Error(err), zap.String("collectionId", collectionId))
-		tx.Rollback(ctx)
 		return
 	}
+	var totalUncompactedDepth int64
+	totalUncompactedDepth, err = queriesWithTx.GetTotalUncompactedRecordsCount(ctx)
+	if err != nil {
+		trace_log.Error("Error in getting total uncompacted records count from collection table", zap.Error(err))
+	}
+	rollback = false;
 	tx.Commit(ctx)
-	start = bounds.RecordCompactionOffsetPosition
-	limit = bounds.RecordEnumerationOffsetPosition + 1
+	start = bounds.RecordEnumerationOffsetPosition
+	limit = start + totalUncompactedDepth
 	err = nil
 	return
 }
