@@ -50,17 +50,6 @@ def install_version(version: str, dep_overrides: Dict[str, str]) -> None:
 def install(pkg: str, path: str, dep_overrides: Dict[str, str]) -> int:
     # -q -q to suppress pip output to ERROR level
     # https://pip.pypa.io/en/stable/cli/pip/#quiet
-    print("Purging pip cache")
-    subprocess.check_call(
-        [
-            sys.executable,
-            "-m",
-            "pip",
-            "cache",
-            "purge",
-        ]
-    )
-
     command = [sys.executable, "-m", "pip", "-q", "-q", "install", pkg]
 
     for dep, operator_version in dep_overrides.items():

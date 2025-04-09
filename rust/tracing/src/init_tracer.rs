@@ -91,7 +91,9 @@ pub fn init_otel_layer(
     // Prepare meter.
     let metric_exporter = opentelemetry_otlp::MetricExporter::builder()
         .with_tonic()
-        .with_endpoint(otel_endpoint)
+        .with_endpoint(
+            std::env::var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT").unwrap_or(otel_endpoint.clone()),
+        )
         .build()
         .expect("could not build metric exporter");
 

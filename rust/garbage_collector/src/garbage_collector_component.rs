@@ -189,6 +189,11 @@ impl Component for GarbageCollector {
             || Some(span!(parent: None, tracing::Level::INFO, "Scheduled garbage collection")),
         );
     }
+
+    fn on_stop_timeout(&self) -> Duration {
+        // NOTE: Increased timeout for remaining jobs to finish
+        Duration::from_secs(60)
+    }
 }
 
 impl GarbageCollector {
@@ -252,12 +257,20 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
         _message: GarbageCollectMessage,
         ctx: &ComponentContext<Self>,
     ) -> Self::Result {
+        let absolute_cutoff_time =
+            DateTime::<Utc>::from(SystemTime::now() - self.relative_cutoff_time);
+        tracing::info!(
+            "Using absolute cutoff time: {} (relative cutoff time: {:?})",
+            absolute_cutoff_time,
+            self.relative_cutoff_time
+        );
+
         // Get all collections to gc and create gc orchestrator for each.
         tracing::info!("Getting collections to gc");
         let collections_to_gc = self
             .sysdb_client
             .get_collections_to_gc(
-                Some(self.relative_cutoff_time.as_secs()),
+                Some(absolute_cutoff_time.into()),
                 Some(self.max_collections_to_gc.into()),
             )
             .await
@@ -267,14 +280,6 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
         tracing::info!(
             "Filtered to {} collections to garbage collect",
             collections_to_gc.len()
-        );
-
-        let absolute_cutoff_time =
-            DateTime::<Utc>::from(SystemTime::now() - self.relative_cutoff_time);
-        tracing::info!(
-            "Using absolute cutoff time: {} (relative cutoff time: {:?})",
-            absolute_cutoff_time,
-            self.relative_cutoff_time
         );
 
         let mut jobs = FuturesUnordered::new();

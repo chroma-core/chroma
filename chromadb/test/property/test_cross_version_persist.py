@@ -133,7 +133,7 @@ def configurations(versions: List[str]) -> List[Tuple[str, Settings]]:
                 chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
                 allow_reset=True,
                 is_persistent=True,
-                persist_directory=tempfile.gettempdir() + "/persistence_test_chromadb",
+                persist_directory=tempfile.mkdtemp(),
             ),
         )
         for version in versions
@@ -141,7 +141,7 @@ def configurations(versions: List[str]) -> List[Tuple[str, Settings]]:
 
 
 test_old_versions = versions()
-base_install_dir = tempfile.gettempdir() + "/persistence_test_chromadb_versions"
+base_install_dir = tempfile.mkdtemp()
 
 
 # This fixture is not shared with the rest of the tests because it is unique in how it

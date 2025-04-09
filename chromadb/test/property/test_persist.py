@@ -29,10 +29,10 @@ from hypothesis.stateful import (
     MultipleResults,
 )
 import os
-import shutil
 from chromadb.api.client import Client as ClientCreator
 from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
 import numpy as np
+import tempfile
 
 CreatePersistAPI = Callable[[], ServerAPI]
 
@@ -46,6 +46,7 @@ configurations = (
             chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
             allow_reset=True,
             is_persistent=True,
+            persist_directory=tempfile.mkdtemp(),
         )
     ]
     if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ
@@ -58,6 +59,7 @@ configurations = (
             chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
             allow_reset=True,
             is_persistent=True,
+            persist_directory=tempfile.mkdtemp(),
         ),
     ]
 )
@@ -65,15 +67,7 @@ configurations = (
 
 @pytest.fixture(scope="module", params=configurations)
 def settings(request: pytest.FixtureRequest) -> Generator[Settings, None, None]:
-    configuration = request.param
-    save_path = configuration.persist_directory
-    # Create if it doesn't exist
-    if not os.path.exists(save_path):
-        os.makedirs(save_path, exist_ok=True)
-    yield configuration
-    # Remove if it exists
-    if os.path.exists(save_path):
-        shutil.rmtree(save_path, ignore_errors=True)
+    yield request.param
 
 
 collection_st = st.shared(
