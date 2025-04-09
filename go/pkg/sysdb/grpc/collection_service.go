@@ -434,8 +434,13 @@ func (s *Server) FlushCollectionCompaction(ctx context.Context, req *coordinator
 }
 
 func (s *Server) ListCollectionsToGc(ctx context.Context, req *coordinatorpb.ListCollectionsToGcRequest) (*coordinatorpb.ListCollectionsToGcResponse, error) {
-	// Dumb implementation that just returns ALL the collections for now.
-	collectionsToGc, err := s.coordinator.ListCollectionsToGc(ctx, req.CutoffTimeSecs, req.Limit)
+	absoluteCutoffTimeSecs := (*uint64)(nil)
+	if req.CutoffTime != nil {
+		cutoffTime := uint64(req.CutoffTime.Seconds)
+		absoluteCutoffTimeSecs = &cutoffTime
+	}
+
+	collectionsToGc, err := s.coordinator.ListCollectionsToGc(ctx, absoluteCutoffTimeSecs, req.Limit)
 	if err != nil {
 		log.Error("ListCollectionsToGc failed", zap.Error(err))
 		return nil, grpcutils.BuildInternalGrpcError(err.Error())
