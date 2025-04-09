@@ -85,6 +85,12 @@ impl FetchLogOperator {
                 self.start_log_offset_id,
                 limit_offset
             );
+            if let Some(maximum_fetch_count) = self.maximum_fetch_count {
+                limit_offset = std::cmp::min(
+                    limit_offset,
+                    self.start_log_offset_id + maximum_fetch_count as u64,
+                );
+            }
             let window_size: usize = self.batch_size as usize;
             let ranges = (self.start_log_offset_id..limit_offset)
                 .step_by(window_size)
@@ -100,7 +106,7 @@ impl FetchLogOperator {
                     let start = start as i64;
                     async move {
                         log_client
-                            .read(collection_uuid, start, num_records, None)
+                            .read(collection_uuid, start, num_records, Some(timestamp))
                             .await
                     }
                 })
