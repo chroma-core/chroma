@@ -13,6 +13,7 @@ collections_with_segments_provider:
   cache:
     lru:
       capacity: 1000
+  cache_ttl_secs: 60
   permitted_parallelism: 180
   cache_invalidation_retry_policy:
     delay_ms: 0
