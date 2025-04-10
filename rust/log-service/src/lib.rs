@@ -652,11 +652,7 @@ impl LogService for LogServer {
         let collection_id = Uuid::parse_str(&scout_logs.collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
-        tracing::info!(
-            "Scouting logs for collection {} from offset {}",
-            collection_id,
-            scout_logs.start_from_offset,
-        );
+        tracing::info!("Scouting logs for collection {}", collection_id,);
         let prefix = storage_prefix_for_log(collection_id);
         let log_reader = LogReader::new(
             self.config.reader.clone(),

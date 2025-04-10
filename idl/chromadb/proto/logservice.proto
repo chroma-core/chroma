@@ -16,7 +16,6 @@ message PushLogsResponse {
 
 message ScoutLogsRequest {
   string collection_id = 1;
-  int64 start_from_offset = 2;
 }
 
 message ScoutLogsResponse {

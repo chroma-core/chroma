@@ -48,13 +48,11 @@ func (s *logServer) ScoutLogs(ctx context.Context, req *logservicepb.ScoutLogsRe
 	var collectionID types.UniqueID
 	collectionID, err = types.ToUniqueID(&req.CollectionId)
 	if err != nil {
-		// TODO HANDLE ERROR
 		return
 	}
 	var limit int64
 	_, limit, err = s.lr.GetBoundsForCollection(ctx, collectionID.String())
 	if err != nil {
-		// TODO HANDLE ERROR
 		return
 	}
 	res = &logservicepb.ScoutLogsResponse {
