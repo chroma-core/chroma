@@ -52,24 +52,24 @@ def default_collection_configuration() -> CollectionConfiguration:
 
 
 def load_collection_configuration_from_json_str(
-    json_str: str,
+    config_json_str: str,
 ) -> CollectionConfiguration:
-    json_map = json.loads(json_str)
-    return load_collection_configuration_from_json(json_map)
+    config_json_map = json.loads(config_json_str)
+    return load_collection_configuration_from_json(config_json_map)
 
 
 # TODO: make warnings prettier and add link to migration docs
 def load_collection_configuration_from_json(
-    json_map: Dict[str, Any]
+    config_json_map: Dict[str, Any]
 ) -> CollectionConfiguration:
-    if json_map.get("hnsw") is None:
-        if json_map.get("embedding_function") is None:
+    if config_json_map.get("hnsw") is None:
+        if config_json_map.get("embedding_function") is None:
             return CollectionConfiguration(
                 hnsw=None,
                 embedding_function=None,
             )
         else:
-            ef_config = json_map["embedding_function"]
+            ef_config = config_json_map["embedding_function"]
             if ef_config["type"] == "legacy":
                 warnings.warn(
                     "legacy embedding function config",
@@ -92,13 +92,13 @@ def load_collection_configuration_from_json(
                     embedding_function=ef.build_from_config(ef_config["config"]),
                 )
     else:
-        if json_map.get("embedding_function") is None:
+        if config_json_map.get("embedding_function") is None:
             return CollectionConfiguration(
-                hnsw=cast(HNSWConfiguration, json_map["hnsw"]),
+                hnsw=cast(HNSWConfiguration, config_json_map["hnsw"]),
                 embedding_function=None,
             )
         else:
-            ef_config = json_map["embedding_function"]
+            ef_config = config_json_map["embedding_function"]
             if ef_config["type"] == "legacy":
                 warnings.warn(
                     "legacy embedding function config",
@@ -106,7 +106,7 @@ def load_collection_configuration_from_json(
                     stacklevel=2,
                 )
                 return CollectionConfiguration(
-                    hnsw=cast(HNSWConfiguration, json_map["hnsw"]),
+                    hnsw=cast(HNSWConfiguration, config_json_map["hnsw"]),
                     embedding_function=None,
                 )
             else:
@@ -117,7 +117,7 @@ def load_collection_configuration_from_json(
                         f"Embedding function {ef_config['name']} not found. Add @register_embedding_function decorator to the class definition."
                     )
                 return CollectionConfiguration(
-                    hnsw=cast(HNSWConfiguration, json_map["hnsw"]),
+                    hnsw=cast(HNSWConfiguration, config_json_map["hnsw"]),
                     embedding_function=ef.build_from_config(ef_config["config"]),
                 )
 
