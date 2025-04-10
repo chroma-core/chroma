@@ -27,3 +27,8 @@ assignment_policy:
   rendezvous_hashing:
     hasher: Murmur3
 my_member_id: "garbage-collector-0"
+memberlist_provider:
+  custom_resource:
+    kube_namespace: "chroma"
+    memberlist_name: "garbage-collection-service-memberlist"
+    queue_size: 100
