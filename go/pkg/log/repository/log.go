@@ -174,7 +174,7 @@ func (r *LogRepository) GetBoundsForCollection(ctx context.Context, collectionId
 	var tx pgx.Tx
 	tx, err = r.conn.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
-		trace_log.Error("Error in begin transaction for garbage collection", zap.Error(err))
+		trace_log.Error("Error in begin transaction for get bounds", zap.Error(err))
 		return
 	}
 	defer func() {
