@@ -202,7 +202,7 @@ impl GrpcLog {
         collection_id: CollectionUuid,
         starting_offset: u64,
     ) -> Result<u64, Box<dyn ChromaError>> {
-        tracing::info!("scout logs for {}", starting_offset);
+        tracing::info!("scout logs staring offset: {}", starting_offset);
         let request = self
             .client_for(collection_id)
             .scout_logs(chroma_proto::ScoutLogsRequest {
