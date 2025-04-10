@@ -65,7 +65,7 @@ pub async fn frontend_service_entrypoint_with_config_system_registry(
 ) {
     if let Some(config) = &config.open_telemetry {
         let tracing_layers = vec![
-            init_global_filter_layer(),
+            // init_global_filter_layer(),
             init_otel_layer(&config.service_name, &config.endpoint),
             init_stdout_layer(),
         ];
