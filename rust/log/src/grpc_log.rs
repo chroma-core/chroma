@@ -18,6 +18,8 @@ use uuid::Uuid;
 pub enum GrpcPullLogsError {
     #[error("Failed to fetch")]
     FailedToPullLogs(#[from] tonic::Status),
+    #[error("Failed to scout logs: {0}")]
+    FailedToScoutLogs(tonic::Status),
     #[error("Failed to convert proto embedding record into EmbeddingRecord")]
     ConversionError(#[from] RecordConversionError),
 }
@@ -26,6 +28,7 @@ impl ChromaError for GrpcPullLogsError {
     fn code(&self) -> ErrorCodes {
         match self {
             GrpcPullLogsError::FailedToPullLogs(err) => err.code().into(),
+            GrpcPullLogsError::FailedToScoutLogs(err) => err.code().into(),
             GrpcPullLogsError::ConversionError(_) => ErrorCodes::Internal,
         }
     }
@@ -192,6 +195,29 @@ impl GrpcLog {
             }
         }
         &mut self.client
+    }
+
+    pub(super) async fn scout_logs(
+        &mut self,
+        collection_id: CollectionUuid,
+        starting_offset: u64,
+    ) -> Result<u64, Box<dyn ChromaError>> {
+        let request = self
+            .client_for(collection_id)
+            .scout_logs(chroma_proto::ScoutLogsRequest {
+                collection_id: collection_id.0.to_string(),
+            });
+        let response = request.await;
+        let response = match response {
+            Ok(response) => response,
+            Err(err) => {
+                tracing::error!("Failed to scout logs: {}", err);
+                return Err(Box::new(GrpcPullLogsError::FailedToScoutLogs(err)));
+            }
+        };
+        let scout = response.into_inner();
+        tracing::info!("scout logs: {} -> {}", starting_offset, scout.limit_offset);
+        Ok(scout.limit_offset as u64)
     }
 
     pub(super) async fn read(
