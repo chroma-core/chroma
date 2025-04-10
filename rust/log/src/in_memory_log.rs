@@ -136,7 +136,7 @@ impl InMemoryLog {
             .collection_to_log
             .get(&collection_id)
             .iter()
-            .flat_map(|x| x.iter().map(|rec| rec.log_offset).max())
+            .flat_map(|x| x.iter().map(|rec| rec.log_offset + 1).max())
             .max()
             .unwrap_or(starting_offset as i64) as u64;
         if answer >= starting_offset {

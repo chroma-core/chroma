@@ -195,7 +195,7 @@ func (r *LogRepository) GetBoundsForCollection(ctx context.Context, collectionId
 	}
 	rollback = false;
 	tx.Commit(ctx)
-	start = bounds.RecordEnumerationOffsetPosition
+	start = bounds.RecordCompactionOffsetPosition
 	limit = start + totalUncompactedDepth
 	err = nil
 	return
