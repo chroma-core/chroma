@@ -14,7 +14,7 @@ use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Layer};
 
 pub fn init_global_filter_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
     EnvFilter::new(std::env::var("RUST_LOG").unwrap_or_else(|_| {
-        "error,".to_string()
+        "error,opentelemetry_sdk=info,".to_string()
             + &vec![
                 "chroma",
                 "chroma-blockstore",
@@ -139,6 +139,10 @@ pub fn init_stdout_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
                     .module_path()
                     .unwrap_or("")
                     .starts_with("garbage_collector")
+                || metadata
+                    .module_path()
+                    .unwrap_or("")
+                    .starts_with("opentelemetry_sdk")
         }))
         .with_filter(tracing_subscriber::filter::LevelFilter::INFO)
         .boxed()
