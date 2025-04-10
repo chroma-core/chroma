@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use arrow::array::{ArrayRef, BinaryArray, RecordBatch, UInt64Array};
-use chroma_storage::admissioncontrolleds3::{StorageRequest, StorageRequestPriority};
+use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
 use chroma_storage::{PutOptions, Storage, StorageError};
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
@@ -491,12 +491,12 @@ pub async fn upload_parquet(
     loop {
         tracing::info!("upload_parquet: {:?}", path);
         let (buffer, setsum) = construct_parquet(log_position, &messages)?;
-        let storage_request = StorageRequest {
-            key: path.clone(),
-            priority: StorageRequestPriority::High,
-        };
         match storage
-            .put_bytes(storage_request, buffer.clone(), PutOptions::if_not_exists())
+            .put_bytes(
+                &path,
+                buffer.clone(),
+                PutOptions::if_not_exists(StorageRequestPriority::P0),
+            )
             .await
         {
             Ok(_) => {

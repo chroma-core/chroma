@@ -1,6 +1,7 @@
 use crate::{
     config::{RateLimitingConfig, StorageConfig},
     s3::S3Storage,
+    GetOptions,
 };
 use crate::{ETag, PutOptions, StorageConfigError};
 use async_trait::async_trait;
@@ -50,26 +51,21 @@ pub struct AdmissionControlledS3Storage {
     rate_limiter: Arc<RateLimitPolicy>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize, Eq, PartialEq, Default)]
 pub enum StorageRequestPriority {
-    High = 0,
-    Medium = 1,
+    #[default]
+    P0 = 0,
+    P1 = 1,
 }
 
 impl StorageRequestPriority {
-    pub fn max() -> Self {
-        StorageRequestPriority::Medium
+    pub fn lowest() -> Self {
+        StorageRequestPriority::P1
     }
 
     pub fn as_usize(self) -> usize {
         self as usize
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct StorageRequest {
-    pub key: String,
-    pub priority: StorageRequestPriority,
 }
 
 impl AdmissionControlledS3Storage {
@@ -95,9 +91,10 @@ impl AdmissionControlledS3Storage {
     async fn parallel_fetch(
         storage: S3Storage,
         rate_limiter: Arc<RateLimitPolicy>,
-        request: StorageRequest,
+        key: String,
+        options: GetOptions,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
-        let (content_length, ranges, e_tag) = storage.get_key_ranges(&request.key).await?;
+        let (content_length, ranges, e_tag) = storage.get_key_ranges(&key).await?;
 
         // .buffer_unordered() below will hang if the range is empty (https://github.com/rust-lang/futures-rs/issues/2740), so we short-circuit here
         if content_length == 0 {
@@ -118,8 +115,8 @@ impl AdmissionControlledS3Storage {
         for (range, output_slice) in range_and_output_slices {
             let rate_limiter_clone = rate_limiter.clone();
             let storage_clone = storage.clone();
-            let key_clone = request.key.clone();
-            let priority = request.priority;
+            let key_clone = key.clone();
+            let priority = options.priority;
             let fut = async move {
                 // Acquire permit.
                 let token = rate_limiter_clone.enter(priority).await;
@@ -166,12 +163,13 @@ impl AdmissionControlledS3Storage {
     async fn read_from_storage(
         storage: S3Storage,
         rate_limiter: Arc<RateLimitPolicy>,
-        request: StorageRequest,
+        key: String,
+        options: GetOptions,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
         // Acquire permit.
-        let _permit = rate_limiter.enter(request.priority).await;
+        let _permit = rate_limiter.enter(options.priority).await;
         storage
-            .get_with_e_tag(&request.key)
+            .get_with_e_tag(&key)
             .instrument(tracing::trace_span!(parent: Span::current(), "S3 get"))
             .await
         // Permit gets dropped here due to RAII.
@@ -179,7 +177,8 @@ impl AdmissionControlledS3Storage {
 
     pub async fn get_parallel(
         &self,
-        request: StorageRequest,
+        key: String,
+        options: GetOptions,
     ) -> Result<Arc<Vec<u8>>, StorageError> {
         // If there is a duplicate request and the original request finishes
         // before we look it up in the map below then we will end up with another
@@ -187,21 +186,22 @@ impl AdmissionControlledS3Storage {
         let future_to_await;
         {
             let mut requests = self.outstanding_read_requests.lock();
-            let maybe_inflight = requests.get(&request.key).cloned();
+            let maybe_inflight = requests.get(&key).cloned();
             future_to_await = match maybe_inflight {
                 Some(fut) => {
-                    tracing::info!("[AdmissionControlledS3] Found inflight request to s3 for request: {:?}. Deduping", request);
+                    tracing::trace!("[AdmissionControlledS3] Found inflight request to s3 for key: {:?}. Deduping", key);
                     fut
                 }
                 None => {
                     let get_parallel_storage_future = AdmissionControlledS3Storage::parallel_fetch(
                         self.storage.clone(),
                         self.rate_limiter.clone(),
-                        request.clone(),
+                        key.clone(),
+                        options,
                     )
                     .boxed()
                     .shared();
-                    requests.insert(request.key.clone(), get_parallel_storage_future.clone());
+                    requests.insert(key.clone(), get_parallel_storage_future.clone());
                     get_parallel_storage_future
                 }
             };
@@ -210,20 +210,21 @@ impl AdmissionControlledS3Storage {
         let res = future_to_await.await;
         {
             let mut requests = self.outstanding_read_requests.lock();
-            requests.remove(&request.key);
+            requests.remove(&key);
         }
         Ok(res?.0)
     }
 
-    pub async fn get(&self, request: StorageRequest) -> Result<Arc<Vec<u8>>, StorageError> {
-        self.get_with_e_tag(request)
+    pub async fn get(&self, key: &str, options: GetOptions) -> Result<Arc<Vec<u8>>, StorageError> {
+        self.get_with_e_tag(key, options)
             .await
             .map(|(bytes, _e_tag)| bytes)
     }
 
     pub async fn get_with_e_tag(
         &self,
-        request: StorageRequest,
+        key: &str,
+        options: GetOptions,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
         // If there is a duplicate request and the original request finishes
         // before we look it up in the map below then we will end up with another
@@ -231,18 +232,19 @@ impl AdmissionControlledS3Storage {
         let future_to_await;
         {
             let mut requests = self.outstanding_read_requests.lock();
-            let maybe_inflight = requests.get(&request.key).cloned();
+            let maybe_inflight = requests.get(key).cloned();
             future_to_await = match maybe_inflight {
                 Some(fut) => fut,
                 None => {
                     let get_storage_future = AdmissionControlledS3Storage::read_from_storage(
                         self.storage.clone(),
                         self.rate_limiter.clone(),
-                        request.clone(),
+                        key.to_string(),
+                        options,
                     )
                     .boxed()
                     .shared();
-                    requests.insert(request.key.clone(), get_storage_future.clone());
+                    requests.insert(key.to_string(), get_storage_future.clone());
                     get_storage_future
                 }
             };
@@ -251,14 +253,14 @@ impl AdmissionControlledS3Storage {
         let res = future_to_await.await;
         {
             let mut requests = self.outstanding_read_requests.lock();
-            requests.remove(&request.key);
+            requests.remove(key);
         }
         res
     }
 
     async fn oneshot_upload(
         &self,
-        request: StorageRequest,
+        key: &str,
         total_size_bytes: usize,
         create_bytestream_fn: impl Fn(
             Range<usize>,
@@ -266,21 +268,16 @@ impl AdmissionControlledS3Storage {
         options: PutOptions,
     ) -> Result<Option<ETag>, StorageError> {
         // Acquire permit.
-        let _permit = self.rate_limiter.enter(request.priority).await;
+        let _permit = self.rate_limiter.enter(options.priority).await;
         self.storage
-            .oneshot_upload(
-                &request.key,
-                total_size_bytes,
-                create_bytestream_fn,
-                options,
-            )
+            .oneshot_upload(key, total_size_bytes, create_bytestream_fn, options)
             .await
         // Permit gets dropped due to RAII.
     }
 
     async fn multipart_upload(
         &self,
-        request: StorageRequest,
+        key: &str,
         total_size_bytes: usize,
         create_bytestream_fn: impl Fn(
             Range<usize>,
@@ -289,16 +286,16 @@ impl AdmissionControlledS3Storage {
     ) -> Result<Option<ETag>, StorageError> {
         let (part_count, size_of_last_part, upload_id) = self
             .storage
-            .prepare_multipart_upload(&request.key, total_size_bytes)
+            .prepare_multipart_upload(key, total_size_bytes)
             .await?;
         let mut upload_parts = Vec::new();
         for part_index in 0..part_count {
             // Acquire token.
-            let _permit = self.rate_limiter.enter(request.priority).await;
+            let _permit = self.rate_limiter.enter(options.priority).await;
             let completed_part = self
                 .storage
                 .upload_part(
-                    &request.key,
+                    key,
                     &upload_id,
                     part_count,
                     part_index,
@@ -311,13 +308,13 @@ impl AdmissionControlledS3Storage {
         }
 
         self.storage
-            .finish_multipart_upload(&request.key, &upload_id, upload_parts, options)
+            .finish_multipart_upload(key, &upload_id, upload_parts, options)
             .await
     }
 
     async fn put_object(
         &self,
-        request: StorageRequest,
+        key: &str,
         total_size_bytes: usize,
         create_bytestream_fn: impl Fn(
             Range<usize>,
@@ -326,19 +323,20 @@ impl AdmissionControlledS3Storage {
     ) -> Result<Option<ETag>, StorageError> {
         if self.storage.is_oneshot_upload(total_size_bytes) {
             return self
-                .oneshot_upload(request, total_size_bytes, create_bytestream_fn, options)
+                .oneshot_upload(key, total_size_bytes, create_bytestream_fn, options)
                 .await;
         }
 
-        self.multipart_upload(request, total_size_bytes, create_bytestream_fn, options)
+        self.multipart_upload(key, total_size_bytes, create_bytestream_fn, options)
             .await?;
         Ok(None)
     }
 
     pub async fn put_file(
         &self,
-        request: StorageRequest,
+        key: &str,
         path: &str,
+        options: PutOptions,
     ) -> Result<Option<ETag>, StorageError> {
         let file_size = tokio::fs::metadata(path)
             .await
@@ -350,7 +348,7 @@ impl AdmissionControlledS3Storage {
         let path = path.to_string();
 
         self.put_object(
-            request,
+            key,
             file_size as usize,
             move |range| {
                 let path = path.clone();
@@ -368,21 +366,21 @@ impl AdmissionControlledS3Storage {
                 }
                 .boxed()
             },
-            PutOptions::default(),
+            options,
         )
         .await
     }
 
     pub async fn put_bytes(
         &self,
-        request: StorageRequest,
+        key: &str,
         bytes: Vec<u8>,
         options: PutOptions,
     ) -> Result<Option<ETag>, StorageError> {
         let bytes = Arc::new(Bytes::from(bytes));
 
         self.put_object(
-            request,
+            key,
             bytes.len(),
             move |range| {
                 let bytes = bytes.clone();
@@ -451,10 +449,13 @@ impl CountBasedPolicy {
     }
     async fn acquire(&self, priority: StorageRequestPriority) -> SemaphorePermit<'_> {
         // TODO(Sanket): Check for index out of bound.
-        for lower_pri in StorageRequestPriority::as_usize(priority)
-            ..=StorageRequestPriority::as_usize(StorageRequestPriority::max())
+        for curr_pri in StorageRequestPriority::as_usize(priority)
+            ..=std::cmp::min(
+                self.remaining_tokens.len() - 1,
+                StorageRequestPriority::as_usize(StorageRequestPriority::lowest()),
+            )
         {
-            match self.remaining_tokens[lower_pri].try_acquire() {
+            match self.remaining_tokens[curr_pri].try_acquire() {
                 Ok(token) => {
                     return token;
                 }
@@ -497,12 +498,7 @@ mod tests {
 
     use rand::{distributions::Alphanumeric, Rng};
 
-    use crate::{
-        admissioncontrolleds3::{
-            AdmissionControlledS3Storage, StorageRequest, StorageRequestPriority,
-        },
-        s3::S3Storage,
-    };
+    use crate::{admissioncontrolleds3::AdmissionControlledS3Storage, s3::S3Storage, GetOptions};
 
     fn get_s3_client() -> aws_sdk_s3::Client {
         // Set up credentials assuming minio is running locally
@@ -551,13 +547,9 @@ mod tests {
             .take(value_size)
             .map(char::from)
             .collect();
-        let request = StorageRequest {
-            key: test_data_key.clone(),
-            priority: StorageRequestPriority::High,
-        };
         admission_controlled_storage
             .put_bytes(
-                request.clone(),
+                &test_data_key,
                 test_data_value_string.as_bytes().to_vec(),
                 crate::PutOptions::default(),
             )
@@ -571,7 +563,7 @@ mod tests {
 
         // Parallel fetch.
         let buf = admission_controlled_storage
-            .get_parallel(request)
+            .get_parallel(test_data_key, GetOptions::default())
             .await
             .unwrap();
 
@@ -595,20 +587,19 @@ mod tests {
             AdmissionControlledS3Storage::new_with_default_policy(storage);
 
         let test_data = "test data";
-        let request = StorageRequest {
-            key: "test".to_string(),
-            priority: StorageRequestPriority::High,
-        };
         admission_controlled_storage
             .put_bytes(
-                request.clone(),
+                "test",
                 test_data.as_bytes().to_vec(),
                 crate::PutOptions::default(),
             )
             .await
             .unwrap();
 
-        let buf = admission_controlled_storage.get(request).await.unwrap();
+        let buf = admission_controlled_storage
+            .get("test", GetOptions::default())
+            .await
+            .unwrap();
         let buf = String::from_utf8(Arc::unwrap_or_clone(buf)).unwrap();
         assert_eq!(buf, test_data);
     }

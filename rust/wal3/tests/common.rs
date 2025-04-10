@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use chroma_storage::{admissioncontrolleds3::{StorageRequest, StorageRequestPriority}, Storage};
+use chroma_storage::{admissioncontrolleds3::StorageRequestPriority, GetOptions, Storage};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
 extern crate wal3;
@@ -71,12 +71,8 @@ pub struct SnapshotCondition {
 impl SnapshotCondition {
     pub async fn assert(&self, storage: &Storage, prefix: &str, path: &str) {
         let key = format!("{prefix}/{}", path);
-        let storage_request = StorageRequest {
-            key,
-            priority: StorageRequestPriority::High,
-        };
         let json = storage
-            .get(storage_request)
+            .get(&key, GetOptions::new(StorageRequestPriority::P0))
             .await
             .expect("post condition expects snapshot to exist");
         let snapshot = serde_json::from_slice::<Snapshot>(&json)
@@ -110,12 +106,8 @@ pub struct FragmentCondition {
 impl FragmentCondition {
     pub async fn assert(&self, storage: &Storage, prefix: &str) {
         let key = format!("{prefix}/{}", self.path);
-        let storage_request = StorageRequest {
-            key,
-            priority: StorageRequestPriority::High,
-        };
         let parquet = storage
-            .get(storage_request)
+            .get(&key, GetOptions::new(StorageRequestPriority::P0))
             .await
             .expect("post condition expects fragment to exist");
         let builder = ParquetRecordBatchReaderBuilder::try_new(Bytes::from_owner(parquet.to_vec()))
@@ -166,12 +158,10 @@ pub async fn assert_conditions(storage: &Storage, prefix: &str, postconditions: 
         match postcondition {
             Condition::PathNotExist(path) => {
                 println!("assert_postconditions: PathNotExist: {}", path);
-                let storage_request = StorageRequest {
-                    key: path.clone(),
-                    priority: StorageRequestPriority::High,
-                };
                 assert!(matches!(
-                    storage.get(storage_request).await,
+                    storage
+                        .get(path, GetOptions::new(StorageRequestPriority::P0))
+                        .await,
                     Err(chroma_storage::StorageError::NotFound { .. })
                 ));
                 println!("check succeeded");

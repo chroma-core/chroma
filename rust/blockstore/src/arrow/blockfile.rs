@@ -1,5 +1,5 @@
 use super::migrations::{apply_migrations_to_blockfile, MigrationError};
-use super::provider::{BlockGetRequest, GetError, RootManager};
+use super::provider::{GetError, RootManager};
 use super::root::{RootReader, RootWriter, Version};
 use super::{block::delta::UnorderedBlockDelta, provider::BlockManager};
 use super::{
@@ -182,11 +182,11 @@ impl ArrowUnorderedBlockfileWriter {
 
         let delta = match delta {
             None => {
-                let block_get_request = BlockGetRequest {
-                    id: target_block_id,
-                    priority: StorageRequestPriority::High,
-                };
-                let block = match self.block_manager.get(block_get_request).await {
+                let block = match self
+                    .block_manager
+                    .get(&target_block_id, StorageRequestPriority::P0)
+                    .await
+                {
                     Ok(Some(block)) => block,
                     Ok(None) => {
                         return Err(Box::new(ArrowBlockfileError::BlockNotFound));
@@ -265,11 +265,11 @@ impl ArrowUnorderedBlockfileWriter {
 
         let delta = match delta {
             None => {
-                let block_get_request = BlockGetRequest {
-                    id: target_block_id,
-                    priority: StorageRequestPriority::High,
-                };
-                let block = match self.block_manager.get(block_get_request).await {
+                let block = match self
+                    .block_manager
+                    .get(&target_block_id, StorageRequestPriority::P0)
+                    .await
+                {
                     Ok(Some(block)) => block,
                     Ok(None) => {
                         return Err(Box::new(ArrowBlockfileError::BlockNotFound));
@@ -323,11 +323,11 @@ impl ArrowUnorderedBlockfileWriter {
 
         let delta = match delta {
             None => {
-                let block_get_request = BlockGetRequest {
-                    id: target_block_id,
-                    priority: StorageRequestPriority::High,
-                };
-                let block = match self.block_manager.get(block_get_request).await {
+                let block = match self
+                    .block_manager
+                    .get(&target_block_id, StorageRequestPriority::P0)
+                    .await
+                {
                     Ok(Some(block)) => block,
                     Ok(None) => {
                         return Err(Box::new(ArrowBlockfileError::BlockNotFound));
@@ -393,13 +393,14 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
 
     pub(super) async fn get_block(
         &self,
-        request: BlockGetRequest,
+        block_id: Uuid,
+        priority: StorageRequestPriority,
     ) -> Result<Option<&Block>, GetError> {
         // NOTE(rescrv):  This will complain with clippy, but we don't want to hold a reference to
         // the loaded_blocks map across a call to the block manager.
         #[allow(clippy::map_entry)]
-        if !self.loaded_blocks.lock().contains_key(&request.id) {
-            let block = match self.block_manager.get(request.clone()).await {
+        if !self.loaded_blocks.lock().contains_key(&block_id) {
+            let block = match self.block_manager.get(&block_id, priority).await {
                 Ok(Some(block)) => block,
                 Ok(None) => {
                     return Ok(None);
@@ -408,12 +409,10 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                     return Err(e);
                 }
             };
-            self.loaded_blocks
-                .lock()
-                .insert(request.id, Box::new(block));
+            self.loaded_blocks.lock().insert(block_id, Box::new(block));
         }
 
-        if let Some(block) = self.loaded_blocks.lock().get(&request.id) {
+        if let Some(block) = self.loaded_blocks.lock().get(&block_id) {
             // https://github.com/mitsuhiko/memo-map/blob/a5db43853b2561145d7778dc2a5bd4b861fbfd75/src/lib.rs#L163
             // This is safe because we only ever insert Box<Block> into the HashMap
             // We never remove the Box<Block> from the HashMap, so the reference is always valid
@@ -447,11 +446,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             if !self.block_manager.cached(block_id).await
                 && !self.loaded_blocks.lock().contains_key(block_id)
             {
-                let block_get_request = BlockGetRequest {
-                    id: *block_id,
-                    priority: StorageRequestPriority::Medium,
-                };
-                futures.push(self.get_block(block_get_request));
+                futures.push(self.get_block(*block_id, StorageRequestPriority::P1));
             }
         }
         join_all(futures).await;
@@ -477,11 +472,9 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
     ) -> Result<Option<V>, Box<dyn ChromaError>> {
         let search_key = CompositeKey::new(prefix.to_string(), key.clone());
         let target_block_id = self.root.sparse_index.get_target_block_id(&search_key);
-        let block_get_request = BlockGetRequest {
-            id: target_block_id,
-            priority: StorageRequestPriority::High,
-        };
-        let block = self.get_block(block_get_request).await;
+        let block = self
+            .get_block(target_block_id, StorageRequestPriority::P0)
+            .await;
         match block {
             Ok(Some(block)) => Ok(block.get(prefix, key.clone())),
             Ok(None) => {
@@ -512,11 +505,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                 .map(Ok),
         )
         .try_filter_map(move |block_id| async move {
-            let block_get_request = BlockGetRequest {
-                id: block_id,
-                priority: StorageRequestPriority::High,
-            };
-            match self.get_block(block_get_request).await {
+            match self.get_block(block_id, StorageRequestPriority::P0).await {
                 Ok(Some(block)) => Ok(Some(block)),
                 Ok(None) => Err(Box::new(ArrowBlockfileError::BlockNotFound)),
                 Err(e) => Err(Box::new(ArrowBlockfileError::BlockFetchError(e))),
@@ -550,11 +539,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
 
         let mut result: Vec<(K, V)> = vec![];
         for block_id in block_ids {
-            let block_get_request = BlockGetRequest {
-                id: block_id,
-                priority: StorageRequestPriority::High,
-            };
-            let block_opt = match self.get_block(block_get_request).await {
+            let block_opt = match self.get_block(block_id, StorageRequestPriority::P0).await {
                 Ok(Some(block)) => Some(block),
                 Ok(None) => {
                     return Err(Box::new(ArrowBlockfileError::BlockNotFound));
@@ -583,11 +568,10 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
     ) -> Result<bool, Box<dyn ChromaError>> {
         let search_key = CompositeKey::new(prefix.to_string(), key.clone());
         let target_block_id = self.root.sparse_index.get_target_block_id(&search_key);
-        let block_get_request = BlockGetRequest {
-            id: target_block_id,
-            priority: StorageRequestPriority::High,
-        };
-        let block = match self.get_block(block_get_request).await {
+        let block = match self
+            .get_block(target_block_id, StorageRequestPriority::P0)
+            .await
+        {
             Ok(Some(block)) => block,
             Ok(None) => {
                 return Ok(false);
@@ -625,11 +609,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             self.load_blocks(&block_ids).await;
             let mut result: usize = 0;
             for block_id in block_ids {
-                let block_get_request = BlockGetRequest {
-                    id: block_id,
-                    priority: StorageRequestPriority::High,
-                };
-                let block = match self.get_block(block_get_request).await {
+                let block = match self.get_block(block_id, StorageRequestPriority::P0).await {
                     Ok(Some(block)) => block,
                     Ok(None) => {
                         return Err(Box::new(ArrowBlockfileError::BlockNotFound));
@@ -678,12 +658,8 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             } else {
                 self.load_blocks(&block_ids).await;
                 for block_id in block_ids.iter().take(block_ids.len() - 1) {
-                    let block_get_request = BlockGetRequest {
-                        id: *block_id,
-                        priority: StorageRequestPriority::High,
-                    };
                     let block =
-                        self.get_block(block_get_request)
+                        self.get_block(*block_id, StorageRequestPriority::P0)
                             .await
                             .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?
                             .ok_or(Box::new(ArrowBlockfileError::BlockNotFound)
@@ -691,12 +667,8 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                     rank += block.len();
                 }
             }
-            let block_get_request = BlockGetRequest {
-                id: *last_id,
-                priority: StorageRequestPriority::High,
-            };
             let last_block = self
-                .get_block(block_get_request)
+                .get_block(*last_id, StorageRequestPriority::P0)
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?
                 .ok_or(Box::new(ArrowBlockfileError::BlockNotFound) as Box<dyn ChromaError>)?;
@@ -714,11 +686,10 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         }
 
         for (_, block_id) in self.root.sparse_index.data.forward.iter() {
-            let block_get_request = BlockGetRequest {
-                id: block_id.id,
-                priority: StorageRequestPriority::High,
-            };
-            match self.get_block(block_get_request).await {
+            match self
+                .get_block(block_id.id, StorageRequestPriority::P0)
+                .await
+            {
                 Ok(Some(block)) => {
                     if block.get_size() > self.block_manager.max_block_size_bytes() {
                         return false;

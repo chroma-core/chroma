@@ -18,8 +18,7 @@ use chroma_cache::{CacheError, PersistentCache};
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::{
-    admissioncontrolleds3::{StorageRequest, StorageRequestPriority},
-    PutOptions, Storage,
+    admissioncontrolleds3::StorageRequestPriority, GetOptions, PutOptions, Storage,
 };
 use futures::{stream::FuturesUnordered, StreamExt};
 use std::sync::Arc;
@@ -95,11 +94,7 @@ impl ArrowBlockfileProvider {
         for block_id in block_ids.iter() {
             // Don't prefetch if already cached.
             if !self.block_manager.cached(block_id).await {
-                let block_get_request = BlockGetRequest {
-                    id: *block_id,
-                    priority: StorageRequestPriority::Medium,
-                };
-                futures.push(self.block_manager.get(block_get_request));
+                futures.push(self.block_manager.get(block_id, StorageRequestPriority::P1));
             }
         }
         let count = futures.len();
@@ -269,12 +264,6 @@ pub(super) struct BlockManager {
     write_mutex: Arc<tokio::sync::Mutex<()>>,
 }
 
-#[derive(Clone, Debug)]
-pub struct BlockGetRequest {
-    pub id: Uuid,
-    pub priority: StorageRequestPriority,
-}
-
 impl BlockManager {
     pub(super) fn new(
         storage: Storage,
@@ -299,11 +288,7 @@ impl BlockManager {
         &self,
         block_id: &Uuid,
     ) -> Result<D, ForkError> {
-        let block_get_request = BlockGetRequest {
-            id: *block_id,
-            priority: StorageRequestPriority::High,
-        };
-        let block = self.get(block_get_request).await;
+        let block = self.get(block_id, StorageRequestPriority::P0).await;
         let block = match block {
             Ok(Some(block)) => block,
             Ok(None) => {
@@ -338,43 +323,35 @@ impl BlockManager {
 
     pub(super) async fn get(
         &self,
-        block_get_request: BlockGetRequest,
+        id: &Uuid,
+        priority: StorageRequestPriority,
     ) -> Result<Option<Block>, GetError> {
-        let block = self
-            .block_cache
-            .get(&block_get_request.id)
-            .await
-            .ok()
-            .flatten();
+        let block = self.block_cache.get(id).await.ok().flatten();
         match block {
             Some(block) => Ok(Some(block)),
             None => async {
-                let key = format!("block/{}", block_get_request.id);
-                let storage_request = StorageRequest {
-                    key: key.clone(),
-                    priority: block_get_request.priority,
-                };
+                let key = format!("block/{}", id);
                 let bytes_res = self
                     .storage
-                    .get(storage_request)
+                    .get(&key, GetOptions::new(priority))
                     .instrument(
-                        tracing::trace_span!(parent: Span::current(), "BlockManager storage get", id = block_get_request.id.to_string()),
+                        tracing::trace_span!(parent: Span::current(), "BlockManager storage get", id = id.to_string()),
                     )
                     .await;
                 match bytes_res {
                     Ok(bytes) => {
                         let deserialization_span = tracing::trace_span!(parent: Span::current(), "BlockManager deserialize block");
                         let block =
-                            deserialization_span.in_scope(|| Block::from_bytes(&bytes, block_get_request.id));
+                            deserialization_span.in_scope(|| Block::from_bytes(&bytes, *id));
                         match block {
                             Ok(block) => {
                                 let _guard = self.write_mutex.lock().await;
-                                match self.block_cache.get(&block_get_request.id).await {
+                                match self.block_cache.get(id).await {
                                     Ok(Some(b)) => {
                                         Ok(Some(b))
                                     }
                                     Ok(None) => {
-                                        self.block_cache.insert(block_get_request.id, block.clone()).await;
+                                        self.block_cache.insert(*id, block.clone()).await;
                                         Ok(Some(block))
                                     }
                                     Err(e) => {
@@ -398,7 +375,7 @@ impl BlockManager {
                         Err(GetError::StorageGetError(e))
                     }
                 }
-            }.instrument(tracing::trace_span!(parent: Span::current(), "BlockManager get cold", block_id = block_get_request.id.to_string())).await
+            }.instrument(tracing::trace_span!(parent: Span::current(), "BlockManager get cold", block_id = id.to_string())).await
         }
     }
 
@@ -411,14 +388,14 @@ impl BlockManager {
             }
         };
         let key = format!("block/{}", block.id);
-        let block_put_request = StorageRequest {
-            key: key.clone(),
-            priority: StorageRequestPriority::High,
-        };
         let block_bytes_len = bytes.len();
         let res = self
             .storage
-            .put_bytes(block_put_request, bytes, PutOptions::default())
+            .put_bytes(
+                &key,
+                bytes,
+                PutOptions::with_priority(StorageRequestPriority::P0),
+            )
             .await;
         match res {
             Ok(_) => {
@@ -508,11 +485,11 @@ impl RootManager {
                 tracing::info!("Cache miss - fetching root from storage");
                 let key = Self::get_storage_key(id);
                 tracing::debug!("Reading root from storage with key: {}", key);
-                let storage_request = StorageRequest {
-                    key: key.clone(),
-                    priority: StorageRequestPriority::High,
-                };
-                match self.storage.get(storage_request).await {
+                match self
+                    .storage
+                    .get(&key, GetOptions::new(StorageRequestPriority::P0))
+                    .await
+                {
                     Ok(bytes) => match RootReader::from_bytes::<K>(&bytes, *id) {
                         Ok(root) => {
                             self.cache.insert(*id, root.clone()).await;
@@ -535,11 +512,11 @@ impl RootManager {
     pub async fn get_all_block_ids(&self, id: &Uuid) -> Result<Vec<Uuid>, RootManagerError> {
         let key = Self::get_storage_key(id);
         tracing::debug!("Reading root from storage with key: {}", key);
-        let storage_request = StorageRequest {
-            key: key.clone(),
-            priority: StorageRequestPriority::High,
-        };
-        match self.storage.get(storage_request).await {
+        match self
+            .storage
+            .get(&key, GetOptions::new(StorageRequestPriority::P0))
+            .await
+        {
             Ok(bytes) => RootReader::get_all_block_ids_from_bytes(&bytes, *id)
                 .map_err(RootManagerError::FromBytesError),
             Err(e) => {
@@ -561,13 +538,13 @@ impl RootManager {
             }
         };
         let key = format!("sparse_index/{}", root.id);
-        let storage_request = StorageRequest {
-            key: key.clone(),
-            priority: StorageRequestPriority::High,
-        };
         let res = self
             .storage
-            .put_bytes(storage_request, bytes, PutOptions::default())
+            .put_bytes(
+                &key,
+                bytes,
+                PutOptions::with_priority(StorageRequestPriority::P0),
+            )
             .await;
         match res {
             Ok(_) => {

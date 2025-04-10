@@ -2,7 +2,8 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use chroma_storage::{
-    admissioncontrolleds3::{StorageRequest, StorageRequestPriority}, ETag, PutOptions, Storage, StorageError,
+    admissioncontrolleds3::StorageRequestPriority, ETag, GetOptions, PutOptions, Storage,
+    StorageError,
 };
 
 use crate::{CursorStoreOptions, Error, LogPosition};
@@ -113,13 +114,9 @@ impl CursorStore {
         // SAFETY(rescrv):  Semaphore poisoning.
         let _permit = self.semaphore.acquire().await.unwrap();
         let path = format!("{}/{}", self.prefix, name.path());
-        let storage_request = StorageRequest {
-            key: path.clone(),
-            priority: StorageRequestPriority::High,
-        };
         let (data, e_tag) = match self
             .storage
-            .get_with_e_tag(storage_request)
+            .get_with_e_tag(&path, GetOptions::new(StorageRequestPriority::P0))
             .await
             .map_err(Arc::new)
         {
@@ -143,7 +140,7 @@ impl CursorStore {
 
     pub async fn init<'a>(&self, name: &CursorName<'a>, cursor: Cursor) -> Result<Witness, Error> {
         // Semaphore taken by put.
-        let options = PutOptions::if_not_exists();
+        let options = PutOptions::if_not_exists(StorageRequestPriority::P0);
         self.put(name, cursor, options).await
     }
 
@@ -154,7 +151,7 @@ impl CursorStore {
         witness: &Witness,
     ) -> Result<Witness, Error> {
         // Semaphore taken by put.
-        let options = PutOptions::if_matches(&witness.0);
+        let options = PutOptions::if_matches(&witness.0, StorageRequestPriority::P0);
         self.put(name, cursor.clone(), options).await
     }
 
@@ -171,13 +168,9 @@ impl CursorStore {
         let data = serde_json::to_vec(&cursor).map_err(|err| {
             Error::CorruptCursor(format!("Failed to serialize cursor {}: {}", name.0, err))
         })?;
-        let storage_request = StorageRequest {
-            key: path.clone(),
-            priority: StorageRequestPriority::High,
-        };
         let e_tag = self
             .storage
-            .put_bytes(storage_request, data, options)
+            .put_bytes(&path, data, options)
             .await
             .map_err(Arc::new)?;
         let Some(e_tag) = e_tag else {

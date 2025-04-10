@@ -1,4 +1,3 @@
-use chroma_storage::admissioncontrolleds3::{StorageRequest, StorageRequestPriority};
 use chroma_types::{
     Collection, CollectionAndSegments, CollectionUuid, Database, FlushCompactionResponse,
     GetCollectionSizeError, GetCollectionWithSegmentsError, GetSegmentsError, ListDatabasesError,
@@ -334,12 +333,8 @@ impl TestSysDb {
         // Write the serialized bytes to storage
         if let Some(storage) = storage {
             let result = tokio::task::block_in_place(|| {
-                let storage_request = StorageRequest {
-                    key: version_file_name.clone(),
-                    priority: StorageRequestPriority::High,
-                };
                 tokio::runtime::Handle::current().block_on(storage.put_bytes(
-                    storage_request,
+                    &version_file_name,
                     version_file_bytes,
                     PutOptions::default(),
                 ))
