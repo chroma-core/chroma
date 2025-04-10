@@ -188,10 +188,15 @@ func (r *LogRepository) GetBoundsForCollection(ctx context.Context, collectionId
 		trace_log.Error("Error in getting minimum and maximum offset for collection", zap.Error(err), zap.String("collectionId", collectionId))
 		return
 	}
+	var totalUncompactedDepth int64
+	totalUncompactedDepth, err = queriesWithTx.GetTotalUncompactedRecordsCount(ctx)
+	if err != nil {
+		trace_log.Error("Error in getting total uncompacted records count from collection table", zap.Error(err))
+	}
 	rollback = false;
 	tx.Commit(ctx)
 	start = bounds.RecordCompactionOffsetPosition
-	limit = bounds.RecordEnumerationOffsetPosition
+	limit = start + totalUncompactedDepth
 	err = nil
 	return
 }
