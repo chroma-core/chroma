@@ -77,7 +77,7 @@ Continue with the full [getting started guide](./getting-started).
 | Ruby          | [from @mariochavez](https://github.com/mariochavez/chroma)                                                               |
 | Java          | [from @t_azarov](https://github.com/amikos-tech/chromadb-java-client)                                                    |
 | Go            | [from @t_azarov](https://github.com/amikos-tech/chroma-go)                                                               |
-| C#            | [from @microsoft](https://github.com/microsoft/semantic-kernel/tree/main/dotnet/src/Connectors/Connectors.Memory.Chroma) |
+| C#/.NET       | [from @cincuranet, @ssone95, @microsoft](https://github.com/ssone95/ChromaDB.Client)                                     |
 | Rust          | [from @Anush008](https://crates.io/crates/chromadb)                                                                      |
 | Elixir        | [from @3zcurdia](https://hex.pm/packages/chroma/)                                                                        |
 | Dart          | [from @davidmigloz](https://pub.dev/packages/chromadb)                                                                   |
