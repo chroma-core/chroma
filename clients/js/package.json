@@ -65,14 +65,15 @@
   },
   "dependencies": {
     "cliui": "^8.0.1",
-    "isomorphic-fetch": "^3.0.0"
+    "isomorphic-fetch": "^3.0.0",
+    "os": "^0.1.2"
   },
   "peerDependencies": {
     "@google/generative-ai": "^0.1.1",
     "cohere-ai": "^5.0.0 || ^6.0.0 || ^7.0.0",
+    "ollama": "^0.5.0",
     "openai": "^3.0.0 || ^4.0.0",
-    "voyageai": "^0.0.3-1",
-    "ollama": "^0.5.0"
+    "voyageai": "^0.0.3-1"
   },
   "peerDependenciesMeta": {
     "@google/generative-ai": {

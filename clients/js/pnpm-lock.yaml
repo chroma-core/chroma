@@ -29,6 +29,7 @@ importers:
       openai:
         specifier: ^3.0.0 || ^4.0.0
         version: 4.51.0
+      os: {specifier: ^0.1.2, version: 0.1.2}
       voyageai:
         specifier: ^0.0.3-1
         version: 0.0.3-1
@@ -126,10 +127,6 @@ importers:
       voyageai:
         specifier: ^0.0.3-1
         version: 0.0.3-1
-    optionalDependencies:
-      chromadb-js-bindings-darwin-arm64:
-        specifier: ^0.0.1
-        version: 0.0.1
     devDependencies:
       '@internal/chromadb-core':
         specifier: workspace:*
@@ -152,6 +149,10 @@ importers:
       typescript:
         specifier: ^5.0.4
         version: 5.4.5
+    optionalDependencies:
+      chromadb-js-bindings-darwin-arm64:
+        specifier: ^0.0.1
+        version: 0.0.1
 
   packages/chromadb-client:
     dependencies:
@@ -2907,6 +2908,9 @@ packages:
 
   openapi-types@12.1.3:
     resolution: {integrity: sha512-N4YtSYJqghVu4iek2ZUvcN/0aqH1kRDuNqzcycDxhOUpg7GdvLa2F3DgS6yBNhInhv2r/6I0Flkn7CqL8+nIcw==}
+
+  os@0.1.2:
+    resolution: {integrity: sha512-ZoXJkvAnljwvc56MbvhtKVWmSkzV712k42Is2mA0+0KTSRakq5XXuXpjZjgAt9ctzl51ojhQWakQQpmOvXWfjQ==}
 
   p-limit@2.3.0:
     resolution: {integrity: sha512-//88mFWSJx8lxCzwdAABTJL2MyWB12+eIY7MDL2SqLmAkeKU9qxRvWuSyTjm3FUmpBEMuFfckAIqEaVGUDxb6w==}
@@ -7474,6 +7478,8 @@ snapshots:
       - encoding
 
   openapi-types@12.1.3: {}
+
+  os@0.1.2: {}
 
   p-limit@2.3.0:
     dependencies:
