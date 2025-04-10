@@ -263,7 +263,7 @@ impl OnceLogWriter {
             writer,
         )
         .await?;
-        manifest_manager.recover().await?;
+        manifest_manager.recover(&*mark_dirty).await?;
         let flusher = Mutex::new(None);
         let this = Arc::new(Self {
             options,
