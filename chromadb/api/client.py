@@ -23,6 +23,8 @@ from chromadb.api.types import (
     Metadatas,
     QueryResult,
     URIs,
+    IncludeMetadataDocuments,
+    IncludeMetadataDocumentsDistances,
 )
 from chromadb.auth import UserIdentity
 from chromadb.auth.utils import maybe_set_tenant_and_database
@@ -334,13 +336,10 @@ class Client(SharedSystemClient, ClientAPI):
         collection_id: UUID,
         ids: Optional[IDs] = None,
         where: Optional[Where] = None,
-        sort: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
-        page: Optional[int] = None,
-        page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = ["embeddings", "metadatas", "documents"],  # type: ignore[list-item]
+        include: Include = IncludeMetadataDocuments,
     ) -> GetResult:
         return self._server._get(
             collection_id=collection_id,
@@ -348,11 +347,8 @@ class Client(SharedSystemClient, ClientAPI):
             database=self.database,
             ids=ids,
             where=where,
-            sort=sort,
             limit=limit,
             offset=offset,
-            page=page,
-            page_size=page_size,
             where_document=where_document,
             include=include,
         )
@@ -381,7 +377,7 @@ class Client(SharedSystemClient, ClientAPI):
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = ["embeddings", "metadatas", "documents", "distances"],  # type: ignore[list-item]
+        include: Include = IncludeMetadataDocumentsDistances,
     ) -> QueryResult:
         return self._server._query(
             collection_id=collection_id,

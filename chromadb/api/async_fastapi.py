@@ -45,6 +45,9 @@ from chromadb.api.types import (
     CollectionMetadata,
     validate_batch,
     convert_np_embeddings_to_list,
+    IncludeMetadataDocuments,
+    IncludeMetadataDocumentsDistances,
+    IncludeMetadataDocumentsEmbeddings,
 )
 
 
@@ -439,7 +442,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             tenant=tenant,
             database=database,
             limit=n,
-            include=["embeddings", "documents", "metadatas"],
+            include=IncludeMetadataDocumentsEmbeddings,
         )
 
         return resp
@@ -451,20 +454,13 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         collection_id: UUID,
         ids: Optional[IDs] = None,
         where: Optional[Where] = None,
-        sort: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
-        page: Optional[int] = None,
-        page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = ["metadatas", "documents"],
+        include: Include = IncludeMetadataDocuments,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> GetResult:
-        if page and page_size:
-            offset = (page - 1) * page_size
-            limit = page_size
-
         # Servers do not support the "data" include, as that is hydrated on the client side
         filtered_include = [i for i in include if i != "data"]
 
@@ -474,7 +470,6 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             json={
                 "ids": ids,
                 "where": where,
-                "sort": sort,
                 "limit": limit,
                 "offset": offset,
                 "where_document": where_document,
@@ -631,7 +626,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = ["metadatas", "documents", "distances"],
+        include: Include = IncludeMetadataDocumentsDistances,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> QueryResult:
