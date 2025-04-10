@@ -56,6 +56,16 @@ pub enum StorageRequestPriority {
     Medium = 1,
 }
 
+impl StorageRequestPriority {
+    pub fn max() -> Self {
+        StorageRequestPriority::Medium
+    }
+
+    pub fn as_usize(self) -> usize {
+        self as usize
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct StorageRequest {
     pub key: String,
@@ -441,7 +451,9 @@ impl CountBasedPolicy {
     }
     async fn acquire(&self, priority: StorageRequestPriority) -> SemaphorePermit<'_> {
         // TODO(Sanket): Check for index out of bound.
-        for lower_pri in priority as usize..=StorageRequestPriority::Medium as usize {
+        for lower_pri in StorageRequestPriority::as_usize(priority)
+            ..=StorageRequestPriority::as_usize(StorageRequestPriority::max())
+        {
             match self.remaining_tokens[lower_pri].try_acquire() {
                 Ok(token) => {
                     return token;
