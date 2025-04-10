@@ -231,7 +231,6 @@ impl GrpcLog {
             Some(end_timestamp) => end_timestamp,
             None => i64::MAX,
         };
-        tracing::info!("pull_logs offset: {}, batch_size: {}", offset, batch_size);
         let request = self
             .client_for(collection_id)
             .pull_logs(chroma_proto::PullLogsRequest {
