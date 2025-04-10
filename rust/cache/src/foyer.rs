@@ -1,7 +1,6 @@
 use super::{CacheError, Weighted};
 use ahash::RandomState;
 use chroma_error::ChromaError;
-use chroma_types::CollectionAndSegments;
 use clap::Parser;
 use foyer::{
     CacheBuilder, DirectFsDeviceOptions, Engine, FifoConfig, FifoPicker, HybridCacheBuilder,
@@ -636,12 +635,6 @@ where
     K: Clone + Send + Sync + Eq + PartialEq + Hash + StorageKey + 'static,
     V: Clone + Send + Sync + Weighted + StorageValue + 'static,
 {
-}
-
-impl crate::Weighted for CollectionAndSegments {
-    fn weight(&self) -> usize {
-        1
-    }
 }
 
 #[cfg(test)]

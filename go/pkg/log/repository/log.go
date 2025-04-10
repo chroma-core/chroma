@@ -169,6 +169,18 @@ func (r *LogRepository) GetLastCompactedOffsetForCollection(ctx context.Context,
 	return
 }
 
+func (r *LogRepository) GetBoundsForCollection(ctx context.Context, collectionId string) (start, limit int64, err error) {
+	bounds, err := r.queries.GetBoundsForCollection(ctx, collectionId)
+	if err != nil {
+		trace_log.Error("Error in getting minimum and maximum offset for collection", zap.Error(err), zap.String("collectionId", collectionId))
+		return
+	}
+	start = bounds.RecordCompactionOffsetPosition
+	limit = bounds.RecordEnumerationOffsetPosition + 1
+	err = nil
+	return
+}
+
 func (r *LogRepository) GarbageCollection(ctx context.Context) error {
 	collectionToCompact, err := r.queries.GetAllCollections(ctx)
 	if err != nil {

@@ -880,7 +880,7 @@ impl Handler<TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOp
             }
         };
 
-        if num_tasks_left == 0 {
+        if num_tasks_left == 0 && self.num_uncompleted_materialization_tasks == 0 {
             let segment_writer = self.get_segment_writer_by_id(message.segment_id).await;
             let segment_writer = match self.ok_or_terminate(segment_writer, ctx) {
                 Some(writer) => writer,

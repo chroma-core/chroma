@@ -63,6 +63,10 @@ spec:
             valueFrom:
               fieldRef:
                 fieldPath: metadata.name
+          {{ range .Values.garbageCollector.env }}
+          - name: {{ .name }}
+{{ .value | nindent 12 }}
+          {{ end }}
 
 ---
 apiVersion: v1
