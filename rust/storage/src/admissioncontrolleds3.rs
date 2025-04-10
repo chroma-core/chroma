@@ -464,7 +464,9 @@ impl CountBasedPolicy {
                 },
             }
         }
-        let token_res = self.remaining_tokens[priority as usize].acquire().await;
+        let token_res = self.remaining_tokens[StorageRequestPriority::as_usize(priority)]
+            .acquire()
+            .await;
         match token_res {
             Ok(token) => token,
             Err(e) => panic!("AcquireToken Failed {}", e),
