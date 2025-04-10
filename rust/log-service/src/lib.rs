@@ -659,10 +659,16 @@ impl LogService for LogServer {
             Arc::clone(&self.storage),
             prefix,
         );
-        let limit_position = log_reader
-            .maximum_log_position()
-            .await
-            .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
+        let limit_position = match log_reader.maximum_log_position().await {
+            Ok(limit_position) => limit_position,
+            Err(err) => {
+                if err.code() == chroma_error::ErrorCodes::FailedPrecondition {
+                    LogPosition::default()
+                } else {
+                    return Err(Status::new(err.code().into(), err.to_string()));
+                }
+            }
+        };
         let limit_offset = limit_position.offset() as i64;
         Ok(Response::new(ScoutLogsResponse { limit_offset }))
     }
