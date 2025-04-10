@@ -1,6 +1,5 @@
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::ChromaError;
-use chroma_segment::distributed_spann::POSTING_LIST_PATH;
 use chroma_system::{Operator, OperatorType};
 use chroma_types::{Segment, SegmentType};
 use futures::{stream::FuturesUnordered, StreamExt};
@@ -68,10 +67,7 @@ impl Operator<PrefetchSegmentInput, PrefetchSegmentOutput> for PrefetchSegmentOp
         &self,
         input: &PrefetchSegmentInput,
     ) -> Result<PrefetchSegmentOutput, PrefetchSegmentError> {
-        if input.segment.r#type != SegmentType::BlockfileMetadata
-            && input.segment.r#type != SegmentType::BlockfileRecord
-            && input.segment.r#type != SegmentType::Spann
-        {
+        if !input.segment.prefetch_supported() {
             return Err(PrefetchSegmentError::UnsupportedSegmentType(
                 input.segment.r#type,
             ));
@@ -83,32 +79,21 @@ impl Operator<PrefetchSegmentInput, PrefetchSegmentOutput> for PrefetchSegmentOp
             input.segment.id,
         );
 
-        let total_blocks_fetched = if SegmentType::Spann == input.segment.r#type {
-            let mut total_blocks_fetched = 0;
-            if let Some(path) = input.segment.file_path.get(POSTING_LIST_PATH) {
-                let blockfile_id = Uuid::parse_str(&path[0])?;
-                total_blocks_fetched += input.blockfile_provider.prefetch(&blockfile_id).await?;
-            }
-            total_blocks_fetched
-        } else {
-            let mut futures = input
-                .segment
-                .file_path
-                .values()
-                .flatten()
-                .map(|blockfile_id| async move {
-                    let blockfile_id = Uuid::parse_str(blockfile_id)?;
-                    let count = input.blockfile_provider.prefetch(&blockfile_id).await?;
-                    Ok::<_, PrefetchSegmentError>(count)
-                })
-                .collect::<FuturesUnordered<_>>();
+        let mut futures = input
+            .segment
+            .filepaths_to_prefetch()
+            .into_iter()
+            .map(|blockfile_id| async move {
+                let blockfile_id = Uuid::parse_str(&blockfile_id)?;
+                let count = input.blockfile_provider.prefetch(&blockfile_id).await?;
+                Ok::<_, PrefetchSegmentError>(count)
+            })
+            .collect::<FuturesUnordered<_>>();
 
-            let mut total_blocks_fetched = 0;
-            while let Some(result) = futures.next().await {
-                total_blocks_fetched += result?;
-            }
-            total_blocks_fetched
-        };
+        let mut total_blocks_fetched = 0;
+        while let Some(result) = futures.next().await {
+            total_blocks_fetched += result?;
+        }
 
         Ok(PrefetchSegmentOutput {
             num_blocks_fetched: total_blocks_fetched,

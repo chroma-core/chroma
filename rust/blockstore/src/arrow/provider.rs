@@ -21,7 +21,11 @@ use chroma_storage::{
     admissioncontrolleds3::StorageRequestPriority, GetOptions, PutOptions, Storage,
 };
 use futures::{stream::FuturesUnordered, StreamExt};
-use std::{collections::HashSet, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 use thiserror::Error;
 use tracing::{Instrument, Span};
 use uuid::Uuid;
@@ -42,6 +46,8 @@ impl ChromaError for ArrowBlockfileProviderPrefetchError {
         }
     }
 }
+
+const PREFETCH_TTL_HOURS: u64 = 8;
 
 /// A BlockFileProvider that creates ArrowBlockfiles (Arrow-backed blockfiles used for production).
 /// For now, it keeps a simple local cache of blockfiles.
@@ -470,7 +476,7 @@ pub struct RootManager {
     cache: Arc<dyn PersistentCache<Uuid, RootReader>>,
     storage: Storage,
     // Sparse indexes that have already been prefetched and don't need to be prefetched again.
-    prefetched_roots: Arc<parking_lot::Mutex<HashSet<Uuid>>>,
+    prefetched_roots: Arc<parking_lot::Mutex<HashMap<Uuid, Duration>>>,
 }
 
 impl RootManager {
@@ -479,7 +485,7 @@ impl RootManager {
         Self {
             cache,
             storage,
-            prefetched_roots: Arc::new(parking_lot::Mutex::new(HashSet::new())),
+            prefetched_roots: Arc::new(parking_lot::Mutex::new(HashMap::new())),
         }
     }
 
@@ -592,7 +598,37 @@ impl RootManager {
 
     fn should_prefetch(&self, id: &Uuid) -> bool {
         let mut lock_guard = self.prefetched_roots.lock();
-        lock_guard.insert(*id)
+        let expires_at = lock_guard.get(id);
+        match expires_at {
+            Some(expires_at) => {
+                if SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("Do not deploy before UNIX epoch")
+                    < *expires_at
+                {
+                    false
+                } else {
+                    lock_guard.insert(
+                        *id,
+                        SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .expect("Do not deploy before UNIX epoch")
+                            + std::time::Duration::from_secs(PREFETCH_TTL_HOURS * 3600),
+                    );
+                    true
+                }
+            }
+            None => {
+                lock_guard.insert(
+                    *id,
+                    SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .expect("Do not deploy before UNIX epoch")
+                        + std::time::Duration::from_secs(PREFETCH_TTL_HOURS * 3600),
+                );
+                true
+            }
+        }
     }
 }
 
