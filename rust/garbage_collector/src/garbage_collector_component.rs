@@ -405,6 +405,7 @@ impl Configurable<GarbageCollectorConfig> for GarbageCollector {
 mod tests {
     use super::*;
     use crate::helper::ChromaGrpcClients;
+    use chroma_memberlist::memberlist_provider::Member;
     use chroma_storage::config::{
         ObjectStoreBucketConfig, ObjectStoreConfig, ObjectStoreType, StorageConfig,
     };
@@ -604,7 +605,7 @@ mod tests {
             default_mode: CleanupMode::DryRun,
             tenant_mode_overrides: Some(tenant_mode_overrides),
             assignment_policy: chroma_config::assignment::config::AssignmentPolicyConfig::default(),
-            my_member_id: "my-member-id".to_string(),
+            my_member_id: "test-gc".to_string(),
             memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig::default(),
         };
         let registry = Registry::new();
@@ -641,7 +642,19 @@ mod tests {
 
         garbage_collector_component.set_dispatcher(dispatcher_handle);
         garbage_collector_component.set_system(system.clone());
-        let garbage_collector_handle = system.start_component(garbage_collector_component);
+        let mut garbage_collector_handle = system.start_component(garbage_collector_component);
+
+        garbage_collector_handle
+            .send(
+                vec![Member {
+                    member_id: "test-gc".to_string(),
+                    member_ip: "0.0.0.0".to_string(),
+                    member_node_name: "test-gc-node".to_string(),
+                }],
+                None,
+            )
+            .await
+            .unwrap();
 
         garbage_collector_handle
             .request(GarbageCollectMessage {}, Some(Span::current()))
