@@ -21,7 +21,7 @@ use chroma_storage::{
     admissioncontrolleds3::StorageRequestPriority, GetOptions, PutOptions, Storage,
 };
 use futures::{stream::FuturesUnordered, StreamExt};
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 use thiserror::Error;
 use tracing::{Instrument, Span};
 use uuid::Uuid;
@@ -83,6 +83,9 @@ impl ArrowBlockfileProvider {
     }
 
     pub async fn prefetch(&self, id: &Uuid) -> Result<usize, ArrowBlockfileProviderPrefetchError> {
+        if !self.root_manager.should_prefetch(id) {
+            return Ok(0);
+        }
         // We call .get_all_block_ids() here instead of just reading the root because reading the root requires a concrete Key type.
         let block_ids = self
             .root_manager
@@ -466,12 +469,18 @@ impl ChromaError for RootManagerError {
 pub struct RootManager {
     cache: Arc<dyn PersistentCache<Uuid, RootReader>>,
     storage: Storage,
+    // Sparse indexes that have already been prefetched and don't need to be prefetched again.
+    prefetched_roots: Arc<parking_lot::Mutex<HashSet<Uuid>>>,
 }
 
 impl RootManager {
     pub fn new(storage: Storage, cache: Box<dyn PersistentCache<Uuid, RootReader>>) -> Self {
         let cache: Arc<dyn PersistentCache<Uuid, RootReader>> = cache.into();
-        Self { cache, storage }
+        Self {
+            cache,
+            storage,
+            prefetched_roots: Arc::new(parking_lot::Mutex::new(HashSet::new())),
+        }
     }
 
     pub async fn get<'new, K: ArrowReadableKey<'new> + 'new>(
@@ -579,6 +588,11 @@ impl RootManager {
         // from a fixed location. The path is sparse_index/ for legacy reasons.
         // This will be replaced with a full prefix-based storage shortly
         format!("sparse_index/{}", id)
+    }
+
+    fn should_prefetch(&self, id: &Uuid) -> bool {
+        let mut lock_guard = self.prefetched_roots.lock();
+        lock_guard.insert(*id)
     }
 }
 
