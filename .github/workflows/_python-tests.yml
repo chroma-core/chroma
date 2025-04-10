@@ -56,7 +56,7 @@ jobs:
           api_key: ${{ secrets.DD_API_KEY }}
           site: ${{ vars.DD_SITE }}
       - name: Test
-        run: python -m pytest ${{ matrix.test-globs }} ${{ matrix.parallelized && '-n auto --dist worksteal' || '' }} -v --color=yes
+        run: python -m pytest ${{ matrix.test-globs }} ${{ matrix.parallelized && '-n auto --dist worksteal' || '' }} -v --color=yes --durations 10
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
@@ -180,7 +180,7 @@ jobs:
         with:
           depot-project-id: ${{ vars.DEPOT_PROJECT_ID }}
       - name: Test
-        run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.test-globs }}"'
+        run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.test-globs }}"' --durations 10
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
@@ -242,7 +242,7 @@ jobs:
           api_key: ${{ secrets.DD_API_KEY }}
           site: ${{ vars.DD_SITE }}
       - name: Test
-        run: python -m pytest ${{ matrix.test-globs }}
+        run: python -m pytest ${{ matrix.test-globs }} --durations 10
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
