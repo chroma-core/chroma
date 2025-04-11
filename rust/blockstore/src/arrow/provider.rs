@@ -108,10 +108,13 @@ impl ArrowBlockfileProvider {
         }
         let count = futures.len();
 
+        tracing::info!("Prefetching {} blocks for blockfile ID: {:?}", count, id);
+
         while let Some(result) = futures.next().await {
             result?;
         }
 
+        tracing::info!("Prefetched {} blocks for blockfile ID: {:?}", count, id);
         Ok(count)
     }
 

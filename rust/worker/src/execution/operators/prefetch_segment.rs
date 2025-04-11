@@ -73,12 +73,6 @@ impl Operator<PrefetchSegmentInput, PrefetchSegmentOutput> for PrefetchSegmentOp
             ));
         }
 
-        tracing::info!(
-            "Prefetching segment: {:?} ({:?})",
-            input.segment.r#type,
-            input.segment.id,
-        );
-
         let mut futures = input
             .segment
             .filepaths_to_prefetch()
