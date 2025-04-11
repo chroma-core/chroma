@@ -154,11 +154,11 @@ pub struct CountBasedPolicyConfig {
 
 impl CountBasedPolicyConfig {
     fn default_max_concurrent_requests() -> usize {
-        15
+        30
     }
 
     fn default_bandwidth_allocation() -> Vec<f32> {
-        vec![1.0]
+        vec![0.7, 0.3]
     }
 }
 

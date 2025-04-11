@@ -36,8 +36,8 @@ query_service:
                 download_part_size_bytes: 8388608 # 8MiB
             rate_limiting_policy:
                 count_based_policy:
-                    max_concurrent_requests: 15
-                    bandwidth_allocation: [0.9, 0.1]
+                    max_concurrent_requests: 30
+                    bandwidth_allocation: [0.7, 0.3]
     log:
         grpc:
             host: "logservice.chroma"
@@ -111,7 +111,7 @@ compaction_service:
             rate_limiting_policy:
                 count_based_policy:
                     max_concurrent_requests: 30
-                    bandwidth_allocation: [0.9, 0.1]
+                    bandwidth_allocation: [0.7, 0.3]
     log:
         grpc:
             host: "logservice.chroma"
