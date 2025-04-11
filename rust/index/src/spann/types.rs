@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     sync::{atomic::AtomicU32, Arc},
+    time::Instant,
 };
 
 use chroma_blockstore::{
@@ -14,7 +15,6 @@ use chroma_types::SpannPostingList;
 use chroma_types::{CollectionUuid, InternalSpannConfiguration};
 use rand::seq::SliceRandom;
 use thiserror::Error;
-use tracing::{instrument, Instrument, Span};
 use uuid::Uuid;
 
 use crate::{
@@ -32,6 +32,7 @@ use crate::{
 
 use super::utils::{rng_query, KMeansAlgorithmInput, KMeansError, RngQueryError};
 
+#[derive(Clone, Debug)]
 pub struct VersionsMapInner {
     pub versions_map: HashMap<u32, u32>,
 }
@@ -1963,6 +1964,8 @@ pub enum SpannIndexReaderError {
     PostingListReaderConstructionError(#[source] OpenError),
     #[error("Error creating/opening versions map reader")]
     VersionsMapReaderConstructionError(#[source] OpenError),
+    #[error("Error loading data from versions map blockfile {0}")]
+    VersionsMapDataLoadError(#[source] Box<dyn ChromaError>),
     #[error("Spann index uninitialized")]
     UninitializedIndex,
     #[error("Error reading posting list {0}")]
@@ -1985,6 +1988,7 @@ impl ChromaError for SpannIndexReaderError {
             Self::HnswIndexConstructionError(e) => e.code(),
             Self::PostingListReaderConstructionError(e) => e.code(),
             Self::VersionsMapReaderConstructionError(e) => e.code(),
+            Self::VersionsMapDataLoadError(e) => e.code(),
             Self::UninitializedIndex => ErrorCodes::Internal,
             Self::PostingListReadError(e) => e.code(),
             Self::PostingListNotFound => ErrorCodes::NotFound,
@@ -2002,11 +2006,11 @@ pub struct SpannPosting {
     pub doc_embedding: Vec<f32>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SpannIndexReader<'me> {
     pub posting_lists: BlockfileReader<'me, u32, SpannPostingList<'me>>,
     pub hnsw_index: HnswIndexRef,
-    pub versions_map: BlockfileReader<'me, u32, u32>,
+    pub versions_map: Arc<VersionsMapInner>,
     pub dimensionality: usize,
 }
 
@@ -2060,19 +2064,38 @@ impl<'me> SpannIndexReader<'me> {
         }
     }
 
-    async fn versions_map_reader_from_id(
+    async fn load_versions_map(
         blockfile_id: &Uuid,
         blockfile_provider: &BlockfileProvider,
-    ) -> Result<BlockfileReader<'me, u32, u32>, SpannIndexReaderError> {
-        match blockfile_provider.read::<u32, u32>(blockfile_id).await {
-            Ok(reader) => Ok(reader),
+    ) -> Result<VersionsMapInner, SpannIndexReaderError> {
+        // Create a reader for the blockfile. Load all the data into the versions map.
+        let mut versions_map = HashMap::new();
+        let reader = match blockfile_provider.read::<u32, u32>(blockfile_id).await {
+            Ok(reader) => reader,
             Err(e) => {
-                tracing::error!("Error opening versions map reader {}: {}", blockfile_id, e);
-                Err(SpannIndexReaderError::VersionsMapReaderConstructionError(
+                tracing::error!(
+                    "Error creating reader for versions map blockfile {:?}: {:?}",
+                    blockfile_id,
+                    e
+                );
+                return Err(SpannIndexReaderError::VersionsMapReaderConstructionError(
                     *e,
-                ))
+                ));
             }
-        }
+        };
+        // Load data using the reader.
+        let versions_data = reader.get_range(.., ..).await.map_err(|e| {
+            tracing::error!(
+                "Error performing get_range for versions map blockfile {:?}: {:?}",
+                blockfile_id,
+                e
+            );
+            SpannIndexReaderError::VersionsMapDataLoadError(e)
+        })?;
+        versions_data.iter().for_each(|(key, value)| {
+            versions_map.insert(*key, *value);
+        });
+        Ok(VersionsMapInner { versions_map })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2109,21 +2132,18 @@ impl<'me> SpannIndexReader<'me> {
         };
 
         let versions_map_reader = match versions_map_blockfile_id {
-            Some(versions_id) => {
-                Self::versions_map_reader_from_id(versions_id, blockfile_provider).await?
-            }
+            Some(versions_id) => Self::load_versions_map(versions_id, blockfile_provider).await?,
             None => return Err(SpannIndexReaderError::UninitializedIndex),
         };
 
         Ok(Self {
             posting_lists: postings_list_reader,
             hnsw_index: hnsw_reader,
-            versions_map: versions_map_reader,
+            versions_map: Arc::new(versions_map_reader),
             dimensionality,
         })
     }
 
-    #[instrument(skip(self), name = "is_entry_outdated")]
     async fn is_outdated(
         &self,
         doc_offset_id: u32,
@@ -2131,59 +2151,71 @@ impl<'me> SpannIndexReader<'me> {
     ) -> Result<bool, SpannIndexReaderError> {
         let actual_version = self
             .versions_map
-            .get("", doc_offset_id)
-            .await
-            .map_err(|e| {
-                tracing::error!(
-                    "Error getting version for doc offset id {}: {}",
-                    doc_offset_id,
-                    e
-                );
-                SpannIndexReaderError::VersionsMapReadError(e)
-            })?
+            .versions_map
+            .get(&doc_offset_id)
             .ok_or(SpannIndexReaderError::VersionsMapNotFound)?;
-        Ok(actual_version == 0 || doc_version < actual_version)
+        Ok(*actual_version == 0 || doc_version < *actual_version)
     }
 
     pub async fn fetch_posting_list(
         &self,
         head_id: u32,
     ) -> Result<Vec<SpannPosting>, SpannIndexReaderError> {
+        let current_time = Instant::now();
         let res = self
             .posting_lists
             .get("", head_id)
-            .instrument(tracing::trace_span!(parent: Span::current(), "Fetch head", head_id = head_id.to_string()))
             .await
             .map_err(|e| {
                 tracing::error!("Error getting posting list for head {}: {}", head_id, e);
                 SpannIndexReaderError::PostingListReadError(e)
             })?
             .ok_or(SpannIndexReaderError::PostingListNotFound)?;
+        println!(
+            "(Sanket-temp) Time taken to get posting list for head {}: {} us",
+            head_id,
+            current_time.elapsed().as_micros()
+        );
 
-        async {
-            let mut posting_lists = Vec::with_capacity(res.doc_offset_ids.len());
-            let mut unique_ids = HashSet::new();
-            for (index, doc_offset_id) in res.doc_offset_ids.iter().enumerate() {
-                if self
-                    .is_outdated(*doc_offset_id, res.doc_versions[index])
-                    .await?
-                {
-                    continue;
-                }
-                if unique_ids.contains(doc_offset_id) {
-                    continue;
-                }
-                unique_ids.insert(*doc_offset_id);
-                posting_lists.push(SpannPosting {
-                    doc_offset_id: *doc_offset_id,
-                    doc_embedding: res.doc_embeddings
-                        [index * self.dimensionality..(index + 1) * self.dimensionality]
-                        .to_vec(),
-                });
+        let current_time = Instant::now();
+        let mut posting_lists = Vec::with_capacity(res.doc_offset_ids.len());
+        let mut unique_ids = HashSet::new();
+        for (index, doc_offset_id) in res.doc_offset_ids.iter().enumerate() {
+            let current_time = Instant::now();
+            if self
+                .is_outdated(*doc_offset_id, res.doc_versions[index])
+                .await?
+            {
+                continue;
             }
-            Ok(posting_lists)
-        }.instrument(tracing::trace_span!(parent: Span::current(), "Remove outdated entries from Pl", head_id = head_id.to_string()))
-        .await
+            println!(
+                "(Sanket-temp) Time taken to check if outdated for head {}: {} us",
+                head_id,
+                current_time.elapsed().as_micros()
+            );
+            let current_time = Instant::now();
+            if unique_ids.contains(doc_offset_id) {
+                continue;
+            }
+            unique_ids.insert(*doc_offset_id);
+            posting_lists.push(SpannPosting {
+                doc_offset_id: *doc_offset_id,
+                doc_embedding: res.doc_embeddings
+                    [index * self.dimensionality..(index + 1) * self.dimensionality]
+                    .to_vec(),
+            });
+            println!(
+                "(Sanket-temp) Time taken to copy PL for head {}: {} us",
+                head_id,
+                current_time.elapsed().as_micros()
+            );
+        }
+        println!(
+            "(Sanket-temp) Time taken to dedup posting list for head {}: {} us",
+            head_id,
+            current_time.elapsed().as_micros()
+        );
+        Ok(posting_lists)
     }
 
     // Only for testing purposes as of 5 March 2024.
@@ -2222,16 +2254,8 @@ impl<'me> SpannIndexReader<'me> {
                     {
                         let actual_version = self
                             .versions_map
-                            .get("", *doc_offset_id)
-                            .await
-                            .map_err(|e| {
-                                tracing::error!(
-                                    "Error getting version for doc offset id {}: {}",
-                                    doc_offset_id,
-                                    e
-                                );
-                                SpannIndexReaderError::VersionsMapReadError(e)
-                            })?
+                            .versions_map
+                            .get(doc_offset_id)
                             .ok_or(SpannIndexReaderError::VersionsMapNotFound)?;
                         tracing::error!("Duplicate doc offset id {} at latest version {} with different embeddings", doc_offset_id, actual_version);
                         return Err(SpannIndexReaderError::DataInconsistencyError);

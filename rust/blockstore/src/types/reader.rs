@@ -6,6 +6,7 @@ use crate::memory::reader_writer::MemoryBlockfileReader;
 use crate::memory::storage::Readable;
 use chroma_error::ChromaError;
 use futures::{Stream, StreamExt};
+use std::fmt::Debug;
 use std::ops::RangeBounds;
 
 #[derive(Clone)]
@@ -130,6 +131,27 @@ impl<
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => Ok(reader.rank(prefix, key)),
             BlockfileReader::ArrowBlockfileReader(reader) => reader.rank(prefix, key).await,
+        }
+    }
+}
+
+impl<
+        'referred_data,
+        K: Key
+            + Into<KeyWrapper>
+            + TryFrom<&'referred_data KeyWrapper, Error = InvalidKeyConversion>
+            + ArrowReadableKey<'referred_data>,
+        V: Value + Readable<'referred_data> + ArrowReadableValue<'referred_data>,
+    > Debug for BlockfileReader<'referred_data, K, V>
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BlockfileReader::MemoryBlockfileReader(reader) => {
+                write!(f, "MemoryBlockfileReader({})", reader.id())
+            }
+            BlockfileReader::ArrowBlockfileReader(reader) => {
+                write!(f, "ArrowBlockfileReader({})", reader.id())
+            }
         }
     }
 }

@@ -424,7 +424,6 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             // We never drop the HashMap while the Box<Block> is still alive
             return Ok(Some(unsafe { transmute::<&Block, &Block>(&**block) }));
         }
-
         Ok(None)
     }
 

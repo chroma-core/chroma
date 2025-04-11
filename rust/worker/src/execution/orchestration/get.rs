@@ -176,7 +176,7 @@ impl Orchestrator for GetOrchestrator {
         self.dispatcher.clone()
     }
 
-    fn initial_tasks(&self, ctx: &ComponentContext<Self>) -> Vec<TaskMessage> {
+    async fn initial_tasks(&mut self, ctx: &ComponentContext<Self>) -> Vec<TaskMessage> {
         vec![wrap(Box::new(self.fetch_log.clone()), (), ctx.receiver())]
     }
 

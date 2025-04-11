@@ -195,7 +195,7 @@ impl Orchestrator for GarbageCollectorOrchestrator {
         self.dispatcher.clone()
     }
 
-    fn initial_tasks(&self, ctx: &ComponentContext<Self>) -> Vec<TaskMessage> {
+    async fn initial_tasks(&mut self, ctx: &ComponentContext<Self>) -> Vec<TaskMessage> {
         tracing::info!(
             path = %self.version_file_path,
             "Creating initial fetch version file task"

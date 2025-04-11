@@ -545,7 +545,7 @@ pub async fn materialize_logs(
 ) -> Result<MaterializeLogsResult, LogMaterializerError> {
     // Trace the total_len since len() iterates over the entire chunk
     // and we don't want to do that just to trace the length.
-    tracing::info!("Total length of logs in materializer: {}", logs.total_len());
+    // tracing::info!("Total length of logs in materializer: {}", logs.total_len());
     // The offset ID that should be used for the next record
     let next_offset_id = match next_offset_id.as_ref() {
         Some(next_offset_id) => next_offset_id.clone(),

@@ -1,5 +1,3 @@
-use crate::spann_provider::SpannProvider;
-
 use super::blockfile_record::ApplyMaterializedLogError;
 use super::blockfile_record::RecordSegmentReader;
 use super::types::{
@@ -406,15 +404,7 @@ impl ChromaError for SpannSegmentReaderError {
     }
 }
 
-#[derive(Debug)]
-pub struct SpannSegmentReaderContext {
-    pub collection: Collection,
-    pub segment: Segment,
-    pub spann_provider: SpannProvider,
-    pub dimension: usize,
-}
-
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SpannSegmentReader<'me> {
     pub index_reader: SpannIndexReader<'me>,
     #[allow(dead_code)]
@@ -968,9 +958,10 @@ mod test {
         let mut versions_map = spann_reader
             .index_reader
             .versions_map
-            .get_range(.., ..)
-            .await
-            .expect("Error gettting all data from reader");
+            .versions_map
+            .clone()
+            .into_iter()
+            .collect::<Vec<(u32, u32)>>();
         versions_map.sort_by(|a, b| a.0.cmp(&b.0));
         assert_eq!(versions_map, vec![(1, 1), (2, 1)]);
     }
