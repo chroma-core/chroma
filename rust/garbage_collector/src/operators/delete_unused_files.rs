@@ -152,11 +152,8 @@ impl Operator<DeleteUnusedFilesInput, DeleteUnusedFilesOutput> for DeleteUnusedF
         // We don't want to fail the entire operation if one file fails to rename or delete.
         // It's possible that the file was already renamed/deleted in the last run that
         // did not finish successfully (i.e. crashed before committing the work to SysDb).
-        let mut file_operation_errors = Vec::new();
         match self.cleanup_mode {
-            CleanupMode::DryRun => {
-                // Do nothing here. List is written to S3 for all modes later in this function.
-            }
+            CleanupMode::DryRun => {}
             CleanupMode::Rename => {
                 // Soft delete - rename the file
                 if !all_files.is_empty() {
@@ -170,7 +167,7 @@ impl Operator<DeleteUnusedFilesInput, DeleteUnusedFilesOutput> for DeleteUnusedF
                     // Process any errors that occurred
                     while let Some(result) = rename_stream.next().await {
                         if let Err(e) = result {
-                            file_operation_errors.push(format!("{}: {}", e.path, e.error));
+                            tracing::info!("Failed to rename {}: {}", e.path, e.error);
                         }
                     }
                 }
@@ -185,17 +182,13 @@ impl Operator<DeleteUnusedFilesInput, DeleteUnusedFilesOutput> for DeleteUnusedF
                     // Process any errors that occurred
                     while let Some(result) = delete_stream.next().await {
                         if let Err(e) = result {
-                            file_operation_errors.push(format!("{}: {}", e.path, e.error));
+                            tracing::info!("Failed to delete {}: {}", e.path, e.error);
                         }
                     }
                 }
             }
         }
 
-        tracing::debug!(
-            "File deletion operation completed with {} file operation errors",
-            file_operation_errors.len()
-        );
         Ok(DeleteUnusedFilesOutput {
             deleted_files: all_files.into_iter().collect(),
         })
