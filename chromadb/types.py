@@ -152,7 +152,7 @@ class Collection(
     def get_model_fields(self) -> Dict[Any, Any]:
         """Used for backward compatibility with Pydantic 1.x"""
         try:
-            return self.model_fields  # pydantic 2.x
+            return type(self).model_fields  # pydantic 2.x, 3.x
         except AttributeError:
             return self.__fields__  # pydantic 1.x
 
