@@ -12,7 +12,7 @@ data:
 {{ end }}
 
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: garbage-collector
   namespace: {{ .Values.namespace }}
@@ -27,6 +27,7 @@ spec:
     metadata:
       labels:
         app: garbage-collector
+        member-type: garbage-collection-service
     spec:
       serviceAccountName: garbage-collector-serviceaccount
       volumes:
@@ -58,6 +59,10 @@ spec:
           - name: CONFIG_PATH
             value: /config/config.yaml
           {{ end }}
+          - name: CHROMA_GC_MY_MEMBER_ID
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
           {{ range .Values.garbageCollector.env }}
           - name: {{ .name }}
 {{ .value | nindent 12 }}

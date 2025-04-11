@@ -1,4 +1,6 @@
 use chroma_config::Configurable;
+use chroma_memberlist::memberlist_provider::CustomResourceMemberlistProvider;
+use chroma_memberlist::memberlist_provider::MemberlistProvider;
 use chroma_system::{Dispatcher, System};
 use chroma_tracing::{
     init_global_filter_layer, init_otel_layer, init_panic_tracing_hook, init_stdout_layer,
@@ -45,17 +47,17 @@ pub async fn garbage_collector_service_entrypoint() -> Result<(), Box<dyn std::e
     info!("Loaded configuration successfully: {:#?}", config);
 
     let registry = chroma_config::registry::Registry::new();
+    let system = System::new();
 
     // Setup the dispatcher and the pool of workers.
     let dispatcher = Dispatcher::try_from_config(&config.dispatcher_config, &registry)
         .await
-        .map_err(|e| {
-            error!("Failed to create dispatcher: {:?}", e);
-            e
-        })?;
-
-    let system = System::new();
+        .expect("Failed to create dispatcher from config");
     let mut dispatcher_handle = system.start_component(dispatcher);
+
+    let mut memberlist =
+        CustomResourceMemberlistProvider::try_from_config(&config.memberlist_provider, &registry)
+            .await?;
 
     // Start a background task to periodically check for garbage.
     // Garbage collector is a component that gets notified every
@@ -71,6 +73,8 @@ pub async fn garbage_collector_service_entrypoint() -> Result<(), Box<dyn std::e
     garbage_collector_component.set_system(system.clone());
 
     let mut garbage_collector_handle = system.start_component(garbage_collector_component);
+    memberlist.subscribe(garbage_collector_handle.receiver());
+    let mut memberlist_handle = system.start_component(memberlist);
 
     // Keep the service running and handle shutdown signals
     let mut sigterm = signal(SignalKind::terminate())?;
@@ -88,6 +92,11 @@ pub async fn garbage_collector_service_entrypoint() -> Result<(), Box<dyn std::e
     info!("Starting graceful shutdown, waiting for in-progress tasks");
     // NOTE: We should first stop the garbage collector. The garbage collector will finish the remaining jobs before shutdown.
     // We cannot directly shutdown the dispatcher and system because that will fail remaining jobs.
+    memberlist_handle.stop();
+    memberlist_handle
+        .join()
+        .await
+        .expect("Memberlist should be stoppable");
     garbage_collector_handle.stop();
     garbage_collector_handle
         .join()
