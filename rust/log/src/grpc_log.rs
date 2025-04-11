@@ -216,7 +216,6 @@ impl GrpcLog {
             }
         };
         let scout = response.into_inner();
-        tracing::info!("scout logs: {} -> {}", starting_offset, scout.limit_offset);
         Ok(scout.limit_offset as u64)
     }
 
