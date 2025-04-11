@@ -114,7 +114,7 @@ const response = await collection.get({
   limit: 10,
   offset: 0,
   include: ["embeddings", "metadatas", "documents"],
-  whereDocument: { $contains: "value" },
+  whereDocument: { "$contains": "value" },
 });
 ```
 
