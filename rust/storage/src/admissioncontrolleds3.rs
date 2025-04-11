@@ -442,7 +442,7 @@ impl CountBasedPolicy {
         let mut remaining_tokens = Vec::with_capacity(bandwidth_allocation.len());
         for allocation in bandwidth_allocation {
             remaining_tokens.push(Semaphore::new(
-                (max_allowed_outstanding as f32 * allocation) as usize,
+                (max_allowed_outstanding as f32 * allocation).ceil() as usize,
             ));
         }
         Self { remaining_tokens }
