@@ -472,6 +472,7 @@ class RustBindingsAPI(ServerAPI):
         self,
         collection_id: UUID,
         query_embeddings: Embeddings,
+        ids: Optional[IDs] = None,
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
@@ -496,6 +497,7 @@ class RustBindingsAPI(ServerAPI):
 
         rust_response = self.bindings.query(
             str(collection_id),
+            ids,
             query_embeddings,
             n_results,
             json.dumps(where) if where else None,
