@@ -152,7 +152,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: ["depot-ubuntu-22.04-4"]
+        platform: ["blacksmith-16vcpu-ubuntu-2204"]
         test-globs: ["chromadb/test/api",
                     "chromadb/test/api/test_collection.py",
                     "chromadb/test/api/test_limit_offset.py",
@@ -173,15 +173,18 @@ jobs:
       - uses: ./.github/actions/python
         with:
           python-version: ${{ matrix.python }}
-      - name: Configure pytest to upload results to Datadog
-        uses: datadog/test-visibility-github-action@v2
+      - uses: useblacksmith/build-push-action@setup-only
         with:
-          languages: python
-          api_key: ${{ secrets.DD_API_KEY }}
-          site: ${{ vars.DD_SITE }}
+          setup-only: true
+      # - name: Configure pytest to upload results to Datadog
+      #   uses: datadog/test-visibility-github-action@v2
+      #   with:
+      #     languages: python
+      #     api_key: ${{ secrets.DD_API_KEY }}
+      #     site: ${{ vars.DD_SITE }}
       - uses: ./.github/actions/tilt
-        with:
-          depot-project-id: ${{ vars.DEPOT_PROJECT_ID }}
+        # with:
+        #   depot-project-id: ${{ vars.DEPOT_PROJECT_ID }}
       - name: Test
         run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.test-globs }}"' --durations 10
         shell: bash
