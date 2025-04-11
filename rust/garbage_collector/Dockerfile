@@ -16,8 +16,9 @@ COPY idl/ idl/
 COPY rust/ rust/
 
 FROM builder AS garbage_collector_builder
-RUN --mount=type=cache,sharing=locked,target=/chroma/target/ \
-    --mount=type=cache,sharing=locked,target=/usr/local/cargo/registry/ \
+# we want to avoid caching the target directory because Buildkit has its own cache that conflicts with the cargo cache
+RUN --mount=type=cache,target=/usr/local/cargo/git/ \
+    --mount=type=cache,target=/usr/local/cargo/registry/ \
     cd rust/garbage_collector && \
     if [ "$RELEASE_MODE" = "1" ]; then cargo build --bin garbage_collector_service --release; else cargo build --bin garbage_collector_service; fi && \
     cd ../.. && \
