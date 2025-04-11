@@ -10,6 +10,14 @@ use chroma_segment::local_segment_manager::LocalSegmentManager;
 use chroma_sqlite::db::SqliteDb;
 use chroma_sysdb::SysDb;
 use chroma_system::System;
+use chroma_telemetry::{
+    client::TelemetryClient,
+    events::{
+        CollectionAddEvent, CollectionDeleteEvent, CollectionGetEvent, CollectionQueryEvent,
+        CollectionUpdateEvent, ProductTelemetryEvent,
+    },
+    posthog::Posthog,
+};
 use chroma_tracing::meter_event::{MeterEvent, ReadAction, WriteAction};
 use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
@@ -35,9 +43,11 @@ use chroma_types::{
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
+use std::fmt;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::sync::Mutex;
 
 use super::utils::to_records;
 
@@ -49,7 +59,7 @@ struct Metrics {
     get_retries_counter: Counter<u64>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ServiceBasedFrontend {
     allow_reset: bool,
     executor: Executor,
@@ -58,6 +68,32 @@ pub struct ServiceBasedFrontend {
     collections_with_segments_provider: CollectionsWithSegmentsProvider,
     max_batch_size: u32,
     metrics: Arc<Metrics>,
+    telemetry_client: Option<Arc<Mutex<dyn TelemetryClient + Send + Sync>>>,
+}
+
+impl fmt::Debug for ServiceBasedFrontend {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ServiceBasedFrontend")
+            .field("allow_reset", &self.allow_reset)
+            .field("executor", &self.executor)
+            .field("log_client", &self.log_client)
+            .field("sysdb_client", &self.sysdb_client)
+            .field(
+                "collections_with_segments_provider",
+                &self.collections_with_segments_provider,
+            )
+            .field("max_batch_size", &self.max_batch_size)
+            .field("metrics", &self.metrics)
+            .field(
+                "telemetry_client",
+                &if self.telemetry_client.is_some() {
+                    "Some(<TelemetryClient>)"
+                } else {
+                    "None"
+                },
+            )
+            .finish()
+    }
 }
 
 impl ServiceBasedFrontend {
@@ -68,6 +104,7 @@ impl ServiceBasedFrontend {
         log_client: Log,
         executor: Executor,
         max_batch_size: u32,
+        telemetry_client: Option<Arc<Mutex<dyn TelemetryClient + Send + Sync>>>,
     ) -> Self {
         let meter = global::meter("chroma");
         let delete_retries_counter = meter.u64_counter("delete_retries").build();
@@ -88,6 +125,7 @@ impl ServiceBasedFrontend {
             collections_with_segments_provider,
             max_batch_size,
             metrics,
+            telemetry_client,
         }
     }
 
@@ -517,6 +555,12 @@ impl ServiceBasedFrontend {
 
         let embeddings = embeddings.map(|embeddings| embeddings.into_iter().map(Some).collect());
 
+        // Capture lengths of ids, embeddings, documents, uris, and metadatas
+        let add_amount = ids.len();
+        let with_documents = documents.as_ref().map_or(0, |_| add_amount);
+        let with_metadata = metadatas.as_ref().map_or(0, |_| add_amount);
+        let with_uris = uris.as_ref().map_or(0, |_| add_amount);
+
         let (records, log_size_bytes) =
             to_records(ids, embeddings, documents, uris, metadatas, Operation::Add)
                 .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
@@ -525,6 +569,26 @@ impl ServiceBasedFrontend {
             .push_logs(collection_id, records)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+
+        // --- Telemetry Capture ---
+        if let Some(telemetry_client) = self.telemetry_client.clone() {
+            let collection_uuid_str = collection_id.to_string();
+
+            let event = Box::new(CollectionAddEvent::new(
+                collection_uuid_str,
+                add_amount,
+                with_documents,
+                with_metadata,
+                with_uris,
+                add_amount, // batch_size for this event instance
+            )) as Box<dyn ProductTelemetryEvent + Send + Sync>; // Explicit cast
+
+            tokio::spawn(async move {
+                let mut client = telemetry_client.lock().await;
+                client.capture(event).await;
+            });
+        }
+        // --- End Telemetry Capture ---
 
         // TODO: Submit event after the response is sent
         MeterEvent::CollectionWrite {
@@ -560,6 +624,13 @@ impl ServiceBasedFrontend {
         .await
         .map_err(|err| err.boxed())?;
 
+        // Capture lengths of ids, embeddings, documents, uris, and metadatas
+        let update_amount = ids.len();
+        let with_embeddings = embeddings.as_ref().map_or(0, |_| update_amount);
+        let with_documents = documents.as_ref().map_or(0, |_| update_amount);
+        let with_metadata = metadatas.as_ref().map_or(0, |_| update_amount);
+        let with_uris = uris.as_ref().map_or(0, |_| update_amount);
+
         let (records, log_size_bytes) = to_records(
             ids,
             embeddings,
@@ -574,6 +645,26 @@ impl ServiceBasedFrontend {
             .push_logs(collection_id, records)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+
+        // --- Telemetry Capture ---
+        if let Some(telemetry_client) = self.telemetry_client.clone() {
+            let collection_uuid_str = collection_id.to_string();
+
+            let event = Box::new(CollectionUpdateEvent::new(
+                collection_uuid_str,
+                update_amount,
+                with_embeddings,
+                with_metadata,
+                with_documents,
+                with_uris,
+            )) as Box<dyn ProductTelemetryEvent + Send + Sync>; // Explicit cast
+
+            tokio::spawn(async move {
+                let mut client = telemetry_client.lock().await;
+                client.capture(event).await;
+            });
+        }
+        // --- End Telemetry Capture ---
 
         // TODO: Submit event after the response is sent
         MeterEvent::CollectionWrite {
@@ -611,6 +702,11 @@ impl ServiceBasedFrontend {
 
         let embeddings = embeddings.map(|embeddings| embeddings.into_iter().map(Some).collect());
 
+        let add_amount = ids.len();
+        let with_documents = documents.as_ref().map_or(0, |_| add_amount);
+        let with_metadata = metadatas.as_ref().map_or(0, |_| add_amount);
+        let with_uris = uris.as_ref().map_or(0, |_| add_amount);
+
         let (records, log_size_bytes) = to_records(
             ids,
             embeddings,
@@ -625,6 +721,27 @@ impl ServiceBasedFrontend {
             .push_logs(collection_id, records)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+
+        // --- Telemetry Capture ---
+        if let Some(telemetry_client) = self.telemetry_client.clone() {
+            let collection_uuid_str = collection_id.to_string();
+
+            // Using CollectionAddEvent for upsert based on Python implementation
+            let event = Box::new(CollectionAddEvent::new(
+                collection_uuid_str,
+                add_amount,
+                with_documents,
+                with_metadata,
+                with_uris,
+                add_amount, // batch_size for this event instance
+            )) as Box<dyn ProductTelemetryEvent + Send + Sync>; // Explicit cast
+
+            tokio::spawn(async move {
+                let mut client = telemetry_client.lock().await;
+                client.capture(event).await;
+            });
+        }
+        // --- End Telemetry Capture ---
 
         // TODO: Submit event after the response is sent
         MeterEvent::CollectionWrite {
@@ -733,6 +850,8 @@ impl ServiceBasedFrontend {
             return Ok(DeleteCollectionRecordsResponse {});
         }
 
+        let delete_amount = records.len();
+
         let log_size_bytes = records.iter().map(OperationRecord::size_bytes).sum();
 
         self.log_client
@@ -753,6 +872,22 @@ impl ServiceBasedFrontend {
         }
         .submit()
         .await;
+
+        // --- Telemetry Capture ---
+        if let Some(telemetry_client) = self.telemetry_client.clone() {
+            let collection_uuid_str = collection_id.to_string();
+
+            let event = Box::new(CollectionDeleteEvent::new(
+                collection_uuid_str,
+                delete_amount,
+            )) as Box<dyn ProductTelemetryEvent + Send + Sync>; // Explicit cast
+
+            tokio::spawn(async move {
+                let mut client = telemetry_client.lock().await;
+                client.capture(event).await;
+            });
+        }
+        // --- End Telemetry Capture ---
 
         Ok(DeleteCollectionRecordsResponse {})
     }
@@ -910,6 +1045,7 @@ impl ServiceBasedFrontend {
             ..
         }: GetRequest,
     ) -> Result<GetResponse, QueryError> {
+        let ids_amount = ids.as_ref().map_or(0, |i| i.len());
         let collection_and_segments = self
             .collections_with_segments_provider
             .get_collection_with_segments(collection_id)
@@ -965,6 +1101,43 @@ impl ServiceBasedFrontend {
         }
         .submit()
         .await;
+
+        // --- Telemetry Capture ---
+        if let Some(telemetry_client) = self.telemetry_client.clone() {
+            let collection_uuid_str = collection_id.to_string();
+            let include_metadata = if include.0.contains(&Include::Metadata) {
+                ids_amount
+            } else {
+                0
+            };
+            let include_documents = if include.0.contains(&Include::Document) {
+                ids_amount
+            } else {
+                0
+            };
+            // Handle Uri separately as it implies Metadata in the projection
+            let include_uris = if include.0.contains(&Include::Uri) {
+                ids_amount
+            } else {
+                0
+            };
+
+            let event = Box::new(CollectionGetEvent::new(
+                collection_uuid_str,
+                ids_amount,
+                limit.map(|l| l as usize), // Use the input limit
+                include_metadata,
+                include_documents,
+                include_uris,
+            )) as Box<dyn ProductTelemetryEvent + Send + Sync>; // Explicit cast
+
+            tokio::spawn(async move {
+                let mut client = telemetry_client.lock().await;
+                client.capture(event).await;
+            });
+        }
+        // --- End Telemetry Capture ---
+
         Ok((get_result, include).into())
     }
 
@@ -1028,6 +1201,8 @@ impl ServiceBasedFrontend {
             ..
         }: QueryRequest,
     ) -> Result<QueryResponse, QueryError> {
+        let query_amount = embeddings.len();
+        let with_metadata_filter = if r#where.is_some() { query_amount } else { 0 };
         let collection_and_segments = self
             .collections_with_segments_provider
             .get_collection_with_segments(collection_id)
@@ -1087,6 +1262,53 @@ impl ServiceBasedFrontend {
         }
         .submit()
         .await;
+
+        // --- Telemetry Capture ---
+        if let Some(telemetry_client) = self.telemetry_client.clone() {
+            let collection_uuid_str = collection_id.to_string();
+            // where_document is not part of the Rust query signature
+            let with_document_filter = 0;
+            let include_metadatas = if include.0.contains(&Include::Metadata) {
+                query_amount
+            } else {
+                0
+            };
+            let include_documents = if include.0.contains(&Include::Document) {
+                query_amount
+            } else {
+                0
+            };
+            // Handle Uri separately as it implies Metadata in the projection
+            let include_uris = if include.0.contains(&Include::Uri) {
+                query_amount
+            } else {
+                0
+            };
+            let include_distances = if include.0.contains(&Include::Distance) {
+                query_amount
+            } else {
+                0
+            };
+
+            let event = Box::new(CollectionQueryEvent::new(
+                collection_uuid_str,
+                query_amount,
+                with_metadata_filter,
+                with_document_filter,
+                n_results as usize, // Use the input n_results
+                include_metadatas,
+                include_documents,
+                include_uris,
+                include_distances,
+            )) as Box<dyn ProductTelemetryEvent + Send + Sync>; // Explicit cast
+
+            tokio::spawn(async move {
+                let mut client = telemetry_client.lock().await;
+                client.capture(event).await;
+            });
+        }
+        // --- End Telemetry Capture ---
+
         Ok((query_result, include).into())
     }
 
@@ -1196,6 +1418,27 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
         let executor =
             Executor::try_from_config(&(config.executor.clone(), system.clone()), registry).await?;
 
+        // Initialize TelemetryClient based on config
+        let telemetry_client: Option<Arc<Mutex<dyn TelemetryClient + Send + Sync>>> =
+            if let Some(telemetry_config) = &config.telemetry {
+                // TODO: Get actual chroma version, maybe from build info or env var?
+                let chroma_version = telemetry_config
+                    .chroma_version
+                    .clone()
+                    .unwrap_or_else(|| "unknown".to_string());
+
+                let posthog_client = Posthog::new(
+                    telemetry_config.user_id.clone(),
+                    telemetry_config.is_server,
+                    chroma_version,
+                )
+                .await;
+                Some(Arc::new(Mutex::new(posthog_client)))
+            } else {
+                tracing::warn!("Telemetry configuration not found. Telemetry will be disabled.");
+                None
+            };
+
         Ok(ServiceBasedFrontend::new(
             config.allow_reset,
             sysdb,
@@ -1203,6 +1446,7 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
             log,
             executor,
             max_batch_size,
+            telemetry_client,
         ))
     }
 }
