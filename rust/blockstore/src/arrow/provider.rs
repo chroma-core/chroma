@@ -17,7 +17,9 @@ use async_trait::async_trait;
 use chroma_cache::{CacheError, PersistentCache};
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_storage::{PutOptions, Storage};
+use chroma_storage::{
+    admissioncontrolleds3::StorageRequestPriority, GetOptions, PutOptions, Storage,
+};
 use futures::{stream::FuturesUnordered, StreamExt};
 use std::sync::Arc;
 use thiserror::Error;
@@ -92,7 +94,7 @@ impl ArrowBlockfileProvider {
         for block_id in block_ids.iter() {
             // Don't prefetch if already cached.
             if !self.block_manager.cached(block_id).await {
-                futures.push(self.block_manager.get(block_id));
+                futures.push(self.block_manager.get(block_id, StorageRequestPriority::P1));
             }
         }
         let count = futures.len();
@@ -286,7 +288,7 @@ impl BlockManager {
         &self,
         block_id: &Uuid,
     ) -> Result<D, ForkError> {
-        let block = self.get(block_id).await;
+        let block = self.get(block_id, StorageRequestPriority::P0).await;
         let block = match block {
             Ok(Some(block)) => block,
             Ok(None) => {
@@ -319,7 +321,11 @@ impl BlockManager {
             .unwrap_or(false)
     }
 
-    pub(super) async fn get(&self, id: &Uuid) -> Result<Option<Block>, GetError> {
+    pub(super) async fn get(
+        &self,
+        id: &Uuid,
+        priority: StorageRequestPriority,
+    ) -> Result<Option<Block>, GetError> {
         let block = self.block_cache.get(id).await.ok().flatten();
         match block {
             Some(block) => Ok(Some(block)),
@@ -327,7 +333,7 @@ impl BlockManager {
                 let key = format!("block/{}", id);
                 let bytes_res = self
                     .storage
-                    .get(&key)
+                    .get(&key, GetOptions::new(priority))
                     .instrument(
                         tracing::trace_span!(parent: Span::current(), "BlockManager storage get", id = id.to_string()),
                     )
@@ -385,7 +391,11 @@ impl BlockManager {
         let block_bytes_len = bytes.len();
         let res = self
             .storage
-            .put_bytes(&key, bytes, PutOptions::default())
+            .put_bytes(
+                &key,
+                bytes,
+                PutOptions::with_priority(StorageRequestPriority::P0),
+            )
             .await;
         match res {
             Ok(_) => {
@@ -475,7 +485,11 @@ impl RootManager {
                 tracing::info!("Cache miss - fetching root from storage");
                 let key = Self::get_storage_key(id);
                 tracing::debug!("Reading root from storage with key: {}", key);
-                match self.storage.get(&key).await {
+                match self
+                    .storage
+                    .get(&key, GetOptions::new(StorageRequestPriority::P0))
+                    .await
+                {
                     Ok(bytes) => match RootReader::from_bytes::<K>(&bytes, *id) {
                         Ok(root) => {
                             self.cache.insert(*id, root.clone()).await;
@@ -498,7 +512,11 @@ impl RootManager {
     pub async fn get_all_block_ids(&self, id: &Uuid) -> Result<Vec<Uuid>, RootManagerError> {
         let key = Self::get_storage_key(id);
         tracing::debug!("Reading root from storage with key: {}", key);
-        match self.storage.get(&key).await {
+        match self
+            .storage
+            .get(&key, GetOptions::new(StorageRequestPriority::P0))
+            .await
+        {
             Ok(bytes) => RootReader::get_all_block_ids_from_bytes(&bytes, *id)
                 .map_err(RootManagerError::FromBytesError),
             Err(e) => {
@@ -522,7 +540,11 @@ impl RootManager {
         let key = format!("sparse_index/{}", root.id);
         let res = self
             .storage
-            .put_bytes(&key, bytes, PutOptions::default())
+            .put_bytes(
+                &key,
+                bytes,
+                PutOptions::with_priority(StorageRequestPriority::P0),
+            )
             .await;
         match res {
             Ok(_) => {

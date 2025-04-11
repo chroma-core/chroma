@@ -12,7 +12,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_storage::{Storage, StorageError};
+use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
+use chroma_storage::{GetOptions, Storage, StorageError};
 use chroma_system::{Operator, OperatorType};
 use thiserror::Error;
 
@@ -89,7 +90,10 @@ impl Operator<FetchVersionFileInput, FetchVersionFileOutput> for FetchVersionFil
 
         let content = input
             .storage
-            .get(&input.version_file_path)
+            .get(
+                &input.version_file_path,
+                GetOptions::new(StorageRequestPriority::P0),
+            )
             .await
             .map_err(|e| {
                 tracing::error!(

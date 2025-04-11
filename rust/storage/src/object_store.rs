@@ -187,7 +187,12 @@ impl ObjectStore {
         Ok(Arc::new(output_buffer))
     }
 
-    pub async fn put_file(&self, key: &str, path: &str) -> Result<Option<ETag>, StorageError> {
+    pub async fn put_file(
+        &self,
+        key: &str,
+        path: &str,
+        _: crate::PutOptions,
+    ) -> Result<Option<ETag>, StorageError> {
         let multipart = self.object_store.put_multipart(&Path::from(key)).await?;
         let multipart = Arc::new(Mutex::new(multipart));
         let file_size = tokio::fs::metadata(path)
@@ -329,6 +334,8 @@ impl ObjectStore {
 
 #[cfg(test)]
 mod tests {
+    use crate::PutOptions;
+
     use super::*;
 
     #[test]
@@ -383,7 +390,10 @@ mod tests {
         let bytes = b"test data".to_vec();
         let path = "test_file";
         tokio::fs::write(path, &bytes).await.unwrap();
-        object_store.put_file(key, path).await.unwrap();
+        object_store
+            .put_file(key, path, PutOptions::default())
+            .await
+            .unwrap();
         let result = object_store.get(key).await.unwrap();
         assert_eq!(result, bytes.into());
         std::fs::remove_file(path).unwrap();
