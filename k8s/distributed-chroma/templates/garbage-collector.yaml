@@ -59,7 +59,7 @@ spec:
           - name: CONFIG_PATH
             value: /config/config.yaml
           {{ end }}
-          - name: CHROMA_GC__MY_MEMBER_ID
+          - name: CHROMA_GC_MY_MEMBER_ID
             valueFrom:
               fieldRef:
                 fieldPath: metadata.name
