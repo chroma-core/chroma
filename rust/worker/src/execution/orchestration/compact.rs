@@ -644,14 +644,14 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             Some(writer) => writer,
             None => return,
         };
-        let vector_writer = match vector_segment.r#type {
+        let (vector_writer, is_vector_segment_spann) = match vector_segment.r#type {
             SegmentType::Spann => match self.ok_or_terminate(
                 self.spann_provider
                     .write(&collection, &vector_segment, dimension)
                     .await,
                 ctx,
             ) {
-                Some(writer) => VectorSegmentWriter::Spann(writer),
+                Some(writer) => (VectorSegmentWriter::Spann(writer), true),
                 None => return,
             },
             _ => match self.ok_or_terminate(
@@ -665,7 +665,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                 .map_err(|err| *err),
                 ctx,
             ) {
-                Some(writer) => VectorSegmentWriter::Hnsw(writer),
+                Some(writer) => (VectorSegmentWriter::Hnsw(writer), false),
                 None => return,
             },
         };
@@ -690,7 +690,13 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         // Prefetch segments
         let prefetch_segments = match self.rebuild {
             true => vec![output.record_segment],
-            false => vec![output.metadata_segment, output.record_segment],
+            false => {
+                let mut segments = vec![output.metadata_segment, output.record_segment];
+                if is_vector_segment_spann {
+                    segments.push(output.vector_segment);
+                }
+                segments
+            }
         };
         for segment in prefetch_segments {
             let prefetch_task = wrap(

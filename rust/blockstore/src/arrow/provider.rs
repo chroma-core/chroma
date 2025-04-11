@@ -21,7 +21,11 @@ use chroma_storage::{
     admissioncontrolleds3::StorageRequestPriority, GetOptions, PutOptions, Storage,
 };
 use futures::{stream::FuturesUnordered, StreamExt};
-use std::sync::Arc;
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 use thiserror::Error;
 use tracing::{Instrument, Span};
 use uuid::Uuid;
@@ -42,6 +46,8 @@ impl ChromaError for ArrowBlockfileProviderPrefetchError {
         }
     }
 }
+
+const PREFETCH_TTL_HOURS: u64 = 8;
 
 /// A BlockFileProvider that creates ArrowBlockfiles (Arrow-backed blockfiles used for production).
 /// For now, it keeps a simple local cache of blockfiles.
@@ -83,6 +89,9 @@ impl ArrowBlockfileProvider {
     }
 
     pub async fn prefetch(&self, id: &Uuid) -> Result<usize, ArrowBlockfileProviderPrefetchError> {
+        if !self.root_manager.should_prefetch(id) {
+            return Ok(0);
+        }
         // We call .get_all_block_ids() here instead of just reading the root because reading the root requires a concrete Key type.
         let block_ids = self
             .root_manager
@@ -99,10 +108,13 @@ impl ArrowBlockfileProvider {
         }
         let count = futures.len();
 
+        tracing::info!("Prefetching {} blocks for blockfile ID: {:?}", count, id);
+
         while let Some(result) = futures.next().await {
             result?;
         }
 
+        tracing::info!("Prefetched {} blocks for blockfile ID: {:?}", count, id);
         Ok(count)
     }
 
@@ -175,6 +187,7 @@ impl ArrowBlockfileProvider {
     pub async fn clear(&self) -> Result<(), CacheError> {
         self.block_manager.block_cache.clear().await?;
         self.root_manager.cache.clear().await?;
+        self.root_manager.prefetched_roots.lock().clear();
         Ok(())
     }
 }
@@ -466,12 +479,18 @@ impl ChromaError for RootManagerError {
 pub struct RootManager {
     cache: Arc<dyn PersistentCache<Uuid, RootReader>>,
     storage: Storage,
+    // Sparse indexes that have already been prefetched and don't need to be prefetched again.
+    prefetched_roots: Arc<parking_lot::Mutex<HashMap<Uuid, Duration>>>,
 }
 
 impl RootManager {
     pub fn new(storage: Storage, cache: Box<dyn PersistentCache<Uuid, RootReader>>) -> Self {
         let cache: Arc<dyn PersistentCache<Uuid, RootReader>> = cache.into();
-        Self { cache, storage }
+        Self {
+            cache,
+            storage,
+            prefetched_roots: Arc::new(parking_lot::Mutex::new(HashMap::new())),
+        }
     }
 
     pub async fn get<'new, K: ArrowReadableKey<'new> + 'new>(
@@ -579,6 +598,41 @@ impl RootManager {
         // from a fixed location. The path is sparse_index/ for legacy reasons.
         // This will be replaced with a full prefix-based storage shortly
         format!("sparse_index/{}", id)
+    }
+
+    fn should_prefetch(&self, id: &Uuid) -> bool {
+        let mut lock_guard = self.prefetched_roots.lock();
+        let expires_at = lock_guard.get(id);
+        match expires_at {
+            Some(expires_at) => {
+                if SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("Do not deploy before UNIX epoch")
+                    < *expires_at
+                {
+                    false
+                } else {
+                    lock_guard.insert(
+                        *id,
+                        SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .expect("Do not deploy before UNIX epoch")
+                            + std::time::Duration::from_secs(PREFETCH_TTL_HOURS * 3600),
+                    );
+                    true
+                }
+            }
+            None => {
+                lock_guard.insert(
+                    *id,
+                    SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .expect("Do not deploy before UNIX epoch")
+                        + std::time::Duration::from_secs(PREFETCH_TTL_HOURS * 3600),
+                );
+                true
+            }
+        }
     }
 }
 
