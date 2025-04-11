@@ -11,6 +11,10 @@ Welcome! This guide demonstrates how to leverage ChromaDB as a powerful vector s
 **What is Mastra?** Mastra is an open-source TypeScript agent framework designed to provide the essential primitives for building AI applications. It enables developers to create AI agents with memory and tool-calling capabilities, implement deterministic LLM workflows, and leverage RAG for knowledge integration. With features like model routing, workflow graphs, and automated evals, Mastra provides a complete toolkit for developing, testing, and deploying AI applications.
 {% /Banner %}
 
+{% Banner type="tip" %}
+**Code Example:** You can find the complete code for the application built in this guide on GitHub: [akuya-ekorot/chroma-mastra](https://github.com/akuya-ekorot/chroma-mastra)
+{% /Banner %}
+
 This example showcases the seamless integration between ChromaDB and Mastra, highlighting how developers can easily build sophisticated AI applications by combining these technologies.
 
 ## Goal
@@ -537,3 +541,12 @@ If you query before adding any documents, you'll receive an error indicating the
 ---
 
 Congratulations! You have successfully set up a Mastra application that uses custom API routes to interact with ChromaDB for a basic RAG workflow, leveraging Cohere embeddings. You can now build upon this foundation to create more complex AI applications.
+
+---
+
+## Resources
+
+- **Mastra Documentation:** [https://mastra.ai/docs](https://mastra.ai/docs)
+- **Mastra GitHub Repository:** [https://github.com/mastra-ai/mastra](https://github.com/mastra-ai/mastra)
+- **`@mastra/chroma` Package:** [https://www.npmjs.com/package/@mastra/chroma](https://www.npmjs.com/package/@mastra/chroma)
+- **Example Code for this Guide:** [https://github.com/akuya-ekorot/chroma-mastra](https://github.com/akuya-ekorot/chroma-mastra)
