@@ -187,6 +187,7 @@ impl ArrowBlockfileProvider {
     pub async fn clear(&self) -> Result<(), CacheError> {
         self.block_manager.block_cache.clear().await?;
         self.root_manager.cache.clear().await?;
+        self.root_manager.prefetched_roots.lock().clear();
         Ok(())
     }
 }
