@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::HNSW_INDEX_S3_PREFIX;
 use chroma_storage::Storage;
+use chroma_storage::StorageError;
 use chroma_system::{Operator, OperatorType};
 use futures::stream::StreamExt;
 use std::collections::HashSet;
@@ -47,28 +48,16 @@ impl DeleteUnusedFilesOperator {
         )
     }
 
-    async fn delete_with_path(&self, file_path: String) -> Result<(), FileOperationError> {
-        self.storage
-            .delete(&file_path)
-            .await
-            .map_err(|e| FileOperationError {
-                path: file_path,
-                error: e.to_string(),
-            })
+    async fn delete_with_path(&self, file_path: String) -> Result<(), StorageError> {
+        self.storage.delete(&file_path).await
     }
 
     async fn rename_with_path(
         &self,
         file_path: String,
         new_path: String,
-    ) -> Result<(), FileOperationError> {
-        self.storage
-            .rename(&file_path, &new_path)
-            .await
-            .map_err(|e| FileOperationError {
-                path: file_path,
-                error: e.to_string(),
-            })
+    ) -> Result<(), StorageError> {
+        self.storage.rename(&file_path, &new_path).await
     }
 }
 
@@ -98,12 +87,6 @@ impl ChromaError for DeleteUnusedFilesError {
     fn code(&self) -> ErrorCodes {
         ErrorCodes::Internal
     }
-}
-
-#[derive(Debug)]
-struct FileOperationError {
-    path: String,
-    error: String,
 }
 
 #[async_trait]
@@ -167,7 +150,15 @@ impl Operator<DeleteUnusedFilesInput, DeleteUnusedFilesOutput> for DeleteUnusedF
                     // Process any errors that occurred
                     while let Some(result) = rename_stream.next().await {
                         if let Err(e) = result {
-                            tracing::info!("Failed to rename {}: {}", e.path, e.error);
+                            match e {
+                                StorageError::NotFound { path, source } => {
+                                    tracing::info!("Rename file {path} not found: {source}")
+                                }
+                                StorageError::AlreadyExists { path, source } => {
+                                    tracing::info!("Rename file {path} already exists: {source}")
+                                }
+                                err => tracing::error!("Failed to rename: {err}"),
+                            }
                         }
                     }
                 }
@@ -182,7 +173,12 @@ impl Operator<DeleteUnusedFilesInput, DeleteUnusedFilesOutput> for DeleteUnusedF
                     // Process any errors that occurred
                     while let Some(result) = delete_stream.next().await {
                         if let Err(e) = result {
-                            tracing::info!("Failed to delete {}: {}", e.path, e.error);
+                            match e {
+                                StorageError::NotFound { path, source } => {
+                                    tracing::info!("Rename file {path} not found: {source}")
+                                }
+                                err => tracing::error!("Failed to rename: {err}"),
+                            }
                         }
                     }
                 }
