@@ -107,6 +107,8 @@ pub fn init_otel_layer(
         .with_resource(resource.clone())
         .build();
     global::set_meter_provider(meter_provider);
+    // Set global text_map propagator for any downstream context propagation, for example reqwest-middleware
+    global::set_text_map_propagator(TraceContextPropagator::new());
     // Layer for adding our configured tracer.
     // Export everything at this layer. The backend i.e. honeycomb or jaeger will filter at its end.
     tracing_opentelemetry::OpenTelemetryLayer::new(tracer)
