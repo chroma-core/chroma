@@ -200,7 +200,7 @@ impl GrpcLog {
     pub(super) async fn scout_logs(
         &mut self,
         collection_id: CollectionUuid,
-        starting_offset: u64,
+        _: u64,
     ) -> Result<u64, Box<dyn ChromaError>> {
         let request = self
             .client_for(collection_id)
