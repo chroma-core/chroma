@@ -8,6 +8,7 @@ mod proptest_helpers;
 
 prop_state_machine! {
      #![proptest_config(proptest::test_runner::Config {
+        cases: 2000,
             fork: false,
             // verbose: 2,
             ..proptest::test_runner::Config::default()
