@@ -24,14 +24,13 @@ use chroma_types::{
     GetCollectionError, GetCollectionRequest, GetCollectionResponse, GetCollectionsError,
     GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
     GetTenantError, GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError,
-    HeartbeatResponse, Include, InternalCollectionConfiguration, ListCollectionsRequest,
-    ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
-    Operation, OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
-    Segment, SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError,
-    UpdateCollectionRecordsError, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
-    UpdateCollectionRequest, UpdateCollectionResponse, UpsertCollectionRecordsError,
-    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, VectorIndexConfiguration,
-    Where,
+    HeartbeatResponse, Include, KnnIndex, ListCollectionsRequest, ListCollectionsResponse,
+    ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse, Operation, OperationRecord,
+    QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse, Segment, SegmentScope,
+    SegmentType, SegmentUuid, UpdateCollectionError, UpdateCollectionRecordsError,
+    UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateCollectionRequest,
+    UpdateCollectionResponse, UpsertCollectionRecordsError, UpsertCollectionRecordsRequest,
+    UpsertCollectionRecordsResponse, VectorIndexConfiguration, Where,
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
@@ -58,6 +57,7 @@ pub struct ServiceBasedFrontend {
     collections_with_segments_provider: CollectionsWithSegmentsProvider,
     max_batch_size: u32,
     metrics: Arc<Metrics>,
+    default_knn_index: KnnIndex,
 }
 
 impl ServiceBasedFrontend {
@@ -68,6 +68,7 @@ impl ServiceBasedFrontend {
         log_client: Log,
         executor: Executor,
         max_batch_size: u32,
+        default_knn_index: KnnIndex,
     ) -> Self {
         let meter = global::meter("chroma");
         let delete_retries_counter = meter.u64_counter("delete_retries").build();
@@ -88,7 +89,12 @@ impl ServiceBasedFrontend {
             collections_with_segments_provider,
             max_batch_size,
             metrics,
+            default_knn_index,
         }
+    }
+
+    pub fn get_default_knn_index(&self) -> KnnIndex {
+        self.default_knn_index
     }
 
     pub async fn heartbeat(&self) -> Result<HeartbeatResponse, HeartbeatError> {
@@ -99,6 +105,10 @@ impl ServiceBasedFrontend {
 
     pub fn get_max_batch_size(&mut self) -> u32 {
         self.max_batch_size
+    }
+
+    pub fn get_supported_segment_types(&self) -> Vec<SegmentType> {
+        self.executor.get_supported_segment_types()
     }
 
     async fn get_collection_dimension(
@@ -338,8 +348,6 @@ impl ServiceBasedFrontend {
         }: CreateCollectionRequest,
     ) -> Result<CreateCollectionResponse, CreateCollectionError> {
         let collection_id = CollectionUuid::new();
-        let configuration: Option<InternalCollectionConfiguration> =
-            configuration.map(|c| c.try_into()).transpose()?;
 
         let segments = match self.executor {
             Executor::Distributed(_) => {
@@ -432,6 +440,13 @@ impl ServiceBasedFrontend {
             ..
         }: UpdateCollectionRequest,
     ) -> Result<UpdateCollectionResponse, UpdateCollectionError> {
+        // Check if spann is requested with a local executor
+        if let (Some(config), Executor::Local(_)) = (new_configuration.as_ref(), &self.executor) {
+            if config.spann.is_some() {
+                return Err(UpdateCollectionError::SpannNotImplemented);
+            }
+        }
+
         self.sysdb_client
             .update_collection(
                 collection_id,
@@ -1203,6 +1218,7 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
             log,
             executor,
             max_batch_size,
+            config.default_knn_index,
         ))
     }
 }
