@@ -122,12 +122,13 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
     The embedding model is configured in the server.
     """
 
-    def __init__(self, url: str):
+    def __init__(self, url: str, api_key: Optional[str] = None):
         """
         Initialize the HuggingFaceEmbeddingServer.
 
         Args:
             url (str): The URL of the HuggingFace Embedding Server.
+            api_key (Optional[str]): The API key for the HuggingFace Embedding Server.
         """
         try:
             import httpx
@@ -137,6 +138,7 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
             )
 
         self.url = url
+        self.api_key = api_key
         self._api_url = f"{url}"
         self._session = httpx.Client()
 
@@ -156,7 +158,12 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
             >>> embeddings = hugging_face(texts)
         """
         # Call HuggingFace Embedding Server API for each document
-        response = self._session.post(self._api_url, json={"inputs": input}).json()
+        headers = (
+            self.api_key if {"Authorization": "Bearer " + str(self.api_key)} else None
+        )
+        response = self._session.post(
+            self._api_url, json={"inputs": input}, headers=headers
+        ).json()
 
         # Convert to numpy arrays
         return [np.array(embedding, dtype=np.float32) for embedding in response]
@@ -174,13 +181,14 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
         url = config.get("url")
+        api_key = config.get("api_key")
         if url is None:
             raise ValueError("URL must be provided for HuggingFaceEmbeddingServer")
 
-        return HuggingFaceEmbeddingServer(url=url)
+        return HuggingFaceEmbeddingServer(url=url, api_key=api_key)
 
     def get_config(self) -> Dict[str, Any]:
-        return {"url": self.url}
+        return {"url": self.url, "api_key": self.api_key}
 
     def validate_config_update(
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
