@@ -72,7 +72,7 @@ jobs:
           name: bindings-x86_64-apple-darwin
           path: rust/js_bindings/chromadb-js-bindings.darwin-x64.node
           if-no-files-found: error
-          
+
   build-windows:
     name: Build Windows bindings
     runs-on: windows-latest
@@ -125,10 +125,10 @@ jobs:
           name: bindings-x86_64-pc-windows-msvc
           path: rust/js_bindings/chromadb-js-bindings.win32-x64-msvc.node
           if-no-files-found: error
-          
+
   build-linux:
     name: Build Linux bindings
-    runs-on: depot-ubuntu-22.04-16
+    runs-on: bp-ubuntu-latest-x64-4x
     defaults:
       run:
         working-directory: rust/js_bindings
@@ -241,7 +241,7 @@ jobs:
         run: |
           set -e
           npm config set provenance true
-          echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc          
+          echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc
           for dir in npm/*; do
             if [ -d "$dir" ]; then
               cd "$dir" && npm publish --access public && cd -

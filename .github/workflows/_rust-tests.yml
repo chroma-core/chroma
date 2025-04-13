@@ -7,7 +7,7 @@ jobs:
   test:
     strategy:
       matrix:
-        platform: [depot-ubuntu-22.04]
+        platform: [bp-ubuntu-latest-x64-4x]
     runs-on: ${{ matrix.platform }}
     env:
       CARGO_TERM_COLOR: always
@@ -35,7 +35,7 @@ jobs:
   test-integration:
     strategy:
       matrix:
-        platform: [depot-ubuntu-22.04-16]
+        platform: [bp-ubuntu-latest-x64-16x]
     runs-on: ${{ matrix.platform }}
     # OIDC token auth for Depot & AWS
     permissions:
@@ -54,6 +54,7 @@ jobs:
         uses: ./.github/actions/tilt
         with:
           depot-project-id: ${{ vars.DEPOT_PROJECT_ID }}
+          BP_DOCKERHUB_TOKEN: ${{ secrets.BP_DOCKERHUB_TOKEN }}
       - name: Build CLI
         run: cargo build --bin chroma
       - name: Run tests
@@ -74,7 +75,7 @@ jobs:
   test-benches:
     strategy:
       matrix:
-        platform: [depot-ubuntu-22.04-16]
+        platform: [bp-ubuntu-latest-x64-16x]
         bench-command:
           - "--bench blockfile_writer -- --sample-size 10"
           - "--bench distance_metrics"
@@ -97,7 +98,7 @@ jobs:
         run: cargo bench ${{ matrix.bench-command }}
 
   can-build-release:
-    runs-on: depot-ubuntu-22.04-16
+    runs-on: bp-ubuntu-latest-x64-16x
     env:
       CARGO_TERM_COLOR: always
     steps:

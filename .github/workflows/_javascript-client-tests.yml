@@ -5,7 +5,7 @@ on:
 
 jobs:
   test:
-    runs-on: depot-ubuntu-22.04
+    runs-on: bp-ubuntu-latest-x64-4x
     steps:
       - name: Checkout
         uses: actions/checkout@v4

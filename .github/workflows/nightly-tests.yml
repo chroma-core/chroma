@@ -15,7 +15,7 @@ jobs:
                    "chromadb/test/property/test_add.py",
                    "chromadb/test/property/test_filtering.py",
                    "chromadb/test/property/test_embeddings.py"]
-    runs-on: "depot-ubuntu-22.04-8"
+    runs-on: "bp-ubuntu-latest-x64-8x"
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/python
@@ -27,6 +27,7 @@ jobs:
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: slow
+          BP_DOCKERHUB_TOKEN: ${{ secrets.BP_DOCKERHUB_TOKEN }}
       - name: Create artifact name
         id: create-artifact-name
         run: |
