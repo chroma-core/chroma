@@ -704,7 +704,7 @@ impl LogService for LogServer {
             };
             let fragments = match log_reader
                 .scan(
-                    LogPosition::from_offset(pull_logs.start_from_offset as u64),
+                    LogPosition::from_offset(pull_logs.start_from_offset as u64 - 1),
                     limits,
                 )
                 .await
