@@ -1,7 +1,10 @@
-use crate::types::CollectionInfo;
-use chroma_types::{CollectionUuid, LogRecord};
 use std::collections::HashMap;
 use std::fmt::Debug;
+
+use chroma_error::ChromaError;
+use chroma_types::{CollectionUuid, LogRecord};
+
+use crate::types::CollectionInfo;
 
 // This is used for testing only, it represents a log record that is stored in memory
 // internal to a mock log implementation
@@ -122,6 +125,25 @@ impl InMemoryLog {
         new_offset: i64,
     ) {
         self.offsets.insert(collection_id, new_offset);
+    }
+
+    pub(super) async fn scout_logs(
+        &mut self,
+        collection_id: CollectionUuid,
+        starting_offset: u64,
+    ) -> Result<u64, Box<dyn ChromaError>> {
+        let answer = self
+            .collection_to_log
+            .get(&collection_id)
+            .iter()
+            .flat_map(|x| x.iter().map(|rec| rec.log_offset + 1).max())
+            .max()
+            .unwrap_or(starting_offset as i64) as u64;
+        if answer >= starting_offset {
+            Ok(answer)
+        } else {
+            Ok(starting_offset)
+        }
     }
 }
 

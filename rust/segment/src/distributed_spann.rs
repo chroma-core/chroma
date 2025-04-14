@@ -18,17 +18,16 @@ use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::SpannIndexWri
 use chroma_types::Collection;
 use chroma_types::InternalSpannConfiguration;
 use chroma_types::SegmentUuid;
+use chroma_types::HNSW_PATH;
+use chroma_types::MAX_HEAD_ID_BF_PATH;
+use chroma_types::POSTING_LIST_PATH;
+use chroma_types::VERSION_MAP_PATH;
 use chroma_types::{MaterializedLogOperation, Segment, SegmentScope, SegmentType};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use thiserror::Error;
 use uuid::Uuid;
-
-const HNSW_PATH: &str = "hnsw_path";
-const VERSION_MAP_PATH: &str = "version_map_path";
-const POSTING_LIST_PATH: &str = "posting_list_path";
-const MAX_HEAD_ID_BF_PATH: &str = "max_head_id_path";
 
 #[derive(Clone)]
 pub struct SpannSegmentWriter {

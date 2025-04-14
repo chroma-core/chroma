@@ -36,12 +36,21 @@
     "cliui": "^8.0.1",
     "cohere-ai": "^7.0.0",
     "isomorphic-fetch": "^3.0.0",
-    "openai": "^4.0.0",
     "ollama": "^0.5.0",
+    "openai": "^4.0.0",
+    "semver": "^7.7.1",
     "voyageai": "^0.0.3-1"
+  },
+  "optionalDependencies": {
+    "chromadb-js-bindings-darwin-arm64": "^0.0.1",
+    "chromadb-js-bindings-darwin-x64": "^0.0.1",
+    "chromadb-js-bindings-linux-arm64-gnu": "^0.0.1",
+    "chromadb-js-bindings-linux-x64-gnu": "^0.0.1",
+    "chromadb-js-bindings-win32-x64-msvc": "^0.0.1"
   },
   "devDependencies": {
     "@internal/chromadb-core": "workspace:*",
+    "@types/semver": "^7.7.0",
     "jest": "^29.5.0",
     "rimraf": "^5.0.0",
     "ts-jest": "^29.1.0",
@@ -50,5 +59,8 @@
   },
   "engines": {
     "node": ">=14.17.0"
+  },
+  "bin": {
+    "chroma": "dist/cli.mjs"
   }
 }

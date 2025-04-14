@@ -8,7 +8,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use chroma_storage::{ETag, PutOptions, Storage, StorageError};
+use chroma_storage::{
+    admissioncontrolleds3::StorageRequestPriority, ETag, GetOptions, PutOptions, Storage,
+    StorageError,
+};
 use setsum::Setsum;
 
 use crate::{
@@ -164,7 +167,11 @@ impl Snapshot {
         let mut retries = 0;
         let path = format!("{}/{}", prefix, pointer.path_to_snapshot);
         loop {
-            match storage.get_with_e_tag(&path).await.map_err(Arc::new) {
+            match storage
+                .get_with_e_tag(&path, GetOptions::new(StorageRequestPriority::P0))
+                .await
+                .map_err(Arc::new)
+            {
                 Ok((ref snapshot, _)) => {
                     let snapshot: Snapshot = serde_json::from_slice(snapshot).map_err(|e| {
                         Error::CorruptManifest(format!("could not decode JSON snapshot: {e:?}"))
@@ -204,7 +211,7 @@ impl Snapshot {
                     Error::CorruptManifest(format!("could not encode JSON manifest: {e:?}"))
                 })?
                 .into_bytes();
-            let options = PutOptions::if_not_exists();
+            let options = PutOptions::if_not_exists(StorageRequestPriority::P0);
             match storage.put_bytes(&path, payload, options).await {
                 Ok(_) => {
                     return Ok(());
@@ -267,69 +274,70 @@ impl Manifest {
         writer: &str,
     ) -> Option<Snapshot> {
         let writer = writer.to_string();
-        let can_snapshot_snapshots = self.snapshots.iter().filter(|s| s.depth < 2).count()
-            >= snapshot_options.snapshot_rollover_threshold;
-        let can_snapshot_fragments =
-            self.fragments.len() >= snapshot_options.fragment_rollover_threshold;
-        if can_snapshot_snapshots || can_snapshot_fragments {
+        let mut snapshot_depth = self.snapshots.iter().map(|s| s.depth).max().unwrap_or(0);
+        while snapshot_depth > 0 {
             // NOTE(rescrv):  We _either_ compact a snapshot of snapshots or a snapshot of log
             // fragments.  We don't do both as interior snapshot nodes only refer to objects of the
             // same type.  Manifests are the only objects to refer to both fragments and snapshots.
             let mut snapshots = vec![];
-            let mut fragments = vec![];
             let mut setsum = Setsum::default();
-            let depth = if can_snapshot_snapshots {
-                for snapshot in self.snapshots.iter() {
-                    if snapshot.depth < 2
-                        && snapshots.len() < snapshot_options.snapshot_rollover_threshold
-                    {
-                        setsum += snapshot.setsum;
-                        snapshots.push(snapshot.clone());
-                    }
+            for snapshot in self.snapshots.iter().filter(|s| s.depth == snapshot_depth) {
+                if snapshots.len() < snapshot_options.snapshot_rollover_threshold {
+                    setsum += snapshot.setsum;
+                    snapshots.push(snapshot.clone());
                 }
-                2
-            } else if can_snapshot_fragments {
-                for fragment in self.fragments.iter() {
-                    // NOTE(rescrv):  When taking a snapshot, it's important that we keep around
-                    // one fragment so that the max seq no is always calculable.
-                    //
-                    // Otherwise, a low-traffic log could be compacted into a state where all of
-                    // its fragments have been compacted and therefore the implicit fragment seq no
-                    // for each fragment is zero.  This wedges the manifest manager.
-                    //
-                    // The fix is to keep around the last fragment.
-                    if fragments.len() < snapshot_options.fragment_rollover_threshold
-                        && self
-                            .fragments
-                            .iter()
-                            .map(|f| f.seq_no)
-                            .max()
-                            .unwrap_or(FragmentSeqNo(0))
-                            != fragment.seq_no
-                    {
-                        setsum += fragment.setsum;
-                        fragments.push(fragment.clone());
-                    }
-                }
-                1
-            } else {
-                unreachable!("I checked A || B above, then checked A and B separately; should not reach here.");
-            };
-            if snapshots.is_empty() && fragments.is_empty() {
-                return None;
             }
-            let path = unprefixed_snapshot_path(setsum);
-            Some(Snapshot {
-                path,
-                depth,
-                setsum,
-                writer,
-                snapshots,
-                fragments,
-            })
-        } else {
-            None
+            if snapshots.len() >= snapshot_options.snapshot_rollover_threshold {
+                let path = unprefixed_snapshot_path(setsum);
+                return Some(Snapshot {
+                    path,
+                    depth: snapshot_depth + 1,
+                    setsum,
+                    writer,
+                    snapshots,
+                    fragments: vec![],
+                });
+            }
+            snapshot_depth -= 1;
         }
+        if self.fragments.len() >= snapshot_options.fragment_rollover_threshold {
+            let mut setsum = Setsum::default();
+            let mut fragments = vec![];
+            for fragment in self.fragments.iter() {
+                // NOTE(rescrv):  When taking a snapshot, it's important that we keep around
+                // one fragment so that the max seq no is always calculable.
+                //
+                // Otherwise, a low-traffic log could be compacted into a state where all of
+                // its fragments have been compacted and therefore the implicit fragment seq no
+                // for each fragment is zero.  This wedges the manifest manager.
+                //
+                // The fix is to keep around the last fragment.
+                if fragments.len() < snapshot_options.fragment_rollover_threshold
+                    && self
+                        .fragments
+                        .iter()
+                        .map(|f| f.seq_no)
+                        .max()
+                        .unwrap_or(FragmentSeqNo(0))
+                        != fragment.seq_no
+                {
+                    setsum += fragment.setsum;
+                    fragments.push(fragment.clone());
+                }
+            }
+            if fragments.len() >= snapshot_options.fragment_rollover_threshold {
+                let path = unprefixed_snapshot_path(setsum);
+                return Some(Snapshot {
+                    path,
+                    depth: 1,
+                    setsum,
+                    writer,
+                    snapshots: vec![],
+                    fragments,
+                });
+            }
+        }
+        None
     }
 
     /// Given a snapshot, apply it to the manifest.  This modifies the manifest to refer to the
@@ -508,7 +516,11 @@ impl Manifest {
             .map_err(|e| Error::CorruptManifest(format!("could not encode JSON manifest: {e:?}")))?
             .into_bytes();
         storage
-            .put_bytes(&manifest_path(prefix), payload, PutOptions::if_not_exists())
+            .put_bytes(
+                &manifest_path(prefix),
+                payload,
+                PutOptions::if_not_exists(StorageRequestPriority::P0),
+            )
             .await
             .map_err(Arc::new)?;
         Ok(())
@@ -528,7 +540,11 @@ impl Manifest {
         let mut retries = 0;
         let path = manifest_path(prefix);
         loop {
-            match storage.get_with_e_tag(&path).await.map_err(Arc::new) {
+            match storage
+                .get_with_e_tag(&path, GetOptions::new(StorageRequestPriority::P0))
+                .await
+                .map_err(Arc::new)
+            {
                 Ok((ref manifest, e_tag)) => {
                     let Some(e_tag) = e_tag else {
                         return Err(Error::CorruptManifest(format!(
@@ -577,9 +593,9 @@ impl Manifest {
                 })?
                 .into_bytes();
             let options = if let Some(e_tag) = current {
-                PutOptions::if_matches(e_tag)
+                PutOptions::if_matches(e_tag, StorageRequestPriority::P0)
             } else {
-                PutOptions::if_not_exists()
+                PutOptions::if_not_exists(StorageRequestPriority::P0)
             };
             match storage
                 .put_bytes(&manifest_path(prefix), payload, options)

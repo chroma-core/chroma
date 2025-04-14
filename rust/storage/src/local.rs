@@ -65,10 +65,15 @@ impl LocalStorage {
         }
     }
 
-    pub async fn put_file(&self, key: &str, path: &str) -> Result<Option<ETag>, StorageError> {
+    pub async fn put_file(
+        &self,
+        key: &str,
+        path: &str,
+        options: PutOptions,
+    ) -> Result<Option<ETag>, StorageError> {
         let file = std::fs::read(path);
         match file {
-            Ok(bytes_u8) => self.put_bytes(key, &bytes_u8, PutOptions::default()).await,
+            Ok(bytes_u8) => self.put_bytes(key, &bytes_u8, options).await,
             Err(e) => Err(StorageError::Generic {
                 source: Arc::new(e),
             }),

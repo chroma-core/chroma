@@ -3,12 +3,12 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use arrow::array::{ArrayRef, BinaryArray, RecordBatch, UInt64Array};
+use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
 use chroma_storage::{PutOptions, Storage, StorageError};
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
 use setsum::Setsum;
-use tracing::instrument::Instrument;
 
 use crate::{
     unprefixed_fragment_path, BatchManager, CursorStore, CursorStoreOptions, Error,
@@ -103,7 +103,6 @@ impl LogWriter {
             writer.to_string(),
             Arc::clone(&mark_dirty),
         )
-        .instrument(tracing::info_span!("open_or_initialize"))
         .await
         {
             Ok(writer) => writer,
@@ -148,6 +147,7 @@ impl LogWriter {
         self.append_many(vec![message]).await
     }
 
+    #[tracing::instrument(skip(self, messages))]
     pub async fn append_many(&self, messages: Vec<Vec<u8>>) -> Result<LogPosition, Error> {
         // SAFETY(rescrv):  Mutex poisoning.
         let inner = { self.inner.lock().unwrap().clone() };
@@ -264,7 +264,7 @@ impl OnceLogWriter {
             writer,
         )
         .await?;
-        manifest_manager.recover().await?;
+        manifest_manager.recover(&*mark_dirty).await?;
         let flusher = Mutex::new(None);
         let this = Arc::new(Self {
             options,
@@ -325,6 +325,7 @@ impl OnceLogWriter {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self, messages))]
     async fn append(self: &Arc<Self>, messages: Vec<Vec<u8>>) -> Result<LogPosition, Error> {
         if messages.is_empty() {
             return Err(Error::EmptyBatch);
@@ -340,6 +341,7 @@ impl OnceLogWriter {
         rx.await.map_err(|_| Error::Internal)?
     }
 
+    #[tracing::instrument(skip(self, work))]
     #[allow(clippy::type_complexity)]
     async fn append_batch(
         self: Arc<Self>,
@@ -382,6 +384,7 @@ impl OnceLogWriter {
         }
     }
 
+    #[tracing::instrument(skip(self, messages))]
     async fn append_batch_internal(
         &self,
         fragment_seq_no: FragmentSeqNo,
@@ -471,6 +474,7 @@ pub fn construct_parquet(
     Ok((buffer, setsum))
 }
 
+#[tracing::instrument(skip(options, storage, messages))]
 pub async fn upload_parquet(
     options: &LogWriterOptions,
     storage: &Storage,
@@ -488,7 +492,11 @@ pub async fn upload_parquet(
         tracing::info!("upload_parquet: {:?}", path);
         let (buffer, setsum) = construct_parquet(log_position, &messages)?;
         match storage
-            .put_bytes(&path, buffer.clone(), PutOptions::if_not_exists())
+            .put_bytes(
+                &path,
+                buffer.clone(),
+                PutOptions::if_not_exists(StorageRequestPriority::P0),
+            )
             .await
         {
             Ok(_) => {

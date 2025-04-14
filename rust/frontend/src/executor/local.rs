@@ -72,16 +72,16 @@ impl LocalExecutor {
         self.compactor_handle
             .request(backfill_msg, None)
             .await
-            .map_err(|_| ExecutorError::BackfillError)?
-            .map_err(|_| ExecutorError::BackfillError)?;
+            .map_err(|err| ExecutorError::BackfillError(Box::new(err)))?
+            .map_err(|err| ExecutorError::BackfillError(Box::new(err)))?;
         let purge_log_msg = PurgeLogsMessage {
             collection_id: collection_and_segment.collection.collection_id,
         };
         self.compactor_handle
             .request(purge_log_msg, None)
             .await
-            .map_err(|_| ExecutorError::BackfillError)?
-            .map_err(|_| ExecutorError::BackfillError)?;
+            .map_err(|err| ExecutorError::BackfillError(Box::new(err)))?
+            .map_err(|err| ExecutorError::BackfillError(Box::new(err)))?;
         let mut backfill_guard = self.backfilled_collections.lock();
         backfill_guard.insert(collection_and_segment.collection.collection_id);
         Ok(())

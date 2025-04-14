@@ -50,6 +50,28 @@ impl Log {
         }
     }
 
+    #[tracing::instrument(skip(self))]
+    pub async fn scout_logs(
+        &mut self,
+        collection_id: CollectionUuid,
+        starting_offset: u64,
+    ) -> Result<u64, Box<dyn ChromaError>> {
+        match self {
+            Log::Sqlite(log) => log
+                .scout_logs(collection_id, starting_offset as i64)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
+            Log::Grpc(log) => log
+                .scout_logs(collection_id, starting_offset)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
+            Log::InMemory(log) => log
+                .scout_logs(collection_id, starting_offset)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
+        }
+    }
+
     #[tracing::instrument(skip(self, records))]
     pub async fn push_logs(
         &mut self,

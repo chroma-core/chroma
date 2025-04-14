@@ -7,16 +7,6 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Update rustup
-      if: runner.os != 'Windows'
-      shell: bash
-      run: |
-        rustup self update
-    - name: Update rustup on Windows
-      if: runner.os == 'Windows'
-      shell: pwsh
-      run: |
-        $env:CARGO_HOME="C:\Users\Default\.cargo"; rustup self update
     - name: Setup Rust
       shell: bash
       # (reads from rust-toolchain.toml)
@@ -45,7 +35,7 @@ runs:
       with:
         repo-token: ${{ inputs.github-token }}
     - name: Use sccache
-      uses: mozilla-actions/sccache-action@v0.0.7
+      uses: mozilla-actions/sccache-action@v0.0.9
     - name: Enable sccache
       shell: bash
       run: |

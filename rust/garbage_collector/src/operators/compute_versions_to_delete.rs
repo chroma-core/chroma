@@ -3,6 +3,8 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_system::{Operator, OperatorType};
 use chroma_types::chroma_proto::{CollectionVersionFile, VersionListForCollection};
 use chrono::{DateTime, Utc};
+use humantime::format_duration;
+use std::time::Duration;
 use thiserror::Error;
 
 #[derive(Clone, Debug)]
@@ -12,8 +14,6 @@ pub struct ComputeVersionsToDeleteOperator {}
 pub struct ComputeVersionsToDeleteInput {
     pub version_file: CollectionVersionFile,
     pub cutoff_time: DateTime<Utc>,
-    // Absolute cutoff time in seconds.
-    pub cutoff_time_secs: u64,
     pub min_versions_to_keep: u32,
 }
 
@@ -63,7 +63,7 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
                 ComputeVersionsToDeleteError::ComputeError("Missing collection info".to_string())
             })?;
 
-        tracing::debug!(
+        tracing::info!(
             tenant = %collection_info.tenant_id,
             database = %collection_info.database_id,
             collection = %collection_info.collection_id,
@@ -89,23 +89,23 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
                 }
             }
 
-            tracing::debug!(
+            tracing::info!(
                 "Oldest version to keep: {}, min versions to keep: {}, cutoff time: {}, total versions: {}",
                 oldest_version_to_keep,
                 input.min_versions_to_keep,
-                input.cutoff_time_secs,
+                input.cutoff_time,
                 version_history.versions.len()
             );
 
             // Second pass: mark for deletion if older than oldest_version_to_keep AND before cutoff
             for version in version_history.versions.iter_mut() {
                 if version.version == 0 {
-                    tracing::debug!("Skipping version 0");
+                    tracing::info!("Skipping version 0");
                     continue;
                 }
 
                 if version.version >= oldest_version_to_keep {
-                    tracing::debug!(
+                    tracing::info!(
                         "Keeping version {} (created at {}) because it's greater than or equal to {}",
                         version.version,
                         version.created_at_secs,
@@ -114,11 +114,15 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
                     continue;
                 }
 
-                if version.created_at_secs >= input.cutoff_time_secs as i64 {
+                if version.created_at_secs >= input.cutoff_time.timestamp() {
                     tracing::debug!(
-                        "Keeping version {} (created at {}) because it's newer than cutoff time",
+                        "Keeping version {} (created at {}) because it's {} newer than cutoff time ({})",
                         version.version,
-                        version.created_at_secs
+                        version.created_at_secs,
+                        format_duration(Duration::from_secs(
+                            (input.cutoff_time.timestamp() - version.created_at_secs) as u64,
+                        )),
+                        input.cutoff_time
                     );
                     continue;
                 }
@@ -208,7 +212,6 @@ mod tests {
         let input = ComputeVersionsToDeleteInput {
             version_file,
             cutoff_time: now - Duration::hours(20),
-            cutoff_time_secs: (now - Duration::hours(20)).timestamp() as u64,
             min_versions_to_keep: 2,
         };
 

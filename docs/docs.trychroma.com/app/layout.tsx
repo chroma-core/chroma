@@ -9,9 +9,34 @@ import CloudSignUp from "@/components/header/cloud-signup";
 import HeaderNav from "@/components/header/header-nav";
 
 export const metadata: Metadata = {
-  title: "Chroma Docs",
-  description: "Documentation for ChromaDB",
-};
+  title: 'Chroma Docs',
+  description: 'Documentation for ChromaDB',
+  openGraph: {
+    title: 'Chroma Docs',
+    description: 'Documentation for ChromaDB',
+    siteName: 'Chroma Docs',
+    url: 'https://docs.trychroma.com',
+    images: [
+      {
+        url: 'https://docs.trychroma.com/og.png', // must be an absolute url
+        width: 2400,
+        height: 1256,
+      },
+    ],
+    locale: 'en_US',
+    type: 'website',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Chroma Docs',
+    description: 'Documentation for ChromaDB',
+    site: 'trychroma',
+    siteId: '1507488634458439685',
+    creator: '@trychroma',
+    creatorId: '1507488634458439685',
+    images: ['https://docs.trychroma.com/og.png'], // must be an absolute url
+  },
+}
 
 const inter = Inter({ subsets: ["latin"] });
 

@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::future::Future;
@@ -13,8 +15,8 @@ use chroma_types::chroma_proto::{
     log_service_server::LogService, CollectionInfo, GetAllCollectionInfoToCompactRequest,
     GetAllCollectionInfoToCompactResponse, LogRecord, OperationRecord, PullLogsRequest,
     PullLogsResponse, PurgeDirtyForCollectionRequest, PurgeDirtyForCollectionResponse,
-    PushLogsRequest, PushLogsResponse, UpdateCollectionLogOffsetRequest,
-    UpdateCollectionLogOffsetResponse,
+    PushLogsRequest, PushLogsResponse, ScoutLogsRequest, ScoutLogsResponse,
+    UpdateCollectionLogOffsetRequest, UpdateCollectionLogOffsetResponse,
 };
 use chroma_types::CollectionUuid;
 use figment::providers::{Env, Format, Yaml};
@@ -23,6 +25,7 @@ use prost::Message;
 use serde::{Deserialize, Serialize};
 use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
+use tracing::Instrument;
 use uuid::Uuid;
 use wal3::{
     Cursor, CursorName, CursorStore, CursorStoreOptions, Limits, LogPosition, LogReader,
@@ -641,7 +644,39 @@ impl LogService for LogServer {
         Ok(Response::new(PushLogsResponse { record_count }))
     }
 
-    #[tracing::instrument(skip(self, request), err(Display))]
+    async fn scout_logs(
+        &self,
+        request: Request<ScoutLogsRequest>,
+    ) -> Result<Response<ScoutLogsResponse>, Status> {
+        let scout_logs = request.into_inner();
+        let collection_id = Uuid::parse_str(&scout_logs.collection_id)
+            .map(CollectionUuid)
+            .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+        let span = tracing::info_span!("scouting logs", collection_id = collection_id.to_string());
+        async move {
+            let prefix = storage_prefix_for_log(collection_id);
+            let log_reader = LogReader::new(
+                self.config.reader.clone(),
+                Arc::clone(&self.storage),
+                prefix,
+            );
+            let limit_position = match log_reader.maximum_log_position().await {
+                Ok(limit_position) => limit_position,
+                Err(err) => {
+                    if err.code() == chroma_error::ErrorCodes::FailedPrecondition {
+                        LogPosition::from_offset(1)
+                    } else {
+                        return Err(Status::new(err.code().into(), err.to_string()));
+                    }
+                }
+            };
+            let limit_offset = limit_position.offset() as i64;
+            Ok(Response::new(ScoutLogsResponse { limit_offset }))
+        }
+        .instrument(span)
+        .await
+    }
+
     async fn pull_logs(
         &self,
         request: Request<PullLogsRequest>,
@@ -650,62 +685,67 @@ impl LogService for LogServer {
         let collection_id = Uuid::parse_str(&pull_logs.collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
-        tracing::info!(
-            "Pulling logs for collection {} from offset {} with batch size {}",
-            collection_id,
-            pull_logs.start_from_offset,
-            pull_logs.batch_size,
+        let span = tracing::info_span!(
+            "pull_logs",
+            collection_id = collection_id.to_string(),
+            start_from_offset = pull_logs.start_from_offset,
+            batch_size = pull_logs.batch_size,
         );
-        let prefix = storage_prefix_for_log(collection_id);
-        let log_reader = LogReader::new(
-            self.config.reader.clone(),
-            Arc::clone(&self.storage),
-            prefix,
-        );
-        let limits = Limits {
-            max_files: Some(pull_logs.batch_size as u64),
-            max_bytes: Some(pull_logs.batch_size as u64 * 32_768),
-        };
-        let fragments = match log_reader
-            .scan(
-                LogPosition::from_offset(pull_logs.start_from_offset as u64),
-                limits,
-            )
-            .await
-        {
-            Ok(fragments) => fragments,
-            Err(err) => {
-                if let wal3::Error::UninitializedLog = err {
-                    tracing::info!("Uninitialized log for collection {}", collection_id);
-                    return Ok(Response::new(PullLogsResponse { records: vec![] }));
-                } else {
-                    return Err(Status::new(err.code().into(), err.to_string()));
+        async move {
+            let prefix = storage_prefix_for_log(collection_id);
+            let log_reader = LogReader::new(
+                self.config.reader.clone(),
+                Arc::clone(&self.storage),
+                prefix,
+            );
+            let limits = Limits {
+                max_files: Some(pull_logs.batch_size as u64 + 1),
+                max_bytes: Some(pull_logs.batch_size as u64 * 100_000),
+            };
+            let fragments = match log_reader
+                .scan(
+                    LogPosition::from_offset(pull_logs.start_from_offset as u64),
+                    limits,
+                )
+                .await
+            {
+                Ok(fragments) => fragments,
+                Err(err) => {
+                    if let wal3::Error::UninitializedLog = err {
+                        tracing::info!("Uninitialized log for collection {}", collection_id);
+                        return Ok(Response::new(PullLogsResponse { records: vec![] }));
+                    } else {
+                        return Err(Status::new(err.code().into(), err.to_string()));
+                    }
+                }
+            };
+            let futures = fragments
+                .iter()
+                .map(|fragment| async { log_reader.fetch(fragment).await })
+                .collect::<Vec<_>>();
+            let parquets = futures::future::try_join_all(futures)
+                .await
+                .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
+            let mut records = Vec::with_capacity(pull_logs.batch_size as usize);
+            for parquet in parquets {
+                let this = parquet_to_records(parquet)?;
+                for record in this {
+                    if records.len() >= pull_logs.batch_size as usize {
+                        break;
+                    }
+                    let op_record = OperationRecord::decode(record.1.as_slice())
+                        .map_err(|err| Status::data_loss(err.to_string()))?;
+                    records.push(LogRecord {
+                        log_offset: record.0.offset() as i64,
+                        record: Some(op_record),
+                    });
                 }
             }
-        };
-        let futures = fragments
-            .iter()
-            .map(|fragment| async { log_reader.fetch(fragment).await })
-            .collect::<Vec<_>>();
-        let parquets = futures::future::try_join_all(futures)
-            .await
-            .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
-        let mut records = Vec::with_capacity(pull_logs.batch_size as usize);
-        for parquet in parquets {
-            let this = parquet_to_records(parquet)?;
-            for record in this {
-                if records.len() >= pull_logs.batch_size as usize {
-                    break;
-                }
-                let op_record = OperationRecord::decode(record.1.as_slice())
-                    .map_err(|err| Status::data_loss(err.to_string()))?;
-                records.push(LogRecord {
-                    log_offset: record.0.offset() as i64,
-                    record: Some(op_record),
-                });
-            }
+            tracing::info!("pulled {} records", records.len());
+            Ok(Response::new(PullLogsResponse { records }))
         }
-        Ok(Response::new(PullLogsResponse { records }))
+        .instrument(span)
+        .await
     }
 
     #[tracing::instrument(info, skip(self, request), err(Display))]

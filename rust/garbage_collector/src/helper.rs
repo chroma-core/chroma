@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use tonic::transport::Channel;
 use uuid::Uuid;
 
+#[derive(Clone)]
 pub struct ChromaGrpcClients {
     pub sysdb: SysDbClient<Channel>,
     pub log_service: LogServiceClient<Channel>,
@@ -23,7 +24,7 @@ impl ChromaGrpcClients {
         let sysdb_channel = Channel::from_static("http://localhost:50051")
             .connect()
             .await?;
-        let logservice_channel = Channel::from_static("http://localhost:50052")
+        let logservice_channel = Channel::from_static("http://localhost:50054")
             .connect()
             .await?;
         let queryservice_channel = Channel::from_static("http://localhost:50053")

@@ -1,3 +1,4 @@
+#![recursion_limit = "256"]
 pub mod config;
 pub mod sqlite;
 #[allow(clippy::module_inception)]
