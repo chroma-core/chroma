@@ -94,7 +94,6 @@ def validation_context(name: str) -> Callable[[Callable[..., T]], Callable[..., 
             try:
                 return func(self, *args, **kwargs)
             except Exception as e:
-                # modify the error message
                 msg = f"{str(e)} in {name}."
                 # add the rest of the args to the error message if they exist
                 e.args = (msg,) + e.args[1:] if e.args else ()
