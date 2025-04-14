@@ -671,7 +671,16 @@ impl LogService for LogServer {
                 }
             };
             let limit_offset = limit_position.offset() as i64;
-            Ok(Response::new(ScoutLogsResponse { limit_offset }))
+            if limit_offset > 0 {
+                Ok(Response::new(ScoutLogsResponse {
+                    limit_offset: limit_offset - 1,
+                }))
+            } else {
+                Err(Status::new(
+                    chroma_error::ErrorCodes::Internal.into(),
+                    "Got a <= 0 value for log position.",
+                ))
+            }
         }
         .instrument(span)
         .await
@@ -704,7 +713,7 @@ impl LogService for LogServer {
             };
             let fragments = match log_reader
                 .scan(
-                    LogPosition::from_offset(pull_logs.start_from_offset as u64 - 1),
+                    LogPosition::from_offset(pull_logs.start_from_offset as u64),
                     limits,
                 )
                 .await
