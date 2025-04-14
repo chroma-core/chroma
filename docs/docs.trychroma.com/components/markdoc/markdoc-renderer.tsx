@@ -93,8 +93,8 @@ const MarkdocRenderer: React.FC<{ slug: string[] }> = ({ slug }) => {
 
   return (
     <MarkdocPage>
-      <div className="flex flex-row">
-      <div className="py-10 relative pr-10 max-w-3xl h-full marker:text-black dark:marker:text-gray-200">
+      <div className="md:flex flex-row">
+      <div className="py-10 relative md:pr-10 max-w-3xl h-full marker:text-black dark:marker:text-gray-200">
         <SidebarToggle path={slug} />
         {/* <AskAI content={source} /> */}
         {output}

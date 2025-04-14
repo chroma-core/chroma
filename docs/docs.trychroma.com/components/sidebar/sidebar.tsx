@@ -1,12 +1,10 @@
 import React from "react";
-import MenuItem from "@/components/sidebar/menu-item";
 import sidebarConfig from "@/markdoc/content/sidebar-config";
 import PageIndex from "@/components/sidebar/page-index";
 import path from "path";
 import fs from "fs";
 import matter from "gray-matter";
 import ScrollableContent from "./scrollable-content";
-import CloudSignUp from "@/components/header/cloud-signup";
 
 const generatePages = (slug: string[]): { id: string; name: string }[] => {
   const dirPath = path.join(process.cwd(), "markdoc", "content", ...slug);
@@ -50,18 +48,9 @@ const Sidebar: React.FC<{ path: string[]; mobile?: boolean }> = ({
 
   return (
     <div
-      className={`h-full ${!mobile && "md:block"}`}
+      className={`${!mobile && "md:block"}`}
     >
-      <div className="overflow-y-scroll text-sm flex flex-col h-full w-64 p-5 border-r-[1px] flex-shrink-0 dark:border-gray-700">
-        {/* <div className="flex flex-col gap-y-1.5 pb-10">
-          {sidebarConfig.map((section) => (
-            <MenuItem
-              key={section.id}
-              section={section}
-              active={currentSection.id === section.id}
-            />
-          ))}
-        </div> */}
+      <div className="overflow-y-scroll hidden md:flex text-sm flex-col h-full w-64 p-5 border-r-[1px] flex-shrink-0 dark:border-gray-700">
         <ScrollableContent pagesIndex={allSectionPages}>
           {currentSection.pages && (
             <div className="flex flex-col gap-2">
@@ -86,6 +75,23 @@ const Sidebar: React.FC<{ path: string[]; mobile?: boolean }> = ({
             />
           ))}
         </ScrollableContent>
+      </div>
+      <div className="md:hidden flex flex-col gap-2 w-full ">
+        {currentSection.subsections?.map((subsection, index) => (
+          <div key={subsection.id} className="flex flex-col gap-2">
+          <PageIndex
+            key={subsection.id}
+            index={index}
+            name={subsection.name}
+            path={`/${currentSection.id}/${subsection.id}`}
+            pages={
+              subsection.generatePages
+                ? generatePages([currentSection.id, subsection.id])
+                : subsection.pages || []
+            }
+          />
+          </div>
+        ))}
       </div>
     </div>
   );

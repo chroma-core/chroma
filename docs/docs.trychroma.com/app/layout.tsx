@@ -46,8 +46,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="h-full overscroll-none" suppressHydrationWarning>
-      <body className={`h-full overflow-hidden ${inter.className} antialiased`}>
+    <html lang="en" className="h-full md:overscroll-none" suppressHydrationWarning>
+      <body className={`h-full md:overflow-hidden ${inter.className} antialiased`}>
         <ThemeProvider
           attribute="class"
           defaultTheme="system"
