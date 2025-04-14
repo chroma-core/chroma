@@ -181,6 +181,7 @@ watch_file('k8s/distributed-chroma/*.yaml')
 k8s_yaml([
   'k8s/test/otel-collector.yaml',
   'k8s/test/grafana-service.yaml',
+  'k8s/test/grafana-dashboards.yaml',
   'k8s/test/grafana.yaml',
   'k8s/test/jaeger-service.yaml',
   'k8s/test/jaeger.yaml',

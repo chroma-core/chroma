@@ -71,6 +71,8 @@ spec:
               mountPath: /etc/grafana
             - name: prometheus-volume
               mountPath: /etc/grafana/provisioning/datasources
+            - name: grafana-dashboards-volume
+              mountPath: /etc/grafana/provisioning/dashboards
       volumes:
         - name: config-volume
           configMap:
@@ -78,6 +80,9 @@ spec:
         - name: prometheus-volume
           configMap:
             name: grafana-prometheus-config
+        - name: grafana-dashboards-volume
+          configMap:
+            name: grafana-dashboards-config
 
 ---
 apiVersion: v1
