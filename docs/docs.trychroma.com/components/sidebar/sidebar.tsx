@@ -5,6 +5,8 @@ import path from "path";
 import fs from "fs";
 import matter from "gray-matter";
 import ScrollableContent from "./scrollable-content";
+import { ChevronDown } from "lucide-react";
+import MobileSidebar from "./mobile-sidebar";
 
 const generatePages = (slug: string[]): { id: string; name: string }[] => {
   const dirPath = path.join(process.cwd(), "markdoc", "content", ...slug);
@@ -46,6 +48,11 @@ const Sidebar: React.FC<{ path: string[]; mobile?: boolean }> = ({
     allSectionPages.push(...(subsection.pages?.map((p) => p.id) || []));
   });
 
+  // cloneCurrentSection
+  const cloneCurrentSection = { ...currentSection };
+  // remove subsections from cloneCurrentSection
+  delete cloneCurrentSection.icon;
+
   return (
     <div
       className={`${!mobile && "md:block"}`}
@@ -76,23 +83,7 @@ const Sidebar: React.FC<{ path: string[]; mobile?: boolean }> = ({
           ))}
         </ScrollableContent>
       </div>
-      <div className="md:hidden flex flex-col gap-2 w-full ">
-        {currentSection.subsections?.map((subsection, index) => (
-          <div key={subsection.id} className="flex flex-col gap-2">
-          <PageIndex
-            key={subsection.id}
-            index={index}
-            name={subsection.name}
-            path={`/${currentSection.id}/${subsection.id}`}
-            pages={
-              subsection.generatePages
-                ? generatePages([currentSection.id, subsection.id])
-                : subsection.pages || []
-            }
-          />
-          </div>
-        ))}
-      </div>
+      <MobileSidebar currentSection={cloneCurrentSection} currentId={currentSection.id} />
     </div>
   );
 };
