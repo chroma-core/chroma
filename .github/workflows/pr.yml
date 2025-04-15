@@ -43,12 +43,6 @@ jobs:
             # Outside JS client
             outside-js-client:
               - '!clients/js/**'
-            # Workflow files
-            workflow:
-              - '.github/workflows/**'
-            # Outside workflow
-            outside-workflow:
-              - '!.github/workflows/**'
 
       - name: Determine tests to run
         id: determine-tests
@@ -64,14 +58,6 @@ jobs:
             exit 0
           else
             echo "docs-only=false" >> $GITHUB_OUTPUT
-          fi
-
-          # Check for workflow-only changes
-          if [[ "${{ steps.filter.outputs.workflow }}" == "true" && "${{ steps.filter.outputs.outside-workflow }}" == "false" ]]; then
-            echo "Workflow-only changes detected"
-            TESTS_TO_RUN='[]'
-            echo "tests-to-run=${TESTS_TO_RUN}" >> $GITHUB_OUTPUT
-            exit 0
           fi
 
           # Check for JS-only changes (changes in JS but not outside JS)
@@ -177,8 +163,9 @@ jobs:
     needs: change-detection
     if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
     uses: ./.github/workflows/_python-tests.yml
+    secrets: inherit
     with:
-      property_testing_preset: 'fast'
+      property_testing_preset: 'normal'
 
   python-vulnerability-scan:
     name: Python vulnerability scan
@@ -197,6 +184,7 @@ jobs:
     needs: change-detection
     if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'rust')
     uses: ./.github/workflows/_rust-tests.yml
+    secrets: inherit
 
   go-tests:
     name: Go tests

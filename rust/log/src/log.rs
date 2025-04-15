@@ -15,6 +15,7 @@ pub struct CollectionRecord {
     pub first_record_time: i64,
     pub offset: i64,
     pub collection_version: i32,
+    pub collection_logical_size_bytes: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -26,6 +27,7 @@ pub enum Log {
 }
 
 impl Log {
+    #[tracing::instrument(skip(self))]
     pub async fn read(
         &mut self,
         collection_id: CollectionUuid,
@@ -48,6 +50,29 @@ impl Log {
         }
     }
 
+    #[tracing::instrument(skip(self))]
+    pub async fn scout_logs(
+        &mut self,
+        collection_id: CollectionUuid,
+        starting_offset: u64,
+    ) -> Result<u64, Box<dyn ChromaError>> {
+        match self {
+            Log::Sqlite(log) => log
+                .scout_logs(collection_id, starting_offset as i64)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
+            Log::Grpc(log) => log
+                .scout_logs(collection_id, starting_offset)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
+            Log::InMemory(log) => log
+                .scout_logs(collection_id, starting_offset)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
+        }
+    }
+
+    #[tracing::instrument(skip(self, records))]
     pub async fn push_logs(
         &mut self,
         collection_id: CollectionUuid,
@@ -66,6 +91,7 @@ impl Log {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn get_collections_with_new_data(
         &mut self,
         min_compaction_size: u64,
@@ -83,6 +109,7 @@ impl Log {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn update_collection_log_offset(
         &mut self,
         collection_id: CollectionUuid,
@@ -105,7 +132,23 @@ impl Log {
         }
     }
 
-    // Only supported in sqlite. Distributed has a different workflow.
+    /// Only supported in distributed. Sqlite has a different workflow.
+    #[tracing::instrument(skip(self))]
+    pub async fn purge_dirty_for_collection(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<(), Box<dyn ChromaError>> {
+        match self {
+            Log::Sqlite(_) => unimplemented!("not implemented for sqlite"),
+            Log::Grpc(log) => Ok(log
+                .purge_dirty_for_collection(collection_id)
+                .await
+                .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?),
+            Log::InMemory(_) => unimplemented!("not implemented for in memory"),
+        }
+    }
+
+    /// Only supported in sqlite. Distributed has a different workflow.
     pub async fn purge_logs(
         &mut self,
         collection_id: CollectionUuid,

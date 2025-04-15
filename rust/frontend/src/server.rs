@@ -1,24 +1,25 @@
 use axum::{
-    extract::{DefaultBodyLimit, Path, Query, Request, State},
+    extract::{DefaultBodyLimit, Path, Query, State},
     http::{header::HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router, ServiceExt,
 };
 use chroma_system::System;
+use chroma_types::RawWhereFields;
 use chroma_types::{
-    AddCollectionRecordsResponse, ChecklistResponse, Collection, CollectionMetadataUpdate,
-    CollectionUuid, CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
-    CreateCollectionRequest, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest,
-    CreateTenantResponse, DeleteCollectionRecordsResponse, DeleteDatabaseRequest,
-    DeleteDatabaseResponse, DistributedIndexType, GetCollectionRequest, GetDatabaseRequest,
-    GetDatabaseResponse, GetRequest, GetResponse, GetTenantRequest, GetTenantResponse,
-    GetUserIdentityResponse, HeartbeatResponse, IncludeList, ListCollectionsRequest,
-    ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest,
-    QueryResponse, UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateMetadata,
+    AddCollectionRecordsResponse, ChecklistResponse, Collection, CollectionConfiguration,
+    CollectionMetadataUpdate, CollectionUuid, CountCollectionsRequest, CountCollectionsResponse,
+    CountRequest, CountResponse, CreateCollectionRequest, CreateDatabaseRequest,
+    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
+    DeleteCollectionRecordsResponse, DeleteDatabaseRequest, DeleteDatabaseResponse,
+    GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
+    GetTenantRequest, GetTenantResponse, GetUserIdentityResponse, HeartbeatResponse, IncludeList,
+    ListCollectionsRequest, ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse,
+    Metadata, QueryRequest, QueryResponse, UpdateCollectionConfiguration,
+    UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateMetadata,
     UpsertCollectionRecordsResponse,
 };
-use chroma_types::{DistributedIndexTypeParam, RawWhereFields};
 use mdac::{Rule, Scorecard, ScorecardTicket};
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Meter};
@@ -42,10 +43,11 @@ use crate::{
     ac::AdmissionControlledService,
     auth::{AuthenticateAndAuthorize, AuthzAction, AuthzResource},
     config::FrontendServerConfig,
-    frontend::Frontend,
     quota::{Action, QuotaEnforcer, QuotaPayload},
+    server_middleware::{always_json_errors_middleware, default_json_content_type_middleware},
     tower_tracing::add_tracing_middleware,
     types::errors::{ErrorResponse, ServerError, ValidationError},
+    Frontend,
 };
 
 struct ScorecardGuard {
@@ -78,6 +80,7 @@ pub struct Metrics {
     pre_flight_checks: Counter<u64>,
     reset: Counter<u64>,
     version: Counter<u64>,
+    get_user_identity: Counter<u64>,
     create_tenant: Counter<u64>,
     get_tenant: Counter<u64>,
     list_databases: Counter<u64>,
@@ -107,6 +110,7 @@ impl Metrics {
             pre_flight_checks: meter.u64_counter("pre_flight_checks").build(),
             reset: meter.u64_counter("reset").build(),
             version: meter.u64_counter("version").build(),
+            get_user_identity: meter.u64_counter("get_user_identity").build(),
             create_tenant: meter.u64_counter("create_tenant").build(),
             get_tenant: meter.u64_counter("get_tenant").build(),
             list_databases: meter.u64_counter("list_databases").build(),
@@ -128,21 +132,6 @@ impl Metrics {
             collection_query: meter.u64_counter("collection_query").build(),
         }
     }
-}
-
-/// If the request does not have a `Content-Type` header, set it to `application/json`.
-async fn default_json_content_type(mut req: Request, next: axum::middleware::Next) -> Response {
-    if req
-        .headers()
-        .get(axum::http::header::CONTENT_TYPE)
-        .is_none()
-    {
-        req.headers_mut().insert(
-            axum::http::header::CONTENT_TYPE,
-            axum::http::HeaderValue::from_static("application/json"),
-        );
-    }
-    next.run(req).await
 }
 
 #[derive(Clone)]
@@ -212,6 +201,7 @@ impl FrontendServer {
                     .head(v1_deprecation_notice)
                     .options(v1_deprecation_notice),
             )
+            .route("/api/v2", get(heartbeat))
             .route("/api/v2/healthcheck", get(healthcheck))
             .route("/api/v2/heartbeat", get(heartbeat))
             .route("/api/v2/pre-flight-checks", get(pre_flight_checks))
@@ -273,7 +263,10 @@ impl FrontendServer {
             .merge(docs_router)
             .with_state(self)
             .layer(DefaultBodyLimit::max(max_payload_size_bytes))
-            .layer(axum::middleware::from_fn(default_json_content_type));
+            .layer(axum::middleware::from_fn(
+                default_json_content_type_middleware,
+            ))
+            .layer(axum::middleware::from_fn(always_json_errors_middleware));
 
         let mut app = add_tracing_middleware(app);
 
@@ -452,7 +445,7 @@ async fn get_user_identity(
     headers: HeaderMap,
     State(server): State<FrontendServer>,
 ) -> Result<Json<GetUserIdentityResponse>, ServerError> {
-    server.metrics.version.add(1, &[]);
+    server.metrics.get_user_identity.add(1, &[]);
     Ok(Json(server.auth.get_user_identity(&headers).await?))
 }
 
@@ -531,8 +524,8 @@ async fn get_tenant(
 }
 
 #[derive(Deserialize, Serialize, ToSchema, Debug)]
-struct CreateDatabasePayload {
-    name: String,
+pub struct CreateDatabasePayload {
+    pub name: String,
 }
 
 /// Creates a new database for a given tenant.
@@ -555,7 +548,10 @@ async fn create_database(
     State(mut server): State<FrontendServer>,
     Json(CreateDatabasePayload { name }): Json<CreateDatabasePayload>,
 ) -> Result<Json<CreateDatabaseResponse>, ServerError> {
-    server.metrics.create_database.add(1, &[]);
+    server
+        .metrics
+        .create_database
+        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
     tracing::info!("Creating database [{}] for tenant [{}]", name, tenant);
     server
         .authenticate_and_authorize(
@@ -614,7 +610,10 @@ async fn list_databases(
     Query(ListDatabasesParams { limit, offset }): Query<ListDatabasesParams>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<ListDatabasesResponse>, ServerError> {
-    server.metrics.list_databases.add(1, &[]);
+    server
+        .metrics
+        .list_databases
+        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
     tracing::info!("Listing database for tenant [{}]", tenant);
     server
         .authenticate_and_authorize(
@@ -654,7 +653,10 @@ async fn get_database(
     Path((tenant, database)): Path<(String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<GetDatabaseResponse>, ServerError> {
-    server.metrics.get_database.add(1, &[]);
+    server
+        .metrics
+        .get_database
+        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
     tracing::info!("Getting database [{}] for tenant [{}]", database, tenant);
     server
         .authenticate_and_authorize(
@@ -694,7 +696,10 @@ async fn delete_database(
     Path((tenant, database)): Path<(String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<DeleteDatabaseResponse>, ServerError> {
-    server.metrics.delete_database.add(1, &[]);
+    server
+        .metrics
+        .delete_database
+        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
     tracing::info!("Deleting database [{}] for tenant [{}]", database, tenant);
     server
         .authenticate_and_authorize(
@@ -742,7 +747,10 @@ async fn list_collections(
     Query(ListCollectionsParams { limit, offset }): Query<ListCollectionsParams>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<ListCollectionsResponse>, ServerError> {
-    server.metrics.list_collections.add(1, &[]);
+    server
+        .metrics
+        .list_collections
+        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
     tracing::info!(
         "Listing collections in database [{}] for tenant [{}] with limit [{:?}] and offset [{:?}]",
         database,
@@ -795,7 +803,10 @@ async fn count_collections(
     Path((tenant, database)): Path<(String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<CountCollectionsResponse>, ServerError> {
-    server.metrics.count_collections.add(1, &[]);
+    server
+        .metrics
+        .count_collections
+        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
     tracing::info!("Counting number of collections in database [{database}] for tenant [{tenant}]",);
     server
         .authenticate_and_authorize(
@@ -820,7 +831,7 @@ async fn count_collections(
 #[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
 pub struct CreateCollectionPayload {
     pub name: String,
-    pub configuration: Option<serde_json::Value>,
+    pub configuration: Option<CollectionConfiguration>,
     pub metadata: Option<Metadata>,
     #[serde(default)]
     pub get_or_create: bool,
@@ -847,7 +858,10 @@ async fn create_collection(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<CreateCollectionPayload>,
 ) -> Result<Json<Collection>, ServerError> {
-    server.metrics.create_collection.add(1, &[]);
+    server
+        .metrics
+        .create_collection
+        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
     tracing::info!("Creating collection in database [{database}] for tenant [{tenant}]");
     server
         .authenticate_and_authorize(
@@ -874,11 +888,13 @@ async fn create_collection(
         "op:create_collection",
         format!("tenant:{}", tenant).as_str(),
     ]);
-    let index_type = DistributedIndexTypeParam::try_from(&payload.metadata)?;
-    // spann index not allowed.
-    if index_type.index_type == DistributedIndexType::Spann && !server.config.enable_span_indexing {
-        return Err(ValidationError::SpannNotImplemented)?;
+
+    if let Some(configuration) = payload.configuration.as_ref() {
+        if configuration.spann.is_some() && !server.config.enable_span_indexing {
+            return Err(ValidationError::SpannNotImplemented)?;
+        }
     }
+
     let request = CreateCollectionRequest::try_new(
         tenant,
         database,
@@ -913,7 +929,10 @@ async fn get_collection(
     Path((tenant, database, collection_name)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<Collection>, ServerError> {
-    server.metrics.get_collection.add(1, &[]);
+    server
+        .metrics
+        .get_collection
+        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
     tracing::info!(
         "Getting collection [{collection_name}] in database [{database}] for tenant [{tenant}]"
     );
@@ -939,6 +958,7 @@ async fn get_collection(
 pub struct UpdateCollectionPayload {
     pub new_name: Option<String>,
     pub new_metadata: Option<UpdateMetadata>,
+    pub new_configuration: Option<UpdateCollectionConfiguration>,
 }
 
 /// Updates an existing collection's name or metadata.
@@ -964,7 +984,13 @@ async fn update_collection(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<UpdateCollectionPayload>,
 ) -> Result<Json<UpdateCollectionResponse>, ServerError> {
-    server.metrics.update_collection.add(1, &[]);
+    server.metrics.update_collection.add(
+        1,
+        &[
+            KeyValue::new("tenant", tenant.clone()),
+            KeyValue::new("collection_id", collection_id.clone()),
+        ],
+    );
     tracing::info!(
         "Updating collection [{collection_id}] in database [{database}] for tenant [{tenant}]"
     );
@@ -1004,6 +1030,7 @@ async fn update_collection(
         payload
             .new_metadata
             .map(CollectionMetadataUpdate::UpdateMetadata),
+        payload.new_configuration,
     )?;
 
     server.frontend.update_collection(request).await?;
@@ -1032,7 +1059,10 @@ async fn delete_collection(
     Path((tenant, database, collection_name)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<UpdateCollectionResponse>, ServerError> {
-    server.metrics.delete_collection.add(1, &[]);
+    server
+        .metrics
+        .delete_collection
+        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
     tracing::info!(
         "Deleting collection [{collection_name}] in database [{database}] for tenant [{tenant}]"
     );
@@ -1083,7 +1113,13 @@ async fn collection_add(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<AddCollectionRecordsPayload>,
 ) -> Result<(StatusCode, Json<AddCollectionRecordsResponse>), ServerError> {
-    server.metrics.collection_add.add(1, &[]);
+    server.metrics.collection_add.add(
+        1,
+        &[
+            KeyValue::new("tenant", tenant.clone()),
+            KeyValue::new("collection_id", collection_id.clone()),
+        ],
+    );
     server
         .authenticate_and_authorize(
             &headers,
@@ -1164,7 +1200,13 @@ async fn collection_update(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<UpdateCollectionRecordsPayload>,
 ) -> Result<Json<UpdateCollectionRecordsResponse>, ServerError> {
-    server.metrics.collection_update.add(1, &[]);
+    server.metrics.collection_update.add(
+        1,
+        &[
+            KeyValue::new("tenant", tenant.clone()),
+            KeyValue::new("collection_id", collection_id.clone()),
+        ],
+    );
     server
         .authenticate_and_authorize(
             &headers,
@@ -1249,7 +1291,13 @@ async fn collection_upsert(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<UpsertCollectionRecordsPayload>,
 ) -> Result<Json<UpsertCollectionRecordsResponse>, ServerError> {
-    server.metrics.collection_upsert.add(1, &[]);
+    server.metrics.collection_upsert.add(
+        1,
+        &[
+            KeyValue::new("tenant", tenant.clone()),
+            KeyValue::new("collection_id", collection_id.clone()),
+        ],
+    );
     server
         .authenticate_and_authorize(
             &headers,
@@ -1333,7 +1381,13 @@ async fn collection_delete(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<DeleteCollectionRecordsPayload>,
 ) -> Result<Json<DeleteCollectionRecordsResponse>, ServerError> {
-    server.metrics.collection_delete.add(1, &[]);
+    server.metrics.collection_delete.add(
+        1,
+        &[
+            KeyValue::new("tenant", tenant.clone()),
+            KeyValue::new("collection_id", collection_id.clone()),
+        ],
+    );
     server
         .authenticate_and_authorize(
             &headers,
@@ -1404,7 +1458,6 @@ async fn collection_count(
         1,
         &[
             KeyValue::new("tenant", tenant.clone()),
-            KeyValue::new("database", database.clone()),
             KeyValue::new("collection_id", collection_id.clone()),
         ],
     );
@@ -1690,10 +1743,37 @@ struct ApiDoc;
 
 #[cfg(test)]
 mod tests {
-    use crate::{config::FrontendServerConfig, frontend::Frontend, FrontendServer};
+    use crate::{config::FrontendServerConfig, Frontend, FrontendServer};
     use chroma_config::{registry::Registry, Configurable};
     use chroma_system::System;
     use std::sync::Arc;
+
+    async fn test_server() -> u16 {
+        let registry = Registry::new();
+        let system = System::new();
+
+        let port = random_port::PortPicker::new().random(true).pick().unwrap();
+
+        let mut config = FrontendServerConfig::single_node_default();
+        config.port = port;
+
+        let frontend = Frontend::try_from_config(&(config.clone().frontend, system), &registry)
+            .await
+            .unwrap();
+        let app = FrontendServer::new(
+            config,
+            frontend,
+            vec![],
+            Arc::new(()),
+            Arc::new(()),
+            System::new(),
+        );
+        tokio::task::spawn(async move {
+            app.run().await;
+        });
+
+        port
+    }
 
     #[tokio::test]
     async fn test_cors() {
@@ -1745,29 +1825,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_defaults_to_json_content_type() {
-        let registry = Registry::new();
-        let system = System::new();
-
-        let port = random_port::PortPicker::new().pick().unwrap();
-
-        let mut config = FrontendServerConfig::single_node_default();
-        config.port = port;
-        config.cors_allow_origins = Some(vec!["http://localhost:3000".to_string()]);
-
-        let frontend = Frontend::try_from_config(&(config.clone().frontend, system), &registry)
-            .await
-            .unwrap();
-        let app = FrontendServer::new(
-            config,
-            frontend,
-            vec![],
-            Arc::new(()),
-            Arc::new(()),
-            System::new(),
-        );
-        tokio::task::spawn(async move {
-            app.run().await;
-        });
+        let port = test_server().await;
 
         // We don't send a content-type header
         let client = reqwest::Client::new();
@@ -1778,5 +1836,31 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(res.status(), 200);
+    }
+
+    #[tokio::test]
+    async fn test_plaintext_error_conversion() {
+        // By default, axum returns plaintext errors for some errors. This asserts that there's middleware to ensure all errors are returned as JSON.
+        let port = test_server().await;
+
+        let client = reqwest::Client::new();
+        let res = client
+            .post(format!("http://localhost:{}/api/v2/tenants", port))
+            .header("content-type", "application/json")
+            .body("{") // invalid JSON
+            .send()
+            .await
+            .unwrap();
+
+        // Should have returned JSON
+        assert_eq!(
+            res.headers().get("content-type").unwrap(),
+            "application/json"
+        );
+        let response_json = res.json::<serde_json::Value>().await.unwrap();
+        assert_eq!(
+            response_json["error"],
+            serde_json::Value::String("InvalidArgumentError".to_string())
+        );
     }
 }

@@ -139,7 +139,7 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
                     }
                 }
                 Err(e) => {
-                    println!("Error reading record segment");
+                    tracing::error!("Error reading record segment: {:?}", e);
                     return Err(CountRecordsError::RecordSegmentReadError(e));
                 }
             }
@@ -185,7 +185,7 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
                 res_count += val as i32;
             }
             Err(e) => {
-                println!("Error reading record segment");
+                tracing::error!("Error reading record segment: {:?}", e);
                 return Err(CountRecordsError::RecordSegmentReadError(e));
             }
         };

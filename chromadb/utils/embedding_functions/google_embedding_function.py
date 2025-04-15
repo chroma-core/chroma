@@ -70,10 +70,10 @@ class GooglePalmEmbeddingFunction(EmbeddingFunction[Documents]):
         return "google_palm"
 
     def default_space(self) -> Space:
-        return Space.COSINE
+        return "cosine"
 
     def supported_spaces(self) -> List[Space]:
-        return [Space.COSINE, Space.L2, Space.INNER_PRODUCT]
+        return ["cosine", "l2", "ip"]
 
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
@@ -187,10 +187,10 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
         return "google_generative_ai"
 
     def default_space(self) -> Space:
-        return Space.COSINE
+        return "cosine"
 
     def supported_spaces(self) -> List[Space]:
-        return [Space.COSINE, Space.L2, Space.INNER_PRODUCT]
+        return ["cosine", "l2", "ip"]
 
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
@@ -311,10 +311,10 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
         return "google_vertex"
 
     def default_space(self) -> Space:
-        return Space.COSINE
+        return "cosine"
 
     def supported_spaces(self) -> List[Space]:
-        return [Space.COSINE, Space.L2, Space.INNER_PRODUCT]
+        return ["cosine", "l2", "ip"]
 
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":

@@ -1,6 +1,5 @@
 // NOTE:  This is file is copied to files of the same name in the
 // load/src/opentelemetry_config.rs file
-// and garbage_collector/src/opentelemetry_config.rs file.
 // Keep them in-sync manually.
 
 use std::borrow::Cow;
@@ -9,13 +8,13 @@ use opentelemetry::trace::TracerProvider;
 use opentelemetry::{global, InstrumentationScope};
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
-use tracing_bunyan_formatter::BunyanFormattingLayer;
+use tracing_subscriber::fmt;
 use tracing_subscriber::Registry;
 use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Layer};
 
 pub fn init_global_filter_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
     EnvFilter::new(std::env::var("RUST_LOG").unwrap_or_else(|_| {
-        "error,".to_string()
+        "error,opentelemetry_sdk=info,".to_string()
             + &vec![
                 "chroma",
                 "chroma-blockstore",
@@ -23,6 +22,8 @@ pub fn init_global_filter_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
                 "chroma-cache",
                 "chroma-distance",
                 "chroma-error",
+                "chroma-log",
+                "chroma-log-service",
                 "chroma-frontend",
                 "chroma-index",
                 "chroma-storage",
@@ -34,7 +35,9 @@ pub fn init_global_filter_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
                 "hosted-frontend",
                 "metadata_filtering",
                 "query_service",
+                "wal3",
                 "worker",
+                "garbage_collector",
             ]
             .into_iter()
             .map(|s| s.to_string() + "=trace")
@@ -88,7 +91,9 @@ pub fn init_otel_layer(
     // Prepare meter.
     let metric_exporter = opentelemetry_otlp::MetricExporter::builder()
         .with_tonic()
-        .with_endpoint(otel_endpoint)
+        .with_endpoint(
+            std::env::var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT").unwrap_or(otel_endpoint.clone()),
+        )
         .build()
         .expect("could not build metric exporter");
 
@@ -109,8 +114,10 @@ pub fn init_otel_layer(
         .boxed()
 }
 
-pub fn init_stdout_layer(service_name: &str) -> Box<dyn Layer<Registry> + Send + Sync> {
-    BunyanFormattingLayer::new(service_name.to_string(), std::io::stdout)
+pub fn init_stdout_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
+    fmt::layer()
+        .pretty()
+        .with_target(false)
         .with_filter(tracing_subscriber::filter::FilterFn::new(|metadata| {
             // NOTE(rescrv):  This is a hack, too.  Not an uppercase hack, just a hack.  This
             // one's localized to the cache module.  There's not much to do to unify it with
@@ -123,6 +130,19 @@ pub fn init_stdout_layer(service_name: &str) -> Box<dyn Layer<Registry> + Send +
                 .unwrap_or("")
                 .starts_with("chroma_cache")
                 && metadata.name() != "clear")
+        }))
+        .with_filter(tracing_subscriber::filter::FilterFn::new(|metadata| {
+            metadata.module_path().unwrap_or("").starts_with("chroma")
+                || metadata.module_path().unwrap_or("").starts_with("wal3")
+                || metadata.module_path().unwrap_or("").starts_with("worker")
+                || metadata
+                    .module_path()
+                    .unwrap_or("")
+                    .starts_with("garbage_collector")
+                || metadata
+                    .module_path()
+                    .unwrap_or("")
+                    .starts_with("opentelemetry_sdk")
         }))
         .with_filter(tracing_subscriber::filter::LevelFilter::INFO)
         .boxed()
@@ -162,7 +182,7 @@ pub fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
     let layers = vec![
         init_global_filter_layer(),
         init_otel_layer(service_name, otel_endpoint),
-        init_stdout_layer(service_name),
+        init_stdout_layer(),
     ];
     init_tracing(layers);
     init_panic_tracing_hook();

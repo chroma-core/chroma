@@ -7,6 +7,7 @@ interface CohereAIAPI {
   createEmbedding: (params: {
     model: string;
     input: string[];
+    isImage?: boolean;
   }) => Promise<number[][]>;
 }
 
@@ -66,13 +67,22 @@ class CohereAISDK7 implements CohereAIAPI {
   public async createEmbedding(params: {
     model: string;
     input: string[];
+    isImage?: boolean;
   }): Promise<number[][]> {
     await this.loadClient();
-    return await this.cohereClient
-      .embed({ texts: params.input, model: params.model })
-      .then((response: any) => {
-        return response.embeddings;
-      });
+    if (params.isImage) {
+      return await this.cohereClient
+        .embed({ images: params.input, model: params.model })
+        .then((response: any) => {
+          return response.embeddings;
+        });
+    } else {
+      return await this.cohereClient
+        .embed({ texts: params.input, model: params.model })
+        .then((response: any) => {
+          return response.embeddings;
+        });
+    }
   }
 }
 
@@ -86,6 +96,7 @@ export class CohereEmbeddingFunction implements IEmbeddingFunction {
 
   private cohereAiApi?: CohereAIAPI;
   private model: string;
+  private isImage: boolean;
   private apiKey: string;
   private apiKeyEnvVar: string;
 
@@ -93,12 +104,23 @@ export class CohereEmbeddingFunction implements IEmbeddingFunction {
     cohere_api_key,
     model = "large",
     cohere_api_key_env_var = "CHROMA_COHERE_API_KEY",
+    /**
+     * If true, the input texts passed to `generate` are expected to be
+     * base64 encoded PNG data URIs.
+     */
+    isImage = false,
   }: {
     cohere_api_key?: string;
     model?: string;
     cohere_api_key_env_var: string;
+    /**
+     * If true, the input texts passed to `generate` are expected to be
+     * base64 encoded PNG data URIs.
+     */
+    isImage?: boolean;
   }) {
     this.model = model;
+    this.isImage = isImage;
 
     const apiKey = cohere_api_key ?? process.env[cohere_api_key_env_var];
     if (!apiKey) {
@@ -140,6 +162,7 @@ export class CohereEmbeddingFunction implements IEmbeddingFunction {
     return await this.cohereAiApi.createEmbedding({
       model: this.model,
       input: texts,
+      isImage: this.isImage,
     });
   }
 
@@ -171,11 +194,11 @@ export class CohereEmbeddingFunction implements IEmbeddingFunction {
 
   supportedSpaces(): EmbeddingFunctionSpace[] {
     if (this.model === "embed-english-v3.0") {
-      return ["cosine", "l2", "inner_product"];
+      return ["cosine", "l2", "ip"];
     }
 
     if (this.model === "embed-english-light-v3.0") {
-      return ["cosine", "inner_product", "l2"];
+      return ["cosine", "ip", "l2"];
     }
 
     if (this.model === "embed-english-v2.0") {
@@ -187,23 +210,23 @@ export class CohereEmbeddingFunction implements IEmbeddingFunction {
     }
 
     if (this.model === "embed-multilingual-v3.0") {
-      return ["cosine", "l2", "inner_product"];
+      return ["cosine", "l2", "ip"];
     }
 
     if (this.model === "embed-multilingual-light-v3.0") {
-      return ["cosine", "l2", "inner_product"];
+      return ["cosine", "l2", "ip"];
     }
 
     if (this.model === "embed-multilingual-v2.0") {
-      return ["inner_product"];
+      return ["ip"];
     }
 
-    return ["cosine", "l2", "inner_product"];
+    return ["cosine", "l2", "ip"];
   }
 
   defaultSpace(): EmbeddingFunctionSpace {
     if (this.model == "embed-multilingual-v2.0") {
-      return "inner_product";
+      return "ip";
     }
 
     return "cosine";

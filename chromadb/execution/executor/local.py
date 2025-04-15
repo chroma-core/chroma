@@ -2,7 +2,7 @@ from typing import Optional, Sequence
 
 from overrides import overrides
 
-from chromadb.api.types import GetResult, IncludeEnum, Metadata, QueryResult
+from chromadb.api.types import GetResult, Metadata, QueryResult
 from chromadb.config import System
 from chromadb.execution.executor.abstract import Executor
 from chromadb.execution.expression.plan import CountPlan, GetPlan, KNNPlan
@@ -78,19 +78,19 @@ class LocalExecutor(Executor):
                 embeddings = [v["embedding"] for v in vectors]
             else:
                 embeddings = list()
-            included.append(IncludeEnum.embeddings)
+            included.append("embeddings")
 
         if plan.projection.document:
             documents = [_doc(r["metadata"]) for r in records]
-            included.append(IncludeEnum.documents)
+            included.append("documents")
 
         if plan.projection.uri:
             uris = [_uri(r["metadata"]) for r in records]
-            included.append(IncludeEnum.uris)
+            included.append("uris")
 
         if plan.projection.metadata:
             metadatas = [_clean_metadata(r["metadata"]) for r in records]
-            included.append(IncludeEnum.metadatas)
+            included.append("metadatas")
 
         # TODO: Fix typing
         return GetResult(
@@ -144,11 +144,11 @@ class LocalExecutor(Executor):
 
         if plan.projection.embedding:
             embeddings = [[r["embedding"] for r in result] for result in knns]
-            included.append(IncludeEnum.embeddings)
+            included.append("embeddings")
 
         if plan.projection.rank:
             distances = [[r["distance"] for r in result] for result in knns]
-            included.append(IncludeEnum.distances)
+            included.append("distances")
 
         if plan.projection.document or plan.projection.metadata or plan.projection.uri:
             merged_ids = list(set([id for result in ids for id in result]))
@@ -170,21 +170,21 @@ class LocalExecutor(Executor):
                     [_doc(metadata_by_id.get(id, None)) for id in result]
                     for result in ids
                 ]
-                included.append(IncludeEnum.documents)
+                included.append("documents")
 
             if plan.projection.uri:
                 uris = [
                     [_uri(metadata_by_id.get(id, None)) for id in result]
                     for result in ids
                 ]
-                included.append(IncludeEnum.uris)
+                included.append("uris")
 
             if plan.projection.metadata:
                 metadatas = [
                     [_clean_metadata(metadata_by_id.get(id, None)) for id in result]
                     for result in ids
                 ]
-                included.append(IncludeEnum.metadatas)
+                included.append("metadatas")
 
         # TODO: Fix typing
         return QueryResult(

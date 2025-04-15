@@ -13,6 +13,7 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dao"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbcore"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbmodel"
+	s3metastore "github.com/chroma-core/chroma/go/pkg/sysdb/metastore/s3"
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/genproto/googleapis/rpc/code"
@@ -34,7 +35,15 @@ func (suite *TenantDatabaseServiceTestSuite) SetupSuite() {
 	s, err := NewWithGrpcProvider(Config{
 		SystemCatalogProvider: "database",
 		Testing:               true,
-		BlockStoreProvider:    "none",
+		MetaStoreConfig: s3metastore.S3MetaStoreConfig{
+			BucketName:              "test-bucket",
+			Region:                  "us-east-1",
+			Endpoint:                "http://localhost:9000",
+			AccessKeyID:             "minio",
+			SecretAccessKey:         "minio123",
+			ForcePathStyle:          true,
+			CreateBucketIfNotExists: true,
+		},
 	}, grpcutils.Default)
 	if err != nil {
 		suite.T().Fatalf("error creating server: %v", err)

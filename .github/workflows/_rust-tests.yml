@@ -11,6 +11,7 @@ jobs:
     runs-on: ${{ matrix.platform }}
     env:
       CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: 1
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -18,13 +19,28 @@ jobs:
         uses: ./.github/actions/rust
         with:
           github-token: ${{ github.token }}
+      - name: Build CLI
+        run: cargo build --bin chroma
       - name: Test
-        run: cargo nextest run
+        run: cargo nextest run --no-capture --profile ci
+      - name: Upload test results
+        uses: datadog/junit-upload-github-action@v1
+        with:
+            api_key: ${{ secrets.DD_API_KEY }}
+            site: ${{ vars.DD_SITE }}
+            service: chroma
+            files: target/nextest/ci/junit.xml
+            logs: true
+
   test-integration:
     strategy:
       matrix:
         platform: [depot-ubuntu-22.04-16]
     runs-on: ${{ matrix.platform }}
+    # OIDC token auth for Depot & AWS
+    permissions:
+      contents: read
+      id-token: write
     env:
       CARGO_TERM_COLOR: always
     steps:
@@ -36,20 +52,39 @@ jobs:
           github-token: ${{ github.token }}
       - name: Start services in Tilt
         uses: ./.github/actions/tilt
+        with:
+          depot-project-id: ${{ vars.DEPOT_PROJECT_ID }}
+      - name: Build CLI
+        run: cargo build --bin chroma
       - name: Run tests
-        run: cargo nextest run --profile k8s_integration
+        run: cargo nextest run --profile ci_k8s_integration
+      - name: Upload test results
+        uses: datadog/junit-upload-github-action@v1
+        with:
+            api_key: ${{ secrets.DD_API_KEY }}
+            site: ${{ vars.DD_SITE }}
+            service: chroma
+            files: target/nextest/ci/junit.xml
+            logs: true
       - name: Save service logs to artifact
         if: always()
         uses: ./.github/actions/export-tilt-logs
         with:
           artifact-name: "rust-integration-test"
-
   test-benches:
     strategy:
       matrix:
         platform: [depot-ubuntu-22.04-16]
+        bench-command:
+          - "--bench blockfile_writer -- --sample-size 10"
+          - "--bench distance_metrics"
+          - "--bench filter"
+          - "--bench get"
+          - "--bench limit"
+          - "--bench query"
     runs-on: ${{ matrix.platform }}
     env:
+      RUST_BACKTRACE: 1
       CARGO_TERM_COLOR: always
     steps:
       - name: Checkout
@@ -58,8 +93,8 @@ jobs:
         uses: ./.github/actions/rust
         with:
           github-token: ${{ github.token }}
-      - name: Test compile
-        run: cargo bench --no-run
+      - name: Run benchmark
+        run: cargo bench ${{ matrix.bench-command }}
 
   can-build-release:
     runs-on: depot-ubuntu-22.04-16

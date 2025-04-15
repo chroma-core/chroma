@@ -127,10 +127,10 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
 
     def default_space(self) -> Space:
         # OpenAI embeddings work best with cosine similarity
-        return Space.COSINE
+        return "cosine"
 
     def supported_spaces(self) -> List[Space]:
-        return [Space.COSINE, Space.L2, Space.INNER_PRODUCT]
+        return ["cosine", "l2", "ip"]
 
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":

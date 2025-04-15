@@ -6,8 +6,11 @@ use chroma_blockstore::{
 };
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::fulltext::types::FullTextIndexError;
-use chroma_types::{DataRecord, MaterializedLogOperation, Segment, SegmentType, SegmentUuid};
-use futures::{Stream, StreamExt};
+use chroma_types::{
+    DataRecord, MaterializedLogOperation, Segment, SegmentType, SegmentUuid, MAX_OFFSET_ID,
+    OFFSET_ID_TO_DATA, OFFSET_ID_TO_USER_ID, USER_ID_TO_OFFSET_ID,
+};
+use futures::{Stream, StreamExt, TryStreamExt};
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
 use std::ops::RangeBounds;
@@ -15,11 +18,6 @@ use std::sync::atomic::{self, AtomicU32};
 use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
-
-const USER_ID_TO_OFFSET_ID: &str = "user_id_to_offset_id";
-const OFFSET_ID_TO_USER_ID: &str = "offset_id_to_user_id";
-const OFFSET_ID_TO_DATA: &str = "offset_id_to_data";
-const MAX_OFFSET_ID: &str = "max_offset_id";
 
 #[derive(Clone)]
 pub struct RecordSegmentWriter {
@@ -827,6 +825,15 @@ impl RecordSegmentReader<'_> {
             .map(|vec| vec.into_iter().map(|(_, data)| data).collect())
     }
 
+    pub async fn get_data_stream<'me>(
+        &'me self,
+        offset_range: impl RangeBounds<u32> + Clone + Send + 'me,
+    ) -> impl Stream<Item = Result<DataRecord<'me>, Box<dyn ChromaError>>> + 'me {
+        self.id_to_data
+            .get_range_stream(""..="", offset_range)
+            .map(|res| res.map(|(_, rec)| rec))
+    }
+
     /// Get a stream of offset ids from the smallest to the largest in the given range
     pub fn get_offset_stream<'me>(
         &'me self,
@@ -853,16 +860,25 @@ impl RecordSegmentReader<'_> {
     }
 
     pub async fn prefetch_id_to_data(&self, keys: &[u32]) {
-        let prefixes = vec![""; keys.len()];
-        self.id_to_data.load_blocks_for_keys(&prefixes, keys).await
+        self.id_to_data
+            .load_blocks_for_keys(keys.iter().map(|k| ("".to_string(), *k)))
+            .await
     }
 
     #[allow(dead_code)]
     pub(crate) async fn prefetch_user_id_to_id(&self, keys: Vec<&str>) {
-        let prefixes = vec![""; keys.len()];
         self.user_id_to_id
-            .load_blocks_for_keys(&prefixes, &keys)
+            .load_blocks_for_keys(keys.iter().map(|k| ("".to_string(), *k)))
             .await
+    }
+
+    pub async fn get_total_logical_size_bytes(&self) -> Result<u64, Box<dyn ChromaError>> {
+        self.id_to_data
+            .get_range_stream(""..="", ..)
+            .map(|res| res.map(|(_, d)| d.get_size() as u64))
+            .try_collect::<Vec<_>>()
+            .await
+            .map(|sizes| sizes.iter().sum())
     }
 }
 

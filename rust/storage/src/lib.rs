@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use self::config::StorageConfig;
+use admissioncontrolleds3::StorageRequestPriority;
 use async_trait::async_trait;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
@@ -208,13 +209,13 @@ impl ChromaError for StorageConfigError {
 }
 
 impl Storage {
-    pub async fn get(&self, key: &str) -> Result<Arc<Vec<u8>>, StorageError> {
+    pub async fn get(&self, key: &str, options: GetOptions) -> Result<Arc<Vec<u8>>, StorageError> {
         match self {
             Storage::ObjectStore(object_store) => Ok(object_store.get(key).await?),
             Storage::S3(s3) => s3.get(key).await,
             Storage::Local(local) => local.get(key).await,
             Storage::AdmissionControlledS3(admission_controlled_storage) => {
-                admission_controlled_storage.get(key).await
+                admission_controlled_storage.get(key, options).await
             }
         }
     }
@@ -222,36 +223,48 @@ impl Storage {
     pub async fn get_with_e_tag(
         &self,
         key: &str,
+        options: GetOptions,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
         match self {
             Storage::ObjectStore(object_store) => object_store.get_with_e_tag(key).await,
             Storage::S3(s3) => s3.get_with_e_tag(key).await,
             Storage::Local(local) => local.get_with_e_tag(key).await,
             Storage::AdmissionControlledS3(admission_controlled_storage) => {
-                admission_controlled_storage.get_with_e_tag(key).await
+                admission_controlled_storage
+                    .get_with_e_tag(key, options)
+                    .await
             }
         }
     }
 
-    pub async fn get_parallel(&self, key: &str) -> Result<Arc<Vec<u8>>, StorageError> {
+    pub async fn get_parallel(
+        &self,
+        key: &str,
+        options: GetOptions,
+    ) -> Result<Arc<Vec<u8>>, StorageError> {
         match self {
             Storage::ObjectStore(object_store) => object_store.get_parallel(key).await,
             Storage::S3(s3) => s3.get_parallel(key).await.map(|res| res.0),
             Storage::Local(local) => local.get(key).await,
             Storage::AdmissionControlledS3(admission_controlled_storage) => {
                 admission_controlled_storage
-                    .get_parallel(key.to_string())
+                    .get_parallel(key.to_string(), options)
                     .await
             }
         }
     }
 
-    pub async fn put_file(&self, key: &str, path: &str) -> Result<Option<ETag>, StorageError> {
+    pub async fn put_file(
+        &self,
+        key: &str,
+        path: &str,
+        options: PutOptions,
+    ) -> Result<Option<ETag>, StorageError> {
         match self {
-            Storage::ObjectStore(object_store) => object_store.put_file(key, path).await,
-            Storage::S3(s3) => s3.put_file(key, path).await,
-            Storage::Local(local) => local.put_file(key, path).await,
-            Storage::AdmissionControlledS3(as3) => as3.put_file(key, path).await,
+            Storage::ObjectStore(object_store) => object_store.put_file(key, path, options).await,
+            Storage::S3(s3) => s3.put_file(key, path, options).await,
+            Storage::Local(local) => local.put_file(key, path, options).await,
+            Storage::AdmissionControlledS3(as3) => as3.put_file(key, path, options).await,
         }
     }
 
@@ -337,10 +350,11 @@ pub fn test_storage() -> Storage {
     ))
 }
 
-#[derive(Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct PutOptions {
     if_not_exists: bool,
     if_match: Option<ETag>,
+    priority: StorageRequestPriority,
 }
 
 #[derive(Error, Debug)]
@@ -350,19 +364,27 @@ pub enum PutOptionsCreateError {
 }
 
 impl PutOptions {
-    pub fn if_not_exists() -> Self {
+    pub fn if_not_exists(priority: StorageRequestPriority) -> Self {
         // SAFETY(rescrv):  This is always safe because of a unit test.
-        Self::new(true, None).unwrap()
+        Self::new(true, None, priority).unwrap()
     }
 
-    pub fn if_matches(e_tag: &ETag) -> Self {
+    pub fn if_matches(e_tag: &ETag, priority: StorageRequestPriority) -> Self {
         // SAFETY(rescrv):  This is always safe because of a unit test.
-        Self::new(false, Some(e_tag.clone())).unwrap()
+        Self::new(false, Some(e_tag.clone()), priority).unwrap()
+    }
+
+    pub fn with_priority(priority: StorageRequestPriority) -> Self {
+        Self {
+            priority,
+            ..Default::default()
+        }
     }
 
     pub fn new(
         if_not_exists: bool,
         if_match: Option<ETag>,
+        priority: StorageRequestPriority,
     ) -> Result<PutOptions, PutOptionsCreateError> {
         if if_not_exists && if_match.is_some() {
             return Err(PutOptionsCreateError::IfNotExistsAndIfMatchEnabled);
@@ -370,7 +392,19 @@ impl PutOptions {
         Ok(PutOptions {
             if_not_exists,
             if_match,
+            priority,
         })
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct GetOptions {
+    priority: StorageRequestPriority,
+}
+
+impl GetOptions {
+    pub fn new(priority: StorageRequestPriority) -> Self {
+        Self { priority }
     }
 }
 
@@ -385,7 +419,7 @@ mod tests {
 
     #[test]
     fn put_options_ctors() {
-        let _x = PutOptions::if_not_exists();
-        let _x = PutOptions::if_matches(&ETag("123".to_string()));
+        let _x = PutOptions::if_not_exists(StorageRequestPriority::P0);
+        let _x = PutOptions::if_matches(&ETag("123".to_string()), StorageRequestPriority::P0);
     }
 }

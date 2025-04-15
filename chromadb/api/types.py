@@ -1,11 +1,21 @@
-from typing import Optional, Set, Union, TypeVar, List, Dict, Any, Tuple, cast
+from typing import (
+    Optional,
+    Set,
+    Union,
+    TypeVar,
+    List,
+    Dict,
+    Any,
+    Tuple,
+    cast,
+    Literal,
+    get_args,
+)
 from numpy.typing import NDArray
 import numpy as np
 from typing_extensions import TypedDict, Protocol, runtime_checkable
-from enum import Enum
-from pydantic import Field
 import chromadb.errors as errors
-from chromadb.types import (
+from chromadb.base_types import (
     Metadata,
     UpdateMetadata,
     Vector,
@@ -24,7 +34,13 @@ from abc import abstractmethod
 
 
 # Re-export types from chromadb.types
-__all__ = ["Metadata", "Where", "WhereDocument", "UpdateCollectionMetadata"]
+__all__ = [
+    "Metadata",
+    "Where",
+    "WhereDocument",
+    "UpdateCollectionMetadata",
+    "UpdateMetadata",
+]
 META_KEY_CHROMA_DOCUMENT = "chroma:document"
 T = TypeVar("T")
 OneOrMany = Union[T, List[T]]
@@ -52,11 +68,7 @@ PyEmbeddings = List[PyEmbedding]
 Embedding = Vector
 Embeddings = List[Embedding]
 
-
-class Space(Enum):
-    COSINE = "cosine"
-    L2 = "l2"
-    INNER_PRODUCT = "inner_product"
+Space = Literal["cosine", "l2", "ip"]
 
 
 def normalize_embeddings(
@@ -310,29 +322,18 @@ def _validate_record_set_contains(
 
 Parameter = TypeVar("Parameter", Document, Image, Embedding, Metadata, ID)
 
-
-class IncludeEnum(str, Enum):
-    documents = "documents"
-    embeddings = "embeddings"
-    metadatas = "metadatas"
-    distances = "distances"
-    uris = "uris"
-    data = "data"
-
-
-# This should ust be List[Literal["documents", "embeddings", "metadatas", "distances"]]
-# However, this provokes an incompatibility with the Overrides library and Python 3.7
-Include = List[IncludeEnum]
-IncludeMetadataDocuments = Field(default=["metadatas", "documents"])
-IncludeMetadataDocumentsEmbeddings = Field(
-    default=["metadatas", "documents", "embeddings"]
-)
-IncludeMetadataDocumentsEmbeddingsDistances = Field(
-    default=["metadatas", "documents", "embeddings", "distances"]
-)
-IncludeMetadataDocumentsDistances = Field(
-    default=["metadatas", "documents", "distances"]
-)
+Include = List[
+    Literal["documents", "embeddings", "metadatas", "distances", "uris", "data"]
+]
+IncludeMetadataDocuments: Include = ["metadatas", "documents"]
+IncludeMetadataDocumentsEmbeddings: Include = ["metadatas", "documents", "embeddings"]
+IncludeMetadataDocumentsEmbeddingsDistances: Include = [
+    "metadatas",
+    "documents",
+    "embeddings",
+    "distances",
+]
+IncludeMetadataDocumentsDistances: Include = ["metadatas", "documents", "distances"]
 
 # Re-export types from chromadb.types
 LiteralValue = LiteralValue
@@ -460,6 +461,7 @@ class IndexMetadata(TypedDict):
     time_created: float
 
 
+# TODO: make warnings prettier and add link to migration docs
 @runtime_checkable
 class EmbeddingFunction(Protocol[D]):
     """
@@ -529,21 +531,19 @@ class EmbeddingFunction(Protocol[D]):
             DeprecationWarning,
             stacklevel=2,
         )
-        raise NotImplementedError(
-            "name() is not implemented for this embedding function."
-        )
+        return NotImplemented
 
     def default_space(self) -> Space:
         """
         Return the default space for the embedding function.
         """
-        return Space.COSINE
+        return "cosine"
 
     def supported_spaces(self) -> List[Space]:
         """
         Return the supported spaces for the embedding function.
         """
-        return [Space.COSINE, Space.L2, Space.INNER_PRODUCT]
+        return ["cosine", "l2", "ip"]
 
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[D]":
@@ -562,9 +562,7 @@ class EmbeddingFunction(Protocol[D]):
             DeprecationWarning,
             stacklevel=2,
         )
-        raise NotImplementedError(
-            "build_from_config() is not implemented for this embedding function."
-        )
+        return NotImplemented
 
     def get_config(self) -> Dict[str, Any]:
         """
@@ -582,9 +580,7 @@ class EmbeddingFunction(Protocol[D]):
             DeprecationWarning,
             stacklevel=2,
         )
-        raise NotImplementedError(
-            "get_config() is not implemented for this embedding function."
-        )
+        return NotImplemented
 
     def validate_config_update(
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
@@ -600,6 +596,15 @@ class EmbeddingFunction(Protocol[D]):
         Validate the config.
         """
         return
+
+    def is_legacy(self) -> bool:
+        if (
+            self.name() is NotImplemented
+            or self.get_config() is NotImplemented
+            or self.build_from_config(self.get_config()) is NotImplemented
+        ):
+            return True
+        return False
 
 
 def validate_embedding_function(
@@ -852,9 +857,11 @@ def validate_include(include: Include, dissalowed: Optional[Include] = None) -> 
         if not isinstance(item, str):
             raise ValueError(f"Expected include item to be a str, got {item}")
 
-        if not any(item == e for e in IncludeEnum):
+        # Get the valid items from the Literal type inside the List
+        valid_items = get_args(get_args(Include)[0])
+        if item not in valid_items:
             raise ValueError(
-                f"Expected include item to be one of {', '.join(IncludeEnum)}, got {item}"
+                f"Expected include item to be one of {', '.join(valid_items)}, got {item}"
             )
 
         if dissalowed is not None and any(item == e for e in dissalowed):

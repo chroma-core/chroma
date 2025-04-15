@@ -55,6 +55,7 @@ impl Configurable<(config::DistributedExecutorConfig, System)> for DistributedEx
             config.connections_per_node,
             config.connect_timeout_ms,
             config.request_timeout_ms,
+            config.max_query_service_response_size_bytes,
         );
         let client_manager_handle = system.start_component(client_manager);
 
@@ -85,9 +86,10 @@ impl DistributedExecutor {
     ///////////////////////// Plan Operations /////////////////////////
     pub async fn count(&mut self, plan: Count) -> Result<CountResult, ExecutorError> {
         let clients = self.clients(plan.scan.collection_and_segments.collection.collection_id)?;
+        let plan: chroma_types::chroma_proto::CountPlan = plan.clone().try_into()?;
         let res = (|| async {
             choose_client(clients.as_slice())?
-                .count(Request::new(plan.clone().into()))
+                .count(Request::new(plan.clone()))
                 .await
         })
         .retry(self.backoff)

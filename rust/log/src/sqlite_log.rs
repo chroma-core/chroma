@@ -27,6 +27,8 @@ pub enum SqlitePullLogsError {
     InvalidEmbedding(bytemuck::PodCastError),
     #[error("Failed to parse metadata: {0}")]
     InvalidMetadata(#[from] serde_json::Error),
+    #[error("Method {0} is not implemented")]
+    NotImplemented(String),
 }
 
 impl ChromaError for SqlitePullLogsError {
@@ -36,6 +38,7 @@ impl ChromaError for SqlitePullLogsError {
             SqlitePullLogsError::InvalidEncoding(_) => ErrorCodes::InvalidArgument,
             SqlitePullLogsError::InvalidEmbedding(_) => ErrorCodes::InvalidArgument,
             SqlitePullLogsError::InvalidMetadata(_) => ErrorCodes::InvalidArgument,
+            SqlitePullLogsError::NotImplemented(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -121,18 +124,18 @@ impl ChromaError for SqliteGetLegacyEmbeddingsQueueConfigError {
     }
 }
 
-fn legacy_embeddings_queue_config_default_kind() -> String {
+pub fn legacy_embeddings_queue_config_default_kind() -> String {
     "EmbeddingsQueueConfigurationInternal".to_owned()
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-struct LegacyEmbeddingsQueueConfig {
-    automatically_purge: bool,
+pub struct LegacyEmbeddingsQueueConfig {
+    pub automatically_purge: bool,
     #[serde(
         default = "legacy_embeddings_queue_config_default_kind",
         rename = "_type"
     )]
-    kind: String,
+    pub kind: String,
 }
 
 #[derive(Clone, Debug)]
@@ -160,6 +163,16 @@ impl SqliteLog {
         self.compactor_handle
             .set(compactor_handle)
             .map_err(|_| SqlitePushLogsError::CompactorHandleSetError)
+    }
+
+    pub(super) async fn scout_logs(
+        &mut self,
+        _collection_id: CollectionUuid,
+        _starting_offset: i64,
+    ) -> Result<u64, SqlitePullLogsError> {
+        Err(SqlitePullLogsError::NotImplemented(
+            "scout_logs".to_string(),
+        ))
     }
 
     pub(super) async fn read(
@@ -507,6 +520,23 @@ impl SqliteLog {
 
         Ok(default_config)
     }
+
+    pub async fn update_legacy_embeddings_queue_config(
+        &self,
+        config: LegacyEmbeddingsQueueConfig,
+    ) -> Result<LegacyEmbeddingsQueueConfig, SqliteGetLegacyEmbeddingsQueueConfigError> {
+        let mut tx = self.db.get_conn().begin().await.map_err(WrappedSqlxError)?;
+        let value = serde_json::to_string(&config)?;
+        sqlx::query(
+            "INSERT OR REPLACE INTO embeddings_queue_config (id, config_json_str) VALUES (1, ?)",
+        )
+        .bind(value)
+        .execute(&mut *tx)
+        .await
+        .map_err(WrappedSqlxError)?;
+        tx.commit().await.map_err(WrappedSqlxError)?;
+        Ok(config)
+    }
 }
 
 #[derive(Error, Debug)]
@@ -590,7 +620,7 @@ mod tests {
     use super::*;
     use chroma_config::{registry::Registry, Configurable};
     use chroma_sqlite::{config::SqliteDBConfig, db::test_utils::new_test_db_persist_path};
-    use chroma_types::{are_metadatas_close_to_equal, CollectionUuid};
+    use chroma_types::{are_update_metadatas_close_to_equal, CollectionUuid};
     use proptest::prelude::*;
 
     use tokio::runtime::Runtime;
@@ -697,7 +727,7 @@ mod tests {
                     assert!(log.record.embedding == operation.embedding);
                     assert!(log.record.encoding == operation.encoding);
                     assert!(
-                        are_metadatas_close_to_equal(
+                        are_update_metadatas_close_to_equal(
                             &received_metadata,
                             &expected_metadata
                         ),

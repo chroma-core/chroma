@@ -169,58 +169,104 @@ func (r *LogRepository) GetLastCompactedOffsetForCollection(ctx context.Context,
 	return
 }
 
+func (r *LogRepository) GetBoundsForCollection(ctx context.Context, collectionId string) (start, limit int64, err error) {
+	bounds, err := r.queries.GetBoundsForCollection(ctx, collectionId)
+	if err != nil {
+		trace_log.Error("Error in getting minimum and maximum offset for collection", zap.Error(err), zap.String("collectionId", collectionId))
+		return
+	}
+	start = bounds.RecordCompactionOffsetPosition
+	limit = bounds.RecordEnumerationOffsetPosition + 1
+	err = nil
+	return
+}
+
 func (r *LogRepository) GarbageCollection(ctx context.Context) error {
 	collectionToCompact, err := r.queries.GetAllCollections(ctx)
 	if err != nil {
 		trace_log.Error("Error in getting collections to compact", zap.Error(err))
 		return err
 	}
+	trace_log.Info("Obtained collections to compact", zap.Int("collectionCount", len(collectionToCompact)))
 	if collectionToCompact == nil {
 		return nil
 	}
 	collectionsToGC := make([]string, 0)
-	// TODO(Sanket): Make batch size configurable.
+	// TODO(Sanket): Make batch size configurable
 	batchSize := 5000
 	for i := 0; i < len(collectionToCompact); i += batchSize {
 		end := min(len(collectionToCompact), i+batchSize)
 		exists, err := r.sysDb.CheckCollections(ctx, collectionToCompact[i:end])
+		trace_log.Info("Checking collections in sysdb", zap.Int("collectionCount", len(collectionToCompact[i:end])))
 		if err != nil {
 			trace_log.Error("Error in checking collection in sysdb", zap.Error(err))
 			continue
 		}
 		for offset, exist := range exists {
 			if !exist {
-				collectionsToGC = append(collectionsToGC, collectionToCompact[i+offset])
+				collectionsToGC = append(collectionsToGC, collectionToCompact[offset+i])
 			}
 		}
 	}
-	if len(collectionsToGC) > 0 {
+	trace_log.Info("Obtained collections to GC", zap.Int("collectionCount", len(collectionsToGC)))
+
+	for _, collectionId := range collectionsToGC {
 		var tx pgx.Tx
 		tx, err = r.conn.BeginTx(ctx, pgx.TxOptions{})
 		if err != nil {
 			trace_log.Error("Error in begin transaction for garbage collection", zap.Error(err))
+			tx.Rollback(ctx)
 			return err
 		}
 		queriesWithTx := r.queries.WithTx(tx)
-		defer func() {
-			if err != nil {
-				tx.Rollback(ctx)
-			} else {
-				err = tx.Commit(ctx)
-			}
-		}()
-		err = queriesWithTx.DeleteRecords(ctx, collectionsToGC)
+
+		trace_log.Info("Deleting records for collection", zap.String("collectionId", collectionId))
+		minMax, err := queriesWithTx.GetMinimumMaximumOffsetForCollection(ctx, collectionId)
 		if err != nil {
-			trace_log.Error("Error in garbage collection", zap.Error(err))
-			return err
+			trace_log.Error("Error in getting minimum and maximum offset for collection", zap.Error(err), zap.String("collectionId", collectionId))
+			tx.Rollback(ctx)
+			continue
 		}
+		trace_log.Info("Obtained minimum and maximum offset for collection", zap.String("collectionId", collectionId), zap.Int64("minOffset", minMax.MinOffset), zap.Int64("maxOffset", minMax.MaxOffset))
+		minOffset := minMax.MinOffset
+		if minOffset == 1 {
+			minOffset = 0
+		}
+		maxOffset := minMax.MaxOffset
+		batchSize := max(1, min(int(maxOffset-minOffset), 100))
+		for offset := minOffset; offset <= maxOffset; offset += int64(batchSize) {
+			err = queriesWithTx.DeleteRecordsRange(ctx, log.DeleteRecordsRangeParams{
+				CollectionID: collectionId,
+				MinOffset:    minOffset,
+				MaxOffset:    min(offset+int64(batchSize), maxOffset+1),
+			})
+			if err != nil {
+				trace_log.Error("Error in deleting records for collection", zap.Error(err), zap.String("collectionId", collectionId))
+				tx.Rollback(ctx)
+				continue
+			}
+		}
+
+		if err != nil {
+			trace_log.Error("Error in deleting records for collection", zap.Error(err), zap.String("collectionId", collectionId))
+			tx.Rollback(ctx)
+			continue
+		}
+
+		trace_log.Info("Deleted records for collection", zap.String("collectionId", collectionId))
+
 		err = queriesWithTx.DeleteCollection(ctx, collectionsToGC)
 		if err != nil {
 			trace_log.Error("Error in deleting collection", zap.Error(err))
+			tx.Rollback(ctx)
 			return err
 		}
-		trace_log.Info("Garbage collection completed", zap.Strings("collections", collectionsToGC))
+
+		tx.Commit(ctx)
 	}
+
+	trace_log.Info("Garbage collection completed", zap.Strings("collections", collectionsToGC))
+
 	return nil
 }
 

@@ -4,7 +4,9 @@ use axum::{
     Json,
 };
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::{GetCollectionError, UpdateCollectionError};
+use chroma_types::{
+    CollectionConfigurationToInternalConfigurationError, GetCollectionError, UpdateCollectionError,
+};
 use serde::Serialize;
 use std::fmt;
 use thiserror::Error;
@@ -24,6 +26,8 @@ pub enum ValidationError {
     UpdateCollection(#[from] UpdateCollectionError),
     #[error("SPANN is still in development. Not allowed to created spann indexes")]
     SpannNotImplemented,
+    #[error("Error parsing collection configuration: {0}")]
+    ParseCollectionConfiguration(#[from] CollectionConfigurationToInternalConfigurationError),
 }
 
 impl ChromaError for ValidationError {
@@ -35,6 +39,7 @@ impl ChromaError for ValidationError {
             ValidationError::GetCollection(err) => err.code(),
             ValidationError::UpdateCollection(err) => err.code(),
             ValidationError::SpannNotImplemented => ErrorCodes::Unimplemented,
+            ValidationError::ParseCollectionConfiguration(_) => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -69,38 +74,10 @@ impl ErrorResponse {
 impl IntoResponse for ServerError {
     fn into_response(self) -> Response {
         tracing::error!("Error: {:?}", self.0);
-        let status_code = match self.0.code() {
-            ErrorCodes::Success => StatusCode::OK,
-            ErrorCodes::Cancelled => StatusCode::BAD_REQUEST,
-            ErrorCodes::Unknown => StatusCode::INTERNAL_SERVER_ERROR,
-            ErrorCodes::InvalidArgument => StatusCode::BAD_REQUEST,
-            ErrorCodes::DeadlineExceeded => StatusCode::GATEWAY_TIMEOUT,
-            ErrorCodes::NotFound => StatusCode::NOT_FOUND,
-            ErrorCodes::AlreadyExists => StatusCode::CONFLICT,
-            ErrorCodes::PermissionDenied => StatusCode::FORBIDDEN,
-            ErrorCodes::ResourceExhausted => StatusCode::TOO_MANY_REQUESTS,
-            ErrorCodes::FailedPrecondition => StatusCode::PRECONDITION_FAILED,
-            ErrorCodes::Aborted => StatusCode::BAD_REQUEST,
-            ErrorCodes::OutOfRange => StatusCode::BAD_REQUEST,
-            ErrorCodes::Unimplemented => StatusCode::NOT_IMPLEMENTED,
-            ErrorCodes::Internal => StatusCode::INTERNAL_SERVER_ERROR,
-            ErrorCodes::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
-            ErrorCodes::DataLoss => StatusCode::INTERNAL_SERVER_ERROR,
-            ErrorCodes::Unauthenticated => StatusCode::UNAUTHORIZED,
-            ErrorCodes::VersionMismatch => StatusCode::INTERNAL_SERVER_ERROR,
-        };
-
-        let error = match self.0.code() {
-            ErrorCodes::InvalidArgument => "InvalidArgumentError",
-            ErrorCodes::NotFound => "NotFoundError",
-            ErrorCodes::Internal => "InternalError",
-            ErrorCodes::VersionMismatch => "VersionMismatchError",
-            _ => "ChromaError",
-        }
-        .to_string();
+        let status_code: StatusCode = self.0.code().into();
 
         let error = ErrorResponse {
-            error,
+            error: self.0.code().name().to_string(),
             message: self.0.to_string(),
         };
 

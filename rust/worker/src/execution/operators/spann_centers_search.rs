@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_segment::distributed_spann::{SpannSegmentReader, SpannSegmentReaderContext};
+use chroma_segment::distributed_spann::SpannSegmentReaderContext;
 use chroma_system::Operator;
 use thiserror::Error;
 
@@ -12,7 +12,6 @@ pub(crate) struct SpannCentersSearchInput {
     pub(crate) normalized_query: Vec<f32>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug)]
 pub(crate) struct SpannCentersSearchOutput {
     pub(crate) center_ids: Vec<usize>,
@@ -38,13 +37,6 @@ impl ChromaError for SpannCentersSearchError {
 #[derive(Debug, Clone)]
 pub(crate) struct SpannCentersSearchOperator {}
 
-impl SpannCentersSearchOperator {
-    #[allow(dead_code)]
-    pub fn new() -> Box<Self> {
-        Box::new(SpannCentersSearchOperator {})
-    }
-}
-
 #[async_trait]
 impl Operator<SpannCentersSearchInput, SpannCentersSearchOutput> for SpannCentersSearchOperator {
     type Error = SpannCentersSearchError;
@@ -53,14 +45,16 @@ impl Operator<SpannCentersSearchInput, SpannCentersSearchOutput> for SpannCenter
         &self,
         input: &SpannCentersSearchInput,
     ) -> Result<SpannCentersSearchOutput, SpannCentersSearchError> {
-        let spann_reader = SpannSegmentReader::from_segment(
-            &input.reader_context.segment,
-            &input.reader_context.blockfile_provider,
-            &input.reader_context.hnsw_provider,
-            input.reader_context.dimension,
-        )
-        .await
-        .map_err(|_| SpannCentersSearchError::SpannSegmentReaderCreationError)?;
+        let spann_reader = input
+            .reader_context
+            .spann_provider
+            .read(
+                &input.reader_context.collection,
+                &input.reader_context.segment,
+                input.reader_context.dimension,
+            )
+            .await
+            .map_err(|_| SpannCentersSearchError::SpannSegmentReaderCreationError)?;
         // RNG Query.
         let res = spann_reader
             .rng_query(&input.normalized_query)

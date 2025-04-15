@@ -23,7 +23,12 @@ from fastapi.routing import APIRoute
 from fastapi import HTTPException, status
 from functools import wraps
 
-from chromadb.api.configuration import CollectionConfigurationInternal
+from chromadb.api.collection_configuration import (
+    load_update_collection_configuration_from_json,
+    load_create_collection_configuration_from_json,
+    create_collection_configuration_from_legacy_collection_metadata,
+    CreateCollectionConfiguration,
+)
 from pydantic import BaseModel
 from chromadb import __version__ as chromadb_version
 from chromadb.api.types import (
@@ -472,7 +477,8 @@ class FastAPI(Server):
     ) -> None:
         return await to_thread.run_sync(
             # NOTE(rescrv, iron will auth):  No need to migrate because this is the utility call.
-            self.sync_auth_request, *(headers, action, tenant, database, collection)
+            self.sync_auth_request,
+            *(headers, action, tenant, database, collection),
         )
 
     @trace_method(
@@ -780,11 +786,19 @@ class FastAPI(Server):
             request: Request, tenant: str, database: str, raw_body: bytes
         ) -> CollectionModel:
             create = validate_model(CreateCollection, orjson.loads(raw_body))
-            configuration = (
-                CollectionConfigurationInternal()
-                if not create.configuration
-                else CollectionConfigurationInternal.from_json(create.configuration)
-            )
+            if not create.configuration:
+                if create.metadata:
+                    configuration = (
+                        create_collection_configuration_from_legacy_collection_metadata(
+                            create.metadata
+                        )
+                    )
+                else:
+                    configuration = None
+            else:
+                configuration = load_create_collection_configuration_from_json(
+                    create.configuration
+                )
 
             # NOTE(rescrv, iron will auth):  Implemented.
             self.sync_auth_request(
@@ -872,12 +886,20 @@ class FastAPI(Server):
                 database_name,
                 collection_id,
             )
+            configuration = (
+                None
+                if not update.new_configuration
+                else load_update_collection_configuration_from_json(
+                    update.new_configuration
+                )
+            )
             self._set_request_context(request=request)
             add_attributes_to_current_span({"tenant": tenant})
             return self._api._modify(
                 id=_uuid(collection_id),
                 new_name=update.new_name,
                 new_metadata=update.new_metadata,
+                new_configuration=configuration,
                 tenant=tenant,
                 database=database_name,
             )
@@ -1081,7 +1103,6 @@ class FastAPI(Server):
                 collection_id=_uuid(collection_id),
                 ids=get.ids,
                 where=get.where,
-                sort=get.sort,
                 limit=get.limit,
                 offset=get.offset,
                 where_document=get.where_document,
@@ -1701,9 +1722,11 @@ class FastAPI(Server):
         ) -> CollectionModel:
             create = validate_model(CreateCollection, orjson.loads(raw_body))
             configuration = (
-                CollectionConfigurationInternal()
+                CreateCollectionConfiguration()
                 if not create.configuration
-                else CollectionConfigurationInternal.from_json(create.configuration)
+                else load_create_collection_configuration_from_json(
+                    create.configuration
+                )
             )
 
             (
@@ -1802,10 +1825,18 @@ class FastAPI(Server):
                 None,
                 collection_id,
             )
+            configuration = (
+                None
+                if not update.new_configuration
+                else load_update_collection_configuration_from_json(
+                    update.new_configuration
+                )
+            )
             return self._api._modify(
                 id=_uuid(collection_id),
                 new_name=update.new_name,
                 new_metadata=update.new_metadata,
+                new_configuration=configuration,
             )
 
         await to_thread.run_sync(
@@ -1990,7 +2021,6 @@ class FastAPI(Server):
                 collection_id=_uuid(collection_id),
                 ids=get.ids,
                 where=get.where,
-                sort=get.sort,
                 limit=get.limit,
                 offset=get.offset,
                 where_document=get.where_document,

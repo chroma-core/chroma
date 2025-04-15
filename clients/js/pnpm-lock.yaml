@@ -40,8 +40,8 @@ importers:
         specifier: ^29.6.3
         version: 29.6.3
       '@openapi-generator-plus/typescript-fetch-client-generator':
-        specifier: ^1.5.0
-        version: 1.6.1
+        specifier: ^1.11.0
+        version: 1.11.0(openapi-types@12.1.3)
       '@types/bcrypt':
         specifier: ^5.0.2
         version: 5.0.2
@@ -64,8 +64,8 @@ importers:
         specifier: ^4.1.5
         version: 4.1.5
       openapi-generator-plus:
-        specifier: ^2.6.0
-        version: 2.16.0(openapi-types@12.1.3)
+        specifier: ^2.20.0
+        version: 2.20.0(@openapi-generator-plus/core@2.23.0(openapi-types@12.1.3))
       openapi-types:
         specifier: ^12.1.3
         version: 12.1.3
@@ -120,13 +120,23 @@ importers:
       openai:
         specifier: ^4.0.0
         version: 4.51.0
+      semver:
+        specifier: ^7.7.1
+        version: 7.7.1
       voyageai:
         specifier: ^0.0.3-1
         version: 0.0.3-1
+    optionalDependencies:
+      chromadb-js-bindings-darwin-arm64:
+        specifier: ^0.0.1
+        version: 0.0.1
     devDependencies:
       '@internal/chromadb-core':
         specifier: workspace:*
         version: link:../chromadb-core
+      '@types/semver':
+        specifier: ^7.7.0
+        version: 7.7.0
       jest:
         specifier: ^29.5.0
         version: 29.7.0(@types/node@20.14.2)(ts-node@10.9.2(@types/node@20.14.2)(typescript@5.4.5))
@@ -904,20 +914,20 @@ packages:
     resolution: {integrity: sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg==}
     engines: {node: '>= 8'}
 
-  '@openapi-generator-plus/core@2.16.0':
-    resolution: {integrity: sha512-I38PitY7jqTmXoS8Bw3du8RnctxEoYhLM0FtZD9W3TOlS24PAZ5dQTWkhEcZfwuSyWvmKMnILSkA5rRxTGDkng==}
+  '@openapi-generator-plus/core@2.23.0':
+    resolution: {integrity: sha512-S8btMFVuuOxp4AU+lIi9lPc2DCDoH1ieEBU5FZyLCO20lLaxKuVLQN1ChyLQj6eB8dn6OmV7LObgpo/GerVTMg==}
 
-  '@openapi-generator-plus/generator-common@1.4.0':
-    resolution: {integrity: sha512-fGwuQ7BaR8AWDhXRoCPS6Mgi2DBi9pOoHjdPA3lREjbs35fhusuz88IRn4RFvZ1K6LStjyp5/vlPZUg+oa/Q2A==}
+  '@openapi-generator-plus/generator-common@1.7.1':
+    resolution: {integrity: sha512-A0o8Pe/FzWh3OUXi8IYXIxO61F146HrdlvYgwdgD/RiiRjsYYWChxKo1OIOLnqN1FnNWvlPXoG1nC4vz8cZZ8g==}
 
-  '@openapi-generator-plus/handlebars-templates@1.4.0':
-    resolution: {integrity: sha512-ZZm1Q9wIZDtmIAe99+wZPG/49XAHea7iaBF6KoxvQ8lpkCcCIbmMoHnP6u4D4mSO03TE92xLF/dDB5AmMNMyHw==}
+  '@openapi-generator-plus/handlebars-templates@1.11.1':
+    resolution: {integrity: sha512-N1yGwqGqxuPZd9w/4rXBQVDjVq37J/0VTWauwIqzWzApBUWbCXkaytXlqk5nV7Yu0HjmrscArBgK1/3l/Cv2KQ==}
 
   '@openapi-generator-plus/indexed-type@1.0.0':
     resolution: {integrity: sha512-RGUrlulyLoH7+V6wDalDGD9bfwTyDgIMZnfPo5GmaQs3CGOZ2aSHYAsB78gVTz2KWTyc5Ov4doi2lPENeUarZQ==}
 
-  '@openapi-generator-plus/java-like-generator-helper@2.2.0':
-    resolution: {integrity: sha512-93K8Z5CjL77TGouEpPmuj/HfWFCRB53c1a2Y42N3BN/RfpoNOaURIB6/bESwJD7bKFV5NhKmeeSirZjlb3kjow==}
+  '@openapi-generator-plus/java-like-generator-helper@2.6.0':
+    resolution: {integrity: sha512-tcvl8M5EAYm4ph3aPzI6axLaFD5072hA8E6i2AXwc+IDg6CTIKR4Dgs+Fxbt2iK3H0zjnEucI++YLo+fJd09Sg==}
 
   '@openapi-generator-plus/json-schema-ref-parser@9.0.11':
     resolution: {integrity: sha512-SJbsXJgQozq86V2ImkLuthI9d7esDIPjG/MUw2BEVa3HLIi/lHMmAVpUvBGNIpK4+yvUGmZSpgLOLmW3R9XoTA==}
@@ -927,23 +937,17 @@ packages:
     peerDependencies:
       openapi-types: '>=7'
 
-  '@openapi-generator-plus/types@2.13.0':
-    resolution: {integrity: sha512-AbFIaoBpfmf/Nlh77dz3HyzI4vBYAP+9ZrS9cPzBbcsD+Kw9XdM0er6j8KmEX7AolMpVMx5v/RSxaRnMy2I4sg==}
+  '@openapi-generator-plus/types@2.19.0':
+    resolution: {integrity: sha512-nw4CboqusBIn3ybXzYDhYGMxW58YybfWIx/56VNgM1brYsgcpdbwjqtsanm5HnjA8gR7NyQEjk1Nq5eJBQ85ww==}
 
-  '@openapi-generator-plus/types@2.14.0':
-    resolution: {integrity: sha512-LSlbjFXfwW2uXk9zo4X3jDO5iQ6z8++V1E4xrgR1e6Ecqyx3AIpXTAW4ZNBLwzqmOm0FlIFRVs4pHIA/ACWz/w==}
+  '@openapi-generator-plus/typescript-fetch-client-generator@1.11.0':
+    resolution: {integrity: sha512-EcRLd6O+YEhEkliLoOrew24vsCCekIlxpPwZ1uEpx+kxQ2tPSxA4eamw5avjtt370GD4Neq16Y50s0bjO6otvw==}
 
-  '@openapi-generator-plus/typescript-fetch-client-generator@1.6.1':
-    resolution: {integrity: sha512-mECFEDma+yl6StTuBY4Ao0VgKYrVma6rx2Rys4rja+Z+JO5zHoE9PO5Gdrocpd3xpY7Mbc+7BmqjKsf8lzIOkg==}
+  '@openapi-generator-plus/typescript-generator-common@1.12.0':
+    resolution: {integrity: sha512-jdqU3wWi0KAc2nfPgbxoGumO7gzxQTv4xg1kOaXng22xM7R2D2FKinobe5O2nqBCqVphcml4BKiQvflC+8fVYQ==}
 
-  '@openapi-generator-plus/typescript-generator-common@1.7.1':
-    resolution: {integrity: sha512-YU/NAoLKUM/ur25mm3J27qsrDmKafWIZEVMrrT1CdNc/8JUW6y3jiZ52TMdPWWy1Ofvh0Cu9YSXhRXUQNEp8pQ==}
-
-  '@openapi-generator-plus/utils@1.0.2':
-    resolution: {integrity: sha512-kOYW3ZNG8IuOlYTZMCG/eYmeK/hSI7fO3wZ2v4aQiSE+f87c6SrNny/Go7ptBIHlUApT9LDHhAqM+atjcmY14Q==}
-
-  '@openapi-generator-plus/utils@1.0.3':
-    resolution: {integrity: sha512-YdjszbBYcxmyArroXuFi9SjnQksgSdfmzoIuyfjF1jGbTjDwXNsSaoEOelUycIW7SA1QvZT8z9RslosWyy/AzQ==}
+  '@openapi-generator-plus/utils@1.1.4':
+    resolution: {integrity: sha512-He0atAw3HIIGZPsNhP6N+pXSkYh/ebdh/FMAduXnuhTHz8V8qPXyI/EBIACCuPNJXuIaSNhbqR5HRn2iUG5/jQ==}
 
   '@pkgjs/parseargs@0.11.0':
     resolution: {integrity: sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg==}
@@ -1341,6 +1345,9 @@ packages:
   '@types/normalize-package-data@2.4.4':
     resolution: {integrity: sha512-37i+OaWTh9qeK4LSHPsyRC7NahnGotNuZvjLSgcPzblpHB3rrCJxAOgI5gCdKm7coonsaX1Of0ILiTcnZjbfxA==}
 
+  '@types/semver@7.7.0':
+    resolution: {integrity: sha512-k107IF4+Xr7UHjwDc7Cfd6PRQfbdkiRabXGRjo07b4WyPahFBZCZ1sE+BNxYIJPPg73UkfOsVOLwqVc/6ETrIA==}
+
   '@types/ssh2-streams@0.1.12':
     resolution: {integrity: sha512-Sy8tpEmCce4Tq0oSOYdfqaBpA3hDM8SoxoFh5vzFsu2oL+znzGz8oVWW7xb4K920yYMUY+PIG31qZnFMfPWNCg==}
 
@@ -1683,6 +1690,12 @@ packages:
 
   chromadb-default-embed@2.14.0:
     resolution: {integrity: sha512-odCiCzZ5jqNI0sS6RcRxObx8gM7aCPULQkdWw/OgqIGdIUOKUj9b8jDElLbZ6feMKNB0MSQhtXi0P8QEeVO75w==}
+
+  chromadb-js-bindings-darwin-arm64@0.0.1:
+    resolution: {integrity: sha512-YEFF2KObB73iaXyRLcC0eSbaHQ8/6vs2Pg2ue+V9jMQL1pcZYlcYLI/2AtELGjOxJTd086iJoMPJpQqy8LNyxQ==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [darwin]
 
   ci-info@3.9.0:
     resolution: {integrity: sha512-NIxF55hv4nSqQswkAeiOi1r83xy8JldOFDTWiug55KBu9Jnblncd2U6ViHmYgHf01TPZS77NJBhBMKdWj9HQMQ==}
@@ -2661,8 +2674,8 @@ packages:
     resolution: {integrity: sha512-hdN1wVrZbb29eBGiGjJbeP8JbKjq1urkHJ/LIP/NY48MZ1QVXUsQBV1G1zvYFHn1XE06cwjBsOI2K3Ulnj1YXQ==}
     engines: {node: '>=8'}
 
-  marked@10.0.0:
-    resolution: {integrity: sha512-YiGcYcWj50YrwBgNzFoYhQ1hT6GmQbFG8SksnYJX1z4BXTHSOrz1GB5/Jm2yQvMg4nN1FHP4M6r03R10KrVUiA==}
+  marked@12.0.2:
+    resolution: {integrity: sha512-qXUm7e/YKFoqFPYPa3Ukg9xlI5cyAtGmyEIzMfW//m6kXwCy2Ps9DYf5ioijFKQ8qyuscrHoY04iJGctu2Kg0Q==}
     engines: {node: '>= 18'}
     hasBin: true
 
@@ -2886,9 +2899,11 @@ packages:
     resolution: {integrity: sha512-UKuWc3/qQyklqhHM8CbdXCv0Z0obap6T0ECdcO5oATQxAbKE5Ky3YCXFQY207z+eGG6ez4U9wvAcuMygxhmStg==}
     hasBin: true
 
-  openapi-generator-plus@2.16.0:
-    resolution: {integrity: sha512-Vbs5oEzXFMcCzpsOE+Dq+1nJ+GEREVOktTM1ud3Ic4lPow/70rSSdyvMYQdmPlDyeXs2vSn+XACOEC5JNYiGlg==}
+  openapi-generator-plus@2.20.0:
+    resolution: {integrity: sha512-WNh+6FPABZG7MzRQ51GwFv4N7A3aB31ZDnNofWzCdF0agB9ikZLQCeV6o9B3chObpWKiSP/qW7yLZYohbOVE6w==}
     hasBin: true
+    peerDependencies:
+      '@openapi-generator-plus/core': '>=2'
 
   openapi-types@12.1.3:
     resolution: {integrity: sha512-N4YtSYJqghVu4iek2ZUvcN/0aqH1kRDuNqzcycDxhOUpg7GdvLa2F3DgS6yBNhInhv2r/6I0Flkn7CqL8+nIcw==}
@@ -3203,6 +3218,11 @@ packages:
 
   semver@7.6.2:
     resolution: {integrity: sha512-FNAIBWCx9qcRhoHcgcJ0gvU7SN1lYU2ZXuSfl04bSC5OpvDHFyJCjdNHomPXxjQlCBU67YW64PzY7/VIEH7F2w==}
+    engines: {node: '>=10'}
+    hasBin: true
+
+  semver@7.7.1:
+    resolution: {integrity: sha512-hlq8tAfn0m/61p4BVRcPzIGr6LKiMwo4VM6dGi6pt4qcRkmNzTcWq6eCEjEh+qXjkMDvPlOFFSGwQjoEa6gyMA==}
     engines: {node: '>=10'}
     hasBin: true
 
@@ -4948,41 +4968,48 @@ snapshots:
       '@nodelib/fs.scandir': 2.1.5
       fastq: 1.17.1
 
-  '@openapi-generator-plus/core@2.16.0(openapi-types@12.1.3)':
+  '@openapi-generator-plus/core@2.23.0(openapi-types@12.1.3)':
     dependencies:
       '@openapi-generator-plus/indexed-type': 1.0.0
       '@openapi-generator-plus/swagger-parser': 10.1.0(openapi-types@12.1.3)
-      '@openapi-generator-plus/types': 2.14.0
-      '@openapi-generator-plus/utils': 1.0.3
+      '@openapi-generator-plus/types': 2.19.0
+      '@openapi-generator-plus/utils': 1.1.4
       lodash: 4.17.21
       pluralize: 8.0.0
     transitivePeerDependencies:
       - openapi-types
 
-  '@openapi-generator-plus/generator-common@1.4.0':
+  '@openapi-generator-plus/generator-common@1.7.1(openapi-types@12.1.3)':
     dependencies:
-      '@openapi-generator-plus/types': 2.13.0
-      '@openapi-generator-plus/utils': 1.0.2
+      '@openapi-generator-plus/core': 2.23.0(openapi-types@12.1.3)
+      '@openapi-generator-plus/types': 2.19.0
+      '@openapi-generator-plus/utils': 1.1.4
       pluralize: 8.0.0
       url-parse: 1.5.10
+    transitivePeerDependencies:
+      - openapi-types
 
-  '@openapi-generator-plus/handlebars-templates@1.4.0':
+  '@openapi-generator-plus/handlebars-templates@1.11.1(openapi-types@12.1.3)':
     dependencies:
-      '@openapi-generator-plus/generator-common': 1.4.0
+      '@openapi-generator-plus/generator-common': 1.7.1(openapi-types@12.1.3)
       '@openapi-generator-plus/indexed-type': 1.0.0
-      '@openapi-generator-plus/types': 2.13.0
+      '@openapi-generator-plus/types': 2.19.0
       change-case: 4.1.2
       handlebars: 4.7.8
-      marked: 10.0.0
+      marked: 12.0.2
       pluralize: 8.0.0
+    transitivePeerDependencies:
+      - openapi-types
 
   '@openapi-generator-plus/indexed-type@1.0.0': {}
 
-  '@openapi-generator-plus/java-like-generator-helper@2.2.0':
+  '@openapi-generator-plus/java-like-generator-helper@2.6.0(openapi-types@12.1.3)':
     dependencies:
-      '@openapi-generator-plus/generator-common': 1.4.0
-      '@openapi-generator-plus/types': 2.13.0
+      '@openapi-generator-plus/generator-common': 1.7.1(openapi-types@12.1.3)
+      '@openapi-generator-plus/types': 2.19.0
       change-case: 4.1.2
+    transitivePeerDependencies:
+      - openapi-types
 
   '@openapi-generator-plus/json-schema-ref-parser@9.0.11':
     dependencies:
@@ -5002,37 +5029,34 @@ snapshots:
       call-me-maybe: 1.0.2
       openapi-types: 12.1.3
 
-  '@openapi-generator-plus/types@2.13.0': {}
+  '@openapi-generator-plus/types@2.19.0': {}
 
-  '@openapi-generator-plus/types@2.14.0': {}
-
-  '@openapi-generator-plus/typescript-fetch-client-generator@1.6.1':
+  '@openapi-generator-plus/typescript-fetch-client-generator@1.11.0(openapi-types@12.1.3)':
     dependencies:
-      '@openapi-generator-plus/generator-common': 1.4.0
-      '@openapi-generator-plus/handlebars-templates': 1.4.0
+      '@openapi-generator-plus/generator-common': 1.7.1(openapi-types@12.1.3)
+      '@openapi-generator-plus/handlebars-templates': 1.11.1(openapi-types@12.1.3)
       '@openapi-generator-plus/indexed-type': 1.0.0
-      '@openapi-generator-plus/types': 2.13.0
-      '@openapi-generator-plus/typescript-generator-common': 1.7.1
+      '@openapi-generator-plus/types': 2.19.0
+      '@openapi-generator-plus/typescript-generator-common': 1.12.0(openapi-types@12.1.3)
       change-case: 4.1.2
+    transitivePeerDependencies:
+      - openapi-types
 
-  '@openapi-generator-plus/typescript-generator-common@1.7.1':
+  '@openapi-generator-plus/typescript-generator-common@1.12.0(openapi-types@12.1.3)':
     dependencies:
-      '@openapi-generator-plus/generator-common': 1.4.0
-      '@openapi-generator-plus/handlebars-templates': 1.4.0
-      '@openapi-generator-plus/java-like-generator-helper': 2.2.0
-      '@openapi-generator-plus/types': 2.13.0
+      '@openapi-generator-plus/generator-common': 1.7.1(openapi-types@12.1.3)
+      '@openapi-generator-plus/handlebars-templates': 1.11.1(openapi-types@12.1.3)
+      '@openapi-generator-plus/java-like-generator-helper': 2.6.0(openapi-types@12.1.3)
+      '@openapi-generator-plus/types': 2.19.0
       handlebars: 4.7.8
       pluralize: 8.0.0
+    transitivePeerDependencies:
+      - openapi-types
 
-  '@openapi-generator-plus/utils@1.0.2':
+  '@openapi-generator-plus/utils@1.1.4':
     dependencies:
       '@openapi-generator-plus/indexed-type': 1.0.0
-      '@openapi-generator-plus/types': 2.13.0
-
-  '@openapi-generator-plus/utils@1.0.3':
-    dependencies:
-      '@openapi-generator-plus/indexed-type': 1.0.0
-      '@openapi-generator-plus/types': 2.14.0
+      '@openapi-generator-plus/types': 2.19.0
 
   '@pkgjs/parseargs@0.11.0':
     optional: true
@@ -5520,6 +5544,8 @@ snapshots:
 
   '@types/normalize-package-data@2.4.4': {}
 
+  '@types/semver@7.7.0': {}
+
   '@types/ssh2-streams@0.1.12':
     dependencies:
       '@types/node': 20.14.2
@@ -5986,6 +6012,9 @@ snapshots:
       sharp: 0.32.6
     optionalDependencies:
       onnxruntime-node: 1.14.0
+
+  chromadb-js-bindings-darwin-arm64@0.0.1:
+    optional: true
 
   ci-info@3.9.0: {}
 
@@ -6756,7 +6785,7 @@ snapshots:
       '@babel/parser': 7.24.7
       '@istanbuljs/schema': 0.1.3
       istanbul-lib-coverage: 3.2.2
-      semver: 7.6.2
+      semver: 7.7.1
     transitivePeerDependencies:
       - supports-color
 
@@ -7042,7 +7071,7 @@ snapshots:
       jest-util: 29.7.0
       natural-compare: 1.4.0
       pretty-format: 29.7.0
-      semver: 7.6.2
+      semver: 7.7.1
     transitivePeerDependencies:
       - supports-color
 
@@ -7190,7 +7219,7 @@ snapshots:
 
   make-dir@4.0.0:
     dependencies:
-      semver: 7.6.2
+      semver: 7.7.1
 
   make-error@1.3.6: {}
 
@@ -7202,7 +7231,7 @@ snapshots:
 
   map-obj@4.3.0: {}
 
-  marked@10.0.0: {}
+  marked@12.0.2: {}
 
   memorystream@0.3.1: {}
 
@@ -7310,7 +7339,7 @@ snapshots:
 
   node-abi@3.74.0:
     dependencies:
-      semver: 7.6.2
+      semver: 7.7.1
 
   node-addon-api@5.1.0: {}
 
@@ -7432,10 +7461,9 @@ snapshots:
     transitivePeerDependencies:
       - encoding
 
-  openapi-generator-plus@2.16.0(openapi-types@12.1.3):
+  openapi-generator-plus@2.20.0(@openapi-generator-plus/core@2.23.0(openapi-types@12.1.3)):
     dependencies:
-      '@openapi-generator-plus/core': 2.16.0(openapi-types@12.1.3)
-      '@openapi-generator-plus/types': 2.14.0
+      '@openapi-generator-plus/core': 2.23.0(openapi-types@12.1.3)
       ansi-colors: 4.1.3
       getopts: 2.3.0
       glob: 10.4.1
@@ -7444,7 +7472,6 @@ snapshots:
       yaml: 2.4.5
     transitivePeerDependencies:
       - encoding
-      - openapi-types
 
   openapi-types@12.1.3: {}
 
@@ -7786,6 +7813,8 @@ snapshots:
 
   semver@7.6.2: {}
 
+  semver@7.7.1: {}
+
   sentence-case@3.0.4:
     dependencies:
       no-case: 3.0.4
@@ -7816,7 +7845,7 @@ snapshots:
       detect-libc: 2.0.3
       node-addon-api: 6.1.0
       prebuild-install: 7.1.3
-      semver: 7.6.2
+      semver: 7.7.1
       simple-get: 4.0.1
       tar-fs: 3.0.6
       tunnel-agent: 0.6.0
@@ -8134,7 +8163,7 @@ snapshots:
       json5: 2.2.3
       lodash.memoize: 4.1.2
       make-error: 1.3.6
-      semver: 7.6.2
+      semver: 7.7.1
       typescript: 5.4.5
       yargs-parser: 21.1.1
     optionalDependencies:
@@ -8153,7 +8182,7 @@ snapshots:
       json5: 2.2.3
       lodash.memoize: 4.1.2
       make-error: 1.3.6
-      semver: 7.6.2
+      semver: 7.7.1
       typescript: 5.4.5
       yargs-parser: 21.1.1
     optionalDependencies:

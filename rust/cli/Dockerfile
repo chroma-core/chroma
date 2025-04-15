@@ -29,6 +29,7 @@ FROM debian:stable-slim AS runner
 RUN apt-get update && apt-get install -y dumb-init && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /chroma/rust/frontend/sample_configs/docker_single_node.yaml /config.yaml
+COPY --from=builder /chroma/rust/frontend/sample_configs/tilt_config.yaml /tilt_config.yaml
 COPY --from=builder /chroma/chroma /usr/local/bin/chroma
 
 EXPOSE 8000

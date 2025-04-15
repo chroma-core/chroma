@@ -3,9 +3,9 @@ from typing import Sequence, Optional
 from uuid import UUID
 
 from overrides import override
-from chromadb.api.configuration import (
-    CollectionConfiguration,
-    CollectionConfigurationInternal,
+from chromadb.api.collection_configuration import (
+    CreateCollectionConfiguration,
+    UpdateCollectionConfiguration,
 )
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
 from chromadb.api.types import (
@@ -17,8 +17,8 @@ from chromadb.api.types import (
     Embeddings,
     IDs,
     Include,
-    IncludeMetadataDocumentsEmbeddings,
-    IncludeMetadataDocumentsEmbeddingsDistances,
+    IncludeMetadataDocumentsDistances,
+    IncludeMetadataDocuments,
     Loadable,
     Metadatas,
     URIs,
@@ -31,7 +31,7 @@ from chromadb.auth import UserIdentity
 from chromadb.config import Component, Settings
 from chromadb.types import Database, Tenant, Collection as CollectionModel
 import chromadb.utils.embedding_functions as ef
-from chromadb.api.models.Collection import Collection, CollectionName
+from chromadb.api.models.Collection import Collection
 
 # Re-export the async version
 from chromadb.api.async_api import (  # noqa: F401
@@ -77,6 +77,7 @@ class BaseAPI(ABC):
         id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
+        new_configuration: Optional[UpdateCollectionConfiguration] = None,
     ) -> None:
         """[Internal] Modify a collection by UUID. Can update the name and/or metadata.
 
@@ -85,6 +86,8 @@ class BaseAPI(ABC):
             new_name: The new name of the collection.
                                 If None, the existing name will remain. Defaults to None.
             new_metadata: The new metadata to associate with the collection.
+                                      Defaults to None.
+            new_configuration: The new configuration to associate with the collection.
                                       Defaults to None.
         """
         pass
@@ -220,27 +223,21 @@ class BaseAPI(ABC):
         collection_id: UUID,
         ids: Optional[IDs] = None,
         where: Optional[Where] = None,
-        sort: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
-        page: Optional[int] = None,
-        page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = IncludeMetadataDocumentsEmbeddings,
+        include: Include = IncludeMetadataDocuments,
     ) -> GetResult:
         """[Internal] Returns entries from a collection specified by UUID.
 
         Args:
             ids: The IDs of the entries to get. Defaults to None.
             where: Conditional filtering on metadata. Defaults to {}.
-            sort: The column to sort the entries by. Defaults to None.
             limit: The maximum number of entries to return. Defaults to None.
             offset: The number of entries to skip before returning. Defaults to None.
-            page: The page number to return. Defaults to None.
-            page_size: The number of entries to return per page. Defaults to None.
             where_document: Conditional filtering on documents. Defaults to {}.
             include: The fields to include in the response.
-                          Defaults to ["embeddings", "metadatas", "documents"].
+                          Defaults to ["metadatas", "documents"].
         Returns:
             GetResult: The entries in the collection that match the query.
 
@@ -276,7 +273,7 @@ class BaseAPI(ABC):
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = IncludeMetadataDocumentsEmbeddingsDistances,
+        include: Include = IncludeMetadataDocumentsDistances,
     ) -> QueryResult:
         """[Internal] Performs a nearest neighbors query on a collection specified by UUID.
 
@@ -287,7 +284,7 @@ class BaseAPI(ABC):
             where: Conditional filtering on metadata. Defaults to {}.
             where_document: Conditional filtering on documents. Defaults to {}.
             include: The fields to include in the response.
-                          Defaults to ["embeddings", "metadatas", "documents", "distances"].
+                          Defaults to ["metadatas", "documents", "distances"].
 
         Returns:
             QueryResult: The results of the query.
@@ -346,19 +343,19 @@ class ClientAPI(BaseAPI, ABC):
         self,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
-    ) -> Sequence[CollectionName]:
+    ) -> Sequence[Collection]:
         """List all collections.
         Args:
             limit: The maximum number of entries to return. Defaults to None.
             offset: The number of entries to skip before returning. Defaults to None.
 
         Returns:
-            Sequence[CollectionName]: A list of collection names
+            Sequence[Collection]: A list of collections
 
         Examples:
             ```python
             client.list_collections()
-            # ["my_collection"]
+            # [collection(name="my_collection", metadata={})]
             ```
         """
         pass
@@ -367,7 +364,7 @@ class ClientAPI(BaseAPI, ABC):
     def create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfiguration] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
@@ -436,7 +433,7 @@ class ClientAPI(BaseAPI, ABC):
     def get_or_create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfiguration] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
@@ -588,7 +585,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
     def create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfigurationInternal] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
@@ -609,7 +606,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
     def get_or_create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfigurationInternal] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -633,6 +630,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
+        new_configuration: Optional[UpdateCollectionConfiguration] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
@@ -666,13 +664,10 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         collection_id: UUID,
         ids: Optional[IDs] = None,
         where: Optional[Where] = None,
-        sort: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
-        page: Optional[int] = None,
-        page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = ["metadatas", "documents"],  # type: ignore[list-item]
+        include: Include = IncludeMetadataDocuments,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> GetResult:
@@ -732,7 +727,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = ["metadatas", "documents", "distances"],  # type: ignore[list-item]
+        include: Include = IncludeMetadataDocumentsDistances,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> QueryResult:

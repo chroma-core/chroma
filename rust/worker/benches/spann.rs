@@ -6,16 +6,18 @@ use chroma_benchmark::{
 };
 use chroma_blockstore::{arrow::provider::ArrowBlockfileProvider, provider::BlockfileProvider};
 use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
+use chroma_config::{registry::Registry, Configurable};
 use chroma_index::{
+    config::{HnswGarbageCollectionConfig, PlGarbageCollectionConfig},
     hnsw_provider::HnswIndexProvider,
     spann::{
-        types::{SpannIndexReader, SpannIndexWriter, SpannPosting},
+        types::{GarbageCollectionContext, SpannIndexReader, SpannIndexWriter, SpannPosting},
         utils::rng_query,
     },
 };
 use chroma_storage::{local::LocalStorage, Storage};
 use chroma_system::Operator;
-use chroma_types::{CollectionUuid, DistributedSpannParameters};
+use chroma_types::{CollectionUuid, InternalSpannConfiguration};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use futures::StreamExt;
 use rand::seq::SliceRandom;
@@ -76,8 +78,18 @@ fn add_to_index_and_get_reader<'a>(
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 128;
-        let params = DistributedSpannParameters::default();
-        let writer = SpannIndexWriter::from_id(
+        let params = InternalSpannConfiguration::default();
+        let ef_search = params.search_ef;
+        let gc_context = GarbageCollectionContext::try_from_config(
+            &(
+                PlGarbageCollectionConfig::default(),
+                HnswGarbageCollectionConfig::default(),
+            ),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
+        let mut writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
             None,
@@ -87,6 +99,7 @@ fn add_to_index_and_get_reader<'a>(
             dimensionality,
             &blockfile_provider,
             params.clone(),
+            gc_context,
         )
         .await
         .expect("Error creating spann index writer");
@@ -125,6 +138,7 @@ fn add_to_index_and_get_reader<'a>(
                 &collection_id,
                 params.space.into(),
                 dimensionality,
+                ef_search,
                 Some(&paths.pl_id),
                 Some(&paths.versions_map_id),
                 &blockfile_provider,

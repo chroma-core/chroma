@@ -7,19 +7,19 @@ use setsum::Setsum;
 
 mod backoff;
 mod batch_manager;
+mod cursors;
 mod manifest;
 mod manifest_manager;
 mod reader;
 mod writer;
 
-use manifest::SnapshotPointer;
-
 pub use backoff::ExponentialBackoff;
 pub use batch_manager::BatchManager;
-pub use manifest::{Manifest, Snapshot};
+pub use cursors::{Cursor, CursorName, CursorStore, Witness};
+pub use manifest::{Manifest, Snapshot, SnapshotPointer};
 pub use manifest_manager::ManifestManager;
 pub use reader::{Limits, LogReader};
-pub use writer::LogWriter;
+pub use writer::{upload_parquet, LogWriter, MarkDirty};
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
@@ -37,20 +37,26 @@ pub enum Error {
     GarbageCollected,
     #[error("log contention fails a write")]
     LogContention,
-    #[error("the log took too long to write")]
-    LogWriteTimeout,
     #[error("the log is full")]
     LogFull,
     #[error("the log is closed")]
     LogClosed,
+    #[error("an empty batch was passed to append")]
+    EmptyBatch,
     #[error("an internal, otherwise unclassifiable error")]
     Internal,
+    #[error("could not find FSN in path: {0}")]
+    MissingFragmentSequenceNumber(String),
     #[error("corrupt manifest: {0}")]
     CorruptManifest(String),
+    #[error("corrupt fragment: {0}")]
+    CorruptFragment(String),
     #[error("corrupt cursor: {0}")]
     CorruptCursor(String),
     #[error("missing cursor: {0}")]
     NoSuchCursor(String),
+    #[error("scrub error: {0}")]
+    ScrubError(#[from] Box<ScrubError>),
     #[error("parquet error: {0}")]
     ParquetError(#[from] Arc<parquet::errors::ParquetError>),
     #[error("storage error: {0}")]
@@ -66,16 +72,27 @@ impl chroma_error::ChromaError for Error {
             Self::GarbageCollected => chroma_error::ErrorCodes::NotFound,
             Self::LogContention => chroma_error::ErrorCodes::Aborted,
             Self::LogFull => chroma_error::ErrorCodes::Aborted,
-            Self::LogWriteTimeout => chroma_error::ErrorCodes::DeadlineExceeded,
             Self::LogClosed => chroma_error::ErrorCodes::FailedPrecondition,
+            Self::EmptyBatch => chroma_error::ErrorCodes::InvalidArgument,
             Self::Internal => chroma_error::ErrorCodes::Internal,
+            Self::MissingFragmentSequenceNumber(_) => chroma_error::ErrorCodes::Internal,
             Self::CorruptManifest(_) => chroma_error::ErrorCodes::DataLoss,
+            Self::CorruptFragment(_) => chroma_error::ErrorCodes::DataLoss,
             Self::CorruptCursor(_) => chroma_error::ErrorCodes::DataLoss,
             Self::NoSuchCursor(_) => chroma_error::ErrorCodes::Unknown,
+            Self::ScrubError(_) => chroma_error::ErrorCodes::DataLoss,
             Self::ParquetError(_) => chroma_error::ErrorCodes::Unknown,
             Self::StorageError(storage) => storage.code(),
         }
     }
+}
+
+/////////////////////////////////////////// ScrubSuccess ///////////////////////////////////////////
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScrubSuccess {
+    pub calculated_setsum: Setsum,
+    pub bytes_read: u64,
 }
 
 //////////////////////////////////////////// ScrubError ////////////////////////////////////////////
@@ -90,13 +107,69 @@ pub enum ScrubError {
         seq_no: FragmentSeqNo,
         what: String,
     },
+    #[error("MismatchedPath: {reference:?} expected {:?} got {:?}", reference.path, empirical.path)]
+    MismatchedPath {
+        reference: Fragment,
+        empirical: Fragment,
+    },
+    #[error("MismatchedSeqNo: {reference:?} expected {:?} got {:?}", reference.seq_no, empirical.seq_no)]
+    MismatchedSeqNo {
+        reference: Fragment,
+        empirical: Fragment,
+    },
+    #[error("MismatchedNumBytes: {reference:?} expected {:?} got {:?}", reference.num_bytes, empirical.num_bytes)]
+    MismatchedNumBytes {
+        reference: Fragment,
+        empirical: Fragment,
+    },
+    #[error("MismatchedStart: {reference:?} expected {:?} got {:?}", reference.start, empirical.start)]
+    MismatchedStart {
+        reference: Fragment,
+        empirical: Fragment,
+    },
+    #[error("MismatchedLimit: {reference:?} expected {:?} got {:?}", reference.limit, empirical.limit)]
+    MismatchedLimit {
+        reference: Fragment,
+        empirical: Fragment,
+    },
+    #[error("MismatchedSnapshotSetsum: {reference:?} expected {} got {}", reference.setsum.hexdigest(), empirical.setsum.hexdigest())]
+    MismatchedSnapshotSetsum {
+        reference: SnapshotPointer,
+        empirical: Snapshot,
+    },
+    #[error("MismatchedFragmentSetsum: {reference:?} expected {} got {}", reference.setsum.hexdigest(), empirical.setsum.hexdigest())]
+    MismatchedFragmentSetsum {
+        reference: Fragment,
+        empirical: Fragment,
+    },
+    #[error("MissingFragment: {reference:?}")]
+    MissingFragment { reference: Fragment },
+    #[error("MissingSnapshot: {reference:?}")]
+    MissingSnapshot { reference: SnapshotPointer },
+    #[error("OverallMismatch: {manifest:?} {observed:?}")]
+    OverallMismatch {
+        manifest: ScrubSuccess,
+        observed: ScrubSuccess,
+    },
 }
 
 //////////////////////////////////////////// LogPosition ///////////////////////////////////////////
 
 /// A log position is a pair of an offset and a timestamp.  Every record has a unique log position.
 /// A LogPosition only implements equality, which checks both offset and timestamp_us.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Hash,
+    serde::Deserialize,
+    serde::Serialize,
+)]
 pub struct LogPosition {
     /// The offset field of a LogPosition is a strictly increasing timestamp.  It has no gaps and
     /// spans [0, u64::MAX).
@@ -104,6 +177,9 @@ pub struct LogPosition {
 }
 
 impl LogPosition {
+    pub const MAX: LogPosition = LogPosition { offset: u64::MAX };
+    pub const MIN: LogPosition = LogPosition { offset: u64::MIN };
+
     /// Create a new log position from offset and current time.
     pub fn from_offset(offset: u64) -> Self {
         LogPosition { offset }
@@ -120,6 +196,16 @@ impl LogPosition {
     }
 }
 
+impl std::ops::Add<u64> for LogPosition {
+    type Output = LogPosition;
+
+    fn add(self, rhs: u64) -> Self::Output {
+        LogPosition {
+            offset: self.offset.wrapping_add(rhs),
+        }
+    }
+}
+
 impl std::ops::Add<usize> for LogPosition {
     type Output = LogPosition;
 
@@ -127,6 +213,14 @@ impl std::ops::Add<usize> for LogPosition {
         LogPosition {
             offset: self.offset.wrapping_add(rhs as u64),
         }
+    }
+}
+
+impl std::ops::Sub<LogPosition> for LogPosition {
+    type Output = u64;
+
+    fn sub(self, rhs: LogPosition) -> Self::Output {
+        self.offset - rhs.offset
     }
 }
 
@@ -156,9 +250,6 @@ pub struct ThrottleOptions {
     /// The number of operations per second to reserve for backoff/retry.  Defaults to 1_500.
     #[serde(default = "ThrottleOptions::default_headroom")]
     pub headroom: usize,
-    /// The maximum number of outstanding requests to allow.  Defaults to 100.
-    #[serde(default = "ThrottleOptions::default_outstanding")]
-    pub outstanding: usize,
 }
 
 impl ThrottleOptions {
@@ -177,10 +268,6 @@ impl ThrottleOptions {
     fn default_headroom() -> usize {
         1_500
     }
-
-    fn default_outstanding() -> usize {
-        1
-    }
 }
 
 impl Default for ThrottleOptions {
@@ -195,8 +282,6 @@ impl Default for ThrottleOptions {
             throughput: Self::default_throughput(),
             // How much headroom we have for retries.
             headroom: Self::default_headroom(),
-            // Allow up to 1 requests to be outstanding.
-            outstanding: Self::default_outstanding(),
         }
     }
 }
@@ -246,7 +331,7 @@ impl Default for SnapshotOptions {
 ///////////////////////////////////////// LogWriterOptions /////////////////////////////////////////
 
 /// LogWriterOptions control the behavior of the log writer.
-#[derive(Clone, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct LogWriterOptions {
     /// Default throttling options for fragments.
     #[serde(default)]
@@ -262,11 +347,36 @@ pub struct LogWriterOptions {
 ///////////////////////////////////////// LogReaderOptions /////////////////////////////////////////
 
 /// LogReaderOptions control the behavior of the log writer.
-#[derive(Clone, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct LogReaderOptions {
     /// Default throttling options for manifest.
     #[serde(default)]
     pub throttle: ThrottleOptions,
+}
+
+//////////////////////////////////////// CursorStoreOptions ////////////////////////////////////////
+
+/// CursorStoreOptions control the behavior of the cursor store.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct CursorStoreOptions {
+    /// Number of concurrent cursor operations per cursor store.
+    #[serde(default = "CursorStoreOptions::default_concurrency")]
+    pub concurrency: usize,
+}
+
+impl CursorStoreOptions {
+    /// Default concurrency for cursor store operations.
+    fn default_concurrency() -> usize {
+        10
+    }
+}
+
+impl Default for CursorStoreOptions {
+    fn default() -> Self {
+        Self {
+            concurrency: Self::default_concurrency(),
+        }
+    }
 }
 
 /////////////////////////////////////////// FragmentSeqNo //////////////////////////////////////////
@@ -290,7 +400,7 @@ impl FragmentSeqNo {
 
     // Round down to the nearest multiple of 5k.
     pub fn bucket(&self) -> u64 {
-        (self.0 / 5_000) * 5_000
+        (self.0 / 4_096) * 4_096
     }
 }
 
@@ -373,4 +483,22 @@ where
 {
     let s = setsum.hexdigest();
     s.serialize(serializer)
+}
+
+////////////////////////////////////////// Fragment Paths //////////////////////////////////////////
+
+pub fn unprefixed_fragment_path(fragment_seq_no: FragmentSeqNo) -> String {
+    format!(
+        "log/Bucket={:016x}/FragmentSeqNo={:016x}.parquet",
+        fragment_seq_no.bucket(),
+        fragment_seq_no.0,
+    )
+}
+
+pub fn parse_fragment_path(path: &str) -> Option<FragmentSeqNo> {
+    // FragmentSeqNo is always in the basename.
+    let (_, basename) = path.rsplit_once('/')?;
+    let fsn_equals_number = basename.strip_suffix(".parquet")?;
+    let number = fsn_equals_number.strip_prefix("FragmentSeqNo=")?;
+    u64::from_str_radix(number, 16).ok().map(FragmentSeqNo)
 }

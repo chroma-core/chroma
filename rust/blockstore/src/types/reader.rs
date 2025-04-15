@@ -113,11 +113,11 @@ impl<
         }
     }
 
-    pub async fn load_blocks_for_keys(&self, prefixes: &[&str], keys: &[K]) {
+    pub async fn load_blocks_for_keys(&self, keys: impl IntoIterator<Item = (String, K)>) {
         match self {
             BlockfileReader::MemoryBlockfileReader(_reader) => unimplemented!(),
             BlockfileReader::ArrowBlockfileReader(reader) => {
-                reader.load_blocks_for_keys(prefixes, keys).await
+                reader.load_blocks_for_keys(keys).await
             }
         }
     }

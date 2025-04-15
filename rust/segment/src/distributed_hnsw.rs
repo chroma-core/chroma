@@ -6,7 +6,7 @@ use chroma_index::hnsw_provider::{
     HnswIndexProviderOpenError, HnswIndexRef,
 };
 use chroma_index::{Index, IndexUuid};
-use chroma_types::{DistributedHnswParameters, HnswParametersFromSegmentError, SegmentUuid};
+use chroma_types::{Collection, HnswParametersFromSegmentError, SegmentUuid};
 use chroma_types::{MaterializedLogOperation, Segment};
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -50,6 +50,8 @@ pub enum DistributedHNSWSegmentFromSegmentError {
     HnswIndexProviderForkError(#[from] HnswIndexProviderForkError),
     #[error("HNSW index provider create error")]
     HnswIndexProviderCreateError(#[from] HnswIndexProviderCreateError),
+    #[error("Collection is missing HNSW configuration")]
+    MissingHnswConfiguration,
     #[error("Could not parse HNSW configuration: {0}")]
     InvalidHnswConfiguration(#[from] HnswParametersFromSegmentError),
 }
@@ -63,6 +65,9 @@ impl ChromaError for DistributedHNSWSegmentFromSegmentError {
             DistributedHNSWSegmentFromSegmentError::HnswIndexProviderOpenError(e) => e.code(),
             DistributedHNSWSegmentFromSegmentError::HnswIndexProviderForkError(e) => e.code(),
             DistributedHNSWSegmentFromSegmentError::HnswIndexProviderCreateError(e) => e.code(),
+            DistributedHNSWSegmentFromSegmentError::MissingHnswConfiguration => {
+                ErrorCodes::Internal
+            }
             DistributedHNSWSegmentFromSegmentError::InvalidHnswConfiguration(_) => {
                 ErrorCodes::Internal
             }
@@ -84,13 +89,17 @@ impl DistributedHNSWSegmentWriter {
     }
 
     pub async fn from_segment(
+        collection: &Collection,
         segment: &Segment,
         dimensionality: usize,
         hnsw_index_provider: HnswIndexProvider,
     ) -> Result<Box<DistributedHNSWSegmentWriter>, Box<DistributedHNSWSegmentFromSegmentError>>
     {
-        let hnsw_configuration = DistributedHnswParameters::try_from(segment)
-            .map_err(DistributedHNSWSegmentFromSegmentError::InvalidHnswConfiguration)?;
+        let hnsw_configuration = collection
+            .config
+            .get_hnsw_config_with_legacy_fallback(segment)
+            .map_err(DistributedHNSWSegmentFromSegmentError::InvalidHnswConfiguration)?
+            .ok_or(DistributedHNSWSegmentFromSegmentError::MissingHnswConfiguration)?;
 
         // TODO: this is hacky, we use the presence of files to determine if we need to load or create the index
         // ideally, an explicit state would be better. When we implement distributed HNSW segments,
@@ -129,7 +138,8 @@ impl DistributedHNSWSegmentWriter {
                     &index_uuid,
                     &segment.collection,
                     dimensionality as i32,
-                    hnsw_configuration.space.into(),
+                    hnsw_configuration.space.clone().into(),
+                    hnsw_configuration.ef_search,
                 )
                 .await
             {
@@ -150,11 +160,11 @@ impl DistributedHNSWSegmentWriter {
             let index = match hnsw_index_provider
                 .create(
                     &segment.collection,
-                    hnsw_configuration.m,
-                    hnsw_configuration.construction_ef,
-                    hnsw_configuration.search_ef,
+                    hnsw_configuration.max_neighbors,
+                    hnsw_configuration.ef_construction,
+                    hnsw_configuration.ef_search,
                     dimensionality as i32,
-                    hnsw_configuration.space.into(),
+                    hnsw_configuration.space.clone().into(),
                 )
                 .await
             {
@@ -276,11 +286,18 @@ impl DistributedHNSWSegmentReader {
     }
 
     pub async fn from_segment(
+        collection: &Collection,
         segment: &Segment,
         dimensionality: usize,
         hnsw_index_provider: HnswIndexProvider,
     ) -> Result<Box<DistributedHNSWSegmentReader>, Box<DistributedHNSWSegmentFromSegmentError>>
     {
+        let hnsw_configuration = collection
+            .config
+            .get_hnsw_config_with_legacy_fallback(segment)
+            .map_err(DistributedHNSWSegmentFromSegmentError::InvalidHnswConfiguration)?
+            .ok_or(DistributedHNSWSegmentFromSegmentError::MissingHnswConfiguration)?;
+
         // TODO: this is hacky, we use the presence of files to determine if we need to load or create the index
         // ideally, an explicit state would be better. When we implement distributed HNSW segments,
         // we can introduce a state in the segment metadata for this
@@ -317,35 +334,32 @@ impl DistributedHNSWSegmentReader {
             // operations are not guaranteed to be atomic.
             // The lock is a partitioned mutex to allow for higher concurrency across collections.
             let _guard = hnsw_index_provider.write_mutex.lock(&index_uuid).await;
-            let index = match hnsw_index_provider
-                .get(&index_uuid, &segment.collection)
-                .await
-            {
-                Some(index) => index,
-                None => {
-                    let hnsw_configuration = DistributedHnswParameters::try_from(segment).map_err(
-                        DistributedHNSWSegmentFromSegmentError::InvalidHnswConfiguration,
-                    )?;
-                    match hnsw_index_provider
-                        .open(
-                            &index_uuid,
-                            &segment.collection,
-                            dimensionality as i32,
-                            hnsw_configuration.space.into(),
-                        )
-                        .await
-                    {
-                        Ok(index) => index,
-                        Err(e) => {
-                            return Err(Box::new(
+            let index =
+                match hnsw_index_provider
+                    .get(&index_uuid, &segment.collection)
+                    .await
+                {
+                    Some(index) => index,
+                    None => {
+                        match hnsw_index_provider
+                            .open(
+                                &index_uuid,
+                                &segment.collection,
+                                dimensionality as i32,
+                                hnsw_configuration.space.clone().into(),
+                                hnsw_configuration.ef_search,
+                            )
+                            .await
+                        {
+                            Ok(index) => index,
+                            Err(e) => return Err(Box::new(
                                 DistributedHNSWSegmentFromSegmentError::HnswIndexProviderOpenError(
                                     *e,
                                 ),
-                            ))
+                            )),
                         }
                     }
-                }
-            };
+                };
 
             Ok(Box::new(DistributedHNSWSegmentReader::new(
                 index, segment.id,
@@ -375,7 +389,8 @@ pub mod test {
 
     use chroma_index::{HnswIndexConfig, DEFAULT_MAX_ELEMENTS};
     use chroma_types::{
-        CollectionUuid, DistributedHnswParameters, MetadataValue, Segment, SegmentUuid,
+        Collection, CollectionUuid, HnswConfiguration, InternalCollectionConfiguration, Segment,
+        SegmentUuid,
     };
     use tempfile::tempdir;
     use uuid::Uuid;
@@ -384,62 +399,65 @@ pub mod test {
     fn parameter_defaults() {
         let persist_path = tempdir().unwrap().path().to_owned();
 
-        let segment = Segment {
-            id: SegmentUuid(Uuid::new_v4()),
-            r#type: chroma_types::SegmentType::HnswDistributed,
-            scope: chroma_types::SegmentScope::VECTOR,
-            metadata: Some(HashMap::new()),
-            collection: CollectionUuid(Uuid::new_v4()),
-            file_path: HashMap::new(),
-        };
-
-        let hnsw_configuration = DistributedHnswParameters::try_from(&segment).unwrap();
+        let hnsw_configuration = HnswConfiguration::default();
         let config = HnswIndexConfig::new_persistent(
-            hnsw_configuration.m,
-            hnsw_configuration.construction_ef,
-            hnsw_configuration.search_ef,
+            hnsw_configuration.max_neighbors,
+            hnsw_configuration.ef_construction,
+            hnsw_configuration.ef_search,
             &persist_path,
         )
         .expect("Error creating hnsw index config");
 
-        let default_hnsw_params = DistributedHnswParameters::default();
+        let default_hnsw_params = HnswConfiguration::default();
 
         assert_eq!(config.max_elements, DEFAULT_MAX_ELEMENTS);
-        assert_eq!(config.m, default_hnsw_params.m);
-        assert_eq!(config.ef_construction, default_hnsw_params.construction_ef);
-        assert_eq!(config.ef_search, default_hnsw_params.search_ef);
+        assert_eq!(config.m, default_hnsw_params.max_neighbors);
+        assert_eq!(config.ef_construction, default_hnsw_params.ef_construction);
+        assert_eq!(config.ef_search, default_hnsw_params.ef_search);
         assert_eq!(config.random_seed, 0);
         assert_eq!(
             config.persist_path,
             Some(persist_path.to_str().unwrap().to_string())
         );
 
-        // Try partial metadata
-        let mut metadata = HashMap::new();
-        metadata.insert("hnsw:M".to_string(), MetadataValue::Int(10_i64));
+        // Try partial override
+        let collection = Collection {
+            config: InternalCollectionConfiguration {
+                vector_index: chroma_types::VectorIndexConfiguration::Hnsw(HnswConfiguration {
+                    max_neighbors: 10,
+                    ..Default::default()
+                }),
+                embedding_function: None,
+            },
+            ..Default::default()
+        };
 
         let segment = Segment {
             id: SegmentUuid(Uuid::new_v4()),
             r#type: chroma_types::SegmentType::HnswDistributed,
             scope: chroma_types::SegmentScope::VECTOR,
-            metadata: Some(metadata),
+            metadata: None,
             collection: CollectionUuid(Uuid::new_v4()),
             file_path: HashMap::new(),
         };
 
-        let hnsw_params = DistributedHnswParameters::try_from(&segment).unwrap();
+        let hnsw_params = collection
+            .config
+            .get_hnsw_config_with_legacy_fallback(&segment)
+            .unwrap()
+            .unwrap();
         let config = HnswIndexConfig::new_persistent(
-            hnsw_params.m,
-            hnsw_params.construction_ef,
-            hnsw_params.search_ef,
+            hnsw_params.max_neighbors,
+            hnsw_params.ef_construction,
+            hnsw_params.ef_search,
             &persist_path,
         )
         .expect("Error creating hnsw index config");
 
         assert_eq!(config.max_elements, DEFAULT_MAX_ELEMENTS);
         assert_eq!(config.m, 10);
-        assert_eq!(config.ef_construction, default_hnsw_params.construction_ef);
-        assert_eq!(config.ef_search, default_hnsw_params.search_ef);
+        assert_eq!(config.ef_construction, default_hnsw_params.ef_construction);
+        assert_eq!(config.ef_search, default_hnsw_params.ef_search);
         assert_eq!(config.random_seed, 0);
         assert_eq!(
             config.persist_path,

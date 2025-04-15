@@ -45,6 +45,9 @@ spec:
         - name: compaction-service
           image: "{{ .Values.compactionService.image.repository }}:{{ .Values.compactionService.image.tag }}"
           imagePullPolicy: IfNotPresent
+          readinessProbe:
+            grpc:
+              port: 50051
           volumeMounts:
             {{if .Values.compactionService.configuration}}
             - name: compaction-service-config
@@ -87,10 +90,6 @@ spec:
       nodeSelector:
         {{ toYaml .Values.compactionService.nodeSelector | nindent 8 }}
       {{ end }}
-      updateStrategy:
-        type: RollingUpdate
-        rollingUpdate:
-          partition: 0
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: "kubernetes.io/hostname"

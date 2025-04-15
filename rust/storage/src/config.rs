@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize, Debug, Serialize)]
+#[derive(Deserialize, Debug, Serialize, Clone)]
 /// The configuration for the chosen storage.
 /// # Options
 /// - S3: The configuration for the s3 storage.
@@ -148,11 +148,17 @@ impl Default for AdmissionControlledS3StorageConfig {
 pub struct CountBasedPolicyConfig {
     #[serde(default = "CountBasedPolicyConfig::default_max_concurrent_requests")]
     pub max_concurrent_requests: usize,
+    #[serde(default = "CountBasedPolicyConfig::default_bandwidth_allocation")]
+    pub bandwidth_allocation: Vec<f32>,
 }
 
 impl CountBasedPolicyConfig {
     fn default_max_concurrent_requests() -> usize {
-        15
+        30
+    }
+
+    fn default_bandwidth_allocation() -> Vec<f32> {
+        vec![0.7, 0.3]
     }
 }
 
@@ -160,6 +166,7 @@ impl Default for CountBasedPolicyConfig {
     fn default() -> Self {
         CountBasedPolicyConfig {
             max_concurrent_requests: Self::default_max_concurrent_requests(),
+            bandwidth_allocation: Self::default_bandwidth_allocation(),
         }
     }
 }

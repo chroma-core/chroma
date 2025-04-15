@@ -41,7 +41,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::AsyncReadExt;
 use tracing::Instrument;
-use tracing::Span;
 
 #[derive(Clone)]
 pub struct S3Storage {
@@ -104,6 +103,8 @@ impl S3Storage {
         }
     }
 
+    #[tracing::instrument(skip(self))]
+    #[allow(clippy::type_complexity)]
     async fn get_stream_and_e_tag(
         &self,
         key: &str,
@@ -130,26 +131,24 @@ impl S3Storage {
                 ))
             }
             Err(e) => {
-                tracing::error!("error: {}", e);
                 match e {
                     SdkError::ServiceError(err) => {
                         let inner = err.into_err();
                         match &inner {
-                            aws_sdk_s3::operation::get_object::GetObjectError::NoSuchKey(msg) => {
-                                 tracing::error!("no such key: {}", msg);
+                            aws_sdk_s3::operation::get_object::GetObjectError::NoSuchKey(_) => {
                                 Err(StorageError::NotFound {
                                     path: key.to_string(),
                                     source: Arc::new(inner),
                                 })
                             }
                             aws_sdk_s3::operation::get_object::GetObjectError::InvalidObjectState(msg) => {
-                                 tracing::error!("invalid object state: {}", msg);
+                                tracing::error!("invalid object state: {}", msg);
                                 Err(StorageError::Generic {
                                     source: Arc::new(inner),
                                 })
                             }
                             _ => {
-                                 tracing::error!("error: {}", inner.to_string());
+                                tracing::error!("error: {}", inner.to_string());
                                 Err(StorageError::Generic {
                                     source: Arc::new(inner),
                                 })
@@ -164,6 +163,8 @@ impl S3Storage {
         }
     }
 
+    #[tracing::instrument(skip(self))]
+    #[allow(clippy::type_complexity)]
     pub(super) async fn get_key_ranges(
         &self,
         key: &str,
@@ -206,6 +207,7 @@ impl S3Storage {
         Ok((content_length, ranges, e_tag.map(ETag)))
     }
 
+    #[tracing::instrument(skip(self))]
     pub(super) async fn fetch_range(
         &self,
         key: String,
@@ -253,6 +255,7 @@ impl S3Storage {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     pub(super) async fn get_parallel(
         &self,
         key: &str,
@@ -302,19 +305,21 @@ impl S3Storage {
         Ok((Arc::new(output_buffer), e_tag))
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn get(&self, key: &str) -> Result<Arc<Vec<u8>>, StorageError> {
         self.get_with_e_tag(key).await.map(|(buf, _)| buf)
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn get_with_e_tag(
         &self,
         key: &str,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
         let (mut stream, e_tag) = self
             .get_stream_and_e_tag(key)
-            .instrument(tracing::trace_span!(parent: Span::current(), "S3 get stream"))
+            .instrument(tracing::trace_span!("S3 get stream"))
             .await?;
-        let read_block_span = tracing::trace_span!(parent: Span::current(), "S3 read bytes to end");
+        let read_block_span = tracing::trace_span!("S3 read bytes to end");
         let buf = read_block_span
             .in_scope(|| async {
                 let mut buf: Vec<u8> = Vec::new();
@@ -329,7 +334,6 @@ impl S3Storage {
                         }
                     }
                 }
-                tracing::info!("Read {:?} bytes from s3", buf.len());
                 Ok(Some(buf))
             })
             .await?;
@@ -346,6 +350,7 @@ impl S3Storage {
         total_size_bytes < self.upload_part_size_bytes
     }
 
+    #[tracing::instrument(skip(self, bytes))]
     pub async fn put_bytes(
         &self,
         key: &str,
@@ -366,7 +371,13 @@ impl S3Storage {
         .await
     }
 
-    pub async fn put_file(&self, key: &str, path: &str) -> Result<Option<ETag>, StorageError> {
+    #[tracing::instrument(skip(self))]
+    pub async fn put_file(
+        &self,
+        key: &str,
+        path: &str,
+        options: PutOptions,
+    ) -> Result<Option<ETag>, StorageError> {
         let file_size = tokio::fs::metadata(path)
             .await
             .map_err(|err| StorageError::Generic {
@@ -395,11 +406,12 @@ impl S3Storage {
                 }
                 .boxed()
             },
-            PutOptions::default(),
+            options,
         )
         .await
     }
 
+    #[tracing::instrument(skip(self, create_bytestream_fn))]
     async fn put_object(
         &self,
         key: &str,
@@ -418,6 +430,7 @@ impl S3Storage {
             .await
     }
 
+    #[tracing::instrument(skip(self, create_bytestream_fn))]
     pub(super) async fn oneshot_upload(
         &self,
         key: &str,
@@ -459,6 +472,7 @@ impl S3Storage {
         Ok(resp.e_tag.map(ETag))
     }
 
+    #[tracing::instrument(skip(self))]
     pub(super) async fn prepare_multipart_upload(
         &self,
         key: &str,
@@ -494,6 +508,7 @@ impl S3Storage {
         Ok((part_count, size_of_last_part, upload_id))
     }
 
+    #[tracing::instrument(skip(self, create_bytestream_fn))]
     pub(super) async fn upload_part(
         &self,
         key: &str,
@@ -536,6 +551,7 @@ impl S3Storage {
             .build())
     }
 
+    #[tracing::instrument(skip(self, upload_parts))]
     pub(super) async fn finish_multipart_upload(
         &self,
         key: &str,
@@ -607,7 +623,7 @@ impl S3Storage {
     }
 
     pub async fn delete(&self, key: &str) -> Result<(), StorageError> {
-        tracing::info!(key = %key, "Deleting object from S3");
+        tracing::debug!(key = %key, "Deleting object from S3");
 
         match self
             .client
@@ -618,7 +634,7 @@ impl S3Storage {
             .await
         {
             Ok(_) => {
-                tracing::info!(key = %key, "Successfully deleted object from S3");
+                tracing::debug!(key = %key, "Successfully deleted object from S3");
                 Ok(())
             }
             Err(e) => {
@@ -761,6 +777,7 @@ pub async fn s3_client_for_test_with_new_bucket() -> crate::Storage {
         1024 * 1024 * 8,
         1024 * 1024 * 8,
     );
+    eprintln!("Creating bucket {}", storage.bucket);
     storage.create_bucket().await.unwrap();
     crate::Storage::S3(storage)
 }
@@ -768,6 +785,8 @@ pub async fn s3_client_for_test_with_new_bucket() -> crate::Storage {
 #[cfg(test)]
 mod tests {
     use std::future::ready;
+
+    use crate::admissioncontrolleds3::StorageRequestPriority;
 
     use super::*;
     use rand::{distributions::Alphanumeric, Rng, SeedableRng};
@@ -857,7 +876,11 @@ mod tests {
         }
 
         storage
-            .put_file("test", temp_file.path().to_str().unwrap())
+            .put_file(
+                "test",
+                temp_file.path().to_str().unwrap(),
+                PutOptions::default(),
+            )
             .await
             .unwrap();
 
@@ -963,6 +986,7 @@ mod tests {
                 PutOptions {
                     if_not_exists: true,
                     if_match: None,
+                    priority: StorageRequestPriority::P0,
                 },
             )
             .await
@@ -976,6 +1000,7 @@ mod tests {
                 PutOptions {
                     if_not_exists: true,
                     if_match: None,
+                    priority: StorageRequestPriority::P0,
                 },
             )
             .await
@@ -1001,6 +1026,7 @@ mod tests {
                 PutOptions {
                     if_not_exists: true,
                     if_match: None,
+                    priority: StorageRequestPriority::P0,
                 },
             )
             .await
@@ -1016,6 +1042,7 @@ mod tests {
                 PutOptions {
                     if_not_exists: false,
                     if_match: e_tag,
+                    priority: StorageRequestPriority::P0,
                 },
             )
             .await
@@ -1033,6 +1060,7 @@ mod tests {
                 PutOptions {
                     if_not_exists: true,
                     if_match: None,
+                    priority: StorageRequestPriority::P0,
                 },
             )
             .await
@@ -1046,6 +1074,7 @@ mod tests {
                 PutOptions {
                     if_not_exists: false,
                     if_match: Some(ETag("e_tag".to_string())),
+                    priority: StorageRequestPriority::P0,
                 },
             )
             .await
@@ -1071,5 +1100,6 @@ mod tests {
 
         assert!(!default.if_not_exists);
         assert_eq!(default.if_match, None);
+        assert_eq!(default.priority, StorageRequestPriority::P0);
     }
 }

@@ -2,6 +2,9 @@
 # In the long term, every service should have an entry in this file
 # and this can become the global configuration file for Chroma
 # for now we nest it in the worker directory
+#
+# NOTE:  This file is NOT currently used by tilt, but instead shipped as the defaults.
+# See the adjacent tilt_config.yaml for tilt.
 
 query_service:
     service_name: "query-service"
@@ -33,7 +36,8 @@ query_service:
                 download_part_size_bytes: 8388608 # 8MiB
             rate_limiting_policy:
                 count_based_policy:
-                    max_concurrent_requests: 15
+                    max_concurrent_requests: 30
+                    bandwidth_allocation: [0.7, 0.3]
     log:
         grpc:
             host: "logservice.chroma"
@@ -107,6 +111,7 @@ compaction_service:
             rate_limiting_policy:
                 count_based_policy:
                     max_concurrent_requests: 30
+                    bandwidth_allocation: [0.7, 0.3]
     log:
         grpc:
             host: "logservice.chroma"
@@ -144,3 +149,30 @@ compaction_service:
             weighted_lru:
                 capacity: 8192 # 8192 MiB = 8GB
         permitted_parallelism: 180
+    spann_provider:
+        pl_garbage_collection:
+            enabled: true
+            policy:
+                random_sample:
+                    sample_size: 0.1
+        hnsw_garbage_collection:
+            enabled: true
+            policy: "full_rebuild"
+
+log_service:
+    opentelemetry:
+        service_name: "rust-log-service"
+        endpoint: "http://otel-collector:4317"
+    storage:
+        admission_controlled_s3:
+            s3_config:
+                bucket: "chroma-storage"
+                credentials: "Minio"
+                connect_timeout_ms: 5000
+                request_timeout_ms: 60000 # 1 minute
+                upload_part_size_bytes: 536870912 # 512MiB
+                download_part_size_bytes: 8388608 # 8MiB
+            rate_limiting_policy:
+                count_based_policy:
+                    max_concurrent_requests: 500
+                    bandwidth_allocation: [1.0]

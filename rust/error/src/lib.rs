@@ -56,6 +56,69 @@ pub enum ErrorCodes {
     Unauthenticated = 16,
     // VERSION_MISMATCH indicates a version mismatch. This is not from the gRPC spec and is specific to Chroma.
     VersionMismatch = 17,
+    // UNPROCESSABLE_ENTITY indicates the request is valid but cannot be processed.
+    UnprocessableEntity = 18,
+}
+
+impl ErrorCodes {
+    pub fn name(&self) -> &'static str {
+        match self {
+            ErrorCodes::InvalidArgument => "InvalidArgumentError",
+            ErrorCodes::NotFound => "NotFoundError",
+            ErrorCodes::Internal => "InternalError",
+            ErrorCodes::VersionMismatch => "VersionMismatchError",
+            _ => "ChromaError",
+        }
+    }
+}
+
+#[cfg(feature = "http")]
+impl From<ErrorCodes> for http::StatusCode {
+    fn from(error_code: ErrorCodes) -> Self {
+        match error_code {
+            ErrorCodes::Success => http::StatusCode::OK,
+            ErrorCodes::Cancelled => http::StatusCode::BAD_REQUEST,
+            ErrorCodes::Unknown => http::StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorCodes::InvalidArgument => http::StatusCode::BAD_REQUEST,
+            ErrorCodes::DeadlineExceeded => http::StatusCode::GATEWAY_TIMEOUT,
+            ErrorCodes::NotFound => http::StatusCode::NOT_FOUND,
+            ErrorCodes::AlreadyExists => http::StatusCode::CONFLICT,
+            ErrorCodes::PermissionDenied => http::StatusCode::FORBIDDEN,
+            ErrorCodes::ResourceExhausted => http::StatusCode::TOO_MANY_REQUESTS,
+            ErrorCodes::FailedPrecondition => http::StatusCode::PRECONDITION_FAILED,
+            ErrorCodes::Aborted => http::StatusCode::BAD_REQUEST,
+            ErrorCodes::OutOfRange => http::StatusCode::BAD_REQUEST,
+            ErrorCodes::Unimplemented => http::StatusCode::NOT_IMPLEMENTED,
+            ErrorCodes::Internal => http::StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorCodes::Unavailable => http::StatusCode::SERVICE_UNAVAILABLE,
+            ErrorCodes::DataLoss => http::StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorCodes::Unauthenticated => http::StatusCode::UNAUTHORIZED,
+            ErrorCodes::VersionMismatch => http::StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorCodes::UnprocessableEntity => http::StatusCode::UNPROCESSABLE_ENTITY,
+        }
+    }
+}
+
+#[cfg(feature = "http")]
+impl From<http::StatusCode> for ErrorCodes {
+    fn from(value: http::StatusCode) -> Self {
+        match value {
+            http::StatusCode::OK => ErrorCodes::Success,
+            http::StatusCode::BAD_REQUEST => ErrorCodes::InvalidArgument,
+            http::StatusCode::UNAUTHORIZED => ErrorCodes::Unauthenticated,
+            http::StatusCode::FORBIDDEN => ErrorCodes::PermissionDenied,
+            http::StatusCode::NOT_FOUND => ErrorCodes::NotFound,
+            http::StatusCode::CONFLICT => ErrorCodes::AlreadyExists,
+            http::StatusCode::TOO_MANY_REQUESTS => ErrorCodes::ResourceExhausted,
+            http::StatusCode::INTERNAL_SERVER_ERROR => ErrorCodes::Internal,
+            http::StatusCode::SERVICE_UNAVAILABLE => ErrorCodes::Unavailable,
+            http::StatusCode::NOT_IMPLEMENTED => ErrorCodes::Unimplemented,
+            http::StatusCode::GATEWAY_TIMEOUT => ErrorCodes::DeadlineExceeded,
+            http::StatusCode::PRECONDITION_FAILED => ErrorCodes::FailedPrecondition,
+            http::StatusCode::UNPROCESSABLE_ENTITY => ErrorCodes::UnprocessableEntity,
+            _ => ErrorCodes::Unknown,
+        }
+    }
 }
 
 pub trait ChromaError: Error + Send {

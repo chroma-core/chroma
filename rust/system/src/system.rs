@@ -55,19 +55,22 @@ impl System {
                 let join_handle = tokio::spawn(task_future.instrument(child_span));
                 ComponentHandle::new(
                     cancel_token,
-                    Some(ConsumableJoinHandle::new(join_handle)),
+                    Some(ConsumableJoinHandle::from_tokio_task_handle(join_handle)),
                     sender,
                 )
             }
             ComponentRuntime::Dedicated => {
-                println!("Spawning on dedicated thread");
+                tracing::debug!("Spawning on dedicated thread");
                 // Spawn on a dedicated thread
                 let rt = Builder::new_current_thread().enable_all().build().unwrap();
-                let _join_handle = std::thread::spawn(move || {
+                let join_handle = std::thread::spawn(move || {
                     rt.block_on(async move { executor.run(rx).await });
                 });
-                // TODO: Implement Join for dedicated threads
-                ComponentHandle::new(cancel_token, None, sender)
+                ComponentHandle::new(
+                    cancel_token,
+                    Some(ConsumableJoinHandle::from_thread_handle(join_handle)),
+                    sender,
+                )
             }
         }
     }

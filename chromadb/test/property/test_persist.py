@@ -15,7 +15,7 @@ from chromadb.segment import VectorReader
 from chromadb.segment.impl.manager.local import LocalSegmentManager
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
-from strategies import hashing_embedding_function
+from chromadb.test.property.strategies import hashing_embedding_function
 from chromadb.test.property.test_embeddings import (
     EmbeddingStateMachineStates,
     trace,
@@ -29,10 +29,10 @@ from hypothesis.stateful import (
     MultipleResults,
 )
 import os
-import shutil
 from chromadb.api.client import Client as ClientCreator
 from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
 import numpy as np
+import tempfile
 
 CreatePersistAPI = Callable[[], ServerAPI]
 
@@ -46,6 +46,7 @@ configurations = (
             chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
             allow_reset=True,
             is_persistent=True,
+            persist_directory=tempfile.mkdtemp(),
         )
     ]
     if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ
@@ -58,6 +59,7 @@ configurations = (
             chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
             allow_reset=True,
             is_persistent=True,
+            persist_directory=tempfile.mkdtemp(),
         ),
     ]
 )
@@ -65,15 +67,7 @@ configurations = (
 
 @pytest.fixture(scope="module", params=configurations)
 def settings(request: pytest.FixtureRequest) -> Generator[Settings, None, None]:
-    configuration = request.param
-    save_path = configuration.persist_directory
-    # Create if it doesn't exist
-    if not os.path.exists(save_path):
-        os.makedirs(save_path, exist_ok=True)
-    yield configuration
-    # Remove if it exists
-    if os.path.exists(save_path):
-        shutil.rmtree(save_path, ignore_errors=True)
+    yield request.param
 
 
 collection_st = st.shared(
@@ -473,7 +467,7 @@ def test_batch_size_less_than_sync_with_duplicate_adds_results_in_skipped_seq_id
                 "hnsw:sync_threshold": 9,
                 "hnsw:batch_size": 7,
             },
-            embedding_function=hashing_embedding_function(dim=92, dtype=np.float64),
+            embedding_function=hashing_embedding_function(dim=92, dtype=np.float64),  # type: ignore[arg-type]
             id=UUID("45c5c816-0a90-4293-8d01-4325ff860040"),
             dimension=92,
             dtype=np.float64,

@@ -1,5 +1,9 @@
 from typing import Dict, Any, Type, Set
-from chromadb.api.types import EmbeddingFunction, Embeddings, Documents, Embeddable
+from chromadb.api.types import (
+    EmbeddingFunction,
+    Embeddings,
+    Documents,
+)
 
 # Import all embedding functions
 from chromadb.utils.embedding_functions.cohere_embedding_function import (
@@ -48,6 +52,9 @@ from chromadb.utils.embedding_functions.amazon_bedrock_embedding_function import
 from chromadb.utils.embedding_functions.chroma_langchain_embedding_function import (
     ChromaLangchainEmbeddingFunction,
 )
+from chromadb.utils.embedding_functions.baseten_embedding_function import (
+    BasetenEmbeddingFunction,
+)
 
 try:
     from chromadb.is_thin_client import is_thin_client
@@ -74,6 +81,7 @@ _all_classes: Set[str] = {
     "Text2VecEmbeddingFunction",
     "AmazonBedrockEmbeddingFunction",
     "ChromaLangchainEmbeddingFunction",
+    "BasetenEmbeddingFunction",
     "DefaultEmbeddingFunction",
 }
 
@@ -112,7 +120,7 @@ class DefaultEmbeddingFunction(EmbeddingFunction[Documents]):
 
 
 # Dictionary of supported embedding functions
-known_embedding_functions: Dict[str, Type[EmbeddingFunction[Documents]]] = {
+known_embedding_functions: Dict[str, Type[EmbeddingFunction]] = {  # type: ignore
     "cohere": CohereEmbeddingFunction,
     "openai": OpenAIEmbeddingFunction,
     "huggingface": HuggingFaceEmbeddingFunction,
@@ -131,25 +139,45 @@ known_embedding_functions: Dict[str, Type[EmbeddingFunction[Documents]]] = {
     "text2vec": Text2VecEmbeddingFunction,
     "amazon_bedrock": AmazonBedrockEmbeddingFunction,
     "chroma_langchain": ChromaLangchainEmbeddingFunction,
+    "baseten": BasetenEmbeddingFunction,
     "default": DefaultEmbeddingFunction,
 }
 
 
-# Function to register custom embedding functions
-def register_embedding_function(ef_class: Type[EmbeddingFunction[Embeddable]]) -> None:
+def register_embedding_function(ef_class=None):  # type: ignore
     """Register a custom embedding function.
+
+    Can be used as a decorator:
+        @register_embedding_function
+        class MyEmbedding(EmbeddingFunction):
+            @classmethod
+            def name(cls): return "my_embedding"
+
+    Or directly:
+        register_embedding_function(MyEmbedding)
 
     Args:
         ef_class: The embedding function class to register.
     """
-    name = ef_class.name()
-    known_embedding_functions[name] = ef_class
+
+    def _register(cls):  # type: ignore
+        try:
+            name = cls.name()
+            known_embedding_functions[name] = cls
+        except Exception as e:
+            raise ValueError(f"Failed to register embedding function: {e}")
+        return cls  # Return the class unchanged
+
+    # If called with a class, register it immediately
+    if ef_class is not None:
+        return _register(ef_class)  # type: ignore
+
+    # If called without arguments, return a decorator
+    return _register
 
 
 # Function to convert config to embedding function
-def config_to_embedding_function(
-    config: Dict[str, Any]
-) -> EmbeddingFunction[Documents]:
+def config_to_embedding_function(config: Dict[str, Any]) -> EmbeddingFunction:  # type: ignore
     """Convert a config dictionary to an embedding function.
 
     Args:
@@ -178,6 +206,7 @@ __all__ = [
     "DefaultEmbeddingFunction",
     "CohereEmbeddingFunction",
     "OpenAIEmbeddingFunction",
+    "BasetenEmbeddingFunction",
     "HuggingFaceEmbeddingFunction",
     "HuggingFaceEmbeddingServer",
     "SentenceTransformerEmbeddingFunction",

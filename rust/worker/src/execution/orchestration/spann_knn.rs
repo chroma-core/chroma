@@ -1,12 +1,11 @@
 use async_trait::async_trait;
-use chroma_blockstore::provider::BlockfileProvider;
 use chroma_distance::{normalize, DistanceFunction};
-use chroma_index::hnsw_provider::HnswIndexProvider;
-use chroma_segment::distributed_spann::SpannSegmentReaderContext;
+use chroma_segment::{distributed_spann::SpannSegmentReaderContext, spann_provider::SpannProvider};
 use chroma_system::{
     wrap, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator, TaskMessage,
     TaskResult,
 };
+use chroma_types::Collection;
 use tokio::sync::oneshot::Sender;
 
 use crate::execution::operators::{
@@ -17,6 +16,9 @@ use crate::execution::operators::{
     },
     prefetch_record::{
         PrefetchRecordError, PrefetchRecordInput, PrefetchRecordOperator, PrefetchRecordOutput,
+    },
+    prefetch_segment::{
+        PrefetchSegmentError, PrefetchSegmentInput, PrefetchSegmentOperator, PrefetchSegmentOutput,
     },
     spann_bf_pl::{SpannBfPlError, SpannBfPlInput, SpannBfPlOperator, SpannBfPlOutput},
     spann_centers_search::{
@@ -36,10 +38,10 @@ use super::knn_filter::{KnnError, KnnFilterOutput, KnnOutput, KnnResult};
 #[derive(Debug)]
 pub struct SpannKnnOrchestrator {
     // Orchestrator parameters
-    blockfile_provider: BlockfileProvider,
-    hnsw_provider: HnswIndexProvider,
+    spann_provider: SpannProvider,
     dispatcher: ComponentHandle<Dispatcher>,
     queue: usize,
+    collection: Collection,
 
     // Output from KnnFilterOrchestrator
     knn_filter_output: KnnFilterOutput,
@@ -73,14 +75,13 @@ pub struct SpannKnnOrchestrator {
     // overhead.
 }
 
-#[allow(dead_code)]
 impl SpannKnnOrchestrator {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        blockfile_provider: BlockfileProvider,
-        hnsw_provider: HnswIndexProvider,
+        spann_provider: SpannProvider,
         dispatcher: ComponentHandle<Dispatcher>,
         queue: usize,
+        collection: Collection,
         knn_filter_output: KnnFilterOutput,
         k: usize,
         query_embedding: Vec<f32>,
@@ -93,10 +94,10 @@ impl SpannKnnOrchestrator {
                 query_embedding
             };
         Self {
-            blockfile_provider,
-            hnsw_provider,
+            spann_provider,
             dispatcher,
             queue,
+            collection,
             knn_filter_output,
             k,
             normalized_query_emb: normalized_query_emb.clone(),
@@ -147,7 +148,7 @@ impl Orchestrator for SpannKnnOrchestrator {
             Box::new(self.log_knn.clone()),
             KnnLogInput {
                 logs: self.knn_filter_output.logs.clone(),
-                blockfile_provider: self.blockfile_provider.clone(),
+                blockfile_provider: self.spann_provider.blockfile_provider.clone(),
                 record_segment: self.knn_filter_output.record_segment.clone(),
                 log_offset_ids: self.knn_filter_output.filter_output.log_offset_ids.clone(),
                 distance_function: self.knn_filter_output.distance_function.clone(),
@@ -157,9 +158,9 @@ impl Orchestrator for SpannKnnOrchestrator {
         tasks.push(knn_log_task);
 
         let reader_context = SpannSegmentReaderContext {
+            collection: self.collection.clone(),
             segment: self.knn_filter_output.vector_segment.clone(),
-            blockfile_provider: self.blockfile_provider.clone(),
-            hnsw_provider: self.hnsw_provider.clone(),
+            spann_provider: self.spann_provider.clone(),
             dimension: self.knn_filter_output.dimension,
         };
         let head_search_task = wrap(
@@ -171,6 +172,16 @@ impl Orchestrator for SpannKnnOrchestrator {
             ctx.receiver(),
         );
         tasks.push(head_search_task);
+
+        let prefetch_task = wrap(
+            Box::new(PrefetchSegmentOperator::new()),
+            PrefetchSegmentInput::new(
+                self.knn_filter_output.vector_segment.clone(),
+                self.spann_provider.blockfile_provider.clone(),
+            ),
+            ctx.receiver(),
+        );
+        tasks.push(prefetch_task);
 
         tasks
     }
@@ -187,6 +198,19 @@ impl Orchestrator for SpannKnnOrchestrator {
         self.result_channel
             .take()
             .expect("The result channel should be set before take")
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<PrefetchSegmentOutput, PrefetchSegmentError>> for SpannKnnOrchestrator {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        _: TaskResult<PrefetchSegmentOutput, PrefetchSegmentError>,
+        _: &ComponentContext<SpannKnnOrchestrator>,
+    ) {
+        // Nothing to do.
     }
 }
 
@@ -230,9 +254,9 @@ impl Handler<TaskResult<SpannCentersSearchOutput, SpannCentersSearchError>>
         for head_id in output.center_ids {
             // Invoke Head search operator.
             let reader_context = SpannSegmentReaderContext {
+                collection: self.collection.clone(),
                 segment: self.knn_filter_output.vector_segment.clone(),
-                blockfile_provider: self.blockfile_provider.clone(),
-                hnsw_provider: self.hnsw_provider.clone(),
+                spann_provider: self.spann_provider.clone(),
                 dimension: self.knn_filter_output.dimension,
             };
             let fetch_pl_task = wrap(
@@ -323,7 +347,7 @@ impl Handler<TaskResult<SpannKnnMergeOutput, SpannKnnMergeError>> for SpannKnnOr
             Box::new(PrefetchRecordOperator {}),
             PrefetchRecordInput {
                 logs: self.knn_filter_output.logs.clone(),
-                blockfile_provider: self.blockfile_provider.clone(),
+                blockfile_provider: self.spann_provider.blockfile_provider.clone(),
                 record_segment: self.knn_filter_output.record_segment.clone(),
                 offset_ids: output
                     .merged_records
@@ -339,7 +363,7 @@ impl Handler<TaskResult<SpannKnnMergeOutput, SpannKnnMergeError>> for SpannKnnOr
             Box::new(self.knn_projection.clone()),
             KnnProjectionInput {
                 logs: self.knn_filter_output.logs.clone(),
-                blockfile_provider: self.blockfile_provider.clone(),
+                blockfile_provider: self.spann_provider.blockfile_provider.clone(),
                 record_segment: self.knn_filter_output.record_segment.clone(),
                 record_distances: output.merged_records,
             },

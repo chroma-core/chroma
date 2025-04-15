@@ -1,30 +1,38 @@
-use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
-    ops::{BitAnd, BitOr},
-    sync::atomic::AtomicU32,
-};
-
-use chroma_blockstore::{provider::BlockfileProvider, test_arrow_blockfile_provider};
-use chroma_index::{hnsw_provider::HnswIndexProvider, test_hnsw_index_provider};
-use chroma_types::{
-    operator::{CountResult, GetResult, Projection, ProjectionOutput, ProjectionRecord},
-    plan::{Count, Get},
-    test_segment, BooleanOperator, Chunk, Collection, CollectionAndSegments, CompositeExpression,
-    DocumentExpression, DocumentOperator, LogRecord, Metadata, MetadataComparison,
-    MetadataExpression, MetadataSetValue, MetadataValue, Operation, OperationRecord,
-    PrimitiveOperator, Segment, SegmentScope, SegmentUuid, SetOperator, UpdateMetadata, Where,
-};
-use thiserror::Error;
+use crate::spann_provider::SpannProvider;
 
 use super::{
     blockfile_metadata::MetadataSegmentWriter, blockfile_record::RecordSegmentWriter,
     distributed_hnsw::DistributedHNSWSegmentWriter, types::materialize_logs,
 };
+use chroma_blockstore::{provider::BlockfileProvider, test_arrow_blockfile_provider};
+use chroma_distance::{normalize, DistanceFunction};
+use chroma_error::ChromaError;
+use chroma_index::{hnsw_provider::HnswIndexProvider, test_hnsw_index_provider};
+use chroma_types::{
+    operator::{
+        CountResult, GetResult, KnnBatchResult, KnnProjectionOutput, KnnProjectionRecord,
+        Projection, ProjectionOutput, ProjectionRecord,
+    },
+    plan::{Count, Get, Knn},
+    test_segment, BooleanOperator, Chunk, Collection, CollectionAndSegments, CompositeExpression,
+    DocumentExpression, DocumentOperator, LogRecord, Metadata, MetadataComparison,
+    MetadataExpression, MetadataSetValue, MetadataValue, Operation, OperationRecord,
+    PrimitiveOperator, Segment, SegmentScope, SegmentUuid, SetOperator, UpdateMetadata, Where,
+    CHROMA_KEY,
+};
+use std::collections::BinaryHeap;
+use std::{
+    collections::{hash_map::Entry, HashMap, HashSet},
+    ops::{BitAnd, BitOr},
+    sync::atomic::AtomicU32,
+};
+use thiserror::Error;
 
 #[derive(Clone)]
 pub struct TestDistributedSegment {
     pub blockfile_provider: BlockfileProvider,
     pub hnsw_provider: HnswIndexProvider,
+    pub spann_provider: SpannProvider,
     pub collection: Collection,
     pub metadata_segment: Segment,
     pub record_segment: Segment,
@@ -35,9 +43,17 @@ impl TestDistributedSegment {
     pub fn new_with_dimension(dimension: usize) -> Self {
         let collection = Collection::test_collection(dimension as i32);
         let collection_uuid = collection.collection_id;
+        let blockfile_provider = test_arrow_blockfile_provider(2 << 22);
+        let hnsw_provider = test_hnsw_index_provider();
+
         Self {
-            blockfile_provider: test_arrow_blockfile_provider(2 << 22),
-            hnsw_provider: test_hnsw_index_provider(),
+            blockfile_provider: blockfile_provider.clone(),
+            hnsw_provider: hnsw_provider.clone(),
+            spann_provider: SpannProvider {
+                hnsw_provider,
+                blockfile_provider,
+                garbage_collection_context: None,
+            },
             collection,
             metadata_segment: test_segment(collection_uuid, SegmentScope::METADATA),
             record_segment: test_segment(collection_uuid, SegmentScope::RECORD),
@@ -90,6 +106,7 @@ impl TestDistributedSegment {
             .expect("Should be able to flush record.");
 
         let vector_writer = DistributedHNSWSegmentWriter::from_segment(
+            &self.collection,
             &self.vector_segment,
             self.collection
                 .dimension
@@ -137,7 +154,15 @@ pub enum TestReferenceSegmentError {
     NotFound,
 }
 
-#[derive(Default)]
+impl ChromaError for TestReferenceSegmentError {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        match self {
+            TestReferenceSegmentError::NotFound => chroma_error::ErrorCodes::NotFound,
+        }
+    }
+}
+
+#[derive(Default, Debug, Clone)]
 pub struct TestReferenceSegment {
     max_id: u32,
     record: HashMap<SegmentUuid, HashMap<String, (u32, ProjectionRecord)>>,
@@ -174,20 +199,42 @@ impl TestReferenceSegment {
         }
     }
 
-    pub fn apply_logs(&mut self, logs: Vec<LogRecord>, segmemt_id: SegmentUuid) {
-        let coll = self.record.entry(segmemt_id).or_default();
-        for LogRecord {
-            log_offset: _,
-            record:
-                OperationRecord {
-                    id,
-                    embedding,
-                    encoding: _,
-                    metadata,
-                    document,
-                    operation,
-                },
-        } in logs
+    fn filter_metadata(metadata: Option<UpdateMetadata>) -> Option<UpdateMetadata> {
+        metadata.and_then(|metadata| {
+            let filtered: UpdateMetadata = metadata
+                .into_iter()
+                .filter(|(k, _)| !k.starts_with(CHROMA_KEY))
+                .collect();
+            if filtered.is_empty() {
+                None
+            } else {
+                Some(filtered)
+            }
+        })
+    }
+
+    pub fn create_segment(&mut self, segment: Segment) {
+        self.record.insert(segment.id, HashMap::new());
+    }
+
+    pub fn apply_logs(&mut self, logs: Vec<LogRecord>, segment_id: SegmentUuid) {
+        self.apply_operation_records(logs.into_iter().map(|l| l.record).collect(), segment_id);
+    }
+
+    pub fn apply_operation_records(
+        &mut self,
+        operations: Vec<OperationRecord>,
+        segment_id: SegmentUuid,
+    ) {
+        let coll = self.record.entry(segment_id).or_default();
+        for OperationRecord {
+            id,
+            embedding,
+            encoding: _,
+            metadata,
+            document,
+            operation,
+        } in operations
         {
             let mut record = ProjectionRecord {
                 id: id.clone(),
@@ -198,27 +245,41 @@ impl TestReferenceSegment {
             match operation {
                 Operation::Add => {
                     if let Entry::Vacant(entry) = coll.entry(id) {
-                        record.metadata = Self::merge_meta(None, metadata);
+                        record.metadata = Self::merge_meta(None, Self::filter_metadata(metadata));
                         entry.insert((self.max_id, record));
                         self.max_id += 1;
                     }
                 }
                 Operation::Update => {
                     if let Some((_, old_record)) = coll.get_mut(&id) {
-                        old_record.document = record.document;
-                        old_record.embedding = record.embedding;
-                        old_record.metadata =
-                            Self::merge_meta(old_record.metadata.clone(), metadata);
+                        if record.document.is_some() {
+                            old_record.document = record.document;
+                        }
+
+                        if record.embedding.is_some() {
+                            old_record.embedding = record.embedding;
+                        }
+
+                        old_record.metadata = Self::merge_meta(
+                            old_record.metadata.clone(),
+                            Self::filter_metadata(metadata),
+                        );
                     }
                 }
                 Operation::Upsert => {
                     if let Some((_, old_record)) = coll.get_mut(&id) {
-                        old_record.document = record.document;
+                        if record.document.is_some() {
+                            old_record.document = record.document;
+                        }
+
                         old_record.embedding = record.embedding;
-                        old_record.metadata =
-                            Self::merge_meta(old_record.metadata.clone(), metadata);
+
+                        old_record.metadata = Self::merge_meta(
+                            old_record.metadata.clone(),
+                            Self::filter_metadata(metadata),
+                        );
                     } else {
-                        record.metadata = Self::merge_meta(None, metadata);
+                        record.metadata = Self::merge_meta(None, Self::filter_metadata(metadata));
                         coll.insert(id, (self.max_id, record));
                         self.max_id += 1;
                     }
@@ -292,6 +353,90 @@ impl TestReferenceSegment {
             },
         })
     }
+
+    pub fn knn(
+        &self,
+        plan: Knn,
+        distance_function: DistanceFunction,
+    ) -> Result<KnnBatchResult, Box<dyn ChromaError>> {
+        let coll = self
+            .record
+            .get(&plan.scan.collection_and_segments.metadata_segment.id)
+            .ok_or(TestReferenceSegmentError::NotFound)
+            .map_err(|e| e.boxed())?;
+
+        let filtered_records = coll
+            .iter()
+            .filter(|(k, (_, rec))| {
+                plan.filter
+                    .query_ids
+                    .as_ref()
+                    .map_or(true, |ids| ids.contains(k))
+                    && plan
+                        .filter
+                        .where_clause
+                        .as_ref()
+                        .map_or(true, |w| w.eval(rec))
+            })
+            .map(|(_, v)| v.clone())
+            .collect::<Vec<_>>();
+
+        struct RecordWithDistance(f32, ProjectionRecord);
+        impl PartialEq for RecordWithDistance {
+            fn eq(&self, other: &Self) -> bool {
+                self.0 == other.0
+            }
+        }
+        impl Eq for RecordWithDistance {}
+        impl PartialOrd for RecordWithDistance {
+            fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+                Some(self.cmp(other))
+            }
+        }
+        impl Ord for RecordWithDistance {
+            fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+                self.0.partial_cmp(&other.0).unwrap()
+            }
+        }
+
+        let mut result = KnnBatchResult::default();
+
+        for embedding in plan.knn.embeddings {
+            let mut max_heap: BinaryHeap<RecordWithDistance> =
+                BinaryHeap::with_capacity(plan.knn.fetch as usize * 100);
+            let target_vector = normalize(&embedding);
+
+            for (_, record) in &filtered_records {
+                let distance = match &distance_function {
+                    DistanceFunction::Cosine => distance_function.distance(
+                        &target_vector,
+                        &normalize(record.embedding.as_ref().unwrap()),
+                    ),
+                    other => other.distance(&embedding, record.embedding.as_ref().unwrap()),
+                };
+
+                if max_heap.len() < plan.knn.fetch as usize {
+                    max_heap.push(RecordWithDistance(distance, record.clone()));
+                } else if distance < max_heap.peek().unwrap().0 {
+                    max_heap.pop();
+                    max_heap.push(RecordWithDistance(distance, record.clone()));
+                }
+            }
+
+            result.results.push(KnnProjectionOutput {
+                records: max_heap
+                    .into_sorted_vec()
+                    .into_iter()
+                    .map(|RecordWithDistance(distance, record)| KnnProjectionRecord {
+                        distance: Some(distance),
+                        record,
+                    })
+                    .collect(),
+            });
+        }
+
+        Ok(result)
+    }
 }
 
 /// Given a record, verify if the predicate evaluates to true on it
@@ -326,7 +471,7 @@ impl CheckRecord for DocumentExpression {
         let contains = record
             .document
             .as_ref()
-            .is_some_and(|doc| doc.contains(&self.text));
+            .is_some_and(|doc| doc.contains(&self.text.replace("%", "")));
         match self.operator {
             DocumentOperator::Contains => contains,
             DocumentOperator::NotContains => !contains,
@@ -340,8 +485,27 @@ impl CheckRecord for MetadataExpression {
         let stored = record.metadata.as_ref().and_then(|m| m.get(&self.key));
         match &self.comparison {
             MetadataComparison::Primitive(primitive_operator, metadata_value) => {
+                // Convert int to float to make comparisons easier
+                let metadata_value = match metadata_value {
+                    MetadataValue::Int(i) => {
+                        if matches!(stored, Some(MetadataValue::Float(_))) {
+                            MetadataValue::Float(*i as f64)
+                        } else {
+                            metadata_value.clone()
+                        }
+                    }
+                    MetadataValue::Float(f) => {
+                        if matches!(stored, Some(MetadataValue::Int(_))) {
+                            MetadataValue::Int(*f as i64)
+                        } else {
+                            metadata_value.clone()
+                        }
+                    }
+                    v => v.clone(),
+                };
+
                 let match_type = matches!(
-                    (stored, metadata_value),
+                    (&stored, &metadata_value),
                     (Some(MetadataValue::Bool(_)), MetadataValue::Bool(_))
                         | (Some(MetadataValue::Int(_)), MetadataValue::Int(_))
                         | (Some(MetadataValue::Float(_)), MetadataValue::Float(_))
@@ -349,22 +513,22 @@ impl CheckRecord for MetadataExpression {
                 );
                 match primitive_operator {
                     PrimitiveOperator::Equal => {
-                        match_type && stored.is_some_and(|v| v == metadata_value)
+                        match_type && stored.is_some_and(|v| *v == metadata_value)
                     }
                     PrimitiveOperator::NotEqual => {
-                        !match_type || stored.is_some_and(|v| v != metadata_value)
+                        !match_type || stored.is_some_and(|v| *v != metadata_value)
                     }
                     PrimitiveOperator::GreaterThan => {
-                        match_type && stored.is_some_and(|v| v > metadata_value)
+                        match_type && stored.is_some_and(|v| *v > metadata_value)
                     }
                     PrimitiveOperator::GreaterThanOrEqual => {
-                        match_type && stored.is_some_and(|v| v >= metadata_value)
+                        match_type && stored.is_some_and(|v| *v >= metadata_value)
                     }
                     PrimitiveOperator::LessThan => {
-                        match_type && stored.is_some_and(|v| v < metadata_value)
+                        match_type && stored.is_some_and(|v| *v < metadata_value)
                     }
                     PrimitiveOperator::LessThanOrEqual => {
-                        match_type && stored.is_some_and(|v| v <= metadata_value)
+                        match_type && stored.is_some_and(|v| *v <= metadata_value)
                     }
                 }
             }

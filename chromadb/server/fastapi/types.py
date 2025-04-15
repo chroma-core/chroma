@@ -42,7 +42,6 @@ class GetEmbedding(BaseModel):
     ids: Optional[List[str]] = None
     where: Optional[Dict[Any, Any]] = None
     where_document: Optional[Dict[Any, Any]] = None
-    sort: Optional[str] = None
     limit: Optional[int] = None
     offset: Optional[int] = None
     include: Include = IncludeMetadataDocuments
@@ -68,6 +67,7 @@ class CreateCollection(BaseModel):
 class UpdateCollection(BaseModel):
     new_name: Optional[str] = None
     new_metadata: Optional[CollectionMetadata] = None
+    new_configuration: Optional[Dict[str, Any]] = None
 
 
 class CreateDatabase(BaseModel):

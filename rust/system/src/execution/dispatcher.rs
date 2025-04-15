@@ -5,12 +5,17 @@ use std::sync::Arc;
 use super::operator::OperatorType;
 use super::{operator::TaskMessage, worker_thread::WorkerThread};
 use crate::execution::config::DispatcherConfig;
-use crate::{Component, ComponentContext, Handler, ReceiverForMessage, System};
+use crate::{
+    Component, ComponentContext, ComponentHandle, ConsumeJoinHandleError, Handler,
+    ReceiverForMessage, System,
+};
 use async_trait::async_trait;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
+use parking_lot::Mutex;
 use std::fmt::Debug;
+use thiserror::Error;
 use tracing::{trace_span, Instrument, Span};
 
 /// The dispatcher is responsible for distributing tasks to worker threads.
@@ -61,6 +66,7 @@ pub struct Dispatcher {
     task_queue: VecDeque<(TaskMessage, Span)>,
     waiters: Vec<TaskRequestMessage>,
     active_io_tasks: Arc<AtomicU64>,
+    worker_handles: Arc<Mutex<Vec<ComponentHandle<WorkerThread>>>>,
 }
 
 impl Dispatcher {
@@ -72,6 +78,7 @@ impl Dispatcher {
             task_queue: VecDeque::new(),
             waiters: Vec::new(),
             active_io_tasks: Arc::new(AtomicU64::new(active_io_tasks as u64)),
+            worker_handles: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -84,9 +91,10 @@ impl Dispatcher {
         system: &mut System,
         self_receiver: Box<dyn ReceiverForMessage<TaskRequestMessage>>,
     ) {
+        let mut worker_handles = self.worker_handles.lock();
         for _ in 0..self.config.num_worker_threads {
             let worker = WorkerThread::new(self_receiver.clone(), self.config.worker_queue_size);
-            system.start_component(worker);
+            worker_handles.push(system.start_component(worker));
         }
     }
 
@@ -163,7 +171,7 @@ impl Dispatcher {
             Some((task, span)) => match request.reply_to.send(task, Some(span)).await {
                 Ok(_) => {}
                 Err(e) => {
-                    println!("Error sending task to worker: {:?}", e);
+                    tracing::error!("Error sending task to worker: {:?}", e);
                 }
             },
             None => {
@@ -201,6 +209,20 @@ impl TaskRequestMessage {
     }
 }
 
+#[derive(Debug, Error)]
+enum DispatcherStopError {
+    #[error("Failed to stop worker thread: {0}")]
+    JoinError(ConsumeJoinHandleError),
+}
+
+impl ChromaError for DispatcherStopError {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        match self {
+            DispatcherStopError::JoinError(_) => chroma_error::ErrorCodes::Internal,
+        }
+    }
+}
+
 // ============= Component implementation =============
 
 #[async_trait]
@@ -213,8 +235,25 @@ impl Component for Dispatcher {
         self.config.dispatcher_queue_size
     }
 
-    async fn start(&mut self, ctx: &ComponentContext<Self>) {
+    async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
         self.spawn_workers(&mut ctx.system.clone(), ctx.receiver());
+    }
+
+    async fn on_stop(&mut self) -> Result<(), Box<dyn ChromaError>> {
+        let mut worker_handles = {
+            let mut handles = self.worker_handles.lock();
+            handles.drain(..).collect::<Vec<_>>()
+        };
+
+        for mut handle in worker_handles.drain(..) {
+            handle.stop();
+            handle
+                .join()
+                .await
+                .map_err(|e| DispatcherStopError::JoinError(e).boxed())?;
+        }
+
+        Ok(())
     }
 }
 
@@ -344,7 +383,7 @@ mod tests {
             1000
         }
 
-        async fn start(&mut self, ctx: &ComponentContext<Self>) {
+        async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
             // dispatch a new task every DISPATCH_FREQUENCY_MS for DISPATCH_COUNT times
             let duration = std::time::Duration::from_millis(DISPATCH_FREQUENCY_MS);
             ctx.scheduler
@@ -407,7 +446,7 @@ mod tests {
             1000
         }
 
-        async fn start(&mut self, ctx: &ComponentContext<Self>) {
+        async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
             // dispatch a new task every DISPATCH_FREQUENCY_MS for DISPATCH_COUNT times
             let duration = std::time::Duration::from_millis(DISPATCH_FREQUENCY_MS);
             ctx.scheduler

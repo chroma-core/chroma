@@ -5,7 +5,6 @@ use chroma_error::ChromaError;
 use chroma_system::Operator;
 use chroma_types::Segment;
 use thiserror::Error;
-use tracing::trace;
 
 use super::{
     fetch_log::FetchLogOutput,
@@ -81,7 +80,7 @@ impl Operator<KnnProjectionInput, KnnProjectionOutput> for KnnProjectionOperator
         &self,
         input: &KnnProjectionInput,
     ) -> Result<KnnProjectionOutput, KnnProjectionError> {
-        trace!("[{}]: {:?}", self.get_name(), input);
+        tracing::debug!("[{}]: {:?}", self.get_name(), input);
 
         let projection_input = ProjectionInput {
             logs: input.logs.clone(),

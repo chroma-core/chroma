@@ -6,7 +6,7 @@ use chroma_config::{
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::IndexUuid;
 use chroma_sqlite::db::SqliteDb;
-use chroma_types::Segment;
+use chroma_types::{Collection, Segment};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
@@ -74,11 +74,11 @@ impl Configurable<LocalSegmentManagerConfig> for LocalSegmentManager {
 
 #[derive(Error, Debug)]
 pub enum LocalSegmentManagerError {
-    #[error("Error creating hnsw segment reader")]
+    #[error("Error creating hnsw segment reader: {0}")]
     LocalHnswSegmentReaderError(#[from] LocalHnswSegmentReaderError),
-    #[error("Error reading hnsw pool cache")]
+    #[error("Error reading hnsw pool cache: {0}")]
     PoolCacheError(#[from] CacheError),
-    #[error("Error creating hnsw segment writer")]
+    #[error("Error creating hnsw segment writer: {0}")]
     LocalHnswSegmentWriterError(#[from] LocalHnswSegmentWriterError),
 }
 
@@ -95,6 +95,7 @@ impl ChromaError for LocalSegmentManagerError {
 impl LocalSegmentManager {
     pub async fn get_hnsw_reader(
         &self,
+        collection: &Collection,
         segment: &Segment,
         dimensionality: usize,
     ) -> Result<LocalHnswSegmentReader, LocalSegmentManagerError> {
@@ -103,6 +104,7 @@ impl LocalSegmentManager {
             Some(hnsw_index) => Ok(LocalHnswSegmentReader::from_index(hnsw_index)),
             None => {
                 let reader = LocalHnswSegmentReader::from_segment(
+                    collection,
                     segment,
                     dimensionality,
                     self.persist_root.clone(),
@@ -121,6 +123,7 @@ impl LocalSegmentManager {
 
     pub async fn get_hnsw_writer(
         &self,
+        collection: &Collection,
         segment: &Segment,
         dimensionality: usize,
     ) -> Result<LocalHnswSegmentWriter, LocalSegmentManagerError> {
@@ -129,6 +132,7 @@ impl LocalSegmentManager {
             Some(hnsw_index) => Ok(LocalHnswSegmentWriter::from_index(hnsw_index)?),
             None => {
                 let writer = LocalHnswSegmentWriter::from_segment(
+                    collection,
                     segment,
                     dimensionality,
                     self.persist_root.clone(),

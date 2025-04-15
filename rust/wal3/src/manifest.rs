@@ -8,12 +8,15 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use chroma_storage::{ETag, PutOptions, Storage, StorageError};
+use chroma_storage::{
+    admissioncontrolleds3::StorageRequestPriority, ETag, GetOptions, PutOptions, Storage,
+    StorageError,
+};
 use setsum::Setsum;
 
 use crate::{
-    Error, Fragment, FragmentSeqNo, LogPosition, LogWriterOptions, ScrubError, SnapshotOptions,
-    ThrottleOptions,
+    Error, Fragment, FragmentSeqNo, LogPosition, LogWriterOptions, ScrubError, ScrubSuccess,
+    SnapshotOptions, ThrottleOptions,
 };
 
 /////////////////////////////////////////////// paths //////////////////////////////////////////////
@@ -22,8 +25,8 @@ fn manifest_path(prefix: &str) -> String {
     format!("{prefix}/manifest/MANIFEST")
 }
 
-fn snapshot_path(prefix: &str, setsum: Setsum) -> String {
-    format!("{prefix}/snapshot/SNAPSHOT.{}", setsum.hexdigest())
+fn unprefixed_snapshot_path(setsum: Setsum) -> String {
+    format!("snapshot/SNAPSHOT.{}", setsum.hexdigest())
 }
 
 fn snapshot_setsum(path: &str) -> Result<Setsum, Error> {
@@ -50,6 +53,7 @@ pub struct SnapshotPointer {
     pub depth: u8,
     pub start: LogPosition,
     pub limit: LogPosition,
+    pub num_bytes: u64,
 }
 
 impl SnapshotPointer {
@@ -75,8 +79,14 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
+    /// Sums up the number of bytes referred to by this snapshot.
+    pub fn num_bytes(&self) -> u64 {
+        self.snapshots.iter().map(|s| s.num_bytes).sum::<u64>()
+            + self.fragments.iter().map(|f| f.num_bytes).sum::<u64>()
+    }
+
     /// Scrub the setsums of this snapshot and compare to the fragments.
-    pub fn scrub(&self) -> Result<Setsum, ScrubError> {
+    pub fn scrub(&self) -> Result<ScrubSuccess, Box<ScrubError>> {
         if !self.fragments.is_empty() && !self.snapshots.is_empty() {
             return Err(ScrubError::CorruptManifest {
                 manifest: self.path.to_string(),
@@ -86,11 +96,14 @@ impl Snapshot {
                 self.fragments.len(),
                 self.snapshots.len(),
             ),
-            });
+            }
+            .into());
         }
-        let mut acc = Setsum::default();
+        let mut calculated_setsum = Setsum::default();
+        let mut bytes_read = 0u64;
         for snapshot in self.snapshots.iter() {
-            acc += snapshot.setsum;
+            calculated_setsum += snapshot.setsum;
+            bytes_read += snapshot.num_bytes;
         }
         let depth = self.snapshots.iter().map(|s| s.depth).max().unwrap_or(0);
         if depth + 1 != self.depth {
@@ -101,20 +114,20 @@ impl Snapshot {
                 self.path,
                 self.depth,
                 depth + 1,
-            )});
+            )}.into());
         }
         for frag in self.fragments.iter() {
-            acc += frag.setsum;
+            calculated_setsum += frag.setsum;
         }
-        if acc != self.setsum {
+        if calculated_setsum != self.setsum {
             return Err(ScrubError::CorruptManifest{
                 manifest: self.path.to_string(),
                 what: format!(
                 "expected snapshot setsum does not match observed contents in {}: expected:{} != observed:{}",
                 self.path,
                 self.setsum.hexdigest(),
-                acc.hexdigest()
-            )});
+                calculated_setsum.hexdigest()
+            )}.into());
         }
         let path_setsum = snapshot_setsum(&self.path).map_err(|_| ScrubError::CorruptManifest {
             manifest: self.path.to_string(),
@@ -132,49 +145,75 @@ impl Snapshot {
                 self.path,
                 self.setsum.hexdigest(),
                 path_setsum.hexdigest(),
-            )});
+            )}.into());
         }
-        Ok(acc)
+        Ok(ScrubSuccess {
+            calculated_setsum,
+            bytes_read,
+        })
     }
 
+    #[tracing::instrument(skip(storage), err(Display))]
     pub async fn load(
-        _options: &ThrottleOptions,
+        options: &ThrottleOptions,
         storage: &Storage,
+        prefix: &str,
         pointer: &SnapshotPointer,
     ) -> Result<Option<Snapshot>, Error> {
-        match storage
-            .get_with_e_tag(&pointer.path_to_snapshot)
-            .await
-            .map_err(Arc::new)
-        {
-            Ok((ref snapshot, _)) => {
-                let snapshot: Snapshot = serde_json::from_slice(snapshot).map_err(|e| {
-                    Error::CorruptManifest(format!("could not decode JSON snapshot: {e:?}"))
-                })?;
-                Ok(Some(snapshot))
+        let exp_backoff = crate::backoff::ExponentialBackoff::new(
+            options.throughput as f64,
+            options.headroom as f64,
+        );
+        let mut retries = 0;
+        let path = format!("{}/{}", prefix, pointer.path_to_snapshot);
+        loop {
+            match storage
+                .get_with_e_tag(&path, GetOptions::new(StorageRequestPriority::P0))
+                .await
+                .map_err(Arc::new)
+            {
+                Ok((ref snapshot, _)) => {
+                    let snapshot: Snapshot = serde_json::from_slice(snapshot).map_err(|e| {
+                        Error::CorruptManifest(format!("could not decode JSON snapshot: {e:?}"))
+                    })?;
+                    return Ok(Some(snapshot));
+                }
+                Err(err) => match &*err {
+                    StorageError::NotFound { path: _, source: _ } => return Ok(None),
+                    err => {
+                        let backoff = exp_backoff.next();
+                        tokio::time::sleep(backoff).await;
+                        if retries >= 3 {
+                            return Err(Error::StorageError(Arc::new(err.clone())));
+                        }
+                        retries += 1;
+                    }
+                },
             }
-            Err(err) => match &*err {
-                StorageError::NotFound { path: _, source: _ } => Ok(None),
-                err => Err(Error::StorageError(Arc::new(err.clone()))),
-            },
         }
     }
 
-    pub async fn install(&self, options: &ThrottleOptions, storage: &Storage) -> Result<(), Error> {
+    #[tracing::instrument(skip(self, storage), err(Display))]
+    pub async fn install(
+        &self,
+        options: &ThrottleOptions,
+        storage: &Storage,
+        prefix: &str,
+    ) -> Result<(), Error> {
         let exp_backoff = crate::backoff::ExponentialBackoff::new(
             options.throughput as f64,
             options.headroom as f64,
         );
         loop {
+            let path = format!("{}/{}", prefix, self.path);
             let payload = serde_json::to_string(&self)
                 .map_err(|e| {
                     Error::CorruptManifest(format!("could not encode JSON manifest: {e:?}"))
                 })?
                 .into_bytes();
-            let options = PutOptions::if_not_exists();
-            match storage.put_bytes(&self.path, payload, options).await {
+            let options = PutOptions::if_not_exists(StorageRequestPriority::P0);
+            match storage.put_bytes(&path, payload, options).await {
                 Ok(_) => {
-                    println!("installed snapshot");
                     return Ok(());
                 }
                 Err(StorageError::Precondition { path: _, source: _ }) => {
@@ -202,7 +241,6 @@ impl Snapshot {
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct Manifest {
-    pub path: String,
     #[serde(
         deserialize_with = "super::deserialize_setsum",
         serialize_with = "super::serialize_setsum"
@@ -216,9 +254,8 @@ pub struct Manifest {
 
 impl Manifest {
     /// Generate a new manifest that's empty and suitable for initialization.
-    pub fn new_empty(prefix: &str, writer: &str) -> Self {
+    pub fn new_empty(writer: &str) -> Self {
         Self {
-            path: manifest_path(prefix),
             setsum: Setsum::default(),
             acc_bytes: 0,
             writer: writer.to_string(),
@@ -234,78 +271,78 @@ impl Manifest {
     pub fn generate_snapshot(
         &self,
         snapshot_options: SnapshotOptions,
-        prefix: &str,
         writer: &str,
     ) -> Option<Snapshot> {
         let writer = writer.to_string();
-        let can_snapshot_snapshots = self.snapshots.iter().filter(|s| s.depth < 2).count()
-            >= snapshot_options.snapshot_rollover_threshold;
-        let can_snapshot_fragments =
-            self.fragments.len() >= snapshot_options.fragment_rollover_threshold;
-        if can_snapshot_snapshots || can_snapshot_fragments {
+        let mut snapshot_depth = self.snapshots.iter().map(|s| s.depth).max().unwrap_or(0);
+        while snapshot_depth > 0 {
             // NOTE(rescrv):  We _either_ compact a snapshot of snapshots or a snapshot of log
             // fragments.  We don't do both as interior snapshot nodes only refer to objects of the
             // same type.  Manifests are the only objects to refer to both fragments and snapshots.
             let mut snapshots = vec![];
-            let mut fragments = vec![];
             let mut setsum = Setsum::default();
-            let depth = if can_snapshot_snapshots {
-                for snapshot in self.snapshots.iter() {
-                    if snapshot.depth < 2
-                        && snapshots.len() < snapshot_options.snapshot_rollover_threshold
-                    {
-                        setsum += snapshot.setsum;
-                        snapshots.push(snapshot.clone());
-                    }
+            for snapshot in self.snapshots.iter().filter(|s| s.depth == snapshot_depth) {
+                if snapshots.len() < snapshot_options.snapshot_rollover_threshold {
+                    setsum += snapshot.setsum;
+                    snapshots.push(snapshot.clone());
                 }
-                2
-            } else if can_snapshot_fragments {
-                for fragment in self.fragments.iter() {
-                    // NOTE(rescrv):  When taking a snapshot, it's important that we keep around
-                    // one fragment so that the max seq no is always calculable.
-                    //
-                    // Otherwise, a low-traffic log could be compacted into a state where all of
-                    // its fragments have been compacted and therefore the implicit fragment seq no
-                    // for each fragment is zero.  This wedges the manifest manager.
-                    //
-                    // The fix is to keep around the last fragment.
-                    if fragments.len() < snapshot_options.fragment_rollover_threshold
-                        && self
-                            .fragments
-                            .iter()
-                            .map(|f| f.seq_no)
-                            .max()
-                            .unwrap_or(FragmentSeqNo(0))
-                            != fragment.seq_no
-                    {
-                        setsum += fragment.setsum;
-                        fragments.push(fragment.clone());
-                    }
-                }
-                1
-            } else {
-                unreachable!("I checked A || B above, then checked A and B separately; should not reach here.");
-            };
-            let path = snapshot_path(prefix, setsum);
-            Some(Snapshot {
-                path,
-                depth,
-                setsum,
-                writer,
-                snapshots,
-                fragments,
-            })
-        } else {
-            None
+            }
+            if snapshots.len() >= snapshot_options.snapshot_rollover_threshold {
+                let path = unprefixed_snapshot_path(setsum);
+                return Some(Snapshot {
+                    path,
+                    depth: snapshot_depth + 1,
+                    setsum,
+                    writer,
+                    snapshots,
+                    fragments: vec![],
+                });
+            }
+            snapshot_depth -= 1;
         }
+        if self.fragments.len() >= snapshot_options.fragment_rollover_threshold {
+            let mut setsum = Setsum::default();
+            let mut fragments = vec![];
+            for fragment in self.fragments.iter() {
+                // NOTE(rescrv):  When taking a snapshot, it's important that we keep around
+                // one fragment so that the max seq no is always calculable.
+                //
+                // Otherwise, a low-traffic log could be compacted into a state where all of
+                // its fragments have been compacted and therefore the implicit fragment seq no
+                // for each fragment is zero.  This wedges the manifest manager.
+                //
+                // The fix is to keep around the last fragment.
+                if fragments.len() < snapshot_options.fragment_rollover_threshold
+                    && self
+                        .fragments
+                        .iter()
+                        .map(|f| f.seq_no)
+                        .max()
+                        .unwrap_or(FragmentSeqNo(0))
+                        != fragment.seq_no
+                {
+                    setsum += fragment.setsum;
+                    fragments.push(fragment.clone());
+                }
+            }
+            if fragments.len() >= snapshot_options.fragment_rollover_threshold {
+                let path = unprefixed_snapshot_path(setsum);
+                return Some(Snapshot {
+                    path,
+                    depth: 1,
+                    setsum,
+                    writer,
+                    snapshots: vec![],
+                    fragments,
+                });
+            }
+        }
+        None
     }
 
     /// Given a snapshot, apply it to the manifest.  This modifies the manifest to refer to the
     /// snapshot and removes from the manifest all data that is now part of the snapshot.
     pub fn apply_snapshot(&mut self, snapshot: &Snapshot) -> Result<(), Error> {
-        if snapshot.fragments.is_empty() {
-            return Ok(());
-        }
         if snapshot.fragments.len() > self.fragments.len() {
             return Err(Error::CorruptManifest(format!(
                 "snapshot has more fragments than manifest: {} > {}",
@@ -347,6 +384,7 @@ impl Manifest {
                 .map(|f| f.limit)
                 .max_by_key(|p| p.offset())
                 .unwrap_or(LogPosition::default()),
+            num_bytes: snapshot.num_bytes(),
         });
         Ok(())
     }
@@ -416,25 +454,31 @@ impl Manifest {
     }
 
     /// Scrub the manifest.
-    pub fn scrub(&self) -> Result<Setsum, ScrubError> {
-        let mut acc = Setsum::default();
+    pub fn scrub(&self) -> Result<ScrubSuccess, Box<ScrubError>> {
+        let mut calculated_setsum = Setsum::default();
+        let mut bytes_read = 0u64;
         for snapshot in self.snapshots.iter() {
-            acc += snapshot.setsum;
+            calculated_setsum += snapshot.setsum;
+            bytes_read += snapshot.num_bytes;
         }
         for frag in self.fragments.iter() {
-            acc += frag.setsum;
+            calculated_setsum += frag.setsum;
+            bytes_read += frag.num_bytes;
         }
-        if self.setsum != acc {
+        if self.setsum != calculated_setsum {
             return Err(ScrubError::CorruptManifest{
-                manifest: self.path.to_string(),
+                manifest: format!("{:?}", self),
                 what: format!(
                 "expected manifest setsum does not match observed contents: expected:{} != observed:{}",
                 self.setsum.hexdigest(),
-                acc.hexdigest()
-            )});
+                calculated_setsum.hexdigest()
+            )}.into());
         }
         // TODO(rescrv):  Check the sequence numbers for sequentiality.
-        Ok(acc)
+        Ok(ScrubSuccess {
+            calculated_setsum,
+            bytes_read,
+        })
     }
 
     /// The next sequence number to generate, or None if the log has exhausted them.
@@ -453,6 +497,7 @@ impl Manifest {
     }
 
     /// Initialize the log with an empty manifest.
+    #[tracing::instrument(skip(storage), err(Display))]
     pub async fn initialize(
         _: &LogWriterOptions,
         storage: &Storage,
@@ -461,7 +506,6 @@ impl Manifest {
     ) -> Result<(), Error> {
         let writer = writer.to_string();
         let initial = Manifest {
-            path: manifest_path(prefix),
             writer,
             setsum: Setsum::default(),
             acc_bytes: 0,
@@ -472,32 +516,69 @@ impl Manifest {
             .map_err(|e| Error::CorruptManifest(format!("could not encode JSON manifest: {e:?}")))?
             .into_bytes();
         storage
-            .put_bytes(&initial.path, payload, PutOptions::if_not_exists())
+            .put_bytes(
+                &manifest_path(prefix),
+                payload,
+                PutOptions::if_not_exists(StorageRequestPriority::P0),
+            )
             .await
             .map_err(Arc::new)?;
         Ok(())
     }
 
     /// Load the latest manifest from object storage.
-    pub async fn load(storage: &Storage, prefix: &str) -> Result<Option<(Manifest, ETag)>, Error> {
+    #[tracing::instrument(skip(storage), err(Display))]
+    pub async fn load(
+        options: &ThrottleOptions,
+        storage: &Storage,
+        prefix: &str,
+    ) -> Result<Option<(Manifest, ETag)>, Error> {
+        let exp_backoff = crate::backoff::ExponentialBackoff::new(
+            options.throughput as f64,
+            options.headroom as f64,
+        );
+        let mut retries = 0;
         let path = manifest_path(prefix);
-        let (manifest, e_tag) = storage.get_with_e_tag(&path).await.map_err(Arc::new)?;
-        let Some(e_tag) = e_tag else {
-            return Err(Error::CorruptManifest(format!(
-                "no ETag for manifest at {}",
-                path
-            )));
-        };
-        serde_json::from_slice(&manifest)
-            .map_err(|e| Error::CorruptManifest(format!("could not decode JSON manifest: {e:?}")))
-            .map(|m| Some((m, e_tag)))
+        loop {
+            match storage
+                .get_with_e_tag(&path, GetOptions::new(StorageRequestPriority::P0))
+                .await
+                .map_err(Arc::new)
+            {
+                Ok((ref manifest, e_tag)) => {
+                    let Some(e_tag) = e_tag else {
+                        return Err(Error::CorruptManifest(format!(
+                            "no ETag for manifest at {}",
+                            path
+                        )));
+                    };
+                    let manifest: Manifest = serde_json::from_slice(manifest).map_err(|e| {
+                        Error::CorruptManifest(format!("could not decode JSON manifest: {e:?}"))
+                    })?;
+                    return Ok(Some((manifest, e_tag)));
+                }
+                Err(err) => match &*err {
+                    StorageError::NotFound { path: _, source: _ } => return Ok(None),
+                    err => {
+                        let backoff = exp_backoff.next();
+                        tokio::time::sleep(backoff).await;
+                        if retries >= 3 {
+                            return Err(Error::StorageError(Arc::new(err.clone())));
+                        }
+                        retries += 1;
+                    }
+                },
+            }
+        }
     }
 
     /// Install a manifest to object storage.
+    #[tracing::instrument(skip(self, storage, new), err(Display))]
     pub async fn install(
         &self,
         options: &ThrottleOptions,
         storage: &Storage,
+        prefix: &str,
         current: Option<&ETag>,
         new: &Manifest,
     ) -> Result<ETag, Error> {
@@ -512,13 +593,15 @@ impl Manifest {
                 })?
                 .into_bytes();
             let options = if let Some(e_tag) = current {
-                PutOptions::if_matches(e_tag)
+                PutOptions::if_matches(e_tag, StorageRequestPriority::P0)
             } else {
-                PutOptions::if_not_exists()
+                PutOptions::if_not_exists(StorageRequestPriority::P0)
             };
-            match storage.put_bytes(&self.path, payload, options).await {
+            match storage
+                .put_bytes(&manifest_path(prefix), payload, options)
+                .await
+            {
                 Ok(Some(e_tag)) => {
-                    println!("installed manifest");
                     return Ok(e_tag);
                 }
                 Ok(None) => {
@@ -542,6 +625,50 @@ impl Manifest {
             }
         }
     }
+
+    /// Return the lowest addressable offset in the log.
+    pub fn maximum_log_position(&self) -> LogPosition {
+        let frags = self
+            .fragments
+            .iter()
+            .map(|f| f.limit)
+            .max_by_key(|p| p.offset());
+        let snaps = self
+            .snapshots
+            .iter()
+            .map(|s| s.limit)
+            .max_by_key(|p| p.offset());
+        match (frags, snaps) {
+            (Some(f), Some(s)) => LogPosition {
+                offset: std::cmp::max(f.offset, s.offset),
+            },
+            (Some(f), None) => f,
+            (None, Some(s)) => s,
+            (None, None) => LogPosition::default(),
+        }
+    }
+
+    /// Return the lowest addressable offset in the log.
+    pub fn minimum_log_position(&self) -> LogPosition {
+        let frags = self
+            .fragments
+            .iter()
+            .map(|f| f.start)
+            .min_by_key(|p| p.offset());
+        let snaps = self
+            .snapshots
+            .iter()
+            .map(|s| s.start)
+            .min_by_key(|p| p.offset());
+        match (frags, snaps) {
+            (Some(f), Some(s)) => LogPosition {
+                offset: std::cmp::min(f.offset, s.offset),
+            },
+            (Some(f), None) => f,
+            (None, Some(s)) => s,
+            (None, None) => LogPosition::default(),
+        }
+    }
 }
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
@@ -554,8 +681,8 @@ mod tests {
     fn paths() {
         assert_eq!("myprefix/manifest/MANIFEST", manifest_path("myprefix"));
         assert_eq!(
-            "myprefix/snapshot/SNAPSHOT.0000000000000000000000000000000000000000000000000000000000000000",
-            snapshot_path("myprefix", Setsum::default())
+            "snapshot/SNAPSHOT.0000000000000000000000000000000000000000000000000000000000000000",
+            unprefixed_snapshot_path(Setsum::default())
         );
     }
 
@@ -595,7 +722,6 @@ mod tests {
             setsum: Setsum::default(),
         };
         let manifest = Manifest {
-            path: String::from("manifest/MANIFEST"),
             writer: "manifest writer 1".to_string(),
             setsum: Setsum::default(),
             acc_bytes: 8200,
@@ -635,7 +761,6 @@ mod tests {
             .unwrap(),
         };
         let manifest = Manifest {
-            path: String::from("manifest/MANIFEST"),
             writer: "manifest writer 1".to_string(),
             setsum: Setsum::from_hexdigest(
                 "307d93deb6b3e91525dc277027bc34958d8f1e74965e4c027820c3596e0f2847",
@@ -647,7 +772,6 @@ mod tests {
         };
         assert!(manifest.scrub().is_ok());
         let manifest = Manifest {
-            path: String::from("manifest/MANIFEST"),
             writer: "manifest writer 1".to_string(),
             setsum: Setsum::from_hexdigest(
                 "6c5b5ee2c5e741a8d190d215d6cb2802a57ce0d3bb5a1a0223964e97acfa8083",
@@ -685,7 +809,6 @@ mod tests {
             .unwrap(),
         };
         let mut manifest = Manifest {
-            path: String::from("manifest/MANIFEST"),
             writer: "manifest writer 1".to_string(),
             setsum: Setsum::default(),
             acc_bytes: 0,
@@ -699,7 +822,6 @@ mod tests {
         manifest.apply_fragment(fragment2);
         assert_eq!(
             Manifest {
-                path: String::from("manifest/MANIFEST"),
                 writer: "manifest writer 1".to_string(),
                 setsum: Setsum::from_hexdigest(
                     "307d93deb6b3e91525dc277027bc34958d8f1e74965e4c027820c3596e0f2847",

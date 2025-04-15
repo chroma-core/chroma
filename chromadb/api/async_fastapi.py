@@ -10,7 +10,15 @@ from chromadb import __version__
 from chromadb.auth import UserIdentity
 from chromadb.api.async_api import AsyncServerAPI
 from chromadb.api.base_http_client import BaseHTTPClient
-from chromadb.api.configuration import CollectionConfigurationInternal
+from chromadb.api.collection_configuration import (
+    CreateCollectionConfiguration,
+    UpdateCollectionConfiguration,
+    create_collection_configuration_to_json,
+    update_collection_configuration_to_json,
+    create_collection_configuration_from_legacy_metadata_dict,
+    populate_create_hnsw_defaults,
+    validate_create_hnsw_config,
+)
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System, Settings
 from chromadb.telemetry.opentelemetry import (
     OpenTelemetryClient,
@@ -37,6 +45,9 @@ from chromadb.api.types import (
     CollectionMetadata,
     validate_batch,
     convert_np_embeddings_to_list,
+    IncludeMetadataDocuments,
+    IncludeMetadataDocumentsDistances,
+    IncludeMetadataDocumentsEmbeddings,
 )
 
 
@@ -279,25 +290,49 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     async def create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfigurationInternal] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
         """Creates a collection"""
+        config_json = (
+            create_collection_configuration_to_json(configuration)
+            if configuration
+            else None
+        )
         resp_json = await self._make_request(
             "post",
             f"/tenants/{tenant}/databases/{database}/collections",
             json={
                 "name": name,
                 "metadata": metadata,
-                "configuration": configuration.to_json() if configuration else None,
+                "configuration": config_json,
                 "get_or_create": get_or_create,
             },
         )
 
         model = CollectionModel.from_json(resp_json)
+
+        # TODO @jai: Remove this once server response contains configuration
+        if configuration is None or configuration.get("hnsw") is None:
+            if model.metadata is not None:
+                model.configuration_json = create_collection_configuration_to_json(
+                    create_collection_configuration_from_legacy_metadata_dict(
+                        model.metadata
+                    )
+                )
+        else:
+            # At this point we know configuration is not None and has hnsw
+            assert configuration is not None  # Help type checker
+            hnsw_config = configuration.get("hnsw")
+            assert hnsw_config is not None  # Help type checker
+            populate_create_hnsw_defaults(hnsw_config)
+            validate_create_hnsw_config(hnsw_config)
+            model.configuration_json = create_collection_configuration_to_json(
+                configuration
+            )
 
         return model
 
@@ -325,7 +360,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     async def get_or_create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfigurationInternal] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -346,13 +381,22 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
+        new_configuration: Optional[UpdateCollectionConfiguration] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
         await self._make_request(
             "put",
             f"/tenants/{tenant}/databases/{database}/collections/{id}",
-            json={"new_metadata": new_metadata, "new_name": new_name},
+            json={
+                "new_metadata": new_metadata,
+                "new_name": new_name,
+                "new_configuration": update_collection_configuration_to_json(
+                    new_configuration
+                )
+                if new_configuration
+                else None,
+            },
         )
 
     @trace_method("AsyncFastAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
@@ -398,7 +442,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             tenant=tenant,
             database=database,
             limit=n,
-            include=["embeddings", "documents", "metadatas"],  # type: ignore[list-item]
+            include=IncludeMetadataDocumentsEmbeddings,
         )
 
         return resp
@@ -410,20 +454,13 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         collection_id: UUID,
         ids: Optional[IDs] = None,
         where: Optional[Where] = None,
-        sort: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
-        page: Optional[int] = None,
-        page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = ["metadatas", "documents"],  # type: ignore[list-item]
+        include: Include = IncludeMetadataDocuments,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> GetResult:
-        if page and page_size:
-            offset = (page - 1) * page_size
-            limit = page_size
-
         # Servers do not support the "data" include, as that is hydrated on the client side
         filtered_include = [i for i in include if i != "data"]
 
@@ -433,7 +470,6 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             json={
                 "ids": ids,
                 "where": where,
-                "sort": sort,
                 "limit": limit,
                 "offset": offset,
                 "where_document": where_document,
@@ -590,7 +626,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = ["metadatas", "documents", "distances"],  # type: ignore[list-item]
+        include: Include = IncludeMetadataDocumentsDistances,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> QueryResult:

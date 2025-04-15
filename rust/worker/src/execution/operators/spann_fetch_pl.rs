@@ -1,9 +1,10 @@
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::spann::types::SpannPosting;
-use chroma_segment::distributed_spann::{SpannSegmentReader, SpannSegmentReaderContext};
+use chroma_segment::distributed_spann::SpannSegmentReaderContext;
 use chroma_system::{Operator, OperatorType};
 use thiserror::Error;
+use tracing::{Instrument, Span};
 
 #[derive(Debug)]
 pub(crate) struct SpannFetchPlInput {
@@ -53,16 +54,20 @@ impl Operator<SpannFetchPlInput, SpannFetchPlOutput> for SpannFetchPlOperator {
         &self,
         input: &SpannFetchPlInput,
     ) -> Result<SpannFetchPlOutput, SpannFetchPlError> {
-        let spann_reader = SpannSegmentReader::from_segment(
-            &input.reader_context.segment,
-            &input.reader_context.blockfile_provider,
-            &input.reader_context.hnsw_provider,
-            input.reader_context.dimension,
-        )
-        .await
-        .map_err(|_| SpannFetchPlError::SpannSegmentReaderCreationError)?;
+        let spann_reader = input
+            .reader_context
+            .spann_provider
+            .read(
+                &input.reader_context.collection,
+                &input.reader_context.segment,
+                input.reader_context.dimension,
+            )
+            .instrument(tracing::trace_span!(parent: Span::current(), "Construct spann reader", head_id = input.head_id.to_string()))
+            .await
+            .map_err(|_| SpannFetchPlError::SpannSegmentReaderCreationError)?;
         let posting_list = spann_reader
             .fetch_posting_list(input.head_id)
+            .instrument(tracing::trace_span!(parent: Span::current(), "Fetch Pl", head_id = input.head_id.to_string()))
             .await
             .map_err(|_| SpannFetchPlError::SpannSegmentReaderError)?;
         Ok(SpannFetchPlOutput { posting_list })

@@ -17,6 +17,8 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
+	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 )
 
 type Config struct {
@@ -47,6 +49,10 @@ type Config struct {
 	CompactionServiceMemberlistName string
 	CompactionServicePodLabel       string
 
+	// Garbage collection service memberlist config
+	GarbageCollectionServiceMemberlistName string
+	GarbageCollectionServicePodLabel       string
+
 	// Config for soft deletes.
 	SoftDeleteEnabled          bool
 	SoftDeleteCleanupInterval  time.Duration
@@ -56,10 +62,7 @@ type Config struct {
 	// Config for testing
 	Testing bool
 
-	// Block store provider
-	// In production, this should be set to "s3".
-	// For local testing, this can be set to "minio".
-	BlockStoreProvider string
+	MetaStoreConfig s3metastore.S3MetaStoreConfig
 
 	// VersionFileEnabled is used to enable/disable version file.
 	VersionFileEnabled bool
@@ -78,9 +81,6 @@ type Server struct {
 }
 
 func New(config Config) (*Server, error) {
-	if config.VersionFileEnabled == true && config.BlockStoreProvider == "none" {
-		return nil, errors.New("version file enabled is true but block store provider is none")
-	}
 	if config.SystemCatalogProvider == "memory" {
 		return NewWithGrpcProvider(config, grpcutils.Default)
 	} else if config.SystemCatalogProvider == "database" {
@@ -109,15 +109,7 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider) (*Serve
 		deleteMode = coordinator.HardDelete
 	}
 
-	blockStoreProvider := s3metastore.BlockStoreProviderType(config.BlockStoreProvider)
-	if !blockStoreProvider.IsValid() {
-		log.Error("invalid block store provider", zap.String("provider", string(blockStoreProvider)))
-		return nil, errors.New("invalid block store provider")
-	}
-
-	s3MetaStore, err := s3metastore.NewS3MetaStore(s3metastore.S3MetaStoreConfig{
-		BlockStoreProvider: blockStoreProvider,
-	})
+	s3MetaStore, err := s3metastore.NewS3MetaStore(config.MetaStoreConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -142,6 +134,9 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider) (*Serve
 			return nil, err
 		}
 
+		// Create memberlist manager for garbage collection service
+		garbageCollectionMemberlistManager, err := createMemberlistManager(namespace, config.GarbageCollectionServiceMemberlistName, config.GarbageCollectionServicePodLabel, config.WatchInterval, config.ReconcileInterval, config.ReconcileCount)
+
 		// Start the memberlist manager for query service
 		err = queryMemberlistManager.Start()
 		if err != nil {
@@ -153,16 +148,25 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider) (*Serve
 			return nil, err
 		}
 
+		// Start the memberlist manager for garbage collection service
+		err = garbageCollectionMemberlistManager.Start()
+		if err != nil {
+			return nil, err
+		}
+
 		log.Info("Starting soft delete cleaner", zap.Duration("cleanup_interval", s.softDeleteCleaner.cleanupInterval), zap.Duration("max_age", s.softDeleteCleaner.maxAge), zap.Uint("limit_per_check", s.softDeleteCleaner.limitPerCheck))
 		s.softDeleteCleaner.Start()
 
 		log.Info("Starting GRPC server")
 		s.grpcServer, err = provider.StartGrpcServer("coordinator", config.GrpcConfig, func(registrar grpc.ServiceRegistrar) {
 			coordinatorpb.RegisterSysDBServer(registrar, s)
+			healthgrpc.RegisterHealthServer(registrar, s.healthServer)
 		})
 		if err != nil {
 			return nil, err
 		}
+
+		s.healthServer.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
 	}
 	return s, nil
 }

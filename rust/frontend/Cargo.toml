@@ -25,6 +25,7 @@ rand = { workspace = true }
 regex = { workspace = true }
 futures = { workspace = true }
 backon = { workspace = true }
+tracing-opentelemetry = { workspace = true }
 tower = { version = "0.4.13", features = ["discover"] }
 mdac = { workspace = true }
 opentelemetry.workspace = true
@@ -34,7 +35,7 @@ rust-embed = { workspace = true }
 chroma-cache = { workspace = true }
 chroma-config = { workspace = true }
 chroma-distance = { workspace = true }
-chroma-error = { workspace = true, features = ["validator"] }
+chroma-error = { workspace = true, features = ["validator", "http"] }
 chroma-log = { workspace = true }
 chroma-memberlist = { workspace = true }
 chroma-segment = { workspace = true }
@@ -50,3 +51,9 @@ utoipa-swagger-ui = { version = "9", features = ["axum"] }
 [dev-dependencies]
 reqwest = { workspace = true }
 random-port = { workspace = true }
+proptest = { workspace = true }
+proptest-state-machine = { workspace = true }
+chroma-types = { workspace = true, features = ["testing"] }
+tempfile = { workspace = true }
+worker = { workspace = true }
+ndarray = { workspace = true }

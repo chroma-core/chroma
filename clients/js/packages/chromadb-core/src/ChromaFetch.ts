@@ -15,9 +15,9 @@ import { FetchAPI } from "./generated";
 function isOfflineError(error: any): boolean {
   return Boolean(
     (error?.name === "TypeError" || error?.name === "FetchError") &&
-      (error.message?.includes("fetch failed") ||
-        error.message?.includes("Failed to fetch") ||
-        error.message?.includes("ENOTFOUND")),
+    (error.message?.includes("fetch failed") ||
+      error.message?.includes("Failed to fetch") ||
+      error.message?.includes("ENOTFOUND")),
   );
 }
 
@@ -83,6 +83,7 @@ export const chromaFetch: FetchAPI = async (
             `Unable to connect to the chromadb server. Please try again later.`,
           );
       }
+
       throw new Error(
         `Failed to fetch ${input} with status ${resp.status}: ${resp.statusText}`,
       );

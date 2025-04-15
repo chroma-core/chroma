@@ -75,6 +75,7 @@ impl HnswIndexConfig {
 pub struct HnswIndex {
     index: hnswlib::HnswIndex,
     pub id: IndexUuid,
+    pub distance_function: DistanceFunction,
 }
 
 #[derive(Error, Debug)]
@@ -162,7 +163,11 @@ impl Index<HnswIndexConfig> for HnswIndex {
                     persist_path: config.persist_path.as_ref().map(|s| s.as_str().into()),
                 })
                 .map_err(|e| WrappedHnswInitError::Other(e).boxed())?;
-                Ok(HnswIndex { index, id })
+                Ok(HnswIndex {
+                    index,
+                    id,
+                    distance_function: index_config.distance_function.clone(),
+                })
             }
         }
     }
@@ -217,16 +222,22 @@ impl PersistentIndex<HnswIndexConfig> for HnswIndex {
     fn load(
         path: &str,
         index_config: &IndexConfig,
+        ef_search: usize,
         id: IndexUuid,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let index = hnswlib::HnswIndex::load(hnswlib::HnswIndexLoadConfig {
             distance_function: map_distance_function(index_config.distance_function.clone()),
             dimensionality: index_config.dimensionality,
             persist_path: path.into(),
+            ef_search,
         })
         .map_err(|e| WrappedHnswInitError::Other(e).boxed())?;
 
-        Ok(HnswIndex { index, id })
+        Ok(HnswIndex {
+            index,
+            id,
+            distance_function: index_config.distance_function.clone(),
+        })
     }
 }
 

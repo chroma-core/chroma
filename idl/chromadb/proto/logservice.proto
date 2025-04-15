@@ -14,6 +14,14 @@ message PushLogsResponse {
   int32 record_count = 1;
 }
 
+message ScoutLogsRequest {
+  string collection_id = 1;
+}
+
+message ScoutLogsResponse {
+  int64 limit_offset = 1;
+}
+
 message PullLogsRequest {
   string collection_id = 1;
   int64 start_from_offset = 2;
@@ -58,9 +66,19 @@ message UpdateCollectionLogOffsetResponse {
   // Empty
 }
 
+message PurgeDirtyForCollectionRequest {
+  string collection_id = 1;
+}
+
+message PurgeDirtyForCollectionResponse {
+  // Empty
+}
+
 service LogService {
   rpc PushLogs(PushLogsRequest) returns (PushLogsResponse) {}
+  rpc ScoutLogs(ScoutLogsRequest) returns (ScoutLogsResponse) {}
   rpc PullLogs(PullLogsRequest) returns (PullLogsResponse) {}
   rpc GetAllCollectionInfoToCompact(GetAllCollectionInfoToCompactRequest) returns (GetAllCollectionInfoToCompactResponse) {}
   rpc UpdateCollectionLogOffset(UpdateCollectionLogOffsetRequest) returns (UpdateCollectionLogOffsetResponse) {}
+  rpc PurgeDirtyForCollection(PurgeDirtyForCollectionRequest) returns (PurgeDirtyForCollectionResponse) {}
 }

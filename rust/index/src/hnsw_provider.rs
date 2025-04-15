@@ -11,7 +11,8 @@ use chroma_config::Configurable;
 use chroma_distance::DistanceFunction;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
-use chroma_storage::Storage;
+use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
+use chroma_storage::{GetOptions, PutOptions, Storage};
 use chroma_types::CollectionUuid;
 use parking_lot::RwLock;
 use std::fmt::Debug;
@@ -180,6 +181,7 @@ impl HnswIndexProvider {
         cache_key: &CacheKey,
         dimensionality: i32,
         distance_function: DistanceFunction,
+        ef_search: usize,
     ) -> Result<HnswIndexRef, Box<HnswIndexProviderForkError>> {
         // We take a lock here to synchronize concurrent forks of the same index.
         // Otherwise, we could end up with a corrupted index since the filesystem
@@ -222,7 +224,7 @@ impl HnswIndexProvider {
         // another thread has loaded the index and we return it.
         match self.get(&new_id, cache_key).await {
             Some(index) => Ok(index.clone()),
-            None => match HnswIndex::load(storage_path_str, &index_config, new_id) {
+            None => match HnswIndex::load(storage_path_str, &index_config, ef_search, new_id) {
                 Ok(index) => {
                     let index = HnswIndexRef {
                         inner: Arc::new(RwLock::new(index)),
@@ -282,7 +284,10 @@ impl HnswIndexProvider {
                 .in_scope(|| async {
                     let key = self.format_key(source_id, file);
                     tracing::info!("Loading hnsw index file: {} into directory", key);
-                    let bytes_res = self.storage.get_parallel(&key).await;
+                    let bytes_res = self
+                        .storage
+                        .get_parallel(&key, GetOptions::new(StorageRequestPriority::P0))
+                        .await;
                     let bytes_read;
                     let buf = match bytes_res {
                         Ok(buf) => {
@@ -316,6 +321,7 @@ impl HnswIndexProvider {
         cache_key: &CacheKey,
         dimensionality: i32,
         distance_function: DistanceFunction,
+        ef_search: usize,
     ) -> Result<HnswIndexRef, Box<HnswIndexProviderOpenError>> {
         let index_storage_path = self.temporary_storage_path.join(id.to_string());
 
@@ -351,7 +357,7 @@ impl HnswIndexProvider {
         // another thread has loaded the index and we return it.
         match self.get(id, cache_key).await {
             Some(index) => Ok(index.clone()),
-            None => match HnswIndex::load(index_storage_path_str, &index_config, *id) {
+            None => match HnswIndex::load(index_storage_path_str, &index_config, ef_search, *id) {
                 Ok(index) => {
                     let index = HnswIndexRef {
                         inner: Arc::new(RwLock::new(index)),
@@ -446,7 +452,11 @@ impl HnswIndexProvider {
             let key = self.format_key(id, file);
             let res = self
                 .storage
-                .put_file(&key, file_path.to_str().unwrap())
+                .put_file(
+                    &key,
+                    file_path.to_str().unwrap(),
+                    PutOptions::with_priority(StorageRequestPriority::P0),
+                )
                 .await;
             match res {
                 Ok(_) => {
@@ -644,7 +654,7 @@ mod tests {
     use super::*;
     use chroma_cache::new_non_persistent_cache_for_test;
     use chroma_storage::local::LocalStorage;
-    use chroma_types::DistributedHnswParameters;
+    use chroma_types::HnswConfiguration;
 
     #[tokio::test]
     async fn test_fork() {
@@ -662,13 +672,13 @@ mod tests {
 
         let dimensionality = 128;
         let distance_function = DistanceFunction::Euclidean;
-        let default_hnsw_params = DistributedHnswParameters::default();
+        let default_hnsw_params = HnswConfiguration::default();
         let created_index = provider
             .create(
                 &collection_id,
-                default_hnsw_params.m,
-                default_hnsw_params.construction_ef,
-                default_hnsw_params.search_ef,
+                default_hnsw_params.max_neighbors,
+                default_hnsw_params.ef_construction,
+                default_hnsw_params.ef_search,
                 dimensionality,
                 distance_function.clone(),
             )
@@ -682,6 +692,7 @@ mod tests {
                 &collection_id,
                 dimensionality,
                 distance_function,
+                default_hnsw_params.ef_search,
             )
             .await
             .unwrap();

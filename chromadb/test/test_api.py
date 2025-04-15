@@ -19,6 +19,7 @@ from chromadb.utils.embedding_functions import (
     DefaultEmbeddingFunction,
 )
 from typing import Any
+from chromadb.errors import InvalidArgumentError
 
 persist_dir = tempfile.mkdtemp()
 
@@ -502,8 +503,7 @@ def test_metadata_cru(client):
 
     # Test list collections
     collections = client.list_collections()
-    for collection_name in collections:
-        collection = client.get_collection(collection_name)
+    for collection in collections:
         if collection.name == "testspace":
             assert collection.metadata is not None
             assert collection.metadata["a"] == 2
@@ -904,6 +904,14 @@ def test_query_document_valid_operators(client):
     with pytest.raises(ValueError, match="where document"):
         collection.get(where_document={"$contains": []})
 
+    # Test invalid $contains
+    with pytest.raises(ValueError, match="where document"):
+        collection.get(where_document={"$contains": {"text": "hello"}})
+
+    # Test invalid $not_contains
+    with pytest.raises(ValueError, match="where document"):
+        collection.get(where_document={"$not_contains": {"text": "hello"}})
+
     # Test invalid $and, $or
     with pytest.raises(ValueError):
         collection.get(where_document={"$and": {"$unsupported": "doc"}})
@@ -1276,13 +1284,7 @@ def test_index_params(client):
 def test_invalid_index_params(client):
     client.reset()
 
-    with pytest.raises(Exception):
-        collection = client.create_collection(
-            name="test_index_params", metadata={"hnsw:foobar": "blarg"}
-        )
-        collection.add(**records)
-
-    with pytest.raises(Exception):
+    with pytest.raises(InvalidArgumentError):
         collection = client.create_collection(
             name="test_index_params", metadata={"hnsw:space": "foobar"}
         )

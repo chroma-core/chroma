@@ -13,11 +13,21 @@ use crate::chroma_proto;
 #[cfg(feature = "pyo3")]
 use pyo3::{types::PyAnyMethods, FromPyObject, IntoPyObject};
 
+#[cfg(feature = "testing")]
+use proptest::prelude::*;
+
 #[derive(Clone, Debug, PartialEq, PartialOrd, Deserialize, Serialize, ToSchema)]
+#[cfg_attr(feature = "testing", derive(proptest_derive::Arbitrary))]
 #[serde(untagged)]
 pub enum UpdateMetadataValue {
     Bool(bool),
     Int(i64),
+    #[cfg_attr(
+        feature = "testing",
+        proptest(
+            strategy = "(-1e6..=1e6f32).prop_map(|v| UpdateMetadataValue::Float(v as f64)).boxed()"
+        )
+    )]
     Float(f64),
     Str(String),
     None,
@@ -123,10 +133,17 @@ MetadataValue
 
 #[derive(Clone, Debug, Deserialize, PartialEq, PartialOrd, Serialize, ToSchema)]
 #[cfg_attr(feature = "pyo3", derive(FromPyObject, IntoPyObject))]
+#[cfg_attr(feature = "testing", derive(proptest_derive::Arbitrary))]
 #[serde(untagged)]
 pub enum MetadataValue {
     Bool(bool),
     Int(i64),
+    #[cfg_attr(
+        feature = "testing",
+        proptest(
+            strategy = "(-1e6..=1e6f32).prop_map(|v| MetadataValue::Float(v as f64)).boxed()"
+        )
+    )]
     Float(f64),
     Str(String),
 }
@@ -281,7 +298,7 @@ pub type UpdateMetadata = HashMap<String, UpdateMetadataValue>;
 /**
  * Check if two metadata are close to equal. Ignores small differences in float values.
  */
-pub fn are_metadatas_close_to_equal(
+pub fn are_update_metadatas_close_to_equal(
     metadata1: &UpdateMetadata,
     metadata2: &UpdateMetadata,
 ) -> bool {
@@ -294,6 +311,29 @@ pub fn are_metadatas_close_to_equal(
         let other_value = metadata2.get(key).unwrap();
 
         if let (UpdateMetadataValue::Float(value), UpdateMetadataValue::Float(other_value)) =
+            (value, other_value)
+        {
+            if (value - other_value).abs() > 1e-6 {
+                return false;
+            }
+        } else if value != other_value {
+            return false;
+        }
+    }
+
+    true
+}
+
+pub fn are_metadatas_close_to_equal(metadata1: &Metadata, metadata2: &Metadata) -> bool {
+    assert_eq!(metadata1.len(), metadata2.len());
+
+    for (key, value) in metadata1.iter() {
+        if !metadata2.contains_key(key) {
+            return false;
+        }
+        let other_value = metadata2.get(key).unwrap();
+
+        if let (MetadataValue::Float(value), MetadataValue::Float(other_value)) =
             (value, other_value)
         {
             if (value - other_value).abs() > 1e-6 {
@@ -345,6 +385,21 @@ Metadata
 
 pub type Metadata = HashMap<String, MetadataValue>;
 pub type DeletedMetadata = HashSet<String>;
+
+pub fn logical_size_of_metadata(metadata: &Metadata) -> usize {
+    metadata
+        .iter()
+        .map(|(k, v)| {
+            k.len()
+                + match v {
+                    MetadataValue::Bool(b) => size_of_val(b),
+                    MetadataValue::Int(i) => size_of_val(i),
+                    MetadataValue::Float(f) => size_of_val(f),
+                    MetadataValue::Str(s) => s.len(),
+                }
+        })
+        .sum()
+}
 
 pub fn get_metadata_value_as<'a, T>(
     metadata: &'a Metadata,
@@ -471,18 +526,38 @@ impl Where {
         })
     }
 
-    pub fn complexity(&self) -> u32 {
-        // TODO: Properly estimate filter complexity
+    pub fn fts_query_length(&self) -> u64 {
         match self {
             Where::Composite(composite_expression) => composite_expression
                 .children
                 .iter()
-                .map(Where::complexity)
+                .map(Where::fts_query_length)
                 .sum(),
+            // The query length is defined to be the number of trigram tokens
             Where::Document(document_expression) => {
-                document_expression.text.len().max(5) as u32 - 3
+                document_expression.text.len().max(3) as u64 - 2
             }
-            Where::Metadata(_metadata_expression) => 1,
+            Where::Metadata(_) => 0,
+        }
+    }
+
+    pub fn metadata_predicate_count(&self) -> u64 {
+        match self {
+            Where::Composite(composite_expression) => composite_expression
+                .children
+                .iter()
+                .map(Where::metadata_predicate_count)
+                .sum(),
+            Where::Document(_) => 0,
+            Where::Metadata(metadata_expression) => match &metadata_expression.comparison {
+                MetadataComparison::Primitive(_, _) => 1,
+                MetadataComparison::Set(_, metadata_set_value) => match metadata_set_value {
+                    MetadataSetValue::Bool(items) => items.len() as u64,
+                    MetadataSetValue::Int(items) => items.len() as u64,
+                    MetadataSetValue::Float(items) => items.len() as u64,
+                    MetadataSetValue::Str(items) => items.len() as u64,
+                },
+            },
         }
     }
 }
@@ -774,6 +849,7 @@ pub enum MetadataComparison {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "testing", derive(proptest_derive::Arbitrary))]
 pub enum PrimitiveOperator {
     Equal,
     NotEqual,
@@ -832,6 +908,7 @@ impl TryFrom<PrimitiveOperator> for chroma_proto::NumberComparator {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "testing", derive(proptest_derive::Arbitrary))]
 pub enum SetOperator {
     In,
     NotIn,
@@ -856,11 +933,23 @@ impl From<SetOperator> for chroma_proto::ListOperator {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "testing", derive(proptest_derive::Arbitrary))]
 pub enum MetadataSetValue {
     Bool(Vec<bool>),
     Int(Vec<i64>),
     Float(Vec<f64>),
     Str(Vec<String>),
+}
+
+impl From<MetadataValue> for MetadataSetValue {
+    fn from(value: MetadataValue) -> Self {
+        match value {
+            MetadataValue::Bool(value) => Self::Bool(vec![value]),
+            MetadataValue::Int(value) => Self::Int(vec![value]),
+            MetadataValue::Float(value) => Self::Float(vec![value]),
+            MetadataValue::Str(value) => Self::Str(vec![value]),
+        }
+    }
 }
 
 // TODO: Deprecate where_document

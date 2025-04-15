@@ -6,14 +6,15 @@ use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
 use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_log::Log;
+use chroma_segment::spann_provider::SpannProvider;
 use chroma_storage::Storage;
 use chroma_sysdb::SysDb;
 use chroma_system::{ComponentHandle, Dispatcher, Orchestrator, System};
 use chroma_tracing::util::wrap_span_with_parent_context;
 use chroma_types::{
     chroma_proto::{
-        self, query_executor_server::QueryExecutor, CountPlan, CountResult, GetPlan, GetResult,
-        KnnBatchResult, KnnPlan,
+        query_executor_server::{QueryExecutor, QueryExecutorServer},
+        CountPlan, CountResult, GetPlan, GetResult, KnnBatchResult, KnnPlan,
     },
     operator::Scan,
     CollectionAndSegments, SegmentType,
@@ -47,6 +48,8 @@ pub struct WorkerServer {
     hnsw_index_provider: HnswIndexProvider,
     blockfile_provider: BlockfileProvider,
     port: u16,
+    // config
+    fetch_log_batch_size: u32,
 }
 
 #[async_trait]
@@ -76,6 +79,7 @@ impl Configurable<QueryServiceConfig> for WorkerServer {
             hnsw_index_provider,
             blockfile_provider,
             port: config.my_port,
+            fetch_log_batch_size: config.fetch_log_batch_size,
         })
     }
 }
@@ -84,13 +88,20 @@ impl WorkerServer {
     pub(crate) async fn run(worker: WorkerServer) -> Result<(), Box<dyn std::error::Error>> {
         let addr = format!("[::]:{}", worker.port).parse().unwrap();
         println!("Worker listening on {}", addr);
-        let server = Server::builder().add_service(
-            chroma_proto::query_executor_server::QueryExecutorServer::new(worker.clone()),
-        );
+
+        let (mut health_reporter, health_service) = tonic_health::server::health_reporter();
+        health_reporter
+            .set_serving::<QueryExecutorServer<Self>>()
+            .await;
+
+        let server = Server::builder()
+            .add_service(health_service)
+            .add_service(QueryExecutorServer::new(worker.clone()));
 
         #[cfg(debug_assertions)]
-        let server =
-            server.add_service(chroma_proto::debug_server::DebugServer::new(worker.clone()));
+        let server = server.add_service(
+            chroma_types::chroma_proto::debug_server::DebugServer::new(worker.clone()),
+        );
 
         let server = server.serve_with_shutdown(addr, async {
             let mut sigterm = match signal(SignalKind::terminate()) {
@@ -117,14 +128,18 @@ impl WorkerServer {
         self.system = Some(system);
     }
 
-    fn fetch_log(&self, collection_and_segments: &CollectionAndSegments) -> FetchLogOperator {
+    fn fetch_log(
+        &self,
+        collection_and_segments: &CollectionAndSegments,
+        batch_size: u32,
+    ) -> FetchLogOperator {
         FetchLogOperator {
             log_client: self.log.clone(),
-            // TODO: Make this configurable
-            batch_size: 100,
+            batch_size,
             // The collection log position is inclusive, and we want to start from the next log
             // Note that we query using the incoming log position this is critical for correctness
-            start_log_offset_id: collection_and_segments.collection.log_position as u32 + 1,
+            start_log_offset_id: u64::try_from(collection_and_segments.collection.log_position + 1)
+                .unwrap_or_default(),
             maximum_fetch_count: None,
             collection_uuid: collection_and_segments.collection.collection_id,
         }
@@ -140,7 +155,7 @@ impl WorkerServer {
             .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
 
         let collection_and_segments = Scan::try_from(scan)?.collection_and_segments;
-        let fetch_log = self.fetch_log(&collection_and_segments);
+        let fetch_log = self.fetch_log(&collection_and_segments, self.fetch_log_batch_size);
 
         let count_orchestrator = CountOrchestrator::new(
             self.blockfile_provider.clone(),
@@ -167,7 +182,7 @@ impl WorkerServer {
             .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
 
         let collection_and_segments = Scan::try_from(scan)?.collection_and_segments;
-        let fetch_log = self.fetch_log(&collection_and_segments);
+        let fetch_log = self.fetch_log(&collection_and_segments, self.fetch_log_batch_size);
 
         let filter = get_inner
             .filter
@@ -221,7 +236,7 @@ impl WorkerServer {
 
         let collection_and_segments = Scan::try_from(scan)?.collection_and_segments;
 
-        let fetch_log = self.fetch_log(&collection_and_segments);
+        let fetch_log = self.fetch_log(&collection_and_segments, self.fetch_log_batch_size);
 
         let filter = knn_inner
             .filter
@@ -262,7 +277,7 @@ impl WorkerServer {
             self.hnsw_index_provider.clone(),
             // TODO: Make this configurable
             1000,
-            collection_and_segments,
+            collection_and_segments.clone(),
             fetch_log,
             filter.try_into()?,
         );
@@ -277,15 +292,20 @@ impl WorkerServer {
         let pulled_log_bytes = matching_records.fetch_log_bytes;
 
         if vector_segment_type == SegmentType::Spann {
-            tracing::info!("Running KNN on SPANN segment");
+            tracing::debug!("Running KNN on SPANN segment");
+            let spann_provider = SpannProvider {
+                hnsw_provider: self.hnsw_index_provider.clone(),
+                blockfile_provider: self.blockfile_provider.clone(),
+                garbage_collection_context: None,
+            };
             let knn_orchestrator_futures = from_proto_knn(knn)?
                 .into_iter()
                 .map(|knn| {
                     SpannKnnOrchestrator::new(
-                        self.blockfile_provider.clone(),
-                        self.hnsw_index_provider.clone(),
+                        spann_provider.clone(),
                         dispatcher.clone(),
                         1000,
+                        collection_and_segments.collection.clone(),
                         matching_records.clone(),
                         knn.fetch as usize,
                         knn.embedding,
@@ -354,10 +374,7 @@ impl QueryExecutor for WorkerServer {
     async fn count(&self, count: Request<CountPlan>) -> Result<Response<CountResult>, Status> {
         // Note: We cannot write a middleware that instruments every service rpc
         // with a span because of https://github.com/hyperium/tonic/pull/1202.
-        let count_span = trace_span!(
-            "CountPlan",
-            count = ?count
-        );
+        let count_span = trace_span!("CountPlan",);
         let instrumented_span = wrap_span_with_parent_context(count_span, count.metadata());
         self.orchestrate_count(count)
             .instrument(instrumented_span)
@@ -367,10 +384,7 @@ impl QueryExecutor for WorkerServer {
     async fn get(&self, get: Request<GetPlan>) -> Result<Response<GetResult>, Status> {
         // Note: We cannot write a middleware that instruments every service rpc
         // with a span because of https://github.com/hyperium/tonic/pull/1202.
-        let get_span = trace_span!(
-            "GetPlan",
-            get = ?get
-        );
+        let get_span = trace_span!("GetPlan",);
         let instrumented_span = wrap_span_with_parent_context(get_span, get.metadata());
         self.orchestrate_get(get)
             .instrument(instrumented_span)
@@ -380,10 +394,7 @@ impl QueryExecutor for WorkerServer {
     async fn knn(&self, knn: Request<KnnPlan>) -> Result<Response<KnnBatchResult>, Status> {
         // Note: We cannot write a middleware that instruments every service rpc
         // with a span because of https://github.com/hyperium/tonic/pull/1202.
-        let knn_span = trace_span!(
-            "KnnPlan",
-            knn = ?knn
-        );
+        let knn_span = trace_span!("KnnPlan",);
         let instrumented_span = wrap_span_with_parent_context(knn_span, knn.metadata());
         self.orchestrate_knn(knn)
             .instrument(instrumented_span)
@@ -393,17 +404,17 @@ impl QueryExecutor for WorkerServer {
 
 #[cfg(debug_assertions)]
 #[async_trait]
-impl chroma_proto::debug_server::Debug for WorkerServer {
+impl chroma_types::chroma_proto::debug_server::Debug for WorkerServer {
     async fn get_info(
         &self,
         request: Request<()>,
-    ) -> Result<Response<chroma_proto::GetInfoResponse>, Status> {
+    ) -> Result<Response<chroma_types::chroma_proto::GetInfoResponse>, Status> {
         // Note: We cannot write a middleware that instruments every service rpc
         // with a span because of https://github.com/hyperium/tonic/pull/1202.
         let request_span = trace_span!("Get info");
 
         wrap_span_with_parent_context(request_span, request.metadata()).in_scope(|| {
-            let response = chroma_proto::GetInfoResponse {
+            let response = chroma_types::chroma_proto::GetInfoResponse {
                 version: option_env!("CARGO_PKG_VERSION")
                     .unwrap_or("unknown")
                     .to_string(),
@@ -430,13 +441,14 @@ mod tests {
     use super::*;
     use chroma_index::test_hnsw_index_provider;
     use chroma_log::in_memory_log::InMemoryLog;
-    #[cfg(debug_assertions)]
-    use chroma_proto::debug_client::DebugClient;
-    use chroma_proto::query_executor_client::QueryExecutorClient;
     use chroma_segment::test::TestDistributedSegment;
     use chroma_sysdb::TestSysDb;
     use chroma_system::system;
     use chroma_system::DispatcherConfig;
+    use chroma_types::chroma_proto;
+    #[cfg(debug_assertions)]
+    use chroma_types::chroma_proto::debug_client::DebugClient;
+    use chroma_types::chroma_proto::query_executor_client::QueryExecutorClient;
     use uuid::Uuid;
 
     fn run_server() -> String {
@@ -453,6 +465,7 @@ mod tests {
             hnsw_index_provider: test_hnsw_index_provider(),
             blockfile_provider: segments.blockfile_provider,
             port,
+            fetch_log_batch_size: 100,
         };
 
         let system: system::System = system::System::new();

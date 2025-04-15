@@ -1,95 +1,58 @@
 use std::sync::OnceLock;
 
-use chroma_system::{ChannelError, ReceiverForMessage};
-use chrono::{DateTime, Utc};
+use chroma_system::ReceiverForMessage;
 use serde::{Deserialize, Serialize};
-use tonic::async_trait;
 use tracing::Span;
 use uuid::Uuid;
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(tag = "event_name")]
-pub enum MeterEventType {
-    CollectionRead {
-        collection_id: Uuid,
-        collection_dimension: u64,
-        latest_collection_record_count: u64,
-        metadata_bytes_read: u64,
-        vector_bytes_read: u64,
-    },
-    CollectionWrite {
-        collection_id: Uuid,
-        log_bytes: u64,
-    },
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "read_action")]
+pub enum ReadAction {
+    Count,
+    Get,
+    GetForDelete,
+    Query,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "write_action")]
+pub enum WriteAction {
+    Add,
+    Delete,
+    Update,
+    Upsert,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct MeterEvent {
-    #[serde(rename = "idempotency_key")]
-    pub event_id: Uuid,
-    pub timestamp: DateTime<Utc>,
-    pub tenant: String,
-    pub database: String,
-    #[serde(flatten)]
-    pub io: MeterEventType,
+#[serde(rename_all = "snake_case", tag = "event_name")]
+pub enum MeterEvent {
+    CollectionRead {
+        tenant: String,
+        database: String,
+        collection_id: Uuid,
+        #[serde(flatten)]
+        action: ReadAction,
+        fts_query_length: u64,
+        metadata_predicate_count: u64,
+        query_embedding_count: u64,
+        pulled_log_size_bytes: u64,
+        latest_collection_logical_size_bytes: u64,
+        return_bytes: u64,
+    },
+    CollectionWrite {
+        tenant: String,
+        database: String,
+        collection_id: Uuid,
+        #[serde(flatten)]
+        action: WriteAction,
+        log_size_bytes: u64,
+    },
 }
 
 pub static METER_EVENT_RECEIVER: OnceLock<Box<dyn ReceiverForMessage<MeterEvent>>> =
     OnceLock::new();
 
-#[async_trait]
-impl ReceiverForMessage<MeterEvent> for () {
-    async fn send(&self, _: MeterEvent, _: Option<Span>) -> Result<(), ChannelError> {
-        Ok(())
-    }
-}
-
 impl MeterEvent {
-    pub fn collection_read(
-        tenant: String,
-        database: String,
-        collection_id: Uuid,
-        collection_dimension: u64,
-        latest_collection_record_count: u64,
-        metadata_complexity: u64,
-        vector_complexity: u64,
-    ) -> Self {
-        // TODO: Properly calculate number of bytes read
-        Self {
-            event_id: Uuid::new_v4(),
-            timestamp: Utc::now(),
-            tenant,
-            database,
-            io: MeterEventType::CollectionRead {
-                collection_id,
-                collection_dimension,
-                latest_collection_record_count,
-                metadata_bytes_read: metadata_complexity * latest_collection_record_count,
-                vector_bytes_read: vector_complexity
-                    * collection_dimension
-                    * latest_collection_record_count,
-            },
-        }
-    }
-
-    pub fn collection_write(
-        tenant: String,
-        database: String,
-        collection_id: Uuid,
-        log_bytes: u64,
-    ) -> Self {
-        Self {
-            event_id: Uuid::new_v4(),
-            timestamp: Utc::now(),
-            tenant,
-            database,
-            io: MeterEventType::CollectionWrite {
-                collection_id,
-                log_bytes,
-            },
-        }
-    }
-
     pub fn init_receiver(receiver: Box<dyn ReceiverForMessage<MeterEvent>>) {
         if METER_EVENT_RECEIVER.set(receiver).is_err() {
             tracing::error!("Meter event handler is already initialized")
@@ -109,19 +72,19 @@ impl MeterEvent {
 mod tests {
     use uuid::Uuid;
 
+    use crate::meter_event::WriteAction;
+
     use super::MeterEvent;
 
     #[test]
     fn test_event_serialization() {
-        let event = MeterEvent::collection_read(
-            "test_tenant".to_string(),
-            "test_database".to_string(),
-            Uuid::new_v4(),
-            1000,
-            384,
-            1,
-            3,
-        );
+        let event = MeterEvent::CollectionWrite {
+            tenant: "test_tenant".to_string(),
+            database: "test_database".to_string(),
+            collection_id: Uuid::new_v4(),
+            action: WriteAction::Add,
+            log_size_bytes: 1000,
+        };
         let json_str = serde_json::to_string(&event).expect("The event should be serializable");
         let json_event =
             serde_json::from_str::<MeterEvent>(&json_str).expect("Json should be deserializable");

@@ -8,14 +8,15 @@ use chroma_error::{ChromaError, ErrorCodes, TonicError, TonicMissingFieldError};
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
 use chroma_types::chroma_proto::VersionListForCollection;
 use chroma_types::{
-    chroma_proto, CollectionAndSegments, CollectionMetadataUpdate, CountCollectionsError,
-    CreateCollectionError, CreateDatabaseError, CreateDatabaseResponse, CreateTenantError,
-    CreateTenantResponse, Database, DeleteCollectionError, DeleteDatabaseError,
-    DeleteDatabaseResponse, GetCollectionSizeError, GetCollectionWithSegmentsError,
-    GetCollectionsError, GetDatabaseError, GetDatabaseResponse, GetSegmentsError, GetTenantError,
-    GetTenantResponse, ListDatabasesError, ListDatabasesResponse, Metadata, ResetError,
+    chroma_proto, chroma_proto::CollectionVersionInfo, CollectionAndSegments,
+    CollectionMetadataUpdate, CountCollectionsError, CreateCollectionError, CreateDatabaseError,
+    CreateDatabaseResponse, CreateTenantError, CreateTenantResponse, Database,
+    DeleteCollectionError, DeleteDatabaseError, DeleteDatabaseResponse, GetCollectionSizeError,
+    GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError, GetDatabaseResponse,
+    GetSegmentsError, GetTenantError, GetTenantResponse, InternalCollectionConfiguration,
+    ListCollectionVersionsError, ListDatabasesError, ListDatabasesResponse, Metadata, ResetError,
     ResetResponse, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
-    UpdateCollectionError,
+    UpdateCollectionConfiguration, UpdateCollectionError, VectorIndexConfiguration,
 };
 use chroma_types::{
     Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
@@ -24,12 +25,14 @@ use chroma_types::{
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use thiserror::Error;
 use tonic::transport::{Channel, Endpoint};
 use tonic::Code;
 use tower::ServiceBuilder;
 use uuid::{Error, Uuid};
+
+pub const VERSION_FILE_S3_PREFIX: &str = "sysdb/version_files/";
 
 #[derive(Debug, Clone)]
 pub enum SysDb {
@@ -187,13 +190,27 @@ impl SysDb {
         collection_id: CollectionUuid,
         name: String,
         segments: Vec<Segment>,
+        configuration: Option<InternalCollectionConfiguration>,
         metadata: Option<Metadata>,
         dimension: Option<i32>,
         get_or_create: bool,
     ) -> Result<Collection, CreateCollectionError> {
-        const CONFIGURATION_JSON_STR: &str = r#"{"hnsw_configuration": {"space": "l2", "ef_construction": 100, "ef_search": 100, "num_threads": 16, "M": 16, "resize_factor": 1.2, "batch_size": 100, "sync_threshold": 1000, "_type": "HNSWConfigurationInternal"}, "_type": "CollectionConfigurationInternal"}"#;
-        let configuration_json: serde_json::Value = serde_json::from_str(CONFIGURATION_JSON_STR)
-            .map_err(CreateCollectionError::Configuration)?;
+        let configuration = match configuration {
+            Some(mut config) => {
+                let hnsw_params = config.get_hnsw_config_from_legacy_metadata(&metadata)?;
+                if let Some(hnsw_params) = hnsw_params {
+                    config.vector_index = VectorIndexConfiguration::Hnsw(hnsw_params);
+                }
+                config
+            }
+            None => metadata
+                .clone()
+                .map(|m| {
+                    InternalCollectionConfiguration::from_legacy_metadata(m).map_err(|e| e.boxed())
+                })
+                .transpose()?
+                .unwrap_or(InternalCollectionConfiguration::default_hnsw()),
+        };
 
         match self {
             SysDb::Grpc(grpc) => {
@@ -203,7 +220,7 @@ impl SysDb {
                     collection_id,
                     name,
                     segments,
-                    configuration_json,
+                    configuration,
                     metadata,
                     dimension,
                     get_or_create,
@@ -218,7 +235,7 @@ impl SysDb {
                         collection_id,
                         name,
                         segments,
-                        configuration_json,
+                        configuration,
                         metadata,
                         dimension,
                         get_or_create,
@@ -226,14 +243,11 @@ impl SysDb {
                     .await
             }
             SysDb::Test(test_sysdb) => {
-                const CONFIGURATION_JSON_STR: &str = r#"{"hnsw_configuration": {"space": "l2", "ef_construction": 100, "ef_search": 100, "num_threads": 16, "M": 16, "resize_factor": 1.2, "batch_size": 100, "sync_threshold": 1000, "_type": "HNSWConfigurationInternal"}, "_type": "CollectionConfigurationInternal"}"#;
-                let configuration_json: serde_json::Value =
-                    serde_json::from_str(CONFIGURATION_JSON_STR)
-                        .map_err(CreateCollectionError::Configuration)?;
                 let collection = Collection {
                     collection_id,
                     name,
-                    configuration_json,
+                    config: configuration,
+                    legacy_configuration_json: (),
                     metadata,
                     dimension,
                     tenant: tenant.clone(),
@@ -260,15 +274,16 @@ impl SysDb {
         name: Option<String>,
         metadata: Option<CollectionMetadataUpdate>,
         dimension: Option<u32>,
+        configuration: Option<UpdateCollectionConfiguration>,
     ) -> Result<(), UpdateCollectionError> {
         match self {
             SysDb::Grpc(grpc) => {
-                grpc.update_collection(collection_id, name, metadata, dimension)
+                grpc.update_collection(collection_id, name, metadata, dimension, configuration)
                     .await
             }
             SysDb::Sqlite(sqlite) => {
                 sqlite
-                    .update_collection(collection_id, name, metadata, dimension)
+                    .update_collection(collection_id, name, metadata, dimension, configuration)
                     .await
             }
             SysDb::Test(_) => {
@@ -302,10 +317,12 @@ impl SysDb {
 
     pub async fn get_collections_to_gc(
         &mut self,
+        cutoff_time: Option<SystemTime>,
+        limit: Option<u64>,
     ) -> Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError> {
         match self {
-            SysDb::Grpc(grpc) => grpc.get_collections_to_gc().await,
-            SysDb::Sqlite(_) => todo!(),
+            SysDb::Grpc(grpc) => grpc.get_collections_to_gc(cutoff_time, limit).await,
+            SysDb::Sqlite(_) => unimplemented!("Garbage collection does not work for local chroma"),
             SysDb::Test(_) => todo!(),
         }
     }
@@ -335,7 +352,11 @@ impl SysDb {
                     .await
             }
             SysDb::Sqlite(sqlite) => sqlite.get_collection_with_segments(collection_id).await,
-            SysDb::Test(_test_sys_db) => todo!(),
+            SysDb::Test(test_sys_db) => {
+                test_sys_db
+                    .get_collection_with_segments(collection_id)
+                    .await
+            }
         }
     }
 
@@ -350,6 +371,7 @@ impl SysDb {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn flush_compaction(
         &mut self,
         tenant_id: String,
@@ -358,6 +380,7 @@ impl SysDb {
         collection_version: i32,
         segment_flush_info: Arc<[SegmentFlushInfo]>,
         total_records_post_compaction: u64,
+        size_bytes_post_compaction: u64,
     ) -> Result<FlushCompactionResponse, FlushCompactionError> {
         match self {
             SysDb::Grpc(grpc) => {
@@ -368,6 +391,7 @@ impl SysDb {
                     collection_version,
                     segment_flush_info,
                     total_records_post_compaction,
+                    size_bytes_post_compaction,
                 )
                 .await
             }
@@ -380,9 +404,21 @@ impl SysDb {
                     collection_version,
                     segment_flush_info,
                     total_records_post_compaction,
+                    size_bytes_post_compaction,
                 )
                 .await
             }
+        }
+    }
+
+    pub async fn list_collection_versions(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<Vec<CollectionVersionInfo>, ListCollectionVersionsError> {
+        match self {
+            SysDb::Grpc(_) => todo!(),
+            SysDb::Sqlite(_) => todo!(),
+            SysDb::Test(test) => test.list_collection_versions(collection_id).await,
         }
     }
 
@@ -486,9 +522,10 @@ impl Configurable<GrpcSysDbConfig> for GrpcSysDb {
     }
 }
 
-#[allow(dead_code)]
+#[derive(Debug)]
 pub struct CollectionToGcInfo {
     pub id: CollectionUuid,
+    pub tenant: String,
     pub name: String,
     pub version_file_path: String,
     pub latest_version: i64,
@@ -522,6 +559,7 @@ impl TryFrom<chroma_proto::CollectionToGcInfo> for CollectionToGcInfo {
         let collection_id = CollectionUuid(collection_uuid);
         Ok(CollectionToGcInfo {
             id: collection_id,
+            tenant: value.tenant_id,
             name: value.name,
             version_file_path: value.version_file_path,
             latest_version: value.latest_version,
@@ -754,7 +792,7 @@ impl GrpcSysDb {
         collection_id: CollectionUuid,
         name: String,
         segments: Vec<Segment>,
-        configuration_json: serde_json::Value,
+        configuration: InternalCollectionConfiguration,
         metadata: Option<Metadata>,
         dimension: Option<i32>,
         get_or_create: bool,
@@ -770,7 +808,7 @@ impl GrpcSysDb {
                     .into_iter()
                     .map(chroma_proto::Segment::from)
                     .collect(),
-                configuration_json_str: serde_json::to_string(&configuration_json)
+                configuration_json_str: serde_json::to_string(&configuration)
                     .map_err(CreateCollectionError::Configuration)?,
                 metadata: metadata.map(|metadata| metadata.into()),
                 dimension,
@@ -800,10 +838,11 @@ impl GrpcSysDb {
         name: Option<String>,
         metadata: Option<CollectionMetadataUpdate>,
         dimension: Option<u32>,
+        _configuration: Option<UpdateCollectionConfiguration>,
     ) -> Result<(), UpdateCollectionError> {
         let req = chroma_proto::UpdateCollectionRequest {
             id: collection_id.0.to_string(),
-            name,
+            name: name.clone(),
             metadata_update: metadata.map(|metadata| match metadata {
                 CollectionMetadataUpdate::UpdateMetadata(metadata) => {
                     chroma_proto::update_collection_request::MetadataUpdate::Metadata(
@@ -855,10 +894,15 @@ impl GrpcSysDb {
 
     pub async fn get_collections_to_gc(
         &mut self,
+        cutoff_time: Option<SystemTime>,
+        limit: Option<u64>,
     ) -> Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError> {
         let res = self
             .client
-            .list_collections_to_gc(chroma_proto::ListCollectionsToGcRequest {})
+            .list_collections_to_gc(chroma_proto::ListCollectionsToGcRequest {
+                cutoff_time: cutoff_time.map(|t| t.into()),
+                limit,
+            })
             .await;
 
         match res {
@@ -975,6 +1019,7 @@ impl GrpcSysDb {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn flush_compaction(
         &mut self,
         tenant_id: String,
@@ -983,6 +1028,7 @@ impl GrpcSysDb {
         collection_version: i32,
         segment_flush_info: Arc<[SegmentFlushInfo]>,
         total_records_post_compaction: u64,
+        size_bytes_post_compaction: u64,
     ) -> Result<FlushCompactionResponse, FlushCompactionError> {
         let segment_compaction_info =
             segment_flush_info
@@ -1007,6 +1053,7 @@ impl GrpcSysDb {
             collection_version,
             segment_compaction_info,
             total_records_post_compaction,
+            size_bytes_post_compaction,
         };
 
         let res = self.client.flush_collection_compaction(req).await;

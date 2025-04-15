@@ -143,7 +143,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CountOrchestrator {
             None => return,
         };
         self.fetch_log_bytes
-            .replace(output.iter().map(|(l, _)| l.size_byte()).sum());
+            .replace(output.iter().map(|(l, _)| l.size_bytes()).sum());
         let task = wrap(
             CountRecordsOperator::new(),
             CountRecordsInput::new(
