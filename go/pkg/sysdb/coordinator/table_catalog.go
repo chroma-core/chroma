@@ -1231,14 +1231,6 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 		var existingVersionFilePb *coordinatorpb.CollectionVersionFile
 		if existingVersionFileName == "" {
 			// The VersionFile has not been created.
-			collectionEntry, err := tc.metaDomain.CollectionDb(ctx).GetCollectionEntry(types.FromUniqueID(flushCollectionCompaction.ID), nil)
-			if err != nil {
-				log.Error("error getting collection entry", zap.Error(err))
-				return nil, err
-			}
-			if collectionEntry == nil {
-				return nil, common.ErrCollectionNotFound
-			}
 			existingVersionFilePb = &coordinatorpb.CollectionVersionFile{
 				CollectionInfoImmutable: &coordinatorpb.CollectionInfoImmutable{
 					TenantId:               collectionEntry.Tenant,
