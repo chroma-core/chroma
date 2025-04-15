@@ -41,11 +41,10 @@ pub fn init_global_filter_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
                 "garbage_collector",
             ]
             .into_iter()
-            .map(|s| s.to_string() + "=trace")
+            .map(|s| s.to_string() + "=info")
             .collect::<Vec<String>>()
             .join(",")
     }))
-    .with_filter(filter::LevelFilter::INFO)
     .boxed()
 }
 
