@@ -33,7 +33,7 @@ pub fn init_global_filter_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
                 "compaction_service",
                 "distance_metrics",
                 "full_text",
-                "hosted_frontend",
+                "hosted-frontend",
                 "metadata_filtering",
                 "query_service",
                 "wal3",
@@ -118,11 +118,7 @@ pub fn init_otel_layer(
 }
 
 pub fn init_stdout_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
-    fmt::layer()
-        .pretty()
-        .with_target(false)
-        .with_filter(tracing_subscriber::filter::LevelFilter::INFO)
-        .boxed()
+    fmt::layer().pretty().with_target(false).boxed()
 }
 
 pub fn init_tracing(layers: Vec<Box<dyn Layer<Registry> + Send + Sync>>) {
