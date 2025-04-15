@@ -8,8 +8,8 @@ use opentelemetry::trace::TracerProvider;
 use opentelemetry::{global, InstrumentationScope};
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
-use tracing_subscriber::fmt;
 use tracing_subscriber::Registry;
+use tracing_subscriber::{filter, fmt};
 use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Layer};
 
 pub fn init_global_filter_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
@@ -44,6 +44,7 @@ pub fn init_global_filter_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
             .collect::<Vec<String>>()
             .join(",")
     }))
+    .with_filter(filter::LevelFilter::TRACE)
     .boxed()
 }
 
@@ -115,7 +116,11 @@ pub fn init_otel_layer(
 }
 
 pub fn init_stdout_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
-    fmt::layer().pretty().with_target(false).boxed()
+    fmt::layer()
+        .pretty()
+        .with_target(false)
+        .with_filter(filter::LevelFilter::INFO)
+        .boxed()
 }
 
 pub fn init_tracing(layers: Vec<Box<dyn Layer<Registry> + Send + Sync>>) {
