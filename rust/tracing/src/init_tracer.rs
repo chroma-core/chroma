@@ -109,11 +109,7 @@ pub fn init_otel_layer(
         .with_resource(resource.clone())
         .build();
     global::set_meter_provider(meter_provider);
-    // Layer for adding our configured tracer.
-    // Export everything at this layer. The backend i.e. honeycomb or jaeger will filter at its end.
-    tracing_opentelemetry::OpenTelemetryLayer::new(tracer)
-        .with_filter(tracing_subscriber::filter::LevelFilter::TRACE)
-        .boxed()
+    tracing_opentelemetry::OpenTelemetryLayer::new(tracer).boxed()
 }
 
 pub fn init_stdout_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
