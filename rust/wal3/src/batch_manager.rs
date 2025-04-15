@@ -189,6 +189,10 @@ impl BatchManager {
         state.last_batch = Instant::now();
         if !state.enqueued.is_empty() {
             self.write_finished.notify_one();
+            tracing::info!(
+                "left behind {enqueued} items",
+                enqueued = state.enqueued.len()
+            );
         }
         Ok(Some((fragment_seq_no, log_position, work)))
     }
