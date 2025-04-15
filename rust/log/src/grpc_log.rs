@@ -197,6 +197,7 @@ impl GrpcLog {
         &mut self.client
     }
 
+    // ScoutLogs returns the offset of the next record to be inserted into the log.
     pub(super) async fn scout_logs(
         &mut self,
         collection_id: CollectionUuid,
@@ -216,7 +217,7 @@ impl GrpcLog {
             }
         };
         let scout = response.into_inner();
-        Ok(scout.limit_offset as u64)
+        Ok(scout.first_uninserted_record_offset as u64)
     }
 
     pub(super) async fn read(

@@ -169,6 +169,10 @@ func (r *LogRepository) GetLastCompactedOffsetForCollection(ctx context.Context,
 	return
 }
 
+// GetBoundsForCollection returns the offset of the last record compacted and the offset of the last
+// record inserted.  Thus, the range of uncompacted records is the interval (start, limit], which is
+// kind of backwards from how it is elsewhere, so pay attention to comments indicating the bias of
+// the offset.
 func (r *LogRepository) GetBoundsForCollection(ctx context.Context, collectionId string) (start, limit int64, err error) {
 	bounds, err := r.queries.GetBoundsForCollection(ctx, collectionId)
 	if err != nil {
@@ -176,7 +180,7 @@ func (r *LogRepository) GetBoundsForCollection(ctx context.Context, collectionId
 		return
 	}
 	start = bounds.RecordCompactionOffsetPosition
-	limit = bounds.RecordEnumerationOffsetPosition + 1
+	limit = bounds.RecordEnumerationOffsetPosition
 	err = nil
 	return
 }

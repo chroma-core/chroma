@@ -671,7 +671,9 @@ impl LogService for LogServer {
                 }
             };
             let limit_offset = limit_position.offset() as i64;
-            Ok(Response::new(ScoutLogsResponse { limit_offset }))
+            Ok(Response::new(ScoutLogsResponse {
+                first_uninserted_record_offset: limit_offset,
+            }))
         }
         .instrument(span)
         .await
@@ -681,11 +683,10 @@ impl LogService for LogServer {
         &self,
         request: Request<PullLogsRequest>,
     ) -> Result<Response<PullLogsResponse>, Status> {
-        let mut pull_logs = request.into_inner();
+        let pull_logs = request.into_inner();
         let collection_id = Uuid::parse_str(&pull_logs.collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
-        pull_logs.start_from_offset -= 1;
         let span = tracing::info_span!(
             "pull_logs",
             collection_id = collection_id.to_string(),
