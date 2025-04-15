@@ -2,16 +2,17 @@
 // load/src/opentelemetry_config.rs file
 // Keep them in-sync manually.
 
-use std::borrow::Cow;
-
 use opentelemetry::trace::TracerProvider;
 use opentelemetry::{global, InstrumentationScope};
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
+use std::borrow::Cow;
 use tracing_subscriber::Registry;
 use tracing_subscriber::{filter, fmt};
 use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Layer};
 
+// This is the filter that will be applied to all subsequent layers.
+// It filters to modules we author / care about / errors.
 pub fn init_global_filter_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
     EnvFilter::new(std::env::var("RUST_LOG").unwrap_or_else(|_| {
         "error,opentelemetry_sdk=info,".to_string()
@@ -48,6 +49,7 @@ pub fn init_global_filter_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
     .boxed()
 }
 
+// This is the layer that will be used to send traces to the OpenTelemetry
 pub fn init_otel_layer(
     service_name: &String,
     otel_endpoint: &String,
@@ -125,6 +127,11 @@ pub fn init_stdout_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
 
 pub fn init_tracing(layers: Vec<Box<dyn Layer<Registry> + Send + Sync>>) {
     global::set_text_map_propagator(TraceContextPropagator::new());
+    // and_then is used to chain layers together
+    let layers = layers
+        .into_iter()
+        .reduce(|a, b| Box::new(a.and_then(b)))
+        .expect("Should be able to create tracing layers");
     let subscriber = tracing_subscriber::registry().with(layers);
     tracing::subscriber::set_global_default(subscriber)
         .expect("Should be able to set global tracing subscriber");
