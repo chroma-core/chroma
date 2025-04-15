@@ -1,8 +1,12 @@
 #!/usr/bin/env sh
 set -e
 
-curl -s http://localhost:8000/openapi.json | jq > openapi.json
+# Run the transformation script instead of copying the file
+echo "Fetching and transforming OpenAPI specification..."
+python3 transform-openapi.py
 
+# Run the OpenAPI generator
+echo "Running OpenAPI generator..."
 openapi-generator-plus -c config.yml
 
 if [[ "$OSTYPE" == "darwin"* ]]; then

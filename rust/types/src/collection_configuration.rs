@@ -250,7 +250,7 @@ impl From<InternalCollectionConfiguration> for CollectionConfiguration {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum UpdateVectorIndexConfiguration {
     Hnsw(Option<UpdateHnswConfiguration>),
