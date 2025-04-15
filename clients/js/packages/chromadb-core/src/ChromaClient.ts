@@ -233,7 +233,7 @@ export class ChromaClient {
         name,
         // @ts-ignore: we need to generate the client libraries again
         configuration: null, //TODO: Configuration type in JavaScript
-        metadata: metadata as any,
+        metadata: metadata,
       },
       this.api.options,
     );
@@ -280,7 +280,7 @@ export class ChromaClient {
         name,
         // @ts-ignore: we need to generate the client libraries again
         configuration: null, //TODO: Configuration type in JavaScript
-        metadata: metadata as any,
+        metadata: metadata,
         get_or_create: true,
       },
       this.api.options,
