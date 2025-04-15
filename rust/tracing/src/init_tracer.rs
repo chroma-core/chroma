@@ -45,7 +45,7 @@ pub fn init_global_filter_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
             .collect::<Vec<String>>()
             .join(",")
     }))
-    .with_filter(filter::LevelFilter::TRACE)
+    .with_filter(filter::LevelFilter::INFO)
     .boxed()
 }
 
