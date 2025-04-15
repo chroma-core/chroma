@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+# This script is used to transform the OpenAPI spec to ensure that the null type and HashMap is handled correctly.
 import json
 import sys
 import urllib.request
