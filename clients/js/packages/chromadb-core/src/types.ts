@@ -144,7 +144,7 @@ export type GetOrCreateCollectionParams = CreateCollectionParams;
 
 export type GetCollectionParams = {
   name: string;
-  embeddingFunction: IEmbeddingFunction;
+  embeddingFunction?: IEmbeddingFunction;
 };
 
 export type DeleteCollectionParams = {
