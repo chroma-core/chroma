@@ -330,7 +330,7 @@ export class Collection {
       this.id,
       {
         new_name: name,
-        new_metadata: metadata as any,
+        new_metadata: metadata,
       },
       this.client.api.options,
     )) as CollectionParams;
