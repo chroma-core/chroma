@@ -232,10 +232,10 @@ class BaseAPI(ABC):
 
         Args:
             ids: The IDs of the entries to get. Defaults to None.
-            where: Conditional filtering on metadata. Defaults to {}.
+            where: Conditional filtering on metadata. Defaults to None.
             limit: The maximum number of entries to return. Defaults to None.
             offset: The number of entries to skip before returning. Defaults to None.
-            where_document: Conditional filtering on documents. Defaults to {}.
+            where_document: Conditional filtering on documents. Defaults to None.
             include: The fields to include in the response.
                           Defaults to ["metadatas", "documents"].
         Returns:
@@ -257,8 +257,8 @@ class BaseAPI(ABC):
         Args:
             collection_id: The UUID of the collection to delete the entries from.
             ids: The IDs of the entries to delete. Defaults to None.
-            where: Conditional filtering on metadata. Defaults to {}.
-            where_document: Conditional filtering on documents. Defaults to {}.
+            where: Conditional filtering on metadata. Defaults to None.
+            where_document: Conditional filtering on documents. Defaults to None.
 
         Returns:
             IDs: The list of IDs of the entries that were deleted.
@@ -281,8 +281,8 @@ class BaseAPI(ABC):
             collection_id: The UUID of the collection to query.
             query_embeddings: The embeddings to use as the query.
             n_results: The number of results to return. Defaults to 10.
-            where: Conditional filtering on metadata. Defaults to {}.
-            where_document: Conditional filtering on documents. Defaults to {}.
+            where: Conditional filtering on metadata. Defaults to None.
+            where_document: Conditional filtering on documents. Defaults to None.
             include: The fields to include in the response.
                           Defaults to ["metadatas", "documents", "distances"].
 
