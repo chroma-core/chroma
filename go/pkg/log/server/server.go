@@ -55,8 +55,9 @@ func (s *logServer) ScoutLogs(ctx context.Context, req *logservicepb.ScoutLogsRe
 	if err != nil {
 		return
 	}
+	// +1 to convert from the (] bound to a [) bound.
 	res = &logservicepb.ScoutLogsResponse {
-		LimitOffset: int64(limit),
+		FirstUninsertedRecordOffset: int64(limit + 1),
 	}
 	return
 }
