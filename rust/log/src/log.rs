@@ -50,7 +50,6 @@ impl Log {
         }
     }
 
-    // ScoutLogs returns the offset of the next record to be inserted into the log.
     #[tracing::instrument(skip(self))]
     pub async fn scout_logs(
         &mut self,

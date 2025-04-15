@@ -644,7 +644,7 @@ impl Manifest {
             },
             (Some(f), None) => f,
             (None, Some(s)) => s,
-            (None, None) => LogPosition::from_offset(1),
+            (None, None) => LogPosition::default(),
         }
     }
 
