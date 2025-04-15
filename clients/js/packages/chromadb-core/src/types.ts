@@ -32,8 +32,8 @@ type WhereOperator = "$gt" | "$gte" | "$lt" | "$lte" | "$ne" | "$eq";
 
 type OperatorExpression = {
   [key in WhereOperator | InclusionOperator | LogicalOperator]?:
-    | LiteralValue
-    | ListLiteralValue;
+  | LiteralValue
+  | ListLiteralValue;
 };
 
 type BaseWhere = {
@@ -50,9 +50,9 @@ type WhereDocumentOperator = "$contains" | "$not_contains" | LogicalOperator;
 
 export type WhereDocument = {
   [key in WhereDocumentOperator]?:
-    | LiteralValue
-    | LiteralNumber
-    | WhereDocument[];
+  | LiteralValue
+  | LiteralNumber
+  | WhereDocument[];
 };
 
 export type MultiGetResponse = {
