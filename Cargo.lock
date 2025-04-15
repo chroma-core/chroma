@@ -1404,8 +1404,8 @@ dependencies = [
  "parking_lot",
  "proptest",
  "proptest-state-machine",
- "prost 0.13.3",
- "prost-types",
+ "prost 0.13.5",
+ "prost-types 0.13.5",
  "rand 0.8.5",
  "roaring",
  "serde",
@@ -1444,7 +1444,7 @@ dependencies = [
 
 [[package]]
 name = "chroma-cli"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "arboard",
  "assert_cmd",
@@ -1654,7 +1654,7 @@ dependencies = [
  "futures",
  "opentelemetry",
  "proptest",
- "prost 0.13.3",
+ "prost 0.13.5",
  "rand 0.8.5",
  "serde",
  "serde_json",
@@ -1694,7 +1694,7 @@ dependencies = [
  "opentelemetry",
  "parquet",
  "proptest",
- "prost 0.13.3",
+ "prost 0.13.5",
  "rand 0.8.5",
  "serde",
  "serde_json",
@@ -1832,7 +1832,7 @@ dependencies = [
  "opentelemetry-otlp",
  "opentelemetry_sdk",
  "parking_lot",
- "prost 0.13.3",
+ "prost 0.13.5",
  "sea-query",
  "sea-query-binder",
  "serde",
@@ -1898,8 +1898,8 @@ dependencies = [
  "chroma-error",
  "proptest",
  "proptest-derive 0.5.1",
- "prost 0.13.3",
- "prost-types",
+ "prost 0.13.5",
+ "prost-types 0.13.5",
  "pyo3",
  "regex",
  "roaring",
@@ -3287,6 +3287,7 @@ dependencies = [
  "chroma-config",
  "chroma-error",
  "chroma-index",
+ "chroma-memberlist",
  "chroma-segment",
  "chroma-storage",
  "chroma-sysdb",
@@ -3303,7 +3304,7 @@ dependencies = [
  "proptest",
  "proptest-derive 0.3.0",
  "proptest-state-machine",
- "prost 0.13.3",
+ "prost 0.13.5",
  "rand 0.8.5",
  "serde",
  "serde_json",
@@ -5372,7 +5373,7 @@ dependencies = [
  "opentelemetry-http",
  "opentelemetry-proto",
  "opentelemetry_sdk",
- "prost 0.13.3",
+ "prost 0.13.5",
  "thiserror 1.0.69",
  "tokio",
  "tonic",
@@ -5387,7 +5388,7 @@ checksum = "a6e05acbfada5ec79023c85368af14abd0b307c015e9064d249b2a950ef459a6"
 dependencies = [
  "opentelemetry",
  "opentelemetry_sdk",
- "prost 0.13.3",
+ "prost 0.13.5",
  "tonic",
 ]
 
@@ -5958,12 +5959,12 @@ dependencies = [
 
 [[package]]
 name = "prost"
-version = "0.13.3"
+version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b0487d90e047de87f984913713b85c601c05609aad5b0df4b4573fbf69aa13f"
+checksum = "2796faa41db3ec313a31f7624d9286acf277b52de526150b7e69f3debf891ee5"
 dependencies = [
  "bytes",
- "prost-derive 0.13.3",
+ "prost-derive 0.13.5",
 ]
 
 [[package]]
@@ -5981,7 +5982,7 @@ dependencies = [
  "petgraph",
  "prettyplease",
  "prost 0.12.3",
- "prost-types",
+ "prost-types 0.12.3",
  "regex",
  "syn 2.0.89",
  "tempfile",
@@ -6003,12 +6004,12 @@ dependencies = [
 
 [[package]]
 name = "prost-derive"
-version = "0.13.3"
+version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9552f850d5f0964a4e4d0bf306459ac29323ddfbae05e35a7c0d35cb0803cc5"
+checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "proc-macro2 1.0.92",
  "quote 1.0.37",
  "syn 2.0.89",
@@ -6021,6 +6022,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "193898f59edcf43c26227dcd4c8427f00d99d61e95dcde58dabd49fa291d470e"
 dependencies = [
  "prost 0.12.3",
+]
+
+[[package]]
+name = "prost-types"
+version = "0.13.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52c2c1bf36ddb1a1c396b3601a3cec27c2462e45f07c386894ec3ccf5332bd16"
+dependencies = [
+ "prost 0.13.5",
 ]
 
 [[package]]
@@ -8152,7 +8162,7 @@ dependencies = [
  "hyper-util",
  "percent-encoding",
  "pin-project",
- "prost 0.13.3",
+ "prost 0.13.5",
  "socket2",
  "tokio",
  "tokio-stream",
@@ -8182,7 +8192,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1eaf34ddb812120f5c601162d5429933c9b527d901ab0e7f930d3147e33a09b2"
 dependencies = [
  "async-stream",
- "prost 0.13.3",
+ "prost 0.13.5",
  "tokio",
  "tokio-stream",
  "tonic",
@@ -9314,8 +9324,8 @@ dependencies = [
  "parking_lot",
  "proptest",
  "proptest-state-machine",
- "prost 0.13.3",
- "prost-types",
+ "prost 0.13.5",
+ "prost-types 0.13.5",
  "rand 0.8.5",
  "rand_xorshift",
  "random-port",

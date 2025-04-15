@@ -33,7 +33,8 @@ query_service:
                 download_part_size_bytes: 8388608 # 8MiB
             rate_limiting_policy:
                 count_based_policy:
-                    max_concurrent_requests: 15
+                    max_concurrent_requests: 30
+                    bandwidth_allocation: [0.7, 0.3]
     log:
         grpc:
             host: "logservice.chroma"
@@ -41,7 +42,7 @@ query_service:
             connect_timeout_ms: 5000
             request_timeout_ms: 5000
             alt_host: "rust-log-service.chroma"
-            #use_alt_host_for_everything: true
+            use_alt_host_for_everything: true
     dispatcher:
         num_worker_threads: 4
         dispatcher_queue_size: 100
@@ -110,6 +111,7 @@ compaction_service:
             rate_limiting_policy:
                 count_based_policy:
                     max_concurrent_requests: 30
+                    bandwidth_allocation: [0.7, 0.3]
     log:
         grpc:
             host: "logservice.chroma"
@@ -117,7 +119,7 @@ compaction_service:
             connect_timeout_ms: 5000
             request_timeout_ms: 5000
             alt_host: "rust-log-service.chroma"
-            #use_alt_host_for_everything: true
+            use_alt_host_for_everything: true
     dispatcher:
         num_worker_threads: 4
         dispatcher_queue_size: 100
@@ -176,3 +178,4 @@ log_service:
             rate_limiting_policy:
                 count_based_policy:
                     max_concurrent_requests: 500
+                    bandwidth_allocation: [1.0]

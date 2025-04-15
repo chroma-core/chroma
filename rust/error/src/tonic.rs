@@ -22,6 +22,7 @@ impl From<ErrorCodes> for tonic::Code {
             ErrorCodes::DataLoss => tonic::Code::DataLoss,
             ErrorCodes::Unauthenticated => tonic::Code::Unauthenticated,
             ErrorCodes::VersionMismatch => tonic::Code::Internal,
+            ErrorCodes::UnprocessableEntity => tonic::Code::ResourceExhausted,
         }
     }
 }

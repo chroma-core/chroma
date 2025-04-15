@@ -35,6 +35,9 @@ pub(super) struct GarbageCollectorConfig {
     pub(super) default_mode: CleanupMode,
     #[serde(default)]
     pub(super) tenant_mode_overrides: Option<HashMap<String, CleanupMode>>,
+    pub(super) assignment_policy: chroma_config::assignment::config::AssignmentPolicyConfig,
+    pub(super) memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig,
+    pub my_member_id: String,
 }
 
 impl GarbageCollectorConfig {
@@ -45,9 +48,10 @@ impl GarbageCollectorConfig {
     pub(super) fn load_from_path(path: &str) -> Self {
         // Unfortunately, figment doesn't support environment variables with underscores. So we have to map and replace them.
         // Excluding our own environment variables, which are prefixed with CHROMA_.
-        let mut f = figment::Figment::from(
-            Env::prefixed("CHROMA_GC_").map(|k| k.as_str().replace("__", ".").into()),
-        );
+        let mut f = figment::Figment::from(Env::prefixed("CHROMA_GC_").map(|k| match k {
+            k if k == "my_member_id" => k.into(),
+            k => k.as_str().replace("__", ".").into(),
+        }));
         if std::path::Path::new(path).exists() {
             f = figment::Figment::from(Yaml::file(path)).merge(f);
         }

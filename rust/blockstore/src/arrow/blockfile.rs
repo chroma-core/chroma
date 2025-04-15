@@ -13,6 +13,7 @@ use crate::key::CompositeKey;
 use crate::key::KeyWrapper;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
+use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
 use futures::future::join_all;
 use futures::{Stream, StreamExt, TryStreamExt};
 use parking_lot::Mutex;
@@ -181,7 +182,11 @@ impl ArrowUnorderedBlockfileWriter {
 
         let delta = match delta {
             None => {
-                let block = match self.block_manager.get(&target_block_id).await {
+                let block = match self
+                    .block_manager
+                    .get(&target_block_id, StorageRequestPriority::P0)
+                    .await
+                {
                     Ok(Some(block)) => block,
                     Ok(None) => {
                         return Err(Box::new(ArrowBlockfileError::BlockNotFound));
@@ -260,7 +265,11 @@ impl ArrowUnorderedBlockfileWriter {
 
         let delta = match delta {
             None => {
-                let block = match self.block_manager.get(&target_block_id).await {
+                let block = match self
+                    .block_manager
+                    .get(&target_block_id, StorageRequestPriority::P0)
+                    .await
+                {
                     Ok(Some(block)) => block,
                     Ok(None) => {
                         return Err(Box::new(ArrowBlockfileError::BlockNotFound));
@@ -314,7 +323,11 @@ impl ArrowUnorderedBlockfileWriter {
 
         let delta = match delta {
             None => {
-                let block = match self.block_manager.get(&target_block_id).await {
+                let block = match self
+                    .block_manager
+                    .get(&target_block_id, StorageRequestPriority::P0)
+                    .await
+                {
                     Ok(Some(block)) => block,
                     Ok(None) => {
                         return Err(Box::new(ArrowBlockfileError::BlockNotFound));
@@ -378,12 +391,16 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         }
     }
 
-    pub(super) async fn get_block(&self, block_id: Uuid) -> Result<Option<&Block>, GetError> {
+    pub(super) async fn get_block(
+        &self,
+        block_id: Uuid,
+        priority: StorageRequestPriority,
+    ) -> Result<Option<&Block>, GetError> {
         // NOTE(rescrv):  This will complain with clippy, but we don't want to hold a reference to
         // the loaded_blocks map across a call to the block manager.
         #[allow(clippy::map_entry)]
         if !self.loaded_blocks.lock().contains_key(&block_id) {
-            let block = match self.block_manager.get(&block_id).await {
+            let block = match self.block_manager.get(&block_id, priority).await {
                 Ok(Some(block)) => block,
                 Ok(None) => {
                     return Ok(None);
@@ -429,7 +446,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             if !self.block_manager.cached(block_id).await
                 && !self.loaded_blocks.lock().contains_key(block_id)
             {
-                futures.push(self.get_block(*block_id));
+                futures.push(self.get_block(*block_id, StorageRequestPriority::P1));
             }
         }
         join_all(futures).await;
@@ -455,7 +472,9 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
     ) -> Result<Option<V>, Box<dyn ChromaError>> {
         let search_key = CompositeKey::new(prefix.to_string(), key.clone());
         let target_block_id = self.root.sparse_index.get_target_block_id(&search_key);
-        let block = self.get_block(target_block_id).await;
+        let block = self
+            .get_block(target_block_id, StorageRequestPriority::P0)
+            .await;
         match block {
             Ok(Some(block)) => Ok(block.get(prefix, key.clone())),
             Ok(None) => {
@@ -486,7 +505,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                 .map(Ok),
         )
         .try_filter_map(move |block_id| async move {
-            match self.get_block(block_id).await {
+            match self.get_block(block_id, StorageRequestPriority::P0).await {
                 Ok(Some(block)) => Ok(Some(block)),
                 Ok(None) => Err(Box::new(ArrowBlockfileError::BlockNotFound)),
                 Err(e) => Err(Box::new(ArrowBlockfileError::BlockFetchError(e))),
@@ -520,7 +539,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
 
         let mut result: Vec<(K, V)> = vec![];
         for block_id in block_ids {
-            let block_opt = match self.get_block(block_id).await {
+            let block_opt = match self.get_block(block_id, StorageRequestPriority::P0).await {
                 Ok(Some(block)) => Some(block),
                 Ok(None) => {
                     return Err(Box::new(ArrowBlockfileError::BlockNotFound));
@@ -549,7 +568,10 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
     ) -> Result<bool, Box<dyn ChromaError>> {
         let search_key = CompositeKey::new(prefix.to_string(), key.clone());
         let target_block_id = self.root.sparse_index.get_target_block_id(&search_key);
-        let block = match self.get_block(target_block_id).await {
+        let block = match self
+            .get_block(target_block_id, StorageRequestPriority::P0)
+            .await
+        {
             Ok(Some(block)) => block,
             Ok(None) => {
                 return Ok(false);
@@ -587,7 +609,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             self.load_blocks(&block_ids).await;
             let mut result: usize = 0;
             for block_id in block_ids {
-                let block = match self.get_block(block_id).await {
+                let block = match self.get_block(block_id, StorageRequestPriority::P0).await {
                     Ok(Some(block)) => block,
                     Ok(None) => {
                         return Err(Box::new(ArrowBlockfileError::BlockNotFound));
@@ -637,7 +659,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                 self.load_blocks(&block_ids).await;
                 for block_id in block_ids.iter().take(block_ids.len() - 1) {
                     let block =
-                        self.get_block(*block_id)
+                        self.get_block(*block_id, StorageRequestPriority::P0)
                             .await
                             .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?
                             .ok_or(Box::new(ArrowBlockfileError::BlockNotFound)
@@ -646,7 +668,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                 }
             }
             let last_block = self
-                .get_block(*last_id)
+                .get_block(*last_id, StorageRequestPriority::P0)
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?
                 .ok_or(Box::new(ArrowBlockfileError::BlockNotFound) as Box<dyn ChromaError>)?;
@@ -664,7 +686,10 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         }
 
         for (_, block_id) in self.root.sparse_index.data.forward.iter() {
-            match self.get_block(block_id.id).await {
+            match self
+                .get_block(block_id.id, StorageRequestPriority::P0)
+                .await
+            {
                 Ok(Some(block)) => {
                     if block.get_size() > self.block_manager.max_block_size_bytes() {
                         return false;

@@ -65,6 +65,10 @@ func init() {
 	Cmd.Flags().StringVar(&conf.CompactionServiceMemberlistName, "compaction-memberlist-name", "compaction-service-memberlist", "Compaction memberlist name")
 	Cmd.Flags().StringVar(&conf.CompactionServicePodLabel, "compaction-pod-label", "compaction-service", "Compaction pod label")
 
+	// Garbage collection service Memberlist
+	Cmd.Flags().StringVar(&conf.GarbageCollectionServiceMemberlistName, "garbage-collection-memberlist-name", "garbage-collection-service-memberlist", "Garbage collection memberlist name")
+	Cmd.Flags().StringVar(&conf.GarbageCollectionServicePodLabel, "garbage-collection-pod-label", "garbage-collection-service", "Garbage collection pod label")
+
 	// S3 config
 	Cmd.Flags().BoolVar(&conf.MetaStoreConfig.CreateBucketIfNotExists, "create-bucket-if-not-exists", false, "Create bucket if not exists")
 	Cmd.Flags().StringVar(&conf.MetaStoreConfig.BucketName, "bucket-name", "chroma-storage", "Bucket name")

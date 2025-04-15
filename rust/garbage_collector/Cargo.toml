@@ -43,6 +43,7 @@ chroma-blockstore = { workspace = true }
 chroma-cache = { workspace = true }
 chroma-index = { workspace = true }
 chroma-segment = { workspace = true }
+chroma-memberlist = { workspace = true }
 chroma-tracing = { workspace = true }
 
 [dev-dependencies]

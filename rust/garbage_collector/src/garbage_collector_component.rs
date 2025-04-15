@@ -6,8 +6,11 @@ use crate::{
     types::CleanupMode,
 };
 use async_trait::async_trait;
-use chroma_config::{registry::Registry, Configurable};
+use chroma_config::{
+    assignment::assignment_policy::AssignmentPolicy, registry::Registry, Configurable,
+};
 use chroma_error::ChromaError;
+use chroma_memberlist::memberlist_provider::Memberlist;
 use chroma_storage::Storage;
 use chroma_sysdb::{CollectionToGcInfo, SysDb, SysDbConfig};
 use chroma_system::{
@@ -37,6 +40,9 @@ pub(crate) struct GarbageCollector {
     storage: Storage,
     dispatcher: Option<ComponentHandle<Dispatcher>>,
     system: Option<chroma_system::System>,
+    assignment_policy: Box<dyn AssignmentPolicy>,
+    memberlist: Memberlist,
+    my_member_id: String,
     default_cleanup_mode: CleanupMode,
     tenant_mode_overrides: Option<HashMap<String, CleanupMode>>,
     total_jobs_metric: Counter<u64>,
@@ -70,6 +76,8 @@ impl GarbageCollector {
         storage: Storage,
         default_cleanup_mode: CleanupMode,
         tenant_mode_overrides: Option<HashMap<String, CleanupMode>>,
+        assignment_policy: Box<dyn AssignmentPolicy>,
+        my_member_id: String,
     ) -> Self {
         let meter = opentelemetry::global::meter("chroma");
 
@@ -84,6 +92,9 @@ impl GarbageCollector {
             system: None,
             default_cleanup_mode,
             tenant_mode_overrides,
+            assignment_policy,
+            memberlist: Memberlist::default(),
+            my_member_id,
             total_jobs_metric: meter
                 .u64_counter("garbage_collector.total_jobs")
                 .with_description("Total number of garbage collection jobs executed")
@@ -178,6 +189,60 @@ impl Component for GarbageCollector {
             || Some(span!(parent: None, tracing::Level::INFO, "Scheduled garbage collection")),
         );
     }
+
+    fn on_stop_timeout(&self) -> Duration {
+        // NOTE: Increased timeout for remaining jobs to finish
+        Duration::from_secs(60)
+    }
+}
+
+impl GarbageCollector {
+    fn filter_collections(
+        &mut self,
+        collections: Vec<CollectionToGcInfo>,
+    ) -> Vec<CollectionToGcInfo> {
+        self.assignment_policy.set_members(
+            self.memberlist
+                .iter()
+                .map(|member| member.member_id.clone())
+                .collect(),
+        );
+
+        collections
+            .into_iter()
+            .filter(|collection| {
+                // Filter out disabled collections
+                if self.disabled_collections.contains(&collection.id) {
+                    tracing::warn!(
+                        "Skipping garbage collection for disabled collection: {}",
+                        collection.id
+                    );
+                    return false;
+                }
+
+                // Only include collections assigned to this member
+                match self
+                    .assignment_policy
+                    .assign_one(&collection.id.0.to_string())
+                {
+                    Ok(member) => member == self.my_member_id,
+                    Err(err) => {
+                        tracing::error!("Failed to assign collection {}: {}", collection.id, err);
+                        false
+                    }
+                }
+            })
+            .collect()
+    }
+}
+
+#[async_trait]
+impl Handler<Memberlist> for GarbageCollector {
+    type Result = ();
+
+    async fn handle(&mut self, message: Memberlist, _ctx: &ComponentContext<GarbageCollector>) {
+        self.memberlist = message;
+    }
 }
 
 #[derive(Debug)]
@@ -192,15 +257,6 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
         _message: GarbageCollectMessage,
         ctx: &ComponentContext<Self>,
     ) -> Self::Result {
-        // Get all collections to gc and create gc orchestrator for each.
-        tracing::info!("Getting collections to gc");
-        let collections_to_gc = self
-            .sysdb_client
-            .get_collections_to_gc()
-            .await
-            .expect("Failed to get collections to gc");
-        tracing::info!("Got {} collections to gc", collections_to_gc.len());
-
         let absolute_cutoff_time =
             DateTime::<Utc>::from(SystemTime::now() - self.relative_cutoff_time);
         tracing::info!(
@@ -209,7 +265,25 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
             self.relative_cutoff_time
         );
 
+        // Get all collections to gc and create gc orchestrator for each.
+        tracing::info!("Getting collections to gc");
+        let collections_to_gc = self
+            .sysdb_client
+            .get_collections_to_gc(
+                Some(absolute_cutoff_time.into()),
+                Some(self.max_collections_to_gc.into()),
+            )
+            .await
+            .expect("Failed to get collections to gc");
+        tracing::info!("Got {} total collections", collections_to_gc.len());
+        let collections_to_gc = self.filter_collections(collections_to_gc);
+        tracing::info!(
+            "Filtered to {} collections to garbage collect",
+            collections_to_gc.len()
+        );
+
         let mut jobs = FuturesUnordered::new();
+
         for collection in collections_to_gc {
             if self.disabled_collections.contains(&collection.id) {
                 tracing::warn!(
@@ -308,6 +382,10 @@ impl Configurable<GarbageCollectorConfig> for GarbageCollector {
             disabled_collections.insert(collection_id);
         }
 
+        let assignment_policy =
+            Box::<dyn AssignmentPolicy>::try_from_config(&config.assignment_policy, registry)
+                .await?;
+
         Ok(GarbageCollector::new(
             config.gc_interval_mins as u64,
             config.relative_cutoff_time,
@@ -317,6 +395,8 @@ impl Configurable<GarbageCollectorConfig> for GarbageCollector {
             storage,
             config.default_mode,
             config.tenant_mode_overrides.clone(),
+            assignment_policy,
+            config.my_member_id.clone(),
         ))
     }
 }
@@ -325,6 +405,7 @@ impl Configurable<GarbageCollectorConfig> for GarbageCollector {
 mod tests {
     use super::*;
     use crate::helper::ChromaGrpcClients;
+    use chroma_memberlist::memberlist_provider::Member;
     use chroma_storage::config::{
         ObjectStoreBucketConfig, ObjectStoreConfig, ObjectStoreType, StorageConfig,
     };
@@ -523,6 +604,9 @@ mod tests {
             }),
             default_mode: CleanupMode::DryRun,
             tenant_mode_overrides: Some(tenant_mode_overrides),
+            assignment_policy: chroma_config::assignment::config::AssignmentPolicyConfig::default(),
+            my_member_id: "test-gc".to_string(),
+            memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig::default(),
         };
         let registry = Registry::new();
 
@@ -558,7 +642,19 @@ mod tests {
 
         garbage_collector_component.set_dispatcher(dispatcher_handle);
         garbage_collector_component.set_system(system.clone());
-        let garbage_collector_handle = system.start_component(garbage_collector_component);
+        let mut garbage_collector_handle = system.start_component(garbage_collector_component);
+
+        garbage_collector_handle
+            .send(
+                vec![Member {
+                    member_id: "test-gc".to_string(),
+                    member_ip: "0.0.0.0".to_string(),
+                    member_node_name: "test-gc-node".to_string(),
+                }],
+                None,
+            )
+            .await
+            .unwrap();
 
         garbage_collector_handle
             .request(GarbageCollectMessage {}, Some(Span::current()))

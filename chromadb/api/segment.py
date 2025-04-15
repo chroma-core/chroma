@@ -46,6 +46,8 @@ from chromadb.api.types import (
     validate_where,
     validate_where_document,
     validate_batch,
+    IncludeMetadataDocuments,
+    IncludeMetadataDocumentsDistances,
 )
 from chromadb.telemetry.product.events import (
     CollectionAddEvent,
@@ -598,13 +600,10 @@ class SegmentAPI(ServerAPI):
         collection_id: UUID,
         ids: Optional[IDs] = None,
         where: Optional[Where] = None,
-        sort: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
-        page: Optional[int] = None,
-        page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = ["embeddings", "metadatas", "documents"],  # type: ignore[list-item]
+        include: Include = IncludeMetadataDocuments,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> GetResult:
@@ -632,13 +631,6 @@ class SegmentAPI(ServerAPI):
             where_document=where_document,
             limit=limit,
         )
-
-        if sort is not None:
-            raise NotImplementedError("Sorting is not yet supported")
-
-        if page and page_size:
-            offset = (page - 1) * page_size
-            limit = page_size
 
         ids_amount = len(ids) if ids else 0
         self._product_telemetry_client.capture(
@@ -786,7 +778,7 @@ class SegmentAPI(ServerAPI):
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = ["documents", "metadatas", "distances"],  # type: ignore[list-item]
+        include: Include = IncludeMetadataDocumentsDistances,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> QueryResult:

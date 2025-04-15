@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use arrow::array::{ArrayRef, BinaryArray, RecordBatch, UInt64Array};
+use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
 use chroma_storage::{PutOptions, Storage, StorageError};
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
@@ -263,7 +264,7 @@ impl OnceLogWriter {
             writer,
         )
         .await?;
-        manifest_manager.recover().await?;
+        manifest_manager.recover(&*mark_dirty).await?;
         let flusher = Mutex::new(None);
         let this = Arc::new(Self {
             options,
@@ -491,7 +492,11 @@ pub async fn upload_parquet(
         tracing::info!("upload_parquet: {:?}", path);
         let (buffer, setsum) = construct_parquet(log_position, &messages)?;
         match storage
-            .put_bytes(&path, buffer.clone(), PutOptions::if_not_exists())
+            .put_bytes(
+                &path,
+                buffer.clone(),
+                PutOptions::if_not_exists(StorageRequestPriority::P0),
+            )
             .await
         {
             Ok(_) => {

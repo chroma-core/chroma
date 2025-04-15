@@ -123,7 +123,8 @@ pub struct CompactOrchestrator {
     result_channel: Option<Sender<Result<CompactionResponse, CompactionError>>>,
     num_uncompleted_materialization_tasks: usize,
     num_uncompleted_tasks_by_segment: HashMap<SegmentUuid, usize>,
-    collection_logical_size_bytes: i64,
+    collection_logical_size_delta_bytes: i64,
+    // How much to pull from fetch_logs
     pulled_log_offset: i64,
     state: ExecutionState,
 
@@ -132,7 +133,6 @@ pub struct CompactOrchestrator {
 
     // We track a parent span for each segment type so we can group all the spans for a given segment type (makes the resulting trace much easier to read)
     segment_spans: HashMap<SegmentUuid, Span>,
-    // How much to pull from fetch_logs
 }
 
 #[derive(Error, Debug)]
@@ -240,7 +240,7 @@ impl CompactOrchestrator {
             result_channel,
             num_uncompleted_materialization_tasks: 0,
             num_uncompleted_tasks_by_segment: HashMap::new(),
-            collection_logical_size_bytes: 0,
+            collection_logical_size_delta_bytes: 0,
             pulled_log_offset: 0,
             state: ExecutionState::Pending,
             total_records_post_compaction: 0,
@@ -268,7 +268,7 @@ impl CompactOrchestrator {
     ) {
         self.state = ExecutionState::MaterializeApplyCommitFlush;
 
-        // NOTE: We allow writers no be uninitialized for the case when the materialized logs are empty
+        // NOTE: We allow writers to be uninitialized for the case when the materialized logs are empty
         let record_reader = self
             .get_segment_writers()
             .ok()
@@ -408,6 +408,24 @@ impl CompactOrchestrator {
             Some(collection) => collection,
             None => return,
         };
+        let collection_logical_size_bytes = if self.rebuild {
+            match u64::try_from(self.collection_logical_size_delta_bytes) {
+                Ok(size_bytes) => size_bytes,
+                _ => {
+                    self.terminate_with_result(
+                        Err(CompactionError::InvariantViolation(
+                            "The collection size delta after rebuild should be non-negative",
+                        )),
+                        ctx,
+                    );
+                    return;
+                }
+            }
+        } else {
+            collection
+                .size_bytes_post_compaction
+                .saturating_add_signed(self.collection_logical_size_delta_bytes)
+        };
         let operator = RegisterOperator::new();
         let input = RegisterInput::new(
             collection.tenant,
@@ -416,9 +434,7 @@ impl CompactOrchestrator {
             collection.version,
             self.flush_results.clone().into(),
             self.total_records_post_compaction,
-            // WARN: For legacy collections the logical size is initialized to zero, so the size after compaction might be negative
-            // TODO: Backfill collection logical size
-            u64::try_from(self.collection_logical_size_bytes).unwrap_or_default(),
+            collection_logical_size_bytes,
             self.sysdb.clone(),
             self.log.clone(),
         );
@@ -550,10 +566,6 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             return;
         };
 
-        self.collection_logical_size_bytes = match self.rebuild {
-            true => 0,
-            false => collection.size_bytes_post_compaction as i64,
-        };
         self.pulled_log_offset = collection.log_position;
 
         let record_reader = match self.ok_or_terminate(
@@ -632,14 +644,14 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             Some(writer) => writer,
             None => return,
         };
-        let vector_writer = match vector_segment.r#type {
+        let (vector_writer, is_vector_segment_spann) = match vector_segment.r#type {
             SegmentType::Spann => match self.ok_or_terminate(
                 self.spann_provider
                     .write(&collection, &vector_segment, dimension)
                     .await,
                 ctx,
             ) {
-                Some(writer) => VectorSegmentWriter::Spann(writer),
+                Some(writer) => (VectorSegmentWriter::Spann(writer), true),
                 None => return,
             },
             _ => match self.ok_or_terminate(
@@ -653,7 +665,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                 .map_err(|err| *err),
                 ctx,
             ) {
-                Some(writer) => VectorSegmentWriter::Hnsw(writer),
+                Some(writer) => (VectorSegmentWriter::Hnsw(writer), false),
                 None => return,
             },
         };
@@ -678,7 +690,13 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         // Prefetch segments
         let prefetch_segments = match self.rebuild {
             true => vec![output.record_segment],
-            false => vec![output.metadata_segment, output.record_segment],
+            false => {
+                let mut segments = vec![output.metadata_segment, output.record_segment];
+                if is_vector_segment_spann {
+                    segments.push(output.vector_segment);
+                }
+                segments
+            }
         };
         for segment in prefetch_segments {
             let prefetch_task = wrap(
@@ -823,7 +841,7 @@ impl Handler<TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>>
                 self.register(ctx).await;
             }
         } else {
-            self.collection_logical_size_bytes += output.collection_logical_size_delta;
+            self.collection_logical_size_delta_bytes += output.collection_logical_size_delta;
             self.dispatch_apply_log_to_segment_writer_tasks(output.result, ctx)
                 .await;
         }
@@ -868,7 +886,7 @@ impl Handler<TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOp
             }
         };
 
-        if num_tasks_left == 0 {
+        if num_tasks_left == 0 && self.num_uncompleted_materialization_tasks == 0 {
             let segment_writer = self.get_segment_writer_by_id(message.segment_id).await;
             let segment_writer = match self.ok_or_terminate(segment_writer, ctx) {
                 Some(writer) => writer,

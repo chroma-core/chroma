@@ -50,7 +50,7 @@ jobs:
           cache-dependency-path: 'clients/js/pnpm-lock.yaml'
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --no-frozen-lockfile
         working-directory: ./clients/js/
 
       - name: Build packages
