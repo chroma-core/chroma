@@ -33,7 +33,7 @@ pub fn init_global_filter_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
                 "compaction_service",
                 "distance_metrics",
                 "full_text",
-                "hosted_frontend",
+                "hosted-frontend",
                 "metadata_filtering",
                 "query_service",
                 "wal3",
