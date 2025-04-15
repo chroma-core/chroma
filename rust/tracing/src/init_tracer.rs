@@ -119,7 +119,7 @@ pub fn init_stdout_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
     fmt::layer()
         .pretty()
         .with_target(false)
-        .with_filter(filter::LevelFilter::INFO)
+        .with_filter(filter::LevelFilter::TRACE)
         .boxed()
 }
 
