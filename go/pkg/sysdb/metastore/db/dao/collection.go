@@ -102,9 +102,9 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 		CollectionUpdatedAt        *time.Time `gorm:"column:collection_updated_at"`
 		LogPosition                int64      `gorm:"column:log_position"`
 		Version                    int32      `gorm:"column:version"`
-		VersionFileName            string     `gorm:"column:version_file_name"`
+		VersionFilePath            string     `gorm:"column:version_file_name"`
 		RootCollectionId           string     `gorm:"column:root_collection_id"`
-		LineageFileName            string     `gorm:"column:lineage_file_name"`
+		LineageFilePath            string     `gorm:"column:lineage_file_name"`
 		TotalRecordsPostCompaction uint64     `gorm:"column:total_records_post_compaction"`
 		SizeBytesPostCompaction    uint64     `gorm:"column:size_bytes_post_compaction"`
 		LastCompactionTimeSecs     uint64     `gorm:"column:last_compaction_time_secs"`
@@ -183,9 +183,9 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 				IsDeleted:                  r.IsDeleted,
 				LogPosition:                r.LogPosition,
 				Version:                    r.Version,
-				VersionFileName:            r.VersionFileName,
+				VersionFilePath:            r.VersionFilePath,
 				RootCollectionId:           r.RootCollectionId,
-				LineageFileName:            r.LineageFileName,
+				LineageFilePath:            r.LineageFilePath,
 				TotalRecordsPostCompaction: r.TotalRecordsPostCompaction,
 				SizeBytesPostCompaction:    r.SizeBytesPostCompaction,
 				LastCompactionTimeSecs:     r.LastCompactionTimeSecs,
@@ -458,4 +458,55 @@ func (s *collectionDb) UpdateVersionRelatedFields(collectionID, existingVersionF
 		return 0, result.Error
 	}
 	return result.RowsAffected, nil
+}
+
+func (s *collectionDb) LockCollection(collectionID *string) error {
+	err := s.db.Table("collections").
+		Where("collections.id = ?", collectionID).Clauses(clause.Locking{
+		Strength: "UPDATE",
+	}).Find(nil).Error
+	if err != nil {
+		return err
+	}
+
+	err = s.db.Table("collection_metadata").
+		Where("collection_metadata.id = ?", collectionID).Clauses(clause.Locking{
+		Strength: "UPDATE",
+	}).Find(nil).Error
+	if err != nil {
+		return err
+	}
+
+	var segments []*dbmodel.Segment
+	err = s.db.Table("segments").
+		Where("segments.collection_id = ?", collectionID).Clauses(clause.Locking{
+		Strength: "UPDATE",
+	}).Find(&segments).Error
+	if err != nil {
+		return err
+	}
+
+	var segmentIDs []*string
+	for _, segment := range segments {
+		segmentIDs = append(segmentIDs, &segment.ID)
+	}
+
+	err = s.db.Table("segment_metadata").
+		Where("segment_metadata.segment_id IN ?", segmentIDs).Clauses(clause.Locking{
+		Strength: "UPDATE",
+	}).Find(nil).Error
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *collectionDb) UpdateCollectionLineageFilePath(collectionID *string, currentLineageFilePath *string, newLineageFilePath *string) error {
+	return s.db.Model(&dbmodel.Collection{}).
+		Where("id = ? AND lineage_file_name = ?", collectionID, currentLineageFilePath).
+		Updates(map[string]interface{}{
+			"lineage_file_name": newLineageFilePath,
+		}).Error
+
 }

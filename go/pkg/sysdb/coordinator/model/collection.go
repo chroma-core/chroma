@@ -15,6 +15,8 @@ type Collection struct {
 	Ts                         types.Timestamp
 	LogPosition                int64
 	Version                    int32
+	RootCollectionId           types.UniqueID
+	LineageFilePath            string
 	UpdatedAt                  types.Timestamp
 	TotalRecordsPostCompaction uint64
 	SizeBytesPostCompaction    uint64 // Note: This represents the size of the records off the log

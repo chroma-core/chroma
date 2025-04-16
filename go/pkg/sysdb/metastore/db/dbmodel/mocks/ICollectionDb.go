@@ -284,6 +284,24 @@ func (_m *ICollectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint
 	return r0, r1
 }
 
+// LockCollection provides a mock function with given fields: collectionID
+func (_m *ICollectionDb) LockCollection(collectionID *string) error {
+	ret := _m.Called(collectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for LockCollection")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*string) error); ok {
+		r0 = rf(collectionID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // Update provides a mock function with given fields: in
 func (_m *ICollectionDb) Update(in *dbmodel.Collection) error {
 	ret := _m.Called(in)
@@ -302,9 +320,27 @@ func (_m *ICollectionDb) Update(in *dbmodel.Collection) error {
 	return r0
 }
 
-// UpdateLogPositionAndVersionInfo provides a mock function with given fields: collectionID, logPosition, currentCollectionVersion, currentVersionFileName, newCollectionVersion, newVersionFileName, totalRecordsPostCompaction, sizeBytesPostCompaction, lastCompactionTimeSecs
-func (_m *ICollectionDb) UpdateLogPositionAndVersionInfo(collectionID string, logPosition int64, currentCollectionVersion int32, currentVersionFileName string, newCollectionVersion int32, newVersionFileName string, totalRecordsPostCompaction uint64, sizeBytesPostCompaction uint64, lastCompactionTimeSecs uint64) (int64, error) {
-	ret := _m.Called(collectionID, logPosition, currentCollectionVersion, currentVersionFileName, newCollectionVersion, newVersionFileName, totalRecordsPostCompaction, sizeBytesPostCompaction, lastCompactionTimeSecs)
+// UpdateCollectionLineageFilePath provides a mock function with given fields: collectionID, currentLineageFilePath, newLineageFilePath
+func (_m *ICollectionDb) UpdateCollectionLineageFilePath(collectionID *string, currentLineageFilePath *string, newLineageFilePath *string) error {
+	ret := _m.Called(collectionID, currentLineageFilePath, newLineageFilePath)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateCollectionLineageFilePath")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*string, *string, *string) error); ok {
+		r0 = rf(collectionID, currentLineageFilePath, newLineageFilePath)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// UpdateLogPositionAndVersionInfo provides a mock function with given fields: collectionID, logPosition, currentCollectionVersion, currentVersionFilePath, newCollectionVersion, newVersionFilePath, totalRecordsPostCompaction, sizeBytesPostCompaction, lastCompactionTimeSecs
+func (_m *ICollectionDb) UpdateLogPositionAndVersionInfo(collectionID string, logPosition int64, currentCollectionVersion int32, currentVersionFilePath string, newCollectionVersion int32, newVersionFilePath string, totalRecordsPostCompaction uint64, sizeBytesPostCompaction uint64, lastCompactionTimeSecs uint64) (int64, error) {
+	ret := _m.Called(collectionID, logPosition, currentCollectionVersion, currentVersionFilePath, newCollectionVersion, newVersionFilePath, totalRecordsPostCompaction, sizeBytesPostCompaction, lastCompactionTimeSecs)
 
 	if len(ret) == 0 {
 		panic("no return value specified for UpdateLogPositionAndVersionInfo")
@@ -313,16 +349,16 @@ func (_m *ICollectionDb) UpdateLogPositionAndVersionInfo(collectionID string, lo
 	var r0 int64
 	var r1 error
 	if rf, ok := ret.Get(0).(func(string, int64, int32, string, int32, string, uint64, uint64, uint64) (int64, error)); ok {
-		return rf(collectionID, logPosition, currentCollectionVersion, currentVersionFileName, newCollectionVersion, newVersionFileName, totalRecordsPostCompaction, sizeBytesPostCompaction, lastCompactionTimeSecs)
+		return rf(collectionID, logPosition, currentCollectionVersion, currentVersionFilePath, newCollectionVersion, newVersionFilePath, totalRecordsPostCompaction, sizeBytesPostCompaction, lastCompactionTimeSecs)
 	}
 	if rf, ok := ret.Get(0).(func(string, int64, int32, string, int32, string, uint64, uint64, uint64) int64); ok {
-		r0 = rf(collectionID, logPosition, currentCollectionVersion, currentVersionFileName, newCollectionVersion, newVersionFileName, totalRecordsPostCompaction, sizeBytesPostCompaction, lastCompactionTimeSecs)
+		r0 = rf(collectionID, logPosition, currentCollectionVersion, currentVersionFilePath, newCollectionVersion, newVersionFilePath, totalRecordsPostCompaction, sizeBytesPostCompaction, lastCompactionTimeSecs)
 	} else {
 		r0 = ret.Get(0).(int64)
 	}
 
 	if rf, ok := ret.Get(1).(func(string, int64, int32, string, int32, string, uint64, uint64, uint64) error); ok {
-		r1 = rf(collectionID, logPosition, currentCollectionVersion, currentVersionFileName, newCollectionVersion, newVersionFileName, totalRecordsPostCompaction, sizeBytesPostCompaction, lastCompactionTimeSecs)
+		r1 = rf(collectionID, logPosition, currentCollectionVersion, currentVersionFilePath, newCollectionVersion, newVersionFilePath, totalRecordsPostCompaction, sizeBytesPostCompaction, lastCompactionTimeSecs)
 	} else {
 		r1 = ret.Error(1)
 	}

@@ -261,7 +261,7 @@ func (tc *Catalog) GetAllTenants(ctx context.Context, ts types.Timestamp) ([]*mo
 	return result, nil
 }
 
-func (tc *Catalog) createCollectionImpl(txCtx context.Context, createCollection *model.CreateCollection, versionFileName string, ts types.Timestamp) (*model.Collection, bool, error) {
+func (tc *Catalog) createCollectionImpl(txCtx context.Context, createCollection *model.CreateCollection, versionFilePath string, ts types.Timestamp) (*model.Collection, bool, error) {
 	// insert collection
 	databaseName := createCollection.DatabaseName
 	tenantID := createCollection.TenantID
@@ -298,7 +298,7 @@ func (tc *Catalog) createCollectionImpl(txCtx context.Context, createCollection 
 		DatabaseID:           databases[0].ID,
 		Ts:                   ts,
 		LogPosition:          0,
-		VersionFileName:      versionFileName,
+		VersionFilePath:      versionFilePath,
 		Tenant:               createCollection.TenantID,
 	}
 
@@ -813,23 +813,104 @@ func (tc *Catalog) UpdateCollection(ctx context.Context, updateCollection *model
 	return result, nil
 }
 
+func (tc *Catalog) getLineageFile(ctx context.Context, collection *model.Collection) (*coordinatorpb.CollectionLineageFile, error) {
+	if len(collection.LineageFilePath) == 0 {
+		// There is no lineage file for the given collection
+		return &coordinatorpb.CollectionLineageFile{
+			Dependencies: []*coordinatorpb.CollectionVersionDependency{},
+		}, nil
+	}
+
+	return tc.s3Store.GetLineageFile(collection.LineageFilePath)
+}
+
 func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.ForkCollection) (*model.Collection, []*model.Segment, error) {
 	log.Info("Forking collection", zap.String("sourceCollectionId", forkCollection.SourceCollectionID.String()), zap.String("targetCollectionName", forkCollection.TargetCollectionName))
 
-	var source_collection *model.Collection
-	var source_segments []*model.Segment
+	var targetCollection *model.Collection
+	var targetSegments []*model.Segment
 
 	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		var err error
-		source_collection, source_segments, err = tc.GetCollectionWithSegments(ctx, forkCollection.SourceCollectionID)
-		return err
+		var rootCollection *model.Collection
+		var sourceCollection *model.Collection
+		var sourceSegments []*model.Segment
+		var newCollection *model.Collection
+		var newLineageFilePath string
+
+		sourceCollectionIDStr := forkCollection.SourceCollectionID.String()
+		err = tc.metaDomain.CollectionDb(ctx).LockCollection(&sourceCollectionIDStr)
+		if err != nil {
+			return err
+		}
+		sourceCollection, sourceSegments, err = tc.GetCollectionWithSegments(ctx, forkCollection.SourceCollectionID)
+		if err != nil {
+			return err
+		}
+
+		rootCollectionID := sourceCollection.RootCollectionId
+		rootCollectionIDStr := sourceCollection.RootCollectionId.String()
+		err = tc.metaDomain.CollectionDb(ctx).LockCollection(&rootCollectionIDStr)
+		if err != nil {
+			return err
+		}
+
+		ts := time.Now().UTC()
+
+		createCollection := &model.CreateCollection{
+			ID:                   types.NewUniqueID(),
+			Name:                 *forkCollection.TargetCollectionName,
+			ConfigurationJsonStr: sourceCollection.ConfigurationJsonStr,
+			Dimension:            sourceCollection.Dimension,
+			Metadata:             sourceCollection.Metadata,
+			GetOrCreate:          false,
+			TenantID:             sourceCollection.TenantID,
+			DatabaseName:         sourceCollection.TenantID,
+			Ts:                   ts.Unix(),
+		}
+
+		createSegments := []*model.CreateSegment{}
+		for _, segment := range sourceSegments {
+			createSegment := &model.CreateSegment{
+				ID:           types.NewUniqueID(),
+				Type:         segment.Type,
+				Scope:        segment.Scope,
+				CollectionID: createCollection.ID,
+				Metadata:     segment.Metadata,
+				Ts:           ts.Unix(),
+			}
+			createSegments = append(createSegments, createSegment)
+		}
+
+		newCollection, _, err = tc.CreateCollectionAndSegments(ctx, createCollection, createSegments, ts.Unix())
+		if err != nil {
+			return err
+		}
+
+		rootCollection, _, err = tc.GetCollectionWithSegments(ctx, rootCollectionID)
+		lineageFile, err := tc.getLineageFile(ctx, rootCollection)
+		if err != nil {
+			return err
+		}
+		lineageFile.Dependencies = append(lineageFile.Dependencies, &coordinatorpb.CollectionVersionDependency{
+			SourceCollectionId:      sourceCollectionIDStr,
+			SourceCollectionVersion: uint64(sourceCollection.Version),
+			TargetCollectionId:      newCollection.ID.String(),
+		})
+
+		newLineageFileName := fmt.Sprintf("%d/%d/%d/%d-%d-%d-%s-%d-%s.binpb", ts.Year(), ts.Month(), ts.Day(), ts.Hour(), ts.Minute(), ts.Second(), sourceCollectionIDStr, sourceCollection.Version, newCollection.ID.String())
+		newLineageFilePath, err = tc.s3Store.PutLineageFile(rootCollection.TenantID, rootCollection.DatabaseName, rootCollectionIDStr, newLineageFileName, lineageFile)
+		if err != nil {
+			return err
+		}
+
+		return tc.metaDomain.CollectionDb(ctx).UpdateCollectionLineageFilePath(&rootCollectionIDStr, &rootCollection.LineageFilePath, &newLineageFilePath)
 	})
 	if err != nil {
 		return nil, nil, err
 	}
 
-	// TODO: Implement forking logic
-	return source_collection, source_segments, nil
+	return targetCollection, targetSegments, nil
 }
 
 func (tc *Catalog) CreateSegment(ctx context.Context, createSegment *model.CreateSegment, ts types.Timestamp) (*model.Segment, error) {
@@ -1146,9 +1227,9 @@ func (tc *Catalog) ListCollectionVersions(ctx context.Context,
 		zap.String("tenant_id", tenantID),
 		zap.String("collection_id", collectionID.String()),
 		zap.Int64("version", int64(collectionEntry.Version)),
-		zap.String("version_file_name", collectionEntry.VersionFileName))
+		zap.String("version_file_name", collectionEntry.VersionFilePath))
 
-	versionFile, err := tc.s3Store.GetVersionFile(tenantID, collectionID.String(), int64(collectionEntry.Version), collectionEntry.VersionFileName)
+	versionFile, err := tc.s3Store.GetVersionFile(collectionEntry.VersionFilePath)
 	if err != nil {
 		log.Error("error getting version file", zap.Error(err))
 		return nil, err
@@ -1371,9 +1452,9 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 			return nil, common.ErrCollectionVersionInvalid
 		}
 
-		existingVersionFileName := collectionEntry.VersionFileName
+		existingVersionFilePath := collectionEntry.VersionFilePath
 		var existingVersionFilePb *coordinatorpb.CollectionVersionFile
-		if existingVersionFileName == "" {
+		if existingVersionFilePath == "" {
 			// The VersionFile has not been created.
 			existingVersionFilePb = &coordinatorpb.CollectionVersionFile{
 				CollectionInfoImmutable: &coordinatorpb.CollectionInfoImmutable{
@@ -1389,7 +1470,7 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 			}
 		} else {
 			// Read the VersionFile from S3MetaStore.
-			existingVersionFilePb, err = tc.s3Store.GetVersionFile(flushCollectionCompaction.TenantID, flushCollectionCompaction.ID.String(), existingVersion, existingVersionFileName)
+			existingVersionFilePb, err = tc.s3Store.GetVersionFile(existingVersionFilePath)
 			if err != nil {
 				return nil, err
 			}
@@ -1405,7 +1486,7 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 		// The update function takes the content of the existing version file,
 		// and the set of segments that are part of the new version file.
 		// NEW VersionFile is created in S3 at this step.
-		newVersionFileName, err := tc.updateVersionFileInS3(ctx, existingVersionFilePb, flushCollectionCompaction, time.Now().Unix())
+		newVersionFilePath, err := tc.updateVersionFileInS3(ctx, existingVersionFilePb, flushCollectionCompaction, time.Now().Unix())
 		if err != nil {
 			return nil, err
 		}
@@ -1445,9 +1526,9 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 				flushCollectionCompaction.ID.String(),
 				flushCollectionCompaction.LogPosition,
 				flushCollectionCompaction.CurrentCollectionVersion,
-				existingVersionFileName,
+				existingVersionFilePath,
 				flushCollectionCompaction.CurrentCollectionVersion+1,
-				newVersionFileName,
+				newVersionFilePath,
 				flushCollectionCompaction.TotalRecordsPostCompaction,
 				flushCollectionCompaction.SizeBytesPostCompaction,
 				// SAFETY(hammadb): This int64 to uint64 conversion is ok because we always are in post-epoch time.
@@ -1495,8 +1576,8 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 			log.Info("version file name stale, retrying",
 				zap.Int("attempt", numAttempts),
 				zap.Int("max_attempts", maxAttempts),
-				zap.String("existing_version_file_name", existingVersionFileName),
-				zap.String("committed_version_file_name", newVersionFileName))
+				zap.String("existing_version_file_path", existingVersionFilePath),
+				zap.String("committed_version_file_path", newVersionFilePath))
 			continue
 
 		default:
@@ -1583,8 +1664,8 @@ func (tc *Catalog) markVersionForDeletionInSingleCollection(
 		}
 		// TODO(rohit): log error if collection in file is different from the one in request.
 
-		existingVersionFileName := collectionEntry.VersionFileName
-		versionFilePb, err := tc.s3Store.GetVersionFile(tenantID, collectionID, int64(collectionEntry.Version), existingVersionFileName)
+		existingVersionFilePath := collectionEntry.VersionFilePath
+		versionFilePb, err := tc.s3Store.GetVersionFile(existingVersionFilePath)
 		if err != nil {
 			return err
 		}
@@ -1609,7 +1690,7 @@ func (tc *Catalog) markVersionForDeletionInSingleCollection(
 
 		// Update the version file name in Postgres table as a CAS operation.
 		// TODO(rohit): Investigate if we really need a Tx here.
-		rowsAffected, err := tc.metaDomain.CollectionDb(ctx).UpdateVersionRelatedFields(collectionID, existingVersionFileName, newVerFileFullPath, nil, nil)
+		rowsAffected, err := tc.metaDomain.CollectionDb(ctx).UpdateVersionRelatedFields(collectionID, existingVersionFilePath, newVerFileFullPath, nil, nil)
 		if err != nil {
 			// Delete the newly created version file from S3 since it is not needed.
 			tc.s3Store.DeleteVersionFile(tenantID, collectionEntry.DatabaseID, collectionID, newVersionFileName)
@@ -1707,8 +1788,8 @@ func (tc *Catalog) DeleteVersionEntriesForCollection(ctx context.Context, tenant
 			return common.ErrCollectionNotFound
 		}
 
-		existingVersionFileName := collectionEntry.VersionFileName
-		versionFilePb, err := tc.s3Store.GetVersionFile(tenantID, collectionID, int64(collectionEntry.Version), existingVersionFileName)
+		existingVersionFilePath := collectionEntry.VersionFilePath
+		versionFilePb, err := tc.s3Store.GetVersionFile(existingVersionFilePath)
 		if err != nil {
 			return err
 		}
@@ -1746,7 +1827,7 @@ func (tc *Catalog) DeleteVersionEntriesForCollection(ctx context.Context, tenant
 		}
 
 		// Update the version file name in Postgres table as a CAS operation
-		rowsAffected, err := tc.metaDomain.CollectionDb(ctx).UpdateVersionRelatedFields(collectionID, existingVersionFileName, newVerFileFullPath, &oldestVersionTs, &numActiveVersions)
+		rowsAffected, err := tc.metaDomain.CollectionDb(ctx).UpdateVersionRelatedFields(collectionID, existingVersionFilePath, newVerFileFullPath, &oldestVersionTs, &numActiveVersions)
 		if err != nil {
 			// Delete the newly created version file from S3 since it is not needed
 			tc.s3Store.DeleteVersionFile(tenantID, collectionEntry.DatabaseID, collectionID, newVersionFileName)
@@ -1786,5 +1867,5 @@ func (tc *Catalog) GetVersionFileNamesForCollection(ctx context.Context, tenantI
 		return "", common.ErrCollectionNotFound
 	}
 
-	return collectionEntry.VersionFileName, nil
+	return collectionEntry.VersionFilePath, nil
 }
