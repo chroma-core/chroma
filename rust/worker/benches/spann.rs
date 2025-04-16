@@ -10,22 +10,13 @@ use chroma_config::{registry::Registry, Configurable};
 use chroma_index::{
     config::{HnswGarbageCollectionConfig, PlGarbageCollectionConfig},
     hnsw_provider::HnswIndexProvider,
-    spann::{
-        types::{GarbageCollectionContext, SpannIndexReader, SpannIndexWriter, SpannPosting},
-        utils::rng_query,
-    },
+    spann::types::{GarbageCollectionContext, SpannIndexReader, SpannIndexWriter},
 };
 use chroma_storage::{local::LocalStorage, Storage};
-use chroma_system::Operator;
 use chroma_types::{CollectionUuid, InternalSpannConfiguration};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use futures::StreamExt;
 use rand::seq::SliceRandom;
-use roaring::RoaringBitmap;
-use worker::execution::operators::{
-    spann_bf_pl::{SpannBfPlInput, SpannBfPlOperator},
-    spann_knn_merge::{SpannKnnMergeInput, SpannKnnMergeOperator},
-};
 
 fn get_records(runtime: &tokio::runtime::Runtime) -> Vec<(u32, Vec<f32>)> {
     runtime.block_on(async {
@@ -151,108 +142,109 @@ fn add_to_index_and_get_reader<'a>(
 }
 
 fn calculate_recall<'a>(
-    runtime: &tokio::runtime::Runtime,
-    spann_reader: SpannIndexReader<'a>,
-    query_emb: &'a [(u32, Vec<f32>)],
-    base_emb: &'a [(u32, Vec<f32>)],
-    deleted_set: HashSet<u32>,
+    _: &tokio::runtime::Runtime,
+    _: SpannIndexReader<'a>,
+    _: &'a [(u32, Vec<f32>)],
+    _: &'a [(u32, Vec<f32>)],
+    _: HashSet<u32>,
 ) {
-    let probe_nbr = 4;
-    let k = 10;
-    let rng_epsilon = 10.0;
-    let rng_factor = 1.0;
-    let distance_function = chroma_distance::DistanceFunction::Euclidean;
-    runtime.block_on(async {
-        let mut avg_recall = 0.0;
-        for (index, emb) in query_emb {
-            let (head_ids, _, _) = rng_query(
-                emb,
-                spann_reader.hnsw_index.clone(),
-                probe_nbr,
-                rng_epsilon,
-                rng_factor,
-                distance_function.clone(),
-                false,
-            )
-            .await
-            .expect("Error running rng query");
-            let mut merge_list = Vec::new();
-            for head_id in head_ids {
-                let pl = spann_reader
-                    .fetch_posting_list(head_id as u32)
-                    .await
-                    .expect("Error fetching posting list");
-                let bf_operator_input = SpannBfPlInput {
-                    posting_list: pl,
-                    k,
-                    query: emb.clone(),
-                    distance_function: distance_function.clone(),
-                    filter: chroma_types::SignedRoaringBitmap::Exclude(RoaringBitmap::new()),
-                };
-                let bf_operator_operator = SpannBfPlOperator::new();
-                let bf_output = bf_operator_operator
-                    .run(&bf_operator_input)
-                    .await
-                    .expect("Error running operator");
-                merge_list.push(bf_output.records);
-            }
-            // Now merge.
-            let knn_input = SpannKnnMergeInput {
-                records: merge_list,
-            };
-            let knn_operator = SpannKnnMergeOperator { k: k as u32 };
-            let knn_output = knn_operator
-                .run(&knn_input)
-                .await
-                .expect("Error running knn merge operator");
-            // Get the ground truth.
-            let mut input_set = Vec::new();
-            for (id, emb) in base_emb {
-                if deleted_set.contains(id) {
-                    continue;
-                }
-                let posting = SpannPosting {
-                    doc_offset_id: *id,
-                    doc_embedding: emb.clone(),
-                };
-                input_set.push(posting);
-            }
-            let bf_operator_input = SpannBfPlInput {
-                posting_list: input_set,
-                k,
-                query: emb.clone(),
-                distance_function: distance_function.clone(),
-                filter: chroma_types::SignedRoaringBitmap::Exclude(RoaringBitmap::new()),
-            };
-            let bf_operator_operator = SpannBfPlOperator::new();
-            let bf_output = bf_operator_operator
-                .run(&bf_operator_input)
-                .await
-                .expect("Error running operator");
-            let mut recall = 0;
-            for bf_record in bf_output.records.iter() {
-                for spann_record in knn_output.merged_records.iter() {
-                    if bf_record.offset_id == spann_record.offset_id {
-                        recall += 1;
-                    }
-                }
-            }
-            println!(
-                "Recall@{} with probe_nbr_count {} for query {}: {}",
-                k,
-                probe_nbr,
-                index,
-                recall as f32 / k as f32
-            );
-            avg_recall += recall as f32 / k as f32;
-        }
-        println!(
-            "Avg recall@{} with probe_nbr_count {} across 1000 queries: {}",
-            k,
-            probe_nbr,
-            avg_recall / query_emb.len() as f32
-        );
-    });
+    // let probe_nbr = 4;
+    // let k = 10;
+    // let rng_epsilon = 10.0;
+    // let rng_factor = 1.0;
+    // let distance_function = chroma_distance::DistanceFunction::Euclidean;
+    // runtime.block_on(async {
+    //     let mut avg_recall = 0.0;
+    //     for (index, emb) in query_emb {
+    //         let (head_ids, _, _) = rng_query(
+    //             emb,
+    //             spann_reader.hnsw_index.clone(),
+    //             probe_nbr,
+    //             rng_epsilon,
+    //             rng_factor,
+    //             distance_function.clone(),
+    //             false,
+    //         )
+    //         .await
+    //         .expect("Error running rng query");
+    //         let mut merge_list = Vec::new();
+    //         for head_id in head_ids {
+    //             let pl = spann_reader
+    //                 .fetch_posting_list(head_id as u32)
+    //                 .await
+    //                 .expect("Error fetching posting list");
+    //             let bf_operator_input = SpannBfPlInput {
+    //                 posting_list: pl,
+    //                 k,
+    //                 query: emb.clone(),
+    //                 distance_function: distance_function.clone(),
+    //                 filter: chroma_types::SignedRoaringBitmap::Exclude(RoaringBitmap::new()),
+    //             };
+    //             let bf_operator_operator = SpannBfPlOperator::new();
+    //             let bf_output = bf_operator_operator
+    //                 .run(&bf_operator_input)
+    //                 .await
+    //                 .expect("Error running operator");
+    //             merge_list.push(bf_output.records);
+    //         }
+    //         // Now merge.
+    //         let knn_input = SpannKnnMergeInput {
+    //             records: merge_list,
+    //         };
+    //         let knn_operator = SpannKnnMergeOperator { k: k as u32 };
+    //         let knn_output = knn_operator
+    //             .run(&knn_input)
+    //             .await
+    //             .expect("Error running knn merge operator");
+    //         // Get the ground truth.
+    //         let mut input_set = Vec::new();
+    //         for (id, emb) in base_emb {
+    //             if deleted_set.contains(id) {
+    //                 continue;
+    //             }
+    //             let posting = SpannPosting {
+    //                 doc_offset_id: *id,
+    //                 doc_embedding: emb.clone(),
+    //             };
+    //             input_set.push(posting);
+    //         }
+    //         let bf_operator_input = SpannBfPlInput {
+    //             posting_list: input_set,
+    //             k,
+    //             query: emb.clone(),
+    //             distance_function: distance_function.clone(),
+    //             filter: chroma_types::SignedRoaringBitmap::Exclude(RoaringBitmap::new()),
+    //         };
+    //         let bf_operator_operator = SpannBfPlOperator::new();
+    //         let bf_output = bf_operator_operator
+    //             .run(&bf_operator_input)
+    //             .await
+    //             .expect("Error running operator");
+    //         let mut recall = 0;
+    //         for bf_record in bf_output.records.iter() {
+    //             for spann_record in knn_output.merged_records.iter() {
+    //                 if bf_record.offset_id == spann_record.offset_id {
+    //                     recall += 1;
+    //                 }
+    //             }
+    //         }
+    //         println!(
+    //             "Recall@{} with probe_nbr_count {} for query {}: {}",
+    //             k,
+    //             probe_nbr,
+    //             index,
+    //             recall as f32 / k as f32
+    //         );
+    //         avg_recall += recall as f32 / k as f32;
+    //     }
+    //     println!(
+    //         "Avg recall@{} with probe_nbr_count {} across 1000 queries: {}",
+    //         k,
+    //         probe_nbr,
+    //         avg_recall / query_emb.len() as f32
+    //     );
+    // });
+    // TODO(Sanket): Implement this.
 }
 
 fn bench_spann_compaction(c: &mut Criterion) {

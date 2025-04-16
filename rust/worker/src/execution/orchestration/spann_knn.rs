@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_segment::{distributed_spann::SpannSegmentReader, spann_provider::SpannProvider};
@@ -7,6 +9,7 @@ use chroma_system::{
 };
 use chroma_types::Collection;
 use tokio::sync::oneshot::Sender;
+use uuid::Uuid;
 
 use crate::execution::operators::{
     knn::{KnnOperator, RecordDistance},
@@ -25,8 +28,8 @@ use crate::execution::operators::{
         SpannCentersSearchError, SpannCentersSearchInput, SpannCentersSearchOperator,
         SpannCentersSearchOutput,
     },
-    spann_fetch_pl::{
-        SpannFetchPlError, SpannFetchPlInput, SpannFetchPlOperator, SpannFetchPlOutput,
+    spann_fetch_block::{
+        SpannFetchBlockError, SpannFetchBlockInput, SpannFetchBlockOperator, SpannFetchBlockOutput,
     },
     spann_knn_merge::{
         SpannKnnMergeError, SpannKnnMergeInput, SpannKnnMergeOperator, SpannKnnMergeOutput,
@@ -54,8 +57,7 @@ pub struct SpannKnnOrchestrator {
     log_knn: KnnOperator,
     // Spann segment knn operators.
     head_search: SpannCentersSearchOperator,
-    fetch_pl: SpannFetchPlOperator,
-    bf_pl: SpannBfPlOperator,
+    bf_pl: Box<SpannBfPlOperator>,
 
     // State tracking.
     heads_searched: bool,
@@ -64,6 +66,7 @@ pub struct SpannKnnOrchestrator {
 
     // Knn output
     records: Vec<Vec<RecordDistance>>,
+    block_ids_to_heads: HashMap<Uuid, Vec<u32>>,
 
     // Merge and project
     merge: SpannKnnMergeOperator,
@@ -105,8 +108,7 @@ impl SpannKnnOrchestrator {
                 fetch: k as u32,
             },
             head_search: SpannCentersSearchOperator {},
-            fetch_pl: SpannFetchPlOperator {},
-            bf_pl: SpannBfPlOperator {},
+            bf_pl: SpannBfPlOperator::new(),
             heads_searched: false,
             num_outstanding_bf_pl: 0,
             bruteforce_log_done: false,
@@ -115,6 +117,7 @@ impl SpannKnnOrchestrator {
             knn_projection,
             result_channel: None,
             spann_reader: None,
+            block_ids_to_heads: HashMap::new(),
         }
     }
 
@@ -275,54 +278,79 @@ impl Handler<TaskResult<SpannCentersSearchOutput, SpannCentersSearchError>>
         // Set state that is used for tracking when we are ready for merging.
         self.heads_searched = true;
         self.num_outstanding_bf_pl = output.center_ids.len();
-        // Spawn fetch posting list tasks for the centers.
-        for head_id in output.center_ids {
-            // Invoke Head search operator.
-            let fetch_pl_task = wrap(
-                Box::new(self.fetch_pl.clone()),
-                SpannFetchPlInput {
-                    reader: self.spann_reader.clone(),
-                    head_id: head_id as u32,
+
+        let centers = output
+            .center_ids
+            .iter()
+            .map(|id| *id as u32)
+            .collect::<Vec<_>>();
+        let block_id_to_heads = match &self.spann_reader {
+            Some(reader) => reader.group_heads_by_blocks(&centers).await,
+            None => {
+                tracing::error!("SpannSegmentReader is not set, cannot group heads by blocks");
+                self.terminate_with_result(Err(KnnError::SpannSegmentReaderNotFound), ctx);
+                return;
+            }
+        };
+        self.block_ids_to_heads = block_id_to_heads;
+        let block_ids = self.block_ids_to_heads.keys().cloned().collect::<Vec<_>>();
+        // Spanw block get tasks one per block.
+        for block_id in block_ids {
+            let fetch_block_task = wrap(
+                SpannFetchBlockOperator::new(),
+                SpannFetchBlockInput {
+                    provider: self.spann_provider.blockfile_provider.clone(),
+                    block_id,
                 },
                 ctx.receiver(),
             );
-
-            self.send(fetch_pl_task, ctx).await;
+            self.send(fetch_block_task, ctx).await;
         }
     }
 }
 
 #[async_trait]
-impl Handler<TaskResult<SpannFetchPlOutput, SpannFetchPlError>> for SpannKnnOrchestrator {
+impl Handler<TaskResult<SpannFetchBlockOutput, SpannFetchBlockError>> for SpannKnnOrchestrator {
     type Result = ();
 
     async fn handle(
         &mut self,
-        message: TaskResult<SpannFetchPlOutput, SpannFetchPlError>,
+        message: TaskResult<SpannFetchBlockOutput, SpannFetchBlockError>,
         ctx: &ComponentContext<Self>,
     ) {
         let output = match self.ok_or_terminate(message.into_inner(), ctx) {
             Some(output) => output,
             None => return,
         };
-        // Spawn brute force posting list task.
-        let bf_pl_task = wrap(
-            Box::new(self.bf_pl.clone()),
-            SpannBfPlInput {
-                posting_list: output.posting_list,
-                k: self.k,
-                filter: self
-                    .knn_filter_output
-                    .filter_output
-                    .compact_offset_ids
-                    .clone(),
-                distance_function: self.knn_filter_output.distance_function.clone(),
-                query: self.normalized_query_emb.clone(),
-            },
-            ctx.receiver(),
-        );
+        let heads = match self.block_ids_to_heads.get(&output.block.id) {
+            Some(heads) => heads.clone(),
+            None => {
+                return;
+            }
+        };
+        for head_id in heads {
+            // Spawn brute force posting list task.
+            let bf_pl_task = wrap(
+                self.bf_pl.clone(),
+                SpannBfPlInput {
+                    block: output.block.clone(),
+                    k: self.k,
+                    filter: self
+                        .knn_filter_output
+                        .filter_output
+                        .compact_offset_ids
+                        .clone(),
+                    distance_function: self.knn_filter_output.distance_function.clone(),
+                    query: self.normalized_query_emb.clone(),
+                    head_id,
+                    reader: self.spann_reader.clone(),
+                    dimension: self.knn_filter_output.dimension,
+                },
+                ctx.receiver(),
+            );
 
-        self.send(bf_pl_task, ctx).await;
+            self.send(bf_pl_task, ctx).await;
+        }
     }
 }
 

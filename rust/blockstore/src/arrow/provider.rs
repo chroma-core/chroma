@@ -88,6 +88,12 @@ impl ArrowBlockfileProvider {
         }
     }
 
+    pub async fn get_block(&self, block_id: &Uuid) -> Result<Option<Block>, GetError> {
+        self.block_manager
+            .get(block_id, StorageRequestPriority::P0)
+            .await
+    }
+
     pub async fn prefetch(&self, id: &Uuid) -> Result<usize, ArrowBlockfileProviderPrefetchError> {
         if !self.root_manager.should_prefetch(id) {
             return Ok(0);

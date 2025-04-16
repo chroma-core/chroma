@@ -451,6 +451,24 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         join_all(futures).await;
     }
 
+    pub(crate) async fn group_keys_by_blocks(
+        &self,
+        keys: impl IntoIterator<Item = (String, K)>,
+    ) -> HashMap<Uuid, Vec<K>> {
+        let mut block_ids_to_keys: HashMap<Uuid, Vec<K>> = HashMap::new();
+
+        for (prefix, key) in keys {
+            let composite_key = CompositeKey::new(prefix, key.clone());
+            let target_block_id = self.root.sparse_index.get_target_block_id(&composite_key);
+            block_ids_to_keys
+                .entry(target_block_id)
+                .or_default()
+                .push(key);
+        }
+
+        block_ids_to_keys
+    }
+
     pub(crate) async fn load_blocks_for_keys(&self, keys: impl IntoIterator<Item = (String, K)>) {
         let composite_keys = keys
             .into_iter()

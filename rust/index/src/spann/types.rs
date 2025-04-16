@@ -2123,7 +2123,7 @@ impl<'me> SpannIndexReader<'me> {
         })
     }
 
-    async fn is_outdated(
+    pub async fn is_outdated(
         &self,
         doc_offset_id: u32,
         doc_version: u32,
@@ -2144,41 +2144,14 @@ impl<'me> SpannIndexReader<'me> {
         Ok(actual_version == 0 || doc_version < actual_version)
     }
 
-    pub async fn fetch_posting_list(
-        &self,
-        head_id: u32,
-    ) -> Result<Vec<SpannPosting>, SpannIndexReaderError> {
-        let res = self
-            .posting_lists
-            .get("", head_id)
+    pub async fn group_heads_by_blocks(&self, head_ids: &[u32]) -> HashMap<Uuid, Vec<u32>> {
+        let keys = head_ids
+            .iter()
+            .map(|head_id| ("".to_string(), *head_id))
+            .collect::<Vec<_>>();
+        self.posting_lists
+            .group_keys_by_blocks(keys.into_iter())
             .await
-            .map_err(|e| {
-                tracing::error!("Error getting posting list for head {}: {}", head_id, e);
-                SpannIndexReaderError::PostingListReadError(e)
-            })?
-            .ok_or(SpannIndexReaderError::PostingListNotFound)?;
-
-        let mut posting_lists = Vec::with_capacity(res.doc_offset_ids.len());
-        let mut unique_ids = HashSet::new();
-        for (index, doc_offset_id) in res.doc_offset_ids.iter().enumerate() {
-            if self
-                .is_outdated(*doc_offset_id, res.doc_versions[index])
-                .await?
-            {
-                continue;
-            }
-            if unique_ids.contains(doc_offset_id) {
-                continue;
-            }
-            unique_ids.insert(*doc_offset_id);
-            posting_lists.push(SpannPosting {
-                doc_offset_id: *doc_offset_id,
-                doc_embedding: res.doc_embeddings
-                    [index * self.dimensionality..(index + 1) * self.dimensionality]
-                    .to_vec(),
-            });
-        }
-        Ok(posting_lists)
     }
 
     // Only for testing purposes as of 5 March 2024.

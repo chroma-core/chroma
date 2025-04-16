@@ -110,6 +110,18 @@ impl BlockfileProvider {
             }
         }
     }
+
+    pub async fn get_block(
+        &self,
+        block_id: &uuid::Uuid,
+    ) -> Result<Option<Block>, Box<dyn ChromaError>> {
+        match self {
+            BlockfileProvider::HashMapBlockfileProvider(_) => unimplemented!(),
+            BlockfileProvider::ArrowBlockfileProvider(provider) => {
+                provider.get_block(block_id).await.map_err(|e| e.boxed())
+            }
+        }
+    }
 }
 
 // =================== Configurable ===================

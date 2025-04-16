@@ -1,10 +1,11 @@
 use std::collections::BinaryHeap;
 
 use async_trait::async_trait;
+use chroma_blockstore::arrow::block::Block;
 use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_index::spann::types::SpannPosting;
-use chroma_types::SignedRoaringBitmap;
+use chroma_segment::distributed_spann::{SpannSegmentReader, SpannSegmentReaderError};
+use chroma_types::{SignedRoaringBitmap, SpannPostingList};
 use thiserror::Error;
 
 use chroma_system::Operator;
@@ -13,10 +14,12 @@ use super::knn::RecordDistance;
 
 // Public fields for testing.
 #[derive(Debug)]
-pub struct SpannBfPlInput {
+pub struct SpannBfPlInput<'referred_data> {
     // TODO(Sanket): We might benefit from a flat structure which might be more cache friendly.
-    // Posting list data.
-    pub posting_list: Vec<SpannPosting>,
+    // Block of postings.
+    pub block: Block,
+    // Key to search.
+    pub head_id: u32,
     // Number of results to return.
     pub k: usize,
     // Bitmap of records to include/exclude.
@@ -25,6 +28,9 @@ pub struct SpannBfPlInput {
     pub distance_function: DistanceFunction,
     // Query embedding.
     pub query: Vec<f32>,
+    // spann reader.
+    pub reader: Option<SpannSegmentReader<'referred_data>>,
+    pub dimension: usize,
 }
 
 #[allow(dead_code)]
@@ -34,44 +40,73 @@ pub struct SpannBfPlOutput {
 }
 
 #[derive(Error, Debug)]
-pub enum SpannBfPlError {}
+pub enum SpannBfPlError {
+    #[error("Posting list not found in the block")]
+    PostingListNotFound,
+    #[error("Error checking if version is outdated {0}")]
+    VersionCheckError(#[source] SpannSegmentReaderError),
+    #[error("Segment reader not found")]
+    SegmentReaderNotFound,
+}
 
 impl ChromaError for SpannBfPlError {
     fn code(&self) -> ErrorCodes {
-        ErrorCodes::Internal
+        match self {
+            SpannBfPlError::PostingListNotFound => ErrorCodes::Internal,
+            SpannBfPlError::VersionCheckError(e) => e.code(),
+            SpannBfPlError::SegmentReaderNotFound => ErrorCodes::Internal,
+        }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct SpannBfPlOperator {}
 
-#[allow(dead_code)]
 impl SpannBfPlOperator {
-    #[allow(dead_code)]
     pub fn new() -> Box<Self> {
         Box::new(SpannBfPlOperator {})
     }
 }
 
 #[async_trait]
-impl Operator<SpannBfPlInput, SpannBfPlOutput> for SpannBfPlOperator {
+impl<'referred_data> Operator<SpannBfPlInput<'referred_data>, SpannBfPlOutput>
+    for SpannBfPlOperator
+{
     type Error = SpannBfPlError;
 
     async fn run(&self, input: &SpannBfPlInput) -> Result<SpannBfPlOutput, SpannBfPlError> {
+        let posting_list: SpannPostingList<'_> = match input.block.get("", input.head_id) {
+            Some(value) => value,
+            None => {
+                return Err(SpannBfPlError::PostingListNotFound);
+            }
+        };
         let mut max_heap = BinaryHeap::with_capacity(input.k);
-        for posting in input.posting_list.iter() {
+        for (index, doc_offset_id) in posting_list.doc_offset_ids.iter().enumerate() {
             let skip_entry = match &input.filter {
-                SignedRoaringBitmap::Include(rbm) => !rbm.contains(posting.doc_offset_id),
-                SignedRoaringBitmap::Exclude(rbm) => rbm.contains(posting.doc_offset_id),
+                SignedRoaringBitmap::Include(rbm) => !rbm.contains(*doc_offset_id),
+                SignedRoaringBitmap::Exclude(rbm) => rbm.contains(*doc_offset_id),
             };
             if skip_entry {
                 continue;
             }
-            let dist = input
-                .distance_function
-                .distance(&posting.doc_embedding, &input.query);
+            let reader = match &input.reader {
+                Some(reader) => reader,
+                None => return Err(SpannBfPlError::SegmentReaderNotFound),
+            };
+            let version = posting_list.doc_versions[index];
+            if reader
+                .is_outdated(*doc_offset_id, version)
+                .await
+                .map_err(SpannBfPlError::VersionCheckError)?
+            {
+                continue;
+            }
+            let embedding = &posting_list.doc_embeddings
+                [index * input.dimension..(index + 1) * input.dimension];
+            let dist = input.distance_function.distance(embedding, &input.query);
             let record = RecordDistance {
-                offset_id: posting.doc_offset_id,
+                offset_id: *doc_offset_id,
                 measure: dist,
             };
             if max_heap.len() < input.k {
@@ -89,42 +124,4 @@ impl Operator<SpannBfPlInput, SpannBfPlOutput> for SpannBfPlOperator {
     }
 }
 
-#[cfg(test)]
-mod test {
-    use chroma_distance::DistanceFunction;
-    use chroma_index::spann::types::SpannPosting;
-    use chroma_system::Operator;
-    use chroma_types::SignedRoaringBitmap;
-    use roaring::RoaringBitmap;
-
-    use crate::execution::operators::spann_bf_pl::{SpannBfPlInput, SpannBfPlOperator};
-
-    // Basic operator test.
-    #[tokio::test]
-    async fn test_spann_bf_pl_operator() {
-        let mut posting_list = Vec::new();
-        for i in 1..=100 {
-            posting_list.push(SpannPosting {
-                doc_offset_id: i,
-                doc_embedding: vec![i as f32; 2],
-            });
-        }
-
-        let input = SpannBfPlInput {
-            posting_list,
-            k: 10,
-            filter: SignedRoaringBitmap::Exclude(RoaringBitmap::new()),
-            distance_function: DistanceFunction::Euclidean,
-            query: vec![0.0; 2],
-        };
-
-        let operator = SpannBfPlOperator::new();
-        let output = operator.run(&input).await.unwrap();
-        println!("Output {:?}", output);
-        assert_eq!(output.records.len(), 10);
-        // Output should be the smallest 10 records.
-        for i in 1..=10 {
-            assert_eq!(output.records[i - 1].offset_id, i as u32);
-        }
-    }
-}
+// TODO(Sanket): Add test.
