@@ -1964,8 +1964,6 @@ pub enum SpannIndexReaderError {
     PostingListReaderConstructionError(#[source] OpenError),
     #[error("Error creating/opening versions map reader")]
     VersionsMapReaderConstructionError(#[source] OpenError),
-    #[error("Error loading data from versions map blockfile {0}")]
-    VersionsMapDataLoadError(#[source] Box<dyn ChromaError>),
     #[error("Spann index uninitialized")]
     UninitializedIndex,
     #[error("Error reading posting list {0}")]
@@ -1988,7 +1986,6 @@ impl ChromaError for SpannIndexReaderError {
             Self::HnswIndexConstructionError(e) => e.code(),
             Self::PostingListReaderConstructionError(e) => e.code(),
             Self::VersionsMapReaderConstructionError(e) => e.code(),
-            Self::VersionsMapDataLoadError(e) => e.code(),
             Self::UninitializedIndex => ErrorCodes::Internal,
             Self::PostingListReadError(e) => e.code(),
             Self::PostingListNotFound => ErrorCodes::NotFound,
@@ -2010,7 +2007,7 @@ pub struct SpannPosting {
 pub struct SpannIndexReader<'me> {
     pub posting_lists: BlockfileReader<'me, u32, SpannPostingList<'me>>,
     pub hnsw_index: HnswIndexRef,
-    pub versions_map: Arc<VersionsMapInner>,
+    pub versions_map: BlockfileReader<'me, u32, u32>,
     pub dimensionality: usize,
 }
 
@@ -2064,38 +2061,19 @@ impl<'me> SpannIndexReader<'me> {
         }
     }
 
-    async fn load_versions_map(
+    async fn versions_map_reader_from_id(
         blockfile_id: &Uuid,
         blockfile_provider: &BlockfileProvider,
-    ) -> Result<VersionsMapInner, SpannIndexReaderError> {
-        // Create a reader for the blockfile. Load all the data into the versions map.
-        let mut versions_map = HashMap::new();
-        let reader = match blockfile_provider.read::<u32, u32>(blockfile_id).await {
-            Ok(reader) => reader,
+    ) -> Result<BlockfileReader<'me, u32, u32>, SpannIndexReaderError> {
+        match blockfile_provider.read::<u32, u32>(blockfile_id).await {
+            Ok(reader) => Ok(reader),
             Err(e) => {
-                tracing::error!(
-                    "Error creating reader for versions map blockfile {:?}: {:?}",
-                    blockfile_id,
-                    e
-                );
-                return Err(SpannIndexReaderError::VersionsMapReaderConstructionError(
+                tracing::error!("Error opening versions map reader {}: {}", blockfile_id, e);
+                Err(SpannIndexReaderError::VersionsMapReaderConstructionError(
                     *e,
-                ));
+                ))
             }
-        };
-        // Load data using the reader.
-        let versions_data = reader.get_range(.., ..).await.map_err(|e| {
-            tracing::error!(
-                "Error performing get_range for versions map blockfile {:?}: {:?}",
-                blockfile_id,
-                e
-            );
-            SpannIndexReaderError::VersionsMapDataLoadError(e)
-        })?;
-        versions_data.iter().for_each(|(key, value)| {
-            versions_map.insert(*key, *value);
-        });
-        Ok(VersionsMapInner { versions_map })
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2132,14 +2110,16 @@ impl<'me> SpannIndexReader<'me> {
         };
 
         let versions_map_reader = match versions_map_blockfile_id {
-            Some(versions_id) => Self::load_versions_map(versions_id, blockfile_provider).await?,
+            Some(versions_id) => {
+                Self::versions_map_reader_from_id(versions_id, blockfile_provider).await?
+            }
             None => return Err(SpannIndexReaderError::UninitializedIndex),
         };
 
         Ok(Self {
             posting_lists: postings_list_reader,
             hnsw_index: hnsw_reader,
-            versions_map: Arc::new(versions_map_reader),
+            versions_map: versions_map_reader,
             dimensionality,
         })
     }
@@ -2151,10 +2131,18 @@ impl<'me> SpannIndexReader<'me> {
     ) -> Result<bool, SpannIndexReaderError> {
         let actual_version = self
             .versions_map
-            .versions_map
-            .get(&doc_offset_id)
+            .get("", doc_offset_id)
+            .await
+            .map_err(|e| {
+                tracing::error!(
+                    "Error getting version for doc offset id {}: {}",
+                    doc_offset_id,
+                    e
+                );
+                SpannIndexReaderError::VersionsMapReadError(e)
+            })?
             .ok_or(SpannIndexReaderError::VersionsMapNotFound)?;
-        Ok(*actual_version == 0 || doc_version < *actual_version)
+        Ok(actual_version == 0 || doc_version < actual_version)
     }
 
     pub async fn fetch_posting_list(
@@ -2254,8 +2242,16 @@ impl<'me> SpannIndexReader<'me> {
                     {
                         let actual_version = self
                             .versions_map
-                            .versions_map
-                            .get(doc_offset_id)
+                            .get("", *doc_offset_id)
+                            .await
+                            .map_err(|e| {
+                                tracing::error!(
+                                    "Error getting version for doc offset id {}: {}",
+                                    doc_offset_id,
+                                    e
+                                );
+                                SpannIndexReaderError::VersionsMapReadError(e)
+                            })?
                             .ok_or(SpannIndexReaderError::VersionsMapNotFound)?;
                         tracing::error!("Duplicate doc offset id {} at latest version {} with different embeddings", doc_offset_id, actual_version);
                         return Err(SpannIndexReaderError::DataInconsistencyError);

@@ -16,7 +16,7 @@ use chroma_error::ErrorCodes;
 use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
 use futures::future::join_all;
 use futures::{Stream, StreamExt, TryStreamExt};
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 use std::collections::HashSet;
 use std::mem::transmute;
 use std::ops::RangeBounds;
@@ -375,7 +375,7 @@ pub struct ArrowBlockfileReader<
 > {
     block_manager: BlockManager,
     pub(super) root: RootReader,
-    loaded_blocks: Arc<Mutex<HashMap<Uuid, Box<Block>>>>,
+    loaded_blocks: Arc<RwLock<HashMap<Uuid, Box<Block>>>>,
     marker: std::marker::PhantomData<(K, V, &'me ())>,
 }
 
@@ -386,7 +386,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         Self {
             block_manager,
             root,
-            loaded_blocks: Arc::new(Mutex::new(HashMap::new())),
+            loaded_blocks: Arc::new(RwLock::new(HashMap::new())),
             marker: std::marker::PhantomData,
         }
     }
@@ -399,7 +399,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         // NOTE(rescrv):  This will complain with clippy, but we don't want to hold a reference to
         // the loaded_blocks map across a call to the block manager.
         #[allow(clippy::map_entry)]
-        if !self.loaded_blocks.lock().contains_key(&block_id) {
+        if !self.loaded_blocks.read().contains_key(&block_id) {
             let block = match self.block_manager.get(&block_id, priority).await {
                 Ok(Some(block)) => block,
                 Ok(None) => {
@@ -409,10 +409,10 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                     return Err(e);
                 }
             };
-            self.loaded_blocks.lock().insert(block_id, Box::new(block));
+            self.loaded_blocks.write().insert(block_id, Box::new(block));
         }
 
-        if let Some(block) = self.loaded_blocks.lock().get(&block_id) {
+        if let Some(block) = self.loaded_blocks.read().get(&block_id) {
             // https://github.com/mitsuhiko/memo-map/blob/a5db43853b2561145d7778dc2a5bd4b861fbfd75/src/lib.rs#L163
             // This is safe because we only ever insert Box<Block> into the HashMap
             // We never remove the Box<Block> from the HashMap, so the reference is always valid
@@ -443,7 +443,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             // but not present in the reader's cache (i.e. loaded_blocks). The
             // next read for this block using this reader instance will populate it.
             if !self.block_manager.cached(block_id).await
-                && !self.loaded_blocks.lock().contains_key(block_id)
+                && !self.loaded_blocks.read().contains_key(block_id)
             {
                 futures.push(self.get_block(*block_id, StorageRequestPriority::P1));
             }

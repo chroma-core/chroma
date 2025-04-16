@@ -958,10 +958,9 @@ mod test {
         let mut versions_map = spann_reader
             .index_reader
             .versions_map
-            .versions_map
-            .clone()
-            .into_iter()
-            .collect::<Vec<(u32, u32)>>();
+            .get_range(.., ..)
+            .await
+            .expect("Error gettting all data from reader");
         versions_map.sort_by(|a, b| a.0.cmp(&b.0));
         assert_eq!(versions_map, vec![(1, 1), (2, 1)]);
     }
