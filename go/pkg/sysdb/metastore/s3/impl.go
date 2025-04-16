@@ -186,7 +186,7 @@ func (store *S3MetaStore) PutLineageFile(tenantID string, databaseID string, col
 }
 
 // Get the version file from S3. Return the protobuf.
-func (store *S3MetaStore) GetVersionFile(tenantID, versionFilePath string) (*coordinatorpb.CollectionVersionFile, error) {
+func (store *S3MetaStore) GetVersionFile(versionFilePath string) (*coordinatorpb.CollectionVersionFile, error) {
 	log.Info("getting version file from S3", zap.String("path", versionFilePath))
 
 	input := &s3.GetObjectInput{
