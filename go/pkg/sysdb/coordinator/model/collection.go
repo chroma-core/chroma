@@ -60,6 +60,11 @@ type UpdateCollection struct {
 	Ts                      types.Timestamp
 }
 
+type ForkCollection struct {
+	SourceCollectionID   types.UniqueID
+	TargetCollectionName *string
+}
+
 type FlushCollectionCompaction struct {
 	ID                         types.UniqueID
 	TenantID                   string
