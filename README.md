@@ -18,7 +18,7 @@
       <img src="https://img.shields.io/badge/docs-up-green" alt="Docs">
   </a> |
   <a href="https://www.trychroma.com/" target="_blank">
-      Homepage
+      <img src="https://img.shields.io/badge/Homepage-green.svg" alt="Homepage">
   </a>
 </p>
 
