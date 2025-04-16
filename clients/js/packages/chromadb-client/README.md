@@ -53,7 +53,10 @@ const collection = await chroma.createCollection({ name: "my-collection" });
 // Add documents to the collection
 await collection.add({
   ids: ["id1", "id2"],
-  embeddings: [[1.1, 2.3, 3.2], [4.5, 6.9, 4.4]],
+  embeddings: [
+    [1.1, 2.3, 3.2],
+    [4.5, 6.9, 4.4],
+  ],
   metadatas: [{ source: "doc1" }, { source: "doc2" }],
   documents: ["Document 1 content", "Document 2 content"],
 });
@@ -75,13 +78,13 @@ import { ChromaClient, OpenAIEmbeddingFunction } from "chromadb-client";
 
 const embedder = new OpenAIEmbeddingFunction({
   openai_api_key: "your-api-key",
-  model_name: "text-embedding-ada-002"
+  model_name: "text-embedding-ada-002",
 });
 
 const chroma = new ChromaClient({ path: "http://localhost:8000" });
 const collection = await chroma.createCollection({
   name: "my-collection",
-  embeddingFunction: embedder
+  embeddingFunction: embedder,
 });
 
 // Now you can add documents without providing embeddings

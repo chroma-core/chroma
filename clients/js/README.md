@@ -16,6 +16,7 @@ This package gives you a JS/TS interface to talk to a backend Chroma DB over RES
 There are two packages available for using ChromaDB in your JavaScript/TypeScript projects:
 
 1. **chromadb**: Includes all embedding libraries as bundled dependencies.
+
    - Use this if you want a simple installation without worrying about dependency management.
    - Install with: `npm install chromadb` or `pnpm add chromadb`
 

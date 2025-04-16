@@ -56,5 +56,7 @@ app.get("/", async (req, res) => {
   res.send(query);
 });
 app.listen(3001, function () {
-  console.log("Example app using chromadb-client package listening on port 3001!");
+  console.log(
+    "Example app using chromadb-client package listening on port 3001!",
+  );
 });

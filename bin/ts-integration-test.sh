@@ -45,16 +45,24 @@ wait_for_server
 
 # Install dependencies
 cd clients/js
-echo "Installing dependencies..."
-pnpm i -g openapi-generator-plus @openapi-generator-plus/typescript-fetch-client-generator
 
 # Generate the JS client
 echo "Generating JS client..."
-chmod +x genapi.sh
-./genapi.sh
+pnpm genapi
 
 # Cleanup: kill the server process
 kill $SERVER_PID
+
+pnpm prettier
+
+# run git diff and check if packages/chromadb-core/src/generated/ has changed
+echo "Checking for changes in generated client..."
+if ! git diff --quiet --exit-code packages/chromadb-core/src/generated/; then
+    echo "Error: Generated JS client has changed. Please commit the changes."
+    git diff packages/chromadb-core/src/generated/ | cat
+    exit 1
+fi
+echo "No changes detected in generated client."
 
 # Install dependencies and run tests
 echo "Running tests..."
