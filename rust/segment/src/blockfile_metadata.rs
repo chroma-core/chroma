@@ -12,6 +12,11 @@ use chroma_index::metadata::types::{
     MetadataIndexError, MetadataIndexFlusher, MetadataIndexReader, MetadataIndexWriter,
 };
 use chroma_types::SegmentType;
+use chroma_types::BOOL_METADATA;
+use chroma_types::F32_METADATA;
+use chroma_types::FULL_TEXT_PLS;
+use chroma_types::STRING_METADATA;
+use chroma_types::U32_METADATA;
 use chroma_types::{MaterializedLogOperation, MetadataValue, Segment, SegmentUuid};
 use core::panic;
 use roaring::RoaringBitmap;
@@ -20,12 +25,6 @@ use std::fmt::{self, Debug, Formatter};
 use tantivy::tokenizer::NgramTokenizer;
 use thiserror::Error;
 use uuid::Uuid;
-
-const FULL_TEXT_PLS: &str = "full_text_pls";
-const STRING_METADATA: &str = "string_metadata";
-const BOOL_METADATA: &str = "bool_metadata";
-const F32_METADATA: &str = "f32_metadata";
-const U32_METADATA: &str = "u32_metadata";
 
 #[derive(Clone)]
 pub struct MetadataSegmentWriter<'me> {

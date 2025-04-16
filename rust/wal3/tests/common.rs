@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use chroma_storage::Storage;
+use chroma_storage::{admissioncontrolleds3::StorageRequestPriority, GetOptions, Storage};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
 extern crate wal3;
@@ -70,8 +70,9 @@ pub struct SnapshotCondition {
 
 impl SnapshotCondition {
     pub async fn assert(&self, storage: &Storage, prefix: &str, path: &str) {
+        let key = format!("{prefix}/{}", path);
         let json = storage
-            .get(&format!("{prefix}/{}", path))
+            .get(&key, GetOptions::new(StorageRequestPriority::P0))
             .await
             .expect("post condition expects snapshot to exist");
         let snapshot = serde_json::from_slice::<Snapshot>(&json)
@@ -104,8 +105,9 @@ pub struct FragmentCondition {
 
 impl FragmentCondition {
     pub async fn assert(&self, storage: &Storage, prefix: &str) {
+        let key = format!("{prefix}/{}", self.path);
         let parquet = storage
-            .get(&format!("{prefix}/{}", self.path))
+            .get(&key, GetOptions::new(StorageRequestPriority::P0))
             .await
             .expect("post condition expects fragment to exist");
         let builder = ParquetRecordBatchReaderBuilder::try_new(Bytes::from_owner(parquet.to_vec()))
@@ -157,7 +159,9 @@ pub async fn assert_conditions(storage: &Storage, prefix: &str, postconditions: 
             Condition::PathNotExist(path) => {
                 println!("assert_postconditions: PathNotExist: {}", path);
                 assert!(matches!(
-                    storage.get(path).await,
+                    storage
+                        .get(path, GetOptions::new(StorageRequestPriority::P0))
+                        .await,
                     Err(chroma_storage::StorageError::NotFound { .. })
                 ));
                 println!("check succeeded");

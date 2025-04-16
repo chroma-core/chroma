@@ -11,7 +11,8 @@ use chroma_config::Configurable;
 use chroma_distance::DistanceFunction;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
-use chroma_storage::Storage;
+use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
+use chroma_storage::{GetOptions, PutOptions, Storage};
 use chroma_types::CollectionUuid;
 use parking_lot::RwLock;
 use std::fmt::Debug;
@@ -283,7 +284,10 @@ impl HnswIndexProvider {
                 .in_scope(|| async {
                     let key = self.format_key(source_id, file);
                     tracing::info!("Loading hnsw index file: {} into directory", key);
-                    let bytes_res = self.storage.get_parallel(&key).await;
+                    let bytes_res = self
+                        .storage
+                        .get_parallel(&key, GetOptions::new(StorageRequestPriority::P0))
+                        .await;
                     let bytes_read;
                     let buf = match bytes_res {
                         Ok(buf) => {
@@ -448,7 +452,11 @@ impl HnswIndexProvider {
             let key = self.format_key(id, file);
             let res = self
                 .storage
-                .put_file(&key, file_path.to_str().unwrap())
+                .put_file(
+                    &key,
+                    file_path.to_str().unwrap(),
+                    PutOptions::with_priority(StorageRequestPriority::P0),
+                )
                 .await;
             match res {
                 Ok(_) => {

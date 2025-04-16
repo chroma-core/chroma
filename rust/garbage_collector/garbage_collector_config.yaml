@@ -23,3 +23,12 @@ storage_config:
     request_timeout_ms: 30000 # 1 minute
     upload_part_size_bytes: 536870912 # 512MiB
     download_part_size_bytes: 8388608 # 8MiB
+assignment_policy:
+  rendezvous_hashing:
+    hasher: Murmur3
+my_member_id: "garbage-collector-0"
+memberlist_provider:
+  custom_resource:
+    kube_namespace: "chroma"
+    memberlist_name: "garbage-collection-service-memberlist"
+    queue_size: 100

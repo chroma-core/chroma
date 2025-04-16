@@ -374,10 +374,7 @@ impl QueryExecutor for WorkerServer {
     async fn count(&self, count: Request<CountPlan>) -> Result<Response<CountResult>, Status> {
         // Note: We cannot write a middleware that instruments every service rpc
         // with a span because of https://github.com/hyperium/tonic/pull/1202.
-        let count_span = info_span!(
-            "CountPlan",
-            count = ?count
-        );
+        let count_span = info_span!("CountPlan",);
         let instrumented_span = wrap_span_with_parent_context(count_span, count.metadata());
         self.orchestrate_count(count)
             .instrument(instrumented_span)
@@ -387,10 +384,7 @@ impl QueryExecutor for WorkerServer {
     async fn get(&self, get: Request<GetPlan>) -> Result<Response<GetResult>, Status> {
         // Note: We cannot write a middleware that instruments every service rpc
         // with a span because of https://github.com/hyperium/tonic/pull/1202.
-        let get_span = info_span!(
-            "GetPlan",
-            get = ?get
-        );
+        let get_span = info_span!("GetPlan",);
         let instrumented_span = wrap_span_with_parent_context(get_span, get.metadata());
         self.orchestrate_get(get)
             .instrument(instrumented_span)
@@ -400,10 +394,7 @@ impl QueryExecutor for WorkerServer {
     async fn knn(&self, knn: Request<KnnPlan>) -> Result<Response<KnnBatchResult>, Status> {
         // Note: We cannot write a middleware that instruments every service rpc
         // with a span because of https://github.com/hyperium/tonic/pull/1202.
-        let knn_span = info_span!(
-            "KnnPlan",
-            knn = ?knn
-        );
+        let knn_span = info_span!("KnnPlan",);
         let instrumented_span = wrap_span_with_parent_context(knn_span, knn.metadata());
         self.orchestrate_knn(knn)
             .instrument(instrumented_span)

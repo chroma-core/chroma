@@ -1,50 +1,14 @@
 use crate::types::CleanupMode;
-use crate::types::{DELETE_LIST_FILE_PREFIX, RENAMED_FILE_PREFIX};
+use crate::types::RENAMED_FILE_PREFIX;
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::HNSW_INDEX_S3_PREFIX;
 use chroma_storage::Storage;
+use chroma_storage::StorageError;
 use chroma_system::{Operator, OperatorType};
 use futures::stream::StreamExt;
 use std::collections::HashSet;
 use thiserror::Error;
-
-struct DeletionListBuilder {
-    files: Vec<String>,
-    failed_files: Vec<String>,
-}
-
-impl DeletionListBuilder {
-    fn new() -> Self {
-        Self {
-            files: Vec::new(),
-            failed_files: Vec::new(),
-        }
-    }
-
-    fn add_files(mut self, files: &[String]) -> Self {
-        self.files.extend(files.iter().cloned());
-        self
-    }
-
-    fn add_failed_files(mut self, failed_files: &[String]) -> Self {
-        self.failed_files.extend(failed_files.iter().cloned());
-        self
-    }
-
-    fn build(mut self) -> String {
-        let mut content = String::from("Deleted Files:\n");
-        content.push_str(&self.files.join("\n"));
-
-        if !self.failed_files.is_empty() {
-            self.failed_files.sort();
-            content.push_str("\n\nFailed files:\n");
-            content.push_str(&self.failed_files.join("\n"));
-        }
-
-        content
-    }
-}
 
 #[derive(Clone)]
 pub struct DeleteUnusedFilesOperator {
@@ -84,66 +48,16 @@ impl DeleteUnusedFilesOperator {
         )
     }
 
-    fn get_deletion_list_path(&self, timestamp: i64) -> String {
-        format!(
-            "{}{}/{}.txt",
-            DELETE_LIST_FILE_PREFIX, self.collection_id, timestamp
-        )
-    }
-
-    async fn write_deletion_list(
-        &self,
-        files: &[String],
-        timestamp: i64,
-        failed_files: &[String],
-    ) -> Result<(), DeleteUnusedFilesError> {
-        let final_content = DeletionListBuilder::new()
-            .add_files(files)
-            .add_failed_files(failed_files)
-            .build();
-
-        let path = self.get_deletion_list_path(timestamp);
-
-        tracing::info!(
-            path = %path,
-            file_count = files.len(),
-            failed_count = failed_files.len(),
-            "Writing deletion list to S3"
-        );
-
-        self.storage
-            .put_bytes(&path, final_content.into_bytes(), Default::default())
-            .await
-            .map_err(|e| DeleteUnusedFilesError::WriteListError {
-                path: path.clone(),
-                message: e.to_string(),
-            })?;
-
-        Ok(())
-    }
-
-    async fn delete_with_path(&self, file_path: String) -> Result<(), FileOperationError> {
-        self.storage
-            .delete(&file_path)
-            .await
-            .map_err(|e| FileOperationError {
-                path: file_path,
-                error: e.to_string(),
-            })
+    async fn delete_with_path(&self, file_path: String) -> Result<(), StorageError> {
+        self.storage.delete(&file_path).await
     }
 
     async fn rename_with_path(
         &self,
         file_path: String,
         new_path: String,
-    ) -> Result<(), FileOperationError> {
-        self.storage
-            .rename(&file_path, &new_path)
-            .await
-            .map_err(|e| FileOperationError {
-                path: file_path,
-                error: e.to_string(),
-            })
+    ) -> Result<(), StorageError> {
+        self.storage.rename(&file_path, &new_path).await
     }
 }
 
@@ -173,12 +87,6 @@ impl ChromaError for DeleteUnusedFilesError {
     fn code(&self) -> ErrorCodes {
         ErrorCodes::Internal
     }
-}
-
-#[derive(Debug)]
-struct FileOperationError {
-    path: String,
-    error: String,
 }
 
 #[async_trait]
@@ -227,11 +135,8 @@ impl Operator<DeleteUnusedFilesInput, DeleteUnusedFilesOutput> for DeleteUnusedF
         // We don't want to fail the entire operation if one file fails to rename or delete.
         // It's possible that the file was already renamed/deleted in the last run that
         // did not finish successfully (i.e. crashed before committing the work to SysDb).
-        let mut file_operation_errors = Vec::new();
         match self.cleanup_mode {
-            CleanupMode::DryRun => {
-                // Do nothing here. List is written to S3 for all modes later in this function.
-            }
+            CleanupMode::DryRun => {}
             CleanupMode::Rename => {
                 // Soft delete - rename the file
                 if !all_files.is_empty() {
@@ -245,7 +150,15 @@ impl Operator<DeleteUnusedFilesInput, DeleteUnusedFilesOutput> for DeleteUnusedF
                     // Process any errors that occurred
                     while let Some(result) = rename_stream.next().await {
                         if let Err(e) = result {
-                            file_operation_errors.push(format!("{}: {}", e.path, e.error));
+                            match e {
+                                StorageError::NotFound { path, source } => {
+                                    tracing::info!("Rename file {path} not found: {source}")
+                                }
+                                StorageError::AlreadyExists { path, source } => {
+                                    tracing::info!("Rename file {path} already exists: {source}")
+                                }
+                                err => tracing::error!("Failed to rename: {err}"),
+                            }
                         }
                     }
                 }
@@ -260,21 +173,18 @@ impl Operator<DeleteUnusedFilesInput, DeleteUnusedFilesOutput> for DeleteUnusedF
                     // Process any errors that occurred
                     while let Some(result) = delete_stream.next().await {
                         if let Err(e) = result {
-                            file_operation_errors.push(format!("{}: {}", e.path, e.error));
+                            match e {
+                                StorageError::NotFound { path, source } => {
+                                    tracing::info!("Rename file {path} not found: {source}")
+                                }
+                                err => tracing::error!("Failed to rename: {err}"),
+                            }
                         }
                     }
                 }
             }
         }
 
-        // Write the deletion list with any potential failed files
-        self.write_deletion_list(&all_files, input.epoch_id, &file_operation_errors)
-            .await?;
-
-        tracing::debug!(
-            "File deletion operation completed with {} file operation errors",
-            file_operation_errors.len()
-        );
         Ok(DeleteUnusedFilesOutput {
             deleted_files: all_files.into_iter().collect(),
         })
@@ -326,7 +236,7 @@ mod tests {
     async fn test_dry_run_mode() {
         let tmp_dir = TempDir::new().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let (test_files, hnsw_files) = setup_test_files(&storage).await;
+        let (test_files, _) = setup_test_files(&storage).await;
 
         let mut unused_files = HashSet::new();
         unused_files.extend(test_files.clone());
@@ -344,27 +254,10 @@ mod tests {
 
         let result = operator.run(&input).await.unwrap();
 
-        // Verify deletion list file was created
-        let deletion_list_path = tmp_dir.path().join(format!(
-            "{}test_collection/123.txt",
-            DELETE_LIST_FILE_PREFIX
-        ));
-        assert!(deletion_list_path.exists());
-
         // Verify original files still exist
         for file in &test_files {
             assert!(result.deleted_files.contains(file));
             assert!(Path::new(&tmp_dir.path().join(file)).exists());
-        }
-
-        // Read and verify deletion list content
-        let content = std::fs::read_to_string(deletion_list_path).unwrap();
-        let listed_files: HashSet<_> = content.lines().collect();
-        for file in &test_files {
-            assert!(listed_files.contains(file.as_str()));
-        }
-        for file in &hnsw_files {
-            assert!(listed_files.contains(file.as_str()));
         }
     }
 
@@ -390,13 +283,6 @@ mod tests {
 
         let result = operator.run(&input).await.unwrap();
 
-        // Verify deletion list was created
-        let deletion_list_path = tmp_dir.path().join(format!(
-            "{}test_collection/123.txt",
-            DELETE_LIST_FILE_PREFIX
-        ));
-        assert!(deletion_list_path.exists());
-
         // Verify regular files were moved to deleted directory
         for file in &test_files {
             let original_path = tmp_dir.path().join(file);
@@ -419,16 +305,6 @@ mod tests {
             assert!(!original_path.exists());
             assert!(new_path.exists());
             assert!(result.deleted_files.contains(file));
-        }
-
-        // Verify deletion list contents
-        let content = std::fs::read_to_string(deletion_list_path).unwrap();
-        let listed_files: HashSet<_> = content.lines().collect();
-        for file in &test_files {
-            assert!(listed_files.contains(file.as_str()));
-        }
-        for file in &hnsw_files {
-            assert!(listed_files.contains(file.as_str()));
         }
     }
 
@@ -454,13 +330,6 @@ mod tests {
 
         let result = operator.run(&input).await.unwrap();
 
-        // Verify deletion list was created
-        let deletion_list_path = tmp_dir.path().join(format!(
-            "{}test_collection/123.txt",
-            DELETE_LIST_FILE_PREFIX
-        ));
-        assert!(deletion_list_path.exists());
-
         // Verify regular files were deleted
         for file in &test_files {
             assert!(!Path::new(&tmp_dir.path().join(file)).exists());
@@ -471,16 +340,6 @@ mod tests {
         for file in &hnsw_files {
             assert!(!Path::new(&tmp_dir.path().join(file)).exists());
             assert!(result.deleted_files.contains(file));
-        }
-
-        // Verify deletion list contents
-        let content = std::fs::read_to_string(deletion_list_path).unwrap();
-        let listed_files: HashSet<_> = content.lines().collect();
-        for file in &test_files {
-            assert!(listed_files.contains(file.as_str()));
-        }
-        for file in &hnsw_files {
-            assert!(listed_files.contains(file.as_str()));
         }
     }
 
@@ -507,15 +366,6 @@ mod tests {
             .await;
         assert!(result.is_ok());
 
-        // Verify deletion list contains the error
-        let deletion_list_path = tmp_dir.path().join(format!(
-            "{}test_collection/123.txt",
-            DELETE_LIST_FILE_PREFIX
-        ));
-        let content = std::fs::read_to_string(deletion_list_path).unwrap();
-        assert!(content.contains("Failed files:"));
-        assert!(content.contains("nonexistent.txt"));
-
         // Test Rename mode - should succeed but record the error in deletion list
         let rename_operator = DeleteUnusedFilesOperator::new(
             storage.clone(),
@@ -531,15 +381,6 @@ mod tests {
             .await;
         assert!(result.is_ok());
 
-        // Verify deletion list contains the error
-        let deletion_list_path = tmp_dir.path().join(format!(
-            "{}test_collection/124.txt",
-            DELETE_LIST_FILE_PREFIX
-        ));
-        let content = std::fs::read_to_string(deletion_list_path).unwrap();
-        assert!(content.contains("Failed files:"));
-        assert!(content.contains("nonexistent.txt"));
-
         // Test DryRun mode with nonexistent files (should succeed)
         let list_operator = DeleteUnusedFilesOperator::new(
             storage,
@@ -554,12 +395,5 @@ mod tests {
             })
             .await;
         assert!(result.is_ok());
-
-        // Verify deletion list was created even for nonexistent files
-        let deletion_list_path = tmp_dir.path().join(format!(
-            "{}test_collection/125.txt",
-            DELETE_LIST_FILE_PREFIX
-        ));
-        assert!(deletion_list_path.exists());
     }
 }

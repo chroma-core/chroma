@@ -44,6 +44,24 @@ func (s *logServer) PushLogs(ctx context.Context, req *logservicepb.PushLogsRequ
 	return
 }
 
+func (s *logServer) ScoutLogs(ctx context.Context, req *logservicepb.ScoutLogsRequest) (res *logservicepb.ScoutLogsResponse, err error) {
+	var collectionID types.UniqueID
+	collectionID, err = types.ToUniqueID(&req.CollectionId)
+	if err != nil {
+		return
+	}
+	var limit int64
+	_, limit, err = s.lr.GetBoundsForCollection(ctx, collectionID.String())
+	if err != nil {
+		return
+	}
+	// +1 to convert from the (] bound to a [) bound.
+	res = &logservicepb.ScoutLogsResponse {
+		FirstUninsertedRecordOffset: int64(limit + 1),
+	}
+	return
+}
+
 func (s *logServer) PullLogs(ctx context.Context, req *logservicepb.PullLogsRequest) (res *logservicepb.PullLogsResponse, err error) {
 	var collectionID types.UniqueID
 	collectionID, err = types.ToUniqueID(&req.CollectionId)

@@ -6,7 +6,10 @@ use chroma_blockstore::{
 };
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::fulltext::types::FullTextIndexError;
-use chroma_types::{DataRecord, MaterializedLogOperation, Segment, SegmentType, SegmentUuid};
+use chroma_types::{
+    DataRecord, MaterializedLogOperation, Segment, SegmentType, SegmentUuid, MAX_OFFSET_ID,
+    OFFSET_ID_TO_DATA, OFFSET_ID_TO_USER_ID, USER_ID_TO_OFFSET_ID,
+};
 use futures::{Stream, StreamExt, TryStreamExt};
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
@@ -15,11 +18,6 @@ use std::sync::atomic::{self, AtomicU32};
 use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
-
-const USER_ID_TO_OFFSET_ID: &str = "user_id_to_offset_id";
-const OFFSET_ID_TO_USER_ID: &str = "offset_id_to_user_id";
-const OFFSET_ID_TO_DATA: &str = "offset_id_to_data";
-const MAX_OFFSET_ID: &str = "max_offset_id";
 
 #[derive(Clone)]
 pub struct RecordSegmentWriter {

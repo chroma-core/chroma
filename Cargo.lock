@@ -1444,7 +1444,7 @@ dependencies = [
 
 [[package]]
 name = "chroma-cli"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "arboard",
  "assert_cmd",
@@ -3287,6 +3287,7 @@ dependencies = [
  "chroma-config",
  "chroma-error",
  "chroma-index",
+ "chroma-memberlist",
  "chroma-segment",
  "chroma-storage",
  "chroma-sysdb",
