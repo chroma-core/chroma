@@ -1228,17 +1228,34 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 		}
 
 		existingVersionFileName := collectionEntry.VersionFileName
-		// Read the VersionFile from S3MetaStore.
-		existingVersionFilePb, err := tc.s3Store.GetVersionFile(flushCollectionCompaction.TenantID, flushCollectionCompaction.ID.String(), existingVersion, existingVersionFileName)
-		if err != nil {
-			return nil, err
-		}
+		var existingVersionFilePb *coordinatorpb.CollectionVersionFile
+		if existingVersionFileName == "" {
+			// The VersionFile has not been created.
+			existingVersionFilePb = &coordinatorpb.CollectionVersionFile{
+				CollectionInfoImmutable: &coordinatorpb.CollectionInfoImmutable{
+					TenantId:               collectionEntry.Tenant,
+					DatabaseId:             collectionEntry.DatabaseID,
+					CollectionId:           collectionEntry.ID,
+					CollectionName:         *collectionEntry.Name,
+					CollectionCreationSecs: collectionEntry.CreatedAt.Unix(),
+				},
+				VersionHistory: &coordinatorpb.CollectionVersionHistory{
+					Versions: []*coordinatorpb.CollectionVersionInfo{},
+				},
+			}
+		} else {
+			// Read the VersionFile from S3MetaStore.
+			existingVersionFilePb, err = tc.s3Store.GetVersionFile(flushCollectionCompaction.TenantID, flushCollectionCompaction.ID.String(), existingVersion, existingVersionFileName)
+			if err != nil {
+				return nil, err
+			}
 
-		// Do a simple validation of the version file.
-		err = tc.validateVersionFile(existingVersionFilePb, collectionEntry.ID, existingVersion)
-		if err != nil {
-			log.Error("version file validation failed", zap.Error(err))
-			return nil, err
+			// Do a simple validation of the version file.
+			err = tc.validateVersionFile(existingVersionFilePb, collectionEntry.ID, existingVersion)
+			if err != nil {
+				log.Error("version file validation failed", zap.Error(err))
+				return nil, err
+			}
 		}
 
 		// The update function takes the content of the existing version file,
