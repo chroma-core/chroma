@@ -420,7 +420,6 @@ impl OnceLogWriter {
         };
         self.manifest_manager.publish_fragment(fragment).await?;
         // Record the records/batches written.
-        self.batch_manager.update_average_batch_size(messages_len);
         self.batch_manager.finish_write();
         Ok(log_position)
     }

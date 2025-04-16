@@ -39,6 +39,8 @@ impl ChromaError for GrpcPullLogsError {
 
 #[derive(Error, Debug)]
 pub enum GrpcPushLogsError {
+    #[error("Please backoff exponentially and retry")]
+    Backoff,
     #[error("Failed to push logs")]
     FailedToPushLogs(#[from] tonic::Status),
     #[error("Failed to convert records to proto")]
@@ -48,6 +50,7 @@ pub enum GrpcPushLogsError {
 impl ChromaError for GrpcPushLogsError {
     fn code(&self) -> ErrorCodes {
         match self {
+            GrpcPushLogsError::Backoff => ErrorCodes::Unavailable,
             GrpcPushLogsError::FailedToPushLogs(_) => ErrorCodes::Internal,
             GrpcPushLogsError::ConversionError(_) => ErrorCodes::Internal,
         }
@@ -287,7 +290,16 @@ impl GrpcLog {
                 >>()?,
         };
 
-        self.client_for(collection_id).push_logs(request).await?;
+        self.client_for(collection_id)
+            .push_logs(request)
+            .await
+            .map_err(|err| {
+                if err.code() == ErrorCodes::Unavailable.into() {
+                    GrpcPushLogsError::Backoff
+                } else {
+                    err.into()
+                }
+            })?;
 
         Ok(())
     }

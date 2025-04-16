@@ -847,6 +847,8 @@ pub struct AddCollectionRecordsResponse {}
 pub enum AddCollectionRecordsError {
     #[error("Failed to get collection: {0}")]
     Collection(#[from] GetCollectionError),
+    #[error("Backoff and retry")]
+    Backoff,
     #[error(transparent)]
     Other(#[from] Box<dyn ChromaError>),
 }
@@ -855,6 +857,7 @@ impl ChromaError for AddCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
             AddCollectionRecordsError::Collection(err) => err.code(),
+            AddCollectionRecordsError::Backoff => ErrorCodes::Unavailable,
             AddCollectionRecordsError::Other(err) => err.code(),
         }
     }
@@ -907,6 +910,8 @@ pub struct UpdateCollectionRecordsResponse {}
 
 #[derive(Error, Debug)]
 pub enum UpdateCollectionRecordsError {
+    #[error("Backoff and retry")]
+    Backoff,
     #[error(transparent)]
     Other(#[from] Box<dyn ChromaError>),
 }
@@ -914,6 +919,7 @@ pub enum UpdateCollectionRecordsError {
 impl ChromaError for UpdateCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
+            UpdateCollectionRecordsError::Backoff => ErrorCodes::Unavailable,
             UpdateCollectionRecordsError::Other(err) => err.code(),
         }
     }
@@ -966,6 +972,8 @@ pub struct UpsertCollectionRecordsResponse {}
 
 #[derive(Error, Debug)]
 pub enum UpsertCollectionRecordsError {
+    #[error("Backoff and retry")]
+    Backoff,
     #[error(transparent)]
     Other(#[from] Box<dyn ChromaError>),
 }
@@ -973,6 +981,7 @@ pub enum UpsertCollectionRecordsError {
 impl ChromaError for UpsertCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
+            UpsertCollectionRecordsError::Backoff => ErrorCodes::Unavailable,
             UpsertCollectionRecordsError::Other(err) => err.code(),
         }
     }
@@ -1025,6 +1034,8 @@ pub struct DeleteCollectionRecordsResponse {}
 pub enum DeleteCollectionRecordsError {
     #[error("Failed to resolve records for deletion: {0}")]
     Get(#[from] ExecutorError),
+    #[error("Backoff and retry")]
+    Backoff,
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
 }
@@ -1033,6 +1044,7 @@ impl ChromaError for DeleteCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
             DeleteCollectionRecordsError::Get(err) => err.code(),
+            DeleteCollectionRecordsError::Backoff => ErrorCodes::Unavailable,
             DeleteCollectionRecordsError::Internal(err) => err.code(),
         }
     }

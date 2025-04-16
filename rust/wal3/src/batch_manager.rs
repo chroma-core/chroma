@@ -1,4 +1,3 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -65,8 +64,6 @@ impl ManagerState {
 pub struct BatchManager {
     options: ThrottleOptions,
     state: Mutex<ManagerState>,
-    records_written: AtomicUsize,
-    batches_written: AtomicUsize,
     write_finished: tokio::sync::Notify,
 }
 
@@ -81,10 +78,6 @@ impl BatchManager {
                 writers_active: 0,
                 enqueued: Vec::new(),
             }),
-            // Set these to 100k and 1 to avoid division by zero.  100k is a reasonable batch size,
-            // to cold-start with as it favors fast ramp-up.
-            records_written: AtomicUsize::new(100_000),
-            batches_written: AtomicUsize::new(1),
             write_finished: tokio::sync::Notify::new(),
         })
     }
@@ -141,7 +134,6 @@ impl BatchManager {
             return Ok(None);
         }
 
-        let enqueued_records = state.enqueued.iter().map(|(r, _)| r.len()).sum::<usize>();
         let mut split_off = 0usize;
         let mut acc_count = 0usize;
         let mut acc_bytes = 0usize;
@@ -191,19 +183,6 @@ impl BatchManager {
             state.backoff = false;
         }
         Ok(Some((fragment_seq_no, log_position, work)))
-    }
-
-    pub fn update_average_batch_size(&self, records: usize) {
-        self.records_written.fetch_add(records, Ordering::Relaxed);
-        self.batches_written.fetch_add(1, Ordering::Relaxed);
-    }
-
-    /// Calculate the batch size based upon the average number of records written per batch.  Add
-    /// 10% to the batch size to make it always grow and open up up to the limits of throttling.
-    fn batch_size(&self) -> usize {
-        let average = self.records_written.load(Ordering::Relaxed)
-            / self.batches_written.load(Ordering::Relaxed);
-        average.saturating_add(average / 4).saturating_add(1)
     }
 
     pub fn finish_write(&self) {
