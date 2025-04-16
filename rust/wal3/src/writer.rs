@@ -492,8 +492,8 @@ pub async fn upload_parquet(
     let exp_backoff: ExponentialBackoff = options.throttle_fragment.into();
     let start = Instant::now();
     loop {
-        tracing::info!("upload_parquet: {:?}", path);
         let (buffer, setsum) = construct_parquet(log_position, &messages)?;
+        tracing::info!("upload_parquet: {:?} with {} bytes", path, buffer.len());
         match storage
             .put_bytes(
                 &path,

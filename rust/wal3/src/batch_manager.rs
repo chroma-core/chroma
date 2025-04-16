@@ -10,7 +10,7 @@ use crate::{Error, FragmentSeqNo, LogPosition, ManifestManager, ThrottleOptions}
 #[derive(Debug)]
 #[allow(clippy::type_complexity)]
 struct ManagerState {
-    last_batch: Instant,
+    backoff: bool,
     next_write: Instant,
     writers_active: usize,
     enqueued: Vec<(
@@ -20,10 +20,14 @@ struct ManagerState {
 }
 
 impl ManagerState {
-    /// Set the next_write instant based upon the current time and throttle options.
+    /// Set the next_write instant based upon the current time and throttle options.  We wait at
+    /// least the 1/\lambda to accommodate throughput, and at least the batch interval.
     fn set_next_write(&mut self, options: &ThrottleOptions) {
-        self.next_write =
-            Instant::now() + Duration::from_micros(1_000_000 / options.throughput as u64);
+        let offset = std::cmp::max(
+            Duration::from_micros(1_000_000 / options.throughput as u64),
+            Duration::from_micros(options.batch_interval_us as u64),
+        );
+        self.next_write = Instant::now() + offset;
     }
 
     /// Select a fragment seq no and log position for writing, if possible.
@@ -72,10 +76,10 @@ impl BatchManager {
         Some(Self {
             options,
             state: Mutex::new(ManagerState {
+                backoff: false,
                 next_write,
                 writers_active: 0,
                 enqueued: Vec::new(),
-                last_batch: Instant::now(),
             }),
             // Set these to 100k and 1 to avoid division by zero.  100k is a reasonable batch size,
             // to cold-start with as it favors fast ramp-up.
@@ -92,7 +96,11 @@ impl BatchManager {
     ) {
         // SAFETY(rescrv): Mutex poisoning.
         let mut state = self.state.lock().unwrap();
-        state.enqueued.push((messages, tx));
+        if state.backoff {
+            let _ = tx.send(Err(Error::Backoff));
+        } else {
+            state.enqueued.push((messages, tx));
+        }
     }
 
     pub async fn wait_for_writable(&self) {
@@ -102,12 +110,11 @@ impl BatchManager {
     pub fn until_next_time(&self) -> Duration {
         // SAFETY(rescrv): Mutex poisoning.
         let state = self.state.lock().unwrap();
-        let elapsed = state.last_batch.elapsed();
-        let threshold = Duration::from_micros(self.options.batch_interval_us as u64);
-        if elapsed > threshold {
-            Duration::ZERO
+        let now = Instant::now();
+        if now < state.next_write {
+            state.next_write - now
         } else {
-            threshold - elapsed
+            Duration::ZERO
         }
     }
 
@@ -134,27 +141,16 @@ impl BatchManager {
             return Ok(None);
         }
 
-        let batch_size = self.batch_size();
         let enqueued_records = state.enqueued.iter().map(|(r, _)| r.len()).sum::<usize>();
-        let batch_size =
-            // If our estimate is wildly under-estimating or is an over-estimate, just take
-            // everything available.
-            if enqueued_records > batch_size * 2 || enqueued_records < batch_size {
-                enqueued_records
-            } else {
-                batch_size
-            };
         let mut split_off = 0usize;
         let mut acc_count = 0usize;
         let mut acc_bytes = 0usize;
         let mut did_split = false;
+        // This loop has two sets of exit conditions that are identical, but switched on
+        // `short_read`.
         for (batch, _) in state.enqueued.iter() {
             let cur_count = batch.len();
             let cur_bytes = batch.iter().map(|r| r.len()).sum::<usize>();
-            if split_off > 0 && acc_count + cur_count >= batch_size {
-                did_split = true;
-                break;
-            }
             if split_off > 0 && acc_bytes + cur_bytes >= self.options.batch_size_bytes {
                 did_split = true;
                 break;
@@ -164,10 +160,7 @@ impl BatchManager {
             split_off += 1;
         }
         // If we haven't waited the batch interval since last write, and we didn't break early, wait for more data.
-        if !did_split
-            && state.last_batch.elapsed()
-                < Duration::from_micros(self.options.batch_interval_us as u64)
-        {
+        if !did_split && state.next_write > Instant::now() {
             // This notify makes sure the background picks up the work and makes progress at end of
             // the batching interval.
             self.write_finished.notify_one();
@@ -186,13 +179,16 @@ impl BatchManager {
         };
         let mut work = std::mem::take(&mut state.enqueued);
         state.enqueued = work.split_off(split_off);
-        state.last_batch = Instant::now();
         if !state.enqueued.is_empty() {
+            state.backoff = state
+                .enqueued
+                .iter()
+                .map(|(recs, _)| recs.iter().map(|r| r.len()).sum::<usize>())
+                .sum::<usize>()
+                >= self.options.batch_size_bytes;
             self.write_finished.notify_one();
-            tracing::info!(
-                "left behind {enqueued} items",
-                enqueued = state.enqueued.len()
-            );
+        } else {
+            state.backoff = false;
         }
         Ok(Some((fragment_seq_no, log_position, work)))
     }
@@ -207,7 +203,7 @@ impl BatchManager {
     fn batch_size(&self) -> usize {
         let average = self.records_written.load(Ordering::Relaxed)
             / self.batches_written.load(Ordering::Relaxed);
-        average.saturating_add(average / 10).saturating_add(1)
+        average.saturating_add(average / 4).saturating_add(1)
     }
 
     pub fn finish_write(&self) {

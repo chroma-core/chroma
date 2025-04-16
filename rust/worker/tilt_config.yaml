@@ -179,3 +179,9 @@ log_service:
                 count_based_policy:
                     max_concurrent_requests: 500
                     bandwidth_allocation: [1.0]
+    writer:
+        throttle_fragment:
+            batch_interval_us: 100000
+            batch_size_bytes: 8388608 # 8MiB
+            throughput: 3300
+            headroom: 200

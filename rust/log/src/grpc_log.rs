@@ -16,6 +16,8 @@ use uuid::Uuid;
 
 #[derive(Error, Debug)]
 pub enum GrpcPullLogsError {
+    #[error("Please backoff exponentially and retry")]
+    Backoff,
     #[error("Failed to fetch")]
     FailedToPullLogs(#[from] tonic::Status),
     #[error("Failed to scout logs: {0}")]
@@ -27,6 +29,7 @@ pub enum GrpcPullLogsError {
 impl ChromaError for GrpcPullLogsError {
     fn code(&self) -> ErrorCodes {
         match self {
+            GrpcPullLogsError::Backoff => ErrorCodes::Unavailable,
             GrpcPullLogsError::FailedToPullLogs(err) => err.code().into(),
             GrpcPullLogsError::FailedToScoutLogs(err) => err.code().into(),
             GrpcPullLogsError::ConversionError(_) => ErrorCodes::Internal,
@@ -259,8 +262,12 @@ impl GrpcLog {
                 Ok(result)
             }
             Err(e) => {
-                tracing::error!("Failed to pull logs: {}", e);
-                Err(GrpcPullLogsError::FailedToPullLogs(e))
+                if e.code() == chroma_error::ErrorCodes::Unavailable.into() {
+                    Err(GrpcPullLogsError::Backoff)
+                } else {
+                    tracing::error!("Failed to pull logs: {}", e);
+                    Err(GrpcPullLogsError::FailedToPullLogs(e))
+                }
             }
         }
     }
