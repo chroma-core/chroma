@@ -343,32 +343,11 @@ message CollectionSegmentInfo {
     // GC's {collection,version} selection policy.
 }
 
-// Tuple of collection ID, tenant ID, and version.
-message CollectionVersionTuple {
-    string collection_id = 1;
-    string tenant_id = 2;
-    int64 version = 3;
-}
-
 message VersionListForCollection {
   string tenant_id = 1;
   string database_id = 2;
   string collection_id = 3;
   repeated int64 versions = 4;
-}
-
-// Contains information about the lineage of a collection.
-message CollectionLineageInfo {
-    // ID of the collection.
-    string collection_id = 1;
-    // ID of the tenant.
-    string tenant_id = 2;
-    // Whether the collection is a root collection.
-    bool is_root_collection = 3;
-    // An ordered list of descendant collections.
-    // The first element is the root {collection, version}, and the last
-    // element is the direct parent of the current collection.
-    repeated CollectionVersionTuple parent_collections = 4;
 }
 
 // Request to list versions of a collection.
@@ -390,6 +369,16 @@ message ListCollectionVersionsResponse {
   repeated CollectionVersionInfo versions = 1;
   // Whether the list is truncated.
   bool list_is_truncated = 2;
+}
+
+message CollectionLineageFile {
+	repeated CollectionVersionDependency dependencies = 1;
+}
+
+message CollectionVersionDependency {
+	string source_collection_id = 1; // The forked collection
+	uint64 source_collection_version = 2; // The forked collection version
+	string target_collection_id = 3; // The forking collection
 }
 
 // Request to restore a collection.
