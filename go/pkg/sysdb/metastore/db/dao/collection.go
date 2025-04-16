@@ -65,8 +65,8 @@ func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64
 		Where("version > 0").
 		Where("version_file_name IS NOT NULL").
 		Where("version_file_name != ''").
-		Where("root_collection_id IS NULL OR root_collection_id == ''").
-		Where("lineage_file_name IS NULL OR lineage_file_name == ''")
+		Where("root_collection_id IS NULL OR root_collection_id = ''").
+		Where("lineage_file_name IS NULL OR lineage_file_name = ''")
 	// Apply cutoff time filter only if provided
 	if cutoffTimeSecs != nil {
 		cutoffTime := time.Unix(int64(*cutoffTimeSecs), 0)
