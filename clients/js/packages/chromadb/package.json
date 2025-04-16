@@ -41,13 +41,6 @@
     "semver": "^7.7.1",
     "voyageai": "^0.0.3-1"
   },
-  "optionalDependencies": {
-    "chromadb-js-bindings-darwin-arm64": "^0.0.1",
-    "chromadb-js-bindings-darwin-x64": "^0.0.1",
-    "chromadb-js-bindings-linux-arm64-gnu": "^0.0.1",
-    "chromadb-js-bindings-linux-x64-gnu": "^0.0.1",
-    "chromadb-js-bindings-win32-x64-msvc": "^0.0.1"
-  },
   "devDependencies": {
     "@internal/chromadb-core": "workspace:*",
     "@types/semver": "^7.7.0",

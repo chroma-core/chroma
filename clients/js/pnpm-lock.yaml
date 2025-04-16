@@ -126,10 +126,6 @@ importers:
       voyageai:
         specifier: ^0.0.3-1
         version: 0.0.3-1
-    optionalDependencies:
-      chromadb-js-bindings-darwin-arm64:
-        specifier: ^0.0.1
-        version: 0.0.1
     devDependencies:
       '@internal/chromadb-core':
         specifier: workspace:*
@@ -1690,12 +1686,6 @@ packages:
 
   chromadb-default-embed@2.14.0:
     resolution: {integrity: sha512-odCiCzZ5jqNI0sS6RcRxObx8gM7aCPULQkdWw/OgqIGdIUOKUj9b8jDElLbZ6feMKNB0MSQhtXi0P8QEeVO75w==}
-
-  chromadb-js-bindings-darwin-arm64@0.0.1:
-    resolution: {integrity: sha512-YEFF2KObB73iaXyRLcC0eSbaHQ8/6vs2Pg2ue+V9jMQL1pcZYlcYLI/2AtELGjOxJTd086iJoMPJpQqy8LNyxQ==}
-    engines: {node: '>= 10'}
-    cpu: [arm64]
-    os: [darwin]
 
   ci-info@3.9.0:
     resolution: {integrity: sha512-NIxF55hv4nSqQswkAeiOi1r83xy8JldOFDTWiug55KBu9Jnblncd2U6ViHmYgHf01TPZS77NJBhBMKdWj9HQMQ==}
@@ -6012,9 +6002,6 @@ snapshots:
       sharp: 0.32.6
     optionalDependencies:
       onnxruntime-node: 1.14.0
-
-  chromadb-js-bindings-darwin-arm64@0.0.1:
-    optional: true
 
   ci-info@3.9.0: {}
 
