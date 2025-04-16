@@ -64,8 +64,9 @@ func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
 		Where("version > 0").
 		Where("version_file_name IS NOT NULL").
-		Where("version_file_name != ''")
-
+		Where("version_file_name != ''").
+		Where("root_collection_id IS NULL OR root_collection_id = ''").
+		Where("lineage_file_name IS NULL OR lineage_file_name = ''")
 	// Apply cutoff time filter only if provided
 	if cutoffTimeSecs != nil {
 		cutoffTime := time.Unix(int64(*cutoffTimeSecs), 0)
@@ -102,6 +103,8 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 		LogPosition                int64      `gorm:"column:log_position"`
 		Version                    int32      `gorm:"column:version"`
 		VersionFileName            string     `gorm:"column:version_file_name"`
+		RootCollectionId           string     `gorm:"column:root_collection_id"`
+		LineageFileName            string     `gorm:"column:lineage_file_name"`
 		TotalRecordsPostCompaction uint64     `gorm:"column:total_records_post_compaction"`
 		SizeBytesPostCompaction    uint64     `gorm:"column:size_bytes_post_compaction"`
 		LastCompactionTimeSecs     uint64     `gorm:"column:last_compaction_time_secs"`
@@ -120,7 +123,7 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 	}
 
 	query := s.db.Table("collections").
-		Select("collections.id as collection_id, collections.name as collection_name, collections.configuration_json_str, collections.dimension, collections.database_id, collections.ts as collection_ts, collections.is_deleted, collections.created_at as collection_created_at, collections.updated_at as collection_updated_at, collections.log_position, collections.version, collections.version_file_name, collections.total_records_post_compaction, collections.size_bytes_post_compaction, collections.last_compaction_time_secs, databases.name as database_name, databases.tenant_id as db_tenant_id, collections.tenant as tenant").
+		Select("collections.id as collection_id, collections.name as collection_name, collections.configuration_json_str, collections.dimension, collections.database_id, collections.ts as collection_ts, collections.is_deleted, collections.created_at as collection_created_at, collections.updated_at as collection_updated_at, collections.log_position, collections.version, collections.version_file_name, collections.root_collection_id, collections.lineage_file_name, collections.total_records_post_compaction, collections.size_bytes_post_compaction, collections.last_compaction_time_secs, databases.name as database_name, databases.tenant_id as db_tenant_id, collections.tenant as tenant").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
 		Order("collections.created_at ASC")
 
@@ -181,6 +184,8 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 				LogPosition:                r.LogPosition,
 				Version:                    r.Version,
 				VersionFileName:            r.VersionFileName,
+				RootCollectionId:           r.RootCollectionId,
+				LineageFileName:            r.LineageFileName,
 				TotalRecordsPostCompaction: r.TotalRecordsPostCompaction,
 				SizeBytesPostCompaction:    r.SizeBytesPostCompaction,
 				LastCompactionTimeSecs:     r.LastCompactionTimeSecs,
