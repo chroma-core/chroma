@@ -197,6 +197,16 @@ impl Orchestrator for SpannKnnOrchestrator {
         );
         tasks.push(prefetch_task);
 
+        let prefetch_record_segment_task = wrap(
+            Box::new(PrefetchSegmentOperator::new()),
+            PrefetchSegmentInput::new(
+                self.knn_filter_output.record_segment.clone(),
+                self.spann_provider.blockfile_provider.clone(),
+            ),
+            ctx.receiver(),
+        );
+        tasks.push(prefetch_record_segment_task);
+
         tasks
     }
 
