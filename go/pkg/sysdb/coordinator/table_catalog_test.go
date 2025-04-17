@@ -241,7 +241,7 @@ func TestCatalog_FlushCollectionCompactionForVersionedCollection(t *testing.T) {
 	mockCollectionEntry := &dbmodel.Collection{
 		ID:              collectionID.String(),
 		Version:         int32(currentVersion),
-		VersionFilePath: "version_1.pb",
+		VersionFileName: "version_1.pb",
 		LogPosition:     logPosition,
 	}
 
@@ -341,7 +341,7 @@ func TestCatalog_DeleteCollectionVersion(t *testing.T) {
 	mockCollectionEntry := &dbmodel.Collection{
 		ID:              collectionID,
 		Version:         currentVersion,
-		VersionFilePath: existingVersionFileName,
+		VersionFileName: existingVersionFileName,
 		OldestVersionTs: time.Unix(0, 0),
 		NumVersions:     4,
 	}
@@ -477,7 +477,7 @@ func TestCatalog_MarkVersionForDeletion(t *testing.T) {
 	mockCollectionEntry := &dbmodel.Collection{
 		ID:              collectionID,
 		Version:         currentVersion,
-		VersionFilePath: existingVersionFileName,
+		VersionFileName: existingVersionFileName,
 	}
 
 	// Setup mock behaviors
@@ -615,7 +615,7 @@ func TestCatalog_MarkVersionForDeletion_VersionNotFound(t *testing.T) {
 	mockCollectionEntry := &dbmodel.Collection{
 		ID:              collectionID,
 		Version:         currentVersion,
-		VersionFilePath: existingVersionFileName,
+		VersionFileName: existingVersionFileName,
 	}
 
 	// Setup mock behaviors
@@ -666,7 +666,7 @@ func TestCatalog_ListCollectionsToGc(t *testing.T) {
 			ID:              "00000000-0000-0000-0000-000000000001",
 			Name:            "collection1",
 			Version:         3,
-			VersionFilePath: "3_existing_version",
+			VersionFileName: "3_existing_version",
 			OldestVersionTs: time.Now().Add(-48 * time.Hour), // 48 hours ago
 			NumVersions:     3,
 		},
@@ -674,7 +674,7 @@ func TestCatalog_ListCollectionsToGc(t *testing.T) {
 			ID:              "00000000-0000-0000-0000-000000000002",
 			Name:            "collection2",
 			Version:         2,
-			VersionFilePath: "2_existing_version",
+			VersionFileName: "2_existing_version",
 			OldestVersionTs: time.Now().Add(-36 * time.Hour), // 36 hours ago
 			NumVersions:     2,
 		},
@@ -725,7 +725,7 @@ func TestCatalog_ListCollectionsToGc_NilParameters(t *testing.T) {
 			ID:              "00000000-0000-0000-0000-000000000001",
 			Name:            "collection1",
 			Version:         3,
-			VersionFilePath: "3_existing_version",
+			VersionFileName: "3_existing_version",
 			OldestVersionTs: time.Now().Add(-48 * time.Hour),
 			NumVersions:     3,
 		},

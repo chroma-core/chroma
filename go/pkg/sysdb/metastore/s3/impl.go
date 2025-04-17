@@ -38,9 +38,9 @@ type S3MetaStoreConfig struct {
 }
 
 type S3MetaStoreInterface interface {
-	GetLineageFile(lineageFilePath string) (*coordinatorpb.CollectionLineageFile, error)
+	GetLineageFile(lineageFileName string) (*coordinatorpb.CollectionLineageFile, error)
 	PutLineageFile(tenantID, databaseID, collectionID, fileName string, file *coordinatorpb.CollectionLineageFile) (string, error)
-	GetVersionFile(versionFilePath string) (*coordinatorpb.CollectionVersionFile, error)
+	GetVersionFile(versionFileName string) (*coordinatorpb.CollectionVersionFile, error)
 	PutVersionFile(tenantID, databaseID, collectionID, fileName string, file *coordinatorpb.CollectionVersionFile) (string, error)
 	HasObjectWithPrefix(ctx context.Context, prefix string) (bool, error)
 	DeleteVersionFile(tenantID, databaseID, collectionID, fileName string) error
@@ -130,12 +130,12 @@ func NewS3MetaStore(config S3MetaStoreConfig) (*S3MetaStore, error) {
 	}, nil
 }
 
-func (store *S3MetaStore) GetLineageFile(lineageFilePath string) (*coordinatorpb.CollectionLineageFile, error) {
-	log.Info("Getting lineage file from S3", zap.String("path", lineageFilePath))
+func (store *S3MetaStore) GetLineageFile(lineageFileName string) (*coordinatorpb.CollectionLineageFile, error) {
+	log.Info("Getting lineage file from S3", zap.String("path", lineageFileName))
 
 	input := &s3.GetObjectInput{
 		Bucket: aws.String(store.BucketName),
-		Key:    aws.String(lineageFilePath),
+		Key:    aws.String(lineageFileName),
 	}
 
 	result, err := store.S3.GetObject(input)
@@ -186,12 +186,12 @@ func (store *S3MetaStore) PutLineageFile(tenantID string, databaseID string, col
 }
 
 // Get the version file from S3. Return the protobuf.
-func (store *S3MetaStore) GetVersionFile(versionFilePath string) (*coordinatorpb.CollectionVersionFile, error) {
-	log.Info("getting version file from S3", zap.String("path", versionFilePath))
+func (store *S3MetaStore) GetVersionFile(versionFileName string) (*coordinatorpb.CollectionVersionFile, error) {
+	log.Info("getting version file from S3", zap.String("path", versionFileName))
 
 	input := &s3.GetObjectInput{
 		Bucket: aws.String(store.BucketName),
-		Key:    aws.String(versionFilePath),
+		Key:    aws.String(versionFileName),
 	}
 
 	result, err := store.S3.GetObject(input)

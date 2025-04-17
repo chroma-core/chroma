@@ -102,9 +102,9 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 		CollectionUpdatedAt        *time.Time `gorm:"column:collection_updated_at"`
 		LogPosition                int64      `gorm:"column:log_position"`
 		Version                    int32      `gorm:"column:version"`
-		VersionFilePath            string     `gorm:"column:version_file_name"`
+		VersionFileName            string     `gorm:"column:version_file_name"`
 		RootCollectionId           string     `gorm:"column:root_collection_id"`
-		LineageFilePath            string     `gorm:"column:lineage_file_name"`
+		LineageFileName            string     `gorm:"column:lineage_file_name"`
 		TotalRecordsPostCompaction uint64     `gorm:"column:total_records_post_compaction"`
 		SizeBytesPostCompaction    uint64     `gorm:"column:size_bytes_post_compaction"`
 		LastCompactionTimeSecs     uint64     `gorm:"column:last_compaction_time_secs"`
@@ -183,9 +183,9 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 				IsDeleted:                  r.IsDeleted,
 				LogPosition:                r.LogPosition,
 				Version:                    r.Version,
-				VersionFilePath:            r.VersionFilePath,
+				VersionFileName:            r.VersionFileName,
 				RootCollectionId:           r.RootCollectionId,
-				LineageFilePath:            r.LineageFilePath,
+				LineageFileName:            r.LineageFileName,
 				TotalRecordsPostCompaction: r.TotalRecordsPostCompaction,
 				SizeBytesPostCompaction:    r.SizeBytesPostCompaction,
 				LastCompactionTimeSecs:     r.LastCompactionTimeSecs,
@@ -502,11 +502,11 @@ func (s *collectionDb) LockCollection(collectionID *string) error {
 	return nil
 }
 
-func (s *collectionDb) UpdateCollectionLineageFilePath(collectionID *string, currentLineageFilePath *string, newLineageFilePath *string) error {
+func (s *collectionDb) UpdateCollectionLineageFilePath(collectionID *string, currentLineageFileName *string, newLineageFileName *string) error {
 	return s.db.Model(&dbmodel.Collection{}).
-		Where("id = ? AND lineage_file_name = ?", collectionID, currentLineageFilePath).
+		Where("id = ? AND lineage_file_name = ?", collectionID, currentLineageFileName).
 		Updates(map[string]interface{}{
-			"lineage_file_name": newLineageFilePath,
+			"lineage_file_name": newLineageFileName,
 		}).Error
 
 }

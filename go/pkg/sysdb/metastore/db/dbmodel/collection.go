@@ -18,9 +18,9 @@ type Collection struct {
 	UpdatedAt                  time.Time       `gorm:"updated_at;type:timestamp;not null;default:current_timestamp"`
 	LogPosition                int64           `gorm:"log_position;default:0"`
 	Version                    int32           `gorm:"version;default:0"`
-	VersionFilePath            string          `gorm:"version_file_name"`
+	VersionFileName            string          `gorm:"version_file_name"`
 	RootCollectionId           string          `gorm:"column:root_collection_id"`
-	LineageFilePath            string          `gorm:"column:lineage_file_name"`
+	LineageFileName            string          `gorm:"column:lineage_file_name"`
 	TotalRecordsPostCompaction uint64          `gorm:"total_records_post_compaction;default:0"`
 	SizeBytesPostCompaction    uint64          `gorm:"size_bytes_post_compaction;default:0"`
 	LastCompactionTimeSecs     uint64          `gorm:"last_compaction_time_secs;default:0"`
@@ -34,7 +34,7 @@ type CollectionToGc struct {
 	TenantID        string    `gorm:"tenant_id;not null;index:idx_tenant_id"`
 	Name            string    `gorm:"name;not null;index:idx_name,unique;"`
 	Version         int32     `gorm:"version;default:0"`
-	VersionFilePath string    `gorm:"version_file_name"`
+	VersionFileName string    `gorm:"version_file_name"`
 	OldestVersionTs time.Time `gorm:"oldest_version_ts;type:timestamp"`
 	NumVersions     uint32    `gorm:"num_versions;default:0"`
 }
