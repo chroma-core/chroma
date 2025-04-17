@@ -24,7 +24,7 @@ use futures::{stream::FuturesUnordered, StreamExt};
 use std::{
     collections::HashMap,
     sync::Arc,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use thiserror::Error;
 use tracing::{Instrument, Span};
@@ -339,13 +339,7 @@ impl BlockManager {
         id: &Uuid,
         priority: StorageRequestPriority,
     ) -> Result<Option<Block>, GetError> {
-        let current_time = Instant::now();
         let block = self.block_cache.get(id).await.ok().flatten();
-        println!(
-            "(Sanket-temp) Id {:?} Cache get took {:?}",
-            id,
-            current_time.elapsed().as_micros()
-        );
         match block {
             Some(block) => Ok(Some(block)),
             None => async {

@@ -83,21 +83,28 @@ pub enum StorageRequestPriority {
 }
 
 impl StorageRequestPriority {
-    pub fn from_usize(value: usize) -> Self {
-        match value {
-            0 => StorageRequestPriority::P0,
-            1 => StorageRequestPriority::P1,
-            // TODO(Sanket): Error out here ideally.
-            _ => StorageRequestPriority::lowest(),
-        }
-    }
-
     pub fn lowest() -> Self {
         StorageRequestPriority::P1
     }
 
     pub fn as_usize(self) -> usize {
         self as usize
+    }
+}
+
+impl From<usize> for StorageRequestPriority {
+    fn from(value: usize) -> Self {
+        match value {
+            0 => StorageRequestPriority::P0,
+            1 => StorageRequestPriority::P1,
+            _ => {
+                tracing::warn!(
+                    "Invalid StorageRequestPriority value: {}. Defaulting to lowest priority.",
+                    value
+                );
+                StorageRequestPriority::lowest()
+            }
+        }
     }
 }
 
@@ -520,7 +527,7 @@ impl CountBasedPolicy {
     ) -> SemaphorePermit<'_> {
         loop {
             let current_priority = priority.load(Ordering::SeqCst);
-            let current_priority = StorageRequestPriority::from_usize(current_priority);
+            let current_priority: StorageRequestPriority = current_priority.into();
 
             // Try acquiring permits at current and lower priorities
             for pri in current_priority.as_usize()
@@ -541,13 +548,21 @@ impl CountBasedPolicy {
                 Some(rx) => {
                     select! {
                         _ = rx.recv() => {
+                            // Reevaluate priority if we got a notification.
                             continue;
                         }
                         token = self.remaining_tokens[current_priority.as_usize()].acquire() => {
-                            if let Ok(token) = token {
-                                return token;
+                            match token {
+                                Ok(token) => {
+                                    // If we got a token, return it.
+                                    return token;
+                                },
+                                Err(e) => {
+                                    // If we got an error, log it and continue.
+                                    tracing::error!("Error acquiring semaphore token: {}", e);
+                                    panic!("Error acquiring semaphore token: {}", e);
+                                }
                             }
-                            continue;
                         }
                     }
                 }
@@ -555,10 +570,17 @@ impl CountBasedPolicy {
                     let token = self.remaining_tokens[current_priority.as_usize()]
                         .acquire()
                         .await;
-                    if let Ok(token) = token {
-                        return token;
+                    match token {
+                        Ok(token) => {
+                            // If we got a token, return it.
+                            return token;
+                        }
+                        Err(e) => {
+                            // If we got an error, log it and continue.
+                            tracing::error!("Error acquiring semaphore token: {}", e);
+                            panic!("Error acquiring semaphore token: {}", e);
+                        }
                     }
-                    continue;
                 }
             }
         }

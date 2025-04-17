@@ -1,7 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
     sync::{atomic::AtomicU32, Arc},
-    time::Instant,
 };
 
 use chroma_blockstore::{
@@ -2149,7 +2148,6 @@ impl<'me> SpannIndexReader<'me> {
         &self,
         head_id: u32,
     ) -> Result<Vec<SpannPosting>, SpannIndexReaderError> {
-        let current_time = Instant::now();
         let res = self
             .posting_lists
             .get("", head_id)
@@ -2159,29 +2157,16 @@ impl<'me> SpannIndexReader<'me> {
                 SpannIndexReaderError::PostingListReadError(e)
             })?
             .ok_or(SpannIndexReaderError::PostingListNotFound)?;
-        println!(
-            "(Sanket-temp) Time taken to get posting list for head {}: {} us",
-            head_id,
-            current_time.elapsed().as_micros()
-        );
 
-        let current_time = Instant::now();
         let mut posting_lists = Vec::with_capacity(res.doc_offset_ids.len());
         let mut unique_ids = HashSet::new();
         for (index, doc_offset_id) in res.doc_offset_ids.iter().enumerate() {
-            let current_time = Instant::now();
             if self
                 .is_outdated(*doc_offset_id, res.doc_versions[index])
                 .await?
             {
                 continue;
             }
-            println!(
-                "(Sanket-temp) Time taken to check if outdated for head {}: {} us",
-                head_id,
-                current_time.elapsed().as_micros()
-            );
-            let current_time = Instant::now();
             if unique_ids.contains(doc_offset_id) {
                 continue;
             }
@@ -2192,17 +2177,7 @@ impl<'me> SpannIndexReader<'me> {
                     [index * self.dimensionality..(index + 1) * self.dimensionality]
                     .to_vec(),
             });
-            println!(
-                "(Sanket-temp) Time taken to copy PL for head {}: {} us",
-                head_id,
-                current_time.elapsed().as_micros()
-            );
         }
-        println!(
-            "(Sanket-temp) Time taken to dedup posting list for head {}: {} us",
-            head_id,
-            current_time.elapsed().as_micros()
-        );
         Ok(posting_lists)
     }
 
