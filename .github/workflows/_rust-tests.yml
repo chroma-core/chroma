@@ -51,10 +51,11 @@ jobs:
         uses: ./.github/actions/rust
         with:
           github-token: ${{ github.token }}
+      - uses: useblacksmith/build-push-action@v1.1
+        with:
+          setup-only: true
       - name: Start services in Tilt
         uses: ./.github/actions/tilt
-        with:
-          depot-project-id: ${{ vars.DEPOT_PROJECT_ID }}
       - name: Build CLI
         run: cargo build --bin chroma
       - name: Run tests
