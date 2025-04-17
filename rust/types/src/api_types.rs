@@ -767,6 +767,45 @@ impl ChromaError for DeleteCollectionError {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum ForkCollectionError {
+    #[error("Collection [{0}] already exists")]
+    AlreadyExists(String),
+    #[error("Failed to convert proto collection")]
+    CollectionConversionError(#[from] CollectionConversionError),
+    #[error("Duplicate segment")]
+    DuplicateSegment,
+    #[error("Missing field: [{0}]")]
+    Field(String),
+    #[error("Collection forking is unsupported for local chroma")]
+    Local,
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+    #[error("Collection [{0}] does not exists")]
+    NotFound(String),
+    #[error("Failed to convert proto segment")]
+    SegmentConversionError(#[from] SegmentConversionError),
+}
+
+impl ChromaError for ForkCollectionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            ForkCollectionError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
+            ForkCollectionError::CollectionConversionError(collection_conversion_error) => {
+                collection_conversion_error.code()
+            }
+            ForkCollectionError::DuplicateSegment => ErrorCodes::FailedPrecondition,
+            ForkCollectionError::Field(_) => ErrorCodes::FailedPrecondition,
+            ForkCollectionError::Local => ErrorCodes::Unimplemented,
+            ForkCollectionError::Internal(chroma_error) => chroma_error.code(),
+            ForkCollectionError::NotFound(_) => ErrorCodes::NotFound,
+            ForkCollectionError::SegmentConversionError(segment_conversion_error) => {
+                segment_conversion_error.code()
+            }
+        }
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum GetCollectionSizeError {
     #[error(transparent)]
