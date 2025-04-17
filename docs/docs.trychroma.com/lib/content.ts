@@ -31,10 +31,12 @@ export const getAllPages = (sidebarConfig: AppSection[], sectionId: string) => {
 
   pages.push(
     ...(section.pages?.map((page) => {
+      // Create the slug first, then reuse it for the path
+      const pageSlug = `${section.id}/${page.id}`;
       return {
         ...page,
-        slug: `${section.id}/${page.id}`,
-        path: `./${page.slug}`,
+        slug: pageSlug,
+        path: `/${pageSlug}`,
       };
     }) || []),
   );
@@ -42,10 +44,12 @@ export const getAllPages = (sidebarConfig: AppSection[], sectionId: string) => {
   section.subsections?.forEach((subsection) => {
     pages.push(
       ...(subsection.pages?.map((page) => {
+        // Create the slug first, then reuse it for the path
+        const pageSlug = `${section.id}/${subsection.id}/${page.id}`;
         return {
           ...page,
-          slug: `${section.id}/${subsection.id}/${page.id}`,
-          path: `../${subsection.id}/${page.id}`,
+          slug: pageSlug,
+          path: `/${pageSlug}`,
         };
       }) || []),
     );
