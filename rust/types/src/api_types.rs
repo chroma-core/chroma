@@ -767,6 +767,35 @@ impl ChromaError for DeleteCollectionError {
     }
 }
 
+#[non_exhaustive]
+#[derive(Clone, Validate, Serialize, ToSchema)]
+pub struct ForkCollectionRequest {
+    pub tenant_id: String,
+    pub database_name: String,
+    pub source_collection_id: CollectionUuid,
+    pub target_collection_name: String,
+}
+
+impl ForkCollectionRequest {
+    pub fn try_new(
+        tenant_id: String,
+        database_name: String,
+        source_collection_id: CollectionUuid,
+        target_collection_name: String,
+    ) -> Result<Self, ChromaValidationError> {
+        let request = Self {
+            tenant_id,
+            database_name,
+            source_collection_id,
+            target_collection_name,
+        };
+        request.validate().map_err(ChromaValidationError::from)?;
+        Ok(request)
+    }
+}
+
+pub type ForkCollectionResponse = Collection;
+
 #[derive(Error, Debug)]
 pub enum ForkCollectionError {
     #[error("Collection [{0}] already exists")]
