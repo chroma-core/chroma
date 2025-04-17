@@ -390,7 +390,7 @@ func (s *collectionDb) UpdateLogPositionAndVersionInfo(
 	// expensive locking mechanism. Taking the lock as a caution for now.
 	result := s.db.Model(&dbmodel.Collection{}).
 		Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("id = ? AND version = ? AND version_file_name = ?",
+		Where("id = ? AND version = ? AND (version_file_name IS NULL OR version_file_name = ?)",
 			collectionID,
 			currentCollectionVersion,
 			currentVersionFileName).
@@ -451,7 +451,8 @@ func (s *collectionDb) UpdateVersionRelatedFields(collectionID, existingVersionF
 	}
 
 	result := s.db.Model(&dbmodel.Collection{}).
-		Where("id = ? AND version_file_name = ?", collectionID, existingVersionFileName).
+		Where("id = ? AND (version_file_name IS NULL OR version_file_name = ?)",
+			collectionID, existingVersionFileName).
 		Updates(updates)
 	if result.Error != nil {
 		return 0, result.Error
