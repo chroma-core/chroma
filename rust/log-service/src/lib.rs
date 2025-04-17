@@ -739,6 +739,12 @@ impl LogService for LogServer {
             for parquet in parquets {
                 let this = parquet_to_records(parquet)?;
                 for record in this {
+                    if record.0.offset() < pull_logs.start_from_offset as u64
+                        || record.0.offset()
+                            >= pull_logs.start_from_offset as u64 + pull_logs.batch_size as u64
+                    {
+                        continue;
+                    }
                     if records.len() >= pull_logs.batch_size as usize {
                         break;
                     }
