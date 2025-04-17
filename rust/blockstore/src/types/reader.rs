@@ -6,8 +6,10 @@ use crate::memory::reader_writer::MemoryBlockfileReader;
 use crate::memory::storage::Readable;
 use chroma_error::ChromaError;
 use futures::{Stream, StreamExt};
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::ops::RangeBounds;
+use uuid::Uuid;
 
 #[derive(Clone)]
 pub enum BlockfileReader<
@@ -119,6 +121,18 @@ impl<
             BlockfileReader::MemoryBlockfileReader(_reader) => unimplemented!(),
             BlockfileReader::ArrowBlockfileReader(reader) => {
                 reader.load_blocks_for_keys(keys).await
+            }
+        }
+    }
+
+    pub async fn group_keys_by_blocks(
+        &self,
+        keys: impl IntoIterator<Item = (String, K)>,
+    ) -> HashMap<Uuid, Vec<K>> {
+        match self {
+            BlockfileReader::MemoryBlockfileReader(_reader) => unimplemented!(),
+            BlockfileReader::ArrowBlockfileReader(reader) => {
+                reader.group_keys_by_blocks(keys).await
             }
         }
     }

@@ -6,7 +6,7 @@ pub mod materialize_logs;
 pub(super) mod register;
 pub mod spann_bf_pl;
 pub(super) mod spann_centers_search;
-pub(super) mod spann_fetch_pl;
+pub(super) mod spann_fetch_block;
 pub mod spann_knn_merge;
 
 pub mod fetch_log;

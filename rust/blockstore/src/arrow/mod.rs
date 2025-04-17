@@ -1,4 +1,4 @@
-pub(crate) mod block;
+pub mod block;
 pub(crate) mod blockfile;
 #[cfg(test)]
 mod concurrency_test;

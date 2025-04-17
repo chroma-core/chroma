@@ -24,7 +24,7 @@ use crate::execution::operators::{
     knn_projection::{KnnProjectionError, KnnProjectionOutput},
     spann_bf_pl::SpannBfPlError,
     spann_centers_search::SpannCentersSearchError,
-    spann_fetch_pl::SpannFetchPlError,
+    spann_fetch_block::SpannFetchBlockError,
     spann_knn_merge::SpannKnnMergeError,
 };
 
@@ -56,14 +56,16 @@ pub enum KnnError {
     Result(#[from] RecvError),
     #[error("Error running Spann Bruteforce Postinglist Operator: {0}")]
     SpannBfPl(#[from] SpannBfPlError),
-    #[error("Error running Spann Fetch Postinglist Operator: {0}")]
-    SpannFetchPl(#[from] SpannFetchPlError),
+    #[error("Error running Spann Fetch Block Operator: {0}")]
+    SpannFetchBlock(#[from] SpannFetchBlockError),
     #[error("Error running Spann Head Search Operator: {0}")]
     SpannHeadSearch(#[from] SpannCentersSearchError),
     #[error("Error running Spann Knn Merge Operator")]
     SpannKnnMerge(#[from] SpannKnnMergeError),
     #[error("Error creating spann segment reader: {0}")]
     SpannSegmentReaderCreationError(#[from] SpannSegmentReaderError),
+    #[error("No spann reader available, cannot run Knn")]
+    SpannSegmentReaderNotFound,
     #[error("Invalid distance function")]
     InvalidDistanceFunction,
     #[error("Operation aborted because resources exhausted")]
@@ -86,12 +88,13 @@ impl ChromaError for KnnError {
             KnnError::Panic(_) => ErrorCodes::Aborted,
             KnnError::Result(_) => ErrorCodes::Internal,
             KnnError::SpannBfPl(e) => e.code(),
-            KnnError::SpannFetchPl(e) => e.code(),
+            KnnError::SpannFetchBlock(e) => e.code(),
             KnnError::SpannHeadSearch(e) => e.code(),
             KnnError::SpannKnnMerge(_) => ErrorCodes::Internal,
             KnnError::InvalidDistanceFunction => ErrorCodes::InvalidArgument,
             KnnError::Aborted => ErrorCodes::ResourceExhausted,
             KnnError::SpannSegmentReaderCreationError(e) => e.code(),
+            KnnError::SpannSegmentReaderNotFound => ErrorCodes::Internal,
         }
     }
 }

@@ -7,7 +7,7 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::spann::types::GarbageCollectionContext;
 use chroma_index::spann::types::{
-    SpannIndexFlusher, SpannIndexReader, SpannIndexReaderError, SpannIndexWriterError, SpannPosting,
+    SpannIndexFlusher, SpannIndexReader, SpannIndexReaderError, SpannIndexWriterError,
 };
 use chroma_index::spann::utils::rng_query;
 use chroma_index::spann::utils::RngQueryError;
@@ -512,15 +512,20 @@ impl<'me> SpannSegmentReader<'me> {
         })
     }
 
-    pub async fn fetch_posting_list(
+    pub async fn group_heads_by_blocks(&self, head_ids: &[u32]) -> HashMap<Uuid, Vec<u32>> {
+        self.index_reader.group_heads_by_blocks(head_ids).await
+    }
+
+    pub async fn is_outdated(
         &self,
         head_id: u32,
-    ) -> Result<Vec<SpannPosting>, SpannSegmentReaderError> {
+        version: u32,
+    ) -> Result<bool, SpannSegmentReaderError> {
         self.index_reader
-            .fetch_posting_list(head_id)
+            .is_outdated(head_id, version)
             .await
             .map_err(|e| {
-                tracing::error!("Error fetching posting list for head {}:{:?}", head_id, e);
+                tracing::error!("Error checking if head {} is outdated: {:?}", head_id, e);
                 SpannSegmentReaderError::KeyReadError(e)
             })
     }
