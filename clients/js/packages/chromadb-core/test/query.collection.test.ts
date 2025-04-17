@@ -1,9 +1,4 @@
-import {
-  beforeEach,
-  describe,
-  expect,
-  test,
-} from "@jest/globals";
+import { beforeEach, describe, expect, test } from "@jest/globals";
 import { IncludeEnum } from "../src/types";
 import { EMBEDDINGS, IDS, METADATAS, DOCUMENTS } from "./data";
 

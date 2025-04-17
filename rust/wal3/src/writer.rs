@@ -9,6 +9,7 @@ use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
 use setsum::Setsum;
+use tracing::Instrument;
 
 use crate::{
     unprefixed_fragment_path, BatchManager, CursorStore, CursorStoreOptions, Error,
@@ -338,7 +339,8 @@ impl OnceLogWriter {
             let this = Arc::clone(self);
             this.append_batch(fragment_seq_no, log_position, work).await
         }
-        rx.await.map_err(|_| Error::Internal)?
+        let span = tracing::info_span!("wait_for_durability");
+        rx.instrument(span).await.map_err(|_| Error::Internal)?
     }
 
     #[tracing::instrument(skip(self, work))]
@@ -424,6 +426,7 @@ impl OnceLogWriter {
     }
 }
 
+#[tracing::instrument(skip(messages))]
 pub fn construct_parquet(
     log_position: LogPosition,
     messages: &[Vec<u8>],

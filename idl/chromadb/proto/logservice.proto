@@ -19,7 +19,10 @@ message ScoutLogsRequest {
 }
 
 message ScoutLogsResponse {
-  int64 limit_offset = 1;
+  // This field was once used for an ambiguous last_record_offset alternative.
+  reserved 1;
+  // The next record to insert will have this offset.
+  int64 first_uninserted_record_offset = 2;
 }
 
 message PullLogsRequest {

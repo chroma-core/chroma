@@ -671,7 +671,9 @@ impl LogService for LogServer {
                 }
             };
             let limit_offset = limit_position.offset() as i64;
-            Ok(Response::new(ScoutLogsResponse { limit_offset }))
+            Ok(Response::new(ScoutLogsResponse {
+                first_uninserted_record_offset: limit_offset,
+            }))
         }
         .instrument(span)
         .await

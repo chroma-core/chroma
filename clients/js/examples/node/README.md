@@ -17,6 +17,7 @@ This is an example of how to use ChromaDB with Node.js.
 This example demonstrates both ChromaDB package options:
 
 1. **chromadb** (Bundled Package): Includes all embedding libraries as dependencies.
+
    - Good for simple projects or when you want everything included.
    - Import with: `const chroma = require("chromadb");`
 

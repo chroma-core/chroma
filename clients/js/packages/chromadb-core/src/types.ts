@@ -6,6 +6,7 @@ export enum IncludeEnum {
   Embeddings = "embeddings",
   Metadatas = "metadatas",
   Distances = "distances",
+  Uris = "uris",
 }
 
 export type Embedding = number[];
@@ -93,7 +94,7 @@ export interface CollectionParams {
   embeddingFunction: IEmbeddingFunction;
 }
 
-export type CollectionMetadata = Record<string, unknown>;
+export type CollectionMetadata = Record<string, boolean | number | string>;
 
 // RequestInit can be used to set Authorization headers and more
 // see all options here: https://www.jsdocs.io/package/@types/node-fetch#RequestInit

@@ -23,7 +23,7 @@ export function toArray<T>(obj: T | T[]): Array<T> {
 
 // a function to convert an array to array of arrays
 export function toArrayOfArrays<T>(
-  obj: Array<Array<T>> | Array<T>
+  obj: Array<Array<T>> | Array<T>,
 ): Array<Array<T>> {
   if (obj.length === 0) {
     return [];
@@ -33,8 +33,8 @@ export function toArrayOfArrays<T>(
     return obj as Array<Array<T>>;
   }
 
-  if (obj[0] && typeof (obj[0] as any)[Symbol.iterator] === 'function') {
-    return (obj as unknown as Array<Iterable<T>>).map(el => Array.from(el));
+  if (obj[0] && typeof (obj[0] as any)[Symbol.iterator] === "function") {
+    return (obj as unknown as Array<Iterable<T>>).map((el) => Array.from(el));
   }
 
   return [obj] as Array<Array<T>>;

@@ -126,7 +126,7 @@ export class ChromaClient {
    *
    */
   async getUserIdentity(): Promise<void> {
-    const user_identity = (await this.api.getUserIdentityV2(
+    const user_identity = (await this.api.getUserIdentity(
       this.api.options,
     )) as UserIdentity;
     const user_tenant = user_identity.tenant;
@@ -166,7 +166,7 @@ export class ChromaClient {
    */
   async reset(): Promise<boolean> {
     await this.init();
-    return await this.api.resetV2(this.api.options);
+    return await this.api.reset(this.api.options);
   }
 
   /**
@@ -180,7 +180,7 @@ export class ChromaClient {
    * ```
    */
   async version(): Promise<string> {
-    return await this.api.versionV2(this.api.options);
+    return await this.api.version(this.api.options);
   }
 
   /**
@@ -194,7 +194,7 @@ export class ChromaClient {
    * ```
    */
   async heartbeat(): Promise<number> {
-    const response = await this.api.heartbeatV2(this.api.options);
+    const response = await this.api.heartbeat(this.api.options);
     return response["nanosecond heartbeat"];
   }
 
@@ -226,22 +226,22 @@ export class ChromaClient {
     embeddingFunction = new DefaultEmbeddingFunction(),
   }: CreateCollectionParams): Promise<Collection> {
     await this.init();
-    const newCollection = (await this.api.createCollectionV2(
+    const newCollection = await this.api.createCollection(
       this.tenant,
       this.database,
       {
         name,
         // @ts-ignore: we need to generate the client libraries again
         configuration: null, //TODO: Configuration type in JavaScript
-        metadata,
+        metadata: metadata,
       },
       this.api.options,
-    )) as CollectionParams;
+    );
 
     return wrapCollection(this, {
       name: newCollection.name,
       id: newCollection.id,
-      metadata: newCollection.metadata,
+      metadata: newCollection.metadata as CollectionMetadata | undefined,
       embeddingFunction,
     });
   }
@@ -273,23 +273,23 @@ export class ChromaClient {
     embeddingFunction = new DefaultEmbeddingFunction(),
   }: GetOrCreateCollectionParams): Promise<Collection> {
     await this.init();
-    const newCollection = (await this.api.createCollectionV2(
+    const newCollection = await this.api.createCollection(
       this.tenant,
       this.database,
       {
         name,
         // @ts-ignore: we need to generate the client libraries again
         configuration: null, //TODO: Configuration type in JavaScript
-        metadata,
+        metadata: metadata,
         get_or_create: true,
       },
       this.api.options,
-    )) as CollectionParams;
+    );
 
     return wrapCollection(this, {
       name: newCollection.name,
       id: newCollection.id,
-      metadata: newCollection.metadata,
+      metadata: newCollection.metadata as CollectionMetadata | undefined,
       embeddingFunction,
     });
   }
@@ -315,7 +315,7 @@ export class ChromaClient {
   > {
     await this.init();
 
-    const response = (await this.api.listCollectionsV2(
+    const response = (await this.api.listCollections(
       this.tenant,
       this.database,
       limit,
@@ -352,7 +352,7 @@ export class ChromaClient {
     }[]
   > {
     await this.init();
-    const results = (await this.api.listCollectionsV2(
+    const results = (await this.api.listCollections(
       this.tenant,
       this.database,
       limit,
@@ -376,7 +376,7 @@ export class ChromaClient {
    */
   async countCollections(): Promise<number> {
     await this.init();
-    const response = (await this.api.countCollectionsV2(
+    const response = (await this.api.countCollections(
       this.tenant,
       this.database,
       this.api.options,
@@ -405,17 +405,17 @@ export class ChromaClient {
     embeddingFunction,
   }: GetCollectionParams): Promise<Collection> {
     await this.init();
-    const response = (await this.api.getCollectionV2(
+    const response = await this.api.getCollection(
       this.tenant,
       this.database,
       name,
       this.api.options,
-    )) as CollectionParams;
+    );
 
     return wrapCollection(this, {
       id: response.id,
       name: response.name,
-      metadata: response.metadata,
+      metadata: response.metadata as CollectionMetadata | undefined,
       embeddingFunction:
         embeddingFunction !== undefined
           ? embeddingFunction
@@ -440,10 +440,10 @@ export class ChromaClient {
   async deleteCollection({ name }: DeleteCollectionParams): Promise<void> {
     await this.init();
 
-    await this.api.deleteCollectionV2(
-      name,
+    await this.api.deleteCollection(
       this.tenant,
       this.database,
+      name,
       this.api.options,
     );
   }
