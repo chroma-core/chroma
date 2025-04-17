@@ -15,7 +15,7 @@ type Collection struct {
 	Ts                         types.Timestamp
 	LogPosition                int64
 	Version                    int32
-	RootCollectionId           types.UniqueID
+	RootCollectionID           *types.UniqueID
 	LineageFileName            string
 	UpdatedAt                  types.Timestamp
 	TotalRecordsPostCompaction uint64

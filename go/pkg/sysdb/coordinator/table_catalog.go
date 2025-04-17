@@ -847,8 +847,8 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 			return err
 		}
 
-		rootCollectionID := sourceCollection.RootCollectionId
-		rootCollectionIDStr := sourceCollection.RootCollectionId.String()
+		rootCollectionID := sourceCollection.RootCollectionID
+		rootCollectionIDStr := sourceCollection.RootCollectionID.String()
 		err = tc.metaDomain.CollectionDb(ctx).LockCollection(&rootCollectionIDStr)
 		if err != nil {
 			return err
@@ -887,7 +887,11 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 		}
 		newCollectionID = newCollection.ID
 
-		rootCollection, _, err = tc.GetCollectionWithSegments(ctx, rootCollectionID)
+		if rootCollectionID == nil {
+			rootCollection = sourceCollection
+		} else {
+			rootCollection, _, err = tc.GetCollectionWithSegments(ctx, *rootCollectionID)
+		}
 		lineageFile, err := tc.getLineageFile(ctx, rootCollection)
 		if err != nil {
 			return err

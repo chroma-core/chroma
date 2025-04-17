@@ -14,6 +14,10 @@ func convertCollectionToModel(collectionAndMetadataList []*dbmodel.CollectionAnd
 	}
 	collections := make([]*model.Collection, 0, len(collectionAndMetadataList))
 	for _, collectionAndMetadata := range collectionAndMetadataList {
+		var rootCollectionID *types.UniqueID
+		if id, err := types.Parse(collectionAndMetadata.Collection.RootCollectionId); err == nil {
+			rootCollectionID = &id
+		}
 		collection := &model.Collection{
 			ID:                         types.MustParse(collectionAndMetadata.Collection.ID),
 			Name:                       *collectionAndMetadata.Collection.Name,
@@ -27,7 +31,7 @@ func convertCollectionToModel(collectionAndMetadataList []*dbmodel.CollectionAnd
 			TotalRecordsPostCompaction: collectionAndMetadata.Collection.TotalRecordsPostCompaction,
 			SizeBytesPostCompaction:    collectionAndMetadata.Collection.SizeBytesPostCompaction,
 			LastCompactionTimeSecs:     collectionAndMetadata.Collection.LastCompactionTimeSecs,
-			RootCollectionId:           types.MustParse(collectionAndMetadata.Collection.RootCollectionId),
+			RootCollectionID:           rootCollectionID,
 			LineageFileName:            collectionAndMetadata.Collection.LineageFileName,
 		}
 		collection.Metadata = convertCollectionMetadataToModel(collectionAndMetadata.CollectionMetadata)
