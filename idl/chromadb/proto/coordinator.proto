@@ -218,7 +218,8 @@ message UpdateCollectionResponse {
 
 message ForkCollectionRequest {
   string source_collection_id = 1;
-  string target_collection_name = 2;
+  string target_collection_id = 2;
+  string target_collection_name = 3;
 }
 
 message ForkCollectionResponse {
