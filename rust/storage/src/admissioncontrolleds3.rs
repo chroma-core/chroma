@@ -68,7 +68,8 @@ impl InflightRequest {
             if priority.as_usize() < curr_pri {
                 self.priority
                     .store(priority.as_usize(), std::sync::atomic::Ordering::SeqCst);
-                // TODO(Sanket): Ignore send errors?
+                // Ignore send errors since it can happen that the receiver is dropped
+                // and the task is busy reading the data from s3.
                 let _ = channel.send(()).await;
             }
         }
