@@ -524,7 +524,13 @@ impl ServiceBasedFrontend {
         self.log_client
             .push_logs(collection_id, records)
             .await
-            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+            .map_err(|err| {
+                if err.code() == ErrorCodes::Unavailable {
+                    AddCollectionRecordsError::Backoff
+                } else {
+                    AddCollectionRecordsError::Other(Box::new(err) as _)
+                }
+            })?;
 
         // TODO: Submit event after the response is sent
         MeterEvent::CollectionWrite {
@@ -573,7 +579,13 @@ impl ServiceBasedFrontend {
         self.log_client
             .push_logs(collection_id, records)
             .await
-            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+            .map_err(|err| {
+                if err.code() == ErrorCodes::Unavailable {
+                    UpdateCollectionRecordsError::Backoff
+                } else {
+                    UpdateCollectionRecordsError::Other(Box::new(err) as _)
+                }
+            })?;
 
         // TODO: Submit event after the response is sent
         MeterEvent::CollectionWrite {
@@ -624,7 +636,13 @@ impl ServiceBasedFrontend {
         self.log_client
             .push_logs(collection_id, records)
             .await
-            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+            .map_err(|err| {
+                if err.code() == ErrorCodes::Unavailable {
+                    UpsertCollectionRecordsError::Backoff
+                } else {
+                    UpsertCollectionRecordsError::Other(Box::new(err) as _)
+                }
+            })?;
 
         // TODO: Submit event after the response is sent
         MeterEvent::CollectionWrite {
@@ -738,7 +756,13 @@ impl ServiceBasedFrontend {
         self.log_client
             .push_logs(collection_id, records)
             .await
-            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+            .map_err(|err| {
+                if err.code() == ErrorCodes::Unavailable {
+                    DeleteCollectionRecordsError::Backoff
+                } else {
+                    DeleteCollectionRecordsError::Internal(Box::new(err) as _)
+                }
+            })?;
 
         if let Some(event) = read_event {
             event.submit().await;

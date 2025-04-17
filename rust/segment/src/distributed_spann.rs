@@ -1,5 +1,3 @@
-use crate::spann_provider::SpannProvider;
-
 use super::blockfile_record::ApplyMaterializedLogError;
 use super::blockfile_record::RecordSegmentReader;
 use super::types::{
@@ -406,15 +404,7 @@ impl ChromaError for SpannSegmentReaderError {
     }
 }
 
-#[derive(Debug)]
-pub struct SpannSegmentReaderContext {
-    pub collection: Collection,
-    pub segment: Segment,
-    pub spann_provider: SpannProvider,
-    pub dimension: usize,
-}
-
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SpannSegmentReader<'me> {
     pub index_reader: SpannIndexReader<'me>,
     #[allow(dead_code)]

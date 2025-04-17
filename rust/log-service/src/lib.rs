@@ -596,7 +596,7 @@ pub struct LogServer {
 
 #[async_trait::async_trait]
 impl LogService for LogServer {
-    #[tracing::instrument(skip(self, request), err(Display))]
+    #[tracing::instrument(skip(self, request))]
     async fn push_logs(
         &self,
         request: Request<PushLogsRequest>,
@@ -638,9 +638,16 @@ impl LogService for LogServer {
             messages.push(buf);
         }
         let record_count = messages.len() as i32;
-        log.append_many(messages)
-            .await
-            .map_err(|err| Status::unknown(err.to_string()))?;
+        log.append_many(messages).await.map_err(|err| {
+            if let wal3::Error::Backoff = err {
+                Status::new(
+                    chroma_error::ErrorCodes::Unavailable.into(),
+                    err.to_string(),
+                )
+            } else {
+                Status::new(err.code().into(), err.to_string())
+            }
+        })?;
         Ok(Response::new(PushLogsResponse { record_count }))
     }
 
@@ -732,6 +739,12 @@ impl LogService for LogServer {
             for parquet in parquets {
                 let this = parquet_to_records(parquet)?;
                 for record in this {
+                    if record.0.offset() < pull_logs.start_from_offset as u64
+                        || record.0.offset()
+                            >= pull_logs.start_from_offset as u64 + pull_logs.batch_size as u64
+                    {
+                        continue;
+                    }
                     if records.len() >= pull_logs.batch_size as usize {
                         break;
                     }
