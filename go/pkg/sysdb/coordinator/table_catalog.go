@@ -827,14 +827,11 @@ func (tc *Catalog) getLineageFile(ctx context.Context, collection *model.Collect
 func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.ForkCollection) (*model.Collection, []*model.Segment, error) {
 	log.Info("Forking collection", zap.String("sourceCollectionId", forkCollection.SourceCollectionID.String()), zap.String("targetCollectionName", forkCollection.TargetCollectionName))
 
-	var newCollectionID types.UniqueID
-
 	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		var err error
 		var rootCollection *model.Collection
 		var sourceCollection *model.Collection
 		var sourceSegments []*model.Segment
-		var newCollection *model.Collection
 		var newLineageFileFullName string
 
 		sourceCollectionIDStr := forkCollection.SourceCollectionID.String()
@@ -857,8 +854,8 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 		ts := time.Now().UTC()
 
 		createCollection := &model.CreateCollection{
-			ID:                   types.NewUniqueID(),
-			Name:                 *forkCollection.TargetCollectionName,
+			ID:                   forkCollection.TargetCollectionID,
+			Name:                 forkCollection.TargetCollectionName,
 			ConfigurationJsonStr: sourceCollection.ConfigurationJsonStr,
 			Dimension:            sourceCollection.Dimension,
 			Metadata:             sourceCollection.Metadata,
@@ -874,18 +871,17 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 				ID:           types.NewUniqueID(),
 				Type:         segment.Type,
 				Scope:        segment.Scope,
-				CollectionID: createCollection.ID,
+				CollectionID: forkCollection.TargetCollectionID,
 				Metadata:     segment.Metadata,
 				Ts:           ts.Unix(),
 			}
 			createSegments = append(createSegments, createSegment)
 		}
 
-		newCollection, _, err = tc.CreateCollectionAndSegments(ctx, createCollection, createSegments, ts.Unix())
+		_, _, err = tc.CreateCollectionAndSegments(ctx, createCollection, createSegments, ts.Unix())
 		if err != nil {
 			return err
 		}
-		newCollectionID = newCollection.ID
 
 		if rootCollectionID == nil {
 			rootCollection = sourceCollection
@@ -899,10 +895,10 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 		lineageFile.Dependencies = append(lineageFile.Dependencies, &coordinatorpb.CollectionVersionDependency{
 			SourceCollectionId:      sourceCollectionIDStr,
 			SourceCollectionVersion: uint64(sourceCollection.Version),
-			TargetCollectionId:      newCollection.ID.String(),
+			TargetCollectionId:      forkCollection.TargetCollectionID.String(),
 		})
 
-		newLineageFileBaseName := fmt.Sprintf("%d/%d/%d/%d-%d-%d-%s-%d-%s.binpb", ts.Year(), ts.Month(), ts.Day(), ts.Hour(), ts.Minute(), ts.Second(), sourceCollectionIDStr, sourceCollection.Version, newCollectionID.String())
+		newLineageFileBaseName := fmt.Sprintf("%d/%d/%d/%d-%d-%d-%s-%d-%s.binpb", ts.Year(), ts.Month(), ts.Day(), ts.Hour(), ts.Minute(), ts.Second(), sourceCollectionIDStr, sourceCollection.Version, forkCollection.TargetCollectionID.String())
 		newLineageFileFullName, err = tc.s3Store.PutLineageFile(rootCollection.TenantID, rootCollection.DatabaseName, rootCollectionIDStr, newLineageFileBaseName, lineageFile)
 		if err != nil {
 			return err
@@ -914,7 +910,7 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 		return nil, nil, err
 	}
 
-	return tc.GetCollectionWithSegments(ctx, newCollectionID)
+	return tc.GetCollectionWithSegments(ctx, forkCollection.TargetCollectionID)
 }
 
 func (tc *Catalog) CreateSegment(ctx context.Context, createSegment *model.CreateSegment, ts types.Timestamp) (*model.Segment, error) {
