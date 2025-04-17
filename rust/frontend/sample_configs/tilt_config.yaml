@@ -44,7 +44,13 @@ executor:
 scorecard_enabled: true
 scorecard:
   - patterns:
-      - "op:*"
-      - "collection_id:*"
-    score: 100
+      - "op:read"
+      - "collection:*"
+    score: 10
+  - patterns:
+      - "op:write"
+      - "collection:*"
+    score: 1
+circuit_breaker:
+  requests: 1000
 enable_span_indexing: true
