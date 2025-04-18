@@ -16,6 +16,8 @@ from chromadb.api.configuration import (
 from chromadb.serde import BaseModelJSONSerializable
 from chromadb.api.collection_configuration import (
     CollectionConfiguration,
+    HNSWConfiguration,
+    SpannConfiguration,
     collection_configuration_to_json,
     load_collection_configuration_from_json,
 )
@@ -153,7 +155,8 @@ class Collection(
                 stacklevel=2,
             )
             return CollectionConfiguration(
-                hnsw={},
+                hnsw=HNSWConfiguration(),
+                spann=SpannConfiguration(),
                 embedding_function=None,
             )
 
