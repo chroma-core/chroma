@@ -58,6 +58,23 @@ impl ChromaError for GrpcPushLogsError {
 }
 
 #[derive(Error, Debug)]
+pub enum GrpcForkLogsError {
+    #[error("Please backoff exponentially and retry")]
+    Backoff,
+    #[error("Failed to push logs")]
+    FailedToForkLogs(#[from] tonic::Status),
+}
+
+impl ChromaError for GrpcForkLogsError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GrpcForkLogsError::Backoff => ErrorCodes::Unavailable,
+            GrpcForkLogsError::FailedToForkLogs(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
+#[derive(Error, Debug)]
 pub enum GrpcGetCollectionsWithNewDataError {
     #[error("Failed to fetch")]
     FailedGetCollectionsWithNewData(#[from] tonic::Status),
@@ -304,6 +321,24 @@ impl GrpcLog {
             })?;
 
         Ok(())
+    }
+
+    pub(super) async fn fork_logs(
+        &mut self,
+        source_collection_id: CollectionUuid,
+        target_collection_id: CollectionUuid,
+    ) -> Result<(), GrpcForkLogsError> {
+        self.client_for(source_collection_id)
+            .fork_logs(chroma_proto::ForkLogsRequest {
+                source_collection_id: source_collection_id.to_string(),
+                target_collection_id: target_collection_id.to_string(),
+            })
+            .await
+            .map(|_| ())
+            .map_err(|err| match err.code() {
+                tonic::Code::Unavailable => GrpcForkLogsError::Backoff,
+                _ => err.into(),
+            })
     }
 
     pub(crate) async fn get_collections_with_new_data(

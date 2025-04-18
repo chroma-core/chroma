@@ -126,6 +126,47 @@ func (r *LogRepository) PullRecords(ctx context.Context, collectionId string, of
 	return
 }
 
+func (r *LogRepository) ForkRecords(ctx context.Context, sourceCollectionID string, targetCollectionID string) (err error) {
+	var tx pgx.Tx
+	tx, err = r.conn.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		trace_log.Error("Error in begin transaction for forking logs in log service", zap.Error(err), zap.String("sourceCollectionID", sourceCollectionID))
+		return
+	}
+	queriesWithTx := r.queries.WithTx(tx)
+	defer func() {
+		if err != nil {
+			tx.Rollback(ctx)
+		} else {
+			err = tx.Commit(ctx)
+		}
+	}()
+
+	err = queriesWithTx.LockCollection(ctx, sourceCollectionID)
+	if err != nil {
+		trace_log.Error("Error locking collection for fork", zap.String("sourceCollectionID", sourceCollectionID))
+		return
+	}
+	err = queriesWithTx.ForkCollectionOffset(ctx, log.ForkCollectionOffsetParams{
+		ID:   sourceCollectionID,
+		ID_2: targetCollectionID,
+	})
+	if err != nil {
+		trace_log.Error("Error forking log offset", zap.String("sourceCollectionID", sourceCollectionID))
+		return
+	}
+	err = queriesWithTx.ForkCollectionRecord(ctx, log.ForkCollectionRecordParams{
+		CollectionID:   sourceCollectionID,
+		CollectionID_2: targetCollectionID,
+	})
+	if err != nil {
+		trace_log.Error("Error forking log record", zap.String("sourceCollectionID", sourceCollectionID))
+		return
+	}
+
+	return
+}
+
 func (r *LogRepository) GetAllCollectionInfoToCompact(ctx context.Context, minCompactionSize uint64) (collectionToCompact []log.GetAllCollectionsToCompactRow, err error) {
 	collectionToCompact, err = r.queries.GetAllCollectionsToCompact(ctx, int64(minCompactionSize))
 	if collectionToCompact == nil {
