@@ -291,15 +291,18 @@ func (tc *Catalog) createCollectionImpl(txCtx context.Context, createCollection 
 	}
 
 	dbCollection := &dbmodel.Collection{
-		ID:                   createCollection.ID.String(),
-		Name:                 &createCollection.Name,
-		ConfigurationJsonStr: &createCollection.ConfigurationJsonStr,
-		Dimension:            createCollection.Dimension,
-		DatabaseID:           databases[0].ID,
-		Ts:                   ts,
-		LogPosition:          0,
-		VersionFileName:      versionFileName,
-		Tenant:               createCollection.TenantID,
+		ID:                         createCollection.ID.String(),
+		Name:                       &createCollection.Name,
+		ConfigurationJsonStr:       &createCollection.ConfigurationJsonStr,
+		Dimension:                  createCollection.Dimension,
+		DatabaseID:                 databases[0].ID,
+		VersionFileName:            versionFileName,
+		Tenant:                     createCollection.TenantID,
+		Ts:                         ts,
+		LogPosition:                createCollection.LogPosition,
+		TotalRecordsPostCompaction: createCollection.TotalRecordsPostCompaction,
+		SizeBytesPostCompaction:    createCollection.SizeBytesPostCompaction,
+		LastCompactionTimeSecs:     createCollection.LastCompactionTimeSecs,
 	}
 
 	err = tc.metaDomain.CollectionDb(txCtx).Insert(dbCollection)
@@ -864,15 +867,19 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 		}
 
 		createCollection := &model.CreateCollection{
-			ID:                   forkCollection.TargetCollectionID,
-			Name:                 forkCollection.TargetCollectionName,
-			ConfigurationJsonStr: sourceCollection.ConfigurationJsonStr,
-			Dimension:            sourceCollection.Dimension,
-			Metadata:             sourceCollection.Metadata,
-			GetOrCreate:          false,
-			TenantID:             sourceCollection.TenantID,
-			DatabaseName:         sourceCollection.DatabaseName,
-			Ts:                   ts.Unix(),
+			ID:                         forkCollection.TargetCollectionID,
+			Name:                       forkCollection.TargetCollectionName,
+			ConfigurationJsonStr:       sourceCollection.ConfigurationJsonStr,
+			Dimension:                  sourceCollection.Dimension,
+			Metadata:                   sourceCollection.Metadata,
+			GetOrCreate:                false,
+			TenantID:                   sourceCollection.TenantID,
+			DatabaseName:               sourceCollection.DatabaseName,
+			Ts:                         ts.Unix(),
+			LogPosition:                sourceCollection.LogPosition,
+			TotalRecordsPostCompaction: sourceCollection.TotalRecordsPostCompaction,
+			SizeBytesPostCompaction:    sourceCollection.SizeBytesPostCompaction,
+			LastCompactionTimeSecs:     sourceCollection.LastCompactionTimeSecs,
 		}
 
 		createSegments := []*model.CreateSegment{}

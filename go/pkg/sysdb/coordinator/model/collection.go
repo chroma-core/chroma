@@ -32,15 +32,19 @@ type CollectionToGc struct {
 }
 
 type CreateCollection struct {
-	ID                   types.UniqueID
-	Name                 string
-	ConfigurationJsonStr string
-	Dimension            *int32
-	Metadata             *CollectionMetadata[CollectionMetadataValueType]
-	GetOrCreate          bool
-	TenantID             string
-	DatabaseName         string
-	Ts                   types.Timestamp
+	ID                         types.UniqueID
+	Name                       string
+	ConfigurationJsonStr       string
+	Dimension                  *int32
+	Metadata                   *CollectionMetadata[CollectionMetadataValueType]
+	GetOrCreate                bool
+	TenantID                   string
+	DatabaseName               string
+	Ts                         types.Timestamp
+	LogPosition                int64
+	TotalRecordsPostCompaction uint64
+	SizeBytesPostCompaction    uint64 // Note: This represents the size of the records off the log
+	LastCompactionTimeSecs     uint64
 }
 
 type DeleteCollection struct {
