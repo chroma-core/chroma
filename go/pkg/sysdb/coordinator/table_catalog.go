@@ -838,11 +838,11 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 		ts := time.Now().UTC()
 
 		sourceCollectionIDStr := forkCollection.SourceCollectionID.String()
-		err = tc.metaDomain.CollectionDb(ctx).LockCollection(&sourceCollectionIDStr)
+		err = tc.metaDomain.CollectionDb(txCtx).LockCollection(&sourceCollectionIDStr)
 		if err != nil {
 			return err
 		}
-		sourceCollection, sourceSegments, err = tc.GetCollectionWithSegments(ctx, forkCollection.SourceCollectionID)
+		sourceCollection, sourceSegments, err = tc.GetCollectionWithSegments(txCtx, forkCollection.SourceCollectionID)
 		if err != nil {
 			return err
 		}
@@ -852,12 +852,12 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 			rootCollectionIDStr = sourceCollectionIDStr
 		} else {
 			rootCollectionIDStr = sourceCollection.RootCollectionID.String()
-			err = tc.metaDomain.CollectionDb(ctx).LockCollection(&rootCollectionIDStr)
+			err = tc.metaDomain.CollectionDb(txCtx).LockCollection(&rootCollectionIDStr)
 			if err != nil {
 				return err
 			}
 
-			rootCollection, _, err = tc.GetCollectionWithSegments(ctx, *sourceCollection.RootCollectionID)
+			rootCollection, _, err = tc.GetCollectionWithSegments(txCtx, *sourceCollection.RootCollectionID)
 			if err != nil {
 				return err
 			}
@@ -876,9 +876,11 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 		}
 
 		createSegments := []*model.CreateSegment{}
+		flushFilePaths := []*model.FlushSegmentCompaction{}
 		for _, segment := range sourceSegments {
+			newSegmentID := types.NewUniqueID()
 			createSegment := &model.CreateSegment{
-				ID:           types.NewUniqueID(),
+				ID:           newSegmentID,
 				Type:         segment.Type,
 				Scope:        segment.Scope,
 				CollectionID: forkCollection.TargetCollectionID,
@@ -886,14 +888,24 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 				Ts:           ts.Unix(),
 			}
 			createSegments = append(createSegments, createSegment)
+			flushFilePath := &model.FlushSegmentCompaction{
+				ID:        newSegmentID,
+				FilePaths: segment.FilePaths,
+			}
+			flushFilePaths = append(flushFilePaths, flushFilePath)
 		}
 
-		_, _, err = tc.CreateCollectionAndSegments(ctx, createCollection, createSegments, ts.Unix())
+		_, _, err = tc.CreateCollectionAndSegments(txCtx, createCollection, createSegments, ts.Unix())
 		if err != nil {
 			return err
 		}
 
-		lineageFile, err := tc.getLineageFile(ctx, rootCollection)
+		err = tc.metaDomain.SegmentDb(txCtx).RegisterFilePaths(flushFilePaths)
+		if err != nil {
+			return err
+		}
+
+		lineageFile, err := tc.getLineageFile(txCtx, rootCollection)
 		if err != nil {
 			return err
 		}
@@ -909,7 +921,7 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 			return err
 		}
 
-		return tc.metaDomain.CollectionDb(ctx).UpdateCollectionLineageFilePath(&rootCollectionIDStr, &rootCollection.LineageFileName, &newLineageFileFullName)
+		return tc.metaDomain.CollectionDb(txCtx).UpdateCollectionLineageFilePath(&rootCollectionIDStr, &rootCollection.LineageFileName, &newLineageFileFullName)
 	})
 	if err != nil {
 		return nil, nil, err
