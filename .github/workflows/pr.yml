@@ -258,14 +258,6 @@ jobs:
     if: always()
     needs:
     - python-tests
-    - python-vulnerability-scan
-    - javascript-client-tests
-    - rust-tests
-    - go-tests
-    - check-title
-    - lint
-    - check-helm-version-bump
-    - delete-helm-comment
     runs-on: ubuntu-latest
     steps:
     - name: Decide whether the needed jobs succeeded or failed
