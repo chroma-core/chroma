@@ -40,7 +40,7 @@ query_service:
             host: "logservice.chroma"
             port: 50051
             connect_timeout_ms: 5000
-            request_timeout_ms: 5000
+            request_timeout_ms: 60000 # 1 minute
             alt_host: "rust-log-service.chroma"
             use_alt_host_for_everything: true
     dispatcher:
@@ -117,7 +117,7 @@ compaction_service:
             host: "logservice.chroma"
             port: 50051
             connect_timeout_ms: 5000
-            request_timeout_ms: 5000
+            request_timeout_ms: 60000 # 1 minute
             alt_host: "rust-log-service.chroma"
             use_alt_host_for_everything: true
     dispatcher:
