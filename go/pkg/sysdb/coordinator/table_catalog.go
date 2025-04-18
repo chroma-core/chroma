@@ -813,6 +813,25 @@ func (tc *Catalog) UpdateCollection(ctx context.Context, updateCollection *model
 	return result, nil
 }
 
+func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.ForkCollection) (*model.Collection, []*model.Segment, error) {
+	log.Info("Forking collection", zap.String("sourceCollectionId", forkCollection.SourceCollectionID.String()), zap.String("targetCollectionName", *forkCollection.TargetCollectionName))
+
+	var source_collection *model.Collection
+	var source_segments []*model.Segment
+
+	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+		var err error
+		source_collection, source_segments, err = tc.GetCollectionWithSegments(ctx, forkCollection.SourceCollectionID)
+		return err
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// TODO: Implement forking logic
+	return source_collection, source_segments, nil
+}
+
 func (tc *Catalog) CreateSegment(ctx context.Context, createSegment *model.CreateSegment, ts types.Timestamp) (*model.Segment, error) {
 	var result *model.Segment
 
