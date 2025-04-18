@@ -35,7 +35,7 @@ export namespace Api {
   }
 
   export interface Collection {
-    configuration_json: Api.InternalCollectionConfiguration;
+    configuration_json: Api.CollectionConfiguration;
     database: string;
     /**
      * @type {number | null}
@@ -256,100 +256,6 @@ export namespace Api {
     Uris = "uris",
   }
 
-  export interface InternalCollectionConfiguration {
-    embedding_function?: Api.EmbeddingFunctionConfiguration | null;
-    vector_index?: Api.VectorIndexConfiguration;
-  }
-
-  export interface InternalSpannConfiguration {
-    /**
-     * @type {number}
-     * @memberof InternalSpannConfiguration
-     * minimum: 0
-     */
-    construction_ef?: number;
-    /**
-     * @type {number}
-     * @memberof InternalSpannConfiguration
-     */
-    initial_lambda?: number;
-    /**
-     * @type {number}
-     * @memberof InternalSpannConfiguration
-     * minimum: 0
-     */
-    m?: number;
-    /**
-     * @type {number}
-     * @memberof InternalSpannConfiguration
-     * minimum: 0
-     */
-    merge_threshold?: number;
-    /**
-     * @type {number}
-     * @memberof InternalSpannConfiguration
-     * minimum: 0
-     */
-    num_centers_to_merge_to?: number;
-    /**
-     * @type {number}
-     * @memberof InternalSpannConfiguration
-     * minimum: 0
-     */
-    num_samples_kmeans?: number;
-    /**
-     * @type {number}
-     * @memberof InternalSpannConfiguration
-     * minimum: 0
-     */
-    reassign_nbr_count?: number;
-    /**
-     * @type {number}
-     * @memberof InternalSpannConfiguration
-     * minimum: 0
-     */
-    search_ef?: number;
-    /**
-     * @type {number}
-     * @memberof InternalSpannConfiguration
-     * minimum: 0
-     */
-    search_nprobe?: number;
-    /**
-     * @type {number}
-     * @memberof InternalSpannConfiguration
-     */
-    search_rng_epsilon?: number;
-    /**
-     * @type {number}
-     * @memberof InternalSpannConfiguration
-     */
-    search_rng_factor?: number;
-    space?: Api.HnswSpace;
-    /**
-     * @type {number}
-     * @memberof InternalSpannConfiguration
-     * minimum: 0
-     */
-    split_threshold?: number;
-    /**
-     * @type {number}
-     * @memberof InternalSpannConfiguration
-     * minimum: 0
-     */
-    write_nprobe?: number;
-    /**
-     * @type {number}
-     * @memberof InternalSpannConfiguration
-     */
-    write_rng_epsilon?: number;
-    /**
-     * @type {number}
-     * @memberof InternalSpannConfiguration
-     */
-    write_rng_factor?: number;
-  }
-
   export interface QueryRequestPayload extends Api.RawWhereFields {
     ids?: string[] | null;
     include?: Api.Include[];
@@ -492,7 +398,7 @@ export namespace Api {
   export interface UpsertCollectionRecordsResponse {}
 
   export interface Vec2 {
-    configuration_json: Api.InternalCollectionConfiguration;
+    configuration_json: Api.CollectionConfiguration;
     database: string;
     /**
      * @type {number | null}
@@ -518,23 +424,5 @@ export namespace Api {
      * @memberof Vec2
      */
     version: number;
-  }
-
-  export type VectorIndexConfiguration =
-    | Api.VectorIndexConfiguration.ObjectValue
-    | Api.VectorIndexConfiguration.ObjectValue2;
-
-  /**
-   * @export
-   * @namespace VectorIndexConfiguration
-   */
-  export namespace VectorIndexConfiguration {
-    export interface ObjectValue {
-      hnsw: Api.HnswConfiguration;
-    }
-
-    export interface ObjectValue2 {
-      spann: Api.InternalSpannConfiguration;
-    }
   }
 }

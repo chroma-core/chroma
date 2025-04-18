@@ -1,7 +1,7 @@
 {
   "name": "chromadb-root",
   "private": true,
-  "version": "2.2.1",
+  "version": "3.0.0",
   "description": "A JavaScript interface for chroma",
   "keywords": [],
   "author": "",
@@ -70,9 +70,9 @@
   "peerDependencies": {
     "@google/generative-ai": "^0.1.1",
     "cohere-ai": "^5.0.0 || ^6.0.0 || ^7.0.0",
+    "ollama": "^0.5.0",
     "openai": "^3.0.0 || ^4.0.0",
-    "voyageai": "^0.0.3-1",
-    "ollama": "^0.5.0"
+    "voyageai": "^0.0.3-1"
   },
   "peerDependenciesMeta": {
     "@google/generative-ai": {

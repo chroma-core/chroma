@@ -148,7 +148,7 @@ class Collection(
             return load_collection_configuration_from_json(self.configuration_json)
         except Exception as e:
             warnings.warn(
-                f"server does not respond with configuration_json. Please update server: {e}",
+                f"Server does not respond with configuration_json. Please update server: {e}",
                 DeprecationWarning,
                 stacklevel=2,
             )
@@ -181,7 +181,7 @@ class Collection(
             configuration = load_collection_configuration_from_json(configuration_json)
         except Exception as e:
             warnings.warn(
-                f"server does not respond with configuration_json. Please update server: {e}",
+                f"Server does not respond with configuration_json. Please update server: {e}",
                 DeprecationWarning,
                 stacklevel=2,
             )
