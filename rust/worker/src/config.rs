@@ -61,6 +61,11 @@ impl RootConfig {
     pub fn load_from_path(path: &str) -> Self {
         // Unfortunately, figment doesn't support environment variables with underscores. So we have to map and replace them.
         // Excluding our own environment variables, which are prefixed with CHROMA_.
+        eprintln!("loading config from {path}");
+        eprintln!(
+            "{}",
+            std::fs::read_to_string(path).unwrap_or("<ERROR>".to_string())
+        );
         let mut f = figment::Figment::from(Env::prefixed("CHROMA_").map(|k| match k {
             k if k == "my_member_id" => k.into(),
             k => k.as_str().replace("__", ".").into(),
