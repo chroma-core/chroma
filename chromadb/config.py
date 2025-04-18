@@ -267,7 +267,7 @@ class Settings(BaseSettings):  # type: ignore
     chroma_query_replication_factor: int = 2
 
     chroma_logservice_host = "localhost"
-    chroma_logservice_port = 50052
+    chroma_logservice_port = 50054
 
     chroma_quota_provider_impl: Optional[str] = None
     chroma_rate_limiting_provider_impl: Optional[str] = None
