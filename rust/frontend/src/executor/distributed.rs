@@ -11,6 +11,7 @@ use chroma_memberlist::{
     memberlist_provider::{CustomResourceMemberlistProvider, MemberlistProvider},
 };
 use chroma_system::System;
+use chroma_types::SegmentType;
 use chroma_types::{
     chroma_proto::query_executor_client::QueryExecutorClient,
     operator::{CountResult, GetResult, KnnBatchResult},
@@ -79,6 +80,17 @@ impl Configurable<(config::DistributedExecutorConfig, System)> for DistributedEx
             replication_factor: config.replication_factor,
             backoff,
         })
+    }
+}
+
+impl DistributedExecutor {
+    pub fn get_supported_segment_types(&self) -> Vec<SegmentType> {
+        vec![
+            SegmentType::HnswDistributed,
+            SegmentType::Spann,
+            SegmentType::BlockfileRecord,
+            SegmentType::BlockfileMetadata,
+        ]
     }
 }
 

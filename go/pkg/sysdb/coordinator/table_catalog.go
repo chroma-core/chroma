@@ -674,10 +674,7 @@ func (tc *Catalog) updateCollectionConfiguration(
 	if updateConfig.VectorIndex != nil {
 		if updateConfig.VectorIndex.Type == "hnsw" && updateConfig.VectorIndex.Hnsw != nil {
 			if existingConfig.VectorIndex == nil || existingConfig.VectorIndex.Type != "hnsw" {
-				existingConfig.VectorIndex = &model.VectorIndexConfiguration{
-					Type: "hnsw",
-					Hnsw: model.DefaultHnswConfiguration(),
-				}
+				return existingConfigJsonStr, nil
 			}
 			if updateConfig.VectorIndex.Hnsw.EfSearch != nil {
 				existingConfig.VectorIndex.Hnsw.EfSearch = *updateConfig.VectorIndex.Hnsw.EfSearch
@@ -699,12 +696,13 @@ func (tc *Catalog) updateCollectionConfiguration(
 			}
 		} else if updateConfig.VectorIndex.Type == "spann" && updateConfig.VectorIndex.Spann != nil {
 			if existingConfig.VectorIndex == nil || existingConfig.VectorIndex.Type != "spann" {
-				existingConfig.VectorIndex = &model.VectorIndexConfiguration{
-					Type:  "spann",
-					Spann: updateConfig.VectorIndex.Spann.SpannConfig,
-				}
-			} else {
-				existingConfig.VectorIndex.Spann = updateConfig.VectorIndex.Spann.SpannConfig
+				return existingConfigJsonStr, nil
+			}
+			if updateConfig.VectorIndex.Spann.EfSearch != nil {
+				existingConfig.VectorIndex.Spann.EfSearch = *updateConfig.VectorIndex.Spann.EfSearch
+			}
+			if updateConfig.VectorIndex.Spann.SearchNprobe != nil {
+				existingConfig.VectorIndex.Spann.SearchNprobe = *updateConfig.VectorIndex.Spann.SearchNprobe
 			}
 		}
 	}

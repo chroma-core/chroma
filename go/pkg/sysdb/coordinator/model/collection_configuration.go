@@ -42,12 +42,15 @@ func DefaultHnswConfiguration() *HnswConfiguration {
 }
 
 type SpannConfiguration struct {
-	SearchNprobe   int    `json:"search_nprobe"`
-	WriteNprobe    int    `json:"write_nprobe"`
-	Space          string `json:"space"`
-	ConstructionEf int    `json:"construction_ef"`
-	SearchEf       int    `json:"search_ef"`
-	M              int    `json:"m"`
+	SearchNprobe          int    `json:"search_nprobe"`
+	WriteNprobe           int    `json:"write_nprobe"`
+	Space                 string `json:"space"`
+	EfConstruction        int    `json:"ef_construction"`
+	EfSearch              int    `json:"ef_search"`
+	MaxNeighbors          int    `json:"max_neighbors"`
+	ReassignNeighborCount int    `json:"reassign_neighbor_count"`
+	SplitThreshold        int    `json:"split_threshold"`
+	MergeThreshold        int    `json:"merge_threshold"`
 }
 
 type InternalCollectionConfiguration struct {
@@ -111,7 +114,8 @@ type UpdateHnswConfiguration struct {
 }
 
 type UpdateSpannConfiguration struct {
-	SpannConfig *SpannConfiguration `json:"spann_config,omitempty"`
+	SearchNprobe *int `json:"search_nprobe,omitempty"`
+	EfSearch     *int `json:"ef_search,omitempty"`
 }
 
 type UpdateVectorIndexConfiguration struct {

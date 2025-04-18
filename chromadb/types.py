@@ -174,6 +174,7 @@ class Collection(
         """Deserializes a Collection object from JSON"""
         configuration: CollectionConfiguration = {
             "hnsw": {},
+            "spann": {},
             "embedding_function": None,
         }
         try:
