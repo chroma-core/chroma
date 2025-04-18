@@ -475,10 +475,6 @@ def validate_create_hnsw_config(
         if config["batch_size"] > config["sync_threshold"]:
             raise ValueError("batch_size must be less than or equal to sync_threshold")
     if "num_threads" in config:
-        if config["num_threads"] > cpu_count():
-            raise ValueError(
-                "num_threads must be less than or equal to the number of available threads"
-            )
         if config["num_threads"] <= 0:
             raise ValueError("num_threads must be greater than 0")
     if "resize_factor" in config:
@@ -535,10 +531,6 @@ def validate_update_hnsw_config(
         if config["ef_search"] <= 0:
             raise ValueError("ef_search must be greater than 0")
     if "num_threads" in config:
-        if config["num_threads"] > cpu_count():
-            raise ValueError(
-                "num_threads must be less than or equal to the number of available threads"
-            )
         if config["num_threads"] <= 0:
             raise ValueError("num_threads must be greater than 0")
     if "batch_size" in config and "sync_threshold" in config:
