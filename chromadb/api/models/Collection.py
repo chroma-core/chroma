@@ -264,7 +264,7 @@ class Collection(CollectionCommon["ServerAPI"]):
 
     def fork(
         self,
-        new_name: str
+        new_name: str,
     ) -> "Collection":
         """Fork the current collection under a new name. The returning collection should contain identical data to the current collection.
         This is an experimental API that only works for Hosted Chroma for now.
