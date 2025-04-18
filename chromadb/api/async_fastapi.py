@@ -376,6 +376,23 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             },
         )
 
+    @trace_method("AsyncFastAPI._fork", OpenTelemetryGranularity.OPERATION)
+    @override
+    async def _fork(
+        self,
+        collection_id: UUID,
+        new_name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> CollectionModel:
+        resp_json = await self._make_request(
+            "post",
+            f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/fork",
+            json={"new_name": new_name},
+        )
+        model = CollectionModel.from_json(resp_json)
+        return model
+
     @trace_method("AsyncFastAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
     @override
     async def delete_collection(

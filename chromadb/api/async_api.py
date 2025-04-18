@@ -631,6 +631,16 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
         pass
 
     @abstractmethod
+    async def _fork(
+        self,
+        collection_id: UUID,
+        new_name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> CollectionModel:
+        pass
+
+    @abstractmethod
     @override
     async def _count(
         self,

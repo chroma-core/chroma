@@ -405,6 +405,16 @@ class SegmentAPI(ServerAPI):
         elif new_configuration:
             self._sysdb.update_collection(id, configuration=new_configuration)
 
+    @override
+    def _fork(
+        self,
+        collection_id: UUID,
+        new_name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> CollectionModel:
+        raise NotImplementedError("Collection forking is not implemented for SegmentAPI")
+
     @trace_method("SegmentAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
     @override
     @rate_limit
