@@ -20,7 +20,8 @@ use chroma_types::{
 };
 use chroma_types::{
     Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
-    FlushCompactionResponseConversionError, Segment, SegmentConversionError, SegmentScope, Tenant,
+    FlushCompactionResponseConversionError, ForkCollectionError, Segment, SegmentConversionError,
+    SegmentScope, Tenant,
 };
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -311,6 +312,27 @@ impl SysDb {
             SysDb::Test(_) => {
                 todo!()
             }
+        }
+    }
+
+    pub async fn fork_collection(
+        &mut self,
+        source_collection_id: CollectionUuid,
+        target_collection_id: CollectionUuid,
+        target_collection_name: String,
+    ) -> Result<CollectionAndSegments, ForkCollectionError> {
+        match self {
+            SysDb::Grpc(grpc_sys_db) => {
+                grpc_sys_db
+                    .fork_collection(
+                        source_collection_id,
+                        target_collection_id,
+                        target_collection_name,
+                    )
+                    .await
+            }
+            SysDb::Sqlite(_) => Err(ForkCollectionError::Local),
+            SysDb::Test(_) => Err(ForkCollectionError::Local),
         }
     }
 
@@ -894,6 +916,55 @@ impl GrpcSysDb {
                 }
             })?;
         Ok(())
+    }
+
+    pub async fn fork_collection(
+        &mut self,
+        source_collection_id: CollectionUuid,
+        target_collection_id: CollectionUuid,
+        target_collection_name: String,
+    ) -> Result<CollectionAndSegments, ForkCollectionError> {
+        let res = self
+            .client
+            .fork_collection(chroma_proto::ForkCollectionRequest {
+                source_collection_id: source_collection_id.0.to_string(),
+                target_collection_id: target_collection_id.0.to_string(),
+                target_collection_name: target_collection_name.clone(),
+            })
+            .await
+            .map_err(|err| match err.code() {
+                Code::AlreadyExists => ForkCollectionError::AlreadyExists(target_collection_name),
+                Code::NotFound => ForkCollectionError::NotFound(source_collection_id.0.to_string()),
+                _ => ForkCollectionError::Internal(err.into()),
+            })?
+            .into_inner();
+        let raw_segment_counts = res.segments.len();
+        let mut segment_map: HashMap<_, _> = res
+            .segments
+            .into_iter()
+            .map(|seg| (seg.scope(), seg))
+            .collect();
+        if segment_map.len() < raw_segment_counts {
+            return Err(ForkCollectionError::DuplicateSegment);
+        }
+        Ok(CollectionAndSegments {
+            collection: res
+                .collection
+                .ok_or(ForkCollectionError::Field("collection".to_string()))?
+                .try_into()?,
+            metadata_segment: segment_map
+                .remove(&chroma_proto::SegmentScope::Metadata)
+                .ok_or(ForkCollectionError::Field("metadata".to_string()))?
+                .try_into()?,
+            record_segment: segment_map
+                .remove(&chroma_proto::SegmentScope::Record)
+                .ok_or(ForkCollectionError::Field("record".to_string()))?
+                .try_into()?,
+            vector_segment: segment_map
+                .remove(&chroma_proto::SegmentScope::Vector)
+                .ok_or(ForkCollectionError::Field("vector".to_string()))?
+                .try_into()?,
+        })
     }
 
     pub async fn get_collections_to_gc(

@@ -151,43 +151,55 @@ impl CollectionsWithSegmentsProvider {
                 return Ok(collection_and_segments_with_ttl.collection_and_segments);
             }
         }
-        // We acquire a lock to prevent the sysdb from experiencing a thundering herd.
-        // This can happen when a large number of threads try to get the same collection
-        // at the same time.
-        let _guard = self.sysdb_rpc_lock.lock(&collection_id).await;
-        // Double checked locking pattern to avoid lock contention in the
-        // happy path when the collection is already cached.
-        if let Some(collection_and_segments_with_ttl) = self
-            .collections_with_segments_cache
-            .get(&collection_id)
-            .await?
-        {
-            if collection_and_segments_with_ttl.expires_at
-                > SystemTime::now()
+
+        let collection_and_segments_sysdb = {
+            // We acquire a lock to prevent the sysdb from experiencing a thundering herd.
+            // This can happen when a large number of threads try to get the same collection
+            // at the same time.
+            let _guard = self.sysdb_rpc_lock.lock(&collection_id).await;
+            // Double checked locking pattern to avoid lock contention in the
+            // happy path when the collection is already cached.
+            if let Some(collection_and_segments_with_ttl) = self
+                .collections_with_segments_cache
+                .get(&collection_id)
+                .await?
+            {
+                if collection_and_segments_with_ttl.expires_at
+                    > SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .expect("Do not deploy before UNIX epoch")
+                {
+                    return Ok(collection_and_segments_with_ttl.collection_and_segments);
+                }
+            }
+            tracing::info!("Cache miss for collection {}", collection_id);
+            self.sysdb_client
+                .get_collection_with_segments(collection_id)
+                .await?
+        };
+
+        self.set_collection_with_segments(collection_and_segments_sysdb.clone())
+            .await;
+        Ok(collection_and_segments_sysdb)
+    }
+
+    pub(crate) async fn set_collection_with_segments(
+        &mut self,
+        collection_and_segments: CollectionAndSegments,
+    ) {
+        // Insert only if the collection dimension is set.
+        if collection_and_segments.collection.dimension.is_some() {
+            let collection_id = collection_and_segments.collection.collection_id;
+            let collection_and_segments_with_ttl = CollectionAndSegmentsWithTtl {
+                collection_and_segments,
+                expires_at: SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .expect("Do not deploy before UNIX epoch")
-            {
-                return Ok(collection_and_segments_with_ttl.collection_and_segments);
-            }
-        }
-        tracing::info!("Cache miss for collection {}", collection_id);
-        let collection_and_segments_sysdb = self
-            .sysdb_client
-            .get_collection_with_segments(collection_id)
-            .await?;
-        let collection_and_segments_sysdb_with_ttl = CollectionAndSegmentsWithTtl {
-            collection_and_segments: collection_and_segments_sysdb.clone(),
-            expires_at: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("Do not deploy before UNIX epoch")
-                + Duration::from_secs(self.cache_ttl_secs as u64), // Cache for 1 minute
-        };
-        // Insert only if the collection dimension is set.
-        if collection_and_segments_sysdb.collection.dimension.is_some() {
+                    + Duration::from_secs(self.cache_ttl_secs as u64), // Cache for 1 minute
+            };
             self.collections_with_segments_cache
-                .insert(collection_id, collection_and_segments_sysdb_with_ttl)
+                .insert(collection_id, collection_and_segments_with_ttl)
                 .await;
         }
-        Ok(collection_and_segments_sysdb)
     }
 }

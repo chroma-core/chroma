@@ -767,6 +767,74 @@ impl ChromaError for DeleteCollectionError {
     }
 }
 
+#[non_exhaustive]
+#[derive(Clone, Validate, Serialize, ToSchema)]
+pub struct ForkCollectionRequest {
+    pub tenant_id: String,
+    pub database_name: String,
+    pub source_collection_id: CollectionUuid,
+    pub target_collection_name: String,
+}
+
+impl ForkCollectionRequest {
+    pub fn try_new(
+        tenant_id: String,
+        database_name: String,
+        source_collection_id: CollectionUuid,
+        target_collection_name: String,
+    ) -> Result<Self, ChromaValidationError> {
+        let request = Self {
+            tenant_id,
+            database_name,
+            source_collection_id,
+            target_collection_name,
+        };
+        request.validate().map_err(ChromaValidationError::from)?;
+        Ok(request)
+    }
+}
+
+pub type ForkCollectionResponse = Collection;
+
+#[derive(Error, Debug)]
+pub enum ForkCollectionError {
+    #[error("Collection [{0}] already exists")]
+    AlreadyExists(String),
+    #[error("Failed to convert proto collection")]
+    CollectionConversionError(#[from] CollectionConversionError),
+    #[error("Duplicate segment")]
+    DuplicateSegment,
+    #[error("Missing field: [{0}]")]
+    Field(String),
+    #[error("Collection forking is unsupported for local chroma")]
+    Local,
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+    #[error("Collection [{0}] does not exists")]
+    NotFound(String),
+    #[error("Failed to convert proto segment")]
+    SegmentConversionError(#[from] SegmentConversionError),
+}
+
+impl ChromaError for ForkCollectionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            ForkCollectionError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
+            ForkCollectionError::CollectionConversionError(collection_conversion_error) => {
+                collection_conversion_error.code()
+            }
+            ForkCollectionError::DuplicateSegment => ErrorCodes::FailedPrecondition,
+            ForkCollectionError::Field(_) => ErrorCodes::FailedPrecondition,
+            ForkCollectionError::Local => ErrorCodes::Unimplemented,
+            ForkCollectionError::Internal(chroma_error) => chroma_error.code(),
+            ForkCollectionError::NotFound(_) => ErrorCodes::NotFound,
+            ForkCollectionError::SegmentConversionError(segment_conversion_error) => {
+                segment_conversion_error.code()
+            }
+        }
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum GetCollectionSizeError {
     #[error(transparent)]

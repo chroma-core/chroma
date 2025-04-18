@@ -21,13 +21,14 @@ use chroma_types::{
     CreateTenantError, CreateTenantRequest, CreateTenantResponse, DeleteCollectionError,
     DeleteCollectionRecordsError, DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse,
     DeleteCollectionRequest, DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse,
-    GetCollectionError, GetCollectionRequest, GetCollectionResponse, GetCollectionsError,
-    GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
-    GetTenantError, GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError,
-    HeartbeatResponse, Include, KnnIndex, ListCollectionsRequest, ListCollectionsResponse,
-    ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse, Operation, OperationRecord,
-    QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse, Segment, SegmentScope,
-    SegmentType, SegmentUuid, UpdateCollectionError, UpdateCollectionRecordsError,
+    ForkCollectionError, ForkCollectionRequest, ForkCollectionResponse, GetCollectionError,
+    GetCollectionRequest, GetCollectionResponse, GetCollectionsError, GetDatabaseError,
+    GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantError,
+    GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError, HeartbeatResponse,
+    Include, KnnIndex, ListCollectionsRequest, ListCollectionsResponse, ListDatabasesError,
+    ListDatabasesRequest, ListDatabasesResponse, Operation, OperationRecord, QueryError,
+    QueryRequest, QueryResponse, ResetError, ResetResponse, Segment, SegmentScope, SegmentType,
+    SegmentUuid, UpdateCollectionError, UpdateCollectionRecordsError,
     UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateCollectionRequest,
     UpdateCollectionResponse, UpsertCollectionRecordsError, UpsertCollectionRecordsRequest,
     UpsertCollectionRecordsResponse, VectorIndexConfiguration, Where,
@@ -540,6 +541,33 @@ impl ServiceBasedFrontend {
             .await;
 
         Ok(DeleteCollectionRecordsResponse {})
+    }
+
+    pub async fn fork_collection(
+        &mut self,
+        ForkCollectionRequest {
+            source_collection_id,
+            target_collection_name,
+            ..
+        }: ForkCollectionRequest,
+    ) -> Result<ForkCollectionResponse, ForkCollectionError> {
+        let target_collection_id = CollectionUuid::new();
+        let collection_and_segments = self
+            .sysdb_client
+            .fork_collection(
+                source_collection_id,
+                target_collection_id,
+                target_collection_name,
+            )
+            .await?;
+        let collection = collection_and_segments.collection.clone();
+
+        // Update the cache.
+        self.collections_with_segments_provider
+            .set_collection_with_segments(collection_and_segments)
+            .await;
+
+        Ok(collection)
     }
 
     pub async fn add(
