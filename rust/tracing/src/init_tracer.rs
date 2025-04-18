@@ -7,8 +7,8 @@ use opentelemetry::{global, InstrumentationScope};
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use std::borrow::Cow;
+use tracing_subscriber::fmt;
 use tracing_subscriber::Registry;
-use tracing_subscriber::{filter, fmt};
 use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Layer};
 
 // This is the filter that will be applied to all subsequent layers.
