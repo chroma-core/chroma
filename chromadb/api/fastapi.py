@@ -330,6 +330,24 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             },
         )
 
+    @trace_method("FastAPI._fork", OpenTelemetryGranularity.OPERATION)
+    @override
+    def _fork(
+        self,
+        collection_id: UUID,
+        new_name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> CollectionModel:
+        """Forks a collection"""
+        resp_json = self._make_request(
+            "post",
+            f"/tenants/{tenant}/databases/{database}/collections/{id}/fork",
+            json={"new_name": new_name},
+        )
+        model = CollectionModel.from_json(resp_json)
+        return model
+
     @trace_method("FastAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
     @override
     def delete_collection(

@@ -87,6 +87,23 @@ class AsyncBaseAPI(ABC):
         pass
 
     @abstractmethod
+    async def _fork(
+        self,
+        collection_id: UUID,
+        new_name: str
+    ) -> CollectionModel:
+        """[Internal] Fork the current collection under a new name. The returning collection should contain identical data to the current collection.
+        This is an experimental API that only works for Hosted Chroma for now.
+
+        Args:
+            new_name: The name of the new collection.
+
+        Returns:
+            Collection: A new collection with the specified name and containing identical data to the current collection.
+        """
+        pass
+
+    @abstractmethod
     async def delete_collection(
         self,
         name: str,
@@ -628,6 +645,17 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
+        pass
+
+    @abstractmethod
+    @override
+    async def _fork(
+        self,
+        collection_id: UUID,
+        new_name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> CollectionModel:
         pass
 
     @abstractmethod
