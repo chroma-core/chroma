@@ -830,9 +830,12 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		var err error
 		var rootCollection *model.Collection
+		var rootCollectionIDStr string
 		var sourceCollection *model.Collection
 		var sourceSegments []*model.Segment
 		var newLineageFileFullName string
+
+		ts := time.Now().UTC()
 
 		sourceCollectionIDStr := forkCollection.SourceCollectionID.String()
 		err = tc.metaDomain.CollectionDb(ctx).LockCollection(&sourceCollectionIDStr)
@@ -844,14 +847,21 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 			return err
 		}
 
-		rootCollectionID := sourceCollection.RootCollectionID
-		rootCollectionIDStr := sourceCollection.RootCollectionID.String()
-		err = tc.metaDomain.CollectionDb(ctx).LockCollection(&rootCollectionIDStr)
-		if err != nil {
-			return err
-		}
+		if sourceCollection.RootCollectionID == nil {
+			rootCollection = sourceCollection
+			rootCollectionIDStr = sourceCollectionIDStr
+		} else {
+			rootCollectionIDStr = sourceCollection.RootCollectionID.String()
+			err = tc.metaDomain.CollectionDb(ctx).LockCollection(&rootCollectionIDStr)
+			if err != nil {
+				return err
+			}
 
-		ts := time.Now().UTC()
+			rootCollection, _, err = tc.GetCollectionWithSegments(ctx, *sourceCollection.RootCollectionID)
+			if err != nil {
+				return err
+			}
+		}
 
 		createCollection := &model.CreateCollection{
 			ID:                   forkCollection.TargetCollectionID,
@@ -861,7 +871,7 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 			Metadata:             sourceCollection.Metadata,
 			GetOrCreate:          false,
 			TenantID:             sourceCollection.TenantID,
-			DatabaseName:         sourceCollection.TenantID,
+			DatabaseName:         sourceCollection.DatabaseName,
 			Ts:                   ts.Unix(),
 		}
 
@@ -883,11 +893,6 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 			return err
 		}
 
-		if rootCollectionID == nil {
-			rootCollection = sourceCollection
-		} else {
-			rootCollection, _, err = tc.GetCollectionWithSegments(ctx, *rootCollectionID)
-		}
 		lineageFile, err := tc.getLineageFile(ctx, rootCollection)
 		if err != nil {
 			return err

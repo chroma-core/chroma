@@ -461,16 +461,20 @@ func (s *collectionDb) UpdateVersionRelatedFields(collectionID, existingVersionF
 }
 
 func (s *collectionDb) LockCollection(collectionID *string) error {
-	err := s.db.Table("collections").
+	var collections []dbmodel.Collection
+	err := s.db.Model(&dbmodel.Collection{}).
 		Where("collections.id = ?", collectionID).Clauses(clause.Locking{
 		Strength: "UPDATE",
-	}).Find(nil).Error
+	}).Find(&collections).Error
 	if err != nil {
 		return err
 	}
+	if len(collections) == 0 {
+		return common.ErrCollectionNotFound
+	}
 
-	err = s.db.Table("collection_metadata").
-		Where("collection_metadata.id = ?", collectionID).Clauses(clause.Locking{
+	err = s.db.Model(&dbmodel.CollectionMetadata{}).
+		Where("collection_metadata.collection_id = ?", collectionID).Clauses(clause.Locking{
 		Strength: "UPDATE",
 	}).Find(nil).Error
 	if err != nil {
@@ -478,7 +482,7 @@ func (s *collectionDb) LockCollection(collectionID *string) error {
 	}
 
 	var segments []*dbmodel.Segment
-	err = s.db.Table("segments").
+	err = s.db.Model(&dbmodel.Segment{}).
 		Where("segments.collection_id = ?", collectionID).Clauses(clause.Locking{
 		Strength: "UPDATE",
 	}).Find(&segments).Error
@@ -491,7 +495,7 @@ func (s *collectionDb) LockCollection(collectionID *string) error {
 		segmentIDs = append(segmentIDs, &segment.ID)
 	}
 
-	err = s.db.Table("segment_metadata").
+	err = s.db.Model(&dbmodel.SegmentMetadata{}).
 		Where("segment_metadata.segment_id IN ?", segmentIDs).Clauses(clause.Locking{
 		Strength: "UPDATE",
 	}).Find(nil).Error
