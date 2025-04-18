@@ -42,6 +42,15 @@ message PullLogsResponse {
   repeated LogRecord records = 1;
 }
 
+message ForkLogsRequest {
+  string source_collection_id = 1;
+  string target_collection_id = 2;
+}
+
+message ForkLogsResponse {
+  // Empty  
+}
+
 message CollectionInfo {
   string collection_id = 1;
   // The log offset of the first log entry of the collection that needs to be compacted
@@ -81,6 +90,7 @@ service LogService {
   rpc PushLogs(PushLogsRequest) returns (PushLogsResponse) {}
   rpc ScoutLogs(ScoutLogsRequest) returns (ScoutLogsResponse) {}
   rpc PullLogs(PullLogsRequest) returns (PullLogsResponse) {}
+  rpc ForkLogs(ForkLogsRequest) returns (ForkLogsResponse) {}
   rpc GetAllCollectionInfoToCompact(GetAllCollectionInfoToCompactRequest) returns (GetAllCollectionInfoToCompactResponse) {}
   rpc UpdateCollectionLogOffset(UpdateCollectionLogOffsetRequest) returns (UpdateCollectionLogOffsetResponse) {}
   rpc PurgeDirtyForCollection(PurgeDirtyForCollectionRequest) returns (PurgeDirtyForCollectionResponse) {}

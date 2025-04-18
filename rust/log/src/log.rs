@@ -3,7 +3,9 @@ use crate::in_memory_log::InMemoryLog;
 use crate::sqlite_log::SqliteLog;
 use crate::types::CollectionInfo;
 use chroma_error::ChromaError;
-use chroma_types::{CollectionUuid, LogRecord, OperationRecord, ResetError, ResetResponse};
+use chroma_types::{
+    CollectionUuid, ForkCollectionError, LogRecord, OperationRecord, ResetError, ResetResponse,
+};
 use std::fmt::Debug;
 
 #[derive(Clone, Debug)]
@@ -89,6 +91,22 @@ impl Log {
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
             Log::InMemory(_) => unimplemented!(),
+        }
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub async fn fork_logs(
+        &mut self,
+        source_collection_id: CollectionUuid,
+        target_collection_id: CollectionUuid,
+    ) -> Result<(), ForkCollectionError> {
+        match self {
+            Log::Sqlite(_) => Err(ForkCollectionError::Local),
+            Log::Grpc(log) => log
+                .fork_logs(source_collection_id, target_collection_id)
+                .await
+                .map_err(|err| err.boxed().into()),
+            Log::InMemory(_) => Err(ForkCollectionError::Local),
         }
     }
 

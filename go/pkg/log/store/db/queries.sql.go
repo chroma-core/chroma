@@ -33,6 +33,40 @@ func (q *Queries) DeleteRecordsRange(ctx context.Context, arg DeleteRecordsRange
 	return err
 }
 
+const forkCollectionOffset = `-- name: ForkCollectionOffset :exec
+INSERT INTO collection (id, record_compaction_offset_position, record_enumeration_offset_position)
+    SELECT $2, collection.record_compaction_offset_position, collection.record_enumeration_offset_position
+    FROM collection
+    WHERE collection.id = $1
+`
+
+type ForkCollectionOffsetParams struct {
+	ID   string
+	ID_2 string
+}
+
+func (q *Queries) ForkCollectionOffset(ctx context.Context, arg ForkCollectionOffsetParams) error {
+	_, err := q.db.Exec(ctx, forkCollectionOffset, arg.ID, arg.ID_2)
+	return err
+}
+
+const forkCollectionRecord = `-- name: ForkCollectionRecord :exec
+INSERT INTO record_log ("offset", collection_id, timestamp, record)
+    SELECT record_log.offset, $2, record_log.timestamp, record_log.record
+    FROM record_log
+    WHERE record_log.collection_id = $1
+`
+
+type ForkCollectionRecordParams struct {
+	CollectionID   string
+	CollectionID_2 string
+}
+
+func (q *Queries) ForkCollectionRecord(ctx context.Context, arg ForkCollectionRecordParams) error {
+	_, err := q.db.Exec(ctx, forkCollectionRecord, arg.CollectionID, arg.CollectionID_2)
+	return err
+}
+
 const getAllCollections = `-- name: GetAllCollections :many
 SELECT id FROM collection
 `
@@ -103,9 +137,7 @@ func (q *Queries) GetAllCollectionsToCompact(ctx context.Context, minCompactionS
 }
 
 const getBoundsForCollection = `-- name: GetBoundsForCollection :one
-SELECT
-	COALESCE(record_compaction_offset_position, 0) AS record_compaction_offset_position,
-	COALESCE(record_enumeration_offset_position, 0) AS record_enumeration_offset_position
+SELECT record_compaction_offset_position, record_enumeration_offset_position
 FROM collection
 WHERE id = $1
 `
@@ -239,6 +271,15 @@ type InsertRecordParams struct {
 	Offset       int64
 	Record       []byte
 	Timestamp    int64
+}
+
+const lockCollection = `-- name: LockCollection :exec
+SELECT id, record_compaction_offset_position, record_enumeration_offset_position FROM collection WHERE id = $1 FOR UPDATE
+`
+
+func (q *Queries) LockCollection(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, lockCollection, id)
+	return err
 }
 
 const purgeRecords = `-- name: PurgeRecords :exec

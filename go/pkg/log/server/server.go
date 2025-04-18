@@ -56,7 +56,7 @@ func (s *logServer) ScoutLogs(ctx context.Context, req *logservicepb.ScoutLogsRe
 		return
 	}
 	// +1 to convert from the (] bound to a [) bound.
-	res = &logservicepb.ScoutLogsResponse {
+	res = &logservicepb.ScoutLogsResponse{
 		FirstUninsertedRecordOffset: int64(limit + 1),
 	}
 	return
@@ -87,6 +87,27 @@ func (s *logServer) PullLogs(ctx context.Context, req *logservicepb.PullLogsRequ
 			Record:    record,
 		}
 	}
+	return
+}
+
+func (s *logServer) ForkLogs(ctx context.Context, req *logservicepb.ForkLogsRequest) (res *logservicepb.ForkLogsResponse, err error) {
+	var sourceCollectionID types.UniqueID
+	var targetCollectionID types.UniqueID
+	sourceCollectionID, err = types.ToUniqueID(&req.SourceCollectionId)
+	if err != nil {
+		return
+	}
+	targetCollectionID, err = types.ToUniqueID(&req.TargetCollectionId)
+	if err != nil {
+		return
+	}
+
+	err = s.lr.ForkRecords(ctx, sourceCollectionID.String(), targetCollectionID.String())
+	if err != nil {
+		return
+	}
+
+	res = &logservicepb.ForkLogsResponse{}
 	return
 }
 

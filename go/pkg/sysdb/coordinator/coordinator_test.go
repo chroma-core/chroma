@@ -1416,11 +1416,9 @@ func (suite *APIsTestSuite) TestForkCollection() {
 	}
 
 	sourceFlushCollectionCompaction := &model.FlushCollectionCompaction{
-		ID:       sourceCreateCollection.ID,
-		TenantID: sourceCreateCollection.TenantID,
-		// TODO: Inherit log position after log fork is implemented
-		// LogPosition:              1000,
-		LogPosition:              0,
+		ID:                       sourceCreateCollection.ID,
+		TenantID:                 sourceCreateCollection.TenantID,
+		LogPosition:              1000,
 		CurrentCollectionVersion: 0,
 		FlushSegmentCompactions: []*model.FlushSegmentCompaction{
 			sourceFlushMetadataSegment,
