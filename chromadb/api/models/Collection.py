@@ -275,11 +275,17 @@ class Collection(CollectionCommon["ServerAPI"]):
         Returns:
             Collection: A new collection with the specified name and containing identical data to the current collection.
         """
-        return self._client._fork(
+        model = self._client._fork(
             collection_id=self.id,
             new_name=new_name,
             tenant=self.tenant,
             database=self.database,
+        )
+        return Collection(
+            client=self._client,
+            model=model,
+            embedding_function=self._embedding_function,
+            data_loader=self._data_loader
         )
 
     def update(
