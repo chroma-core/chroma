@@ -344,23 +344,30 @@ func (s *Server) UpdateCollection(ctx context.Context, req *coordinatorpb.Update
 }
 
 func (s *Server) ForkCollection(ctx context.Context, req *coordinatorpb.ForkCollectionRequest) (*coordinatorpb.ForkCollectionResponse, error) {
-	collectionID := req.SourceCollectionId
-
 	res := &coordinatorpb.ForkCollectionResponse{}
 
-	parsedCollectionID, err := types.ToUniqueID(&collectionID)
+	sourceCollectionID := req.SourceCollectionId
+	parsedSourceCollectionID, err := types.ToUniqueID(&sourceCollectionID)
 	if err != nil {
-		log.Error("ForkCollection failed. Failed to parse source collection id", zap.Error(err), zap.String("collection_id", collectionID))
+		log.Error("ForkCollection failed. Failed to parse source collection id", zap.Error(err), zap.String("collection_id", sourceCollectionID))
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	targetCollectionID := req.TargetCollectionId
+	parsedTargetCollectionID, err := types.ToUniqueID(&targetCollectionID)
+	if err != nil {
+		log.Error("ForkCollection failed. Failed to parse Target collection id", zap.Error(err), zap.String("collection_id", targetCollectionID))
 		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 
 	forkCollection := &model.ForkCollection{
-		SourceCollectionID:   parsedCollectionID,
-		TargetCollectionName: &req.TargetCollectionName,
+		SourceCollectionID:   parsedSourceCollectionID,
+		TargetCollectionID:   parsedTargetCollectionID,
+		TargetCollectionName: req.TargetCollectionName,
 	}
 	collection, segments, err := s.coordinator.ForkCollection(ctx, forkCollection)
 	if err != nil {
-		log.Error("ForkCollection failed. ", zap.Error(err), zap.String("collection_id", collectionID))
+		log.Error("ForkCollection failed. ", zap.Error(err), zap.String("collection_id", sourceCollectionID))
 		if err == common.ErrCollectionNotFound {
 			return res, grpcutils.BuildNotFoundGrpcError(err.Error())
 		}
