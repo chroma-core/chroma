@@ -62,14 +62,19 @@ hypothesis.settings.register_profile(
         hypothesis.HealthCheck.large_base_example,
         hypothesis.HealthCheck.function_scoped_fixture,
     ],
+    verbosity=hypothesis.Verbosity.verbose
 )
 
 hypothesis.settings.register_profile(
-    "fast", hypothesis.settings.get_profile("base"), max_examples=50
+    "fast", hypothesis.settings.get_profile("base"), max_examples=50,
+    phases=[hypothesis.Phase.explicit, hypothesis.Phase.reuse, hypothesis.Phase.generate,
+            hypothesis.Phase.target, hypothesis.Phase.explain],
 )
 # Hypothesis's default max_examples is 100
 hypothesis.settings.register_profile(
-    "normal", hypothesis.settings.get_profile("base"), max_examples=100
+    "normal", hypothesis.settings.get_profile("base"), max_examples=100,
+    phases=[hypothesis.Phase.explicit, hypothesis.Phase.reuse, hypothesis.Phase.generate,
+            hypothesis.Phase.target, hypothesis.Phase.explain],
 )
 hypothesis.settings.register_profile(
     "slow",
