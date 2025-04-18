@@ -93,23 +93,6 @@ class BaseAPI(ABC):
         pass
 
     @abstractmethod
-    def _fork(
-        self,
-        collection_id: UUID,
-        new_name: str
-    ) -> CollectionModel:
-        """[Internal] Fork the current collection under a new name. The returning collection should contain identical data to the current collection.
-        This is an experimental API that only works for Hosted Chroma for now.
-
-        Args:
-            new_name: The name of the new collection.
-
-        Returns:
-            Collection: A new collection with the specified name and containing identical data to the current collection.
-        """
-        pass
-
-    @abstractmethod
     def delete_collection(
         self,
         name: str,
@@ -479,6 +462,24 @@ class ClientAPI(BaseAPI, ABC):
         pass
 
     @abstractmethod
+    def _fork(
+        self,
+        collection_id: UUID,
+        new_name: str
+    ) -> Collection:
+        """[Internal] Fork the current collection under a new name. The returning collection should contain identical data to the current collection.
+        This is an experimental API that only works for Hosted Chroma for now.
+
+        Args:
+            new_name: The name of the new collection.
+
+        Returns:
+            Collection: A new collection with the specified name and containing identical data to the current collection.
+        """
+        pass
+
+
+    @abstractmethod
     def set_tenant(self, tenant: str, database: str = DEFAULT_DATABASE) -> None:
         """Set the tenant and database for the client. Raises an error if the tenant or
         database does not exist.
@@ -654,7 +655,6 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         pass
 
     @abstractmethod
-    @override
     def _fork(
         self,
         collection_id: UUID,

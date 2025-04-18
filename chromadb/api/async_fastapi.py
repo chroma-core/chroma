@@ -387,7 +387,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     ) -> CollectionModel:
         resp_json = await self._make_request(
             "post",
-            f"/tenants/{tenant}/databases/{database}/collections/{id}/fork",
+            f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/fork",
             json={"new_name": new_name},
         )
         model = CollectionModel.from_json(resp_json)

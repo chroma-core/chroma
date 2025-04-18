@@ -87,23 +87,6 @@ class AsyncBaseAPI(ABC):
         pass
 
     @abstractmethod
-    async def _fork(
-        self,
-        collection_id: UUID,
-        new_name: str
-    ) -> CollectionModel:
-        """[Internal] Fork the current collection under a new name. The returning collection should contain identical data to the current collection.
-        This is an experimental API that only works for Hosted Chroma for now.
-
-        Args:
-            new_name: The name of the new collection.
-
-        Returns:
-            Collection: A new collection with the specified name and containing identical data to the current collection.
-        """
-        pass
-
-    @abstractmethod
     async def delete_collection(
         self,
         name: str,
@@ -473,6 +456,27 @@ class AsyncClientAPI(AsyncBaseAPI, ABC):
         pass
 
     @abstractmethod
+    async def _fork(
+        self,
+        collection_id: UUID,
+        new_name: str,
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Loadable]] = None,
+    ) -> AsyncCollection:
+        """[Internal] Fork the current collection under a new name. The returning collection should contain identical data to the current collection.
+        This is an experimental API that only works for Hosted Chroma for now.
+
+        Args:
+            new_name: The name of the new collection.
+
+        Returns:
+            Collection: A new collection with the specified name and containing identical data to the current collection.
+        """
+        pass
+
+    @abstractmethod
     async def set_tenant(self, tenant: str, database: str = DEFAULT_DATABASE) -> None:
         """Set the tenant and database for the client. Raises an error if the tenant or
         database does not exist.
@@ -648,7 +652,6 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
         pass
 
     @abstractmethod
-    @override
     async def _fork(
         self,
         collection_id: UUID,

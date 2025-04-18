@@ -269,6 +269,27 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         )
 
     @override
+    async def _fork(
+        self,
+        collection_id: UUID,
+        new_name: str,
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Loadable]] = None,
+    ) -> AsyncCollection:
+        model = await self._server._fork(
+            collection_id=collection_id,
+            new_name=new_name,
+        )
+        return AsyncCollection(
+            client=self._server,
+            model=model,
+            embedding_function=embedding_function,
+            data_loader=data_loader,
+        )
+
+    @override
     async def delete_collection(
         self,
         name: str,
