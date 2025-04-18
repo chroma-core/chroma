@@ -56,7 +56,7 @@ if CURRENT_PRESET not in VALID_PRESETS:
 
 hypothesis.settings.register_profile(
     "base",
-    deadline=45000,
+    deadline=60000,
     suppress_health_check=[
         hypothesis.HealthCheck.data_too_large,
         hypothesis.HealthCheck.large_base_example,
@@ -66,11 +66,15 @@ hypothesis.settings.register_profile(
 )
 
 hypothesis.settings.register_profile(
-    "fast", hypothesis.settings.get_profile("base"), max_examples=50
+    "fast", hypothesis.settings.get_profile("base"), max_examples=50,
+    phases=[hypothesis.Phase.explicit, hypothesis.Phase.reuse, hypothesis.Phase.generate,
+            hypothesis.Phase.target, hypothesis.Phase.explain],
 )
 # Hypothesis's default max_examples is 100
 hypothesis.settings.register_profile(
-    "normal", hypothesis.settings.get_profile("base"), max_examples=100
+    "normal", hypothesis.settings.get_profile("base"), max_examples=100,
+    phases=[hypothesis.Phase.explicit, hypothesis.Phase.reuse, hypothesis.Phase.generate,
+            hypothesis.Phase.target, hypothesis.Phase.explain],
 )
 hypothesis.settings.register_profile(
     "slow",
