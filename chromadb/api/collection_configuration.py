@@ -424,6 +424,14 @@ def create_collection_configuration_to_json(
                 "config": ef.get_config(),
             }
             register_embedding_function(type(ef))  # type: ignore
+            if hnsw_config is None:
+                hnsw_config = CreateHNSWConfiguration(space=ef.default_space())
+            elif hnsw_config.get("space") is None:
+                hnsw_config["space"] = ef.default_space()
+            if spann_config is None:
+                spann_config = CreateSpannConfiguration(space=ef.default_space())
+            elif spann_config.get("space") is None:
+                spann_config["space"] = ef.default_space()
     except Exception as e:
         warnings.warn(
             f"legacy embedding function config: {e}",

@@ -858,3 +858,106 @@ def test_default_collection_creation(client: ClientAPI) -> None:
     ef = config.get("embedding_function")
     assert ef is not None
     assert ef.name() == "default"
+
+
+def test_default_space_inference(client: ClientAPI) -> None:
+    """Test that the default space is inferred from the embedding function when no index config is provided."""
+    client.reset()
+    coll = client.create_collection(
+        name="test_default_space_inference",
+        embedding_function=CustomEmbeddingFunction(),  # Defaults to cosine
+    )
+    config = load_collection_configuration_from_json(coll.configuration_json)
+    assert config is not None
+    # Default index is HNSW
+    hnsw_config = config.get("hnsw")
+    assert hnsw_config is not None
+    assert hnsw_config.get("space") == "cosine"  # Should match EF default
+    assert config.get("spann") is None
+    ef = config.get("embedding_function")
+    assert ef is not None
+    assert ef.name() == "custom_ef"
+
+
+def test_default_space_hnsw(client: ClientAPI) -> None:
+    """Test that the default space is used for HNSW if not specified in config."""
+    client.reset()
+    hnsw_config_no_space: CreateHNSWConfiguration = {"ef_construction": 123}
+    coll = client.create_collection(
+        name="test_default_space_hnsw",
+        configuration={"hnsw": hnsw_config_no_space},
+        embedding_function=CustomEmbeddingFunction(),  # Defaults to cosine
+    )
+    config = load_collection_configuration_from_json(coll.configuration_json)
+    assert config is not None
+    hnsw_config = config.get("hnsw")
+    assert hnsw_config is not None
+    assert hnsw_config.get("space") == "cosine"  # Should match EF default
+    assert hnsw_config.get("ef_construction") == 123
+    assert config.get("spann") is None
+    ef = config.get("embedding_function")
+    assert ef is not None
+    assert ef.name() == "custom_ef"
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_default_space_spann(client: ClientAPI) -> None:
+    """Test that the default space is used for SPANN if not specified in config."""
+    client.reset()
+    spann_config_no_space: CreateSpannConfiguration = {"ef_construction": 123}
+    coll = client.create_collection(
+        name="test_default_space_spann",
+        configuration={"spann": spann_config_no_space},
+        embedding_function=CustomEmbeddingFunction(),  # Defaults to cosine
+    )
+    config = load_collection_configuration_from_json(coll.configuration_json)
+    assert config is not None
+    spann_config = config.get("spann")
+    assert spann_config is not None
+    assert spann_config.get("space") == "cosine"  # Should match EF default
+    assert spann_config.get("ef_construction") == 123
+    assert config.get("hnsw") is None
+    ef = config.get("embedding_function")
+    assert ef is not None
+    assert ef.name() == "custom_ef"
+
+
+def test_override_default_space_hnsw(client: ClientAPI) -> None:
+    """Test that specifying space in HNSW config overrides the EF default."""
+    client.reset()
+    hnsw_config_override: CreateHNSWConfiguration = {"space": "l2"}
+    coll = client.create_collection(
+        name="test_override_space_hnsw",
+        configuration={"hnsw": hnsw_config_override},
+        embedding_function=CustomEmbeddingFunction(),  # Defaults to cosine
+    )
+    config = load_collection_configuration_from_json(coll.configuration_json)
+    assert config is not None
+    hnsw_config = config.get("hnsw")
+    assert hnsw_config is not None
+    assert hnsw_config.get("space") == "l2"  # Should be overridden value
+    assert config.get("spann") is None
+    ef = config.get("embedding_function")
+    assert ef is not None
+    assert ef.name() == "custom_ef"
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_override_default_space_spann(client: ClientAPI) -> None:
+    """Test that specifying space in SPANN config overrides the EF default."""
+    client.reset()
+    spann_config_override: CreateSpannConfiguration = {"space": "l2"}
+    coll = client.create_collection(
+        name="test_override_space_spann",
+        configuration={"spann": spann_config_override},
+        embedding_function=CustomEmbeddingFunction(),  # Defaults to cosine
+    )
+    config = load_collection_configuration_from_json(coll.configuration_json)
+    assert config is not None
+    spann_config = config.get("spann")
+    assert spann_config is not None
+    assert spann_config.get("space") == "l2"  # Should be overridden value
+    assert config.get("hnsw") is None
+    ef = config.get("embedding_function")
+    assert ef is not None
+    assert ef.name() == "custom_ef"
