@@ -634,6 +634,7 @@ mod test {
             total_records_post_compaction: 0,
             size_bytes_post_compaction: 0,
             last_compaction_time_secs: 0,
+            legacy_configuration_json: (),
         };
 
         let spann_writer = SpannSegmentWriter::from_segment(

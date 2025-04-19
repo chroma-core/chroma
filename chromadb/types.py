@@ -17,7 +17,6 @@ from chromadb.serde import BaseModelJSONSerializable
 from chromadb.api.collection_configuration import (
     CollectionConfiguration,
     HNSWConfiguration,
-    SpannConfiguration,
     collection_configuration_to_json,
     load_collection_configuration_from_json,
 )
@@ -156,7 +155,7 @@ class Collection(
             )
             return CollectionConfiguration(
                 hnsw=HNSWConfiguration(),
-                spann=SpannConfiguration(),
+                spann=None,
                 embedding_function=None,
             )
 
@@ -175,11 +174,11 @@ class Collection(
     @override
     def from_json(cls, json_map: Dict[str, Any]) -> Self:
         """Deserializes a Collection object from JSON"""
-        configuration: CollectionConfiguration = {
-            "hnsw": {},
-            "spann": {},
-            "embedding_function": None,
-        }
+        configuration = CollectionConfiguration(
+            hnsw=None,
+            spann=None,
+            embedding_function=None,
+        )
         try:
             configuration_json = json_map.get("configuration_json", None)
             configuration = load_collection_configuration_from_json(configuration_json)

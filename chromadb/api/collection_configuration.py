@@ -224,6 +224,26 @@ class CreateSpannConfiguration(TypedDict, total=False):
     merge_threshold: int
 
 
+def populate_create_spann_defaults(
+    config: CreateSpannConfiguration,
+) -> CreateSpannConfiguration:
+    if config.get("space") is None:
+        config["space"] = "l2"
+    if config.get("ef_construction") is None:
+        config["ef_construction"] = 200
+    if config.get("max_neighbors") is None:
+        config["max_neighbors"] = 64
+    if config.get("ef_search") is None:
+        config["ef_search"] = 200
+    if config.get("reassign_neighbor_count") is None:
+        config["reassign_neighbor_count"] = 64
+    if config.get("split_threshold") is None:
+        config["split_threshold"] = 200
+    if config.get("merge_threshold") is None:
+        config["merge_threshold"] = 100
+    return config
+
+
 def validate_create_spann_config(
     config: Optional[CreateSpannConfiguration], ef: Optional[EmbeddingFunction] = None  # type: ignore
 ) -> None:

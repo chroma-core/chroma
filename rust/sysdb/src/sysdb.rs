@@ -256,6 +256,7 @@ impl SysDb {
                     total_records_post_compaction: 0,
                     size_bytes_post_compaction: 0,
                     last_compaction_time_secs: 0,
+                    legacy_configuration_json: (),
                 };
 
                 test_sysdb.add_collection(collection.clone());

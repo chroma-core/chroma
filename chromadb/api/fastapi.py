@@ -12,6 +12,12 @@ from chromadb.api.collection_configuration import (
     UpdateCollectionConfiguration,
     update_collection_configuration_to_json,
     create_collection_configuration_to_json,
+    create_collection_configuration_from_legacy_metadata_dict,
+    populate_create_hnsw_defaults,
+    validate_create_hnsw_config,
+    CreateHNSWConfiguration,
+    validate_create_spann_config,
+    populate_create_spann_defaults,
 )
 from chromadb import __version__
 from chromadb.api.base_http_client import BaseHTTPClient
@@ -263,6 +269,58 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             },
         )
         model = CollectionModel.from_json(resp_json)
+
+        # TODO: @jairad26 Remove this once server response contains configuration
+        hnsw = None
+        spann = None
+        embedding_function = None
+        if configuration is not None:
+            hnsw = configuration.get("hnsw")
+            spann = configuration.get("spann")
+            embedding_function = configuration.get("embedding_function")
+
+        # if neither are specified, use the legacy metadata to populate the configuration
+        print("Test legacy metadata: ", model.metadata)
+        if hnsw is None and spann is None:
+            if model.metadata is not None:
+                # update the configuration with the legacy metadata
+                configuration = (
+                    create_collection_configuration_from_legacy_metadata_dict(
+                        model.metadata
+                    )
+                )
+                hnsw = configuration.get("hnsw")
+                spann = configuration.get("spann")
+
+        else:
+            # At this point we know at least one of hnsw or spann is not None
+            if hnsw is not None:
+                populate_create_hnsw_defaults(hnsw)
+                validate_create_hnsw_config(hnsw)
+            if spann is not None:
+                populate_create_spann_defaults(spann)
+                validate_create_spann_config(spann)
+
+            assert configuration is not None
+            configuration["hnsw"] = hnsw
+            configuration["spann"] = spann
+
+        # if hnsw and spann are both still None, it was neither specified in config nor in legacy metadata
+        # in this case, rfe will take care of defaults, so we just need to populate the hnsw config
+        if hnsw is None and spann is None:
+            hnsw = CreateHNSWConfiguration()
+            populate_create_hnsw_defaults(hnsw)
+            validate_create_hnsw_config(hnsw)
+            if configuration is not None:
+                configuration["hnsw"] = hnsw
+            else:
+                configuration = CreateCollectionConfiguration(hnsw=hnsw)
+
+        assert configuration is not None
+        configuration["embedding_function"] = embedding_function
+        model.configuration_json = create_collection_configuration_to_json(
+            configuration
+        )
 
         return model
 

@@ -52,7 +52,16 @@ impl std::fmt::Display for CollectionUuid {
     }
 }
 
-fn serialize_internal_collection_configuration<S: serde::Serializer>(
+const CONFIGURATION_JSON_STR: &str = r#"{"hnsw_configuration": {"space": "l2", "ef_construction": 100, "ef_search": 100, "num_threads": 16, "M": 16, "resize_factor": 1.2, "batch_size": 100, "sync_threshold": 1000, "_type": "HNSWConfigurationInternal"}, "_type": "CollectionConfigurationInternal"}"#;
+
+fn emit_legacy_config_json_str<S: serde::Serializer>(_: &(), s: S) -> Result<S::Ok, S::Error> {
+    serde_json::from_str::<serde_json::Value>(CONFIGURATION_JSON_STR)
+        .unwrap()
+        .serialize(s)
+        .map_err(serde::ser::Error::custom)
+}
+
+fn _serialize_internal_collection_configuration<S: serde::Serializer>(
     config: &InternalCollectionConfiguration,
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
@@ -76,7 +85,8 @@ pub struct Collection {
     pub collection_id: CollectionUuid,
     pub name: String,
     #[serde(
-        serialize_with = "serialize_internal_collection_configuration",
+        // serialize_with = "serialize_internal_collection_configuration",
+        skip_serializing,
         deserialize_with = "deserialize_internal_collection_configuration",
         rename = "configuration_json"
     )]
@@ -94,6 +104,12 @@ pub struct Collection {
     pub size_bytes_post_compaction: u64,
     #[serde(skip)]
     pub last_compaction_time_secs: u64,
+    #[serde(
+        serialize_with = "emit_legacy_config_json_str",
+        skip_deserializing,
+        rename = "configuration_json"
+    )]
+    pub legacy_configuration_json: (),
 }
 
 impl Default for Collection {
@@ -111,6 +127,7 @@ impl Default for Collection {
             total_records_post_compaction: 0,
             size_bytes_post_compaction: 0,
             last_compaction_time_secs: 0,
+            legacy_configuration_json: (),
         }
     }
 }
@@ -226,6 +243,7 @@ impl TryFrom<chroma_proto::Collection> for Collection {
             total_records_post_compaction: proto_collection.total_records_post_compaction,
             size_bytes_post_compaction: proto_collection.size_bytes_post_compaction,
             last_compaction_time_secs: proto_collection.last_compaction_time_secs,
+            legacy_configuration_json: (),
         })
     }
 }

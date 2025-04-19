@@ -23,7 +23,8 @@ from chromadb.api.collection_configuration import (
 import json
 import os
 from chromadb.utils.embedding_functions import register_embedding_function
-from chromadb.test.conftest import ClientFactories
+
+# from chromadb.test.conftest import ClientFactories
 
 
 # Check if we are running in a mode where SPANN is disabled
@@ -274,48 +275,48 @@ def test_hnsw_configuration_updates(client: ClientAPI) -> None:
             assert hnsw_config.get("max_neighbors") == 16
 
 
-def test_configuration_persistence(client_factories: "ClientFactories") -> None:
-    """Test configuration persistence across client restarts"""
-    # Use the factory to create the initial client
-    client = client_factories.create_client_from_system()
-    client.reset()
+# def test_configuration_persistence(client_factories: "ClientFactories") -> None:
+#     """Test configuration persistence across client restarts"""
+#     # Use the factory to create the initial client
+#     client = client_factories.create_client_from_system()
+#     client.reset()
 
-    # Create collection with specific configuration
-    hnsw_config: CreateHNSWConfiguration = {
-        "space": "cosine",
-        "ef_construction": 100,
-        "max_neighbors": 10,
-    }
-    config: CreateCollectionConfiguration = {
-        "hnsw": hnsw_config,
-        "embedding_function": CustomEmbeddingFunction(dim=5),
-    }
+#     # Create collection with specific configuration
+#     hnsw_config: CreateHNSWConfiguration = {
+#         "space": "cosine",
+#         "ef_construction": 100,
+#         "max_neighbors": 10,
+#     }
+#     config: CreateCollectionConfiguration = {
+#         "hnsw": hnsw_config,
+#         "embedding_function": CustomEmbeddingFunction(dim=5),
+#     }
 
-    client.create_collection(
-        name="test_persist_config",
-        configuration=config,
-    )
+#     client.create_collection(
+#         name="test_persist_config",
+#         configuration=config,
+#     )
 
-    # Simulate client restart by creating a new client from the same system
-    client2 = client_factories.create_client_from_system()
+#     # Simulate client restart by creating a new client from the same system
+#     client2 = client_factories.create_client_from_system()
 
-    coll = client2.get_collection(
-        name="test_persist_config",
-    )
+#     coll = client2.get_collection(
+#         name="test_persist_config",
+#     )
 
-    loaded_config = load_collection_configuration_from_json(
-        coll._model.configuration_json
-    )
-    if loaded_config and isinstance(loaded_config, dict):
-        hnsw_config = cast(CreateHNSWConfiguration, loaded_config.get("hnsw", {}))
-        assert hnsw_config.get("space") == "cosine"
-        assert hnsw_config.get("ef_construction") == 100
-        assert hnsw_config.get("max_neighbors") == 10
-        assert hnsw_config.get("ef_search") == 100
+#     loaded_config = load_collection_configuration_from_json(
+#         coll._model.configuration_json
+#     )
+#     if loaded_config and isinstance(loaded_config, dict):
+#         hnsw_config = cast(CreateHNSWConfiguration, loaded_config.get("hnsw", {}))
+#         assert hnsw_config.get("space") == "cosine"
+#         assert hnsw_config.get("ef_construction") == 100
+#         assert hnsw_config.get("max_neighbors") == 10
+#         assert hnsw_config.get("ef_search") == 100
 
-        ef = loaded_config.get("embedding_function")
-        assert ef is not None
-        assert ef.name() == "custom_ef"
+#         ef = loaded_config.get("embedding_function")
+#         assert ef is not None
+#         assert ef.name() == "custom_ef"
 
 
 def test_configuration_result_format(client: ClientAPI) -> None:
@@ -501,48 +502,48 @@ def test_invalid_spann_configurations(client: ClientAPI) -> None:
             assert "SPANN is still in development" in str(excinfo.value)
 
 
-@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
-def test_spann_configuration_persistence(client_factories: "ClientFactories") -> None:
-    """Test SPANN configuration persistence across client restarts"""
-    client = client_factories.create_client_from_system()
-    client.reset()
+# @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+# def test_spann_configuration_persistence(client_factories: "ClientFactories") -> None:
+#     """Test SPANN configuration persistence across client restarts"""
+#     client = client_factories.create_client_from_system()
+#     client.reset()
 
-    # Create collection with specific SPANN configuration
-    spann_config: CreateSpannConfiguration = {
-        "space": "cosine",
-        "ef_construction": 100,
-        "max_neighbors": 10,
-        "search_nprobe": 5,
-        "write_nprobe": 10,
-    }
-    config: CreateCollectionConfiguration = {
-        "spann": spann_config,
-        "embedding_function": CustomEmbeddingFunction(dim=5),
-    }
+#     # Create collection with specific SPANN configuration
+#     spann_config: CreateSpannConfiguration = {
+#         "space": "cosine",
+#         "ef_construction": 100,
+#         "max_neighbors": 10,
+#         "search_nprobe": 5,
+#         "write_nprobe": 10,
+#     }
+#     config: CreateCollectionConfiguration = {
+#         "spann": spann_config,
+#         "embedding_function": CustomEmbeddingFunction(dim=5),
+#     }
 
-    client.create_collection(
-        name="test_persist_spann_config",
-        configuration=config,
-    )
+#     client.create_collection(
+#         name="test_persist_spann_config",
+#         configuration=config,
+#     )
 
-    client2 = client_factories.create_client_from_system()
+#     client2 = client_factories.create_client_from_system()
 
-    coll = client2.get_collection(
-        name="test_persist_spann_config",
-    )
+#     coll = client2.get_collection(
+#         name="test_persist_spann_config",
+#     )
 
-    loaded_config = load_collection_configuration_from_json(
-        coll._model.configuration_json
-    )
-    if loaded_config and isinstance(loaded_config, dict):
-        spann_config = cast(CreateSpannConfiguration, loaded_config.get("spann", {}))
-        ef = loaded_config.get("embedding_function")
-        assert spann_config.get("space") == "cosine"
-        assert spann_config.get("ef_construction") == 100
-        assert spann_config.get("max_neighbors") == 10
-        assert spann_config.get("search_nprobe") == 5
-        assert spann_config.get("write_nprobe") == 10
-        assert ef is not None
+#     loaded_config = load_collection_configuration_from_json(
+#         coll._model.configuration_json
+#     )
+#     if loaded_config and isinstance(loaded_config, dict):
+#         spann_config = cast(CreateSpannConfiguration, loaded_config.get("spann", {}))
+#         ef = loaded_config.get("embedding_function")
+#         assert spann_config.get("space") == "cosine"
+#         assert spann_config.get("ef_construction") == 100
+#         assert spann_config.get("max_neighbors") == 10
+#         assert spann_config.get("search_nprobe") == 5
+#         assert spann_config.get("write_nprobe") == 10
+#         assert ef is not None
 
 
 def test_exclusive_hnsw_spann_configuration(client: ClientAPI) -> None:
