@@ -6,7 +6,6 @@ use axum::{
     Json, Router, ServiceExt,
 };
 use chroma_system::System;
-use chroma_types::RawWhereFields;
 use chroma_types::{
     AddCollectionRecordsResponse, ChecklistResponse, Collection, CollectionConfiguration,
     CollectionMetadataUpdate, CollectionUuid, CountCollectionsRequest, CountCollectionsResponse,
@@ -20,6 +19,7 @@ use chroma_types::{
     UpdateCollectionConfiguration, UpdateCollectionRecordsResponse, UpdateCollectionResponse,
     UpdateMetadata, UpsertCollectionRecordsResponse,
 };
+use chroma_types::{KnnIndex, RawWhereFields};
 use mdac::{Rule, Scorecard, ScorecardTicket};
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Meter};
@@ -892,10 +892,11 @@ async fn create_collection(
     let configuration = match payload.configuration {
         Some(c) => Some(InternalCollectionConfiguration::try_from_config(
             c,
-            server.config.frontend.default_knn_index,
+            KnnIndex::Spann,
         )?),
         None => None,
     };
+    println!("(Sanket-temp) Configuration: {:?}", configuration);
 
     let request = CreateCollectionRequest::try_new(
         tenant,
