@@ -403,6 +403,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         self,
         collection_id: UUID,
         query_embeddings: Embeddings,
+        ids: Optional[IDs] = None,
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
@@ -411,6 +412,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         return await self._server._query(
             collection_id=collection_id,
             query_embeddings=query_embeddings,
+            ids=ids,
             n_results=n_results,
             where=where,
             where_document=where_document,

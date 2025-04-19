@@ -472,6 +472,7 @@ class RustBindingsAPI(ServerAPI):
         self,
         collection_id: UUID,
         query_embeddings: Embeddings,
+        ids: Optional[IDs] = None,
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
@@ -480,10 +481,12 @@ class RustBindingsAPI(ServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> QueryResult:
         query_amount = len(query_embeddings)
+        filtered_ids_amount = len(ids) if ids else 0
         self.product_telemetry_client.capture(
             CollectionQueryEvent(
                 collection_uuid=str(collection_id),
                 query_amount=query_amount,
+                filtered_ids_amount=filtered_ids_amount,
                 n_results=n_results,
                 with_metadata_filter=query_amount if where is not None else 0,
                 with_document_filter=query_amount if where_document is not None else 0,
@@ -496,6 +499,7 @@ class RustBindingsAPI(ServerAPI):
 
         rust_response = self.bindings.query(
             str(collection_id),
+            ids,
             query_embeddings,
             n_results,
             json.dumps(where) if where else None,

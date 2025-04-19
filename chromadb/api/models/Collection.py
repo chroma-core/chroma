@@ -172,6 +172,7 @@ class Collection(CollectionCommon["ServerAPI"]):
         query_texts: Optional[OneOrMany[Document]] = None,
         query_images: Optional[OneOrMany[Image]] = None,
         query_uris: Optional[OneOrMany[URI]] = None,
+        ids: Optional[IDs] = None,
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
@@ -188,6 +189,7 @@ class Collection(CollectionCommon["ServerAPI"]):
             query_texts: The document texts to get the closes neighbors of. Optional.
             query_images: The images to get the closes neighbors of. Optional.
             query_uris: The URIs to be used with data loader. Optional.
+            ids: A subset of ids to search within. Optional.
             n_results: The number of neighbors to return for each query_embedding or query_texts. Optional.
             where: A Where type dict used to filter results by. E.g. `{"$and": [{"color" : "red"}, {"price": {"$gte": 4.20}}]}`. Optional.
             where_document: A WhereDocument type dict used to filter by the documents. E.g. `{"$contains": "hello"}`. Optional.
@@ -217,6 +219,7 @@ class Collection(CollectionCommon["ServerAPI"]):
 
         query_results = self._client._query(
             collection_id=self.id,
+            ids=ids,
             query_embeddings=query_request["embeddings"],
             n_results=query_request["n_results"],
             where=query_request["where"],

@@ -215,6 +215,7 @@ export type ModifyCollectionParams = {
 };
 
 export type BaseQueryParams = {
+  ids?: IDs;
   nResults?: PositiveInteger;
   where?: Where;
   queryTexts?: string | string[];
