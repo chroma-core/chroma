@@ -256,7 +256,12 @@ impl DistributedHNSWSegmentWriter {
 
     pub async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
         let hnsw_index_id = self.index.inner.read().id;
-        match self.hnsw_index_provider.flush(&hnsw_index_id).await {
+        let path_prefix = self.index.path_prefix;
+        match self
+            .hnsw_index_provider
+            .flush(&hnsw_index_id, &path_prefix)
+            .await
+        {
             Ok(_) => {}
             Err(e) => return Err(e),
         }

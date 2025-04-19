@@ -52,7 +52,7 @@ query_service:
     blockfile_provider:
         arrow:
             block_manager_config:
-                max_block_size_bytes: 16384
+                max_block_size_bytes: 8388608 # 8MB
                 block_cache_config:
                     disk:
                         dir: "/cache/chroma/query-service/block-cache"
@@ -138,7 +138,7 @@ compaction_service:
     blockfile_provider:
         arrow:
             block_manager_config:
-                max_block_size_bytes: 16384
+                max_block_size_bytes: 8388608 # 8MB
                 block_cache_config:
                     lru:
                         capacity: 1000
