@@ -86,136 +86,6 @@ const knownEmbeddingFunctions: Record<
   { build_from_config: (config: any) => IEmbeddingFunction }
 > = {};
 
-// --- Validation Helpers ---
-
-function validateSpace(space?: string, ef?: IEmbeddingFunction | null): void {
-  if (!space) return;
-  if (!["l2", "cosine", "ip"].includes(space)) {
-    throw new InvalidConfigurationError(`space must be one of: l2, cosine, ip`);
-  }
-  if (ef?.supportedSpaces) {
-    const supported = ef.supportedSpaces();
-    if (!supported.includes(space as EmbeddingFunctionSpace)) {
-      // Cast needed as we checked inclusion above
-      throw new InvalidConfigurationError(
-        `space '${space}' must be supported by the embedding function (${supported.join(
-          ", ",
-        )})`,
-      );
-    }
-  }
-}
-
-export function validateCreateHnswConfig(
-  config?: CreateHNSWConfiguration | null,
-  ef?: IEmbeddingFunction | null,
-): void {
-  if (!config) return;
-
-  if (config.batch_size !== undefined && config.sync_threshold !== undefined) {
-    if (config.batch_size > config.sync_threshold) {
-      throw new InvalidConfigurationError(
-        "batch_size must be less than or equal to sync_threshold",
-      );
-    }
-  }
-  if (config.num_threads !== undefined && config.num_threads <= 0) {
-    throw new InvalidConfigurationError("num_threads must be greater than 0");
-  }
-  if (config.resize_factor !== undefined && config.resize_factor <= 0) {
-    throw new InvalidConfigurationError("resize_factor must be greater than 0");
-  }
-  validateSpace(config.space, ef);
-  if (config.ef_construction !== undefined && config.ef_construction <= 0) {
-    throw new InvalidConfigurationError(
-      "ef_construction must be greater than 0",
-    );
-  }
-  if (config.max_neighbors !== undefined && config.max_neighbors <= 0) {
-    throw new InvalidConfigurationError("max_neighbors must be greater than 0");
-  }
-  if (config.ef_search !== undefined && config.ef_search <= 0) {
-    throw new InvalidConfigurationError("ef_search must be greater than 0");
-  }
-}
-
-export function validateUpdateHnswConfig(
-  config?: UpdateHNSWConfiguration | null,
-): void {
-  if (!config) return;
-
-  if (config.ef_search !== undefined && config.ef_search <= 0) {
-    throw new InvalidConfigurationError("ef_search must be greater than 0");
-  }
-  if (config.num_threads !== undefined && config.num_threads <= 0) {
-    throw new InvalidConfigurationError("num_threads must be greater than 0");
-  }
-  // Note: Python version checks batch_size > sync_threshold only if both are present in the update.
-  // This TS version doesn't have access to the existing config to do that check fully here.
-  // It's primarily validated server-side anyway.
-  if (config.resize_factor !== undefined && config.resize_factor <= 0) {
-    throw new InvalidConfigurationError("resize_factor must be greater than 0");
-  }
-}
-
-export function validateCreateSpannConfig(
-  config?: CreateSpannConfiguration | null,
-  ef?: IEmbeddingFunction | null,
-): void {
-  if (!config) return;
-
-  validateSpace(config.space, ef);
-
-  if (config.search_nprobe !== undefined && config.search_nprobe <= 0) {
-    throw new InvalidConfigurationError("search_nprobe must be greater than 0");
-  }
-  if (config.write_nprobe !== undefined && config.write_nprobe <= 0) {
-    throw new InvalidConfigurationError("write_nprobe must be greater than 0");
-  }
-  if (config.ef_construction !== undefined && config.ef_construction <= 0) {
-    throw new InvalidConfigurationError(
-      "ef_construction must be greater than 0",
-    );
-  }
-  if (config.max_neighbors !== undefined && config.max_neighbors <= 0) {
-    throw new InvalidConfigurationError("max_neighbors must be greater than 0");
-  }
-  if (config.ef_search !== undefined && config.ef_search <= 0) {
-    throw new InvalidConfigurationError("ef_search must be greater than 0");
-  }
-  if (
-    config.reassign_neighbor_count !== undefined &&
-    config.reassign_neighbor_count <= 0
-  ) {
-    throw new InvalidConfigurationError(
-      "reassign_neighbor_count must be greater than 0",
-    );
-  }
-  if (config.split_threshold !== undefined && config.split_threshold <= 0) {
-    throw new InvalidConfigurationError(
-      "split_threshold must be greater than 0",
-    );
-  }
-  if (config.merge_threshold !== undefined && config.merge_threshold <= 0) {
-    throw new InvalidConfigurationError(
-      "merge_threshold must be greater than 0",
-    );
-  }
-}
-
-export function validateUpdateSpannConfig(
-  config?: UpdateSpannConfiguration | null,
-): void {
-  if (!config) return;
-
-  if (config.search_nprobe !== undefined && config.search_nprobe <= 0) {
-    throw new InvalidConfigurationError("search_nprobe must be greater than 0");
-  }
-  if (config.ef_search !== undefined && config.ef_search <= 0) {
-    throw new InvalidConfigurationError("ef_search must be greater than 0");
-  }
-}
-
 // --- JSON Conversion Helpers ---
 
 function serializeEmbeddingFunction(
@@ -399,10 +269,6 @@ export function createCollectionConfigurationToJson(
     );
   }
 
-  // Perform validation before returning the JSON object
-  validateCreateHnswConfig(hnswConfig, ef);
-  validateCreateSpannConfig(spannConfig, ef);
-
   return {
     hnsw: hnswConfig,
     spann: spannConfig,
@@ -454,7 +320,6 @@ export function updateCollectionConfigurationToJson(
         "Invalid HNSW config provided in UpdateCollectionConfiguration",
       );
     }
-    validateUpdateHnswConfig(hnswConfig);
   }
 
   // Validate SPANN config if present
@@ -464,7 +329,6 @@ export function updateCollectionConfigurationToJson(
         "Invalid SPANN config provided in UpdateCollectionConfiguration",
       );
     }
-    validateUpdateSpannConfig(spannConfig);
   }
 
   // Handle embedding function serialization only if explicitly provided (ef !== undefined)

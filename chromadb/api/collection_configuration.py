@@ -135,8 +135,6 @@ def collection_configuration_to_json(config: CollectionConfiguration) -> Dict[st
 
     if ef is None:
         ef = None
-        validate_create_hnsw_config(hnsw_config, ef)
-        validate_create_spann_config(spann_config, ef)
         ef_config = {"type": "legacy"}
         return {
             "hnsw": hnsw_config,
@@ -163,9 +161,6 @@ def collection_configuration_to_json(config: CollectionConfiguration) -> Dict[st
             )
             ef = None
             ef_config = {"type": "legacy"}
-
-    validate_create_hnsw_config(hnsw_config, ef)
-    validate_create_spann_config(spann_config, ef)
 
     return {
         "hnsw": hnsw_config,
@@ -222,45 +217,6 @@ class CreateSpannConfiguration(TypedDict, total=False):
     reassign_neighbor_count: int
     split_threshold: int
     merge_threshold: int
-
-
-def validate_create_spann_config(
-    config: Optional[CreateSpannConfiguration], ef: Optional[EmbeddingFunction] = None  # type: ignore
-) -> None:
-    """Validate a CreateSpann configuration"""
-    if config is None:
-        return
-    if "space" in config:
-        # Check if the space value is one of the string values of the Space literal
-        if config["space"] not in get_args(Space):
-            raise ValueError(f"space must be one of: {get_args(Space)}")
-        if ef is not None:
-            if config["space"] not in ef.supported_spaces():
-                raise ValueError("space must be supported by the embedding function")
-    if "search_nprobe" in config:
-        if config["search_nprobe"] <= 0:
-            raise ValueError("search_nprobe must be greater than 0")
-    if "write_nprobe" in config:
-        if config["write_nprobe"] <= 0:
-            raise ValueError("write_nprobe must be greater than 0")
-    if "ef_construction" in config:
-        if config["ef_construction"] <= 0:
-            raise ValueError("ef_construction must be greater than 0")
-    if "ef_search" in config:
-        if config["ef_search"] <= 0:
-            raise ValueError("ef_search must be greater than 0")
-    if "max_neighbors" in config:
-        if config["max_neighbors"] <= 0:
-            raise ValueError("max_neighbors must be greater than 0")
-    if "reassign_neighbor_count" in config:
-        if config["reassign_neighbor_count"] <= 0:
-            raise ValueError("reassign_neighbor_count must be greater than 0")
-    if "split_threshold" in config:
-        if config["split_threshold"] <= 0:
-            raise ValueError("split_threshold must be greater than 0")
-    if "merge_threshold" in config:
-        if config["merge_threshold"] <= 0:
-            raise ValueError("merge_threshold must be greater than 0")
 
 
 def json_to_create_spann_configuration(
@@ -329,7 +285,6 @@ def create_collection_configuration_from_legacy_metadata_dict(
             json_map[old_to_new[name]] = value
     hnsw_config = json_to_create_hnsw_configuration(json_map)
     hnsw_config = populate_create_hnsw_defaults(hnsw_config)
-    validate_create_hnsw_config(hnsw_config)
 
     return CreateCollectionConfiguration(hnsw=hnsw_config)
 
@@ -404,8 +359,6 @@ def create_collection_configuration_to_json(
 
     if config.get("embedding_function") is None:
         ef = None
-        validate_create_hnsw_config(hnsw_config, ef)
-        validate_create_spann_config(spann_config, ef)
         ef_config = {"type": "legacy"}
         return {
             "hnsw": hnsw_config,
@@ -433,8 +386,6 @@ def create_collection_configuration_to_json(
         ef = None
         ef_config = {"type": "legacy"}
 
-    validate_create_hnsw_config(hnsw_config, ef)
-    validate_create_spann_config(spann_config, ef)
     return {
         "hnsw": hnsw_config,
         "spann": spann_config,
@@ -465,39 +416,6 @@ def populate_create_hnsw_defaults(
     return config
 
 
-def validate_create_hnsw_config(
-    config: Optional[CreateHNSWConfiguration], ef: Optional[EmbeddingFunction] = None  # type: ignore
-) -> None:
-    """Validate a CreateHNSW configuration"""
-    if config is None:
-        return
-    if "batch_size" in config and "sync_threshold" in config:
-        if config["batch_size"] > config["sync_threshold"]:
-            raise ValueError("batch_size must be less than or equal to sync_threshold")
-    if "num_threads" in config:
-        if config["num_threads"] <= 0:
-            raise ValueError("num_threads must be greater than 0")
-    if "resize_factor" in config:
-        if config["resize_factor"] <= 0:
-            raise ValueError("resize_factor must be greater than 0")
-    if "space" in config:
-        # Check if the space value is one of the string values of the Space literal
-        if config["space"] not in get_args(Space):
-            raise ValueError(f"space must be one of: {get_args(Space)}")
-        if ef is not None:
-            if config["space"] not in ef.supported_spaces():
-                raise ValueError("space must be supported by the embedding function")
-    if "ef_construction" in config:
-        if config["ef_construction"] <= 0:
-            raise ValueError("ef_construction must be greater than 0")
-    if "max_neighbors" in config:
-        if config["max_neighbors"] <= 0:
-            raise ValueError("max_neighbors must be greater than 0")
-    if "ef_search" in config:
-        if config["ef_search"] <= 0:
-            raise ValueError("ef_search must be greater than 0")
-
-
 class UpdateHNSWConfiguration(TypedDict, total=False):
     ef_search: int
     num_threads: int
@@ -523,24 +441,6 @@ def json_to_update_hnsw_configuration(
     return config
 
 
-def validate_update_hnsw_config(
-    config: UpdateHNSWConfiguration,
-) -> None:
-    """Validate an UpdateHNSW configuration"""
-    if "ef_search" in config:
-        if config["ef_search"] <= 0:
-            raise ValueError("ef_search must be greater than 0")
-    if "num_threads" in config:
-        if config["num_threads"] <= 0:
-            raise ValueError("num_threads must be greater than 0")
-    if "batch_size" in config and "sync_threshold" in config:
-        if config["batch_size"] > config["sync_threshold"]:
-            raise ValueError("batch_size must be less than or equal to sync_threshold")
-    if "resize_factor" in config:
-        if config["resize_factor"] <= 0:
-            raise ValueError("resize_factor must be greater than 0")
-
-
 class UpdateSpannConfiguration(TypedDict, total=False):
     search_nprobe: int
     ef_search: int
@@ -555,18 +455,6 @@ def json_to_update_spann_configuration(
     if "ef_search" in json_map:
         config["ef_search"] = json_map["ef_search"]
     return config
-
-
-def validate_update_spann_config(
-    config: UpdateSpannConfiguration,
-) -> None:
-    """Validate an UpdateSpann configuration"""
-    if "search_nprobe" in config:
-        if config["search_nprobe"] <= 0:
-            raise ValueError("search_nprobe must be greater than 0")
-    if "ef_search" in config:
-        if config["ef_search"] <= 0:
-            raise ValueError("ef_search must be greater than 0")
 
 
 class UpdateCollectionConfiguration(TypedDict, total=False):
@@ -591,7 +479,6 @@ def update_collection_configuration_from_legacy_collection_metadata(
         if name in old_to_new:
             json_map[old_to_new[name]] = value
     hnsw_config = json_to_update_hnsw_configuration(json_map)
-    validate_update_hnsw_config(hnsw_config)
     return UpdateCollectionConfiguration(hnsw=hnsw_config)
 
 
@@ -611,7 +498,6 @@ def update_collection_configuration_from_legacy_update_metadata(
         if name in old_to_new:
             json_map[old_to_new[name]] = value
     hnsw_config = json_to_update_hnsw_configuration(json_map)
-    validate_update_hnsw_config(hnsw_config)
     return UpdateCollectionConfiguration(hnsw=hnsw_config)
 
 
@@ -636,14 +522,12 @@ def update_collection_configuration_to_json(
     if hnsw_config is not None:
         try:
             hnsw_config = cast(UpdateHNSWConfiguration, hnsw_config)
-            validate_update_hnsw_config(hnsw_config)
         except Exception as e:
             raise ValueError(f"not a valid hnsw config: {e}")
 
     if spann_config is not None:
         try:
             spann_config = cast(UpdateSpannConfiguration, spann_config)
-            validate_update_spann_config(spann_config)
         except Exception as e:
             raise ValueError(f"not a valid spann config: {e}")
 
