@@ -419,6 +419,10 @@ class QueryResult(TypedDict):
     included: Include
 
 
+# Type alias for union of result types
+GetOrQueryResult = Union["QueryResult", "GetResult"]
+
+
 class UpdateRequest(TypedDict):
     ids: IDs
     embeddings: Optional[Embeddings]
