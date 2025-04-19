@@ -412,7 +412,7 @@ impl BlockManager {
             .await;
         match res {
             Ok(_) => {
-                tracing::info!(
+                tracing::debug!(
                     "Block: {} written to storage ({}B)",
                     block.id,
                     block_bytes_len
