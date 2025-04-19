@@ -16,17 +16,18 @@ COPY idl/ idl/
 COPY rust/ rust/
 
 FROM builder AS query_service_builder
-# sharing=locked is necessary to prevent cargo build from running concurrently on the same mounted directory
-RUN --mount=type=cache,sharing=locked,target=/chroma/target/ \
-    --mount=type=cache,sharing=locked,target=/usr/local/cargo/registry/ \
+# we want to avoid caching the target directory because Buildkit has its own cache that conflicts with the cargo cache
+RUN --mount=type=cache,target=/usr/local/cargo/git/ \
+    --mount=type=cache,target=/usr/local/cargo/registry/ \
     cd rust/worker && \
     if [ "$RELEASE_MODE" = "1" ]; then cargo build --bin query_service --release; else cargo build --bin query_service; fi && \
     cd ../.. && \
     if [ "$RELEASE_MODE" = "1" ]; then mv target/release/query_service ./query_service; else mv target/debug/query_service ./query_service; fi
 
 FROM builder AS compaction_service_builder
-RUN --mount=type=cache,sharing=locked,target=/chroma/target/ \
-    --mount=type=cache,sharing=locked,target=/usr/local/cargo/registry/ \
+# we want to avoid caching the target directory because Buildkit has its own cache that conflicts with the cargo cache
+RUN --mount=type=cache,target=/usr/local/cargo/git/ \
+    --mount=type=cache,target=/usr/local/cargo/registry/ \
     cd rust/worker && \
     if [ "$RELEASE_MODE" = "1" ]; then cargo build --bin compaction_service --release; else cargo build --bin compaction_service; fi && \
     cd ../.. && \
