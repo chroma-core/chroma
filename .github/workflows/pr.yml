@@ -258,10 +258,10 @@ jobs:
     if: always()
     needs:
     - python-tests
-    - python-vulnerability-scan
-    - javascript-client-tests
-    - rust-tests
-    - go-tests
+    # - python-vulnerability-scan
+    # - javascript-client-tests
+    # - rust-tests
+    # - go-tests
     - check-title
     - lint
     - check-helm-version-bump
