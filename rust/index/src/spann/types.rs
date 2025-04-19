@@ -1878,15 +1878,17 @@ impl SpannIndexWriter {
         tracing::info!("Committed max head id");
 
         // Hnsw.
-        let (hnsw_id, hnsw_index) = match self.cleaned_up_hnsw_index {
+        let (hnsw_id, path_prefix, hnsw_index) = match self.cleaned_up_hnsw_index {
             Some(index) => {
                 tracing::info!("Committing cleaned up hnsw index");
                 let index_id = index.inner.read().id;
-                (index_id, index)
+                let path_prefix = index.path_prefix.clone();
+                (index_id, path_prefix, index)
             }
             None => {
                 let index_id = self.hnsw_index.inner.read().id;
-                (index_id, self.hnsw_index)
+                let path_prefix = self.hnsw_index.path_prefix.clone();
+                (index_id, path_prefix, self.hnsw_index)
             }
         };
         self.hnsw_provider.commit(hnsw_index).map_err(|e| {
@@ -1900,6 +1902,7 @@ impl SpannIndexWriter {
             versions_map_flusher,
             max_head_id_flusher,
             hnsw_id,
+            path_prefix,
             hnsw_flusher: self.hnsw_provider,
         })
     }
@@ -1910,6 +1913,7 @@ pub struct SpannIndexFlusher {
     versions_map_flusher: BlockfileFlusher,
     max_head_id_flusher: BlockfileFlusher,
     hnsw_id: IndexUuid,
+    path_prefix: String,
     hnsw_flusher: HnswIndexProvider,
 }
 
@@ -1950,10 +1954,13 @@ impl SpannIndexFlusher {
                 tracing::error!("Error flushing max head id {}: {}", res.max_head_id_id, e);
                 SpannIndexWriterError::MaxHeadIdFlushError(e)
             })?;
-        self.hnsw_flusher.flush(&self.hnsw_id).await.map_err(|e| {
-            tracing::error!("Error flushing hnsw index {}: {}", res.hnsw_id, e);
-            SpannIndexWriterError::HnswIndexFlushError(*e)
-        })?;
+        self.hnsw_flusher
+            .flush(&self.hnsw_id, &self.path_prefix)
+            .await
+            .map_err(|e| {
+                tracing::error!("Error flushing hnsw index {}: {}", res.hnsw_id, e);
+                SpannIndexWriterError::HnswIndexFlushError(*e)
+            })?;
         Ok(res)
     }
 }

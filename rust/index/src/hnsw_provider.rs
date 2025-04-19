@@ -470,8 +470,15 @@ impl HnswIndexProvider {
         Ok(())
     }
 
-    pub async fn flush(&self, id: &IndexUuid) -> Result<(), Box<HnswIndexProviderFlushError>> {
-        let index_storage_path = self.temporary_storage_path.join(id.to_string());
+    pub async fn flush(
+        &self,
+        id: &IndexUuid,
+        path_prefix: &str,
+    ) -> Result<(), Box<HnswIndexProviderFlushError>> {
+        let index_storage_path = self
+            .temporary_storage_path
+            .join(path_prefix)
+            .join(id.to_string());
         for file in FILES.iter() {
             let file_path = index_storage_path.join(file);
             let key = self.format_key(id, file);
