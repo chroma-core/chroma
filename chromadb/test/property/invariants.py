@@ -347,7 +347,7 @@ def ann_accuracy(
                     continue
             else:
                 query_distance = query_results["distances"][i][j]
-                print('(Sanket-temp) Correct distance {correct_distance}, expected distance {distances_i[index]}, got {query_distance}')
+                print(f"(Sanket-temp) Correct distance {correct_distance}, expected distance {distances_i[index]}, got {query_distance}")
                 assert correct_distance
 
             assert np.allclose(embeddings[index], query_results["embeddings"][i][j])
