@@ -4,6 +4,8 @@ inputs:
   depot-project-id:
     description: "Depot project ID"
     required: true
+  BP_DOCKERHUB_TOKEN:
+    required: true
 runs:
   using: "composite"
   steps:
@@ -12,16 +14,25 @@ runs:
       run: |
         TILT_VERSION="0.33.3"
         curl -fsSL https://github.com/tilt-dev/tilt/releases/download/v$TILT_VERSION/tilt.$TILT_VERSION.linux.x86_64.tar.gz | \
-          tar -xzv -C /usr/local/bin tilt
+          sudo tar -xzv -C /usr/local/bin tilt
     - name: Install ctlptlc
       shell: bash
       run: |
         CTLPTL_VERSION="0.8.20"
         curl -fsSL https://github.com/tilt-dev/ctlptl/releases/download/v$CTLPTL_VERSION/ctlptl.$CTLPTL_VERSION.linux.x86_64.tar.gz | \
-          tar -xzv -C /usr/local/bin ctlptl
+          sudo tar -xzv -C /usr/local/bin ctlptl
     - name: Set up kind
       shell: bash
       run: ctlptl create cluster kind --registry=ctlptl-registry
+    - name: Add DockerHub credentials as IPS
+      shell: bash
+      run: |
+        kubectl --kubeconfig ~/.kube/config create namespace chroma
+        kubectl --kubeconfig ~/.kube/config -n chroma create secret docker-registry default --docker-server=https://index.docker.io/v1/ --docker-username=buildpulseapp --docker-password=$BP_DOCKERHUB_TOKEN
+        kubectl --kubeconfig ~/.kube/config -n chroma create serviceaccount default
+        kubectl --kubeconfig ~/.kube/config -n chroma patch serviceaccount default --type='merge' --patch='{"imagePullSecrets":[{"name":"default"}]}'
+      env:
+        BP_DOCKERHUB_TOKEN: ${{ inputs.BP_DOCKERHUB_TOKEN }}
     - name: Start Tilt
       shell: bash
       run: tilt ci

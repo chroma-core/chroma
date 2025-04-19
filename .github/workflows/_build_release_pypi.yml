@@ -41,7 +41,7 @@ permissions:
 jobs:
   version:
     name: Resolve version
-    runs-on: depot-ubuntu-22.04
+    runs-on: bp-ubuntu-latest-x64-4x
     outputs:
       version: ${{ steps.resolve_version.outputs.version }}
     steps:
@@ -65,8 +65,8 @@ jobs:
       fail-fast: false
       matrix:
         platform:
-          - { os: linux, runner: depot-ubuntu-22.04, target: x86_64 }
-          - { os: linux, runner: depot-ubuntu-22.04-arm, target: aarch64 }
+          - { os: linux, runner: bp-ubuntu-latest-x64-4x, target: x86_64 }
+          - { os: linux, runner: bp-ubuntu-latest-arm64-4x, target: aarch64 }
           - { os: windows, runner: windows-latest, target: x64 }
           - { os: macos, runner: depot-macos-14, target: x86_64 }
           - { os: macos, runner: depot-macos-14, target: aarch64 }
@@ -127,7 +127,7 @@ jobs:
 
   sdist:
     name: build-sdist
-    runs-on: depot-ubuntu-22.04
+    runs-on: bp-ubuntu-latest-x64-4x
     needs: version
     steps:
       - uses: actions/checkout@v4
