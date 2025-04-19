@@ -225,12 +225,6 @@ export namespace Api {
     /**
      * @type {number}
      * @memberof HnswConfiguration
-     * minimum: 0
-     */
-    num_threads?: number;
-    /**
-     * @type {number}
-     * @memberof HnswConfiguration
      */
     resize_factor?: number;
     space?: Api.HnswSpace;

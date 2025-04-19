@@ -268,7 +268,6 @@ def test_hnsw_configuration_updates(client: ClientAPI) -> None:
         hnsw_config = loaded_config.get("hnsw", {})
         if isinstance(hnsw_config, dict):
             assert hnsw_config.get("ef_search") == 20
-            assert hnsw_config.get("num_threads") == 2
             assert hnsw_config.get("space") == "cosine"
             assert hnsw_config.get("ef_construction") == 100
             assert hnsw_config.get("max_neighbors") == 16
@@ -337,7 +336,6 @@ def test_configuration_result_format(client: ClientAPI) -> None:
     hnsw_config = coll._model.configuration_json.get("hnsw")
     assert hnsw_config is not None
     assert hnsw_config.get("ef_search") == 10
-    assert hnsw_config.get("num_threads") == 2
     assert hnsw_config.get("space") == "cosine"
 
 

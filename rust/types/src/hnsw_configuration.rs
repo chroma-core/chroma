@@ -82,6 +82,7 @@ pub struct HnswConfiguration {
     #[serde(default = "default_m")]
     pub max_neighbors: usize,
     #[serde(default = "default_num_threads")]
+    #[serde(skip_serializing)]
     pub num_threads: usize,
     #[serde(default = "default_resize_factor")]
     pub resize_factor: f64,
