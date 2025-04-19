@@ -62,6 +62,7 @@ pub struct HnswIndexProvider {
 #[derive(Clone)]
 pub struct HnswIndexRef {
     pub inner: Arc<RwLock<HnswIndex>>,
+    pub path_prefix: String,
 }
 
 impl Debug for HnswIndexRef {
@@ -131,9 +132,9 @@ impl HnswIndexProvider {
         let temporary_storage_path = storage_path.to_path_buf();
         let task = async move {
             while let Some((collection_id, index_ref)) = evicted.recv().await {
-                let index_id = {
+                let (index_id, path_prefix) = {
                     let index = index_ref.inner.read();
-                    index.id
+                    (index.id, index_ref.path_prefix.clone())
                 };
                 let weight = index_ref.weight();
                 tracing::info!(
@@ -143,7 +144,7 @@ impl HnswIndexProvider {
                     weight,
                     Instant::now().elapsed().as_nanos()
                 );
-                let _ = Self::purge_one_id(&temporary_storage_path, index_id).await;
+                let _ = Self::purge_one_id(&temporary_storage_path, &path_prefix, index_id).await;
             }
         };
         let purger = Some(Arc::new(tokio::task::spawn(task.instrument(
@@ -198,7 +199,11 @@ impl HnswIndexProvider {
         // The lock is a partitioned mutex to allow for higher concurrency across collections.
         let _guard = self.write_mutex.lock(source_id).await;
         let new_id = IndexUuid(Uuid::new_v4());
-        let new_storage_path = self.temporary_storage_path.join(new_id.to_string());
+        let path_prefix_uuid = Uuid::new_v4();
+        let path_with_prefix = self
+            .temporary_storage_path
+            .join(path_prefix_uuid.to_string());
+        let new_storage_path = path_with_prefix.join(new_id.to_string());
         // This is ok to be called from multiple threads concurrently. See
         // the documentation of tokio::fs::create_dir_all to see why.
         match self.create_dir_all(&new_storage_path).await {
@@ -237,6 +242,7 @@ impl HnswIndexProvider {
                 Ok(index) => {
                     let index = HnswIndexRef {
                         inner: Arc::new(RwLock::new(index)),
+                        path_prefix: path_prefix_uuid.to_string(),
                     };
                     self.cache.insert(*cache_key, index.clone()).await;
                     Ok(index)
@@ -332,7 +338,11 @@ impl HnswIndexProvider {
         distance_function: DistanceFunction,
         ef_search: usize,
     ) -> Result<HnswIndexRef, Box<HnswIndexProviderOpenError>> {
-        let index_storage_path = self.temporary_storage_path.join(id.to_string());
+        let path_prefix_uuid = Uuid::new_v4();
+        let path_with_prefix = self
+            .temporary_storage_path
+            .join(path_prefix_uuid.to_string());
+        let index_storage_path = path_with_prefix.join(id.to_string());
 
         match self.create_dir_all(&index_storage_path).await {
             Ok(_) => {}
@@ -370,6 +380,7 @@ impl HnswIndexProvider {
                 Ok(index) => {
                     let index = HnswIndexRef {
                         inner: Arc::new(RwLock::new(index)),
+                        path_prefix: path_prefix_uuid.to_string(),
                     };
                     self.cache.insert(*cache_key, index.clone()).await;
                     Ok(index)
@@ -404,7 +415,11 @@ impl HnswIndexProvider {
         // operations are not guaranteed to be atomic.
         // The lock is a partitioned mutex to allow for higher concurrency across collections.
         let _guard = self.write_mutex.lock(&id).await;
-        let index_storage_path = self.temporary_storage_path.join(id.to_string());
+        let path_prefix_uuid = Uuid::new_v4();
+        let path_with_prefix = self
+            .temporary_storage_path
+            .join(path_prefix_uuid.to_string());
+        let index_storage_path = path_with_prefix.join(id.to_string());
 
         match self.create_dir_all(&index_storage_path).await {
             Ok(_) => {}
@@ -436,6 +451,7 @@ impl HnswIndexProvider {
             None => {
                 let index = HnswIndexRef {
                     inner: Arc::new(RwLock::new(index)),
+                    path_prefix: path_prefix_uuid.to_string(),
                 };
                 self.cache.insert(*cache_key, index.clone()).await;
                 Ok(index)
@@ -482,14 +498,7 @@ impl HnswIndexProvider {
     /// Purge entries from the cache by index ID and remove temporary files from disk.
     pub async fn purge_by_id(&mut self, cache_keys: &[CacheKey]) {
         for collection_uuid in cache_keys {
-            let Some(index_id) = self
-                .cache
-                .get(collection_uuid)
-                .await
-                .ok()
-                .flatten()
-                .map(|r| r.inner.read().id)
-            else {
+            let Some(index) = self.cache.get(collection_uuid).await.ok().flatten() else {
                 tracing::info!(
                     "[End of compaction purging] No index found for collection: {} at ts {}",
                     collection_uuid,
@@ -497,13 +506,17 @@ impl HnswIndexProvider {
                 );
                 continue;
             };
+            let (index_id, path_prefix) = {
+                let guard = index.inner.read();
+                (guard.id, index.path_prefix.clone())
+            };
             tracing::info!(
                 "[End of compaction purging] Purging index: {} for collection {} at ts {}",
                 index_id,
                 collection_uuid,
                 Instant::now().elapsed().as_nanos()
             );
-            match Self::purge_one_id(&self.temporary_storage_path, index_id).await {
+            match Self::purge_one_id(&self.temporary_storage_path, &path_prefix, index_id).await {
                 Ok(_) => {}
                 Err(e) => {
                     tracing::error!("Failed to remove temporary files for {index_id}: {e}");
@@ -512,8 +525,13 @@ impl HnswIndexProvider {
         }
     }
 
-    pub async fn purge_one_id(path: &Path, id: IndexUuid) -> tokio::io::Result<()> {
-        let index_storage_path = path.join(id.to_string());
+    pub async fn purge_one_id(
+        path: &Path,
+        path_prefix_id: &str,
+        id: IndexUuid,
+    ) -> tokio::io::Result<()> {
+        let path_with_prefix = path.join(path_prefix_id);
+        let index_storage_path = path_with_prefix.join(id.to_string());
         tracing::info!(
             "Purging HNSW index ID: {}, path: {}, ts: {}",
             id,
