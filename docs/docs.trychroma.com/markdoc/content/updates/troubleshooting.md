@@ -4,6 +4,19 @@ This page is a list of common gotchas or issues and how to fix them.
 
 If you don't see your problem listed here, please also search the [Github Issues](https://github.com/chroma-core/chroma/issues).
 
+## Chroma JS-Client in serverless Node environments
+
+If you are using the Chroma JS-client in a serverless node environment, you may experience slow response times. In Node, every `fetch` request (used by the Chroma client) creates a new TCP connection with your Chroma server. To work around this issue, initialize your Chroma client with `keepalive` set to `true` in the constructor's `fetchOptions` argument.
+
+```javascript
+const chromaClient = new ChromaClient({
+   fetchOptions: {
+       keepalive: true,
+   },
+   ...
+});
+```
+
 ## Chroma JS-Client failures on NextJS projects
 
 When using Chroma with Next.js, be sure to do any embedding in the server - client-side embedding is not supported.
