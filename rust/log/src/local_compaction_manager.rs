@@ -86,7 +86,7 @@ pub enum CompactionManagerError {
     HnswApplyLogsError,
     #[error("Error getting collection with segments: {0}")]
     GetCollectionWithSegmentsError(#[from] GetCollectionWithSegmentsError),
-    #[error("Error reading from metadata segment reader")]
+    #[error("Error reading from metadata segment reader: {0} ")]
     MetadataReaderError(#[from] SqliteMetadataError),
     #[error("Error reading from hnsw segment reader: {0}")]
     HnswReaderError(#[from] LocalHnswSegmentReaderError),
