@@ -60,7 +60,7 @@ chromaClient.heartbeat()
 
 **Client-only package**
 
-If you're using Python, you may want to use the [client-only package](../chroma-server/python-thin-client) for a smaller install size.
+If you're using Python, you may want to use the [client-only package](/production/chroma-server/python-thin-client) for a smaller install size.
 {% /Banner %}
 
 ## Configuration

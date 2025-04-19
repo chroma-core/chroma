@@ -126,7 +126,7 @@ terraform output -raw chroma_instance_ip
 
 Once your Compute Engine instance is up and running with Chroma, all
 you need to do is configure your `HttpClient` to use the server's IP address and port
-`8000`. Since you are running a Chroma server on GCP, our [thin-client package](../chroma-server/python-thin-client) may be enough for your application.
+`8000`. Since you are running a Chroma server on GCP, our [thin-client package](/production/chroma-server/python-thin-client) may be enough for your application.
 
 {% TabbedCodeBlock %}
 

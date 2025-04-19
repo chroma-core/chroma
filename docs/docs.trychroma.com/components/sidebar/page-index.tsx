@@ -10,11 +10,11 @@ const playfairDisplay = Playfair_Display({
 });
 
 const PageIndex: React.FC<{
-  path: string;
+  basePath: string;
   pages: { id: string; name: string }[];
   name?: string;
   index: number;
-}> = ({ path, pages, name, index }) => {
+}> = ({ basePath, pages, name, index }) => {
   const className = index === 0 ? "" : "border-t-2 pt-6 dark:border-t-gray-700";
 
   return (
@@ -34,7 +34,7 @@ const PageIndex: React.FC<{
             <PageLink
               id={page.id}
               name={page.name}
-              path={`${path}/${page.id}`}
+              slug={`${basePath}/${page.id}`}
               sectionPage={name !== undefined}
             />
           </Suspense>

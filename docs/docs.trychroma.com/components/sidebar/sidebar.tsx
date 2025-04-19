@@ -66,7 +66,7 @@ const Sidebar: React.FC<{ path: string[]; mobile?: boolean }> = ({
           {currentSection.pages && (
             <div className="flex flex-col gap-2">
               <PageIndex
-                path={`/${currentSection.id}`}
+                basePath={`${currentSection.id}`}
                 pages={currentSection.pages}
                 index={0}
               />
@@ -77,7 +77,7 @@ const Sidebar: React.FC<{ path: string[]; mobile?: boolean }> = ({
               key={subsection.id}
               index={index}
               name={subsection.name}
-              path={`/${currentSection.id}/${subsection.id}`}
+              basePath={`${currentSection.id}/${subsection.id}`}
               pages={
                 subsection.generatePages
                   ? generatePages([currentSection.id, subsection.id])

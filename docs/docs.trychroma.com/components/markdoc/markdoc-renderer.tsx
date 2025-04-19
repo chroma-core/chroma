@@ -31,24 +31,24 @@ const MarkdocRenderer: React.FC<{ slug: string[] }> = ({ slug }) => {
   function extractToc(ast) {
     // @ts-expect-error - This is a private function
     const toc = [];
-  
+
     // @ts-expect-error - This is a private function
     function traverse(node) {
       if (!node) return;
-  
+
       if (node.type === "heading") {
         const title = node.children[0].children[0].attributes.content;
         const id =
           node.attributes.id ||
           title.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, ""); // Generate an ID if missing
-  
+
         toc.push({
           level: node.attributes.level, // Heading level (1, 2, 3...)
           title: title.trim(),
           id: id.trim(),
         });
       }
-  
+
       // Recursively traverse children
       if (node.children) {
         for (const child of node.children) {
@@ -56,16 +56,16 @@ const MarkdocRenderer: React.FC<{ slug: string[] }> = ({ slug }) => {
         }
       }
     }
-  
+
     traverse(ast);
     // @ts-expect-error - This is a private function
     return toc;
   }
-  
+
   // Extracts text recursively from children nodes
   // function extractText(node) {
   //   if (!node || !node.children) return "";
-  
+
   //   return node.children
   //     .map((child) => {
   //       if (child.type === "text") return child.content || ""; // Direct text content
@@ -100,12 +100,12 @@ const MarkdocRenderer: React.FC<{ slug: string[] }> = ({ slug }) => {
         {output}
         <div className="flex items-center justify-between mt-5">
           {prev ? (
-            <PageNav path={prev.path || ""} name={prev.name} type="prev" />
+            <PageNav slug={prev.slug || ""} name={prev.name} type="prev" />
           ) : (
             <div />
           )}
           {next ? (
-            <PageNav path={next.path || ""} name={next.name} type="next" />
+            <PageNav slug={next.slug || ""} name={next.name} type="next" />
           ) : (
             <div />
           )}
@@ -137,4 +137,3 @@ const MarkdocRenderer: React.FC<{ slug: string[] }> = ({ slug }) => {
 };
 
 export default MarkdocRenderer;
-
