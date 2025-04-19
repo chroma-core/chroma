@@ -13,7 +13,7 @@ jobs:
     strategy:
       matrix:
         registry: [ "https://npm.pkg.github.com" ]
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2204
     if: ${{ github.ref == 'refs/heads/main' }}
     permissions: write-all
     steps:
@@ -40,7 +40,7 @@ jobs:
           run_install: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: useblacksmith/setup-node@v5
         with:
           node-version: "18.x"
           registry-url: ${{ matrix.registry }}

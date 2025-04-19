@@ -9,7 +9,7 @@ runs:
   using: "composite"
   steps:
     - name: Set up Python 3.9 for protos
-      uses: actions/setup-python@v5
+      uses: useblacksmith/setup-python@v6
       with:
         python-version: "3.9"
         cache: "pip"
@@ -31,7 +31,7 @@ runs:
         python -m pip uninstall -y grpcio grpcio-tools
       shell: bash
     - name: Set up Python ${{ inputs.python-version }}
-      uses: actions/setup-python@v5
+      uses: useblacksmith/setup-python@v6
       with:
         python-version: ${{ inputs.python-version }}
         cache: "pip"

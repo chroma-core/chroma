@@ -12,7 +12,7 @@ runs:
       # (reads from rust-toolchain.toml)
       run: |
         rustup --version
-        rustup toolchain install
+        rustup toolchain install 1.81.0
     # Needed for sccache to work on Windows
     - name: Set default toolchain to rust-toolchain.toml on Windows
       if: runner.os == 'Windows'
