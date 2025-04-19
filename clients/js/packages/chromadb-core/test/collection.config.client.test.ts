@@ -38,7 +38,6 @@ describe("collection operations", () => {
     expect(collection.configuration?.hnsw?.ef_construction).toBe(100);
     expect(collection.configuration?.hnsw?.max_neighbors).toBe(10);
     expect(collection.configuration?.hnsw?.ef_search).toBe(20);
-    expect(collection.configuration?.hnsw?.num_threads).toBe(2);
   });
 
   test("it should get a collection with configuration", async () => {
@@ -67,7 +66,6 @@ describe("collection operations", () => {
     expect(collection.configuration?.hnsw?.ef_construction).toBe(150);
     expect(collection.configuration?.hnsw?.max_neighbors).toBe(15);
     expect(collection.configuration?.hnsw?.ef_search).toBe(100);
-    expect(collection.configuration?.hnsw?.num_threads).toBeGreaterThan(0);
   });
 
   test("it should update a collection configuration", async () => {
@@ -84,7 +82,6 @@ describe("collection operations", () => {
     });
 
     expect(collection.configuration?.hnsw?.ef_search).toBe(10);
-    expect(collection.configuration?.hnsw?.num_threads).toBe(1);
 
     // Update configuration
     const updateConfig: UpdateCollectionConfiguration = {
@@ -108,7 +105,6 @@ describe("collection operations", () => {
     expect(updatedCollection.configuration).toBeDefined();
     expect(updatedCollection.configuration).toHaveProperty("hnsw");
     expect(updatedCollection.configuration?.hnsw?.ef_search).toBe(20);
-    expect(updatedCollection.configuration?.hnsw?.num_threads).toBe(2);
     expect(updatedCollection.configuration?.hnsw?.space).toBe("cosine");
     expect(updatedCollection.configuration?.hnsw?.ef_construction).toBe(100);
     expect(updatedCollection.configuration?.hnsw?.max_neighbors).toBe(16);
@@ -145,7 +141,6 @@ describe("collection operations", () => {
     expect(collection.configuration?.hnsw?.ef_construction).toBe(100); // Default
     expect(collection.configuration?.hnsw?.max_neighbors).toBe(16); // Default
     expect(collection.configuration?.hnsw?.ef_search).toBe(100); // Default
-    expect(collection.configuration?.hnsw?.num_threads).toBeGreaterThan(0); // Default > 0
   });
 
   test("it should apply defaults for unspecified hnsw params (space)", async () => {
@@ -160,7 +155,6 @@ describe("collection operations", () => {
     expect(collection.configuration?.hnsw?.ef_construction).toBe(100); // Default
     expect(collection.configuration?.hnsw?.max_neighbors).toBe(16); // Default
     expect(collection.configuration?.hnsw?.ef_search).toBe(100); // Default
-    expect(collection.configuration?.hnsw?.num_threads).toBeGreaterThan(0); // Default > 0
   });
 
   test("it should apply defaults for unspecified hnsw params (ef_construction)", async () => {
@@ -175,7 +169,6 @@ describe("collection operations", () => {
     expect(collection.configuration?.hnsw?.ef_construction).toBe(200); // Specified
     expect(collection.configuration?.hnsw?.max_neighbors).toBe(16); // Default
     expect(collection.configuration?.hnsw?.ef_search).toBe(100); // Default
-    expect(collection.configuration?.hnsw?.num_threads).toBeGreaterThan(0); // Default > 0
   });
 
   test("it should apply defaults for unspecified hnsw params (max_neighbors)", async () => {
@@ -190,7 +183,6 @@ describe("collection operations", () => {
     expect(collection.configuration?.hnsw?.ef_construction).toBe(100); // Default
     expect(collection.configuration?.hnsw?.max_neighbors).toBe(32); // Specified
     expect(collection.configuration?.hnsw?.ef_search).toBe(100); // Default
-    expect(collection.configuration?.hnsw?.num_threads).toBeGreaterThan(0); // Default > 0
   });
 
   test("it should apply defaults for unspecified hnsw params (ef_search)", async () => {
@@ -205,7 +197,6 @@ describe("collection operations", () => {
     expect(collection.configuration?.hnsw?.ef_construction).toBe(100); // Default
     expect(collection.configuration?.hnsw?.max_neighbors).toBe(16); // Default
     expect(collection.configuration?.hnsw?.ef_search).toBe(50); // Specified
-    expect(collection.configuration?.hnsw?.num_threads).toBeGreaterThan(0); // Default > 0
   });
 
   test("it should apply defaults for unspecified hnsw params (num_threads)", async () => {
@@ -220,6 +211,5 @@ describe("collection operations", () => {
     expect(collection.configuration?.hnsw?.ef_construction).toBe(100); // Default
     expect(collection.configuration?.hnsw?.max_neighbors).toBe(16); // Default
     expect(collection.configuration?.hnsw?.ef_search).toBe(100); // Default
-    expect(collection.configuration?.hnsw?.num_threads).toBe(4); // Specified
   });
 });

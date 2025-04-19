@@ -203,12 +203,6 @@ export namespace Api {
      * @memberof HnswConfiguration
      * minimum: 0
      */
-    batch_size?: number;
-    /**
-     * @type {number}
-     * @memberof HnswConfiguration
-     * minimum: 0
-     */
     ef_construction?: number;
     /**
      * @type {number}
@@ -222,12 +216,6 @@ export namespace Api {
      * minimum: 0
      */
     max_neighbors?: number;
-    /**
-     * @type {number}
-     * @memberof HnswConfiguration
-     * minimum: 0
-     */
-    num_threads?: number;
     /**
      * @type {number}
      * @memberof HnswConfiguration
