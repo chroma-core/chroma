@@ -63,6 +63,16 @@ impl Drop for ScorecardGuard {
     }
 }
 
+#[derive(Clone, Copy, Debug, thiserror::Error)]
+#[error("Too many requests; backoff and try again")]
+struct RateLimitError;
+
+impl chroma_error::ChromaError for RateLimitError {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        chroma_error::ErrorCodes::ResourceExhausted
+    }
+}
+
 async fn graceful_shutdown(system: System) {
     select! {
         // Kubernetes will send SIGTERM to stop the pod gracefully
@@ -301,14 +311,20 @@ impl FrontendServer {
         };
     }
 
-    fn scorecard_request(&self, tags: &[&str]) -> Option<ScorecardGuard> {
+    fn scorecard_request(
+        &self,
+        tags: &[&str],
+    ) -> Result<ScorecardGuard, Box<dyn chroma_error::ChromaError>> {
         if self.scorecard_enabled.load(Ordering::Relaxed) {
-            self.scorecard.track(tags).map(|ticket| ScorecardGuard {
-                scorecard: Arc::clone(&self.scorecard),
-                ticket: Some(ticket),
-            })
+            self.scorecard
+                .track(tags)
+                .map(|ticket| ScorecardGuard {
+                    scorecard: Arc::clone(&self.scorecard),
+                    ticket: Some(ticket),
+                })
+                .ok_or_else(|| Box::new(RateLimitError) as _)
         } else {
-            Some(ScorecardGuard {
+            Ok(ScorecardGuard {
                 scorecard: Arc::clone(&self.scorecard),
                 ticket: None,
             })
@@ -573,7 +589,7 @@ async fn create_database(
     quota_payload = quota_payload.with_collection_name(&name);
     server.quota_enforcer.enforce(&quota_payload).await?;
     let _guard =
-        server.scorecard_request(&["op:create_database", format!("tenant:{}", tenant).as_str()]);
+        server.scorecard_request(&["op:create_database", format!("tenant:{}", tenant).as_str()])?;
     let create_database_request = CreateDatabaseRequest::try_new(tenant, name)?;
     let res = server
         .frontend
@@ -627,7 +643,7 @@ async fn list_databases(
         )
         .await?;
     let _guard =
-        server.scorecard_request(&["op:list_databases", format!("tenant:{}", tenant).as_str()]);
+        server.scorecard_request(&["op:list_databases", format!("tenant:{}", tenant).as_str()])?;
 
     let request = ListDatabasesRequest::try_new(tenant, limit, offset)?;
     Ok(Json(server.frontend.list_databases(request).await?))
@@ -670,7 +686,7 @@ async fn get_database(
         )
         .await?;
     let _guard =
-        server.scorecard_request(&["op:get_database", format!("tenant:{}", tenant).as_str()]);
+        server.scorecard_request(&["op:get_database", format!("tenant:{}", tenant).as_str()])?;
     let request = GetDatabaseRequest::try_new(tenant, database)?;
     let res = server.frontend.get_database(request).await?;
     Ok(Json(res))
@@ -713,7 +729,7 @@ async fn delete_database(
         )
         .await?;
     let _guard =
-        server.scorecard_request(&["op:delete_database", format!("tenant:{}", tenant).as_str()]);
+        server.scorecard_request(&["op:delete_database", format!("tenant:{}", tenant).as_str()])?;
     let request = DeleteDatabaseRequest::try_new(tenant, database)?;
     Ok(Json(server.frontend.delete_database(request).await?))
 }
@@ -778,8 +794,8 @@ async fn list_collections(
         quota_payload = quota_payload.with_limit(limit);
     }
     server.quota_enforcer.enforce(&quota_payload).await?;
-    let _guard =
-        server.scorecard_request(&["op:list_collections", format!("tenant:{}", tenant).as_str()]);
+    let _guard = server
+        .scorecard_request(&["op:list_collections", format!("tenant:{}", tenant).as_str()])?;
     let request = ListCollectionsRequest::try_new(tenant, database, limit, offset)?;
     Ok(Json(server.frontend.list_collections(request).await?))
 }
@@ -822,7 +838,7 @@ async fn count_collections(
     let _guard = server.scorecard_request(&[
         "op:count_collections",
         format!("tenant:{}", tenant).as_str(),
-    ]);
+    ])?;
 
     let request = CountCollectionsRequest::try_new(tenant, database)?;
     Ok(Json(server.frontend.count_collections(request).await?))
@@ -887,7 +903,7 @@ async fn create_collection(
     let _guard = server.scorecard_request(&[
         "op:create_collection",
         format!("tenant:{}", tenant).as_str(),
-    ]);
+    ])?;
 
     let configuration = match payload.configuration {
         Some(c) => Some(InternalCollectionConfiguration::try_from_config(
@@ -950,7 +966,7 @@ async fn get_collection(
         )
         .await?;
     let _guard =
-        server.scorecard_request(&["op:get_collection", format!("tenant:{}", tenant).as_str()]);
+        server.scorecard_request(&["op:get_collection", format!("tenant:{}", tenant).as_str()])?;
     let request = GetCollectionRequest::try_new(tenant, database, collection_name)?;
     let collection = server.frontend.get_collection(request).await?;
     Ok(Json(collection))
@@ -1022,7 +1038,7 @@ async fn update_collection(
     let _guard = server.scorecard_request(&[
         "op:update_collection",
         format!("tenant:{}", tenant).as_str(),
-    ]);
+    ])?;
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
 
@@ -1082,7 +1098,7 @@ async fn delete_collection(
     let _guard = server.scorecard_request(&[
         "op:delete_collection",
         format!("tenant:{}", tenant).as_str(),
-    ]);
+    ])?;
     let request =
         chroma_types::DeleteCollectionRequest::try_new(tenant, database, collection_name)?;
     server.frontend.delete_collection(request).await?;
@@ -1159,7 +1175,7 @@ async fn collection_add(
         "op:write",
         format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
-    ]);
+    ])?;
 
     let request = chroma_types::AddCollectionRecordsRequest::try_new(
         tenant,
@@ -1245,7 +1261,7 @@ async fn collection_update(
         "op:write",
         format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
-    ]);
+    ])?;
 
     let request = chroma_types::UpdateCollectionRecordsRequest::try_new(
         tenant,
@@ -1337,7 +1353,7 @@ async fn collection_upsert(
         "op:write",
         format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
-    ]);
+    ])?;
 
     let request = chroma_types::UpsertCollectionRecordsRequest::try_new(
         tenant,
@@ -1420,7 +1436,7 @@ async fn collection_delete(
         "op:write",
         format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
-    ]);
+    ])?;
 
     let request = chroma_types::DeleteCollectionRecordsRequest::try_new(
         tenant,
@@ -1481,7 +1497,7 @@ async fn collection_count(
         "op:read",
         format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
-    ]);
+    ])?;
 
     let request = CountRequest::try_new(
         tenant,
@@ -1569,7 +1585,7 @@ async fn collection_get(
         "op:read",
         format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
-    ]);
+    ])?;
     let request = GetRequest::try_new(
         tenant,
         database,
@@ -1665,7 +1681,7 @@ async fn collection_query(
         "op:read",
         format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
-    ]);
+    ])?;
 
     let request = QueryRequest::try_new(
         tenant,

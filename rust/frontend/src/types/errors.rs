@@ -70,7 +70,6 @@ impl ErrorResponse {
 
 impl IntoResponse for ServerError {
     fn into_response(self) -> Response {
-        tracing::error!("Error: {:?}", self.0);
         let status_code: StatusCode = self.0.code().into();
 
         let error = ErrorResponse {
