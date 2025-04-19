@@ -7,9 +7,7 @@
 }
 ---
 
-
 # Usage Guide
-
 
 {% tabs group="code-lang" hideContent=true %}
 
@@ -635,10 +633,6 @@ Using the $eq operator is equivalent to using the `where` filter.
 }
 ```
 
-{% note type="note" %}
-Where filters only search embeddings where the key exists. If you search `collection.get(where={"version": {"$ne": 1}})`. Metadata that does not have the key `version` will not be returned.
-{% /note %}
-
 ##### Filtering by document contents
 
 In order to filter on document contents, you must supply a `where_document` filter dictionary to the query. We support two filtering keys: `$contains` and `$not_contains`. The dictionary must have the following structure:
@@ -716,7 +710,7 @@ An `$in` operator will return results where the metadata attribute is part of a 
 }
 ```
 
-An `$nin` operator will return results where the metadata attribute is not part of a provided list:
+An `$nin` operator will return results where the metadata attribute is not part of a provided list (or the attribute's key is not present):
 
 ```json
 {
