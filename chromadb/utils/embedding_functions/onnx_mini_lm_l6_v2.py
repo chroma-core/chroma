@@ -2,6 +2,7 @@ import hashlib
 import importlib
 import logging
 import os
+import sys
 import tarfile
 from functools import cached_property
 from pathlib import Path
@@ -305,7 +306,10 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
                 name=os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME),
                 mode="r:gz",
             ) as tar:
-                tar.extractall(path=self.DOWNLOAD_PATH)
+                kwargs = {}
+                if sys.version_info >= (3, 12):
+                    kwargs["filter"] = "data"
+                tar.extractall(path=self.DOWNLOAD_PATH, **kwargs)
 
     @staticmethod
     def name() -> str:
