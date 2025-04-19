@@ -22,3 +22,37 @@ body {
 .prose :where(h1):not(:where([class~="not-prose"],[class~="not-prose"] *)) {
   font-size: 1.5em;
 }
+
+.pl-0 {
+  padding-left: 0;
+}
+.pl-1 {
+  padding-left: 0.25rem;
+}
+.pl-2 {
+  padding-left: 0.5rem;
+}
+.pl-3 {
+  padding-left: 0.75rem;
+}
+.pl-4 {
+  padding-left: 1rem;
+}
+.pl-5 {
+  padding-left: 1.25rem;
+}
+.pl-6 {
+  padding-left: 1.5rem;
+}
+.pl-7 {
+  padding-left: 1.75rem;
+}
+.pl-8 {
+  padding-left: 2rem;
+}
+.pl-9 {
+  padding-left: 2.25rem;
+}
+.pl-10 {
+  padding-left: 2.5rem;
+}
