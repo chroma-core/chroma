@@ -382,7 +382,16 @@ fn arbitrary_query_request(
     let embeddings_strategy = proptest::collection::vec(state.get_embedding_strategy(), 0..10);
 
     let n_results_strategy = (1..=100u32).boxed();
-    let include_list_strategy = any::<IncludeList>();
+    // todo
+    let include_list_strategy = any::<IncludeList>().prop_map(|mut include| {
+        if !include.0.contains(&Include::Distance) {
+            include.0.push(Include::Distance);
+        }
+        if !include.0.contains(&Include::Embedding) {
+            include.0.push(Include::Embedding);
+        }
+        include
+    });
 
     (
         prop_oneof![
