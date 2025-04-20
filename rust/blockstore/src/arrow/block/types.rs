@@ -528,7 +528,7 @@ impl Block {
 
     /// Load a block from bytes in Arrow IPC format with the given id
     pub fn from_bytes(bytes: &[u8], id: Uuid) -> Result<Self, BlockLoadError> {
-        Self::from_bytes_internal(bytes, id, false)
+        Self::from_bytes_internal(bytes, id, true)
     }
 
     /// Load a block from bytes in Arrow IPC format with the given id and validate the layout

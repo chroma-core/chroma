@@ -186,7 +186,6 @@ impl Orchestrator for SpannKnnOrchestrator {
                 // Segment uninited means no compaction yet.
                 SpannSegmentReaderError::UninitializedSegment => {
                     // If the segment is uninitialized, we can skip the head search.
-                    println!("(Sanket-temp) Uninitialized segment, skipping head search");
                     self.spann_reader = None;
                     self.heads_searched = true;
                 }

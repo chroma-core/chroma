@@ -78,10 +78,6 @@ impl Operator<KnnLogInput, KnnLogOutput> for KnnOperator {
         } else {
             &self.embedding
         };
-        println!(
-            "(Sanket-temp) distance function {:?}, Target embedding: {:?}",
-            input.distance_function, target_embedding
-        );
 
         let mut max_heap = BinaryHeap::with_capacity(self.fetch as usize);
 
@@ -105,11 +101,6 @@ impl Operator<KnnLogInput, KnnLogOutput> for KnnOperator {
                 } else {
                     log.merged_embeddings_ref()
                 };
-                println!(
-                    "(Sanket-temp) log embedding: {:?}, log offset id: {}",
-                    log_embedding,
-                    log.get_offset_id()
-                );
 
                 let distance = RecordDistance {
                     offset_id: log.get_offset_id(),

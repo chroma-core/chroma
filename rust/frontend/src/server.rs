@@ -896,7 +896,6 @@ async fn create_collection(
         )?),
         None => None,
     };
-    println!("(Sanket-temp) Configuration: {:?}", configuration);
 
     let request = CreateCollectionRequest::try_new(
         tenant,
