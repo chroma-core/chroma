@@ -14,16 +14,17 @@ use clap::{Parser, Subcommand};
 use colored::Colorize;
 use utils::CliError;
 use utils::UtilsError;
+use crate::commands::browse::{browse, BrowseArgs};
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    #[command(subcommand, hide = true)]
+    Browse(BrowseArgs),
+    #[command(subcommand)]
     Db(DbCommand),
     Docs,
     Install(InstallArgs),
-    #[command(hide = true)]
     Login(LoginArgs),
-    #[command(subcommand, hide = true)]
+    #[command(subcommand)]
     Profile(ProfileCommand),
     Run(RunArgs),
     Support,
@@ -52,6 +53,7 @@ pub fn chroma_cli(args: Vec<String>) {
     println!();
 
     let result = match cli.command {
+        Command::Browse(args) => browse(args),
         Command::Db(db_subcommand) => db_command(db_subcommand),
         Command::Docs => {
             let url = "https://docs.trychroma.com";

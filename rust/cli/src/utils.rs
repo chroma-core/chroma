@@ -26,6 +26,7 @@ use std::io::{stdout, Write};
 use std::path::PathBuf;
 use std::{fs, io};
 use thiserror::Error;
+use crate::commands::browse::BrowseError;
 
 pub const LOGO: &str = "
                 \x1b[38;5;069m(((((((((    \x1b[38;5;203m(((((\x1b[38;5;220m####
@@ -68,6 +69,8 @@ pub enum CliError {
     DashboardClient(#[from] DashboardClientError),
     #[error("{0}")]
     Install(#[from] InstallError),
+    #[error("{0}")]
+    Browse(#[from] BrowseError),
 }
 
 #[derive(Debug, Error)]
