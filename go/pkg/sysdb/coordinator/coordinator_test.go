@@ -1446,7 +1446,7 @@ func (suite *APIsTestSuite) TestForkCollection() {
 	suite.NoError(err)
 	suite.Equal(forkCollection.TargetCollectionID, collection.ID)
 	suite.Equal(forkCollection.TargetCollectionName, collection.Name)
-	suite.Equal(sourceCreateCollection.ID, collection.RootCollectionID)
+	suite.Equal(sourceCreateCollection.ID, *collection.RootCollectionID)
 	suite.Equal(sourceCreateCollection.TenantID, collection.TenantID)
 	suite.Equal(sourceCreateCollection.DatabaseName, collection.DatabaseName)
 	suite.Equal(sourceFlushCollectionCompaction.LogPosition, collection.LogPosition)
@@ -1454,6 +1454,7 @@ func (suite *APIsTestSuite) TestForkCollection() {
 	suite.Equal(sourceFlushCollectionCompaction.SizeBytesPostCompaction, collection.SizeBytesPostCompaction)
 	for _, segment := range collection_segments {
 		suite.Equal(collection.ID, segment.CollectionID)
+		suite.Contains([]string{"METADATA", "RECORD", "VECTOR"}, segment.Scope)
 		if segment.Scope == "METADATA" {
 			suite.NotEqual(sourceCreateMetadataSegment.ID, segment.ID)
 			suite.Equal(sourceFlushMetadataSegment.FilePaths, segment.FilePaths)
