@@ -248,6 +248,7 @@ collection_st: st.SearchStrategy[strategies.Collection] = st.shared(
     embeddings_strategy=strategies.recordsets(collection_st, max_size=200),
 )
 @settings(deadline=None)
+@hypothesis.reproduce_failure('6.112.2', b'AXicY2BgZEABjDA+AABDAAQ=')
 def test_cycle_versions(
     version_settings: Tuple[str, Settings],
     collection_strategy: strategies.Collection,
