@@ -160,6 +160,11 @@ impl FrontendServerConfig {
     }
 
     pub fn load_from_path(path: &str) -> Self {
+        // SAFETY(rescrv): If we cannot read the config, we panic anyway.
+        eprintln!(
+            "==========\n{}\n==========\n",
+            std::fs::read_to_string(path).unwrap()
+        );
         // Unfortunately, figment doesn't support environment variables with underscores. So we have to map and replace them.
         // Excluding our own environment variables, which are prefixed with CHROMA_.
         let mut f = figment::Figment::from(
