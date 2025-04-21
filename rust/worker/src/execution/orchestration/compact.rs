@@ -516,7 +516,7 @@ impl Orchestrator for CompactOrchestrator {
         self.dispatcher.clone()
     }
 
-    fn initial_tasks(&self, ctx: &ComponentContext<Self>) -> Vec<TaskMessage> {
+    async fn initial_tasks(&mut self, ctx: &ComponentContext<Self>) -> Vec<TaskMessage> {
         vec![wrap(
             Box::new(GetCollectionAndSegmentsOperator {
                 sysdb: self.sysdb.clone(),

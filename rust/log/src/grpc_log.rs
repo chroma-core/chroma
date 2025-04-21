@@ -16,6 +16,8 @@ use uuid::Uuid;
 
 #[derive(Error, Debug)]
 pub enum GrpcPullLogsError {
+    #[error("Please backoff exponentially and retry")]
+    Backoff,
     #[error("Failed to fetch")]
     FailedToPullLogs(#[from] tonic::Status),
     #[error("Failed to scout logs: {0}")]
@@ -27,6 +29,7 @@ pub enum GrpcPullLogsError {
 impl ChromaError for GrpcPullLogsError {
     fn code(&self) -> ErrorCodes {
         match self {
+            GrpcPullLogsError::Backoff => ErrorCodes::Unavailable,
             GrpcPullLogsError::FailedToPullLogs(err) => err.code().into(),
             GrpcPullLogsError::FailedToScoutLogs(err) => err.code().into(),
             GrpcPullLogsError::ConversionError(_) => ErrorCodes::Internal,
@@ -36,6 +39,8 @@ impl ChromaError for GrpcPullLogsError {
 
 #[derive(Error, Debug)]
 pub enum GrpcPushLogsError {
+    #[error("Please backoff exponentially and retry")]
+    Backoff,
     #[error("Failed to push logs")]
     FailedToPushLogs(#[from] tonic::Status),
     #[error("Failed to convert records to proto")]
@@ -45,6 +50,7 @@ pub enum GrpcPushLogsError {
 impl ChromaError for GrpcPushLogsError {
     fn code(&self) -> ErrorCodes {
         match self {
+            GrpcPushLogsError::Backoff => ErrorCodes::Unavailable,
             GrpcPushLogsError::FailedToPushLogs(_) => ErrorCodes::Internal,
             GrpcPushLogsError::ConversionError(_) => ErrorCodes::Internal,
         }
@@ -198,10 +204,11 @@ impl GrpcLog {
     }
 
     // ScoutLogs returns the offset of the next record to be inserted into the log.
+    #[tracing::instrument(skip(self), ret)]
     pub(super) async fn scout_logs(
         &mut self,
         collection_id: CollectionUuid,
-        _: u64,
+        start_from: u64,
     ) -> Result<u64, Box<dyn ChromaError>> {
         let request = self
             .client_for(collection_id)
@@ -220,6 +227,7 @@ impl GrpcLog {
         Ok(scout.first_uninserted_record_offset as u64)
     }
 
+    #[tracing::instrument(skip(self))]
     pub(super) async fn read(
         &mut self,
         collection_id: CollectionUuid,
@@ -259,8 +267,12 @@ impl GrpcLog {
                 Ok(result)
             }
             Err(e) => {
-                tracing::error!("Failed to pull logs: {}", e);
-                Err(GrpcPullLogsError::FailedToPullLogs(e))
+                if e.code() == chroma_error::ErrorCodes::Unavailable.into() {
+                    Err(GrpcPullLogsError::Backoff)
+                } else {
+                    tracing::error!("Failed to pull logs: {}", e);
+                    Err(GrpcPullLogsError::FailedToPullLogs(e))
+                }
             }
         }
     }
@@ -280,7 +292,16 @@ impl GrpcLog {
                 >>()?,
         };
 
-        self.client_for(collection_id).push_logs(request).await?;
+        self.client_for(collection_id)
+            .push_logs(request)
+            .await
+            .map_err(|err| {
+                if err.code() == ErrorCodes::Unavailable.into() {
+                    GrpcPushLogsError::Backoff
+                } else {
+                    err.into()
+                }
+            })?;
 
         Ok(())
     }

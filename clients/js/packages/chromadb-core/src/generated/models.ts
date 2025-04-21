@@ -35,6 +35,7 @@ export namespace Api {
   }
 
   export interface Collection {
+    configuration_json: Api.CollectionConfiguration;
     database: string;
     /**
      * @type {number | null}
@@ -202,12 +203,6 @@ export namespace Api {
      * @memberof HnswConfiguration
      * minimum: 0
      */
-    batch_size?: number;
-    /**
-     * @type {number}
-     * @memberof HnswConfiguration
-     * minimum: 0
-     */
     ef_construction?: number;
     /**
      * @type {number}
@@ -221,12 +216,6 @@ export namespace Api {
      * minimum: 0
      */
     max_neighbors?: number;
-    /**
-     * @type {number}
-     * @memberof HnswConfiguration
-     * minimum: 0
-     */
-    num_threads?: number;
     /**
      * @type {number}
      * @memberof HnswConfiguration
@@ -290,32 +279,50 @@ export namespace Api {
      * @memberof SpannConfiguration
      * minimum: 0
      */
-    construction_ef: number;
+    ef_construction?: number;
     /**
      * @type {number}
      * @memberof SpannConfiguration
      * minimum: 0
      */
-    m: number;
+    ef_search?: number;
     /**
      * @type {number}
      * @memberof SpannConfiguration
      * minimum: 0
      */
-    search_ef: number;
+    max_neighbors?: number;
     /**
      * @type {number}
      * @memberof SpannConfiguration
      * minimum: 0
      */
-    search_nprobe: number;
-    space: Api.HnswSpace;
+    merge_threshold?: number;
     /**
      * @type {number}
      * @memberof SpannConfiguration
      * minimum: 0
      */
-    write_nprobe: number;
+    reassign_neighbor_count?: number;
+    /**
+     * @type {number}
+     * @memberof SpannConfiguration
+     * minimum: 0
+     */
+    search_nprobe?: number;
+    space?: Api.HnswSpace;
+    /**
+     * @type {number}
+     * @memberof SpannConfiguration
+     * minimum: 0
+     */
+    split_threshold?: number;
+    /**
+     * @type {number}
+     * @memberof SpannConfiguration
+     * minimum: 0
+     */
+    write_nprobe?: number;
   }
 
   export interface UpdateCollectionConfiguration {
@@ -397,6 +404,7 @@ export namespace Api {
   export interface UpsertCollectionRecordsResponse {}
 
   export interface Vec2 {
+    configuration_json: Api.CollectionConfiguration;
     database: string;
     /**
      * @type {number | null}

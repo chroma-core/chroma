@@ -24,17 +24,17 @@ use chroma_types::{
     GetCollectionError, GetCollectionRequest, GetCollectionResponse, GetCollectionsError,
     GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
     GetTenantError, GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError,
-    HeartbeatResponse, Include, InternalCollectionConfiguration, ListCollectionsRequest,
-    ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
-    Operation, OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
-    Segment, SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError,
-    UpdateCollectionRecordsError, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
-    UpdateCollectionRequest, UpdateCollectionResponse, UpsertCollectionRecordsError,
-    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, VectorIndexConfiguration,
-    Where,
+    HeartbeatResponse, Include, KnnIndex, ListCollectionsRequest, ListCollectionsResponse,
+    ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse, Operation, OperationRecord,
+    QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse, Segment, SegmentScope,
+    SegmentType, SegmentUuid, UpdateCollectionError, UpdateCollectionRecordsError,
+    UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateCollectionRequest,
+    UpdateCollectionResponse, UpsertCollectionRecordsError, UpsertCollectionRecordsRequest,
+    UpsertCollectionRecordsResponse, VectorIndexConfiguration, Where,
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -58,6 +58,7 @@ pub struct ServiceBasedFrontend {
     collections_with_segments_provider: CollectionsWithSegmentsProvider,
     max_batch_size: u32,
     metrics: Arc<Metrics>,
+    default_knn_index: KnnIndex,
 }
 
 impl ServiceBasedFrontend {
@@ -68,6 +69,7 @@ impl ServiceBasedFrontend {
         log_client: Log,
         executor: Executor,
         max_batch_size: u32,
+        default_knn_index: KnnIndex,
     ) -> Self {
         let meter = global::meter("chroma");
         let delete_retries_counter = meter.u64_counter("delete_retries").build();
@@ -88,7 +90,12 @@ impl ServiceBasedFrontend {
             collections_with_segments_provider,
             max_batch_size,
             metrics,
+            default_knn_index,
         }
+    }
+
+    pub fn get_default_knn_index(&self) -> KnnIndex {
+        self.default_knn_index
     }
 
     pub async fn heartbeat(&self) -> Result<HeartbeatResponse, HeartbeatError> {
@@ -99,6 +106,10 @@ impl ServiceBasedFrontend {
 
     pub fn get_max_batch_size(&mut self) -> u32 {
         self.max_batch_size
+    }
+
+    pub fn get_supported_segment_types(&self) -> Vec<SegmentType> {
+        self.executor.get_supported_segment_types()
     }
 
     async fn get_collection_dimension(
@@ -338,8 +349,44 @@ impl ServiceBasedFrontend {
         }: CreateCollectionRequest,
     ) -> Result<CreateCollectionResponse, CreateCollectionError> {
         let collection_id = CollectionUuid::new();
-        let configuration: Option<InternalCollectionConfiguration> =
-            configuration.map(|c| c.try_into()).transpose()?;
+
+        let supported_segment_types: HashSet<SegmentType> =
+            self.get_supported_segment_types().into_iter().collect();
+
+        if let Some(config) = configuration.as_ref() {
+            match &config.vector_index {
+                VectorIndexConfiguration::Spann { .. } => {
+                    if !supported_segment_types.contains(&SegmentType::Spann) {
+                        return Err(CreateCollectionError::SpannNotImplemented);
+                    }
+                }
+                VectorIndexConfiguration::Hnsw { .. } => {
+                    if !supported_segment_types.contains(&SegmentType::HnswDistributed)
+                        && !supported_segment_types.contains(&SegmentType::HnswLocalMemory)
+                        && !supported_segment_types.contains(&SegmentType::HnswLocalPersisted)
+                    {
+                        return Err(CreateCollectionError::HnswNotSupported);
+                    }
+                }
+            }
+        }
+
+        // Check default server configuration's index type
+        match self.default_knn_index {
+            KnnIndex::Spann => {
+                if !supported_segment_types.contains(&SegmentType::Spann) {
+                    return Err(CreateCollectionError::SpannNotImplemented);
+                }
+            }
+            KnnIndex::Hnsw => {
+                if !supported_segment_types.contains(&SegmentType::HnswDistributed)
+                    && !supported_segment_types.contains(&SegmentType::HnswLocalMemory)
+                    && !supported_segment_types.contains(&SegmentType::HnswLocalPersisted)
+                {
+                    return Err(CreateCollectionError::HnswNotSupported);
+                }
+            }
+        }
 
         let segments = match self.executor {
             Executor::Distributed(_) => {
@@ -524,7 +571,13 @@ impl ServiceBasedFrontend {
         self.log_client
             .push_logs(collection_id, records)
             .await
-            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+            .map_err(|err| {
+                if err.code() == ErrorCodes::Unavailable {
+                    AddCollectionRecordsError::Backoff
+                } else {
+                    AddCollectionRecordsError::Other(Box::new(err) as _)
+                }
+            })?;
 
         // TODO: Submit event after the response is sent
         MeterEvent::CollectionWrite {
@@ -573,7 +626,13 @@ impl ServiceBasedFrontend {
         self.log_client
             .push_logs(collection_id, records)
             .await
-            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+            .map_err(|err| {
+                if err.code() == ErrorCodes::Unavailable {
+                    UpdateCollectionRecordsError::Backoff
+                } else {
+                    UpdateCollectionRecordsError::Other(Box::new(err) as _)
+                }
+            })?;
 
         // TODO: Submit event after the response is sent
         MeterEvent::CollectionWrite {
@@ -624,7 +683,13 @@ impl ServiceBasedFrontend {
         self.log_client
             .push_logs(collection_id, records)
             .await
-            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+            .map_err(|err| {
+                if err.code() == ErrorCodes::Unavailable {
+                    UpsertCollectionRecordsError::Backoff
+                } else {
+                    UpsertCollectionRecordsError::Other(Box::new(err) as _)
+                }
+            })?;
 
         // TODO: Submit event after the response is sent
         MeterEvent::CollectionWrite {
@@ -738,7 +803,13 @@ impl ServiceBasedFrontend {
         self.log_client
             .push_logs(collection_id, records)
             .await
-            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+            .map_err(|err| {
+                if err.code() == ErrorCodes::Unavailable {
+                    DeleteCollectionRecordsError::Backoff
+                } else {
+                    DeleteCollectionRecordsError::Internal(Box::new(err) as _)
+                }
+            })?;
 
         if let Some(event) = read_event {
             event.submit().await;
@@ -1203,6 +1274,7 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
             log,
             executor,
             max_batch_size,
+            config.default_knn_index,
         ))
     }
 }

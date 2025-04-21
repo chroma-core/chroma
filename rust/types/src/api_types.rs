@@ -1,4 +1,4 @@
-use crate::collection_configuration::CollectionConfiguration;
+use crate::collection_configuration::InternalCollectionConfiguration;
 use crate::collection_configuration::UpdateCollectionConfiguration;
 use crate::error::QueryConversionError;
 use crate::operator::GetResult;
@@ -547,7 +547,7 @@ pub struct CreateCollectionRequest {
     pub name: String,
     #[validate(custom(function = "validate_non_empty_metadata"))]
     pub metadata: Option<Metadata>,
-    pub configuration: Option<CollectionConfiguration>,
+    pub configuration: Option<InternalCollectionConfiguration>,
     pub get_or_create: bool,
 }
 
@@ -557,7 +557,7 @@ impl CreateCollectionRequest {
         database_name: String,
         name: String,
         metadata: Option<Metadata>,
-        configuration: Option<CollectionConfiguration>,
+        configuration: Option<InternalCollectionConfiguration>,
         get_or_create: bool,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
@@ -593,6 +593,10 @@ pub enum CreateCollectionError {
     Configuration(#[from] serde_json::Error),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
+    #[error("SPANN is still in development. Not allowed to created spann indexes")]
+    SpannNotImplemented,
+    #[error("HNSW is not supported on this platform")]
+    HnswNotSupported,
 }
 
 impl ChromaError for CreateCollectionError {
@@ -606,6 +610,8 @@ impl ChromaError for CreateCollectionError {
             CreateCollectionError::Get(err) => err.code(),
             CreateCollectionError::Configuration(_) => ErrorCodes::Internal,
             CreateCollectionError::Internal(err) => err.code(),
+            CreateCollectionError::SpannNotImplemented => ErrorCodes::InvalidArgument,
+            CreateCollectionError::HnswNotSupported => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -694,6 +700,8 @@ pub enum UpdateCollectionError {
     Internal(#[from] Box<dyn ChromaError>),
     #[error("Could not parse config: {0}")]
     InvalidConfig(#[from] CollectionConfigurationToInternalConfigurationError),
+    #[error("SPANN is still in development. Not allowed to created spann indexes")]
+    SpannNotImplemented,
 }
 
 impl ChromaError for UpdateCollectionError {
@@ -704,6 +712,7 @@ impl ChromaError for UpdateCollectionError {
             UpdateCollectionError::Configuration(_) => ErrorCodes::Internal,
             UpdateCollectionError::Internal(err) => err.code(),
             UpdateCollectionError::InvalidConfig(_) => ErrorCodes::InvalidArgument,
+            UpdateCollectionError::SpannNotImplemented => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -847,6 +856,8 @@ pub struct AddCollectionRecordsResponse {}
 pub enum AddCollectionRecordsError {
     #[error("Failed to get collection: {0}")]
     Collection(#[from] GetCollectionError),
+    #[error("Backoff and retry")]
+    Backoff,
     #[error(transparent)]
     Other(#[from] Box<dyn ChromaError>),
 }
@@ -855,6 +866,7 @@ impl ChromaError for AddCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
             AddCollectionRecordsError::Collection(err) => err.code(),
+            AddCollectionRecordsError::Backoff => ErrorCodes::Unavailable,
             AddCollectionRecordsError::Other(err) => err.code(),
         }
     }
@@ -907,6 +919,8 @@ pub struct UpdateCollectionRecordsResponse {}
 
 #[derive(Error, Debug)]
 pub enum UpdateCollectionRecordsError {
+    #[error("Backoff and retry")]
+    Backoff,
     #[error(transparent)]
     Other(#[from] Box<dyn ChromaError>),
 }
@@ -914,6 +928,7 @@ pub enum UpdateCollectionRecordsError {
 impl ChromaError for UpdateCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
+            UpdateCollectionRecordsError::Backoff => ErrorCodes::Unavailable,
             UpdateCollectionRecordsError::Other(err) => err.code(),
         }
     }
@@ -966,6 +981,8 @@ pub struct UpsertCollectionRecordsResponse {}
 
 #[derive(Error, Debug)]
 pub enum UpsertCollectionRecordsError {
+    #[error("Backoff and retry")]
+    Backoff,
     #[error(transparent)]
     Other(#[from] Box<dyn ChromaError>),
 }
@@ -973,6 +990,7 @@ pub enum UpsertCollectionRecordsError {
 impl ChromaError for UpsertCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
+            UpsertCollectionRecordsError::Backoff => ErrorCodes::Unavailable,
             UpsertCollectionRecordsError::Other(err) => err.code(),
         }
     }
@@ -1025,6 +1043,8 @@ pub struct DeleteCollectionRecordsResponse {}
 pub enum DeleteCollectionRecordsError {
     #[error("Failed to resolve records for deletion: {0}")]
     Get(#[from] ExecutorError),
+    #[error("Backoff and retry")]
+    Backoff,
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
 }
@@ -1033,6 +1053,7 @@ impl ChromaError for DeleteCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
             DeleteCollectionRecordsError::Get(err) => err.code(),
+            DeleteCollectionRecordsError::Backoff => ErrorCodes::Unavailable,
             DeleteCollectionRecordsError::Internal(err) => err.code(),
         }
     }
