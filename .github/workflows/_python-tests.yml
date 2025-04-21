@@ -20,8 +20,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        # NOTE(adityamaru): Removed windows runner for now re-add it on GitHub runners.
-        platform: [blacksmith-8vcpu-ubuntu-2204]
+        platform: [blacksmith-8vcpu-ubuntu-2204, 16core-64gb-windows-latest]
         test-globs:
           - "--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*'"
           - "chromadb/test/property --ignore-glob chromadb/test/property/test_cross_version_persist.py"
@@ -218,8 +217,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        # NOTE(adityamaru): Removed windows runner for now re-add it on GitHub runners.
-        platform: [blacksmith-16vcpu-ubuntu-2204]
+        platform: [blacksmith-16vcpu-ubuntu-2204, 16core-64gb-windows-latest]
         test-globs: ["chromadb/test/stress"]
     runs-on: ${{ matrix.platform }}
     steps:
