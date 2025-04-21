@@ -53,7 +53,7 @@ pub enum Input {
     MetadataValue,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct QueryEditor {
     pub operator: usize,
     pub operators: Vec<Operator>,
@@ -219,7 +219,9 @@ impl QueryEditor {
         if where_document.is_empty() {
             None
         } else {
-            Some(where_document)
+            let mut query_obj = Map::new();
+            query_obj.insert("$contains".to_string(), Value::String(where_document));
+            Some(serde_json::to_string(&Value::Object(query_obj)).unwrap_or_default())
         }
     }
 
@@ -251,6 +253,6 @@ impl QueryEditor {
         let mut query_obj = Map::new();
         query_obj.insert(key, Value::Object(operator_value_obj));
 
-        Some(Value::Object(query_obj).to_string())
+        Some(serde_json::to_string(&Value::Object(query_obj)).unwrap_or_default())
     }
 }

@@ -1,4 +1,4 @@
-mod app;
-mod query_editor;
+pub mod app;
+pub mod query_editor;
 mod ui;
 pub mod lib;

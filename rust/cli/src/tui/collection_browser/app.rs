@@ -10,8 +10,9 @@ use std::sync::Arc;
 use tokio::spawn;
 use tokio::sync::Mutex;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Default)]
 pub enum Screen {
+    #[default]
     Main,
     Expand,
     SearchEditor,
@@ -25,6 +26,7 @@ pub struct Record {
     pub metadata: Option<Metadata>,
 }
 
+#[derive(Debug, Default)]
 pub struct App {
     pub collection: Collection,
     pub loading: bool,
@@ -111,7 +113,7 @@ impl App {
     }
 
     fn handle_query_editor_events(&mut self, key: KeyEvent) -> Result<(), Box<dyn Error>> {
-        if key.modifiers.contains(KeyModifiers::SHIFT) && key.code == KeyCode::Char('c') {
+        if key.modifiers.contains(KeyModifiers::SHIFT) && key.code == KeyCode::Char('C') {
             self.query_editor.clear_inputs();
             return Ok(());
         }

@@ -6,6 +6,7 @@ use chroma_types::{CountResponse, GetResponse, IncludeList, RawWhereFields};
 use reqwest::Method;
 use std::error::Error;
 use std::ops::Deref;
+use serde_json::{json, Map, Value};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -16,7 +17,7 @@ pub enum CollectionAPIError {
     Get(String),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Collection {
     chroma_client: ChromaClient,
     collection: CollectionModel,
@@ -51,17 +52,36 @@ impl Collection {
             "/api/v2/tenants/{}/databases/{}/collections/{}/get",
             self.chroma_client.tenant_id, self.chroma_client.db, self.collection.collection_id
         );
-        let where_fields = RawWhereFields::from_json_str(r#where, where_document)?;
+
+        let mut payload = Map::new();
+
+        if let Some(ids) = ids {
+            payload.insert("ids".to_string(), json!(ids));
+        }
+
+        if let Some(r#where) = r#where {
+            let parsed: Value = serde_json::from_str(r#where)?;
+            payload.insert("where".to_string(), parsed);
+        }
+
+        if let Some(where_document) = where_document {
+            let parsed: Value = serde_json::from_str(where_document)?;
+            payload.insert("where_document".to_string(), parsed);
+        }
+
+        if let Some(include) = include {
+            payload.insert("include".to_string(), json!(include));
+        }
+
+        if let Some(limit) = limit {
+            payload.insert("limit".to_string(), json!(limit));
+        }
+
+        if let Some(offset) = offset {
+            payload.insert("offset".to_string(), json!(offset));
+        }
         
-        let payload = GetRequestPayload::new(
-            ids,
-            where_fields,
-            limit,
-            offset,
-            include.unwrap_or(IncludeList::default_get()),
-        );
-        
-        let response = send_request::<GetRequestPayload, GetResponse>(
+        let response = send_request::<Map<String, Value>, GetResponse>(
             &self.chroma_client.host,
             Method::POST,
             &route,
@@ -70,7 +90,6 @@ impl Collection {
         )
         .await
         .map_err(|e| {
-            println!("{}", e);
             CollectionAPIError::Get(self.collection.name.clone())
         })?;
         Ok(response)
@@ -96,24 +115,35 @@ impl Collection {
 
 mod tests {
     use futures_util::TryStreamExt;
+    use serde_json::{Map, Value};
+    use chroma_types::RawWhereFields;
     use crate::client::admin_client::AdminClient;
     use crate::client::chroma_client::ChromaClient;
+    use crate::tui::collection_browser::app::App;
+    use crate::tui::collection_browser::query_editor::Operator;
     use crate::utils::{get_current_profile, AddressBook};
-
+    
     #[tokio::test]
     async fn test_get() {
         let profile = get_current_profile().expect("Failed to get current profile");
         let admin_client = AdminClient::from_profile(AddressBook::cloud().frontend_url, &profile.1);
-        let db = admin_client.get_database(String::from("chroma-game")).await.expect("Failed to get database");
-        let chrom_client = ChromaClient::with_admin_client(admin_client, db.name);
+        let chrom_client = ChromaClient::with_admin_client(admin_client, String::from("docs"));
         
-        let collection = chrom_client.get_collection(String::from("conversations")).await.expect("Failed to get collection");
+        let collection = chrom_client.get_collection(String::from("docs-content")).await.expect("Failed to get collection");
+        
+        let mut app = App::default();
+        app.query_editor.operators = vec![Operator::Equal];
+        app.query_editor.metadata_key = "page".to_string();
+        app.query_editor.metadata_value = "add-data".to_string();
+        
+        let x = app.query_editor.parse_metadata();
+        println!("{:?}", x);
+        
         let records = collection.get(
-            Some(vec!["11d6a76c-2dcb-4e24-8fe2-3aed0160bb70".to_string()]), Some("{\"friends\": {\"$eq\": \"Ava, Leo\"}}"), None, None, None, None
+            None,x.as_deref(), None, None, None, None
         ).await.map_err(|e| {
             println!("{}", e);
         });
         println!("{:#?}", records);
-        
     }
 }

@@ -14,7 +14,7 @@ pub enum ChromaClientError {
     CollectionGet(String),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ChromaClient {
     pub admin_client: AdminClient,
     pub db: String,
