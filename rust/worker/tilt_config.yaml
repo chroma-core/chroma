@@ -40,7 +40,7 @@ query_service:
             host: "logservice.chroma"
             port: 50051
             connect_timeout_ms: 5000
-            request_timeout_ms: 5000
+            request_timeout_ms: 60000 # 1 minute
             alt_host: "rust-log-service.chroma"
             #use_alt_host_for_everything: true
     dispatcher:
@@ -78,7 +78,7 @@ query_service:
             weighted_lru:
                 capacity: 8589934592 # 8GB
         permitted_parallelism: 180
-    fetch_log_batch_size: 4000
+    fetch_log_batch_size: 1000
 
 compaction_service:
     service_name: "compaction-service"
@@ -117,7 +117,7 @@ compaction_service:
             host: "logservice.chroma"
             port: 50051
             connect_timeout_ms: 5000
-            request_timeout_ms: 5000
+            request_timeout_ms: 60000 # 1 minute
             alt_host: "rust-log-service.chroma"
             #use_alt_host_for_everything: true
     dispatcher:
@@ -134,7 +134,7 @@ compaction_service:
         max_compaction_size: 10000
         max_partition_size: 5000
         disabled_collections: [] # uuids to disable compaction for
-        fetch_log_batch_size: 4000
+        fetch_log_batch_size: 1000
     blockfile_provider:
         arrow:
             block_manager_config:

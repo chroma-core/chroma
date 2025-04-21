@@ -23,7 +23,7 @@ log:
     host: "logservice.chroma"
     port: 50051
     connect_timeout_ms: 5000
-    request_timeout_ms: 5000
+    request_timeout_ms: 60000 # 1 minute
     alt_host: "rust-log-service.chroma"
     #use_alt_host_for_everything: true
 
@@ -32,7 +32,7 @@ executor:
     connections_per_node: 5
     replication_factor: 2
     connect_timeout_ms: 5000
-    request_timeout_ms: 5000
+    request_timeout_ms: 60000 # 1 minute
     assignment:
       rendezvous_hashing:
         hasher: Murmur3
