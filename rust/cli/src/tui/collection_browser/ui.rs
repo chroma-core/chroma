@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Style, Stylize};
@@ -103,7 +104,11 @@ impl UI {
             }
             Screen::Expand => self.render_expand_view(frame, inner_area, app),
             Screen::SearchEditor => self.render_query_editor(frame, inner_area, &app.query_editor),
-            Screen::SearchResults => self.render_table(frame, inner_area, &app.query_records, &mut app.query_table_state),
+            Screen::SearchResults => {
+                if !app.loading {
+                    self.render_table(frame, inner_area, &app.query_records, &mut app.query_table_state)
+                }
+            },
         }
 
         if app.loading {
@@ -169,7 +174,10 @@ impl UI {
 
     fn metadata_inline_json(metadata: Option<Metadata>) -> Result<String, Box<dyn Error>> {
         match metadata {
-            Some(metadata) => Ok(serde_json::to_string(&metadata)?),
+            Some(metadata) => {
+                let sorted: BTreeMap<_, _> = metadata.into_iter().collect();
+                Ok(serde_json::to_string(&sorted)?)
+            },
             None => Ok(String::new()),
         }
     }

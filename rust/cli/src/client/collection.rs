@@ -96,8 +96,6 @@ impl Collection {
 
 mod tests {
     use futures_util::TryStreamExt;
-    use serde_json::Value;
-    use chroma_types::{IncludeList, WhereValidationError};
     use crate::client::admin_client::AdminClient;
     use crate::client::chroma_client::ChromaClient;
     use crate::utils::{get_current_profile, AddressBook};

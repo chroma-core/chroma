@@ -21,6 +21,7 @@ pub struct ChromaClient {
 }
 
 impl ChromaClient {
+    #[allow(dead_code)]
     pub fn new(host: String, tenant_id: String, db: String, api_key: Option<String>) -> Self {
         let admin_client = AdminClient::new(host, tenant_id, api_key);
         Self { admin_client, db }
@@ -30,11 +31,13 @@ impl ChromaClient {
         Self { admin_client, db }
     }
 
+    #[allow(dead_code)]
     pub fn from_profile(host: String, profile: &Profile, db: String) -> Self {
         let admin_client = AdminClient::from_profile(host, profile);
         Self { admin_client, db }
     }
 
+    #[allow(dead_code)]
     pub fn local_default() -> Self {
         let admin_client = AdminClient::local_default();
         Self {
@@ -43,6 +46,7 @@ impl ChromaClient {
         }
     }
 
+    #[allow(dead_code)]
     pub fn local(host: String) -> Self {
         let admin_client = AdminClient::local(host);
         Self {

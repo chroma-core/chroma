@@ -283,7 +283,7 @@ impl ChromaError for CreateDatabaseError {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, ToSchema, Clone)]
+#[derive(Serialize, Deserialize, Debug, ToSchema, Clone, Default)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct Database {
     pub id: Uuid,
@@ -1218,7 +1218,7 @@ impl GetRequest {
     }
 }
 
-#[derive(Clone, Deserialize, Serialize, Debug, ToSchema)]
+#[derive(Clone, Deserialize, Serialize, Debug, ToSchema, Default)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct GetResponse {
     pub ids: Vec<String>,

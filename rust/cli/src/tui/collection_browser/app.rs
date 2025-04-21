@@ -1,13 +1,12 @@
+use std::collections::BTreeMap;
 use crate::client::collection::{Collection, CollectionAPIError};
 use crate::tui::collection_browser::query_editor::QueryEditor;
-use arboard::Clipboard;
 use chroma_types::{GetResponse, IncludeList, Metadata};
 use ratatui::crossterm::event;
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::widgets::TableState;
 use std::error::Error;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::spawn;
 use tokio::sync::Mutex;
 
@@ -68,10 +67,10 @@ impl App {
             KeyCode::Char('q') | KeyCode::Esc => {
                 self.exit = true;
             }
-            KeyCode::Down => self.next_row(),
-            KeyCode::Up => self.previous_row(),
-            KeyCode::Left => self.previous_column(),
-            KeyCode::Right => self.next_column(),
+            KeyCode::Down => Self::next_row(&mut self.table_state, &self.records),
+            KeyCode::Up => Self::previous_row(&mut self.table_state, &self.records),
+            KeyCode::Left => Self::previous_column(&mut self.table_state),
+            KeyCode::Right => Self::next_column(&mut self.table_state),
             KeyCode::Enter => {
                 if self.table_state.selected_cell().is_some() {
                     self.current_screen = Screen::Expand;
@@ -88,7 +87,11 @@ impl App {
     fn handle_expand_events(&mut self, key: KeyEvent) -> Result<(), Box<dyn Error>> {
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => {
-                self.current_screen = Screen::Main;
+                if self.query_records.is_empty() {
+                    self.current_screen = Screen::Main;
+                } else {
+                    self.current_screen = Screen::SearchResults;
+                }
                 self.expand_scroll = 0;
             }
             KeyCode::Up => {
@@ -108,6 +111,11 @@ impl App {
     }
 
     fn handle_query_editor_events(&mut self, key: KeyEvent) -> Result<(), Box<dyn Error>> {
+        if key.modifiers.contains(KeyModifiers::SHIFT) && key.code == KeyCode::Char('c') {
+            self.query_editor.clear_inputs();
+            return Ok(());
+        }
+        
         match key.code {
             KeyCode::Esc => {
                 self.current_screen = Screen::Main;
@@ -146,13 +154,14 @@ impl App {
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => {
                 self.current_screen = Screen::Main;
+                self.query_records = vec![];
             }
-            KeyCode::Down => self.next_row(),
-            KeyCode::Up => self.previous_row(),
-            KeyCode::Left => self.previous_column(),
-            KeyCode::Right => self.next_column(),
+            KeyCode::Down => Self::next_row(&mut self.query_table_state, &self.query_records),
+            KeyCode::Up => Self::previous_row(&mut self.query_table_state, &self.query_records),
+            KeyCode::Left => Self::previous_column(&mut self.query_table_state),
+            KeyCode::Right => Self::next_column(&mut self.query_table_state),
             KeyCode::Enter => {
-                if self.table_state.selected_cell().is_some() {
+                if self.query_table_state.selected_cell().is_some() {
                     self.current_screen = Screen::Expand;
                 }
             }
@@ -178,9 +187,9 @@ impl App {
             };
 
             // Then drain the event queue completely to avoid backlog
-            while event::poll(Duration::from_millis(0))? {
-                let _ = event::read()?;
-            }
+            // while event::poll(Duration::from_millis(0))? {
+            //     let _ = event::read()?;
+            // }
         }
         Ok(())
     }
@@ -370,10 +379,10 @@ impl App {
 
     // ======= Table Navigation ========
 
-    pub fn next_row(&mut self) {
-        let i = match self.table_state.selected() {
+    pub fn next_row(table_state: &mut TableState, records: &[Record]) {
+        let i = match table_state.selected() {
             Some(i) => {
-                if i >= self.records.len() - 1 {
+                if i >= records.len() - 1 {
                     0
                 } else {
                     i + 1
@@ -381,29 +390,29 @@ impl App {
             }
             None => 0,
         };
-        self.table_state.select(Some(i));
+        table_state.select(Some(i));
     }
 
-    pub fn previous_row(&mut self) {
-        let i = match self.table_state.selected() {
+    pub fn previous_row(table_state: &mut TableState, records: &[Record]) {
+        let i = match table_state.selected() {
             Some(i) => {
                 if i == 0 {
-                    self.records.len() - 1
+                    records.len() - 1
                 } else {
                     i - 1
                 }
             }
             None => 0,
         };
-        self.table_state.select(Some(i));
+        table_state.select(Some(i));
     }
 
-    pub fn next_column(&mut self) {
-        self.table_state.select_next_column();
+    pub fn next_column(table_state: &mut TableState) {
+        table_state.select_next_column();
     }
 
-    pub fn previous_column(&mut self) {
-        self.table_state.select_previous_column();
+    pub fn previous_column(table_state: &mut TableState) {
+        table_state.select_previous_column();
     }
 
     pub fn get_selected_record(&self) -> Option<(&Record, usize)> {
@@ -421,7 +430,8 @@ impl App {
             1 => record.document.clone().unwrap_or_default(),
             2 => {
                 let metadata = record.metadata.clone().unwrap_or_default();
-                serde_json::to_string_pretty(&metadata).unwrap_or_else(|_| String::new())
+                let sorted: BTreeMap<_, _> = metadata.into_iter().collect();
+                serde_json::to_string_pretty(&sorted).unwrap_or_else(|_| String::new())
             }
             _ => String::new(),
         }
@@ -434,7 +444,7 @@ impl App {
         }
 
         let (record, column) = selected_record.unwrap();
-        let text = Self::get_record_content(&record, column);
+        let text = Self::get_record_content(record, column);
 
         Self::estimate_wrapped_lines(&text, self.width)
     }
@@ -457,6 +467,6 @@ impl App {
             }
         }
 
-        line_count
+        line_count + 1
     }
 }

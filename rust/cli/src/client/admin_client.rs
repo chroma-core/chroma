@@ -40,11 +40,11 @@ impl AdminClient {
     }
 
     pub fn from_profile(host: String, profile: &Profile) -> Self {
-        Self {
+        Self::new(
             host,
-            tenant_id: profile.tenant_id.clone(),
-            api_key: Some(profile.api_key.clone()),
-        }
+            profile.tenant_id.clone(),
+            Some(profile.api_key.clone()),
+        )
     }
 
     pub fn local_default() -> Self {

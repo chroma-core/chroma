@@ -133,10 +133,6 @@ impl QueryEditor {
         }
     }
     
-    pub fn get_current_field(&self) -> String {
-        self.get_current_input_value().clone()
-    }
-
     fn get_current_input_value_mut(&mut self) -> &mut String {
         match self.inputs[self.current_input] {
             Input::IDs => &mut self.ids,
