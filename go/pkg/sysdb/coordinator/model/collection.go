@@ -42,6 +42,7 @@ type CreateCollection struct {
 	DatabaseName               string
 	Ts                         types.Timestamp
 	LogPosition                int64
+	RootCollectionId           string
 	TotalRecordsPostCompaction uint64
 	SizeBytesPostCompaction    uint64 // Note: This represents the size of the records off the log
 	LastCompactionTimeSecs     uint64

@@ -300,6 +300,7 @@ func (tc *Catalog) createCollectionImpl(txCtx context.Context, createCollection 
 		Tenant:                     createCollection.TenantID,
 		Ts:                         ts,
 		LogPosition:                createCollection.LogPosition,
+		RootCollectionId:           createCollection.RootCollectionId,
 		TotalRecordsPostCompaction: createCollection.TotalRecordsPostCompaction,
 		SizeBytesPostCompaction:    createCollection.SizeBytesPostCompaction,
 		LastCompactionTimeSecs:     createCollection.LastCompactionTimeSecs,
@@ -879,6 +880,7 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 			// TODO: Inherit log position after log fork is implemented
 			// LogPosition:                sourceCollection.LogPosition,
 			LogPosition:                0,
+			RootCollectionId:           rootCollectionIDStr,
 			TotalRecordsPostCompaction: sourceCollection.TotalRecordsPostCompaction,
 			SizeBytesPostCompaction:    sourceCollection.SizeBytesPostCompaction,
 			LastCompactionTimeSecs:     sourceCollection.LastCompactionTimeSecs,

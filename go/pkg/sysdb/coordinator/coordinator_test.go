@@ -1416,9 +1416,11 @@ func (suite *APIsTestSuite) TestForkCollection() {
 	}
 
 	sourceFlushCollectionCompaction := &model.FlushCollectionCompaction{
-		ID:                       sourceCreateCollection.ID,
-		TenantID:                 sourceCreateCollection.TenantID,
-		LogPosition:              1000,
+		ID:       sourceCreateCollection.ID,
+		TenantID: sourceCreateCollection.TenantID,
+		// TODO: Inherit log position after log fork is implemented
+		// LogPosition:              1000,
+		LogPosition:              0,
 		CurrentCollectionVersion: 0,
 		FlushSegmentCompactions: []*model.FlushSegmentCompaction{
 			sourceFlushMetadataSegment,
@@ -1445,6 +1447,8 @@ func (suite *APIsTestSuite) TestForkCollection() {
 	suite.Equal(forkCollection.TargetCollectionID, collection.ID)
 	suite.Equal(forkCollection.TargetCollectionName, collection.Name)
 	suite.Equal(sourceCreateCollection.ID, collection.RootCollectionID)
+	suite.Equal(sourceCreateCollection.TenantID, collection.TenantID)
+	suite.Equal(sourceCreateCollection.DatabaseName, collection.DatabaseName)
 	suite.Equal(sourceFlushCollectionCompaction.LogPosition, collection.LogPosition)
 	suite.Equal(sourceFlushCollectionCompaction.TotalRecordsPostCompaction, collection.TotalRecordsPostCompaction)
 	suite.Equal(sourceFlushCollectionCompaction.SizeBytesPostCompaction, collection.SizeBytesPostCompaction)
