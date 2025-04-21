@@ -1,4 +1,6 @@
-use crate::client::ChromaClientError;
+use crate::client::admin_client::AdminClientError;
+use crate::client::dashboard_client::DashboardClientError;
+use crate::commands::browse::BrowseError;
 use crate::commands::db::DbError;
 use crate::commands::install::InstallError;
 use crate::commands::login::LoginError;
@@ -6,7 +8,6 @@ use crate::commands::profile::ProfileError;
 use crate::commands::run::RunError;
 use crate::commands::update::UpdateError;
 use crate::commands::vacuum::VacuumError;
-use crate::dashboard_client::DashboardClientError;
 use arboard::Clipboard;
 use colored::Colorize;
 use crossterm::{
@@ -15,18 +16,16 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode},
     ExecutableCommand,
 };
+use rand::Rng;
 use regex::Regex;
-use reqwest::header::HeaderMap;
-use reqwest::{Client, Method};
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
 use std::io::{stdout, Write};
+use std::net::TcpListener;
 use std::path::PathBuf;
 use std::{fs, io};
 use thiserror::Error;
-use crate::commands::browse::BrowseError;
 
 pub const LOGO: &str = "
                 \x1b[38;5;069m(((((((((    \x1b[38;5;203m(((((\x1b[38;5;220m####
@@ -58,8 +57,6 @@ pub enum CliError {
     #[error("Failed to vacuum Chroma")]
     Vacuum(#[from] VacuumError),
     #[error("{0}")]
-    Client(#[from] ChromaClientError),
-    #[error("{0}")]
     Db(#[from] DbError),
     #[error("{0}")]
     Update(#[from] UpdateError),
@@ -71,6 +68,8 @@ pub enum CliError {
     Install(#[from] InstallError),
     #[error("{0}")]
     Browse(#[from] BrowseError),
+    #[error("{0}")]
+    AdminClient(#[from] AdminClientError),
 }
 
 #[derive(Debug, Error)]
@@ -105,6 +104,8 @@ pub enum UtilsError {
     NameValidationFailed,
     #[error("name cannot be empty and must only contain alphanumerics, underscores, or hyphens")]
     InvalidName,
+    #[error("Failed to find an availble port for Chroma")]
+    PortSearch,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -319,35 +320,6 @@ pub fn validate_uri(input: String) -> Result<String, UtilsError> {
     Ok(input)
 }
 
-pub async fn send_request<T, R>(
-    url: &String,
-    method: Method,
-    route: &str,
-    headers: Option<HeaderMap>,
-    body: Option<&T>,
-) -> Result<R, Box<dyn Error>>
-where
-    T: Serialize,
-    R: DeserializeOwned + Default,
-{
-    let url = format!("{}{}", url, route);
-
-    let client = Client::new();
-    let mut request_builder = client.request(method, url);
-
-    if let Some(headers) = headers {
-        request_builder = request_builder.headers(headers);
-    }
-
-    if let Some(b) = body {
-        request_builder = request_builder.json(b);
-    }
-
-    let response = request_builder.send().await?.error_for_status()?;
-    let parsed_response = response.json::<R>().await?;
-    Ok(parsed_response)
-}
-
 pub fn read_secret(prompt: &str) -> io::Result<String> {
     let mut stdout = stdout();
     let mut password = String::new();
@@ -385,4 +357,19 @@ pub fn read_secret(prompt: &str) -> io::Result<String> {
     stdout.flush()?;
 
     Ok(password)
+}
+
+pub fn find_available_port(min: u16, max: u16) -> Result<u16, CliError> {
+    let mut rng = rand::thread_rng();
+
+    for _ in 0..100 {
+        let port = rng.gen_range(min..=max);
+        let addr = format!("127.0.0.1:{}", port);
+
+        if TcpListener::bind(&addr).is_ok() {
+            return Ok(port);
+        }
+    }
+
+    Err(UtilsError::PortSearch.into())
 }

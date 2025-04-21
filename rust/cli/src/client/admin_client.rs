@@ -1,4 +1,8 @@
-use reqwest::header::{HeaderMap, HeaderValue};
+use crate::client::utils::{send_request, EmptyResponse};
+use crate::utils::{get_address_book, Profile};
+use axum::http::{HeaderMap, HeaderValue, Method};
+use chroma_frontend::server::CreateDatabasePayload;
+use chroma_types::{Database, GetDatabaseResponse, GetUserIdentityResponse, ListDatabasesResponse};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -13,6 +17,10 @@ pub enum AdminClientError {
     DbListFailed,
     #[error("Failed to get tenant ID")]
     TenantIdNotFound,
+    #[error("Healthcheck failed")]
+    Healthcheck,
+    #[error("DB {0} not found")]
+    DbNotFound(String),
 }
 
 #[derive(Default, Debug, Clone)]
@@ -28,6 +36,14 @@ impl AdminClient {
             host,
             tenant_id,
             api_key,
+        }
+    }
+
+    pub fn from_profile(host: String, profile: &Profile) -> Self {
+        Self {
+            host,
+            tenant_id: profile.tenant_id.clone(),
+            api_key: Some(profile.api_key.clone()),
         }
     }
 
@@ -60,5 +76,92 @@ impl AdminClient {
             }
             None => Ok(None),
         }
+    }
+
+    pub async fn list_databases(&self) -> Result<Vec<Database>, AdminClientError> {
+        let route = format!("/api/v2/tenants/{}/databases", self.tenant_id);
+        let response = send_request::<(), ListDatabasesResponse>(
+            &self.host,
+            Method::GET,
+            &route,
+            self.headers()?,
+            None,
+        )
+        .await
+        .map_err(|_| AdminClientError::DbListFailed)?;
+        Ok(response)
+    }
+
+    pub async fn create_database(&self, name: String) -> Result<(), AdminClientError> {
+        let route = format!("/api/v2/tenants/{}/databases", self.tenant_id);
+        let _response = send_request::<CreateDatabasePayload, EmptyResponse>(
+            &self.host,
+            Method::POST,
+            &route,
+            self.headers()?,
+            Some(&CreateDatabasePayload { name: name.clone() }),
+        )
+        .await
+        .map_err(|_| AdminClientError::DbCreateFailed(name));
+        Ok(())
+    }
+
+    pub async fn delete_database(&self, name: String) -> Result<(), AdminClientError> {
+        let route = format!("/api/v2/tenants/{}/databases/{}", self.tenant_id, name);
+        let _response = send_request::<(), EmptyResponse>(
+            &self.host,
+            Method::DELETE,
+            &route,
+            self.headers()?,
+            None,
+        )
+        .await
+        .map_err(|_| AdminClientError::DbDeleteFailed(name));
+        Ok(())
+    }
+
+    pub async fn get_database(&self, db_name: String) -> Result<Database, AdminClientError> {
+        let route = format!("/api/v2/tenants/{}/databases/{}", self.tenant_id, db_name);
+        let response = send_request::<(), GetDatabaseResponse>(
+            &self.host,
+            Method::GET,
+            &route,
+            self.headers()?,
+            None,
+        )
+        .await
+        .map_err(|_| AdminClientError::DbNotFound(db_name))?;
+        Ok(response)
+    }
+
+    pub async fn get_tenant_id(&self) -> Result<String, AdminClientError> {
+        let route = "/api/v2/auth/identity";
+        let response = send_request::<(), GetUserIdentityResponse>(
+            &self.host,
+            Method::GET,
+            route,
+            self.headers()?,
+            None,
+        )
+        .await
+        .map_err(|_| AdminClientError::TenantIdNotFound)?;
+        Ok(response.tenant)
+    }
+
+    pub async fn healthcheck(&self) -> Result<(), AdminClientError> {
+        let route = "/api/v2/healthcheck";
+        let _response =
+            send_request::<(), String>(&self.host, Method::GET, route, self.headers()?, None)
+                .await
+                .map_err(|_| AdminClientError::Healthcheck)?;
+        Ok(())
+    }
+}
+
+pub fn get_admin_client(profile: Option<&Profile>, dev: bool) -> AdminClient {
+    let address_book = get_address_book(dev);
+    match profile {
+        Some(profile) => AdminClient::from_profile(address_book.frontend_url, profile),
+        None => AdminClient::local_default(),
     }
 }
