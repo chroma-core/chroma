@@ -303,9 +303,11 @@ class RendezvousHashSegmentDirectory(SegmentDirectory, EnforceOverrides):
                 # If the memberlist has an ip, use it, otherwise use the member id with the headless service
                 # this is for backwards compatibility with the old memberlist which only had ids
                 if member.ip is not None and member.ip != "":
+                    assert False
                     endpoint = f"{member.ip}:50051"
                     out_endpoints.append(endpoint)
                 else:
+                    assert False
                     service_name = self.extract_service_name(member.id)
                     endpoint = f"{member.id}.{service_name}.{KUBERNETES_NAMESPACE}.{HEADLESS_SERVICE}:50051"
                     out_endpoints.append(endpoint)
