@@ -409,7 +409,14 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                     return Err(e);
                 }
             };
-            self.loaded_blocks.write().insert(block_id, Box::new(block));
+            // Don't reinsert if someone else has already inserted it.
+            // All existing references to the block would become invalid
+            // causing a NPE.
+            let mut write_guard = self.loaded_blocks.write();
+            if let Some(block) = write_guard.get(&block_id) {
+                return Ok(Some(unsafe { transmute::<&Block, &Block>(&**block) }));
+            }
+            write_guard.insert(block_id, Box::new(block));
         }
 
         if let Some(block) = self.loaded_blocks.read().get(&block_id) {
