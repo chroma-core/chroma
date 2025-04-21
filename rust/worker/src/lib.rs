@@ -26,7 +26,7 @@ pub async fn query_service_entrypoint() {
             eprintln!("loading from {config_path}");
             config::RootConfig::load_from_path(&config_path)
         }
-        Err(_) => {
+        Err(err) => {
             eprintln!("loading from default path because {err}");
             config::RootConfig::load()
         }
