@@ -889,12 +889,23 @@ async fn create_collection(
         format!("tenant:{}", tenant).as_str(),
     ]);
 
+    println!(
+        "(Sanket-temp) Payload configuration: {:?}",
+        payload.configuration
+    );
     let configuration = match payload.configuration {
         Some(c) => Some(InternalCollectionConfiguration::try_from_config(
             c,
             server.config.frontend.default_knn_index,
         )?),
-        None => None,
+        None => Some(InternalCollectionConfiguration::try_from_config(
+            CollectionConfiguration {
+                hnsw: None,
+                spann: None,
+                embedding_function: None,
+            },
+            server.config.frontend.default_knn_index,
+        )?),
     };
 
     let request = CreateCollectionRequest::try_new(

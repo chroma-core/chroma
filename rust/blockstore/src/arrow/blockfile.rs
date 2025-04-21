@@ -409,7 +409,12 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                     return Err(e);
                 }
             };
-            self.loaded_blocks.write().insert(block_id, Box::new(block));
+            let mut write_guard = self.loaded_blocks.write();
+            if let Some(block) = write_guard.get(&block_id) {
+                // Block already exists, return it
+                return Ok(Some(unsafe { transmute::<&Block, &Block>(&**block) }));
+            }
+            write_guard.insert(block_id, Box::new(block));
         }
 
         if let Some(block) = self.loaded_blocks.read().get(&block_id) {

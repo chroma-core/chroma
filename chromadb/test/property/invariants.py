@@ -258,6 +258,7 @@ def ann_accuracy(
     query_indices: Optional[List[int]] = None,
     query_embeddings: Optional[types.Embeddings] = None,
 ) -> None:
+    print("(Sanket-temp) collection model ", collection._model)
     """Validate that the API performs nearest_neighbor searches correctly"""
     normalized_record_set = wrap_all(record_set)
 

@@ -141,7 +141,7 @@ def _test_add(
     n_results = max(1, (len(normalized_record_set["ids"]) // 10))
 
     if batch_ann_accuracy:
-        batch_size = 10
+        batch_size = 1
         for i in range(0, len(normalized_record_set["ids"]), batch_size):
             invariants.ann_accuracy(
                 coll,

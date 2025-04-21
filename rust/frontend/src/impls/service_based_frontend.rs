@@ -348,6 +348,10 @@ impl ServiceBasedFrontend {
             ..
         }: CreateCollectionRequest,
     ) -> Result<CreateCollectionResponse, CreateCollectionError> {
+        println!(
+            "(Sanket-temp) Creating collection: {} with configuration {:?}",
+            name, configuration
+        );
         let collection_id = CollectionUuid::new();
 
         let supported_segment_types: HashSet<SegmentType> =
