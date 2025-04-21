@@ -33,11 +33,11 @@ spec:
           imagePullPolicy: IfNotPresent
           name: logservice
           ports:
-            - containerPort: 50051
+            - containerPort: 50059
               name: grpc
           readinessProbe:
             grpc:
-              port: 50051
+              port: 50059
           {{ if .Values.logService.resources }}
           resources:
             limits:

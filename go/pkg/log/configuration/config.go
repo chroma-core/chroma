@@ -39,7 +39,7 @@ func getEnvWithDefaultInt(key string, defaultValue int32) int32 {
 
 func NewLogServiceConfiguration() *LogServiceConfiguration {
 	return &LogServiceConfiguration{
-		PORT:                  getEnvWithDefault("PORT", "50051"),
+		PORT:                  getEnvWithDefault("PORT", "50059"),
 		DATABASE_URL:          getEnvWithDefault("CHROMA_DATABASE_URL", "postgresql://chroma:chroma@postgres.chroma.svc.cluster.local:5432/log"),
 		OPTL_TRACING_ENDPOINT: getEnvWithDefault("OPTL_TRACING_ENDPOINT", "jaeger:4317"),
 		SYSDB_CONN:            getEnvWithDefault("SYSDB_CONN", "sysdb"),
