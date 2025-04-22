@@ -6,7 +6,6 @@ use axum::{
     Json, Router, ServiceExt,
 };
 use chroma_system::System;
-use chroma_types::RawWhereFields;
 use chroma_types::{
     AddCollectionRecordsResponse, ChecklistResponse, Collection, CollectionConfiguration,
     CollectionMetadataUpdate, CollectionUuid, CountCollectionsRequest, CountCollectionsResponse,
@@ -20,6 +19,7 @@ use chroma_types::{
     UpdateCollectionConfiguration, UpdateCollectionRecordsResponse, UpdateCollectionResponse,
     UpdateMetadata, UpsertCollectionRecordsResponse,
 };
+use chroma_types::{ForkCollectionResponse, RawWhereFields};
 use mdac::{Rule, Scorecard, ScorecardTicket};
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Meter};
@@ -103,6 +103,7 @@ pub struct Metrics {
     get_collection: Counter<u64>,
     update_collection: Counter<u64>,
     delete_collection: Counter<u64>,
+    fork_collection: Counter<u64>,
     collection_add: Counter<u64>,
     collection_update: Counter<u64>,
     collection_upsert: Counter<u64>,
@@ -133,6 +134,7 @@ impl Metrics {
             get_collection: meter.u64_counter("get_collection").build(),
             update_collection: meter.u64_counter("update_collection").build(),
             delete_collection: meter.u64_counter("delete_collection").build(),
+            fork_collection: meter.u64_counter("fork_collection").build(),
             collection_add: meter.u64_counter("collection_add").build(),
             collection_update: meter.u64_counter("collection_update").build(),
             collection_upsert: meter.u64_counter("collection_upsert").build(),
@@ -241,6 +243,10 @@ impl FrontendServer {
                 get(get_collection)
                     .put(update_collection)
                     .delete(delete_collection),
+            )
+            .route(
+                "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/fork",
+                post(fork_collection),
             )
             .route(
                 "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/add",
@@ -1104,6 +1110,70 @@ async fn delete_collection(
     server.frontend.delete_collection(request).await?;
 
     Ok(Json(UpdateCollectionResponse {}))
+}
+
+#[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
+pub struct ForkCollectionPayload {
+    pub new_name: String,
+}
+
+/// Forks an existing collection.
+#[utoipa::path(
+    post,
+    path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/fork",
+    request_body = ForkCollectionPayload,
+    responses(
+        (status = 200, description = "Collection forked successfully", body = ForkCollectionResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Collection not found", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant ID"),
+        ("database" = String, Path, description = "Database name"),
+        ("collection_id" = String, Path, description = "UUID of the collection to update")
+    )
+)]
+async fn fork_collection(
+    headers: HeaderMap,
+    Path((tenant, database, collection_id)): Path<(String, String, String)>,
+    State(mut server): State<FrontendServer>,
+    Json(payload): Json<ForkCollectionPayload>,
+) -> Result<Json<ForkCollectionResponse>, ServerError> {
+    server.metrics.fork_collection.add(
+        1,
+        &[
+            KeyValue::new("tenant", tenant.clone()),
+            KeyValue::new("collection_id", collection_id.clone()),
+        ],
+    );
+    tracing::info!(
+        "Forking collection [{collection_id}] in database [{database}] for tenant [{tenant}]"
+    );
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::ForkCollection,
+            AuthzResource {
+                tenant: Some(tenant.clone()),
+                database: Some(database.clone()),
+                collection: Some(collection_id.clone()),
+            },
+        )
+        .await?;
+    let _guard =
+        server.scorecard_request(&["op:fork_collection", format!("tenant:{}", tenant).as_str()]);
+    let collection_id =
+        CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
+
+    let request = chroma_types::ForkCollectionRequest::try_new(
+        tenant,
+        database,
+        collection_id,
+        payload.new_name,
+    )?;
+
+    Ok(Json(server.frontend.fork_collection(request).await?))
 }
 
 #[derive(Serialize, Deserialize, ToSchema, Debug, Clone)]
