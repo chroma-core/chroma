@@ -68,8 +68,8 @@ jobs:
           - { os: linux, runner: blacksmith-4vcpu-ubuntu-2204, target: x86_64 }
           - { os: linux, runner: blacksmith-4vcpu-ubuntu-2204-arm, target: aarch64 }
           - { os: windows, runner: windows-latest, target: x64 }
-          - { os: macos, runner: depot-macos-14, target: x86_64 }
-          - { os: macos, runner: depot-macos-14, target: aarch64 }
+          - { os: macos, runner: macos-14, target: x86_64 }
+          - { os: macos, runner: macos-14, target: aarch64 }
 
     steps:
       - uses: actions/checkout@v4

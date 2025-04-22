@@ -70,8 +70,6 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        # NOTE(hammadb): For some reason depot-windows fails so leaving default windows-latest
-        # on chromadb/test/client/test_multiple_clients_concurrency.py::test_multiple_clients_concurrently
         platform: [blacksmith-4vcpu-ubuntu-2204, windows-latest]
         test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore='chromadb/test/test_cli.py' --ignore-glob 'chromadb/test/distributed/*'",
                     "chromadb/test/property/test_add.py",
@@ -164,7 +162,7 @@ jobs:
                     "chromadb/test/property/test_collections_with_database_tenant_overwrite.py",
                     "chromadb/test/distributed/test_sanity.py"]
     runs-on: ${{ matrix.platform }}
-    # OIDC token auth for Depot & AWS
+    # OIDC token auth for AWS
     permissions:
       contents: read
       id-token: write

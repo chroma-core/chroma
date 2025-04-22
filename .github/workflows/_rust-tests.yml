@@ -38,7 +38,7 @@ jobs:
       matrix:
         platform: [blacksmith-16vcpu-ubuntu-2204]
     runs-on: ${{ matrix.platform }}
-    # OIDC token auth for Depot & AWS
+    # OIDC token auth for AWS
     permissions:
       contents: read
       id-token: write
