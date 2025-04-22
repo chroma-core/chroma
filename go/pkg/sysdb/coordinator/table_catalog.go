@@ -890,7 +890,11 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 		}
 
 		// Verify that the source collection log position is between the compaction offset (inclusive) and enumeration offset (inclusive)
-		// This is necessary for next compaction to fetch the right logs
+		// This check is necessary for next compaction to fetch the right logs
+		// This scenario could occur during fork because we will reach out to log service first to fork logs. For exampls:
+		// t0: Fork source collection in log with offset [200, 300] (i.e. compaction offset 200, enumeration offset 300)
+		// t1: User writes to source collection, compaction takes place, source collection log offset become [400, 500]
+		// t2: Fork source collection in sysdb, the latest source collection compaction offset is 400. We could not fork this version unless we update the log offsets of the forking collection
 		latestSourceCompactionOffset := uint64(sourceCollection.LogPosition)
 		if forkCollection.SourceCollectionLogEnumerationOffset < latestSourceCompactionOffset || latestSourceCompactionOffset < forkCollection.SourceCollectionLogCompactionOffset {
 			return common.ErrCollectionLogPositionStale
