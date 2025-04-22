@@ -191,7 +191,8 @@ impl Orchestrator for SpannKnnOrchestrator {
                 }
                 _ => {
                     let _: Option<()> = self
-                        .ok_or_terminate(Err(KnnError::SpannSegmentReaderCreationError(e)), ctx);
+                        .ok_or_terminate(Err(KnnError::SpannSegmentReaderCreationError(e)), ctx)
+                        .await;
                 }
             },
         }
