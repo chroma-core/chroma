@@ -880,9 +880,6 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 		if err != nil {
 			return err
 		}
-		if forkCollection.SourceCollectionLogEnumerationOffset < uint64(sourceCollection.LogPosition) {
-			return common.ErrCollectionLogPositionStale
-		}
 		if rootCollectionID != forkCollection.SourceCollectionID {
 			rootCollection, err = tc.GetCollection(txCtx, rootCollectionID, nil, "", "")
 			if err != nil {
@@ -890,6 +887,13 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 			}
 		} else {
 			rootCollection = sourceCollection
+		}
+
+		// Verify that the source collection log position is between the compaction offset (inclusive) and enumeration offset (inclusive)
+		// This is necessary for next compaction to fetch the right logs
+		latestSourceCompactionOffset := uint64(sourceCollection.LogPosition)
+		if forkCollection.SourceCollectionLogEnumerationOffset < latestSourceCompactionOffset || latestSourceCompactionOffset < forkCollection.SourceCollectionLogCompactionOffset {
+			return common.ErrCollectionLogPositionStale
 		}
 
 		// Create the new collection with source collection information
