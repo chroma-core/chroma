@@ -709,7 +709,7 @@ impl LogService for LogServer {
             );
             let limits = Limits {
                 max_files: Some(pull_logs.batch_size as u64 + 1),
-                max_bytes: Some(pull_logs.batch_size as u64 * 100_000),
+                max_bytes: None,
             };
             let fragments = match log_reader
                 .scan(
