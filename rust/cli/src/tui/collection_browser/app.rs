@@ -119,7 +119,7 @@ impl App {
             self.query_editor.clear_inputs();
             return Ok(());
         }
-        
+
         match key.code {
             KeyCode::Esc => {
                 self.query_records = vec![];
@@ -180,22 +180,25 @@ impl App {
     }
 
     pub fn handle_events(&mut self) -> Result<(), Box<dyn Error>> {
-        if let Event::Key(key) = event::read()? {
-            // Process only the most recent key event; throttle for held keys
-            // This helps prevent getting stuck when keys are held down
-
-            // First handle the current event
-            match self.current_screen {
-                Screen::Main => self.handle_main_events(key)?,
-                Screen::Expand => self.handle_expand_events(key)?,
-                Screen::SearchEditor => self.handle_query_editor_events(key)?,
-                Screen::SearchResults => self.handle_search_result_events(key)?,
-            };
-
-            // Then drain the event queue completely to avoid backlog
-            // while event::poll(Duration::from_millis(0))? {
-            //     let _ = event::read()?;
-            // }
+        match event::read()? {
+            Event::Key(key) => {
+                // Process the current event
+                match self.current_screen {
+                    Screen::Main => self.handle_main_events(key)?,
+                    Screen::Expand => self.handle_expand_events(key)?,
+                    Screen::SearchEditor => self.handle_query_editor_events(key)?,
+                    Screen::SearchResults => self.handle_search_result_events(key)?,
+                };
+                
+            },
+            // Handle paste events directly
+            Event::Paste(text) => {
+                if self.current_screen == Screen::SearchEditor {
+                    self.query_editor.handle_paste(&text);
+                }
+            },
+            // Ignore other events
+            _ => {}
         }
         Ok(())
     }

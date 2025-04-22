@@ -159,6 +159,26 @@ impl QueryEditor {
         }
         self.cursor_position += 1;
     }
+    
+    pub fn handle_paste(&mut self, text: &str) {
+        if self.inputs[self.current_input] == Input::MetadataOperator {
+            return;
+        }
+        
+        let current_len = self.get_current_input_value().len();
+        let cursor_pos = self.cursor_position;
+        
+        let input = self.get_current_input_value_mut();
+        if cursor_pos == current_len {
+            input.push_str(text);
+        } else {
+            // Insert character by character to maintain proper cursor position
+            for (i, c) in text.chars().enumerate() {
+                input.insert(cursor_pos + i, c);
+            }
+        }
+        self.cursor_position += text.chars().count();
+    }
 
     pub fn handle_input_delete(&mut self) {
         if self.inputs[self.current_input] == Input::MetadataOperator {

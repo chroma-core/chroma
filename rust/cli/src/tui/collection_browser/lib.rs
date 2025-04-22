@@ -50,11 +50,15 @@ impl CollectionBrowser {
             let app = self.app.lock().await;
             !app.exit
         } {
-            // Add an artificial delay to slow down event processing
-            // This helps prevent the app from getting stuck on held keys
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            // Default poll timeout
+            let poll_timeout = Duration::from_millis(50);
+            
+            // Only sleep if no events are waiting to be processed
+            if !event::poll(Duration::ZERO)? {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
 
-            if event::poll(Duration::from_millis(50))? {
+            if event::poll(poll_timeout)? {
                 let mut app = self.app.lock().await;
                 app.handle_events()?;
             }
