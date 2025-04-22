@@ -131,7 +131,12 @@ impl LogReader {
         }
         fragments.retain(|f| f.limit > from);
         fragments.sort_by_key(|f| f.start.offset());
-        fragments.truncate(limits.max_files.unwrap_or(u64::MAX) as usize);
+        if let Some(max_files) = limits.max_files {
+            if fragments.len() as u64 > max_files {
+                tracing::info!("truncating to {} files from {}", max_files, fragments.len());
+                fragments.truncate(max_files as usize);
+            }
+        }
         while fragments.len() > 1
             && fragments
                 .iter()
@@ -139,6 +144,10 @@ impl LogReader {
                 .fold(0, u64::saturating_add)
                 > limits.max_bytes.unwrap_or(u64::MAX)
         {
+            tracing::info!(
+                "truncating to {} files because bytes restrictions",
+                fragments.len() - 1
+            );
             fragments.pop();
         }
         Ok(fragments)
