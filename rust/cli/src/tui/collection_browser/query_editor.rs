@@ -202,6 +202,9 @@ impl QueryEditor {
     }
 
     fn list_from_string(s: &str) -> Vec<String> {
+        if s.is_empty() {
+            return vec![];
+        }
         s.split(",").map(|s| s.trim().to_string()).collect()
     }
 

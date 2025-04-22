@@ -79,6 +79,8 @@ impl App {
                 }
             }
             KeyCode::Char('s') => {
+                let selected_row = self.table_state.selected();
+                self.table_state = TableState::default().with_selected(selected_row.unwrap_or(0));
                 self.current_screen = Screen::SearchEditor;
             }
             _ => {}
@@ -120,6 +122,8 @@ impl App {
         
         match key.code {
             KeyCode::Esc => {
+                self.query_records = vec![];
+                self.query_table_state = TableState::default().with_selected(0);
                 self.current_screen = Screen::Main;
             }
             KeyCode::Down | KeyCode::Tab => {
@@ -418,11 +422,18 @@ impl App {
     }
 
     pub fn get_selected_record(&self) -> Option<(&Record, usize)> {
-        let cell = self.table_state.selected_cell();
-        if let Some(cell) = cell {
+        let main_cell = self.table_state.selected_cell();
+        if let Some(cell) = main_cell {
             let (row, column) = cell;
             return self.records.get(row).map(|record| (record, column));
         }
+        
+        let search_cell = self.query_table_state.selected_cell();
+        if let Some(cell) = search_cell {
+            let (row, column) = cell;
+            return self.query_records.get(row).map(|record| (record, column));
+        }
+        
         None
     }
 

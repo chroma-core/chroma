@@ -495,7 +495,7 @@ impl UI {
             ("←/→", "Nav cols"),
             ("Enter", "Expand"),
             ("s", "Search"),
-            ("q/Esc", "Clear Search"),
+            ("q/Esc", "Back"),
         ]
     }
 
