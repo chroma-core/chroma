@@ -76,7 +76,7 @@ jobs:
       - name: Setup Rust
         uses: ./.github/actions/rust
         with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       # On Windows, we want to set up Python with the correct architecture
       - name: Set up Python on Windows
@@ -132,10 +132,10 @@ jobs:
     needs: version
     steps:
       - uses: actions/checkout@v4
-      - name: Install Protoc
-        uses: arduino/setup-protoc@v3
+      - name: Setup Rust
+        uses: ./.github/actions/rust
         with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Set version in pyproject.toml
         shell: bash
         run: |
