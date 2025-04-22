@@ -142,6 +142,11 @@ func (r *LogRepository) ForkRecords(ctx context.Context, sourceCollectionID stri
 		}
 	}()
 
+	sourceBounds, err := queriesWithTx.GetBoundsForCollection(ctx, sourceCollectionID)
+	if err != nil {
+		trace_log.Error("Error in getting compaction and enumeration offset for source collection", zap.Error(err), zap.String("collectionId", sourceCollectionID))
+		return
+	}
 	err = queriesWithTx.ForkCollectionRecord(ctx, log.ForkCollectionRecordParams{
 		CollectionID:   sourceCollectionID,
 		CollectionID_2: targetCollectionID,
@@ -150,14 +155,43 @@ func (r *LogRepository) ForkRecords(ctx context.Context, sourceCollectionID stri
 		trace_log.Error("Error forking log record", zap.String("sourceCollectionID", sourceCollectionID))
 		return
 	}
-
-	bounds, err := r.queries.GetBoundsForCollection(ctx, targetCollectionID)
+	targetBounds, err := queriesWithTx.GetMinimumMaximumOffsetForCollection(ctx, targetCollectionID)
 	if err != nil {
-		trace_log.Error("Error in getting compaction and enumeration offset for collection", zap.Error(err), zap.String("collectionId", targetCollectionID))
+		trace_log.Error("Error in deriving compaction and enumeration offset for target collection", zap.Error(err), zap.String("collectionId", targetCollectionID))
 		return
 	}
-	compactionOffset = uint64(bounds.RecordCompactionOffsetPosition)
-	enumerationOffset = uint64(bounds.RecordEnumerationOffsetPosition)
+
+	if targetBounds.MinOffset == 0 {
+		// Either the source collection is not compacted yet or no log is forked
+		compactionOffset = uint64(sourceBounds.RecordCompactionOffsetPosition)
+	} else {
+		// Some logs are forked, the min offset is guaranteed to be larger than source compaction offset
+		compactionOffset = uint64(targetBounds.MinOffset - 1)
+	}
+	err = queriesWithTx.UpdateCollectionCompactionOffsetPosition(ctx, log.UpdateCollectionCompactionOffsetPositionParams{
+		ID:                             targetCollectionID,
+		RecordCompactionOffsetPosition: int64(compactionOffset),
+	})
+	if err != nil {
+		trace_log.Error("Error in updating compaction offset for target collection", zap.Error(err), zap.String("collectionId", targetCollectionID))
+		return
+	}
+
+	if targetBounds.MaxOffset == 0 {
+		// Either the source collection is empty or no log is forked
+		enumerationOffset = uint64(sourceBounds.RecordEnumerationOffsetPosition)
+	} else {
+		// Some logs are forked. The max offset is the enumeration offset
+		compactionOffset = uint64(targetBounds.MaxOffset)
+	}
+	err = queriesWithTx.UpdateCollectionEnumerationOffsetPosition(ctx, log.UpdateCollectionEnumerationOffsetPositionParams{
+		ID:                              targetCollectionID,
+		RecordEnumerationOffsetPosition: int64(enumerationOffset),
+	})
+	if err != nil {
+		trace_log.Error("Error in updating enumeration offset for target collection", zap.Error(err), zap.String("collectionId", targetCollectionID))
+		return
+	}
 	return
 }
 
