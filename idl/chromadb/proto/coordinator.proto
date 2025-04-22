@@ -218,8 +218,10 @@ message UpdateCollectionResponse {
 
 message ForkCollectionRequest {
   string source_collection_id = 1;
-  string target_collection_id = 2;
-  string target_collection_name = 3;
+  uint64 source_collection_log_compaction_offset = 2;
+  uint64 source_collection_log_enumeration_offset = 3;
+  string target_collection_id = 4;
+  string target_collection_name = 5;
 }
 
 message ForkCollectionResponse {
