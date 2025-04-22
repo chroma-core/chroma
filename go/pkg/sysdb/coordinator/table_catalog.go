@@ -902,18 +902,16 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 
 		// Create the new collection with source collection information
 		createCollection := &model.CreateCollection{
-			ID:                   forkCollection.TargetCollectionID,
-			Name:                 forkCollection.TargetCollectionName,
-			ConfigurationJsonStr: sourceCollection.ConfigurationJsonStr,
-			Dimension:            sourceCollection.Dimension,
-			Metadata:             sourceCollection.Metadata,
-			GetOrCreate:          false,
-			TenantID:             sourceCollection.TenantID,
-			DatabaseName:         sourceCollection.DatabaseName,
-			Ts:                   ts.Unix(),
-			// TODO: Inherit log position after log fork is implemented
-			// LogPosition:                sourceCollection.LogPosition,
-			LogPosition:                0,
+			ID:                         forkCollection.TargetCollectionID,
+			Name:                       forkCollection.TargetCollectionName,
+			ConfigurationJsonStr:       sourceCollection.ConfigurationJsonStr,
+			Dimension:                  sourceCollection.Dimension,
+			Metadata:                   sourceCollection.Metadata,
+			GetOrCreate:                false,
+			TenantID:                   sourceCollection.TenantID,
+			DatabaseName:               sourceCollection.DatabaseName,
+			Ts:                         ts.Unix(),
+			LogPosition:                sourceCollection.LogPosition,
 			RootCollectionId:           rootCollectionIDStr,
 			TotalRecordsPostCompaction: sourceCollection.TotalRecordsPostCompaction,
 			SizeBytesPostCompaction:    sourceCollection.SizeBytesPostCompaction,

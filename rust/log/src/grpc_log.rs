@@ -6,7 +6,9 @@ use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::chroma_proto::log_service_client::LogServiceClient;
 use chroma_types::chroma_proto::{self};
-use chroma_types::{CollectionUuid, LogRecord, OperationRecord, RecordConversionError};
+use chroma_types::{
+    CollectionUuid, ForkLogsResponse, LogRecord, OperationRecord, RecordConversionError,
+};
 use std::fmt::Debug;
 use std::time::Duration;
 use thiserror::Error;
@@ -53,6 +55,23 @@ impl ChromaError for GrpcPushLogsError {
             GrpcPushLogsError::Backoff => ErrorCodes::Unavailable,
             GrpcPushLogsError::FailedToPushLogs(_) => ErrorCodes::Internal,
             GrpcPushLogsError::ConversionError(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum GrpcForkLogsError {
+    #[error("Please backoff exponentially and retry")]
+    Backoff,
+    #[error("Failed to push logs")]
+    FailedToForkLogs(#[from] tonic::Status),
+}
+
+impl ChromaError for GrpcForkLogsError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GrpcForkLogsError::Backoff => ErrorCodes::Unavailable,
+            GrpcForkLogsError::FailedToForkLogs(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -304,6 +323,29 @@ impl GrpcLog {
             })?;
 
         Ok(())
+    }
+
+    pub(super) async fn fork_logs(
+        &mut self,
+        source_collection_id: CollectionUuid,
+        target_collection_id: CollectionUuid,
+    ) -> Result<ForkLogsResponse, GrpcForkLogsError> {
+        let response = self
+            .client_for(source_collection_id)
+            .fork_logs(chroma_proto::ForkLogsRequest {
+                source_collection_id: source_collection_id.to_string(),
+                target_collection_id: target_collection_id.to_string(),
+            })
+            .await
+            .map_err(|err| match err.code() {
+                tonic::Code::Unavailable => GrpcForkLogsError::Backoff,
+                _ => err.into(),
+            })?
+            .into_inner();
+        Ok(ForkLogsResponse {
+            compaction_offset: response.compaction_offset,
+            enumeration_offset: response.enumeration_offset,
+        })
     }
 
     pub(crate) async fn get_collections_with_new_data(

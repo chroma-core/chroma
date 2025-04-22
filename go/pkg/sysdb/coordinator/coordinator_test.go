@@ -1416,11 +1416,9 @@ func (suite *APIsTestSuite) TestForkCollection() {
 	}
 
 	sourceFlushCollectionCompaction := &model.FlushCollectionCompaction{
-		ID:       sourceCreateCollection.ID,
-		TenantID: sourceCreateCollection.TenantID,
-		// TODO: Inherit log position after log fork is implemented
-		// LogPosition:              1000,
-		LogPosition:              0,
+		ID:                       sourceCreateCollection.ID,
+		TenantID:                 sourceCreateCollection.TenantID,
+		LogPosition:              1000,
 		CurrentCollectionVersion: 0,
 		FlushSegmentCompactions: []*model.FlushSegmentCompaction{
 			sourceFlushMetadataSegment,
@@ -1437,9 +1435,11 @@ func (suite *APIsTestSuite) TestForkCollection() {
 
 	// Fork source collection
 	forkCollection := &model.ForkCollection{
-		SourceCollectionID:   sourceCreateCollection.ID,
-		TargetCollectionID:   types.NewUniqueID(),
-		TargetCollectionName: "test_fork_collection_fork_1",
+		SourceCollectionID:                   sourceCreateCollection.ID,
+		SourceCollectionLogCompactionOffset:  800,
+		SourceCollectionLogEnumerationOffset: 1200,
+		TargetCollectionID:                   types.NewUniqueID(),
+		TargetCollectionName:                 "test_fork_collection_fork_1",
 	}
 
 	collection, collection_segments, err := suite.coordinator.ForkCollection(ctx, forkCollection)
@@ -1469,9 +1469,11 @@ func (suite *APIsTestSuite) TestForkCollection() {
 
 	// Attempt to fork a collcetion with same name (should fail)
 	forkCollectionWithSameName := &model.ForkCollection{
-		SourceCollectionID:   sourceCreateCollection.ID,
-		TargetCollectionID:   types.NewUniqueID(),
-		TargetCollectionName: "test_fork_collection_source",
+		SourceCollectionID:                   sourceCreateCollection.ID,
+		SourceCollectionLogCompactionOffset:  800,
+		SourceCollectionLogEnumerationOffset: 1200,
+		TargetCollectionID:                   types.NewUniqueID(),
+		TargetCollectionName:                 "test_fork_collection_source",
 	}
 	_, _, err = suite.coordinator.ForkCollection(ctx, forkCollectionWithSameName)
 	suite.Error(err)

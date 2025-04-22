@@ -33,6 +33,23 @@ func (q *Queries) DeleteRecordsRange(ctx context.Context, arg DeleteRecordsRange
 	return err
 }
 
+const forkCollectionRecord = `-- name: ForkCollectionRecord :exec
+INSERT INTO record_log ("offset", collection_id, timestamp, record)
+    SELECT record_log.offset, $2, record_log.timestamp, record_log.record
+    FROM record_log
+    WHERE record_log.collection_id = $1
+`
+
+type ForkCollectionRecordParams struct {
+	CollectionID   string
+	CollectionID_2 string
+}
+
+func (q *Queries) ForkCollectionRecord(ctx context.Context, arg ForkCollectionRecordParams) error {
+	_, err := q.db.Exec(ctx, forkCollectionRecord, arg.CollectionID, arg.CollectionID_2)
+	return err
+}
+
 const getAllCollections = `-- name: GetAllCollections :many
 SELECT id FROM collection
 `
@@ -103,9 +120,7 @@ func (q *Queries) GetAllCollectionsToCompact(ctx context.Context, minCompactionS
 }
 
 const getBoundsForCollection = `-- name: GetBoundsForCollection :one
-SELECT
-	COALESCE(record_compaction_offset_position, 0) AS record_compaction_offset_position,
-	COALESCE(record_enumeration_offset_position, 0) AS record_enumeration_offset_position
+SELECT record_compaction_offset_position, record_enumeration_offset_position
 FROM collection
 WHERE id = $1
 `

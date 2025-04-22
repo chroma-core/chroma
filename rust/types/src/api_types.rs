@@ -796,6 +796,12 @@ impl ForkCollectionRequest {
 
 pub type ForkCollectionResponse = Collection;
 
+#[derive(Clone, Debug)]
+pub struct ForkLogsResponse {
+    pub compaction_offset: u64,
+    pub enumeration_offset: u64,
+}
+
 #[derive(Error, Debug)]
 pub enum ForkCollectionError {
     #[error("Collection [{0}] already exists")]

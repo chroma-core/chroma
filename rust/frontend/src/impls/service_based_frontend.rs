@@ -555,13 +555,16 @@ impl ServiceBasedFrontend {
         }: ForkCollectionRequest,
     ) -> Result<ForkCollectionResponse, ForkCollectionError> {
         let target_collection_id = CollectionUuid::new();
+        let log_offsets = self
+            .log_client
+            .fork_logs(source_collection_id, target_collection_id)
+            .await?;
         let collection_and_segments = self
             .sysdb_client
             .fork_collection(
                 source_collection_id,
-                // TODO: Update this when wiring up log fork
-                0,
-                0,
+                log_offsets.compaction_offset,
+                log_offsets.enumeration_offset,
                 target_collection_id,
                 target_collection_name,
             )
