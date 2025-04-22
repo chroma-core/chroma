@@ -40,7 +40,7 @@ pub trait Orchestrator: Debug + Send + Sized + 'static {
     /// Sends a task to the dispatcher and return whether the task is successfully sent
     async fn send(&mut self, task: TaskMessage, ctx: &ComponentContext<Self>) -> bool {
         let res = self.dispatcher().send(task, Some(Span::current())).await;
-        self.ok_or_terminate(res, ctx).is_some()
+        self.ok_or_terminate(res, ctx).await.is_some()
     }
 
     /// Sets the result channel of the orchestrator
@@ -50,7 +50,7 @@ pub trait Orchestrator: Debug + Send + Sized + 'static {
     fn take_result_channel(&mut self) -> Sender<Result<Self::Output, Self::Error>>;
 
     /// Terminate the orchestrator with a result
-    fn terminate_with_result(
+    async fn terminate_with_result(
         &mut self,
         res: Result<Self::Output, Self::Error>,
         ctx: &ComponentContext<Self>,
@@ -73,7 +73,7 @@ pub trait Orchestrator: Debug + Send + Sized + 'static {
     }
 
     /// Terminate the orchestrator if the result is an error. Returns the output if any.
-    fn ok_or_terminate<O, E: Into<Self::Error>>(
+    async fn ok_or_terminate<O: Send, E: Into<Self::Error> + Send>(
         &mut self,
         res: Result<O, E>,
         ctx: &ComponentContext<Self>,
@@ -81,7 +81,7 @@ pub trait Orchestrator: Debug + Send + Sized + 'static {
         match res {
             Ok(output) => Some(output),
             Err(error) => {
-                self.terminate_with_result(Err(error.into()), ctx);
+                self.terminate_with_result(Err(error.into()), ctx).await;
                 None
             }
         }
