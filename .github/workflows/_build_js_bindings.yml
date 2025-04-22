@@ -98,7 +98,7 @@ jobs:
           toolchain: stable
           override: true
       - name: Install Protoc
-        uses: arduino/setup-protoc@v2
+        uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Add target
@@ -151,7 +151,7 @@ jobs:
           toolchain: stable
           override: true
       - name: Install Protoc
-        uses: arduino/setup-protoc@v2
+        uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Add targets
