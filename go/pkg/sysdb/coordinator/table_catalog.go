@@ -814,7 +814,7 @@ func (tc *Catalog) UpdateCollection(ctx context.Context, updateCollection *model
 }
 
 func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.ForkCollection) (*model.Collection, []*model.Segment, error) {
-	log.Info("Forking collection", zap.String("sourceCollectionId", forkCollection.SourceCollectionID.String()), zap.String("targetCollectionName", *forkCollection.TargetCollectionName))
+	log.Info("Forking collection", zap.String("sourceCollectionId", forkCollection.SourceCollectionID.String()), zap.String("targetCollectionName", forkCollection.TargetCollectionName))
 
 	var source_collection *model.Collection
 	var source_segments []*model.Segment
