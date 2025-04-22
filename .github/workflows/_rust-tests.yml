@@ -7,7 +7,7 @@ jobs:
   test:
     strategy:
       matrix:
-        platform: [depot-ubuntu-22.04]
+        platform: [blacksmith-4vcpu-ubuntu-2204]
     runs-on: ${{ matrix.platform }}
     env:
       CARGO_TERM_COLOR: always
@@ -23,21 +23,22 @@ jobs:
         run: cargo build --bin chroma
       - name: Test
         run: cargo nextest run --no-capture --profile ci
-      - name: Upload test results
-        uses: datadog/junit-upload-github-action@v1
-        with:
-            api_key: ${{ secrets.DD_API_KEY }}
-            site: ${{ vars.DD_SITE }}
-            service: chroma
-            files: target/nextest/ci/junit.xml
-            logs: true
+      # TODO(adityamaru): Add Datadog test visibility when running in Chroma's repo.
+      # - name: Upload test results
+      #   uses: datadog/junit-upload-github-action@v1
+      #   with:
+      #       api_key: ${{ secrets.DD_API_KEY }}
+      #       site: ${{ vars.DD_SITE }}
+      #       service: chroma
+      #       files: target/nextest/ci/junit.xml
+      #       logs: true
 
   test-integration:
     strategy:
       matrix:
-        platform: [depot-ubuntu-22.04-16]
+        platform: [blacksmith-16vcpu-ubuntu-2204]
     runs-on: ${{ matrix.platform }}
-    # OIDC token auth for Depot & AWS
+    # OIDC token auth for AWS
     permissions:
       contents: read
       id-token: write
@@ -50,22 +51,24 @@ jobs:
         uses: ./.github/actions/rust
         with:
           github-token: ${{ github.token }}
+      - uses: useblacksmith/build-push-action@v1.1
+        with:
+          setup-only: true
       - name: Start services in Tilt
         uses: ./.github/actions/tilt
-        with:
-          depot-project-id: ${{ vars.DEPOT_PROJECT_ID }}
       - name: Build CLI
         run: cargo build --bin chroma
       - name: Run tests
         run: cargo nextest run --profile ci_k8s_integration
-      - name: Upload test results
-        uses: datadog/junit-upload-github-action@v1
-        with:
-            api_key: ${{ secrets.DD_API_KEY }}
-            site: ${{ vars.DD_SITE }}
-            service: chroma
-            files: target/nextest/ci/junit.xml
-            logs: true
+      # TODO(adityamaru): Add Datadog test visibility when running in Chroma's repo.
+      # - name: Upload test results
+      #   uses: datadog/junit-upload-github-action@v1
+      #   with:
+      #       api_key: ${{ secrets.DD_API_KEY }}
+      #       site: ${{ vars.DD_SITE }}
+      #       service: chroma
+      #       files: target/nextest/ci/junit.xml
+      #       logs: true
       - name: Save service logs to artifact
         if: always()
         uses: ./.github/actions/export-tilt-logs
@@ -74,7 +77,7 @@ jobs:
   test-benches:
     strategy:
       matrix:
-        platform: [depot-ubuntu-22.04-16]
+        platform: [blacksmith-16vcpu-ubuntu-2204]
         bench-command:
           - "--bench blockfile_writer -- --sample-size 10"
           - "--bench distance_metrics"
@@ -97,7 +100,7 @@ jobs:
         run: cargo bench ${{ matrix.bench-command }}
 
   can-build-release:
-    runs-on: depot-ubuntu-22.04-16
+    runs-on: blacksmith-16vcpu-ubuntu-2204
     env:
       CARGO_TERM_COLOR: always
     steps:
