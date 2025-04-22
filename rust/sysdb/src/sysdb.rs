@@ -318,6 +318,8 @@ impl SysDb {
     pub async fn fork_collection(
         &mut self,
         source_collection_id: CollectionUuid,
+        source_collection_log_compaction_offset: u64,
+        source_collection_log_enumeration_offset: u64,
         target_collection_id: CollectionUuid,
         target_collection_name: String,
     ) -> Result<CollectionAndSegments, ForkCollectionError> {
@@ -326,6 +328,8 @@ impl SysDb {
                 grpc_sys_db
                     .fork_collection(
                         source_collection_id,
+                        source_collection_log_compaction_offset,
+                        source_collection_log_enumeration_offset,
                         target_collection_id,
                         target_collection_name,
                     )
@@ -921,6 +925,8 @@ impl GrpcSysDb {
     pub async fn fork_collection(
         &mut self,
         source_collection_id: CollectionUuid,
+        source_collection_log_compaction_offset: u64,
+        source_collection_log_enumeration_offset: u64,
         target_collection_id: CollectionUuid,
         target_collection_name: String,
     ) -> Result<CollectionAndSegments, ForkCollectionError> {
@@ -928,6 +934,8 @@ impl GrpcSysDb {
             .client
             .fork_collection(chroma_proto::ForkCollectionRequest {
                 source_collection_id: source_collection_id.0.to_string(),
+                source_collection_log_compaction_offset,
+                source_collection_log_enumeration_offset,
                 target_collection_id: target_collection_id.0.to_string(),
                 target_collection_name: target_collection_name.clone(),
             })

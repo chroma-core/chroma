@@ -44,6 +44,7 @@ use super::utils::to_records;
 
 #[derive(Debug)]
 struct Metrics {
+    fork_retries_counter: Counter<u64>,
     delete_retries_counter: Counter<u64>,
     count_retries_counter: Counter<u64>,
     query_retries_counter: Counter<u64>,
@@ -73,11 +74,13 @@ impl ServiceBasedFrontend {
         default_knn_index: KnnIndex,
     ) -> Self {
         let meter = global::meter("chroma");
+        let fork_retries_counter = meter.u64_counter("fork_retries").build();
         let delete_retries_counter = meter.u64_counter("delete_retries").build();
         let count_retries_counter = meter.u64_counter("count_retries").build();
         let query_retries_counter = meter.u64_counter("query_retries").build();
         let get_retries_counter = meter.u64_counter("query_retries").build();
         let metrics = Arc::new(Metrics {
+            fork_retries_counter,
             delete_retries_counter,
             count_retries_counter,
             query_retries_counter,
@@ -543,7 +546,7 @@ impl ServiceBasedFrontend {
         Ok(DeleteCollectionRecordsResponse {})
     }
 
-    pub async fn fork_collection(
+    pub async fn retryable_fork(
         &mut self,
         ForkCollectionRequest {
             source_collection_id,
@@ -556,6 +559,9 @@ impl ServiceBasedFrontend {
             .sysdb_client
             .fork_collection(
                 source_collection_id,
+                // TODO: Update this when wiring up log fork
+                0,
+                0,
                 target_collection_id,
                 target_collection_name,
             )
@@ -568,6 +574,42 @@ impl ServiceBasedFrontend {
             .await;
 
         Ok(collection)
+    }
+
+    pub async fn fork_collection(
+        &mut self,
+        request: ForkCollectionRequest,
+    ) -> Result<ForkCollectionResponse, ForkCollectionError> {
+        let retries = Arc::new(AtomicUsize::new(0));
+        let fork_to_retry = || {
+            let mut self_clone = self.clone();
+            let request_clone = request.clone();
+            async move { self_clone.retryable_fork(request_clone).await }
+        };
+
+        let res = fork_to_retry
+            .retry(self.collections_with_segments_provider.get_retry_backoff())
+            // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
+            .when(|e| {
+                matches!(
+                    e.code(),
+                    ErrorCodes::FailedPrecondition | ErrorCodes::NotFound | ErrorCodes::Unknown
+                )
+            })
+            .notify(|_, _| {
+                let retried = retries.fetch_add(1, Ordering::Relaxed);
+                if retried > 0 {
+                    tracing::info!(
+                        "Retrying fork() request for collection {}",
+                        request.source_collection_id
+                    );
+                }
+            })
+            .await;
+        self.metrics
+            .fork_retries_counter
+            .add(retries.load(Ordering::Relaxed) as u64, &[]);
+        res
     }
 
     pub async fn add(
