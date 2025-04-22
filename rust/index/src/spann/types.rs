@@ -2298,13 +2298,11 @@ mod tests {
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let hnsw_cache = new_non_persistent_cache_for_test();
-        let (_, rx) = tokio::sync::mpsc::unbounded_channel();
         let hnsw_provider = HnswIndexProvider::new(
             storage.clone(),
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
-            rx,
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
@@ -2504,13 +2502,11 @@ mod tests {
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let hnsw_cache = new_non_persistent_cache_for_test();
-        let (_, rx) = tokio::sync::mpsc::unbounded_channel();
         let hnsw_provider = HnswIndexProvider::new(
             storage.clone(),
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
-            rx,
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
@@ -2752,13 +2748,11 @@ mod tests {
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let hnsw_cache = new_non_persistent_cache_for_test();
-        let (_, rx) = tokio::sync::mpsc::unbounded_channel();
         let hnsw_provider = HnswIndexProvider::new(
             storage.clone(),
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
-            rx,
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
@@ -2975,13 +2969,11 @@ mod tests {
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let hnsw_cache = new_non_persistent_cache_for_test();
-        let (_, rx) = tokio::sync::mpsc::unbounded_channel();
         let hnsw_provider = HnswIndexProvider::new(
             storage.clone(),
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
-            rx,
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
@@ -3227,13 +3219,11 @@ mod tests {
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let hnsw_cache = new_non_persistent_cache_for_test();
-        let (_, rx) = tokio::sync::mpsc::unbounded_channel();
         let hnsw_provider = HnswIndexProvider::new(
             storage.clone(),
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
-            rx,
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
@@ -3509,13 +3499,11 @@ mod tests {
 
     fn new_hnsw_provider_for_tests(storage: Storage, temp_dir: &TempDir) -> HnswIndexProvider {
         let hnsw_cache = new_non_persistent_cache_for_test();
-        let (_, rx) = tokio::sync::mpsc::unbounded_channel();
         HnswIndexProvider::new(
             storage,
             PathBuf::from(temp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
-            rx,
         )
     }
 
