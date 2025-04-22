@@ -460,7 +460,7 @@ func (s *collectionDb) UpdateVersionRelatedFields(collectionID, existingVersionF
 	return result.RowsAffected, nil
 }
 
-func (s *collectionDb) LockCollection(collectionID *string) error {
+func (s *collectionDb) LockCollection(collectionID string) error {
 	var collections []dbmodel.Collection
 	err := s.db.Model(&dbmodel.Collection{}).
 		Where("collections.id = ?", collectionID).Clauses(clause.Locking{
@@ -506,9 +506,9 @@ func (s *collectionDb) LockCollection(collectionID *string) error {
 	return nil
 }
 
-func (s *collectionDb) UpdateCollectionLineageFilePath(collectionID *string, currentLineageFileName *string, newLineageFileName *string) error {
+func (s *collectionDb) UpdateCollectionLineageFilePath(collectionID string, currentLineageFileName string, newLineageFileName string) error {
 	return s.db.Model(&dbmodel.Collection{}).
-		Where("id = ? AND lineage_file_name = ?", collectionID, currentLineageFileName).
+		Where("id = ? AND (lineage_file_name IS NULL OR lineage_file_name = ?)", collectionID, currentLineageFileName).
 		Updates(map[string]interface{}{
 			"lineage_file_name": newLineageFileName,
 		}).Error

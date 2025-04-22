@@ -373,6 +373,9 @@ func (s *Server) ForkCollection(ctx context.Context, req *coordinatorpb.ForkColl
 		if err == common.ErrCollectionNotFound {
 			return res, grpcutils.BuildNotFoundGrpcError(err.Error())
 		}
+		if err == common.ErrCollectionEntryIsStale {
+			return res, grpcutils.BuildFailedPreconditionGrpcError(err.Error())
+		}
 		if err == common.ErrCollectionUniqueConstraintViolation {
 			return res, grpcutils.BuildAlreadyExistsGrpcError(err.Error())
 		}

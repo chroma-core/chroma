@@ -285,7 +285,7 @@ func (_m *ICollectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint
 }
 
 // LockCollection provides a mock function with given fields: collectionID
-func (_m *ICollectionDb) LockCollection(collectionID *string) error {
+func (_m *ICollectionDb) LockCollection(collectionID string) error {
 	ret := _m.Called(collectionID)
 
 	if len(ret) == 0 {
@@ -293,7 +293,7 @@ func (_m *ICollectionDb) LockCollection(collectionID *string) error {
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(*string) error); ok {
+	if rf, ok := ret.Get(0).(func(string) error); ok {
 		r0 = rf(collectionID)
 	} else {
 		r0 = ret.Error(0)
@@ -321,7 +321,7 @@ func (_m *ICollectionDb) Update(in *dbmodel.Collection) error {
 }
 
 // UpdateCollectionLineageFilePath provides a mock function with given fields: collectionID, currentLineageFilePath, newLineageFilePath
-func (_m *ICollectionDb) UpdateCollectionLineageFilePath(collectionID *string, currentLineageFilePath *string, newLineageFilePath *string) error {
+func (_m *ICollectionDb) UpdateCollectionLineageFilePath(collectionID string, currentLineageFilePath string, newLineageFilePath string) error {
 	ret := _m.Called(collectionID, currentLineageFilePath, newLineageFilePath)
 
 	if len(ret) == 0 {
@@ -329,7 +329,7 @@ func (_m *ICollectionDb) UpdateCollectionLineageFilePath(collectionID *string, c
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(*string, *string, *string) error); ok {
+	if rf, ok := ret.Get(0).(func(string, string, string) error); ok {
 		r0 = rf(collectionID, currentLineageFilePath, newLineageFilePath)
 	} else {
 		r0 = ret.Error(0)

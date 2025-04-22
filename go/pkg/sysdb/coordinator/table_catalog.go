@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
@@ -470,7 +471,7 @@ func (tc *Catalog) GetCollectionWithSegments(ctx context.Context, collectionID t
 	var segments []*model.Segment
 
 	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
-		collections, e := tc.GetCollections(ctx, collectionID, nil, "", "", nil, nil)
+		collections, e := tc.GetCollections(txCtx, collectionID, nil, "", "", nil, nil)
 		if e != nil {
 			return e
 		}
@@ -482,7 +483,7 @@ func (tc *Catalog) GetCollectionWithSegments(ctx context.Context, collectionID t
 		}
 		collection = collections[0]
 
-		segments, e = tc.GetSegments(ctx, types.NilUniqueID(), nil, nil, collectionID)
+		segments, e = tc.GetSegments(txCtx, types.NilUniqueID(), nil, nil, collectionID)
 		if e != nil {
 			return e
 		}
@@ -834,6 +835,7 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		var err error
 		var rootCollection *model.Collection
+		var rootCollectionID types.UniqueID
 		var rootCollectionIDStr string
 		var sourceCollection *model.Collection
 		var sourceSegments []*model.Segment
@@ -842,31 +844,55 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 		ts := time.Now().UTC()
 
 		sourceCollectionIDStr := forkCollection.SourceCollectionID.String()
-		err = tc.metaDomain.CollectionDb(txCtx).LockCollection(&sourceCollectionIDStr)
+
+		// NOTE: We need to retrieve the source collection to get root collection id, then acquire locks on source and root collections in order to avoid deadlock.
+		// This step is because root collection id is always populated when the collection is created and is never modified.
+		sourceCollectionDb, err := tc.metaDomain.CollectionDb(txCtx).GetCollectionEntry(&sourceCollectionIDStr, nil)
 		if err != nil {
 			return err
 		}
+
+		if len(sourceCollectionDb.RootCollectionId) > 0 {
+			rootCollectionID, err = types.Parse(sourceCollectionDb.RootCollectionId)
+			if err != nil {
+				return err
+			}
+		} else {
+			rootCollectionID = forkCollection.SourceCollectionID
+		}
+		rootCollectionIDStr = rootCollectionID.String()
+
+		// Lock source and root collections in order
+		collectionsToLock := []string{sourceCollectionIDStr}
+		if rootCollectionID != forkCollection.SourceCollectionID {
+			collectionsToLock = append(collectionsToLock, rootCollectionIDStr)
+			slices.Sort(collectionsToLock)
+		}
+		for _, collectionID := range collectionsToLock {
+			err = tc.metaDomain.CollectionDb(txCtx).LockCollection(collectionID)
+			if err != nil {
+				return err
+			}
+		}
+
+		// Get source and root collections after they are locked
 		sourceCollection, sourceSegments, err = tc.GetCollectionWithSegments(txCtx, forkCollection.SourceCollectionID)
 		if err != nil {
 			return err
 		}
-
-		if sourceCollection.RootCollectionID == nil {
-			rootCollection = sourceCollection
-			rootCollectionIDStr = sourceCollectionIDStr
+		if forkCollection.SourceCollectionLogEnumerationOffset < uint64(sourceCollection.LogPosition) {
+			return common.ErrCollectionLogPositionStale
+		}
+		if rootCollectionID != forkCollection.SourceCollectionID {
+			rootCollection, err = tc.GetCollection(txCtx, rootCollectionID, nil, "", "")
+			if err != nil {
+				return err
+			}
 		} else {
-			rootCollectionIDStr = sourceCollection.RootCollectionID.String()
-			err = tc.metaDomain.CollectionDb(txCtx).LockCollection(&rootCollectionIDStr)
-			if err != nil {
-				return err
-			}
-
-			rootCollection, _, err = tc.GetCollectionWithSegments(txCtx, *sourceCollection.RootCollectionID)
-			if err != nil {
-				return err
-			}
+			rootCollection = sourceCollection
 		}
 
+		// Create the new collection with source collection information
 		createCollection := &model.CreateCollection{
 			ID:                   forkCollection.TargetCollectionID,
 			Name:                 forkCollection.TargetCollectionName,
@@ -916,6 +942,7 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 			return err
 		}
 
+		// Update the lineage file
 		lineageFile, err := tc.getLineageFile(txCtx, rootCollection)
 		if err != nil {
 			return err
@@ -932,7 +959,7 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 			return err
 		}
 
-		return tc.metaDomain.CollectionDb(txCtx).UpdateCollectionLineageFilePath(&rootCollectionIDStr, &rootCollection.LineageFileName, &newLineageFileFullName)
+		return tc.metaDomain.CollectionDb(txCtx).UpdateCollectionLineageFilePath(rootCollectionIDStr, rootCollection.LineageFileName, newLineageFileFullName)
 	})
 	if err != nil {
 		return nil, nil, err
