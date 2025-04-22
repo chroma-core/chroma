@@ -114,6 +114,7 @@ impl Configurable<SqliteDBConfig, SqliteCreationError> for SqliteDb {
                 .connect_with(conn_options.filename(path).create_if_missing(true))
                 .await?
         } else {
+
             SqlitePoolOptions::new()
                 .max_lifetime(None)
                 .idle_timeout(None)
