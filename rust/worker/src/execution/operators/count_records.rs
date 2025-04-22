@@ -81,7 +81,7 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
             Err(e) => {
                 match *e {
                     RecordSegmentReaderCreationError::UninitializedSegment => {
-                        tracing::info!("[CountQueryOrchestrator] Record segment is uninitialized");
+                        tracing::info!("[CountQueryOrchestrator] Record segment is uninitialized; using {} records from log", input.log_records.len());
                         // This means there no compaction has occured.
                         // So we can just traverse the log records
                         // and count the number of records.
@@ -179,6 +179,10 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
         // Add the records that are absent in the record segment but
         // have been inserted more recently in the log.
         res_count += non_deleted_absent_in_segment.len() as i32;
+        tracing::info!("deleted_and_non_deleted_present_in_segment = {}, non_deleted_present_in_segment = {}, non_deleted_absent_in_segment = {}",
+            deleted_and_non_deleted_present_in_segment.len(),
+            non_deleted_present_in_segment.len(),
+            non_deleted_absent_in_segment.len());
         // Finally, add the count from the record segment.
         match reader.count().await {
             Ok(val) => {
