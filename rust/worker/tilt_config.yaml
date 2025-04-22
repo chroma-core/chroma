@@ -177,7 +177,7 @@ log_service:
                 download_part_size_bytes: 8388608 # 8MiB
             rate_limiting_policy:
                 count_based_policy:
-                    max_concurrent_requests: 30
+                    max_concurrent_requests: 500
                     bandwidth_allocation: [1.0]
     writer:
         throttle_fragment:
