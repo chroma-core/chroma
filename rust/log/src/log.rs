@@ -171,7 +171,10 @@ impl Log {
                 .get_max_batch_size()
                 .await
                 .map_err(|err| Box::new(err) as Box<dyn ChromaError>),
-            Log::Grpc(_) => Ok(100),
+            // NOTE(hammadb): This is set to a high value and may cause issues
+            // the quota system should be used to limit the number of records
+            // upstream.
+            Log::Grpc(_) => Ok(1000),
             Log::InMemory(_) => todo!(),
         }
     }
