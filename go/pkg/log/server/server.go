@@ -102,12 +102,15 @@ func (s *logServer) ForkLogs(ctx context.Context, req *logservicepb.ForkLogsRequ
 		return
 	}
 
-	err = s.lr.ForkRecords(ctx, sourceCollectionID.String(), targetCollectionID.String())
+	compactionOffset, enumerationOffset, err := s.lr.ForkRecords(ctx, sourceCollectionID.String(), targetCollectionID.String())
 	if err != nil {
 		return
 	}
 
-	res = &logservicepb.ForkLogsResponse{}
+	res = &logservicepb.ForkLogsResponse{
+		CompactionOffset:  compactionOffset,
+		EnumerationOffset: enumerationOffset,
+	}
 	return
 }
 

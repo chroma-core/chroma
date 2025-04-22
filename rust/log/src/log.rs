@@ -4,7 +4,8 @@ use crate::sqlite_log::SqliteLog;
 use crate::types::CollectionInfo;
 use chroma_error::ChromaError;
 use chroma_types::{
-    CollectionUuid, ForkCollectionError, LogRecord, OperationRecord, ResetError, ResetResponse,
+    CollectionUuid, ForkCollectionError, ForkLogsResponse, LogRecord, OperationRecord, ResetError,
+    ResetResponse,
 };
 use std::fmt::Debug;
 
@@ -99,7 +100,7 @@ impl Log {
         &mut self,
         source_collection_id: CollectionUuid,
         target_collection_id: CollectionUuid,
-    ) -> Result<(), ForkCollectionError> {
+    ) -> Result<ForkLogsResponse, ForkCollectionError> {
         match self {
             Log::Sqlite(_) => Err(ForkCollectionError::Local),
             Log::Grpc(log) => log

@@ -126,7 +126,7 @@ func (r *LogRepository) PullRecords(ctx context.Context, collectionId string, of
 	return
 }
 
-func (r *LogRepository) ForkRecords(ctx context.Context, sourceCollectionID string, targetCollectionID string) (err error) {
+func (r *LogRepository) ForkRecords(ctx context.Context, sourceCollectionID string, targetCollectionID string) (compactionOffset uint64, enumerationOffset uint64, err error) {
 	var tx pgx.Tx
 	tx, err = r.conn.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -142,19 +142,6 @@ func (r *LogRepository) ForkRecords(ctx context.Context, sourceCollectionID stri
 		}
 	}()
 
-	err = queriesWithTx.LockCollection(ctx, sourceCollectionID)
-	if err != nil {
-		trace_log.Error("Error locking collection for fork", zap.String("sourceCollectionID", sourceCollectionID))
-		return
-	}
-	err = queriesWithTx.ForkCollectionOffset(ctx, log.ForkCollectionOffsetParams{
-		ID:   sourceCollectionID,
-		ID_2: targetCollectionID,
-	})
-	if err != nil {
-		trace_log.Error("Error forking log offset", zap.String("sourceCollectionID", sourceCollectionID))
-		return
-	}
 	err = queriesWithTx.ForkCollectionRecord(ctx, log.ForkCollectionRecordParams{
 		CollectionID:   sourceCollectionID,
 		CollectionID_2: targetCollectionID,
@@ -164,6 +151,13 @@ func (r *LogRepository) ForkRecords(ctx context.Context, sourceCollectionID stri
 		return
 	}
 
+	bounds, err := r.queries.GetBoundsForCollection(ctx, targetCollectionID)
+	if err != nil {
+		trace_log.Error("Error in getting compaction and enumeration offset for collection", zap.Error(err), zap.String("collectionId", targetCollectionID))
+		return
+	}
+	compactionOffset = uint64(bounds.RecordCompactionOffsetPosition)
+	enumerationOffset = uint64(bounds.RecordEnumerationOffsetPosition)
 	return
 }
 

@@ -48,7 +48,8 @@ message ForkLogsRequest {
 }
 
 message ForkLogsResponse {
-  // Empty  
+  uint64 compaction_offset = 1;
+  uint64 enumeration_offset = 2;
 }
 
 message CollectionInfo {

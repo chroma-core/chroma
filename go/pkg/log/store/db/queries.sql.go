@@ -33,23 +33,6 @@ func (q *Queries) DeleteRecordsRange(ctx context.Context, arg DeleteRecordsRange
 	return err
 }
 
-const forkCollectionOffset = `-- name: ForkCollectionOffset :exec
-INSERT INTO collection (id, record_compaction_offset_position, record_enumeration_offset_position)
-    SELECT $2, collection.record_compaction_offset_position, collection.record_enumeration_offset_position
-    FROM collection
-    WHERE collection.id = $1
-`
-
-type ForkCollectionOffsetParams struct {
-	ID   string
-	ID_2 string
-}
-
-func (q *Queries) ForkCollectionOffset(ctx context.Context, arg ForkCollectionOffsetParams) error {
-	_, err := q.db.Exec(ctx, forkCollectionOffset, arg.ID, arg.ID_2)
-	return err
-}
-
 const forkCollectionRecord = `-- name: ForkCollectionRecord :exec
 INSERT INTO record_log ("offset", collection_id, timestamp, record)
     SELECT record_log.offset, $2, record_log.timestamp, record_log.record
@@ -271,15 +254,6 @@ type InsertRecordParams struct {
 	Offset       int64
 	Record       []byte
 	Timestamp    int64
-}
-
-const lockCollection = `-- name: LockCollection :exec
-SELECT id, record_compaction_offset_position, record_enumeration_offset_position FROM collection WHERE id = $1 FOR UPDATE
-`
-
-func (q *Queries) LockCollection(ctx context.Context, id string) error {
-	_, err := q.db.Exec(ctx, lockCollection, id)
-	return err
 }
 
 const purgeRecords = `-- name: PurgeRecords :exec
