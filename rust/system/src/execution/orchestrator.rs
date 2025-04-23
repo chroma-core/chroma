@@ -49,8 +49,7 @@ pub trait Orchestrator: Debug + Send + Sized + 'static {
     /// Takes the result channel of the orchestrator. The channel should have been set when this is invoked
     fn take_result_channel(&mut self) -> Sender<Result<Self::Output, Self::Error>>;
 
-    /// Terminate the orchestrator with a result
-    async fn terminate_with_result(
+    async fn default_terminate_with_result(
         &mut self,
         res: Result<Self::Output, Self::Error>,
         ctx: &ComponentContext<Self>,
@@ -70,6 +69,15 @@ pub trait Orchestrator: Debug + Send + Sized + 'static {
         if cancel {
             ctx.cancellation_token.cancel();
         }
+    }
+
+    /// Terminate the orchestrator with a result
+    async fn terminate_with_result(
+        &mut self,
+        res: Result<Self::Output, Self::Error>,
+        ctx: &ComponentContext<Self>,
+    ) {
+        self.default_terminate_with_result(res, ctx).await
     }
 
     /// Terminate the orchestrator if the result is an error. Returns the output if any.

@@ -558,7 +558,7 @@ impl Orchestrator for CompactOrchestrator {
             self.hnsw_index_uuid,
         )
         .await;
-        Orchestrator::terminate_with_result(self, res, ctx).await;
+        self.default_terminate_with_result(res, ctx).await
     }
 }
 
