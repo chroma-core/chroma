@@ -41,6 +41,10 @@ pub trait Orchestrator: Debug + Send + Sized + 'static {
 
     /// Sends a task to the dispatcher and return whether the task is successfully sent
     async fn send(&mut self, task: TaskMessage, ctx: &ComponentContext<Self>) -> bool {
+        tracing::info!(
+            task = ?task,
+            "Sending task to dispatcher"
+        );
         let res = self.dispatcher().send(task, Some(Span::current())).await;
         self.ok_or_terminate(res, ctx).is_some()
     }

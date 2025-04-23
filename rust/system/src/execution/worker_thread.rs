@@ -57,11 +57,15 @@ impl Handler<TaskMessage> for WorkerThread {
     type Result = ();
 
     async fn handle(&mut self, mut task: TaskMessage, ctx: &ComponentContext<WorkerThread>) {
+        tracing::info!("Worker thread: executing task {}", task.get_name());
         let child_span =
             trace_span!(parent: Span::current(), "Task execution", name = task.get_name());
         task.run().instrument(child_span).await;
         let req: TaskRequestMessage = TaskRequestMessage::new(ctx.receiver());
-        let _res = self.dispatcher.send(req, None).await;
+        let res = self.dispatcher.send(req, None).await;
+        if let Err(err) = res {
+            tracing::error!("Error sending task request: {}", err);
+        }
         // TODO: task run should be able to error and we should send it as part of the result
     }
 }

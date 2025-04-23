@@ -102,6 +102,10 @@ impl Dispatcher {
     /// # Parameters
     /// - task: The task to enqueue
     async fn enqueue_task(&mut self, mut task: TaskMessage) {
+        tracing::info!(
+            task = ?task,
+            "Enqueueing task"
+        );
         match task.get_type() {
             OperatorType::IO => {
                 let child_span = trace_span!(parent: Span::current(), "IO task execution", name = task.get_name());
