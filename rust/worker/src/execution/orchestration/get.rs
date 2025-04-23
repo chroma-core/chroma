@@ -204,6 +204,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for GetOrchestrator {
         message: TaskResult<FetchLogOutput, FetchLogError>,
         ctx: &ComponentContext<Self>,
     ) {
+        tracing::info!("GetOrchestrator: FetchLogOperator finished");
         let output = match self.ok_or_terminate(message.into_inner(), ctx) {
             Some(output) => output,
             None => return,
@@ -234,6 +235,7 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for GetOrchestrator {
         message: TaskResult<FilterOutput, FilterError>,
         ctx: &ComponentContext<Self>,
     ) {
+        tracing::info!("GetOrchestrator: FilterOperator finished");
         let output = match self.ok_or_terminate(message.into_inner(), ctx) {
             Some(output) => output,
             None => return,
@@ -266,6 +268,7 @@ impl Handler<TaskResult<LimitOutput, LimitError>> for GetOrchestrator {
         message: TaskResult<LimitOutput, LimitError>,
         ctx: &ComponentContext<Self>,
     ) {
+        tracing::info!("GetOrchestrator: LimitOperator finished");
         let output = match self.ok_or_terminate(message.into_inner(), ctx) {
             Some(output) => output,
             None => return,
@@ -320,6 +323,7 @@ impl Handler<TaskResult<ProjectionOutput, ProjectionError>> for GetOrchestrator 
         message: TaskResult<ProjectionOutput, ProjectionError>,
         ctx: &ComponentContext<Self>,
     ) {
+        tracing::info!("GetOrchestrator: ProjectionOperator finished");
         let output = match self.ok_or_terminate(message.into_inner(), ctx) {
             Some(output) => output,
             None => return,
