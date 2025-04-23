@@ -50,9 +50,10 @@ use chroma_system::{
 };
 use chroma_types::chroma_proto::CollectionVersionFile;
 use chroma_types::CollectionUuid;
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Utc};
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
+use tracing::Span;
 
 use crate::operators::compute_unused_files::{
     ComputeUnusedFilesError, ComputeUnusedFilesInput, ComputeUnusedFilesOperator,
@@ -83,11 +84,7 @@ use prost::Message;
 pub struct GarbageCollectorOrchestrator {
     collection_id: CollectionUuid,
     version_file_path: String,
-    // TODO(rohitcp): Remove this parameter.
-    cutoff_time_hours: u32,
-    // Absolute cutoff time in seconds.
-    // Any version created before this time will be deleted unless retained by the min_versions_to_keep parameter.
-    cutoff_time_secs: u64,
+    absolute_cutoff_time: DateTime<Utc>,
     sysdb_client: SysDb,
     dispatcher: ComponentHandle<Dispatcher>,
     storage: Storage,
@@ -120,8 +117,7 @@ impl GarbageCollectorOrchestrator {
     pub fn new(
         collection_id: CollectionUuid,
         version_file_path: String,
-        cutoff_time_secs: u64,
-        cutoff_time_hours: u32,
+        absolute_cutoff_time: DateTime<Utc>,
         sysdb_client: SysDb,
         dispatcher: ComponentHandle<Dispatcher>,
         storage: Storage,
@@ -130,8 +126,7 @@ impl GarbageCollectorOrchestrator {
         Self {
             collection_id,
             version_file_path,
-            cutoff_time_hours,
-            cutoff_time_secs,
+            absolute_cutoff_time,
             sysdb_client,
             dispatcher,
             storage,
@@ -200,7 +195,7 @@ impl Orchestrator for GarbageCollectorOrchestrator {
         self.dispatcher.clone()
     }
 
-    fn initial_tasks(&self, ctx: &ComponentContext<Self>) -> Vec<TaskMessage> {
+    async fn initial_tasks(&mut self, ctx: &ComponentContext<Self>) -> Vec<TaskMessage> {
         tracing::info!(
             path = %self.version_file_path,
             "Creating initial fetch version file task"
@@ -260,12 +255,6 @@ impl Handler<TaskResult<FetchVersionFileOutput, FetchVersionFileError>>
             }
         };
 
-        let cutoff_time = Utc::now() - Duration::hours(self.cutoff_time_hours as i64);
-        tracing::info!(
-            cutoff_time = ?cutoff_time,
-            "Computed cutoff time for version deletion"
-        );
-
         let version_file = match CollectionVersionFile::decode(output.version_file_content()) {
             Ok(file) => {
                 tracing::info!("Successfully decoded version file");
@@ -287,15 +276,18 @@ impl Handler<TaskResult<FetchVersionFileOutput, FetchVersionFileError>>
             Box::new(ComputeVersionsToDeleteOperator {}),
             ComputeVersionsToDeleteInput {
                 version_file,
-                cutoff_time,
-                cutoff_time_secs: self.cutoff_time_secs,
+                cutoff_time: self.absolute_cutoff_time,
                 min_versions_to_keep: 2,
             },
             ctx.receiver(),
         );
 
         tracing::info!("Sending compute versions task to dispatcher");
-        if let Err(e) = self.dispatcher().send(compute_task, None).await {
+        if let Err(e) = self
+            .dispatcher()
+            .send(compute_task, Some(Span::current()))
+            .await
+        {
             tracing::error!(error = ?e, "Failed to send compute task to dispatcher");
             self.terminate_with_result(Err(GarbageCollectorError::Channel(e)), ctx);
             return;
@@ -352,7 +344,11 @@ impl Handler<TaskResult<ComputeVersionsToDeleteOutput, ComputeVersionsToDeleteEr
             ctx.receiver(),
         );
 
-        if let Err(e) = self.dispatcher().send(mark_task, None).await {
+        if let Err(e) = self
+            .dispatcher()
+            .send(mark_task, Some(Span::current()))
+            .await
+        {
             self.terminate_with_result(Err(GarbageCollectorError::Channel(e)), ctx);
             // Signal the dispatcher to shut down
             return;
@@ -391,7 +387,11 @@ impl Handler<TaskResult<MarkVersionsAtSysDbOutput, MarkVersionsAtSysDbError>>
             ctx.receiver(),
         );
 
-        if let Err(e) = self.dispatcher().send(compute_task, None).await {
+        if let Err(e) = self
+            .dispatcher()
+            .send(compute_task, Some(Span::current()))
+            .await
+        {
             self.terminate_with_result(Err(GarbageCollectorError::Channel(e)), ctx);
             return;
         }
@@ -429,7 +429,11 @@ impl Handler<TaskResult<ComputeUnusedFilesOutput, ComputeUnusedFilesError>>
             ctx.receiver(),
         );
 
-        if let Err(e) = self.dispatcher().send(delete_task, None).await {
+        if let Err(e) = self
+            .dispatcher()
+            .send(delete_task, Some(Span::current()))
+            .await
+        {
             self.terminate_with_result(Err(GarbageCollectorError::Channel(e)), ctx);
             return;
         }
@@ -499,7 +503,11 @@ impl Handler<TaskResult<DeleteUnusedFilesOutput, DeleteUnusedFilesError>>
         // Update the deletion list so that GarbageCollectorOrchestrator can use it in the final stage.
         self.deletion_list = output.deleted_files.clone().into_iter().collect();
 
-        if let Err(e) = self.dispatcher().send(delete_versions_task, None).await {
+        if let Err(e) = self
+            .dispatcher()
+            .send(delete_versions_task, Some(Span::current()))
+            .await
+        {
             self.terminate_with_result(Err(GarbageCollectorError::Channel(e)), ctx);
             return;
         }
@@ -547,7 +555,7 @@ mod tests {
     use chroma_system::System;
     use std::str::FromStr;
     use std::time::{Duration, SystemTime};
-    use tracing_subscriber;
+    use tracing_test::traced_test;
     use uuid::Uuid;
 
     #[allow(dead_code)]
@@ -778,9 +786,8 @@ mod tests {
     }
 
     #[tokio::test]
+    #[traced_test]
     async fn test_k8s_integration_check_end_to_end() {
-        let _ = tracing_subscriber::fmt::try_init();
-
         // Create storage config and storage client
         let storage_config = StorageConfig::ObjectStore(ObjectStoreConfig {
             bucket: ObjectStoreBucketConfig {
@@ -843,7 +850,7 @@ mod tests {
             .unwrap();
 
         // Get collection info for GC from sysdb
-        let collections_to_gc = sysdb.get_collections_to_gc().await.unwrap();
+        let collections_to_gc = sysdb.get_collections_to_gc(None, None).await.unwrap();
         let collection_info = collections_to_gc
             .iter()
             .find(|c| c.id == collection_id)
@@ -853,11 +860,7 @@ mod tests {
         let orchestrator = GarbageCollectorOrchestrator::new(
             collection_id,
             collection_info.version_file_path.clone(),
-            SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-            0, // cutoff_time_hours: immediately expire versions
+            SystemTime::now().into(), //  immediately expire versions
             sysdb,
             dispatcher_handle,
             storage.clone(),
@@ -919,9 +922,8 @@ mod tests {
     }
 
     #[tokio::test]
+    #[traced_test]
     async fn test_k8s_integration_soft_delete() {
-        let _ = tracing_subscriber::fmt::try_init();
-
         // Create storage config and storage client
         let storage_config = StorageConfig::ObjectStore(ObjectStoreConfig {
             bucket: ObjectStoreBucketConfig {
@@ -992,7 +994,7 @@ mod tests {
             .unwrap();
 
         // Get collection info for GC from sysdb
-        let collections_to_gc = sysdb.get_collections_to_gc().await.unwrap();
+        let collections_to_gc = sysdb.get_collections_to_gc(None, None).await.unwrap();
         let collection_info = collections_to_gc
             .iter()
             .find(|c| c.id == collection_id)
@@ -1002,11 +1004,7 @@ mod tests {
         let orchestrator = GarbageCollectorOrchestrator::new(
             collection_id,
             collection_info.version_file_path.clone(),
-            SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-            0, // cutoff_time_hours: immediately expire versions
+            SystemTime::now().into(), //  immediately expire versions
             sysdb,
             dispatcher_handle,
             storage.clone(),
@@ -1090,9 +1088,8 @@ mod tests {
     }
 
     #[tokio::test]
+    #[traced_test]
     async fn test_k8s_integration_dry_run() {
-        let _ = tracing_subscriber::fmt::try_init();
-
         // Create storage config and storage client
         let storage_config = StorageConfig::ObjectStore(ObjectStoreConfig {
             bucket: ObjectStoreBucketConfig {
@@ -1155,7 +1152,7 @@ mod tests {
             .unwrap();
 
         // Get collection info for GC from sysdb
-        let collections_to_gc = sysdb.get_collections_to_gc().await.unwrap();
+        let collections_to_gc = sysdb.get_collections_to_gc(None, None).await.unwrap();
         let collection_info = collections_to_gc
             .iter()
             .find(|c| c.id == collection_id)
@@ -1165,11 +1162,7 @@ mod tests {
         let orchestrator = GarbageCollectorOrchestrator::new(
             collection_id,
             collection_info.version_file_path.clone(),
-            SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-            0, // cutoff_time_hours: immediately expire versions
+            SystemTime::now().into(), //  immediately expire versions
             sysdb,
             dispatcher_handle,
             storage.clone(),

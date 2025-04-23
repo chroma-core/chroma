@@ -1,6 +1,5 @@
 import { expect, test, beforeEach, describe } from "@jest/globals";
-import { DefaultEmbeddingFunction } from "../src";
-import { ChromaClient } from "../src";
+import { DefaultEmbeddingFunction, ChromaClient } from "../src";
 
 describe("collection operations", () => {
   // connects to the unauthenticated chroma instance started in

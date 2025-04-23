@@ -178,6 +178,20 @@ fn test_missing_default_field() {
             HnswGarbageCollectionPolicyConfig::FullRebuild => {}
             _ => panic!("Expected FullRebuild policy"),
         }
+        match config.query_service.storage {
+            chroma_storage::config::StorageConfig::AdmissionControlledS3(config) => {
+                assert_eq!(config.s3_config.bucket, "chroma");
+                match config.rate_limiting_policy {
+                    chroma_storage::config::RateLimitingConfig::CountBasedPolicy(config) => {
+                        assert_eq!(config.max_concurrent_requests, 15);
+                        assert_eq!(config.bandwidth_allocation.len(), 2);
+                        assert_eq!(config.bandwidth_allocation[0], 0.7);
+                        assert_eq!(config.bandwidth_allocation[1], 0.3);
+                    }
+                }
+            }
+            _ => panic!("Expected AdmissionControlledS3 storage config"),
+        }
         Ok(())
     });
 }

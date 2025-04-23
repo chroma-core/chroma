@@ -154,10 +154,12 @@ const sidebarConfig: AppSection[] = [
   {
     id: "cli",
     name: "CLI",
-    default: "install-and-run",
+    default: "install",
     icon: SquareTerminalIcon,
     pages: [
-      { id: "install-and-run", name: "Install and run" },
+      { id: "install", name: "Installing the CLI" },
+      { id: "run", name: "Run a Chroma Server" },
+      { id: "sample-apps", name: "Sample Apps" },
       { id: "vacuum", name: "Vacuum" },
     ],
   },
@@ -186,14 +188,6 @@ const sidebarConfig: AppSection[] = [
       },
     ],
   },
-  // {
-  //   id: "guides-and-examples",
-  //   name: "Guides & Examples",
-  //   icon: GraduationCap,
-  //   disable: true,
-  //   tag: "Coming Soon",
-  // },
 ];
 
 export default sidebarConfig;
-

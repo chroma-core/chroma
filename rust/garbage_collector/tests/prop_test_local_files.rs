@@ -48,6 +48,7 @@ use chroma_types::SegmentFlushInfo;
 use chroma_types::SegmentScope;
 use chroma_types::SegmentType;
 use chroma_types::{CollectionUuid, SegmentUuid};
+use chrono::DateTime;
 use futures::executor::block_on;
 use garbage_collector_library::garbage_collector_orchestrator::GarbageCollectorOrchestrator;
 use garbage_collector_library::types::CleanupMode;
@@ -60,6 +61,7 @@ use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use tracing_test::traced_test;
 use uuid::Uuid;
 
 // SegmentBlockIdInfo is used to keep track of the segment block ids for a version.
@@ -756,8 +758,7 @@ impl GcTest {
         let orchestrator = GarbageCollectorOrchestrator::new(
             collection.collection_id,
             version_file_name,
-            cutoff_time,
-            0,
+            DateTime::from_timestamp(cutoff_time as i64, 0).unwrap(),
             sysdb,
             dispatcher_handle.clone(),
             storage,
@@ -956,12 +957,8 @@ prop_state_machine! {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[traced_test]
 async fn run_gc_test_ext() {
-    // Initialize tracing
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .try_init();
-
     INVARIANT_CHECK_COUNT.store(0, Ordering::SeqCst);
     run_gc_test();
     let checks = INVARIANT_CHECK_COUNT.load(Ordering::SeqCst);

@@ -15,7 +15,7 @@ use chroma_types::{
         Projection, ProjectionRecord, RecordDistance,
     },
     plan::{Count, Get, Knn},
-    CollectionAndSegments, CollectionUuid, ExecutorError, HnswSpace,
+    CollectionAndSegments, CollectionUuid, ExecutorError, HnswSpace, SegmentType,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -42,6 +42,14 @@ impl LocalExecutor {
             compactor_handle,
             backfilled_collections: Arc::new(parking_lot::Mutex::new(HashSet::new())),
         }
+    }
+
+    pub fn get_supported_segment_types(&self) -> Vec<SegmentType> {
+        vec![
+            SegmentType::HnswLocalMemory,
+            SegmentType::HnswLocalPersisted,
+            SegmentType::Sqlite,
+        ]
     }
 }
 
@@ -72,16 +80,16 @@ impl LocalExecutor {
         self.compactor_handle
             .request(backfill_msg, None)
             .await
-            .map_err(|_| ExecutorError::BackfillError)?
-            .map_err(|_| ExecutorError::BackfillError)?;
+            .map_err(|err| ExecutorError::BackfillError(Box::new(err)))?
+            .map_err(|err| ExecutorError::BackfillError(Box::new(err)))?;
         let purge_log_msg = PurgeLogsMessage {
             collection_id: collection_and_segment.collection.collection_id,
         };
         self.compactor_handle
             .request(purge_log_msg, None)
             .await
-            .map_err(|_| ExecutorError::BackfillError)?
-            .map_err(|_| ExecutorError::BackfillError)?;
+            .map_err(|err| ExecutorError::BackfillError(Box::new(err)))?
+            .map_err(|err| ExecutorError::BackfillError(Box::new(err)))?;
         let mut backfill_guard = self.backfilled_collections.lock();
         backfill_guard.insert(collection_and_segment.collection.collection_id);
         Ok(())

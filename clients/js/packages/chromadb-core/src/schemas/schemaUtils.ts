@@ -126,7 +126,9 @@ export function getSchemaVersion(schemaName: keyof typeof schemaMap): string {
  * @returns A list of schema names (without .json extension)
  */
 export function getAvailableSchemas(): (keyof typeof schemaMap)[] {
-  return Object.keys(schemaMap).filter((name) => name !== "base_schema") as (keyof typeof schemaMap)[];
+  return Object.keys(schemaMap).filter(
+    (name) => name !== "base_schema",
+  ) as (keyof typeof schemaMap)[];
 }
 
 /**

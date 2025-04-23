@@ -68,7 +68,7 @@ const CloudSignUp: React.FC = () => {
           </div>
           <div className="h-full flex items-start justify-end flex-shrink-0 ">
             <Image
-              src="/cloud-art.svg"
+              src="/cloud-art.jpg"
               alt="Cloud Art"
               width={128}
               height={155}

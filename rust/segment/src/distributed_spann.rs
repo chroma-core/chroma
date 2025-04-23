@@ -1,5 +1,3 @@
-use crate::spann_provider::SpannProvider;
-
 use super::blockfile_record::ApplyMaterializedLogError;
 use super::blockfile_record::RecordSegmentReader;
 use super::types::{
@@ -18,17 +16,16 @@ use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::SpannIndexWri
 use chroma_types::Collection;
 use chroma_types::InternalSpannConfiguration;
 use chroma_types::SegmentUuid;
+use chroma_types::HNSW_PATH;
+use chroma_types::MAX_HEAD_ID_BF_PATH;
+use chroma_types::POSTING_LIST_PATH;
+use chroma_types::VERSION_MAP_PATH;
 use chroma_types::{MaterializedLogOperation, Segment, SegmentScope, SegmentType};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use thiserror::Error;
 use uuid::Uuid;
-
-const HNSW_PATH: &str = "hnsw_path";
-const VERSION_MAP_PATH: &str = "version_map_path";
-const POSTING_LIST_PATH: &str = "posting_list_path";
-const MAX_HEAD_ID_BF_PATH: &str = "max_head_id_path";
 
 #[derive(Clone)]
 pub struct SpannSegmentWriter {
@@ -407,15 +404,7 @@ impl ChromaError for SpannSegmentReaderError {
     }
 }
 
-#[derive(Debug)]
-pub struct SpannSegmentReaderContext {
-    pub collection: Collection,
-    pub segment: Segment,
-    pub spann_provider: SpannProvider,
-    pub dimension: usize,
-}
-
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SpannSegmentReader<'me> {
     pub index_reader: SpannIndexReader<'me>,
     #[allow(dead_code)]
@@ -497,7 +486,7 @@ impl<'me> SpannSegmentReader<'me> {
             &segment.collection,
             params.space.clone().into(),
             dimensionality,
-            params.search_ef,
+            params.ef_search,
             posting_list_id.as_ref(),
             versions_map_id.as_ref(),
             blockfile_provider,
@@ -636,7 +625,6 @@ mod test {
                 vector_index: chroma_types::VectorIndexConfiguration::Spann(params),
                 embedding_function: None,
             },
-            legacy_configuration_json: (),
             metadata: None,
             dimension: None,
             tenant: "test".to_string(),

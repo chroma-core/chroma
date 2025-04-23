@@ -14,6 +14,7 @@ Chroma provides lightweight wrappers around popular embedding providers, making 
 | [OpenAI](./embedding-models/openai)                                     | ✓      | ✓          |
 | [Google Gemini](./embedding-models/google-gemini)                       | ✓      | ✓          |
 | [Cohere](./embedding-models/cohere)                                     | ✓      | ✓          |
+| [Baseten](./embedding-models/baseten)                                   | ✓      | -          |
 | [Hugging Face](./embedding-models/hugging-face)                         | ✓      | -          |
 | [Instructor](./embedding-models/instructor)                             | ✓      | -          |
 | [Hugging Face Embedding Server](./embedding-models/hugging-face-server) | ✓      | ✓          |

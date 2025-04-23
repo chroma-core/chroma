@@ -14,7 +14,6 @@ from typing import (
 from numpy.typing import NDArray
 import numpy as np
 from typing_extensions import TypedDict, Protocol, runtime_checkable
-from pydantic import Field
 import chromadb.errors as errors
 from chromadb.base_types import (
     Metadata,
@@ -326,16 +325,15 @@ Parameter = TypeVar("Parameter", Document, Image, Embedding, Metadata, ID)
 Include = List[
     Literal["documents", "embeddings", "metadatas", "distances", "uris", "data"]
 ]
-IncludeMetadataDocuments = Field(default=["metadatas", "documents"])
-IncludeMetadataDocumentsEmbeddings = Field(
-    default=["metadatas", "documents", "embeddings"]
-)
-IncludeMetadataDocumentsEmbeddingsDistances = Field(
-    default=["metadatas", "documents", "embeddings", "distances"]
-)
-IncludeMetadataDocumentsDistances = Field(
-    default=["metadatas", "documents", "distances"]
-)
+IncludeMetadataDocuments: Include = ["metadatas", "documents"]
+IncludeMetadataDocumentsEmbeddings: Include = ["metadatas", "documents", "embeddings"]
+IncludeMetadataDocumentsEmbeddingsDistances: Include = [
+    "metadatas",
+    "documents",
+    "embeddings",
+    "distances",
+]
+IncludeMetadataDocumentsDistances: Include = ["metadatas", "documents", "distances"]
 
 # Re-export types from chromadb.types
 LiteralValue = LiteralValue
@@ -539,7 +537,7 @@ class EmbeddingFunction(Protocol[D]):
         """
         Return the default space for the embedding function.
         """
-        return "cosine"
+        return "l2"
 
     def supported_spaces(self) -> List[Space]:
         """

@@ -126,6 +126,68 @@ func (r *LogRepository) PullRecords(ctx context.Context, collectionId string, of
 	return
 }
 
+func (r *LogRepository) ForkRecords(ctx context.Context, sourceCollectionID string, targetCollectionID string) (compactionOffset uint64, enumerationOffset uint64, err error) {
+	var tx pgx.Tx
+	tx, err = r.conn.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		trace_log.Error("Error in begin transaction for forking logs in log service", zap.Error(err), zap.String("sourceCollectionID", sourceCollectionID))
+		return
+	}
+	queriesWithTx := r.queries.WithTx(tx)
+	defer func() {
+		if err != nil {
+			tx.Rollback(ctx)
+		} else {
+			err = tx.Commit(ctx)
+		}
+	}()
+
+	sourceBounds, err := queriesWithTx.GetBoundsForCollection(ctx, sourceCollectionID)
+	if err != nil {
+		trace_log.Error("Error in getting compaction and enumeration offset for source collection", zap.Error(err), zap.String("collectionId", sourceCollectionID))
+		return
+	}
+	err = queriesWithTx.ForkCollectionRecord(ctx, log.ForkCollectionRecordParams{
+		CollectionID:   sourceCollectionID,
+		CollectionID_2: targetCollectionID,
+	})
+	if err != nil {
+		trace_log.Error("Error forking log record", zap.String("sourceCollectionID", sourceCollectionID))
+		return
+	}
+	targetBounds, err := queriesWithTx.GetMinimumMaximumOffsetForCollection(ctx, targetCollectionID)
+	if err != nil {
+		trace_log.Error("Error in deriving compaction and enumeration offset for target collection", zap.Error(err), zap.String("collectionId", targetCollectionID))
+		return
+	}
+
+	if targetBounds.MinOffset == 0 {
+		// Either the source collection is not compacted yet or no log is forked
+		compactionOffset = uint64(sourceBounds.RecordCompactionOffsetPosition)
+	} else {
+		// Some logs are forked, the min offset is guaranteed to be larger than source compaction offset
+		compactionOffset = uint64(targetBounds.MinOffset - 1)
+	}
+	if targetBounds.MaxOffset == 0 {
+		// Either the source collection is empty or no log is forked
+		enumerationOffset = uint64(sourceBounds.RecordEnumerationOffsetPosition)
+	} else {
+		// Some logs are forked. The max offset is the enumeration offset
+		enumerationOffset = uint64(targetBounds.MaxOffset)
+	}
+
+	_, err = queriesWithTx.InsertCollection(ctx, log.InsertCollectionParams{
+		ID:                              targetCollectionID,
+		RecordCompactionOffsetPosition:  int64(compactionOffset),
+		RecordEnumerationOffsetPosition: int64(enumerationOffset),
+	})
+	if err != nil {
+		trace_log.Error("Error in updating offset for target collection", zap.Error(err), zap.String("collectionId", targetCollectionID))
+		return
+	}
+	return
+}
+
 func (r *LogRepository) GetAllCollectionInfoToCompact(ctx context.Context, minCompactionSize uint64) (collectionToCompact []log.GetAllCollectionsToCompactRow, err error) {
 	collectionToCompact, err = r.queries.GetAllCollectionsToCompact(ctx, int64(minCompactionSize))
 	if collectionToCompact == nil {
@@ -166,6 +228,22 @@ func (r *LogRepository) GetLastCompactedOffsetForCollection(ctx context.Context,
 	if err != nil {
 		trace_log.Error("Error in getting last compacted offset for collection", zap.Error(err), zap.String("collectionId", collectionId))
 	}
+	return
+}
+
+// GetBoundsForCollection returns the offset of the last record compacted and the offset of the last
+// record inserted.  Thus, the range of uncompacted records is the interval (start, limit], which is
+// kind of backwards from how it is elsewhere, so pay attention to comments indicating the bias of
+// the offset.
+func (r *LogRepository) GetBoundsForCollection(ctx context.Context, collectionId string) (start, limit int64, err error) {
+	bounds, err := r.queries.GetBoundsForCollection(ctx, collectionId)
+	if err != nil {
+		trace_log.Error("Error in getting minimum and maximum offset for collection", zap.Error(err), zap.String("collectionId", collectionId))
+		return
+	}
+	start = bounds.RecordCompactionOffsetPosition
+	limit = bounds.RecordEnumerationOffsetPosition
+	err = nil
 	return
 }
 

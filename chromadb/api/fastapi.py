@@ -12,9 +12,6 @@ from chromadb.api.collection_configuration import (
     UpdateCollectionConfiguration,
     update_collection_configuration_to_json,
     create_collection_configuration_to_json,
-    create_collection_configuration_from_legacy_metadata_dict,
-    populate_create_hnsw_defaults,
-    validate_create_hnsw_config,
 )
 from chromadb import __version__
 from chromadb.api.base_http_client import BaseHTTPClient
@@ -36,6 +33,9 @@ from chromadb.api.types import (
     CollectionMetadata,
     validate_batch,
     convert_np_embeddings_to_list,
+    IncludeMetadataDocuments,
+    IncludeMetadataDocumentsDistances,
+    IncludeMetadataDocumentsEmbeddings,
 )
 from chromadb.auth import UserIdentity
 from chromadb.auth import (
@@ -264,24 +264,6 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         )
         model = CollectionModel.from_json(resp_json)
 
-        # TODO @jai: Remove this once server response contains configuration
-        if configuration is None or configuration.get("hnsw") is None:
-            if model.metadata is not None:
-                model.configuration_json = create_collection_configuration_to_json(
-                    create_collection_configuration_from_legacy_metadata_dict(
-                        model.metadata
-                    )
-                )
-        else:
-            # At this point we know configuration is not None and has hnsw
-            assert configuration is not None  # Help type checker
-            hnsw_config = configuration.get("hnsw")
-            assert hnsw_config is not None  # Help type checker
-            populate_create_hnsw_defaults(hnsw_config)
-            validate_create_hnsw_config(hnsw_config)
-            model.configuration_json = create_collection_configuration_to_json(
-                configuration
-            )
         return model
 
     @trace_method("FastAPI.get_collection", OpenTelemetryGranularity.OPERATION)
@@ -348,6 +330,24 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             },
         )
 
+    @trace_method("FastAPI._fork", OpenTelemetryGranularity.OPERATION)
+    @override
+    def _fork(
+        self,
+        collection_id: UUID,
+        new_name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> CollectionModel:
+        """Forks a collection"""
+        resp_json = self._make_request(
+            "post",
+            f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/fork",
+            json={"new_name": new_name},
+        )
+        model = CollectionModel.from_json(resp_json)
+        return model
+
     @trace_method("FastAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
     @override
     def delete_collection(
@@ -393,7 +393,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
                 tenant=tenant,
                 database=database,
                 limit=n,
-                include=["embeddings", "documents", "metadatas"],
+                include=IncludeMetadataDocumentsEmbeddings,
             ),
         )
 
@@ -404,20 +404,13 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         collection_id: UUID,
         ids: Optional[IDs] = None,
         where: Optional[Where] = None,
-        sort: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
-        page: Optional[int] = None,
-        page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = ["metadatas", "documents"],
+        include: Include = IncludeMetadataDocuments,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> GetResult:
-        if page and page_size:
-            offset = (page - 1) * page_size
-            limit = page_size
-
         # Servers do not support receiving "data", as that is hydrated by the client as a loadable
         filtered_include = [i for i in include if i != "data"]
 
@@ -427,7 +420,6 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             json={
                 "ids": ids,
                 "where": where,
-                "sort": sort,
                 "limit": limit,
                 "offset": offset,
                 "where_document": where_document,
@@ -599,7 +591,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = ["metadatas", "documents", "distances"],
+        include: Include = IncludeMetadataDocumentsDistances,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> QueryResult:

@@ -4,6 +4,7 @@ sqlitedb:
 collections_with_segments_provider:
   cache:
     nop:
+  cache_ttl_secs: 60
   permitted_parallelism: 32
   cache_invalidation_retry_policy:
     delay_ms: 0

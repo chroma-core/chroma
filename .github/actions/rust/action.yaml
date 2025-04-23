@@ -7,22 +7,13 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Update rustup
-      if: runner.os != 'Windows'
-      shell: bash
-      run: |
-        rustup self update
-    - name: Update rustup on Windows
-      if: runner.os == 'Windows'
-      shell: pwsh
-      run: |
-        $env:CARGO_HOME="C:\Users\Default\.cargo"; rustup self update
     - name: Setup Rust
       shell: bash
       # (reads from rust-toolchain.toml)
       run: |
         rustup --version
-        rustup toolchain install
+        rustup toolchain install 1.81.0
+        rustup default 1.81.0
     # Needed for sccache to work on Windows
     - name: Set default toolchain to rust-toolchain.toml on Windows
       if: runner.os == 'Windows'
@@ -41,11 +32,11 @@ runs:
           exit 1
         }
     - name: Install Protoc
-      uses: arduino/setup-protoc@v2
+      uses: arduino/setup-protoc@v3
       with:
         repo-token: ${{ inputs.github-token }}
     - name: Use sccache
-      uses: mozilla-actions/sccache-action@v0.0.7
+      uses: mozilla-actions/sccache-action@v0.0.9
     - name: Enable sccache
       shell: bash
       run: |

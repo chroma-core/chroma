@@ -55,5 +55,7 @@ app.get("/", async (req, res) => {
   res.send(query);
 });
 app.listen(3000, function () {
-  console.log("Example app using bundled chromadb package listening on port 3000!");
+  console.log(
+    "Example app using bundled chromadb package listening on port 3000!",
+  );
 });

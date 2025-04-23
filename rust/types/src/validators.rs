@@ -6,7 +6,7 @@ use std::{net::IpAddr, sync::LazyLock};
 use validator::ValidationError;
 
 static ALNUM_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{1, 61}[a-zA-Z0-9]$")
+    Regex::new(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{1, 510}[a-zA-Z0-9]$")
         .expect("The alphanumeric regex should be valid")
 });
 
@@ -35,7 +35,7 @@ pub(crate) fn validate_non_empty_metadata<V>(
 pub(crate) fn validate_name(name: impl AsRef<str>) -> Result<(), ValidationError> {
     let name_str = name.as_ref();
     if !ALNUM_RE.is_match(name_str) {
-        return Err(ValidationError::new("name").with_message(format!("Expected a name containing 3-63 characters from [a-zA-Z0-9._-], starting and ending with a character in [a-zA-Z0-9]. Got: {name_str}").into()));
+        return Err(ValidationError::new("name").with_message(format!("Expected a name containing 3-512 characters from [a-zA-Z0-9._-], starting and ending with a character in [a-zA-Z0-9]. Got: {name_str}").into()));
     }
 
     if DP_RE.is_match(name_str) {
