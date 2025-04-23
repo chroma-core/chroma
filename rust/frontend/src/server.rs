@@ -1164,7 +1164,7 @@ async fn fork_collection(
         )
         .await?;
     let _guard =
-        server.scorecard_request(&["op:fork_collection", format!("tenant:{}", tenant).as_str()]);
+        server.scorecard_request(&["op:fork_collection", format!("tenant:{}", tenant).as_str()])?;
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
 
