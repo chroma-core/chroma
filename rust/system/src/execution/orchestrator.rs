@@ -17,7 +17,7 @@ pub trait Orchestrator: Debug + Send + Sized + 'static {
     fn dispatcher(&self) -> ComponentHandle<Dispatcher>;
 
     /// Returns a vector of starting tasks that should be run in sequence
-    fn initial_tasks(&self, ctx: &ComponentContext<Self>) -> Vec<TaskMessage>;
+    async fn initial_tasks(&mut self, ctx: &ComponentContext<Self>) -> Vec<TaskMessage>;
 
     fn name() -> &'static str {
         type_name::<Self>()
@@ -99,7 +99,7 @@ impl<O: Orchestrator> Component for O {
     }
 
     async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
-        for task in self.initial_tasks(ctx) {
+        for task in self.initial_tasks(ctx).await {
             if !self.send(task, ctx).await {
                 break;
             }

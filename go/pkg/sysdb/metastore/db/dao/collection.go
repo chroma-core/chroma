@@ -30,7 +30,7 @@ func (s *collectionDb) DeleteAll() error {
 func (s *collectionDb) GetCollectionEntry(collectionID *string, databaseName *string) (*dbmodel.Collection, error) {
 	var collections []*dbmodel.Collection
 	query := s.db.Table("collections").
-		Select("collections.id, collections.name, collections.database_id, collections.is_deleted, databases.tenant_id, collections.version, collections.version_file_name").
+		Select("collections.id, collections.name, collections.database_id, collections.is_deleted, databases.tenant_id, collections.version, collections.version_file_name, collections.root_collection_id").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
 		Where("collections.id = ?", collectionID)
 
@@ -390,7 +390,7 @@ func (s *collectionDb) UpdateLogPositionAndVersionInfo(
 	// expensive locking mechanism. Taking the lock as a caution for now.
 	result := s.db.Model(&dbmodel.Collection{}).
 		Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("id = ? AND version = ? AND version_file_name = ?",
+		Where("id = ? AND version = ? AND (version_file_name IS NULL OR version_file_name = ?)",
 			collectionID,
 			currentCollectionVersion,
 			currentVersionFileName).
@@ -451,10 +451,66 @@ func (s *collectionDb) UpdateVersionRelatedFields(collectionID, existingVersionF
 	}
 
 	result := s.db.Model(&dbmodel.Collection{}).
-		Where("id = ? AND version_file_name = ?", collectionID, existingVersionFileName).
+		Where("id = ? AND (version_file_name IS NULL OR version_file_name = ?)",
+			collectionID, existingVersionFileName).
 		Updates(updates)
 	if result.Error != nil {
 		return 0, result.Error
 	}
 	return result.RowsAffected, nil
+}
+
+func (s *collectionDb) LockCollection(collectionID string) error {
+	var collections []dbmodel.Collection
+	err := s.db.Model(&dbmodel.Collection{}).
+		Where("collections.id = ?", collectionID).Clauses(clause.Locking{
+		Strength: "UPDATE",
+	}).Find(&collections).Error
+	if err != nil {
+		return err
+	}
+	if len(collections) == 0 {
+		return common.ErrCollectionNotFound
+	}
+
+	err = s.db.Model(&dbmodel.CollectionMetadata{}).
+		Where("collection_metadata.collection_id = ?", collectionID).Clauses(clause.Locking{
+		Strength: "UPDATE",
+	}).Find(nil).Error
+	if err != nil {
+		return err
+	}
+
+	var segments []*dbmodel.Segment
+	err = s.db.Model(&dbmodel.Segment{}).
+		Where("segments.collection_id = ?", collectionID).Clauses(clause.Locking{
+		Strength: "UPDATE",
+	}).Find(&segments).Error
+	if err != nil {
+		return err
+	}
+
+	var segmentIDs []*string
+	for _, segment := range segments {
+		segmentIDs = append(segmentIDs, &segment.ID)
+	}
+
+	err = s.db.Model(&dbmodel.SegmentMetadata{}).
+		Where("segment_metadata.segment_id IN ?", segmentIDs).Clauses(clause.Locking{
+		Strength: "UPDATE",
+	}).Find(nil).Error
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *collectionDb) UpdateCollectionLineageFilePath(collectionID string, currentLineageFileName string, newLineageFileName string) error {
+	return s.db.Model(&dbmodel.Collection{}).
+		Where("id = ? AND (lineage_file_name IS NULL OR lineage_file_name = ?)", collectionID, currentLineageFileName).
+		Updates(map[string]interface{}{
+			"lineage_file_name": newLineageFileName,
+		}).Error
+
 }

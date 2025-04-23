@@ -5,12 +5,12 @@ name: DeepEval
 
 # DeepEval
 
-[DeepEval](https://docs.confident-ai.com/docs/integrations-chroma) is the open-source LLM evaluation framework. It provides 20+ research-backed metrics to help you evaluate and pick the best hyperparameters for your LLM system.
+[DeepEval](https://www.deepeval.com/integrations/vector-databases/chroma) is the open-source LLM evaluation framework. It provides 20+ research-backed metrics to help you evaluate and pick the best hyperparameters for your LLM system.
 
 When building a RAG system, you can use DeepEval to pick the best parameters for your **Choma retriever** for optimal retrieval performance and accuracy: `n_results`, `distance_function`, `embedding_model`, `chunk_size`, etc.
 
 {% Banner type="tip" %}
-For more information on how to use DeepEval, see the [DeepEval docs](https://docs.confident-ai.com/docs/getting-started).
+For more information on how to use DeepEval, see the [DeepEval docs](https://www.deepeval.com/docs/getting-started).
 {% /Banner %}
 
 ## Getting Started
@@ -87,7 +87,7 @@ When logged in, running `evaluate` will automatically send evaluation results to
 ![](https://github.com/confident-ai/deepeval/raw/main/assets/demo.gif)
 
 {% Banner type="tip" %}
-To learn more about how to use the platform, please see [this Quickstart Guide](https://docs.confident-ai.com/confident-ai/confident-ai-introduction).
+To learn more about how to use the platform, please see [this Quickstart Guide](https://documentation.confident-ai.com/).
 {% /Banner %}
 
 ## Support

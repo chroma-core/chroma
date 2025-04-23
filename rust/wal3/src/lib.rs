@@ -43,6 +43,8 @@ pub enum Error {
     LogClosed,
     #[error("an empty batch was passed to append")]
     EmptyBatch,
+    #[error("perform exponential backoff and retry")]
+    Backoff,
     #[error("an internal, otherwise unclassifiable error")]
     Internal,
     #[error("could not find FSN in path: {0}")]
@@ -74,6 +76,7 @@ impl chroma_error::ChromaError for Error {
             Self::LogFull => chroma_error::ErrorCodes::Aborted,
             Self::LogClosed => chroma_error::ErrorCodes::FailedPrecondition,
             Self::EmptyBatch => chroma_error::ErrorCodes::InvalidArgument,
+            Self::Backoff => chroma_error::ErrorCodes::Unavailable,
             Self::Internal => chroma_error::ErrorCodes::Internal,
             Self::MissingFragmentSequenceNumber(_) => chroma_error::ErrorCodes::Internal,
             Self::CorruptManifest(_) => chroma_error::ErrorCodes::DataLoss,

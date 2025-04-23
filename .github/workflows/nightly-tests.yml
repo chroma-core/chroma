@@ -15,12 +15,15 @@ jobs:
                    "chromadb/test/property/test_add.py",
                    "chromadb/test/property/test_filtering.py",
                    "chromadb/test/property/test_embeddings.py"]
-    runs-on: "depot-ubuntu-22.04-8"
+    runs-on: "blacksmith-8vcpu-ubuntu-2204"
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/python
         with:
           python-version: "3.12"
+      - uses: useblacksmith/build-push-action@v1.1
+        with:
+          setup-only: true
       - uses: ./.github/actions/tilt
       - name: Test
         run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.test-globs }}"'
@@ -45,7 +48,7 @@ jobs:
           pagerduty-dedup-key: distributed-test-failed-${{ matrix.test-globs}}
 
   merge-cluster-logs:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2204
     needs: test-cluster
     steps:
       - name: Merge

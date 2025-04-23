@@ -4,7 +4,7 @@ import { authOptionsToAuthProvider, ClientAuthProvider } from "./auth";
 import { chromaFetch } from "./ChromaFetch";
 import { Collection } from "./Collection";
 import { DefaultEmbeddingFunction } from "./embeddings/DefaultEmbeddingFunction";
-import { Configuration, ApiApi as DefaultApi } from "./generated";
+import { Configuration, ApiApi as DefaultApi, Api } from "./generated";
 import type {
   ChromaClientParams,
   CollectionMetadata,
@@ -18,7 +18,8 @@ import type {
   UserIdentity,
 } from "./types";
 import { validateTenantDatabase, wrapCollection } from "./utils";
-
+import { loadApiCollectionConfigurationFromCreateCollectionConfiguration } from "./CollectionConfiguration";
+import { warn } from "console";
 const DEFAULT_TENANT = "default_tenant";
 const DEFAULT_DATABASE = "default_database";
 
@@ -224,25 +225,43 @@ export class ChromaClient {
     name,
     metadata,
     embeddingFunction = new DefaultEmbeddingFunction(),
+    configuration,
   }: CreateCollectionParams): Promise<Collection> {
     await this.init();
+    let collectionConfiguration: Api.CollectionConfiguration | undefined =
+      undefined;
+    if (configuration) {
+      collectionConfiguration =
+        loadApiCollectionConfigurationFromCreateCollectionConfiguration(
+          configuration,
+        );
+    }
     const newCollection = await this.api.createCollection(
       this.tenant,
       this.database,
       {
         name,
-        // @ts-ignore: we need to generate the client libraries again
-        configuration: null, //TODO: Configuration type in JavaScript
+        configuration: collectionConfiguration,
         metadata: metadata,
       },
       this.api.options,
     );
+
+    let config: Api.CollectionConfiguration = {};
+    try {
+      config = newCollection.configuration_json;
+    } catch {
+      warn(
+        "Server does not respond with configuration_json. Please update server",
+      );
+    }
 
     return wrapCollection(this, {
       name: newCollection.name,
       id: newCollection.id,
       metadata: newCollection.metadata as CollectionMetadata | undefined,
       embeddingFunction,
+      configuration: config,
     });
   }
 
@@ -271,26 +290,47 @@ export class ChromaClient {
     name,
     metadata,
     embeddingFunction = new DefaultEmbeddingFunction(),
+    configuration,
   }: GetOrCreateCollectionParams): Promise<Collection> {
     await this.init();
+
+    let collectionConfiguration: Api.CollectionConfiguration | undefined =
+      undefined;
+
+    if (configuration) {
+      collectionConfiguration =
+        loadApiCollectionConfigurationFromCreateCollectionConfiguration(
+          configuration,
+        );
+    }
+
     const newCollection = await this.api.createCollection(
       this.tenant,
       this.database,
       {
         name,
-        // @ts-ignore: we need to generate the client libraries again
-        configuration: null, //TODO: Configuration type in JavaScript
+        configuration: collectionConfiguration,
         metadata: metadata,
         get_or_create: true,
       },
       this.api.options,
     );
 
+    let config: Api.CollectionConfiguration = {};
+    try {
+      config = newCollection.configuration_json;
+    } catch {
+      warn(
+        "Server does not respond with configuration_json. Please update server",
+      );
+    }
+
     return wrapCollection(this, {
       name: newCollection.name,
       id: newCollection.id,
       metadata: newCollection.metadata as CollectionMetadata | undefined,
       embeddingFunction,
+      configuration: config,
     });
   }
 
@@ -412,6 +452,15 @@ export class ChromaClient {
       this.api.options,
     );
 
+    let config: Api.CollectionConfiguration = {};
+    try {
+      config = response.configuration_json;
+    } catch {
+      warn(
+        "Server does not respond with configuration_json. Please update server",
+      );
+    }
+
     return wrapCollection(this, {
       id: response.id,
       name: response.name,
@@ -420,6 +469,7 @@ export class ChromaClient {
         embeddingFunction !== undefined
           ? embeddingFunction
           : new DefaultEmbeddingFunction(),
+      configuration: config,
     });
   }
 

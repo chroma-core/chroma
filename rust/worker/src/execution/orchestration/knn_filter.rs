@@ -3,8 +3,9 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;
-use chroma_segment::distributed_hnsw::{
-    DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentReader,
+use chroma_segment::{
+    distributed_hnsw::{DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentReader},
+    distributed_spann::SpannSegmentReaderError,
 };
 use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
@@ -61,6 +62,8 @@ pub enum KnnError {
     SpannHeadSearch(#[from] SpannCentersSearchError),
     #[error("Error running Spann Knn Merge Operator")]
     SpannKnnMerge(#[from] SpannKnnMergeError),
+    #[error("Error creating spann segment reader: {0}")]
+    SpannSegmentReaderCreationError(#[from] SpannSegmentReaderError),
     #[error("Invalid distance function")]
     InvalidDistanceFunction,
     #[error("Operation aborted because resources exhausted")]
@@ -88,6 +91,7 @@ impl ChromaError for KnnError {
             KnnError::SpannKnnMerge(_) => ErrorCodes::Internal,
             KnnError::InvalidDistanceFunction => ErrorCodes::InvalidArgument,
             KnnError::Aborted => ErrorCodes::ResourceExhausted,
+            KnnError::SpannSegmentReaderCreationError(e) => e.code(),
         }
     }
 }
@@ -208,7 +212,7 @@ impl Orchestrator for KnnFilterOrchestrator {
         self.dispatcher.clone()
     }
 
-    fn initial_tasks(&self, ctx: &ComponentContext<Self>) -> Vec<TaskMessage> {
+    async fn initial_tasks(&mut self, ctx: &ComponentContext<Self>) -> Vec<TaskMessage> {
         vec![wrap(Box::new(self.fetch_log.clone()), (), ctx.receiver())]
     }
 

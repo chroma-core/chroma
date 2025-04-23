@@ -64,6 +64,15 @@ pub struct HnswIndexRef {
     pub inner: Arc<RwLock<HnswIndex>>,
 }
 
+impl Debug for HnswIndexRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HnswIndexRef")
+            .field("id", &self.inner.read().id)
+            .field("dimensionality", &self.inner.read().dimensionality())
+            .finish_non_exhaustive()
+    }
+}
+
 impl Debug for HnswIndexProvider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HnswIndexProvider")

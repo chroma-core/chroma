@@ -15,9 +15,6 @@ from chromadb.api.collection_configuration import (
     UpdateCollectionConfiguration,
     create_collection_configuration_to_json,
     update_collection_configuration_to_json,
-    create_collection_configuration_from_legacy_metadata_dict,
-    populate_create_hnsw_defaults,
-    validate_create_hnsw_config,
 )
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System, Settings
 from chromadb.telemetry.opentelemetry import (
@@ -312,27 +309,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
                 "get_or_create": get_or_create,
             },
         )
-
         model = CollectionModel.from_json(resp_json)
-
-        # TODO @jai: Remove this once server response contains configuration
-        if configuration is None or configuration.get("hnsw") is None:
-            if model.metadata is not None:
-                model.configuration_json = create_collection_configuration_to_json(
-                    create_collection_configuration_from_legacy_metadata_dict(
-                        model.metadata
-                    )
-                )
-        else:
-            # At this point we know configuration is not None and has hnsw
-            assert configuration is not None  # Help type checker
-            hnsw_config = configuration.get("hnsw")
-            assert hnsw_config is not None  # Help type checker
-            populate_create_hnsw_defaults(hnsw_config)
-            validate_create_hnsw_config(hnsw_config)
-            model.configuration_json = create_collection_configuration_to_json(
-                configuration
-            )
 
         return model
 
@@ -398,6 +375,23 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
                 else None,
             },
         )
+
+    @trace_method("AsyncFastAPI._fork", OpenTelemetryGranularity.OPERATION)
+    @override
+    async def _fork(
+        self,
+        collection_id: UUID,
+        new_name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> CollectionModel:
+        resp_json = await self._make_request(
+            "post",
+            f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/fork",
+            json={"new_name": new_name},
+        )
+        model = CollectionModel.from_json(resp_json)
+        return model
 
     @trace_method("AsyncFastAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
     @override
