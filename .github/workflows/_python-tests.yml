@@ -185,7 +185,7 @@ jobs:
         id: compute-artifact-name
         # Randomize using $RANDOM
         # run: echo "artifact_name=cluster_logs_rust_frontend_$(basename "${{ matrix.test-globs }}" .py)_${{ matrix.python }}" >> $GITHUB_OUTPUT
-        run: echo "artifact_name=cluster_logs_rust_frontend_${{ matrix.test-globs }}_${{ matrix.python }}_$RANDOM" >> $GITHUB_OUTPUT
+        run: echo "artifact_name=cluster_logs_rust_frontend_$(basename "${{ matrix.test-globs }}" .py)_$RANDOM" >> $GITHUB_OUTPUT
       - name: Save service logs to artifact
         if: always()
         uses: ./.github/actions/export-tilt-logs
