@@ -7,6 +7,18 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use utoipa::ToSchema;
 
+#[derive(Deserialize, Serialize, Clone, Debug, Copy)]
+pub enum KnnIndex {
+    #[serde(alias = "hnsw")]
+    Hnsw,
+    #[serde(alias = "spann")]
+    Spann,
+}
+
+pub fn default_default_knn_index() -> KnnIndex {
+    KnnIndex::Hnsw
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "type")]
 pub enum EmbeddingFunctionConfiguration {
@@ -22,7 +34,7 @@ pub struct EmbeddingFunctionNewConfiguration {
     pub config: serde_json::Value,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum VectorIndexConfiguration {
     Hnsw(HnswConfiguration),
@@ -68,7 +80,7 @@ fn default_vector_index_config() -> VectorIndexConfiguration {
     VectorIndexConfiguration::Hnsw(HnswConfiguration::default())
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct InternalCollectionConfiguration {
     #[serde(default = "default_vector_index_config")]
     pub vector_index: VectorIndexConfiguration,
@@ -172,12 +184,12 @@ impl InternalCollectionConfiguration {
                 current_config.write_nprobe = write_nprobe;
                 let space = spann_config.space.clone();
                 current_config.space = space;
-                let construction_ef = spann_config.construction_ef;
-                current_config.construction_ef = construction_ef;
-                let search_ef = spann_config.search_ef;
-                current_config.search_ef = search_ef;
-                let m = spann_config.m;
-                current_config.m = m;
+                let construction_ef = spann_config.ef_construction;
+                current_config.ef_construction = construction_ef;
+                let search_ef = spann_config.ef_search;
+                current_config.ef_search = search_ef;
+                let m = spann_config.max_neighbors;
+                current_config.max_neighbors = m;
             }
         }
         // Update embedding_function if it exists in the update configuration
@@ -185,28 +197,36 @@ impl InternalCollectionConfiguration {
             self.embedding_function = Some(embedding_function.clone());
         }
     }
-}
 
-#[derive(Debug, Error)]
-pub enum CollectionConfigurationToInternalConfigurationError {
-    #[error("Multiple vector index configurations provided")]
-    MultipleVectorIndexConfigurations,
-}
-
-impl ChromaError for CollectionConfigurationToInternalConfigurationError {
-    fn code(&self) -> ErrorCodes {
-        match self {
-            Self::MultipleVectorIndexConfigurations => ErrorCodes::InvalidArgument,
+    pub fn try_from_config(
+        value: CollectionConfiguration,
+        default_knn_index: KnnIndex,
+    ) -> Result<Self, CollectionConfigurationToInternalConfigurationError> {
+        match (value.hnsw, value.spann) {
+            (Some(_), Some(_)) => Err(CollectionConfigurationToInternalConfigurationError::MultipleVectorIndexConfigurations),
+            (Some(hnsw), None) => Ok(InternalCollectionConfiguration {
+                vector_index: hnsw.into(),
+                embedding_function: value.embedding_function,
+            }),
+            (None, Some(spann)) => {
+                let spann: InternalSpannConfiguration = spann.into();
+                Ok(InternalCollectionConfiguration {
+                    vector_index: spann.into(),
+                    embedding_function: value.embedding_function,
+                })
+            }
+            (None, None) => {
+                let vector_index = match default_knn_index {
+                    KnnIndex::Hnsw => HnswConfiguration::default().into(),
+                    KnnIndex::Spann => InternalSpannConfiguration::default().into(),
+                };
+                Ok(InternalCollectionConfiguration {
+                    vector_index,
+                    embedding_function: value.embedding_function,
+                })
+            }
         }
     }
-}
-
-#[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
-#[cfg_attr(feature = "pyo3", pyo3::pyclass)]
-pub struct CollectionConfiguration {
-    pub hnsw: Option<HnswConfiguration>,
-    pub spann: Option<SpannConfiguration>,
-    pub embedding_function: Option<EmbeddingFunctionConfiguration>,
 }
 
 impl TryFrom<CollectionConfiguration> for InternalCollectionConfiguration {
@@ -234,6 +254,28 @@ impl TryFrom<CollectionConfiguration> for InternalCollectionConfiguration {
     }
 }
 
+#[derive(Debug, Error)]
+pub enum CollectionConfigurationToInternalConfigurationError {
+    #[error("Multiple vector index configurations provided")]
+    MultipleVectorIndexConfigurations,
+}
+
+impl ChromaError for CollectionConfigurationToInternalConfigurationError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            Self::MultipleVectorIndexConfigurations => ErrorCodes::InvalidArgument,
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
+#[cfg_attr(feature = "pyo3", pyo3::pyclass)]
+pub struct CollectionConfiguration {
+    pub hnsw: Option<HnswConfiguration>,
+    pub spann: Option<SpannConfiguration>,
+    pub embedding_function: Option<EmbeddingFunctionConfiguration>,
+}
+
 impl From<InternalCollectionConfiguration> for CollectionConfiguration {
     fn from(value: InternalCollectionConfiguration) -> Self {
         Self {
@@ -250,7 +292,7 @@ impl From<InternalCollectionConfiguration> for CollectionConfiguration {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum UpdateVectorIndexConfiguration {
     Hnsw(Option<UpdateHnswConfiguration>),

@@ -46,7 +46,9 @@ FROM record_log r
 WHERE r.collection_id = $1;
 
 -- name: GetBoundsForCollection :one
-SELECT record_compaction_offset_position, record_enumeration_offset_position
+SELECT
+	COALESCE(record_compaction_offset_position, 0) AS record_compaction_offset_position,
+	COALESCE(record_enumeration_offset_position, 0) AS record_enumeration_offset_position
 FROM collection
 WHERE id = $1;
 
@@ -58,3 +60,9 @@ SELECT id FROM collection;
 
 -- name: GetLastCompactedOffset :one
 SELECT record_compaction_offset_position FROM collection c WHERE c.id = $1;
+
+-- name: ForkCollectionRecord :exec
+INSERT INTO record_log ("offset", collection_id, timestamp, record)
+    SELECT record_log.offset, $2, record_log.timestamp, record_log.record
+    FROM record_log
+    WHERE record_log.collection_id = $1;

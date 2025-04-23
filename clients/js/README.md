@@ -4,6 +4,8 @@ Chroma is the open-source embedding database. Chroma makes it easy to build LLM 
 
 This package gives you a JS/TS interface to talk to a backend Chroma DB over REST.
 
+**Note:** JS client version 3._ is only compatible with chromadb v1.0.6 and newer or Chroma Cloud. For prior version compatiblity, please use JS client version 2._.
+
 [Learn more about Chroma](https://github.com/chroma-core/chroma)
 
 - [💬 Community Discord](https://discord.gg/MMeYNTmh3x)
@@ -16,6 +18,7 @@ This package gives you a JS/TS interface to talk to a backend Chroma DB over RES
 There are two packages available for using ChromaDB in your JavaScript/TypeScript projects:
 
 1. **chromadb**: Includes all embedding libraries as bundled dependencies.
+
    - Use this if you want a simple installation without worrying about dependency management.
    - Install with: `npm install chromadb` or `pnpm add chromadb`
 

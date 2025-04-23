@@ -126,6 +126,7 @@ impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
                     }
                 }
             }
+            fetched.sort_by_key(|f| f.log_offset);
             Ok(Chunk::new(fetched.into()))
         } else {
             // old behavior that we fall back to if the scout is not implemented

@@ -537,7 +537,7 @@ class EmbeddingFunction(Protocol[D]):
         """
         Return the default space for the embedding function.
         """
-        return "cosine"
+        return "l2"
 
     def supported_spaces(self) -> List[Space]:
         """

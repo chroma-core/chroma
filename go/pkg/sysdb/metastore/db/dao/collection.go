@@ -64,8 +64,9 @@ func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
 		Where("version > 0").
 		Where("version_file_name IS NOT NULL").
-		Where("version_file_name != ''")
-
+		Where("version_file_name != ''").
+		Where("root_collection_id IS NULL OR root_collection_id = ''").
+		Where("lineage_file_name IS NULL OR lineage_file_name = ''")
 	// Apply cutoff time filter only if provided
 	if cutoffTimeSecs != nil {
 		cutoffTime := time.Unix(int64(*cutoffTimeSecs), 0)
@@ -102,6 +103,8 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 		LogPosition                int64      `gorm:"column:log_position"`
 		Version                    int32      `gorm:"column:version"`
 		VersionFileName            string     `gorm:"column:version_file_name"`
+		RootCollectionId           string     `gorm:"column:root_collection_id"`
+		LineageFileName            string     `gorm:"column:lineage_file_name"`
 		TotalRecordsPostCompaction uint64     `gorm:"column:total_records_post_compaction"`
 		SizeBytesPostCompaction    uint64     `gorm:"column:size_bytes_post_compaction"`
 		LastCompactionTimeSecs     uint64     `gorm:"column:last_compaction_time_secs"`
@@ -120,7 +123,7 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 	}
 
 	query := s.db.Table("collections").
-		Select("collections.id as collection_id, collections.name as collection_name, collections.configuration_json_str, collections.dimension, collections.database_id, collections.ts as collection_ts, collections.is_deleted, collections.created_at as collection_created_at, collections.updated_at as collection_updated_at, collections.log_position, collections.version, collections.version_file_name, collections.total_records_post_compaction, collections.size_bytes_post_compaction, collections.last_compaction_time_secs, databases.name as database_name, databases.tenant_id as db_tenant_id, collections.tenant as tenant").
+		Select("collections.id as collection_id, collections.name as collection_name, collections.configuration_json_str, collections.dimension, collections.database_id, collections.ts as collection_ts, collections.is_deleted, collections.created_at as collection_created_at, collections.updated_at as collection_updated_at, collections.log_position, collections.version, collections.version_file_name, collections.root_collection_id, collections.lineage_file_name, collections.total_records_post_compaction, collections.size_bytes_post_compaction, collections.last_compaction_time_secs, databases.name as database_name, databases.tenant_id as db_tenant_id, collections.tenant as tenant").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
 		Order("collections.created_at ASC")
 
@@ -181,6 +184,8 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 				LogPosition:                r.LogPosition,
 				Version:                    r.Version,
 				VersionFileName:            r.VersionFileName,
+				RootCollectionId:           r.RootCollectionId,
+				LineageFileName:            r.LineageFileName,
 				TotalRecordsPostCompaction: r.TotalRecordsPostCompaction,
 				SizeBytesPostCompaction:    r.SizeBytesPostCompaction,
 				LastCompactionTimeSecs:     r.LastCompactionTimeSecs,
@@ -385,7 +390,7 @@ func (s *collectionDb) UpdateLogPositionAndVersionInfo(
 	// expensive locking mechanism. Taking the lock as a caution for now.
 	result := s.db.Model(&dbmodel.Collection{}).
 		Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("id = ? AND version = ? AND version_file_name = ?",
+		Where("id = ? AND version = ? AND (version_file_name IS NULL OR version_file_name = ?)",
 			collectionID,
 			currentCollectionVersion,
 			currentVersionFileName).
@@ -446,10 +451,66 @@ func (s *collectionDb) UpdateVersionRelatedFields(collectionID, existingVersionF
 	}
 
 	result := s.db.Model(&dbmodel.Collection{}).
-		Where("id = ? AND version_file_name = ?", collectionID, existingVersionFileName).
+		Where("id = ? AND (version_file_name IS NULL OR version_file_name = ?)",
+			collectionID, existingVersionFileName).
 		Updates(updates)
 	if result.Error != nil {
 		return 0, result.Error
 	}
 	return result.RowsAffected, nil
+}
+
+func (s *collectionDb) LockCollection(collectionID string) error {
+	var collections []dbmodel.Collection
+	err := s.db.Model(&dbmodel.Collection{}).
+		Where("collections.id = ?", collectionID).Clauses(clause.Locking{
+		Strength: "UPDATE",
+	}).Find(&collections).Error
+	if err != nil {
+		return err
+	}
+	if len(collections) == 0 {
+		return common.ErrCollectionNotFound
+	}
+
+	err = s.db.Model(&dbmodel.CollectionMetadata{}).
+		Where("collection_metadata.collection_id = ?", collectionID).Clauses(clause.Locking{
+		Strength: "UPDATE",
+	}).Find(nil).Error
+	if err != nil {
+		return err
+	}
+
+	var segments []*dbmodel.Segment
+	err = s.db.Model(&dbmodel.Segment{}).
+		Where("segments.collection_id = ?", collectionID).Clauses(clause.Locking{
+		Strength: "UPDATE",
+	}).Find(&segments).Error
+	if err != nil {
+		return err
+	}
+
+	var segmentIDs []*string
+	for _, segment := range segments {
+		segmentIDs = append(segmentIDs, &segment.ID)
+	}
+
+	err = s.db.Model(&dbmodel.SegmentMetadata{}).
+		Where("segment_metadata.segment_id IN ?", segmentIDs).Clauses(clause.Locking{
+		Strength: "UPDATE",
+	}).Find(nil).Error
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *collectionDb) UpdateCollectionLineageFilePath(collectionID string, currentLineageFileName string, newLineageFileName string) error {
+	return s.db.Model(&dbmodel.Collection{}).
+		Where("id = ? AND (lineage_file_name IS NULL OR lineage_file_name = ?)", collectionID, currentLineageFileName).
+		Updates(map[string]interface{}{
+			"lineage_file_name": newLineageFileName,
+		}).Error
+
 }

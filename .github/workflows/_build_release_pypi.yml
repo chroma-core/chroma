@@ -41,7 +41,7 @@ permissions:
 jobs:
   version:
     name: Resolve version
-    runs-on: depot-ubuntu-22.04
+    runs-on: blacksmith-4vcpu-ubuntu-2204
     outputs:
       version: ${{ steps.resolve_version.outputs.version }}
     steps:
@@ -65,22 +65,23 @@ jobs:
       fail-fast: false
       matrix:
         platform:
-          - { os: linux, runner: depot-ubuntu-22.04, target: x86_64 }
-          - { os: linux, runner: depot-ubuntu-22.04-arm, target: aarch64 }
+          - { os: linux, runner: blacksmith-4vcpu-ubuntu-2204, target: x86_64 }
+          - { os: linux, runner: blacksmith-4vcpu-ubuntu-2204-arm, target: aarch64 }
           - { os: windows, runner: windows-latest, target: x64 }
-          - { os: macos, runner: depot-macos-14, target: x86_64 }
-          - { os: macos, runner: depot-macos-14, target: aarch64 }
+          - { os: macos, runner: macos-14, target: x86_64 }
+          - { os: macos, runner: macos-14, target: aarch64 }
 
     steps:
       - uses: actions/checkout@v4
-      - name: Install Protoc
-        uses: arduino/setup-protoc@v3
+      - name: Setup Rust
+        uses: ./.github/actions/rust
         with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       # On Windows, we want to set up Python with the correct architecture
       - name: Set up Python on Windows
         if: ${{ matrix.platform.os == 'windows' }}
+        # Blacksmith does not currently support windows, so we use the official action
         uses: actions/setup-python@v5
         with:
           python-version: 3.x
@@ -88,7 +89,7 @@ jobs:
 
       - name: Set up Python on non-Windows
         if: ${{ matrix.platform.os != 'windows' }}
-        uses: actions/setup-python@v5
+        uses: useblacksmith/setup-python@v6
         with:
           python-version: 3.x
 
@@ -127,14 +128,14 @@ jobs:
 
   sdist:
     name: build-sdist
-    runs-on: depot-ubuntu-22.04
+    runs-on: blacksmith-4vcpu-ubuntu-2204
     needs: version
     steps:
       - uses: actions/checkout@v4
-      - name: Install Protoc
-        uses: arduino/setup-protoc@v3
+      - name: Setup Rust
+        uses: ./.github/actions/rust
         with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Set version in pyproject.toml
         shell: bash
         run: |
@@ -170,7 +171,7 @@ jobs:
 
   release:
     name: Release
-    runs-on: ubuntu-22.04
+    runs-on: blacksmith-4vcpu-ubuntu-2204
     if: ${{ inputs.publish_to_pypi || inputs.publish_to_test_pypi }}
     needs: [build, sdist]
     permissions:

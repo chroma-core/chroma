@@ -14,7 +14,6 @@ use chroma_types::SpannPostingList;
 use chroma_types::{CollectionUuid, InternalSpannConfiguration};
 use rand::seq::SliceRandom;
 use thiserror::Error;
-use tracing::{instrument, Instrument, Span};
 use uuid::Uuid;
 
 use crate::{
@@ -32,6 +31,7 @@ use crate::{
 
 use super::utils::{rng_query, KMeansAlgorithmInput, KMeansError, RngQueryError};
 
+#[derive(Clone, Debug)]
 pub struct VersionsMapInner {
     pub versions_map: HashMap<u32, u32>,
 }
@@ -476,7 +476,7 @@ impl SpannIndexWriter {
                     collection_id,
                     distance_function.clone(),
                     dimensionality,
-                    params.search_ef,
+                    params.ef_search,
                 )
                 .await?
             }
@@ -486,9 +486,9 @@ impl SpannIndexWriter {
                     collection_id,
                     distance_function.clone(),
                     dimensionality,
-                    params.m,
-                    params.construction_ef,
-                    params.search_ef,
+                    params.max_neighbors,
+                    params.ef_construction,
+                    params.ef_search,
                 )
                 .await?
             }
@@ -848,9 +848,12 @@ impl SpannIndexWriter {
             )
             .await?;
         // Reassign neighbors of this center if applicable.
-        if self.params.reassign_nbr_count > 0 {
+        if self.params.reassign_neighbor_count > 0 {
             let (nearby_head_ids, _, nearby_head_embeddings) = self
-                .get_nearby_heads(old_head_embedding, self.params.reassign_nbr_count as usize)
+                .get_nearby_heads(
+                    old_head_embedding,
+                    self.params.reassign_neighbor_count as usize,
+                )
                 .await?;
             for (head_idx, head_id) in nearby_head_ids.iter().enumerate() {
                 // Skip the current split heads.
@@ -1662,9 +1665,9 @@ impl SpannIndexWriter {
             .hnsw_provider
             .create(
                 &self.collection_id,
-                self.params.m,
-                self.params.construction_ef,
-                self.params.search_ef,
+                self.params.max_neighbors,
+                self.params.ef_construction,
+                self.params.ef_search,
                 self.dimensionality as i32,
                 self.params.space.clone().into(),
             )
@@ -2002,7 +2005,7 @@ pub struct SpannPosting {
     pub doc_embedding: Vec<f32>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SpannIndexReader<'me> {
     pub posting_lists: BlockfileReader<'me, u32, SpannPostingList<'me>>,
     pub hnsw_index: HnswIndexRef,
@@ -2123,7 +2126,6 @@ impl<'me> SpannIndexReader<'me> {
         })
     }
 
-    #[instrument(skip(self), name = "is_entry_outdated")]
     async fn is_outdated(
         &self,
         doc_offset_id: u32,
@@ -2152,7 +2154,6 @@ impl<'me> SpannIndexReader<'me> {
         let res = self
             .posting_lists
             .get("", head_id)
-            .instrument(tracing::trace_span!(parent: Span::current(), "Fetch head", head_id = head_id.to_string()))
             .await
             .map_err(|e| {
                 tracing::error!("Error getting posting list for head {}: {}", head_id, e);
@@ -2160,30 +2161,27 @@ impl<'me> SpannIndexReader<'me> {
             })?
             .ok_or(SpannIndexReaderError::PostingListNotFound)?;
 
-        async {
-            let mut posting_lists = Vec::with_capacity(res.doc_offset_ids.len());
-            let mut unique_ids = HashSet::new();
-            for (index, doc_offset_id) in res.doc_offset_ids.iter().enumerate() {
-                if self
-                    .is_outdated(*doc_offset_id, res.doc_versions[index])
-                    .await?
-                {
-                    continue;
-                }
-                if unique_ids.contains(doc_offset_id) {
-                    continue;
-                }
-                unique_ids.insert(*doc_offset_id);
-                posting_lists.push(SpannPosting {
-                    doc_offset_id: *doc_offset_id,
-                    doc_embedding: res.doc_embeddings
-                        [index * self.dimensionality..(index + 1) * self.dimensionality]
-                        .to_vec(),
-                });
+        let mut posting_lists = Vec::with_capacity(res.doc_offset_ids.len());
+        let mut unique_ids = HashSet::new();
+        for (index, doc_offset_id) in res.doc_offset_ids.iter().enumerate() {
+            if self
+                .is_outdated(*doc_offset_id, res.doc_versions[index])
+                .await?
+            {
+                continue;
             }
-            Ok(posting_lists)
-        }.instrument(tracing::trace_span!(parent: Span::current(), "Remove outdated entries from Pl", head_id = head_id.to_string()))
-        .await
+            if unique_ids.contains(doc_offset_id) {
+                continue;
+            }
+            unique_ids.insert(*doc_offset_id);
+            posting_lists.push(SpannPosting {
+                doc_offset_id: *doc_offset_id,
+                doc_embedding: res.doc_embeddings
+                    [index * self.dimensionality..(index + 1) * self.dimensionality]
+                    .to_vec(),
+            });
+        }
+        Ok(posting_lists)
     }
 
     // Only for testing purposes as of 5 March 2024.
@@ -2310,7 +2308,13 @@ mod tests {
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
-        let params = InternalSpannConfiguration::default();
+        let params = InternalSpannConfiguration {
+            split_threshold: 100,
+            reassign_neighbor_count: 8,
+            merge_threshold: 50,
+            max_neighbors: 16,
+            ..Default::default()
+        };
         let gc_context = GarbageCollectionContext::try_from_config(
             &(
                 PlGarbageCollectionConfig::default(),
@@ -2510,7 +2514,13 @@ mod tests {
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
-        let params = InternalSpannConfiguration::default();
+        let params = InternalSpannConfiguration {
+            split_threshold: 100,
+            reassign_neighbor_count: 8,
+            merge_threshold: 50,
+            max_neighbors: 16,
+            ..Default::default()
+        };
         let pl_gc_policy = PlGarbageCollectionConfig {
             enabled: true,
             policy: PlGarbageCollectionPolicyConfig::RandomSample(RandomSamplePolicyConfig {
@@ -2752,7 +2762,13 @@ mod tests {
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
-        let params = InternalSpannConfiguration::default();
+        let params = InternalSpannConfiguration {
+            split_threshold: 100,
+            reassign_neighbor_count: 8,
+            merge_threshold: 50,
+            max_neighbors: 16,
+            ..Default::default()
+        };
         let pl_gc_policy = PlGarbageCollectionConfig {
             enabled: true,
             policy: PlGarbageCollectionPolicyConfig::RandomSample(RandomSamplePolicyConfig {
@@ -2969,7 +2985,13 @@ mod tests {
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
-        let params = InternalSpannConfiguration::default();
+        let params = InternalSpannConfiguration {
+            split_threshold: 100,
+            reassign_neighbor_count: 8,
+            merge_threshold: 50,
+            max_neighbors: 16,
+            ..Default::default()
+        };
         let gc_context = GarbageCollectionContext::try_from_config(
             &(
                 PlGarbageCollectionConfig::default(),
@@ -3215,7 +3237,13 @@ mod tests {
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
-        let params = InternalSpannConfiguration::default();
+        let params = InternalSpannConfiguration {
+            split_threshold: 100,
+            reassign_neighbor_count: 8,
+            merge_threshold: 50,
+            max_neighbors: 16,
+            ..Default::default()
+        };
         let pl_gc_policy = PlGarbageCollectionConfig {
             enabled: true,
             policy: PlGarbageCollectionPolicyConfig::RandomSample(RandomSamplePolicyConfig {
@@ -3505,9 +3533,15 @@ mod tests {
             new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
         let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
         let collection_id = CollectionUuid::new();
-        let params = InternalSpannConfiguration::default();
+        let params = InternalSpannConfiguration {
+            split_threshold: 100,
+            reassign_neighbor_count: 8,
+            merge_threshold: 50,
+            max_neighbors: 16,
+            ..Default::default()
+        };
         let distance_function = params.space.clone().into();
-        let ef_search = params.search_ef;
+        let ef_search = params.ef_search;
         let dimensionality = 1000;
         let gc_context = GarbageCollectionContext::try_from_config(
             &(
@@ -3603,10 +3637,16 @@ mod tests {
             new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
         let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
         let collection_id = CollectionUuid::new();
-        let params = InternalSpannConfiguration::default();
+        let params = InternalSpannConfiguration {
+            split_threshold: 100,
+            reassign_neighbor_count: 8,
+            merge_threshold: 50,
+            max_neighbors: 16,
+            ..Default::default()
+        };
         let distance_function = params.space.clone().into();
         let dimensionality = 1000;
-        let ef_search = params.search_ef;
+        let ef_search = params.ef_search;
         let gc_context = GarbageCollectionContext::try_from_config(
             &(
                 PlGarbageCollectionConfig::default(),
@@ -3715,7 +3755,13 @@ mod tests {
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let max_block_size_bytes = 8 * 1024 * 1024;
         let collection_id = CollectionUuid::new();
-        let params = InternalSpannConfiguration::default();
+        let params = InternalSpannConfiguration {
+            split_threshold: 100,
+            reassign_neighbor_count: 8,
+            merge_threshold: 50,
+            max_neighbors: 16,
+            ..Default::default()
+        };
         let gc_context = GarbageCollectionContext::try_from_config(
             &(
                 PlGarbageCollectionConfig::default(),
@@ -3727,7 +3773,7 @@ mod tests {
         .expect("Error converting config to gc context");
         let distance_function = params.space.clone().into();
         let dimensionality = 1000;
-        let ef_search = params.search_ef;
+        let ef_search = params.ef_search;
         let mut hnsw_path = None;
         let mut versions_map_path = None;
         let mut pl_path = None;
@@ -3827,7 +3873,13 @@ mod tests {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let max_block_size_bytes = 8 * 1024 * 1024;
-        let params = InternalSpannConfiguration::default();
+        let params = InternalSpannConfiguration {
+            split_threshold: 100,
+            reassign_neighbor_count: 8,
+            merge_threshold: 50,
+            max_neighbors: 16,
+            ..Default::default()
+        };
         let gc_context = GarbageCollectionContext::try_from_config(
             &(
                 PlGarbageCollectionConfig::default(),
@@ -3840,7 +3892,7 @@ mod tests {
         let distance_function = params.space.clone().into();
         let collection_id = CollectionUuid::new();
         let dimensionality = 1000;
-        let ef_search = params.search_ef;
+        let ef_search = params.ef_search;
         let mut hnsw_path = None;
         let mut versions_map_path = None;
         let mut pl_path = None;
@@ -3965,7 +4017,13 @@ mod tests {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let max_block_size_bytes = 8 * 1024 * 1024;
-        let params = InternalSpannConfiguration::default();
+        let params = InternalSpannConfiguration {
+            split_threshold: 100,
+            reassign_neighbor_count: 8,
+            merge_threshold: 50,
+            max_neighbors: 16,
+            ..Default::default()
+        };
         // Create a garbage collection context.
         let pl_gc_config = PlGarbageCollectionConfig {
             enabled: true,
@@ -3986,7 +4044,7 @@ mod tests {
         let distance_function: DistanceFunction = params.space.clone().into();
         let collection_id = CollectionUuid::new();
         let dimensionality = 1000;
-        let ef_search = params.search_ef;
+        let ef_search = params.ef_search;
         let mut hnsw_path = None;
         let mut versions_map_path = None;
         let mut pl_path = None;
