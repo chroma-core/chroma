@@ -16,6 +16,8 @@ from chromadb.api.configuration import (
 from chromadb.serde import BaseModelJSONSerializable
 from chromadb.api.collection_configuration import (
     CollectionConfiguration,
+    HNSWConfiguration,
+    SpannConfiguration,
     collection_configuration_to_json,
     load_collection_configuration_from_json,
 )
@@ -148,12 +150,13 @@ class Collection(
             return load_collection_configuration_from_json(self.configuration_json)
         except Exception as e:
             warnings.warn(
-                f"server does not respond with configuration_json. Please update server: {e}",
+                f"Server does not respond with configuration_json. Please update server: {e}",
                 DeprecationWarning,
                 stacklevel=2,
             )
             return CollectionConfiguration(
-                hnsw={},
+                hnsw=HNSWConfiguration(),
+                spann=SpannConfiguration(),
                 embedding_function=None,
             )
 
@@ -174,6 +177,7 @@ class Collection(
         """Deserializes a Collection object from JSON"""
         configuration: CollectionConfiguration = {
             "hnsw": {},
+            "spann": {},
             "embedding_function": None,
         }
         try:
@@ -181,7 +185,7 @@ class Collection(
             configuration = load_collection_configuration_from_json(configuration_json)
         except Exception as e:
             warnings.warn(
-                f"server does not respond with configuration_json. Please update server: {e}",
+                f"Server does not respond with configuration_json. Please update server: {e}",
                 DeprecationWarning,
                 stacklevel=2,
             )

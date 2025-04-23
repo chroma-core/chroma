@@ -155,6 +155,13 @@ export async function prepareRecordRequest(
     );
   }
 
+  if (
+    embeddingsArray &&
+    embeddingsArray.some((embedding) => embedding.length === 0)
+  ) {
+    throw new Error("got empty embedding at pos");
+  }
+
   return {
     ids,
     metadatas,
@@ -173,5 +180,6 @@ export function wrapCollection(
     api,
     collection.embeddingFunction,
     collection.metadata,
+    collection.configuration,
   );
 }

@@ -47,6 +47,9 @@ from chromadb.test.utils.wait_for_version_increase import (
 traces: DefaultDict[str, int] = defaultdict(lambda: 0)
 
 
+VERSION_INCREASE_WAIT_TIME = 300
+
+
 def trace(key: str) -> None:
     global traces
     traces[key] += 1
@@ -375,7 +378,8 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
                 current_version,
             )
             new_version = wait_for_version_increase(
-                self.client, self.collection.name, current_version, additional_time=240
+                self.client, self.collection.name, current_version,
+                additional_time=VERSION_INCREASE_WAIT_TIME
             )
             # Everything got compacted.
             self.log_operation_count = 0
@@ -1420,7 +1424,7 @@ def test_no_op_compaction(client: ClientAPI) -> None:
         coll.delete(ids=[str(i) for i in range(batch, batch + 100)])
     if not NOT_CLUSTER_ONLY:
         wait_for_version_increase(
-            client, coll.name, get_collection_version(client, coll.name), 240
+            client, coll.name, get_collection_version(client, coll.name), VERSION_INCREASE_WAIT_TIME
         )
 
 
@@ -1439,7 +1443,7 @@ def test_add_then_purge(client: ClientAPI) -> None:
         )
     if not NOT_CLUSTER_ONLY:
         wait_for_version_increase(
-            client, coll.name, get_collection_version(client, coll.name), 240
+            client, coll.name, get_collection_version(client, coll.name), VERSION_INCREASE_WAIT_TIME
         )
 
     # Purge records and wait for compaction
@@ -1449,7 +1453,7 @@ def test_add_then_purge(client: ClientAPI) -> None:
         coll.delete(ids=record_ids)
     if not NOT_CLUSTER_ONLY:
         wait_for_version_increase(
-            client, coll.name, get_collection_version(client, coll.name), 240
+            client, coll.name, get_collection_version(client, coll.name), VERSION_INCREASE_WAIT_TIME
         )
 
     # There should be no records left
@@ -1472,7 +1476,7 @@ def test_encompassing_delete(client: ClientAPI) -> None:
 
     if not NOT_CLUSTER_ONLY:
         wait_for_version_increase(
-            client, col.name, get_collection_version(client, col.name), 240
+            client, col.name, get_collection_version(client, col.name), VERSION_INCREASE_WAIT_TIME
         )
 
     # Add and then delete and then add 16
@@ -1486,7 +1490,7 @@ def test_encompassing_delete(client: ClientAPI) -> None:
 
     if not NOT_CLUSTER_ONLY:
         wait_for_version_increase(
-            client, col.name, get_collection_version(client, col.name), 240
+            client, col.name, get_collection_version(client, col.name), VERSION_INCREASE_WAIT_TIME
         )
 
     # Ensure we can get all

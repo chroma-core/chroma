@@ -1,4 +1,4 @@
-use crate::collection_configuration::CollectionConfiguration;
+use crate::collection_configuration::InternalCollectionConfiguration;
 use crate::collection_configuration::UpdateCollectionConfiguration;
 use crate::error::QueryConversionError;
 use crate::operator::GetResult;
@@ -547,7 +547,7 @@ pub struct CreateCollectionRequest {
     pub name: String,
     #[validate(custom(function = "validate_non_empty_metadata"))]
     pub metadata: Option<Metadata>,
-    pub configuration: Option<CollectionConfiguration>,
+    pub configuration: Option<InternalCollectionConfiguration>,
     pub get_or_create: bool,
 }
 
@@ -557,7 +557,7 @@ impl CreateCollectionRequest {
         database_name: String,
         name: String,
         metadata: Option<Metadata>,
-        configuration: Option<CollectionConfiguration>,
+        configuration: Option<InternalCollectionConfiguration>,
         get_or_create: bool,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
@@ -593,6 +593,10 @@ pub enum CreateCollectionError {
     Configuration(#[from] serde_json::Error),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
+    #[error("SPANN is still in development. Not allowed to created spann indexes")]
+    SpannNotImplemented,
+    #[error("HNSW is not supported on this platform")]
+    HnswNotSupported,
 }
 
 impl ChromaError for CreateCollectionError {
@@ -606,6 +610,8 @@ impl ChromaError for CreateCollectionError {
             CreateCollectionError::Get(err) => err.code(),
             CreateCollectionError::Configuration(_) => ErrorCodes::Internal,
             CreateCollectionError::Internal(err) => err.code(),
+            CreateCollectionError::SpannNotImplemented => ErrorCodes::InvalidArgument,
+            CreateCollectionError::HnswNotSupported => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -694,6 +700,8 @@ pub enum UpdateCollectionError {
     Internal(#[from] Box<dyn ChromaError>),
     #[error("Could not parse config: {0}")]
     InvalidConfig(#[from] CollectionConfigurationToInternalConfigurationError),
+    #[error("SPANN is still in development. Not allowed to created spann indexes")]
+    SpannNotImplemented,
 }
 
 impl ChromaError for UpdateCollectionError {
@@ -704,6 +712,7 @@ impl ChromaError for UpdateCollectionError {
             UpdateCollectionError::Configuration(_) => ErrorCodes::Internal,
             UpdateCollectionError::Internal(err) => err.code(),
             UpdateCollectionError::InvalidConfig(_) => ErrorCodes::InvalidArgument,
+            UpdateCollectionError::SpannNotImplemented => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -754,6 +763,80 @@ impl ChromaError for DeleteCollectionError {
             DeleteCollectionError::NotFound(_) => ErrorCodes::NotFound,
             DeleteCollectionError::Get(err) => err.code(),
             DeleteCollectionError::Internal(err) => err.code(),
+        }
+    }
+}
+
+#[non_exhaustive]
+#[derive(Clone, Validate, Serialize, ToSchema)]
+pub struct ForkCollectionRequest {
+    pub tenant_id: String,
+    pub database_name: String,
+    pub source_collection_id: CollectionUuid,
+    pub target_collection_name: String,
+}
+
+impl ForkCollectionRequest {
+    pub fn try_new(
+        tenant_id: String,
+        database_name: String,
+        source_collection_id: CollectionUuid,
+        target_collection_name: String,
+    ) -> Result<Self, ChromaValidationError> {
+        let request = Self {
+            tenant_id,
+            database_name,
+            source_collection_id,
+            target_collection_name,
+        };
+        request.validate().map_err(ChromaValidationError::from)?;
+        Ok(request)
+    }
+}
+
+pub type ForkCollectionResponse = Collection;
+
+#[derive(Clone, Debug)]
+pub struct ForkLogsResponse {
+    pub compaction_offset: u64,
+    pub enumeration_offset: u64,
+}
+
+#[derive(Error, Debug)]
+pub enum ForkCollectionError {
+    #[error("Collection [{0}] already exists")]
+    AlreadyExists(String),
+    #[error("Failed to convert proto collection")]
+    CollectionConversionError(#[from] CollectionConversionError),
+    #[error("Duplicate segment")]
+    DuplicateSegment,
+    #[error("Missing field: [{0}]")]
+    Field(String),
+    #[error("Collection forking is unsupported for local chroma")]
+    Local,
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+    #[error("Collection [{0}] does not exists")]
+    NotFound(String),
+    #[error("Failed to convert proto segment")]
+    SegmentConversionError(#[from] SegmentConversionError),
+}
+
+impl ChromaError for ForkCollectionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            ForkCollectionError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
+            ForkCollectionError::CollectionConversionError(collection_conversion_error) => {
+                collection_conversion_error.code()
+            }
+            ForkCollectionError::DuplicateSegment => ErrorCodes::FailedPrecondition,
+            ForkCollectionError::Field(_) => ErrorCodes::FailedPrecondition,
+            ForkCollectionError::Local => ErrorCodes::Unimplemented,
+            ForkCollectionError::Internal(chroma_error) => chroma_error.code(),
+            ForkCollectionError::NotFound(_) => ErrorCodes::NotFound,
+            ForkCollectionError::SegmentConversionError(segment_conversion_error) => {
+                segment_conversion_error.code()
+            }
         }
     }
 }

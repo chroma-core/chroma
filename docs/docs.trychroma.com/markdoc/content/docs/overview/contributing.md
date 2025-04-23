@@ -46,4 +46,4 @@ A CIP starts in the "Proposed" state, then moves to "Under Review" once the Chro
 
 
 ### Discord
-For less fleshed out ideas you want to discuss with the community, you can join our [Discord](https://discord.gg/MMeYNTmh3x) and chat with us in the #feature-ideas channel. We are always happy to discuss new ideas and features with the community.
+For less fleshed out ideas you want to discuss with the community, you can join our [Discord](https://discord.gg/MMeYNTmh3x) and chat with us in the [#feature-ideas](https://discord.com/channels/1073293645303795742/1131592310786887700) channel. We are always happy to discuss new ideas and features with the community.

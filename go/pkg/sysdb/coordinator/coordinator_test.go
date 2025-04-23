@@ -1353,6 +1353,137 @@ func (suite *APIsTestSuite) TestCollectionVersioningWithMinio() {
 	// suite.True(exists, "Version file should exist in S3")
 }
 
+func (suite *APIsTestSuite) TestForkCollection() {
+	ctx := context.Background()
+
+	sourceCreateCollection := &model.CreateCollection{
+		ID:           types.NewUniqueID(),
+		Name:         "test_fork_collection_source",
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	}
+
+	sourceCreateMetadataSegment := &model.CreateSegment{
+		ID:           types.NewUniqueID(),
+		Type:         "test_blockfile",
+		Scope:        "METADATA",
+		CollectionID: sourceCreateCollection.ID,
+	}
+
+	sourceCreateRecordSegment := &model.CreateSegment{
+		ID:           types.NewUniqueID(),
+		Type:         "test_blockfile",
+		Scope:        "RECORD",
+		CollectionID: sourceCreateCollection.ID,
+	}
+
+	sourceCreateVectorSegment := &model.CreateSegment{
+		ID:           types.NewUniqueID(),
+		Type:         "test_hnsw",
+		Scope:        "VECTOR",
+		CollectionID: sourceCreateCollection.ID,
+	}
+
+	segments := []*model.CreateSegment{
+		sourceCreateMetadataSegment,
+		sourceCreateRecordSegment,
+		sourceCreateVectorSegment,
+	}
+
+	// Create source collection
+	_, _, err := suite.coordinator.CreateCollectionAndSegments(ctx, sourceCreateCollection, segments)
+	suite.NoError(err)
+
+	sourceFlushMetadataSegment := &model.FlushSegmentCompaction{
+		ID: sourceCreateMetadataSegment.ID,
+		FilePaths: map[string][]string{
+			"fts_index": {"metadata_sparse_index_file"},
+		},
+	}
+
+	sourceFlushRecordSegment := &model.FlushSegmentCompaction{
+		ID: sourceCreateRecordSegment.ID,
+		FilePaths: map[string][]string{
+			"data_record": {"record_sparse_index_file"},
+		},
+	}
+
+	sourceFlushVectorSegment := &model.FlushSegmentCompaction{
+		ID: sourceCreateVectorSegment.ID,
+		FilePaths: map[string][]string{
+			"hnsw_index": {"hnsw_source_layer_file"},
+		},
+	}
+
+	sourceFlushCollectionCompaction := &model.FlushCollectionCompaction{
+		ID:                       sourceCreateCollection.ID,
+		TenantID:                 sourceCreateCollection.TenantID,
+		LogPosition:              1000,
+		CurrentCollectionVersion: 0,
+		FlushSegmentCompactions: []*model.FlushSegmentCompaction{
+			sourceFlushMetadataSegment,
+			sourceFlushRecordSegment,
+			sourceFlushVectorSegment,
+		},
+		TotalRecordsPostCompaction: 1000,
+		SizeBytesPostCompaction:    65536,
+	}
+
+	// Flush some data to sourceo collection
+	_, err = suite.coordinator.FlushCollectionCompaction(ctx, sourceFlushCollectionCompaction)
+	suite.NoError(err)
+
+	// Fork source collection
+	forkCollection := &model.ForkCollection{
+		SourceCollectionID:                   sourceCreateCollection.ID,
+		SourceCollectionLogCompactionOffset:  800,
+		SourceCollectionLogEnumerationOffset: 1200,
+		TargetCollectionID:                   types.NewUniqueID(),
+		TargetCollectionName:                 "test_fork_collection_fork_1",
+	}
+
+	collection, collection_segments, err := suite.coordinator.ForkCollection(ctx, forkCollection)
+	suite.NoError(err)
+	suite.Equal(forkCollection.TargetCollectionID, collection.ID)
+	suite.Equal(forkCollection.TargetCollectionName, collection.Name)
+	suite.Equal(sourceCreateCollection.ID, *collection.RootCollectionID)
+	suite.Equal(sourceCreateCollection.TenantID, collection.TenantID)
+	suite.Equal(sourceCreateCollection.DatabaseName, collection.DatabaseName)
+	suite.Equal(sourceFlushCollectionCompaction.LogPosition, collection.LogPosition)
+	suite.Equal(sourceFlushCollectionCompaction.TotalRecordsPostCompaction, collection.TotalRecordsPostCompaction)
+	suite.Equal(sourceFlushCollectionCompaction.SizeBytesPostCompaction, collection.SizeBytesPostCompaction)
+	for _, segment := range collection_segments {
+		suite.Equal(collection.ID, segment.CollectionID)
+		suite.Contains([]string{"METADATA", "RECORD", "VECTOR"}, segment.Scope)
+		if segment.Scope == "METADATA" {
+			suite.NotEqual(sourceCreateMetadataSegment.ID, segment.ID)
+			suite.Equal(sourceFlushMetadataSegment.FilePaths, segment.FilePaths)
+		} else if segment.Scope == "RECORD" {
+			suite.NotEqual(sourceCreateRecordSegment.ID, segment.ID)
+			suite.Equal(sourceFlushRecordSegment.FilePaths, segment.FilePaths)
+		} else if segment.Scope == "VECTOR" {
+			suite.NotEqual(sourceCreateVectorSegment.ID, segment.ID)
+			suite.Equal(sourceFlushVectorSegment.FilePaths, segment.FilePaths)
+		}
+	}
+
+	// Attempt to fork a collcetion with same name (should fail)
+	forkCollectionWithSameName := &model.ForkCollection{
+		SourceCollectionID:                   sourceCreateCollection.ID,
+		SourceCollectionLogCompactionOffset:  800,
+		SourceCollectionLogEnumerationOffset: 1200,
+		TargetCollectionID:                   types.NewUniqueID(),
+		TargetCollectionName:                 "test_fork_collection_source",
+	}
+	_, _, err = suite.coordinator.ForkCollection(ctx, forkCollectionWithSameName)
+	suite.Error(err)
+
+	// Check that the collection was not created
+	collections, err := suite.coordinator.GetCollections(ctx, forkCollectionWithSameName.TargetCollectionID, nil, suite.tenantName, suite.databaseName, nil, nil)
+	suite.NoError(err)
+	suite.Empty(collections)
+}
+
 func TestAPIsTestSuite(t *testing.T) {
 	testSuite := new(APIsTestSuite)
 	suite.Run(t, testSuite)

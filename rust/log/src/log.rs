@@ -3,7 +3,10 @@ use crate::in_memory_log::InMemoryLog;
 use crate::sqlite_log::SqliteLog;
 use crate::types::CollectionInfo;
 use chroma_error::ChromaError;
-use chroma_types::{CollectionUuid, LogRecord, OperationRecord, ResetError, ResetResponse};
+use chroma_types::{
+    CollectionUuid, ForkCollectionError, ForkLogsResponse, LogRecord, OperationRecord, ResetError,
+    ResetResponse,
+};
 use std::fmt::Debug;
 
 #[derive(Clone, Debug)]
@@ -93,6 +96,22 @@ impl Log {
     }
 
     #[tracing::instrument(skip(self))]
+    pub async fn fork_logs(
+        &mut self,
+        source_collection_id: CollectionUuid,
+        target_collection_id: CollectionUuid,
+    ) -> Result<ForkLogsResponse, ForkCollectionError> {
+        match self {
+            Log::Sqlite(_) => Err(ForkCollectionError::Local),
+            Log::Grpc(log) => log
+                .fork_logs(source_collection_id, target_collection_id)
+                .await
+                .map_err(|err| err.boxed().into()),
+            Log::InMemory(_) => Err(ForkCollectionError::Local),
+        }
+    }
+
+    #[tracing::instrument(skip(self))]
     pub async fn get_collections_with_new_data(
         &mut self,
         min_compaction_size: u64,
@@ -171,7 +190,10 @@ impl Log {
                 .get_max_batch_size()
                 .await
                 .map_err(|err| Box::new(err) as Box<dyn ChromaError>),
-            Log::Grpc(_) => Ok(100),
+            // NOTE(hammadb): This is set to a high value and may cause issues
+            // the quota system should be used to limit the number of records
+            // upstream.
+            Log::Grpc(_) => Ok(1000),
             Log::InMemory(_) => todo!(),
         }
     }

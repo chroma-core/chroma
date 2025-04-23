@@ -80,6 +80,7 @@ pub struct Collection {
         deserialize_with = "deserialize_internal_collection_configuration",
         rename = "configuration_json"
     )]
+    #[schema(value_type = CollectionConfiguration)]
     pub config: InternalCollectionConfiguration,
     pub metadata: Option<Metadata>,
     pub dimension: Option<i32>,

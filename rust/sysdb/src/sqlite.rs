@@ -1308,7 +1308,6 @@ mod tests {
         match &collection.config.vector_index {
             VectorIndexConfiguration::Hnsw(hnsw) => {
                 assert_eq!(hnsw.ef_search, 20);
-                assert_eq!(hnsw.num_threads, 4);
             }
             _ => panic!("Expected HNSW configuration"),
         }

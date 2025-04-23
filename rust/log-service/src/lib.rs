@@ -18,6 +18,7 @@ use chroma_types::chroma_proto::{
     PushLogsRequest, PushLogsResponse, ScoutLogsRequest, ScoutLogsResponse,
     UpdateCollectionLogOffsetRequest, UpdateCollectionLogOffsetResponse,
 };
+use chroma_types::chroma_proto::{ForkLogsRequest, ForkLogsResponse};
 use chroma_types::CollectionUuid;
 use figment::providers::{Env, Format, Yaml};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
@@ -709,7 +710,7 @@ impl LogService for LogServer {
             );
             let limits = Limits {
                 max_files: Some(pull_logs.batch_size as u64 + 1),
-                max_bytes: Some(pull_logs.batch_size as u64 * 100_000),
+                max_bytes: None,
             };
             let fragments = match log_reader
                 .scan(
@@ -761,6 +762,13 @@ impl LogService for LogServer {
         }
         .instrument(span)
         .await
+    }
+
+    async fn fork_logs(
+        &self,
+        _request: Request<ForkLogsRequest>,
+    ) -> Result<Response<ForkLogsResponse>, Status> {
+        unimplemented!("Log forking is unimplemented for WAL3 for now")
     }
 
     #[tracing::instrument(info, skip(self, request), err(Display))]

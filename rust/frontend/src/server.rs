@@ -6,7 +6,6 @@ use axum::{
     Json, Router, ServiceExt,
 };
 use chroma_system::System;
-use chroma_types::RawWhereFields;
 use chroma_types::{
     AddCollectionRecordsResponse, ChecklistResponse, Collection, CollectionConfiguration,
     CollectionMetadataUpdate, CollectionUuid, CountCollectionsRequest, CountCollectionsResponse,
@@ -15,11 +14,12 @@ use chroma_types::{
     DeleteCollectionRecordsResponse, DeleteDatabaseRequest, DeleteDatabaseResponse,
     GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
     GetTenantRequest, GetTenantResponse, GetUserIdentityResponse, HeartbeatResponse, IncludeList,
-    ListCollectionsRequest, ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse,
-    Metadata, QueryRequest, QueryResponse, UpdateCollectionConfiguration,
-    UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateMetadata,
-    UpsertCollectionRecordsResponse,
+    InternalCollectionConfiguration, ListCollectionsRequest, ListCollectionsResponse,
+    ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
+    UpdateCollectionConfiguration, UpdateCollectionRecordsResponse, UpdateCollectionResponse,
+    UpdateMetadata, UpsertCollectionRecordsResponse,
 };
+use chroma_types::{ForkCollectionResponse, RawWhereFields};
 use mdac::{Rule, Scorecard, ScorecardTicket};
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Meter};
@@ -63,6 +63,16 @@ impl Drop for ScorecardGuard {
     }
 }
 
+#[derive(Clone, Copy, Debug, thiserror::Error)]
+#[error("Too many requests; backoff and try again")]
+struct RateLimitError;
+
+impl chroma_error::ChromaError for RateLimitError {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        chroma_error::ErrorCodes::ResourceExhausted
+    }
+}
+
 async fn graceful_shutdown(system: System) {
     select! {
         // Kubernetes will send SIGTERM to stop the pod gracefully
@@ -93,6 +103,7 @@ pub struct Metrics {
     get_collection: Counter<u64>,
     update_collection: Counter<u64>,
     delete_collection: Counter<u64>,
+    fork_collection: Counter<u64>,
     collection_add: Counter<u64>,
     collection_update: Counter<u64>,
     collection_upsert: Counter<u64>,
@@ -123,6 +134,7 @@ impl Metrics {
             get_collection: meter.u64_counter("get_collection").build(),
             update_collection: meter.u64_counter("update_collection").build(),
             delete_collection: meter.u64_counter("delete_collection").build(),
+            fork_collection: meter.u64_counter("fork_collection").build(),
             collection_add: meter.u64_counter("collection_add").build(),
             collection_update: meter.u64_counter("collection_update").build(),
             collection_upsert: meter.u64_counter("collection_upsert").build(),
@@ -233,6 +245,10 @@ impl FrontendServer {
                     .delete(delete_collection),
             )
             .route(
+                "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/fork",
+                post(fork_collection),
+            )
+            .route(
                 "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/add",
                 post(collection_add),
             )
@@ -301,14 +317,20 @@ impl FrontendServer {
         };
     }
 
-    fn scorecard_request(&self, tags: &[&str]) -> Option<ScorecardGuard> {
+    fn scorecard_request(
+        &self,
+        tags: &[&str],
+    ) -> Result<ScorecardGuard, Box<dyn chroma_error::ChromaError>> {
         if self.scorecard_enabled.load(Ordering::Relaxed) {
-            self.scorecard.track(tags).map(|ticket| ScorecardGuard {
-                scorecard: Arc::clone(&self.scorecard),
-                ticket: Some(ticket),
-            })
+            self.scorecard
+                .track(tags)
+                .map(|ticket| ScorecardGuard {
+                    scorecard: Arc::clone(&self.scorecard),
+                    ticket: Some(ticket),
+                })
+                .ok_or_else(|| Box::new(RateLimitError) as _)
         } else {
-            Some(ScorecardGuard {
+            Ok(ScorecardGuard {
                 scorecard: Arc::clone(&self.scorecard),
                 ticket: None,
             })
@@ -573,7 +595,7 @@ async fn create_database(
     quota_payload = quota_payload.with_collection_name(&name);
     server.quota_enforcer.enforce(&quota_payload).await?;
     let _guard =
-        server.scorecard_request(&["op:create_database", format!("tenant:{}", tenant).as_str()]);
+        server.scorecard_request(&["op:create_database", format!("tenant:{}", tenant).as_str()])?;
     let create_database_request = CreateDatabaseRequest::try_new(tenant, name)?;
     let res = server
         .frontend
@@ -627,7 +649,7 @@ async fn list_databases(
         )
         .await?;
     let _guard =
-        server.scorecard_request(&["op:list_databases", format!("tenant:{}", tenant).as_str()]);
+        server.scorecard_request(&["op:list_databases", format!("tenant:{}", tenant).as_str()])?;
 
     let request = ListDatabasesRequest::try_new(tenant, limit, offset)?;
     Ok(Json(server.frontend.list_databases(request).await?))
@@ -670,7 +692,7 @@ async fn get_database(
         )
         .await?;
     let _guard =
-        server.scorecard_request(&["op:get_database", format!("tenant:{}", tenant).as_str()]);
+        server.scorecard_request(&["op:get_database", format!("tenant:{}", tenant).as_str()])?;
     let request = GetDatabaseRequest::try_new(tenant, database)?;
     let res = server.frontend.get_database(request).await?;
     Ok(Json(res))
@@ -713,7 +735,7 @@ async fn delete_database(
         )
         .await?;
     let _guard =
-        server.scorecard_request(&["op:delete_database", format!("tenant:{}", tenant).as_str()]);
+        server.scorecard_request(&["op:delete_database", format!("tenant:{}", tenant).as_str()])?;
     let request = DeleteDatabaseRequest::try_new(tenant, database)?;
     Ok(Json(server.frontend.delete_database(request).await?))
 }
@@ -778,8 +800,8 @@ async fn list_collections(
         quota_payload = quota_payload.with_limit(limit);
     }
     server.quota_enforcer.enforce(&quota_payload).await?;
-    let _guard =
-        server.scorecard_request(&["op:list_collections", format!("tenant:{}", tenant).as_str()]);
+    let _guard = server
+        .scorecard_request(&["op:list_collections", format!("tenant:{}", tenant).as_str()])?;
     let request = ListCollectionsRequest::try_new(tenant, database, limit, offset)?;
     Ok(Json(server.frontend.list_collections(request).await?))
 }
@@ -822,7 +844,7 @@ async fn count_collections(
     let _guard = server.scorecard_request(&[
         "op:count_collections",
         format!("tenant:{}", tenant).as_str(),
-    ]);
+    ])?;
 
     let request = CountCollectionsRequest::try_new(tenant, database)?;
     Ok(Json(server.frontend.count_collections(request).await?))
@@ -887,20 +909,22 @@ async fn create_collection(
     let _guard = server.scorecard_request(&[
         "op:create_collection",
         format!("tenant:{}", tenant).as_str(),
-    ]);
+    ])?;
 
-    if let Some(configuration) = payload.configuration.as_ref() {
-        if configuration.spann.is_some() && !server.config.enable_span_indexing {
-            return Err(ValidationError::SpannNotImplemented)?;
-        }
-    }
+    let configuration = match payload.configuration {
+        Some(c) => Some(InternalCollectionConfiguration::try_from_config(
+            c,
+            server.config.frontend.default_knn_index,
+        )?),
+        None => None,
+    };
 
     let request = CreateCollectionRequest::try_new(
         tenant,
         database,
         payload.name,
         payload.metadata,
-        payload.configuration,
+        configuration,
         payload.get_or_create,
     )?;
     let collection = server.frontend.create_collection(request).await?;
@@ -948,7 +972,7 @@ async fn get_collection(
         )
         .await?;
     let _guard =
-        server.scorecard_request(&["op:get_collection", format!("tenant:{}", tenant).as_str()]);
+        server.scorecard_request(&["op:get_collection", format!("tenant:{}", tenant).as_str()])?;
     let request = GetCollectionRequest::try_new(tenant, database, collection_name)?;
     let collection = server.frontend.get_collection(request).await?;
     Ok(Json(collection))
@@ -1020,7 +1044,7 @@ async fn update_collection(
     let _guard = server.scorecard_request(&[
         "op:update_collection",
         format!("tenant:{}", tenant).as_str(),
-    ]);
+    ])?;
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
 
@@ -1080,12 +1104,78 @@ async fn delete_collection(
     let _guard = server.scorecard_request(&[
         "op:delete_collection",
         format!("tenant:{}", tenant).as_str(),
-    ]);
+    ])?;
     let request =
         chroma_types::DeleteCollectionRequest::try_new(tenant, database, collection_name)?;
     server.frontend.delete_collection(request).await?;
 
     Ok(Json(UpdateCollectionResponse {}))
+}
+
+#[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
+pub struct ForkCollectionPayload {
+    pub new_name: String,
+}
+
+/// Forks an existing collection.
+#[utoipa::path(
+    post,
+    path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/fork",
+    request_body = ForkCollectionPayload,
+    responses(
+        (status = 200, description = "Collection forked successfully", body = ForkCollectionResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Collection not found", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant ID"),
+        ("database" = String, Path, description = "Database name"),
+        ("collection_id" = String, Path, description = "UUID of the collection to update")
+    )
+)]
+async fn fork_collection(
+    headers: HeaderMap,
+    Path((tenant, database, collection_id)): Path<(String, String, String)>,
+    State(mut server): State<FrontendServer>,
+    Json(payload): Json<ForkCollectionPayload>,
+) -> Result<Json<ForkCollectionResponse>, ServerError> {
+    server.metrics.fork_collection.add(
+        1,
+        &[
+            KeyValue::new("tenant", tenant.clone()),
+            KeyValue::new("collection_id", collection_id.clone()),
+        ],
+    );
+    tracing::info!(
+        "Forking collection [{collection_id}] in database [{database}] for tenant [{tenant}]"
+    );
+    // NOTE: The quota check if skipped for fork collection for now, and we rely on the scorecard to limit access to certain tenents
+    // TODO: Unify the quota and scorecard
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::ForkCollection,
+            AuthzResource {
+                tenant: Some(tenant.clone()),
+                database: Some(database.clone()),
+                collection: Some(collection_id.clone()),
+            },
+        )
+        .await?;
+    let _guard =
+        server.scorecard_request(&["op:fork_collection", format!("tenant:{}", tenant).as_str()]);
+    let collection_id =
+        CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
+
+    let request = chroma_types::ForkCollectionRequest::try_new(
+        tenant,
+        database,
+        collection_id,
+        payload.new_name,
+    )?;
+
+    Ok(Json(server.frontend.fork_collection(request).await?))
 }
 
 #[derive(Serialize, Deserialize, ToSchema, Debug, Clone)]
@@ -1157,7 +1247,7 @@ async fn collection_add(
         "op:write",
         format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
-    ]);
+    ])?;
 
     let request = chroma_types::AddCollectionRecordsRequest::try_new(
         tenant,
@@ -1243,7 +1333,7 @@ async fn collection_update(
         "op:write",
         format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
-    ]);
+    ])?;
 
     let request = chroma_types::UpdateCollectionRecordsRequest::try_new(
         tenant,
@@ -1335,7 +1425,7 @@ async fn collection_upsert(
         "op:write",
         format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
-    ]);
+    ])?;
 
     let request = chroma_types::UpsertCollectionRecordsRequest::try_new(
         tenant,
@@ -1418,7 +1508,7 @@ async fn collection_delete(
         "op:write",
         format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
-    ]);
+    ])?;
 
     let request = chroma_types::DeleteCollectionRecordsRequest::try_new(
         tenant,
@@ -1479,7 +1569,7 @@ async fn collection_count(
         "op:read",
         format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
-    ]);
+    ])?;
 
     let request = CountRequest::try_new(
         tenant,
@@ -1567,7 +1657,7 @@ async fn collection_get(
         "op:read",
         format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
-    ]);
+    ])?;
     let request = GetRequest::try_new(
         tenant,
         database,
@@ -1663,7 +1753,7 @@ async fn collection_query(
         "op:read",
         format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
-    ]);
+    ])?;
 
     let request = QueryRequest::try_new(
         tenant,

@@ -5,8 +5,8 @@ use chroma_segment::test::TestReferenceSegment;
 use chroma_types::operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan};
 use chroma_types::plan::{Count, Get, Knn};
 use chroma_types::{
-    test_segment, Collection, CollectionAndSegments, Database, Include, IncludeList,
-    InternalCollectionConfiguration, Segment,
+    test_segment, Collection, CollectionAndSegments, CreateCollectionError, Database, Include,
+    IncludeList, InternalCollectionConfiguration, Segment, VectorIndexConfiguration,
 };
 use std::collections::HashSet;
 
@@ -224,10 +224,17 @@ impl InMemoryFrontend {
             database: request.database_name,
             config: request
                 .configuration
-                .map(|c| c.try_into().unwrap())
                 .unwrap_or(InternalCollectionConfiguration::default_hnsw()),
             ..Default::default()
         };
+
+        // Prevent SPANN usage in InMemoryFrontend
+        if matches!(
+            collection.config.vector_index,
+            VectorIndexConfiguration::Spann(_)
+        ) {
+            return Err(CreateCollectionError::SpannNotImplemented);
+        }
 
         let metadata_segment = test_segment(
             collection.collection_id,
