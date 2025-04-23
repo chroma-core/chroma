@@ -138,12 +138,14 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CountOrchestrator {
         message: TaskResult<FetchLogOutput, FetchLogError>,
         ctx: &ComponentContext<Self>,
     ) {
+        tracing::info!("CountOrchestrator: FetchLogOperator finished");
         let output = match self.ok_or_terminate(message.into_inner(), ctx) {
             Some(output) => output,
             None => return,
         };
         self.fetch_log_bytes
             .replace(output.iter().map(|(l, _)| l.size_bytes()).sum());
+        tracing::info!("sending CountRecordsOperator");
         let task = wrap(
             CountRecordsOperator::new(),
             CountRecordsInput::new(

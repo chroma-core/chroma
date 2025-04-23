@@ -102,6 +102,7 @@ impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
                 .map(|x| (x, std::cmp::min(x + window_size as u64, limit_offset)))
                 .collect::<Vec<_>>();
             let sema = Arc::new(tokio::sync::Semaphore::new(10));
+            tracing::info!("Fetching logs in {} batches", ranges.len());
             let batch_readers = ranges
                 .into_iter()
                 .map(|(start, limit)| {
@@ -130,6 +131,7 @@ impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
                 })
                 .collect::<Vec<_>>();
             let batches = futures::future::join_all(batch_readers).await;
+            tracing::info!("Fetched {} batches", batches.len());
             for batch in batches {
                 match batch {
                     Ok(batch) => fetched.extend(batch),
@@ -139,6 +141,7 @@ impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
                 }
             }
             fetched.sort_by_key(|f| f.log_offset);
+            tracing::info!(name: "Returning log records", num_records = fetched.len());
             Ok(Chunk::new(fetched.into()))
         } else {
             // old behavior that we fall back to if the scout is not implemented
