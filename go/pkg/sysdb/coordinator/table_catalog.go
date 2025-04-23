@@ -978,7 +978,7 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 			TargetCollectionId:      forkCollection.TargetCollectionID.String(),
 		})
 
-		newLineageFileBaseName := fmt.Sprintf("%d/%d/%d/%d-%d-%d-%s-%d-%s.binpb", ts.Year(), ts.Month(), ts.Day(), ts.Hour(), ts.Minute(), ts.Second(), sourceCollectionIDStr, sourceCollection.Version, forkCollection.TargetCollectionID.String())
+		newLineageFileBaseName := fmt.Sprintf("%s/%d/%s.binpb", sourceCollectionIDStr, sourceCollection.Version, forkCollection.TargetCollectionID)
 		newLineageFileFullName, err = tc.s3Store.PutLineageFile(rootCollection.TenantID, databaseID, rootCollectionIDStr, newLineageFileBaseName, lineageFile)
 		if err != nil {
 			return err
