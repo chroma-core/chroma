@@ -1135,7 +1135,7 @@ pub struct ForkCollectionPayload {
     )
 )]
 async fn fork_collection(
-    _headers: HeaderMap,
+    headers: HeaderMap,
     Path((tenant, database, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
     Json(payload): Json<ForkCollectionPayload>,
