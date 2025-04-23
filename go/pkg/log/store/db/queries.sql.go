@@ -120,7 +120,7 @@ func (q *Queries) GetAllCollectionsToCompact(ctx context.Context, minCompactionS
 }
 
 const getBoundsForCollection = `-- name: GetBoundsForCollection :one
-SELECT record_compaction_offset_position, record_enumeration_offset_position
+SELECT CAST(COALESCE(MIN(record_compaction_offset_position), 0) as bigint) AS record_compaction_offset_position, CAST(COALESCE(MAX(record_enumeration_offset_position), 0) as bigint) AS record_enumeration_offset_position
 FROM collection
 WHERE id = $1
 `
