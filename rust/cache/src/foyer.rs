@@ -478,6 +478,17 @@ where
         let _stopwatch = Stopwatch::new(&self.clear_latency);
         Ok(self.cache.clear().await?)
     }
+
+    async fn obtain(&self, key: K) -> Result<Option<V>, CacheError> {
+        let _stopwatch = Stopwatch::new(&self.get_latency);
+        let res = self.cache.obtain(key).await?.map(|v| v.value().clone());
+        if res.is_some() {
+            self.cache_hit.add(1, &[]);
+        } else {
+            self.cache_miss.add(1, &[]);
+        }
+        Ok(res)
+    }
 }
 
 impl<K, V> super::PersistentCache<K, V> for FoyerHybridCache<K, V>
@@ -627,6 +638,17 @@ where
         let _stopwatch = Stopwatch::new(&self.clear_latency);
         self.cache.clear();
         Ok(())
+    }
+
+    async fn obtain(&self, key: K) -> Result<Option<V>, CacheError> {
+        let _stopwatch = Stopwatch::new(&self.get_latency);
+        let res = self.cache.get(&key).map(|v| v.value().clone());
+        if res.is_some() {
+            self.cache_hit.add(1, &[]);
+        } else {
+            self.cache_miss.add(1, &[]);
+        }
+        Ok(res)
     }
 }
 

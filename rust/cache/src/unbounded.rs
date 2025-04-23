@@ -65,6 +65,12 @@ where
         self.cache.write().clear();
         Ok(())
     }
+
+    async fn obtain(&self, key: K) -> Result<Option<V>, CacheError> {
+        let read_guard = self.cache.read();
+        let value = read_guard.get(&key);
+        Ok(value.cloned())
+    }
 }
 
 impl<K, V> Debug for UnboundedCache<K, V>
