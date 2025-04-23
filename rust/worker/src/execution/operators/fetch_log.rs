@@ -7,6 +7,7 @@ use chroma_log::Log;
 use chroma_system::{Operator, OperatorType};
 use chroma_types::{Chunk, CollectionUuid, LogRecord};
 use thiserror::Error;
+use tokio::select;
 
 /// The `FetchLogOperator` fetches logs from the log service
 ///
@@ -110,10 +111,21 @@ impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
                     let start = start as i64;
                     let sema = Arc::clone(&sema);
                     async move {
-                        let _permit = sema.acquire().await.unwrap();
-                        log_client
-                            .read(collection_uuid, start, num_records, Some(timestamp))
-                            .await
+                        let timeout = tokio::time::sleep(tokio::time::Duration::from_secs(10));
+                        tokio::pin!(timeout);
+                        let res = tokio::select! {
+                            _ = &mut timeout => {
+                                panic!("Timeout while waiting for semaphore");
+                            }
+                            permit = sema.acquire() => {
+                                let _permit = permit.unwrap();
+                                tracing::info!("Acquired semaphore");
+                                log_client
+                                    .read(collection_uuid, start, num_records, Some(timestamp))
+                                    .await
+                            }
+                        };
+                        res
                     }
                 })
                 .collect::<Vec<_>>();

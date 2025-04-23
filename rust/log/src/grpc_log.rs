@@ -183,7 +183,7 @@ impl Configurable<GrpcLogConfig> for GrpcLog {
                 };
                 let endpoint_res = endpoint_res
                     .connect_timeout(Duration::from_millis(my_config.connect_timeout_ms))
-                    .timeout(Duration::from_millis(my_config.request_timeout_ms));
+                    .timeout(Duration::from_millis(5000)); // HARDCODE TO 5s for debugging
                 let channel = endpoint_res.connect_lazy();
                 let channel = ServiceBuilder::new()
                     .layer(chroma_tracing::GrpcTraceLayer)

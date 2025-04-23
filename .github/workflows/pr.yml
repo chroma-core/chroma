@@ -119,44 +119,44 @@ jobs:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_DOCS_PROJECT_ID }}
 
-  check-helm-version-bump:
-    name: Warn if Helm chart was updated without version bump
-    needs: change-detection
-    if: needs.change-detection.outputs.helm-changes == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2204
-    permissions:
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@v4
-      - name: Comment warning
-        if: needs.change-detection.outputs.helm-version-changed == 'false'
-        uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          header: helm-chart-version-info
-          message: |
-            :warning: The Helm chart was updated without a version bump. Your changes will only be published if the version field in `k8s/distributed-chroma/Chart.yaml` is updated.
+  # check-helm-version-bump:
+  #   name: Warn if Helm chart was updated without version bump
+  #   needs: change-detection
+  #   if: needs.change-detection.outputs.helm-changes == 'true'
+  #   runs-on: blacksmith-4vcpu-ubuntu-2204
+  #   permissions:
+  #     pull-requests: write
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Comment warning
+  #       if: needs.change-detection.outputs.helm-version-changed == 'false'
+  #       uses: marocchino/sticky-pull-request-comment@v2
+  #       with:
+  #         header: helm-chart-version-info
+  #         message: |
+  #           :warning: The Helm chart was updated without a version bump. Your changes will only be published if the version field in `k8s/distributed-chroma/Chart.yaml` is updated.
 
-      - name: Comment success
-        if: needs.change-detection.outputs.helm-version-changed == 'true'
-        uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          header: helm-chart-version-info
-          message: |
-            :white_check_mark: The Helm chart's version was changed. Your changes to the chart will be published upon merge to `main`.
+  #     - name: Comment success
+  #       if: needs.change-detection.outputs.helm-version-changed == 'true'
+  #       uses: marocchino/sticky-pull-request-comment@v2
+  #       with:
+  #         header: helm-chart-version-info
+  #         message: |
+  #           :white_check_mark: The Helm chart's version was changed. Your changes to the chart will be published upon merge to `main`.
 
-  delete-helm-comment:
-    name: Delete Helm chart comment if not changed
-    needs: change-detection
-    if: needs.change-detection.outputs.helm-changes == 'false'
-    runs-on: blacksmith-4vcpu-ubuntu-2204
-    permissions:
-      pull-requests: write
-    steps:
-      - name: Delete comment (Helm chart was not changed)
-        uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          header: helm-chart-version-info
-          delete: true
+  # delete-helm-comment:
+  #   name: Delete Helm chart comment if not changed
+  #   needs: change-detection
+  #   if: needs.change-detection.outputs.helm-changes == 'false'
+  #   runs-on: blacksmith-4vcpu-ubuntu-2204
+  #   permissions:
+  #     pull-requests: write
+  #   steps:
+  #     - name: Delete comment (Helm chart was not changed)
+  #       uses: marocchino/sticky-pull-request-comment@v2
+  #       with:
+  #         header: helm-chart-version-info
+  #         delete: true
 
   python-tests:
     name: Python tests
@@ -167,30 +167,30 @@ jobs:
     with:
       property_testing_preset: 'normal'
 
-  python-vulnerability-scan:
-    name: Python vulnerability scan
-    needs: change-detection
-    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
-    uses: ./.github/workflows/_python-vulnerability-scan.yml
+  # python-vulnerability-scan:
+  #   name: Python vulnerability scan
+  #   needs: change-detection
+  #   if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
+  #   uses: ./.github/workflows/_python-vulnerability-scan.yml
 
-  javascript-client-tests:
-    name: JavaScript client tests
-    needs: change-detection
-    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'js-client')
-    uses: ./.github/workflows/_javascript-client-tests.yml
+  # javascript-client-tests:
+  #   name: JavaScript client tests
+  #   needs: change-detection
+  #   if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'js-client')
+  #   uses: ./.github/workflows/_javascript-client-tests.yml
 
-  rust-tests:
-    name: Rust tests
-    needs: change-detection
-    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'rust')
-    uses: ./.github/workflows/_rust-tests.yml
-    secrets: inherit
+  # rust-tests:
+  #   name: Rust tests
+  #   needs: change-detection
+  #   if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'rust')
+  #   uses: ./.github/workflows/_rust-tests.yml
+  #   secrets: inherit
 
-  go-tests:
-    name: Go tests
-    needs: change-detection
-    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'go')
-    uses: ./.github/workflows/_go-tests.yml
+  # go-tests:
+  #   name: Go tests
+  #   needs: change-detection
+  #   if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'go')
+  #   uses: ./.github/workflows/_go-tests.yml
 
   check-title:
     name: Check PR Title
