@@ -254,22 +254,22 @@ jobs:
   # When creating a branch protection rule, you have to specify a static list
   # of checks.
   # So since this job always runs, we can specify it in the branch protection rule.
-  all-required-pr-checks-passed:
-    if: always()
-    needs:
-    - python-tests
-    - python-vulnerability-scan
-    - javascript-client-tests
-    - rust-tests
-    - go-tests
-    - check-title
-    - lint
-    - check-helm-version-bump
-    - delete-helm-comment
-    runs-on: blacksmith-4vcpu-ubuntu-2204
-    steps:
-    - name: Decide whether the needed jobs succeeded or failed
-      uses: re-actors/alls-green@release/v1
-      with:
-        jobs: ${{ toJSON(needs) }}
-        allowed-skips: python-tests,python-vulnerability-scan,javascript-client-tests,rust-tests,go-tests,check-helm-version-bump,delete-helm-comment
+  # all-required-pr-checks-passed:
+  #   if: always()
+  #   needs:
+  #   - python-tests
+  #   - python-vulnerability-scan
+  #   - javascript-client-tests
+  #   - rust-tests
+  #   - go-tests
+  #   - check-title
+  #   - lint
+  #   - check-helm-version-bump
+  #   - delete-helm-comment
+  #   runs-on: blacksmith-4vcpu-ubuntu-2204
+  #   steps:
+  #   - name: Decide whether the needed jobs succeeded or failed
+  #     uses: re-actors/alls-green@release/v1
+  #     with:
+  #       jobs: ${{ toJSON(needs) }}
+  #       allowed-skips: python-tests,python-vulnerability-scan,javascript-client-tests,rust-tests,go-tests,check-helm-version-bump,delete-helm-comment
