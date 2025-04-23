@@ -1135,7 +1135,7 @@ pub struct ForkCollectionPayload {
     )
 )]
 async fn fork_collection(
-    headers: HeaderMap,
+    _headers: HeaderMap,
     Path((tenant, database, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
     Json(payload): Json<ForkCollectionPayload>,
@@ -1150,17 +1150,19 @@ async fn fork_collection(
     tracing::info!(
         "Forking collection [{collection_id}] in database [{database}] for tenant [{tenant}]"
     );
-    server
-        .authenticate_and_authorize(
-            &headers,
-            AuthzAction::ForkCollection,
-            AuthzResource {
-                tenant: Some(tenant.clone()),
-                database: Some(database.clone()),
-                collection: Some(collection_id.clone()),
-            },
-        )
-        .await?;
+    // NOTE: The quota check if skipped for fork collection for now, and we rely on the scorecard to limit access to certain tenents
+    // TODO: Unify the quota and scorecard
+    // server
+    //     .authenticate_and_authorize(
+    //         &headers,
+    //         AuthzAction::ForkCollection,
+    //         AuthzResource {
+    //             tenant: Some(tenant.clone()),
+    //             database: Some(database.clone()),
+    //             collection: Some(collection_id.clone()),
+    //         },
+    //     )
+    //     .await?;
     let _guard =
         server.scorecard_request(&["op:fork_collection", format!("tenant:{}", tenant).as_str()]);
     let collection_id =
