@@ -31,8 +31,10 @@ pub trait Orchestrator: Debug + Send + Sized + 'static {
     async fn run(mut self, system: System) -> Result<Self::Output, Self::Error> {
         let (tx, rx) = oneshot::channel();
         self.set_result_channel(tx);
+        tracing::info!("{} starting", Self::name());
         let mut handle = system.start_component(self);
         let res = rx.await;
+        tracing::info!("{} finished", Self::name());
         handle.stop();
         res?
     }

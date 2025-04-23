@@ -168,6 +168,7 @@ impl Handler<TaskResult<CountRecordsOutput, CountRecordsError>> for CountOrchest
         message: TaskResult<CountRecordsOutput, CountRecordsError>,
         ctx: &ComponentContext<Self>,
     ) {
+        tracing::info!("CountOrchestrator: CountRecordsOperator finished");
         self.terminate_with_result(
             message.into_inner().map_err(|e| e.into()).map(|output| {
                 (
