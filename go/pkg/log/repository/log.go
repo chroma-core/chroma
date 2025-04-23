@@ -147,20 +147,6 @@ func (r *LogRepository) ForkRecords(ctx context.Context, sourceCollectionID stri
 		trace_log.Error("Error in getting compaction and enumeration offset for source collection", zap.Error(err), zap.String("collectionId", sourceCollectionID))
 		return
 	}
-	err = queriesWithTx.DeleteCollection(ctx, []string{targetCollectionID})
-	if err != nil {
-		trace_log.Error("Error clearing offset for target collection", zap.String("targetCollectionID", targetCollectionID))
-		return
-	}
-	err = queriesWithTx.DeleteRecordsRange(ctx, log.DeleteRecordsRangeParams{
-		CollectionID: targetCollectionID,
-		MinOffset:    0,
-		MaxOffset:    sourceBounds.RecordEnumerationOffsetPosition,
-	})
-	if err != nil {
-		trace_log.Error("Error clearing log record for target collection", zap.String("targetCollectionID", targetCollectionID))
-		return
-	}
 	err = queriesWithTx.ForkCollectionRecord(ctx, log.ForkCollectionRecordParams{
 		CollectionID:   sourceCollectionID,
 		CollectionID_2: targetCollectionID,
