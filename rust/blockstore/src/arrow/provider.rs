@@ -17,9 +17,15 @@ use async_trait::async_trait;
 use chroma_cache::{CacheError, PersistentCache};
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_storage::{PutOptions, Storage};
+use chroma_storage::{
+    admissioncontrolleds3::StorageRequestPriority, GetOptions, PutOptions, Storage,
+};
 use futures::{stream::FuturesUnordered, StreamExt};
-use std::sync::Arc;
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 use thiserror::Error;
 use tracing::{Instrument, Span};
 use uuid::Uuid;
@@ -40,6 +46,8 @@ impl ChromaError for ArrowBlockfileProviderPrefetchError {
         }
     }
 }
+
+const PREFETCH_TTL_HOURS: u64 = 8;
 
 /// A BlockFileProvider that creates ArrowBlockfiles (Arrow-backed blockfiles used for production).
 /// For now, it keeps a simple local cache of blockfiles.
@@ -81,6 +89,9 @@ impl ArrowBlockfileProvider {
     }
 
     pub async fn prefetch(&self, id: &Uuid) -> Result<usize, ArrowBlockfileProviderPrefetchError> {
+        if !self.root_manager.should_prefetch(id) {
+            return Ok(0);
+        }
         // We call .get_all_block_ids() here instead of just reading the root because reading the root requires a concrete Key type.
         let block_ids = self
             .root_manager
@@ -92,15 +103,18 @@ impl ArrowBlockfileProvider {
         for block_id in block_ids.iter() {
             // Don't prefetch if already cached.
             if !self.block_manager.cached(block_id).await {
-                futures.push(self.block_manager.get(block_id));
+                futures.push(self.block_manager.get(block_id, StorageRequestPriority::P1));
             }
         }
         let count = futures.len();
+
+        tracing::info!("Prefetching {} blocks for blockfile ID: {:?}", count, id);
 
         while let Some(result) = futures.next().await {
             result?;
         }
 
+        tracing::info!("Prefetched {} blocks for blockfile ID: {:?}", count, id);
         Ok(count)
     }
 
@@ -173,6 +187,7 @@ impl ArrowBlockfileProvider {
     pub async fn clear(&self) -> Result<(), CacheError> {
         self.block_manager.block_cache.clear().await?;
         self.root_manager.cache.clear().await?;
+        self.root_manager.prefetched_roots.lock().clear();
         Ok(())
     }
 }
@@ -286,7 +301,7 @@ impl BlockManager {
         &self,
         block_id: &Uuid,
     ) -> Result<D, ForkError> {
-        let block = self.get(block_id).await;
+        let block = self.get(block_id, StorageRequestPriority::P0).await;
         let block = match block {
             Ok(Some(block)) => block,
             Ok(None) => {
@@ -319,7 +334,11 @@ impl BlockManager {
             .unwrap_or(false)
     }
 
-    pub(super) async fn get(&self, id: &Uuid) -> Result<Option<Block>, GetError> {
+    pub(super) async fn get(
+        &self,
+        id: &Uuid,
+        priority: StorageRequestPriority,
+    ) -> Result<Option<Block>, GetError> {
         let block = self.block_cache.get(id).await.ok().flatten();
         match block {
             Some(block) => Ok(Some(block)),
@@ -327,7 +346,7 @@ impl BlockManager {
                 let key = format!("block/{}", id);
                 let bytes_res = self
                     .storage
-                    .get(&key)
+                    .get(&key, GetOptions::new(priority))
                     .instrument(
                         tracing::trace_span!(parent: Span::current(), "BlockManager storage get", id = id.to_string()),
                     )
@@ -385,11 +404,15 @@ impl BlockManager {
         let block_bytes_len = bytes.len();
         let res = self
             .storage
-            .put_bytes(&key, bytes, PutOptions::default())
+            .put_bytes(
+                &key,
+                bytes,
+                PutOptions::with_priority(StorageRequestPriority::P0),
+            )
             .await;
         match res {
             Ok(_) => {
-                tracing::info!(
+                tracing::debug!(
                     "Block: {} written to storage ({}B)",
                     block.id,
                     block_bytes_len
@@ -456,12 +479,18 @@ impl ChromaError for RootManagerError {
 pub struct RootManager {
     cache: Arc<dyn PersistentCache<Uuid, RootReader>>,
     storage: Storage,
+    // Sparse indexes that have already been prefetched and don't need to be prefetched again.
+    prefetched_roots: Arc<parking_lot::Mutex<HashMap<Uuid, Duration>>>,
 }
 
 impl RootManager {
     pub fn new(storage: Storage, cache: Box<dyn PersistentCache<Uuid, RootReader>>) -> Self {
         let cache: Arc<dyn PersistentCache<Uuid, RootReader>> = cache.into();
-        Self { cache, storage }
+        Self {
+            cache,
+            storage,
+            prefetched_roots: Arc::new(parking_lot::Mutex::new(HashMap::new())),
+        }
     }
 
     pub async fn get<'new, K: ArrowReadableKey<'new> + 'new>(
@@ -475,7 +504,11 @@ impl RootManager {
                 tracing::info!("Cache miss - fetching root from storage");
                 let key = Self::get_storage_key(id);
                 tracing::debug!("Reading root from storage with key: {}", key);
-                match self.storage.get(&key).await {
+                match self
+                    .storage
+                    .get(&key, GetOptions::new(StorageRequestPriority::P0))
+                    .await
+                {
                     Ok(bytes) => match RootReader::from_bytes::<K>(&bytes, *id) {
                         Ok(root) => {
                             self.cache.insert(*id, root.clone()).await;
@@ -498,7 +531,11 @@ impl RootManager {
     pub async fn get_all_block_ids(&self, id: &Uuid) -> Result<Vec<Uuid>, RootManagerError> {
         let key = Self::get_storage_key(id);
         tracing::debug!("Reading root from storage with key: {}", key);
-        match self.storage.get(&key).await {
+        match self
+            .storage
+            .get(&key, GetOptions::new(StorageRequestPriority::P0))
+            .await
+        {
             Ok(bytes) => RootReader::get_all_block_ids_from_bytes(&bytes, *id)
                 .map_err(RootManagerError::FromBytesError),
             Err(e) => {
@@ -522,7 +559,11 @@ impl RootManager {
         let key = format!("sparse_index/{}", root.id);
         let res = self
             .storage
-            .put_bytes(&key, bytes, PutOptions::default())
+            .put_bytes(
+                &key,
+                bytes,
+                PutOptions::with_priority(StorageRequestPriority::P0),
+            )
             .await;
         match res {
             Ok(_) => {
@@ -557,6 +598,41 @@ impl RootManager {
         // from a fixed location. The path is sparse_index/ for legacy reasons.
         // This will be replaced with a full prefix-based storage shortly
         format!("sparse_index/{}", id)
+    }
+
+    fn should_prefetch(&self, id: &Uuid) -> bool {
+        let mut lock_guard = self.prefetched_roots.lock();
+        let expires_at = lock_guard.get(id);
+        match expires_at {
+            Some(expires_at) => {
+                if SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("Do not deploy before UNIX epoch")
+                    < *expires_at
+                {
+                    false
+                } else {
+                    lock_guard.insert(
+                        *id,
+                        SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .expect("Do not deploy before UNIX epoch")
+                            + std::time::Duration::from_secs(PREFETCH_TTL_HOURS * 3600),
+                    );
+                    true
+                }
+            }
+            None => {
+                lock_guard.insert(
+                    *id,
+                    SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .expect("Do not deploy before UNIX epoch")
+                        + std::time::Duration::from_secs(PREFETCH_TTL_HOURS * 3600),
+                );
+                true
+            }
+        }
     }
 }
 

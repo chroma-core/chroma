@@ -157,6 +157,10 @@ func (s *Coordinator) UpdateCollection(ctx context.Context, collection *model.Up
 	return s.catalog.UpdateCollection(ctx, collection, collection.Ts)
 }
 
+func (s *Coordinator) ForkCollection(ctx context.Context, forkCollection *model.ForkCollection) (*model.Collection, []*model.Segment, error) {
+	return s.catalog.ForkCollection(ctx, forkCollection)
+}
+
 func (s *Coordinator) CreateSegment(ctx context.Context, segment *model.CreateSegment) error {
 	if err := verifyCreateSegment(segment); err != nil {
 		return err

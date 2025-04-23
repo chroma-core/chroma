@@ -20,12 +20,13 @@ use chroma_types::{
 };
 use chroma_types::{
     Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
-    FlushCompactionResponseConversionError, Segment, SegmentConversionError, SegmentScope, Tenant,
+    FlushCompactionResponseConversionError, ForkCollectionError, Segment, SegmentConversionError,
+    SegmentScope, Tenant,
 };
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use thiserror::Error;
 use tonic::transport::{Channel, Endpoint};
 use tonic::Code;
@@ -247,7 +248,6 @@ impl SysDb {
                     collection_id,
                     name,
                     config: configuration,
-                    legacy_configuration_json: (),
                     metadata,
                     dimension,
                     tenant: tenant.clone(),
@@ -315,12 +315,39 @@ impl SysDb {
         }
     }
 
+    pub async fn fork_collection(
+        &mut self,
+        source_collection_id: CollectionUuid,
+        source_collection_log_compaction_offset: u64,
+        source_collection_log_enumeration_offset: u64,
+        target_collection_id: CollectionUuid,
+        target_collection_name: String,
+    ) -> Result<CollectionAndSegments, ForkCollectionError> {
+        match self {
+            SysDb::Grpc(grpc_sys_db) => {
+                grpc_sys_db
+                    .fork_collection(
+                        source_collection_id,
+                        source_collection_log_compaction_offset,
+                        source_collection_log_enumeration_offset,
+                        target_collection_id,
+                        target_collection_name,
+                    )
+                    .await
+            }
+            SysDb::Sqlite(_) => Err(ForkCollectionError::Local),
+            SysDb::Test(_) => Err(ForkCollectionError::Local),
+        }
+    }
+
     pub async fn get_collections_to_gc(
         &mut self,
+        cutoff_time: Option<SystemTime>,
+        limit: Option<u64>,
     ) -> Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError> {
         match self {
-            SysDb::Grpc(grpc) => grpc.get_collections_to_gc().await,
-            SysDb::Sqlite(_) => todo!(),
+            SysDb::Grpc(grpc) => grpc.get_collections_to_gc(cutoff_time, limit).await,
+            SysDb::Sqlite(_) => unimplemented!("Garbage collection does not work for local chroma"),
             SysDb::Test(_) => todo!(),
         }
     }
@@ -520,9 +547,10 @@ impl Configurable<GrpcSysDbConfig> for GrpcSysDb {
     }
 }
 
-#[allow(dead_code)]
+#[derive(Debug)]
 pub struct CollectionToGcInfo {
     pub id: CollectionUuid,
+    pub tenant: String,
     pub name: String,
     pub version_file_path: String,
     pub latest_version: i64,
@@ -556,6 +584,7 @@ impl TryFrom<chroma_proto::CollectionToGcInfo> for CollectionToGcInfo {
         let collection_id = CollectionUuid(collection_uuid);
         Ok(CollectionToGcInfo {
             id: collection_id,
+            tenant: value.tenant_id,
             name: value.name,
             version_file_path: value.version_file_path,
             latest_version: value.latest_version,
@@ -834,8 +863,12 @@ impl GrpcSysDb {
         name: Option<String>,
         metadata: Option<CollectionMetadataUpdate>,
         dimension: Option<u32>,
-        _configuration: Option<UpdateCollectionConfiguration>,
+        configuration: Option<UpdateCollectionConfiguration>,
     ) -> Result<(), UpdateCollectionError> {
+        let mut configuration_json_str = None;
+        if let Some(configuration) = configuration {
+            configuration_json_str = Some(serde_json::to_string(&configuration).unwrap());
+        }
         let req = chroma_proto::UpdateCollectionRequest {
             id: collection_id.0.to_string(),
             name: name.clone(),
@@ -850,6 +883,7 @@ impl GrpcSysDb {
                 }
             }),
             dimension: dimension.map(|dim| dim as i32),
+            configuration_json_str,
         };
 
         self.client.update_collection(req).await.map_err(|e| {
@@ -888,14 +922,69 @@ impl GrpcSysDb {
         Ok(())
     }
 
+    pub async fn fork_collection(
+        &mut self,
+        source_collection_id: CollectionUuid,
+        source_collection_log_compaction_offset: u64,
+        source_collection_log_enumeration_offset: u64,
+        target_collection_id: CollectionUuid,
+        target_collection_name: String,
+    ) -> Result<CollectionAndSegments, ForkCollectionError> {
+        let res = self
+            .client
+            .fork_collection(chroma_proto::ForkCollectionRequest {
+                source_collection_id: source_collection_id.0.to_string(),
+                source_collection_log_compaction_offset,
+                source_collection_log_enumeration_offset,
+                target_collection_id: target_collection_id.0.to_string(),
+                target_collection_name: target_collection_name.clone(),
+            })
+            .await
+            .map_err(|err| match err.code() {
+                Code::AlreadyExists => ForkCollectionError::AlreadyExists(target_collection_name),
+                Code::NotFound => ForkCollectionError::NotFound(source_collection_id.0.to_string()),
+                _ => ForkCollectionError::Internal(err.into()),
+            })?
+            .into_inner();
+        let raw_segment_counts = res.segments.len();
+        let mut segment_map: HashMap<_, _> = res
+            .segments
+            .into_iter()
+            .map(|seg| (seg.scope(), seg))
+            .collect();
+        if segment_map.len() < raw_segment_counts {
+            return Err(ForkCollectionError::DuplicateSegment);
+        }
+        Ok(CollectionAndSegments {
+            collection: res
+                .collection
+                .ok_or(ForkCollectionError::Field("collection".to_string()))?
+                .try_into()?,
+            metadata_segment: segment_map
+                .remove(&chroma_proto::SegmentScope::Metadata)
+                .ok_or(ForkCollectionError::Field("metadata".to_string()))?
+                .try_into()?,
+            record_segment: segment_map
+                .remove(&chroma_proto::SegmentScope::Record)
+                .ok_or(ForkCollectionError::Field("record".to_string()))?
+                .try_into()?,
+            vector_segment: segment_map
+                .remove(&chroma_proto::SegmentScope::Vector)
+                .ok_or(ForkCollectionError::Field("vector".to_string()))?
+                .try_into()?,
+        })
+    }
+
     pub async fn get_collections_to_gc(
         &mut self,
+        cutoff_time: Option<SystemTime>,
+        limit: Option<u64>,
     ) -> Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError> {
         let res = self
             .client
             .list_collections_to_gc(chroma_proto::ListCollectionsToGcRequest {
-                cutoff_time_secs: None,
-                limit: None,
+                cutoff_time: cutoff_time.map(|t| t.into()),
+                limit,
             })
             .await;
 

@@ -107,10 +107,10 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
 
         Args:
             ids: The ids of the embeddings to get. Optional.
-            where: A Where type dict used to filter results by. E.g. `{"$and": ["color" : "red", "price": {"$gte": 4.20}]}`. Optional.
+            where: A Where type dict used to filter results by. E.g. `{"$and": [{"color" : "red"}, {"price": {"$gte": 4.20}}]}`. Optional.
             limit: The number of documents to return. Optional.
             offset: The offset to start returning results from. Useful for paging results with limit. Optional.
-            where_document: A WhereDocument type dict used to filter by the documents. E.g. `{$contains: {"text": "hello"}}`. Optional.
+            where_document: A WhereDocument type dict used to filter by the documents. E.g. `{"$contains": "hello"}`. Optional.
             include: A list of what to include in the results. Can contain `"embeddings"`, `"metadatas"`, `"documents"`. Ids are always included. Defaults to `["metadatas", "documents"]`. Optional.
 
         Returns:
@@ -130,7 +130,6 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             where=get_request["where"],
             where_document=get_request["where_document"],
             include=get_request["include"],
-            sort=None,
             limit=limit,
             offset=offset,
             tenant=self.tenant,
@@ -186,8 +185,8 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             query_texts: The document texts to get the closes neighbors of. Optional.
             query_images: The images to get the closes neighbors of. Optional.
             n_results: The number of neighbors to return for each query_embedding or query_texts. Optional.
-            where: A Where type dict used to filter results by. E.g. `{"$and": ["color" : "red", "price": {"$gte": 4.20}]}`. Optional.
-            where_document: A WhereDocument type dict used to filter by the documents. E.g. `{$contains: {"text": "hello"}}`. Optional.
+            where: A Where type dict used to filter results by. E.g. `{"$and": [{"color" : "red"}, {"price": {"$gte": 4.20}}]}`. Optional.
+            where_document: A WhereDocument type dict used to filter by the documents. E.g. `{"$contains": "hello"}`. Optional.
             include: A list of what to include in the results. Can contain `"embeddings"`, `"metadatas"`, `"documents"`, `"distances"`. Ids are always included. Defaults to `["metadatas", "documents", "distances"]`. Optional.
 
         Returns:
@@ -256,6 +255,32 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         )
 
         self._update_model_after_modify_success(name, metadata, configuration)
+
+    async def fork(
+        self,
+        new_name: str,
+    ) -> "AsyncCollection":
+        """Fork the current collection under a new name. The returning collection should contain identical data to the current collection.
+        This is an experimental API that only works for Hosted Chroma for now.
+
+        Args:
+            new_name: The name of the new collection.
+
+        Returns:
+            Collection: A new collection with the specified name and containing identical data to the current collection.
+        """
+        model = await self._client._fork(
+            collection_id=self.id,
+            new_name=new_name,
+            tenant=self.tenant,
+            database=self.database,
+        )
+        return AsyncCollection(
+            client=self._client,
+            model=model,
+            embedding_function=self._embedding_function,
+            data_loader=self._data_loader
+        )
 
     async def update(
         self,
@@ -357,8 +382,8 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
 
         Args:
             ids: The ids of the embeddings to delete
-            where: A Where type dict used to filter the delection by. E.g. `{"$and": ["color" : "red", "price": {"$gte": 4.20}]}`. Optional.
-            where_document: A WhereDocument type dict used to filter the deletion by the document content. E.g. `{$contains: {"text": "hello"}}`. Optional.
+            where: A Where type dict used to filter the delection by. E.g. `{"$and": [{"color" : "red"}, {"price": {"$gte": 4.20}}]}`. Optional.
+            where_document: A WhereDocument type dict used to filter the deletion by the document content. E.g. `{"$contains": "hello"}`. Optional.
 
         Returns:
             None

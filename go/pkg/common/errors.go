@@ -21,7 +21,7 @@ var (
 	ErrCollectionNameEmpty                   = errors.New("collection name is empty")
 	ErrCollectionUniqueConstraintViolation   = errors.New("collection unique constraint violation")
 	ErrCollectionDeleteNonExistingCollection = errors.New("delete non existing collection")
-	ErrCollectionLogPositionStale            = errors.New("collection log position Stale")
+	ErrCollectionLogPositionStale            = errors.New("collection log position stale")
 	ErrCollectionVersionStale                = errors.New("collection version stale")
 	ErrCollectionVersionInvalid              = errors.New("collection version invalid")
 	ErrCollectionVersionFileNameStale        = errors.New("collection version file name stale")

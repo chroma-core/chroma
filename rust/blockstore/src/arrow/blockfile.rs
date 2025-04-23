@@ -13,9 +13,10 @@ use crate::key::CompositeKey;
 use crate::key::KeyWrapper;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
+use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
 use futures::future::join_all;
 use futures::{Stream, StreamExt, TryStreamExt};
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 use std::collections::HashSet;
 use std::mem::transmute;
 use std::ops::RangeBounds;
@@ -181,7 +182,11 @@ impl ArrowUnorderedBlockfileWriter {
 
         let delta = match delta {
             None => {
-                let block = match self.block_manager.get(&target_block_id).await {
+                let block = match self
+                    .block_manager
+                    .get(&target_block_id, StorageRequestPriority::P0)
+                    .await
+                {
                     Ok(Some(block)) => block,
                     Ok(None) => {
                         return Err(Box::new(ArrowBlockfileError::BlockNotFound));
@@ -260,7 +265,11 @@ impl ArrowUnorderedBlockfileWriter {
 
         let delta = match delta {
             None => {
-                let block = match self.block_manager.get(&target_block_id).await {
+                let block = match self
+                    .block_manager
+                    .get(&target_block_id, StorageRequestPriority::P0)
+                    .await
+                {
                     Ok(Some(block)) => block,
                     Ok(None) => {
                         return Err(Box::new(ArrowBlockfileError::BlockNotFound));
@@ -314,7 +323,11 @@ impl ArrowUnorderedBlockfileWriter {
 
         let delta = match delta {
             None => {
-                let block = match self.block_manager.get(&target_block_id).await {
+                let block = match self
+                    .block_manager
+                    .get(&target_block_id, StorageRequestPriority::P0)
+                    .await
+                {
                     Ok(Some(block)) => block,
                     Ok(None) => {
                         return Err(Box::new(ArrowBlockfileError::BlockNotFound));
@@ -362,7 +375,7 @@ pub struct ArrowBlockfileReader<
 > {
     block_manager: BlockManager,
     pub(super) root: RootReader,
-    loaded_blocks: Arc<Mutex<HashMap<Uuid, Box<Block>>>>,
+    loaded_blocks: Arc<RwLock<HashMap<Uuid, Box<Block>>>>,
     marker: std::marker::PhantomData<(K, V, &'me ())>,
 }
 
@@ -373,17 +386,21 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         Self {
             block_manager,
             root,
-            loaded_blocks: Arc::new(Mutex::new(HashMap::new())),
+            loaded_blocks: Arc::new(RwLock::new(HashMap::new())),
             marker: std::marker::PhantomData,
         }
     }
 
-    pub(super) async fn get_block(&self, block_id: Uuid) -> Result<Option<&Block>, GetError> {
+    pub(super) async fn get_block(
+        &self,
+        block_id: Uuid,
+        priority: StorageRequestPriority,
+    ) -> Result<Option<&Block>, GetError> {
         // NOTE(rescrv):  This will complain with clippy, but we don't want to hold a reference to
         // the loaded_blocks map across a call to the block manager.
         #[allow(clippy::map_entry)]
-        if !self.loaded_blocks.lock().contains_key(&block_id) {
-            let block = match self.block_manager.get(&block_id).await {
+        if !self.loaded_blocks.read().contains_key(&block_id) {
+            let block = match self.block_manager.get(&block_id, priority).await {
                 Ok(Some(block)) => block,
                 Ok(None) => {
                     return Ok(None);
@@ -392,10 +409,17 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                     return Err(e);
                 }
             };
-            self.loaded_blocks.lock().insert(block_id, Box::new(block));
+            // Don't reinsert if someone else has already inserted it.
+            // All existing references to the block would become invalid
+            // causing a NPE.
+            let mut write_guard = self.loaded_blocks.write();
+            if let Some(block) = write_guard.get(&block_id) {
+                return Ok(Some(unsafe { transmute::<&Block, &Block>(&**block) }));
+            }
+            write_guard.insert(block_id, Box::new(block));
         }
 
-        if let Some(block) = self.loaded_blocks.lock().get(&block_id) {
+        if let Some(block) = self.loaded_blocks.read().get(&block_id) {
             // https://github.com/mitsuhiko/memo-map/blob/a5db43853b2561145d7778dc2a5bd4b861fbfd75/src/lib.rs#L163
             // This is safe because we only ever insert Box<Block> into the HashMap
             // We never remove the Box<Block> from the HashMap, so the reference is always valid
@@ -407,7 +431,6 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             // We never drop the HashMap while the Box<Block> is still alive
             return Ok(Some(unsafe { transmute::<&Block, &Block>(&**block) }));
         }
-
         Ok(None)
     }
 
@@ -427,9 +450,9 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             // but not present in the reader's cache (i.e. loaded_blocks). The
             // next read for this block using this reader instance will populate it.
             if !self.block_manager.cached(block_id).await
-                && !self.loaded_blocks.lock().contains_key(block_id)
+                && !self.loaded_blocks.read().contains_key(block_id)
             {
-                futures.push(self.get_block(*block_id));
+                futures.push(self.get_block(*block_id, StorageRequestPriority::P1));
             }
         }
         join_all(futures).await;
@@ -455,7 +478,9 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
     ) -> Result<Option<V>, Box<dyn ChromaError>> {
         let search_key = CompositeKey::new(prefix.to_string(), key.clone());
         let target_block_id = self.root.sparse_index.get_target_block_id(&search_key);
-        let block = self.get_block(target_block_id).await;
+        let block = self
+            .get_block(target_block_id, StorageRequestPriority::P0)
+            .await;
         match block {
             Ok(Some(block)) => Ok(block.get(prefix, key.clone())),
             Ok(None) => {
@@ -486,7 +511,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                 .map(Ok),
         )
         .try_filter_map(move |block_id| async move {
-            match self.get_block(block_id).await {
+            match self.get_block(block_id, StorageRequestPriority::P0).await {
                 Ok(Some(block)) => Ok(Some(block)),
                 Ok(None) => Err(Box::new(ArrowBlockfileError::BlockNotFound)),
                 Err(e) => Err(Box::new(ArrowBlockfileError::BlockFetchError(e))),
@@ -520,7 +545,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
 
         let mut result: Vec<(K, V)> = vec![];
         for block_id in block_ids {
-            let block_opt = match self.get_block(block_id).await {
+            let block_opt = match self.get_block(block_id, StorageRequestPriority::P0).await {
                 Ok(Some(block)) => Some(block),
                 Ok(None) => {
                     return Err(Box::new(ArrowBlockfileError::BlockNotFound));
@@ -549,7 +574,10 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
     ) -> Result<bool, Box<dyn ChromaError>> {
         let search_key = CompositeKey::new(prefix.to_string(), key.clone());
         let target_block_id = self.root.sparse_index.get_target_block_id(&search_key);
-        let block = match self.get_block(target_block_id).await {
+        let block = match self
+            .get_block(target_block_id, StorageRequestPriority::P0)
+            .await
+        {
             Ok(Some(block)) => block,
             Ok(None) => {
                 return Ok(false);
@@ -587,7 +615,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             self.load_blocks(&block_ids).await;
             let mut result: usize = 0;
             for block_id in block_ids {
-                let block = match self.get_block(block_id).await {
+                let block = match self.get_block(block_id, StorageRequestPriority::P0).await {
                     Ok(Some(block)) => block,
                     Ok(None) => {
                         return Err(Box::new(ArrowBlockfileError::BlockNotFound));
@@ -637,7 +665,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                 self.load_blocks(&block_ids).await;
                 for block_id in block_ids.iter().take(block_ids.len() - 1) {
                     let block =
-                        self.get_block(*block_id)
+                        self.get_block(*block_id, StorageRequestPriority::P0)
                             .await
                             .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?
                             .ok_or(Box::new(ArrowBlockfileError::BlockNotFound)
@@ -646,7 +674,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                 }
             }
             let last_block = self
-                .get_block(*last_id)
+                .get_block(*last_id, StorageRequestPriority::P0)
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?
                 .ok_or(Box::new(ArrowBlockfileError::BlockNotFound) as Box<dyn ChromaError>)?;
@@ -664,7 +692,10 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         }
 
         for (_, block_id) in self.root.sparse_index.data.forward.iter() {
-            match self.get_block(block_id.id).await {
+            match self
+                .get_block(block_id.id, StorageRequestPriority::P0)
+                .await
+            {
                 Ok(Some(block)) => {
                     if block.get_size() > self.block_manager.max_block_size_bytes() {
                         return false;

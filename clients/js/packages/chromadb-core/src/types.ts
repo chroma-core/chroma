@@ -1,11 +1,14 @@
 import { AuthOptions } from "./auth";
+import { CreateCollectionConfiguration } from "./CollectionConfiguration";
 import { IEmbeddingFunction } from "./embeddings/IEmbeddingFunction";
+import { Api } from "./generated";
 
 export enum IncludeEnum {
   Documents = "documents",
   Embeddings = "embeddings",
   Metadatas = "metadatas",
   Distances = "distances",
+  Uris = "uris",
 }
 
 export type Embedding = number[];
@@ -91,9 +94,10 @@ export interface CollectionParams {
   id: string;
   metadata: CollectionMetadata | undefined;
   embeddingFunction: IEmbeddingFunction;
+  configuration: Api.CollectionConfiguration | undefined;
 }
 
-export type CollectionMetadata = Record<string, unknown>;
+export type CollectionMetadata = Record<string, boolean | number | string>;
 
 // RequestInit can be used to set Authorization headers and more
 // see all options here: https://www.jsdocs.io/package/@types/node-fetch#RequestInit
@@ -137,13 +141,14 @@ export type CreateCollectionParams = {
   name: string;
   metadata?: CollectionMetadata;
   embeddingFunction?: IEmbeddingFunction;
+  configuration?: CreateCollectionConfiguration;
 };
 
 export type GetOrCreateCollectionParams = CreateCollectionParams;
 
 export type GetCollectionParams = {
   name: string;
-  embeddingFunction: IEmbeddingFunction;
+  embeddingFunction?: IEmbeddingFunction;
 };
 
 export type DeleteCollectionParams = {

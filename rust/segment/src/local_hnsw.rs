@@ -32,9 +32,9 @@ pub struct LocalHnswSegmentReader {
 
 #[derive(Error, Debug)]
 pub enum LocalHnswSegmentReaderError {
-    #[error("Error opening pickle file")]
+    #[error("Error opening pickle file: {0}")]
     PickleFileOpenError(#[from] std::io::Error),
-    #[error("Error deserializing pickle file")]
+    #[error("Error deserializing pickle file: {0}")]
     PickleFileDeserializeError(#[from] serde_pickle::Error),
     #[error("Error loading hnsw index")]
     HnswIndexLoadError,
@@ -52,7 +52,7 @@ pub enum LocalHnswSegmentReaderError {
     GetEmbeddingError,
     #[error("Error querying knn")]
     QueryError,
-    #[error("Error reading from sqlite")]
+    #[error("Error reading from sqlite: {0}")]
     SqliteError(#[from] sqlx::error::Error),
 }
 
@@ -327,7 +327,7 @@ impl LocalHnswSegmentReader {
                                     // SAFETY(hammadb): We are sure that the heap has at least one element
                                     // because we insert until we have k elements.
                                     let top = max_heap.peek().unwrap();
-                                    if top.measure < curr_distance {
+                                    if top.measure > curr_distance {
                                         max_heap.pop();
                                         max_heap.push(RecordDistance {
                                             offset_id: *curr_id as u32,

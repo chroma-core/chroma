@@ -32,6 +32,7 @@ use guacamole::{Guacamole, Zipf};
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
 use opentelemetry::{Key, KeyValue, Value};
+use tokio::sync::Mutex as TokioMutex;
 use tower_http::trace::TraceLayer;
 use tracing::Instrument;
 use uuid::Uuid;
@@ -187,13 +188,14 @@ pub async fn client() -> ChromaClient {
 /// variable if set, or no authentication if unset.
 pub async fn client_for_url(url: String) -> ChromaClient {
     if let Ok(auth) = std::env::var("CHROMA_TOKEN") {
+        let db = std::env::var("CHROMA_DATABASE").unwrap_or_else(|_| "hf-tiny-stories".into());
         ChromaClient::new(ChromaClientOptions {
             url: Some(url),
             auth: ChromaAuthMethod::TokenAuth {
                 token: auth,
                 header: ChromaTokenHeader::XChromaToken,
             },
-            database: "hf-tiny-stories".to_string(),
+            database: db,
         })
         .await
         .unwrap()
@@ -229,6 +231,11 @@ pub trait DataSet: std::fmt::Debug + Send + Sync {
 
     /// The number of documents in the data set.
     fn cardinality(&self) -> usize;
+
+    /// The number of documents in the reference data set.
+    fn reference_cardinality(&self) -> usize {
+        self.cardinality()
+    }
 
     /// Get documents by key.  This is used when one workload references another.  Return None to
     /// indicate the data set does not support referencing by index.
@@ -521,18 +528,14 @@ impl KeySelector {
         format!("{:0>16}", index)
     }
 
-    /// Select a key from the distribution.
-    pub fn select_with_offset(
-        &self,
-        guac: &mut Guacamole,
-        data_set: &dyn DataSet,
-        offset: usize,
-    ) -> String {
+    /// Select a key from the reference data set distribution.
+    /// Only supports index selection.
+    pub fn select_from_reference(&self, data_set: &dyn DataSet, offset: usize) -> String {
         let index = match self {
             KeySelector::Index(i) => *i,
-            KeySelector::Random(skew) => skew.sample(guac, data_set.cardinality()),
+            _ => panic!("Only index selection is supported for reference data sets"),
         };
-        let index = (index + offset) % data_set.cardinality();
+        let index = (index + offset) % data_set.reference_cardinality();
         format!("{:0>16}", index)
     }
 }
@@ -559,7 +562,7 @@ pub struct UpsertQuery {
 /// The state of a workload.
 #[derive(Clone)]
 pub struct WorkloadState {
-    seq_no: u64,
+    seq_no: Arc<TokioMutex<u64>>,
     guac: Guacamole,
 }
 
@@ -718,7 +721,16 @@ impl Workload {
                 Box::pin(wrap.step(client, metrics, data_set, state, done)).await
             }
             Workload::Load => {
-                if (state.seq_no * 100) >= data_set.cardinality() as u64 {
+                let load_start_idx: u64;
+                {
+                    // Get the seq_no, increment it, and immediately drop the lock (to allow for
+                    // concurrent loads)
+                    let mut seq_no = state.seq_no.lock().await;
+                    load_start_idx = *seq_no * 100;
+                    *seq_no += 1;
+                }
+
+                if load_start_idx >= data_set.reference_cardinality() as u64 {
                     done.store(true, std::sync::atomic::Ordering::Relaxed);
                     return Ok(());
                 }
@@ -733,7 +745,7 @@ impl Workload {
                     .upsert(
                         client,
                         UpsertQuery {
-                            key: KeySelector::Index((state.seq_no * 100) as usize),
+                            key: KeySelector::Index(load_start_idx as usize),
                             batch_size: 100,
                             // Associativity is the ratio of documents in a cluster to documents
                             // written by the workload.  It is ignored for load.
@@ -1290,10 +1302,9 @@ impl LoadService {
                 }
             }
         });
-        let mut seq_no = 0u64;
+        let seq_no = Arc::new(TokioMutex::new(0u64));
         let start = Instant::now();
         while !done.load(std::sync::atomic::Ordering::Relaxed) {
-            seq_no += 1;
             let throughput = match spec.throughput {
                 Throughput::Constant(throughput) => throughput,
                 Throughput::Sinusoidal {
@@ -1347,7 +1358,10 @@ impl LoadService {
                 let client = Arc::clone(&client);
                 let data_set = Arc::clone(&spec.data_set);
                 let guac = Guacamole::new(any(&mut guac));
-                let mut state = WorkloadState { seq_no, guac };
+                let mut state = WorkloadState {
+                    seq_no: Arc::clone(&seq_no),
+                    guac,
+                };
                 let done = Arc::clone(&done);
                 let fut = async move {
                     this.metrics.num_operations.add(1, &[]);

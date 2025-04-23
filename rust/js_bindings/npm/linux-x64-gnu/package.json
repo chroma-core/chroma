@@ -1,6 +1,6 @@
 {
   "name": "chromadb-js-bindings-linux-x64-gnu",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "os": [
     "linux"
   ],
@@ -17,5 +17,9 @@
   },
   "libc": [
     "glibc"
-  ]
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chroma-core/chroma"
+  }
 }

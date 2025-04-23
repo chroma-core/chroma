@@ -14,6 +14,17 @@ message PushLogsResponse {
   int32 record_count = 1;
 }
 
+message ScoutLogsRequest {
+  string collection_id = 1;
+}
+
+message ScoutLogsResponse {
+  // This field was once used for an ambiguous last_record_offset alternative.
+  reserved 1;
+  // The next record to insert will have this offset.
+  int64 first_uninserted_record_offset = 2;
+}
+
 message PullLogsRequest {
   string collection_id = 1;
   int64 start_from_offset = 2;
@@ -29,6 +40,16 @@ message LogRecord {
 
 message PullLogsResponse {
   repeated LogRecord records = 1;
+}
+
+message ForkLogsRequest {
+  string source_collection_id = 1;
+  string target_collection_id = 2;
+}
+
+message ForkLogsResponse {
+  uint64 compaction_offset = 1;
+  uint64 enumeration_offset = 2;
 }
 
 message CollectionInfo {
@@ -68,7 +89,9 @@ message PurgeDirtyForCollectionResponse {
 
 service LogService {
   rpc PushLogs(PushLogsRequest) returns (PushLogsResponse) {}
+  rpc ScoutLogs(ScoutLogsRequest) returns (ScoutLogsResponse) {}
   rpc PullLogs(PullLogsRequest) returns (PullLogsResponse) {}
+  rpc ForkLogs(ForkLogsRequest) returns (ForkLogsResponse) {}
   rpc GetAllCollectionInfoToCompact(GetAllCollectionInfoToCompactRequest) returns (GetAllCollectionInfoToCompactResponse) {}
   rpc UpdateCollectionLogOffset(UpdateCollectionLogOffsetRequest) returns (UpdateCollectionLogOffsetResponse) {}
   rpc PurgeDirtyForCollection(PurgeDirtyForCollectionRequest) returns (PurgeDirtyForCollectionResponse) {}

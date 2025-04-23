@@ -1,6 +1,5 @@
 // NOTE:  This is file is copied to files of the same name in the
 // load/src/opentelemetry_config.rs file
-// and garbage_collector/src/opentelemetry_config.rs file.
 // Keep them in-sync manually.
 
 use std::borrow::Cow;
@@ -15,7 +14,7 @@ use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Layer};
 
 pub fn init_global_filter_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
     EnvFilter::new(std::env::var("RUST_LOG").unwrap_or_else(|_| {
-        "error,".to_string()
+        "error,opentelemetry_sdk=info,".to_string()
             + &vec![
                 "chroma",
                 "chroma-blockstore",
@@ -38,6 +37,7 @@ pub fn init_global_filter_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
                 "query_service",
                 "wal3",
                 "worker",
+                "garbage_collector",
             ]
             .into_iter()
             .map(|s| s.to_string() + "=trace")
@@ -91,7 +91,9 @@ pub fn init_otel_layer(
     // Prepare meter.
     let metric_exporter = opentelemetry_otlp::MetricExporter::builder()
         .with_tonic()
-        .with_endpoint(otel_endpoint)
+        .with_endpoint(
+            std::env::var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT").unwrap_or(otel_endpoint.clone()),
+        )
         .build()
         .expect("could not build metric exporter");
 
@@ -133,6 +135,14 @@ pub fn init_stdout_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
             metadata.module_path().unwrap_or("").starts_with("chroma")
                 || metadata.module_path().unwrap_or("").starts_with("wal3")
                 || metadata.module_path().unwrap_or("").starts_with("worker")
+                || metadata
+                    .module_path()
+                    .unwrap_or("")
+                    .starts_with("garbage_collector")
+                || metadata
+                    .module_path()
+                    .unwrap_or("")
+                    .starts_with("opentelemetry_sdk")
         }))
         .with_filter(tracing_subscriber::filter::LevelFilter::INFO)
         .boxed()

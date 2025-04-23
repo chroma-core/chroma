@@ -1,3 +1,5 @@
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
@@ -5,7 +7,9 @@ use chromadb::collection::{CollectionEntries, GetOptions, GetResult, QueryOption
 use chromadb::ChromaClient;
 use guacamole::combinators::*;
 use guacamole::Guacamole;
+use tokio::sync::Mutex;
 use tracing::Instrument;
+use tracing::{event, Level};
 
 use crate::{bit_difference, DataSet, Error, GetQuery, KeySelector, QueryQuery, UpsertQuery};
 
@@ -743,6 +747,10 @@ impl DataSet for ReferencingDataSet {
         self.cardinality
     }
 
+    fn reference_cardinality(&self) -> usize {
+        self.references.cardinality()
+    }
+
     async fn get(
         &self,
         client: &ChromaClient,
@@ -822,12 +830,12 @@ impl DataSet for ReferencingDataSet {
         &self,
         client: &ChromaClient,
         uq: UpsertQuery,
-        guac: &mut Guacamole,
+        _: &mut Guacamole,
     ) -> Result<(), Box<dyn std::error::Error + Send>> {
         let collection = client.get_collection(&self.operates_on).await?;
         let mut keys = vec![];
         for offset in 0..uq.batch_size {
-            keys.push(uq.key.select_with_offset(guac, self, offset));
+            keys.push(uq.key.select_from_reference(self, offset));
         }
         let keys = keys.iter().map(|k| k.as_str()).collect::<Vec<_>>();
         if let Some(res) = self.references.get_by_key(client, &keys).await? {
@@ -873,6 +881,349 @@ impl DataSet for ReferencingDataSet {
                 embeddings: Some(embeddings),
             };
             collection.upsert(entries, None).await?;
+        } else {
+            return Err(Box::new(Error::InvalidRequest("No results".into())));
+        }
+        Ok(())
+    }
+}
+
+//////////////////////////////////////// VerifyingDataSet /////////////////////////////////////////
+
+/// A verifying data set uses a reference data set to verify results from a test data set.
+#[derive(Debug)]
+pub struct VerifyingDataSet {
+    reference_data_set: Arc<dyn DataSet>,
+    test_data_set: String,
+    cardinality: AtomicUsize,
+    cardinality_heap: Arc<Mutex<BinaryHeap<Reverse<usize>>>>,
+}
+
+impl VerifyingDataSet {
+    /// Record a load of a chunk of data.
+    ///
+    /// This function updates the cardinality of the data set. It uses a min-heap to track the
+    /// positions for contiguous loaded chunks. For example, if the data set has a cardinality of
+    /// 1000, and a chunk is loaded from 1100 to 1199, then the heap will contain the value 1100.
+    /// The cardinality of the data set will not be updated in this case, because the chunk is not
+    /// contiguous with the data set cardinality. If the next chunk is loaded from 1000 to 1099,
+    /// then the heap will contain the values 1000 and 1100. After looping and reading these
+    /// contiguous chunks, the data set be updated with a cardinality of 1200, and the heap will
+    /// be emptied out.
+    async fn record_load(&self, loaded_chunk_start_idx: usize, batch_size: usize) {
+        let mut heap = self.cardinality_heap.lock().await;
+
+        let mut cardinality = self.cardinality.load(std::sync::atomic::Ordering::Relaxed);
+
+        heap.push(Reverse(loaded_chunk_start_idx));
+
+        let mut min_loaded_so_far = heap.peek().unwrap().0;
+
+        while min_loaded_so_far == cardinality {
+            cardinality = heap.pop().unwrap().0 + batch_size;
+
+            match heap.peek() {
+                Some(Reverse(next_min)) => min_loaded_so_far = *next_min,
+                None => break,
+            }
+        }
+
+        self.cardinality
+            .store(cardinality, std::sync::atomic::Ordering::Relaxed);
+
+        event!(
+            Level::INFO,
+            "Loaded {} keys, loaded chunk start idx: {}, new cardinality: {}",
+            batch_size,
+            loaded_chunk_start_idx,
+            cardinality
+        );
+    }
+}
+
+#[async_trait::async_trait]
+impl DataSet for VerifyingDataSet {
+    fn name(&self) -> String {
+        self.test_data_set.clone()
+    }
+
+    fn description(&self) -> String {
+        format!(
+            "referencing data set {}, testing on {}",
+            self.reference_data_set.name(),
+            self.test_data_set
+        )
+    }
+
+    fn json(&self) -> serde_json::Value {
+        serde_json::json! {
+            {
+                "reference_data_set": self.reference_data_set.json(),
+                "test_data_set": self.test_data_set,
+            }
+        }
+    }
+
+    fn cardinality(&self) -> usize {
+        self.cardinality.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn reference_cardinality(&self) -> usize {
+        self.reference_data_set.cardinality()
+    }
+
+    async fn get(
+        &self,
+        client: &ChromaClient,
+        gq: GetQuery,
+        guac: &mut Guacamole,
+    ) -> Result<(), Box<dyn std::error::Error + Send>> {
+        let mut keys = vec![];
+        let num_keys = gq.limit.sample(guac);
+
+        if self.cardinality() < num_keys {
+            // If the cardinality is less than the number of keys requested, return Ok(())
+            // because the data set is not populated yet.
+            return Ok(());
+        }
+
+        for _ in 0..num_keys {
+            keys.push(KeySelector::Random(gq.skew).select(guac, self));
+        }
+
+        let reference_collection = client
+            .get_collection(&self.reference_data_set.name())
+            .await?;
+        let reference_results = reference_collection
+            .get(GetOptions {
+                ids: keys.clone(),
+                where_metadata: None,
+                limit: None,
+                offset: None,
+                where_document: None,
+                include: Some(vec![
+                    "embeddings".to_string(),
+                    "metadatas".to_string(),
+                    "documents".to_string(),
+                ]),
+            })
+            .await?;
+
+        let test_collection = client.get_collection(&self.test_data_set).await?;
+        let test_results = test_collection
+            .get(GetOptions {
+                ids: keys.clone(),
+                where_metadata: None,
+                limit: None,
+                offset: None,
+                where_document: None,
+                include: Some(vec![
+                    "embeddings".to_string(),
+                    "metadatas".to_string(),
+                    "documents".to_string(),
+                ]),
+            })
+            .await?;
+
+        event!(
+            Level::INFO,
+            "Querying for keys: {}, cardinality: {}, reference results: {}, test results: {}",
+            keys.iter()
+                .map(|k| k.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+            self.cardinality(),
+            reference_results.ids.len(),
+            test_results.ids.len()
+        );
+
+        if test_results.ids.len() != reference_results.ids.len() {
+            return Err(Box::new(Error::InvalidRequest(format!(
+                "IDs lengths are different: got {}, expected {}",
+                test_results.ids.len(),
+                reference_results.ids.len()
+            ))));
+        }
+
+        let reference_embeddings = match reference_results.embeddings {
+            Some(embeddings) => embeddings,
+            None => {
+                return Err(Box::new(Error::InvalidRequest(
+                    "Reference results have no embeddings".into(),
+                )))
+            }
+        };
+        let test_embeddings = match test_results.embeddings {
+            Some(embeddings) => embeddings,
+            None => {
+                return Err(Box::new(Error::InvalidRequest(
+                    "Test results have no embeddings".into(),
+                )))
+            }
+        };
+        if reference_embeddings.len() != test_embeddings.len() {
+            return Err(Box::new(Error::InvalidRequest(format!(
+                "Embeddings lengths are different: got {}, expected {}",
+                test_embeddings.len(),
+                reference_embeddings.len()
+            ))));
+        }
+
+        let reference_metadatas = match reference_results.metadatas {
+            Some(metadatas) => metadatas,
+            None => {
+                return Err(Box::new(Error::InvalidRequest(
+                    "Reference results have no metadatas".into(),
+                )))
+            }
+        };
+        let test_metadatas = match test_results.metadatas {
+            Some(metadatas) => metadatas,
+            None => {
+                return Err(Box::new(Error::InvalidRequest(
+                    "Test results have no metadatas".into(),
+                )))
+            }
+        };
+        if reference_metadatas.len() != test_metadatas.len() {
+            return Err(Box::new(Error::InvalidRequest(format!(
+                "Metadatas lengths are different: got {}, expected {}",
+                test_metadatas.len(),
+                reference_metadatas.len()
+            ))));
+        }
+
+        for (reference_idx, reference_id) in reference_results.ids.iter().enumerate() {
+            let test_idx = test_results
+                .ids
+                .iter()
+                .position(|id| id == reference_id)
+                .unwrap();
+
+            let reference_embedding = match &reference_embeddings[reference_idx] {
+                Some(embedding) => embedding,
+                None => {
+                    return Err(Box::new(Error::InvalidRequest(format!(
+                        "Reference embedding for id {} is missing",
+                        reference_id
+                    ))));
+                }
+            };
+            let test_embedding = match &test_embeddings[test_idx] {
+                Some(embedding) => embedding,
+                None => {
+                    return Err(Box::new(Error::InvalidRequest(format!(
+                        "Test embedding for id {} is missing",
+                        reference_id
+                    ))));
+                }
+            };
+
+            if reference_embedding != test_embedding {
+                return Err(Box::new(Error::InvalidRequest(format!(
+                    "Embeddings for id {} are different: got {:?}, expected {:?}",
+                    reference_id, test_embedding, reference_embedding
+                ))));
+            }
+
+            let reference_metadata = &reference_metadatas[reference_idx];
+            let test_metadata = &test_metadatas[test_idx];
+
+            if reference_metadata != test_metadata {
+                return Err(Box::new(Error::InvalidRequest(format!(
+                    "Metadata for id {} are different: got {:?}, expected {:?}",
+                    reference_id, test_metadata, reference_metadata
+                ))));
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn query(
+        &self,
+        _: &ChromaClient,
+        _: QueryQuery,
+        _: &mut Guacamole,
+    ) -> Result<(), Box<dyn std::error::Error + Send>> {
+        Err(Box::new(Error::InvalidRequest(
+            "Query not implemented (yet)".into(),
+        )))
+    }
+
+    async fn upsert(
+        &self,
+        client: &ChromaClient,
+        uq: UpsertQuery,
+        _: &mut Guacamole,
+    ) -> Result<(), Box<dyn std::error::Error + Send>> {
+        let collection = client.get_collection(&self.test_data_set).await?;
+        let mut keys = vec![];
+
+        let key_start_index = match &uq.key {
+            KeySelector::Index(key_start_index) => *key_start_index,
+            _ => {
+                return Err(Box::new(Error::InvalidRequest(
+                    "Key selector must be an index".into(),
+                )))
+            }
+        };
+
+        event!(
+            Level::INFO,
+            "Upserting {} keys, new cardinality: {}",
+            uq.batch_size,
+            key_start_index + uq.batch_size
+        );
+
+        for offset in 0..uq.batch_size {
+            keys.push(uq.key.select_from_reference(self, offset));
+        }
+        let keys = keys.iter().map(|k| k.as_str()).collect::<Vec<_>>();
+        if let Some(res) = self.reference_data_set.get_by_key(client, &keys).await? {
+            let mut keys = vec![];
+            for id in res.ids.iter() {
+                keys.push(id.as_str());
+            }
+            let mut documents = vec![];
+            if let Some(docs) = res.documents {
+                for (idx, doc) in docs.into_iter().enumerate() {
+                    if let Some(doc) = doc {
+                        documents.push(doc);
+                    } else {
+                        return Err(Box::new(Error::InvalidRequest(format!(
+                            "Missing document for {}",
+                            idx
+                        ))));
+                    }
+                }
+            } else {
+                return Err(Box::new(Error::InvalidRequest("No documents".into())));
+            }
+            let documents = documents.iter().map(|d| d.as_str()).collect::<Vec<_>>();
+            let mut embeddings = vec![];
+            if let Some(embeds) = res.embeddings {
+                for (idx, embed) in embeds.iter().enumerate() {
+                    if let Some(embed) = embed {
+                        embeddings.push(embed.clone());
+                    } else {
+                        return Err(Box::new(Error::InvalidRequest(format!(
+                            "Missing document for {}",
+                            idx
+                        ))));
+                    }
+                }
+            } else {
+                return Err(Box::new(Error::InvalidRequest("No documents".into())));
+            }
+            let entries = CollectionEntries {
+                ids: keys,
+                metadatas: res.metadatas,
+                documents: Some(documents),
+                embeddings: Some(embeddings),
+            };
+            collection.upsert(entries, None).await?;
+            self.record_load(key_start_index, uq.batch_size).await;
         } else {
             return Err(Box::new(Error::InvalidRequest("No results".into())));
         }
@@ -1046,6 +1397,19 @@ pub fn all_data_sets() -> Vec<Arc<dyn DataSet>> {
             }
         }
     }
+
+    let reference_data_set = Arc::new(TinyStoriesDataSet::new(TinyStoriesDataSetType::reference(
+        "reference",
+        ALL_MINILM_L6_V2,
+        1_000_000,
+    )));
+    data_sets.push(Arc::new(VerifyingDataSet {
+        reference_data_set,
+        test_data_set: "test-all-MiniLM-L6-v2".to_string(),
+        cardinality: AtomicUsize::new(0),
+        cardinality_heap: Arc::new(Mutex::new(BinaryHeap::new())),
+    }) as _);
+
     data_sets
 }
 

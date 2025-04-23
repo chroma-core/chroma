@@ -140,10 +140,11 @@ garbageCollector:
   configuration: |
     service_name: "garbage-collector"
     otel_endpoint: "http://otel-collector:4317"
-    cutoff_time_hours: 12
+    relative_cutoff_time_seconds: 60 # GC all versions created at time < now() - relative_cutoff_time_seconds (1 minute)
     max_collections_to_gc: 1000
-    gc_interval_mins: 120
+    gc_interval_mins: 1
     disallow_collections: []
+    default_mode: "delete"
     sysdb_config:
       host: "sysdb.chroma"
       port: 50051
@@ -156,12 +157,11 @@ garbageCollector:
     storage_config:
       s3:
         bucket: "chroma-storage"
-      # object_store:
-      #   bucket:
-      #     name: "chroma-storage"
-      #     type: "minio"
-      #   credentials: "Minio"
-      #   connect_timeout_ms: 5000
-      #   request_timeout_ms: 30000
-      #   upload_part_size_bytes: 536870912
-      #   download_part_size_bytes: 8388608
+    assignment_policy:
+      rendezvous_hashing:
+        hasher: Murmur3
+    memberlist_provider:
+      custom_resource:
+        kube_namespace: "chroma"
+        memberlist_name: "garbage-collection-service-memberlist"
+        queue_size: 100

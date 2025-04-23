@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use tonic::transport::Channel;
 use uuid::Uuid;
 
+#[derive(Clone)]
 pub struct ChromaGrpcClients {
     pub sysdb: SysDbClient<Channel>,
     pub log_service: LogServiceClient<Channel>,

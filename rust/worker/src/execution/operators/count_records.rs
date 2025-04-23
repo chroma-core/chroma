@@ -81,7 +81,7 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
             Err(e) => {
                 match *e {
                     RecordSegmentReaderCreationError::UninitializedSegment => {
-                        tracing::info!("[CountQueryOrchestrator] Record segment is uninitialized");
+                        tracing::info!("[CountQueryOrchestrator] Record segment is uninitialized; using {} records from log", input.log_records.len());
                         // This means there no compaction has occured.
                         // So we can just traverse the log records
                         // and count the number of records.

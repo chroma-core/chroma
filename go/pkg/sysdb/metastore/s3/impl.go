@@ -8,6 +8,7 @@ import (
 	"io"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
@@ -21,35 +22,25 @@ import (
 // Example:
 // s3://<bucket-name>/<sysdbPathPrefix>/<tenant_id>/databases/<database_id>/collections/<collection_id>/versionfiles/file_name
 const (
-	versionFilesPathFormat = "%s/%s/databases/%s/collections/%s/versionfiles/%s"
-	minioEndpoint          = "minio:9000"
-	minioAccessKeyID       = "minio"
-	minioSecretAccessKey   = "minio123"
+	lineageFilesPathFormat = "%s/databases/%s/collections/%s/lineagefiles/%s"
+	versionFilesPathFormat = "%s/databases/%s/collections/%s/versionfiles/%s"
 )
-
-// BlockStoreProviderType represents the type of block store provider
-type BlockStoreProviderType string
-
-const (
-	BlockStoreProviderNone  BlockStoreProviderType = "none"
-	BlockStoreProviderS3    BlockStoreProviderType = "s3"
-	BlockStoreProviderMinio BlockStoreProviderType = "minio"
-)
-
-func (t BlockStoreProviderType) IsValid() bool {
-	return t == BlockStoreProviderS3 || t == BlockStoreProviderMinio || t == BlockStoreProviderNone
-}
 
 type S3MetaStoreConfig struct {
-	BucketName         string
-	Region             string
-	BasePathSysDB      string
-	Endpoint           string
-	BlockStoreProvider BlockStoreProviderType
+	CreateBucketIfNotExists bool
+	BucketName              string
+	Region                  string
+	BasePathSysDB           string
+	Endpoint                string
+	AccessKeyID             string
+	SecretAccessKey         string
+	ForcePathStyle          bool
 }
 
 type S3MetaStoreInterface interface {
-	GetVersionFile(tenantID, collectionID string, version int64, fileName string) (*coordinatorpb.CollectionVersionFile, error)
+	GetLineageFile(lineageFileName string) (*coordinatorpb.CollectionLineageFile, error)
+	PutLineageFile(tenantID, databaseID, collectionID, fileName string, file *coordinatorpb.CollectionLineageFile) (string, error)
+	GetVersionFile(versionFileName string) (*coordinatorpb.CollectionVersionFile, error)
 	PutVersionFile(tenantID, databaseID, collectionID, fileName string, file *coordinatorpb.CollectionVersionFile) (string, error)
 	HasObjectWithPrefix(ctx context.Context, prefix string) (bool, error)
 	DeleteVersionFile(tenantID, databaseID, collectionID, fileName string) error
@@ -87,52 +78,120 @@ func NewS3MetaStoreForTesting(bucketName, region, basePathSysDB, endpoint, acces
 
 // NewS3MetaStore constructs and returns an S3MetaStore.
 func NewS3MetaStore(config S3MetaStoreConfig) (*S3MetaStore, error) {
-	var sess *session.Session
-	var err error
 	bucketName := config.BucketName
 
-	if config.BlockStoreProvider == BlockStoreProviderNone {
-		// TODO(rohit): Remove this once the feature is enabled.
-		// This is valid till the feature is not enabled.
-		return nil, nil
+	aws_config := aws.Config{
+		Region:           aws.String("us-east-1"),
+		S3ForcePathStyle: aws.Bool(config.ForcePathStyle),
 	}
 
-	if config.BlockStoreProvider == BlockStoreProviderMinio {
-		sess, err = session.NewSession(&aws.Config{
-			Credentials:      credentials.NewStaticCredentials(minioAccessKeyID, minioSecretAccessKey, ""),
-			Endpoint:         aws.String(minioEndpoint),
-			Region:           aws.String("us-east-1"),
-			DisableSSL:       aws.Bool(true),
-			S3ForcePathStyle: aws.Bool(true),
-		})
-		bucketName = "chroma-storage"
-	} else {
-		sess, err = session.NewSession(&aws.Config{
-			Region: aws.String(config.Region),
-		})
+	if config.Region != "" {
+		aws_config.Region = aws.String(config.Region)
+	}
+	if config.Endpoint != "" {
+		aws_config.Endpoint = aws.String(config.Endpoint)
+	}
+	if config.AccessKeyID != "" && config.SecretAccessKey != "" {
+		aws_config.Credentials = credentials.NewStaticCredentials(config.AccessKeyID, config.SecretAccessKey, "")
 	}
 
+	sess, err := session.NewSession(&aws_config)
 	if err != nil {
 		return nil, err
 	}
 
+	s3Client := s3.New(sess)
+
+	if config.CreateBucketIfNotExists {
+		_, err = s3Client.CreateBucket(&s3.CreateBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err != nil {
+			if err.(awserr.Error).Code() != s3.ErrCodeBucketAlreadyOwnedByYou {
+				return nil, fmt.Errorf("unable to create bucket %s: %w", bucketName, err)
+			}
+			log.Info("Bucket already exists, continuing", zap.String("bucket", bucketName))
+		}
+	}
+
+	// Verify we have access to the bucket
+	_, err = s3Client.HeadBucket(&s3.HeadBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("unable to access bucket %s: %w", bucketName, err)
+	}
+
 	return &S3MetaStore{
-		S3:            s3.New(sess),
+		S3:            s3Client,
 		BucketName:    bucketName,
 		Region:        config.Region,
 		BasePathSysDB: config.BasePathSysDB,
 	}, nil
 }
 
-// Get the version file from S3. Return the protobuf.
-func (store *S3MetaStore) GetVersionFile(tenantID, collectionID string, version int64, versionFileName string) (*coordinatorpb.CollectionVersionFile, error) {
-	// path := store.GetVersionFilePath(tenantID, collectionID, versionFileName)
-	path := versionFileName
-	log.Info("getting version file from S3", zap.String("path", path))
+func (store *S3MetaStore) GetLineageFile(lineageFileName string) (*coordinatorpb.CollectionLineageFile, error) {
+	log.Info("Getting lineage file from S3", zap.String("path", lineageFileName))
 
 	input := &s3.GetObjectInput{
 		Bucket: aws.String(store.BucketName),
+		Key:    aws.String(lineageFileName),
+	}
+
+	result, err := store.S3.GetObject(input)
+	if err != nil {
+		return nil, err
+	}
+	defer result.Body.Close()
+
+	data, err := io.ReadAll(result.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	lineageFile := &coordinatorpb.CollectionLineageFile{}
+	if err := proto.Unmarshal(data, lineageFile); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal version file: %w", err)
+	}
+
+	return lineageFile, nil
+}
+
+func (store *S3MetaStore) GetLineageFilePath(tenantID string, databaseID string, collectionID string, versionFileName string) string {
+	return fmt.Sprintf(versionFilesPathFormat,
+		tenantID, databaseID, collectionID, versionFileName)
+}
+
+func (store *S3MetaStore) PutLineageFile(tenantID string, databaseID string, collectionID string, lineageFileName string, lineageFile *coordinatorpb.CollectionLineageFile) (string, error) {
+	path := store.GetLineageFilePath(tenantID, databaseID, collectionID, lineageFileName)
+
+	data, err := proto.Marshal(lineageFile)
+	if err != nil {
+		return "", fmt.Errorf("Failed to marshal lineage file: %w", err)
+	}
+
+	numForks := len(lineageFile.Dependencies)
+	log.Info("Putting lineage file", zap.String("collectionID", collectionID), zap.Int("numForks", numForks))
+
+	input := &s3.PutObjectInput{
+		Bucket: aws.String(store.BucketName),
 		Key:    aws.String(path),
+		Body:   bytes.NewReader(data),
+	}
+
+	output, err := store.S3.PutObject(input)
+	log.Info("Put object output", zap.Any("output", output), zap.Error(err))
+
+	return path, err
+}
+
+// Get the version file from S3. Return the protobuf.
+func (store *S3MetaStore) GetVersionFile(versionFileName string) (*coordinatorpb.CollectionVersionFile, error) {
+	log.Info("getting version file from S3", zap.String("path", versionFileName))
+
+	input := &s3.GetObjectInput{
+		Bucket: aws.String(store.BucketName),
+		Key:    aws.String(versionFileName),
 	}
 
 	result, err := store.S3.GetObject(input)
@@ -198,7 +257,7 @@ func (store *S3MetaStore) PutVersionFile(tenantID, databaseID, collectionID stri
 // GetVersionFilePath constructs the S3 path for a version file
 func (store *S3MetaStore) GetVersionFilePath(tenantID, databaseID, collectionID, versionFileName string) string {
 	return fmt.Sprintf(versionFilesPathFormat,
-		store.BasePathSysDB, tenantID, databaseID, collectionID, versionFileName)
+		tenantID, databaseID, collectionID, versionFileName)
 }
 
 // DeleteOldVersionFiles removes version files older than the specified version

@@ -52,7 +52,7 @@ opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
 parking_lot = { version = "0.12.3", features = ["serde"] }
 parquet = "52"
 prost = "0.13"
-prost-types = "0.12"
+prost-types = "0.13.5"
 roaring = "0.10.6"
 sea-query = "0.32"
 sea-query-binder = "0.7"
@@ -88,6 +88,7 @@ hnswlib = { version = "0.8.1", git = "https://github.com/chroma-core/hnswlib.git
 reqwest = { version = "0.12.9",  features = ["rustls-tls-native-roots", "http2"], default-features = false }
 random-port = "0.1.1"
 ndarray = { version = "0.16.1", features = ["approx"] }
+humantime = { version = "2.2.0" }
 
 chroma-benchmark = { path = "rust/benchmark" }
 chroma-blockstore = { path = "rust/blockstore" }

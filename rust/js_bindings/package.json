@@ -1,11 +1,11 @@
 {
-  "name": "@chroma/chromadb-js-bindings",
+  "name": "chromadb-js-bindings",
   "version": "0.1.0",
   "main": "index.js",
   "types": "index.d.ts",
   "napi": {
     "name": "chromadb-js-bindings",
-    "packageName": "@chroma/chromadb-js-bindings",
+    "packageName": "chromadb-js-bindings",
     "triples": {
       "additional": [
         "aarch64-apple-darwin",
@@ -34,5 +34,5 @@
     "universal": "napi universal",
     "version": "napi version"
   },
-  "packageManager": "yarn@4.8.1"
+  "packageManager": "pnpm@9.0.0"
 }
