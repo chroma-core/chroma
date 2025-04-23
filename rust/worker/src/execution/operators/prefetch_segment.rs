@@ -67,27 +67,18 @@ impl Operator<PrefetchSegmentInput, PrefetchSegmentOutput> for PrefetchSegmentOp
         &self,
         input: &PrefetchSegmentInput,
     ) -> Result<PrefetchSegmentOutput, PrefetchSegmentError> {
-        if input.segment.r#type != SegmentType::BlockfileMetadata
-            && input.segment.r#type != SegmentType::BlockfileRecord
-        {
+        if !input.segment.prefetch_supported() {
             return Err(PrefetchSegmentError::UnsupportedSegmentType(
                 input.segment.r#type,
             ));
         }
 
-        tracing::info!(
-            "Prefetching segment: {:?} ({:?})",
-            input.segment.r#type,
-            input.segment.id,
-        );
-
         let mut futures = input
             .segment
-            .file_path
-            .values()
-            .flatten()
+            .filepaths_to_prefetch()
+            .into_iter()
             .map(|blockfile_id| async move {
-                let blockfile_id = Uuid::parse_str(blockfile_id)?;
+                let blockfile_id = Uuid::parse_str(&blockfile_id)?;
                 let count = input.blockfile_provider.prefetch(&blockfile_id).await?;
                 Ok::<_, PrefetchSegmentError>(count)
             })

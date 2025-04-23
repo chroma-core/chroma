@@ -1,9 +1,5 @@
 name: Start Tilt services
 description: "This action starts Tilt services"
-inputs:
-  depot-project-id:
-    description: "Depot project ID"
-    required: true
 runs:
   using: "composite"
   steps:
@@ -25,8 +21,6 @@ runs:
     - name: Start Tilt
       shell: bash
       run: tilt ci
-      env:
-        DEPOT_PROJECT_ID: ${{ inputs.depot-project-id }}
     - name: Forward ports
       shell: bash
       run: |

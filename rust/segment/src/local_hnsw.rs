@@ -327,7 +327,7 @@ impl LocalHnswSegmentReader {
                                     // SAFETY(hammadb): We are sure that the heap has at least one element
                                     // because we insert until we have k elements.
                                     let top = max_heap.peek().unwrap();
-                                    if top.measure < curr_distance {
+                                    if top.measure > curr_distance {
                                         max_heap.pop();
                                         max_heap.push(RecordDistance {
                                             offset_id: *curr_id as u32,

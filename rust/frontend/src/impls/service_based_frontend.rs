@@ -21,20 +21,21 @@ use chroma_types::{
     CreateTenantError, CreateTenantRequest, CreateTenantResponse, DeleteCollectionError,
     DeleteCollectionRecordsError, DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse,
     DeleteCollectionRequest, DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse,
-    GetCollectionError, GetCollectionRequest, GetCollectionResponse, GetCollectionsError,
-    GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
-    GetTenantError, GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError,
-    HeartbeatResponse, Include, InternalCollectionConfiguration, ListCollectionsRequest,
-    ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
-    Operation, OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
-    Segment, SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError,
-    UpdateCollectionRecordsError, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
-    UpdateCollectionRequest, UpdateCollectionResponse, UpsertCollectionRecordsError,
-    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, VectorIndexConfiguration,
-    Where,
+    ForkCollectionError, ForkCollectionRequest, ForkCollectionResponse, GetCollectionError,
+    GetCollectionRequest, GetCollectionResponse, GetCollectionsError, GetDatabaseError,
+    GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantError,
+    GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError, HeartbeatResponse,
+    Include, KnnIndex, ListCollectionsRequest, ListCollectionsResponse, ListDatabasesError,
+    ListDatabasesRequest, ListDatabasesResponse, Operation, OperationRecord, QueryError,
+    QueryRequest, QueryResponse, ResetError, ResetResponse, Segment, SegmentScope, SegmentType,
+    SegmentUuid, UpdateCollectionError, UpdateCollectionRecordsError,
+    UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateCollectionRequest,
+    UpdateCollectionResponse, UpsertCollectionRecordsError, UpsertCollectionRecordsRequest,
+    UpsertCollectionRecordsResponse, VectorIndexConfiguration, Where,
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -43,6 +44,7 @@ use super::utils::to_records;
 
 #[derive(Debug)]
 struct Metrics {
+    fork_retries_counter: Counter<u64>,
     delete_retries_counter: Counter<u64>,
     count_retries_counter: Counter<u64>,
     query_retries_counter: Counter<u64>,
@@ -58,6 +60,7 @@ pub struct ServiceBasedFrontend {
     collections_with_segments_provider: CollectionsWithSegmentsProvider,
     max_batch_size: u32,
     metrics: Arc<Metrics>,
+    default_knn_index: KnnIndex,
 }
 
 impl ServiceBasedFrontend {
@@ -68,13 +71,16 @@ impl ServiceBasedFrontend {
         log_client: Log,
         executor: Executor,
         max_batch_size: u32,
+        default_knn_index: KnnIndex,
     ) -> Self {
         let meter = global::meter("chroma");
+        let fork_retries_counter = meter.u64_counter("fork_retries").build();
         let delete_retries_counter = meter.u64_counter("delete_retries").build();
         let count_retries_counter = meter.u64_counter("count_retries").build();
         let query_retries_counter = meter.u64_counter("query_retries").build();
         let get_retries_counter = meter.u64_counter("query_retries").build();
         let metrics = Arc::new(Metrics {
+            fork_retries_counter,
             delete_retries_counter,
             count_retries_counter,
             query_retries_counter,
@@ -88,7 +94,12 @@ impl ServiceBasedFrontend {
             collections_with_segments_provider,
             max_batch_size,
             metrics,
+            default_knn_index,
         }
+    }
+
+    pub fn get_default_knn_index(&self) -> KnnIndex {
+        self.default_knn_index
     }
 
     pub async fn heartbeat(&self) -> Result<HeartbeatResponse, HeartbeatError> {
@@ -99,6 +110,10 @@ impl ServiceBasedFrontend {
 
     pub fn get_max_batch_size(&mut self) -> u32 {
         self.max_batch_size
+    }
+
+    pub fn get_supported_segment_types(&self) -> Vec<SegmentType> {
+        self.executor.get_supported_segment_types()
     }
 
     async fn get_collection_dimension(
@@ -338,8 +353,44 @@ impl ServiceBasedFrontend {
         }: CreateCollectionRequest,
     ) -> Result<CreateCollectionResponse, CreateCollectionError> {
         let collection_id = CollectionUuid::new();
-        let configuration: Option<InternalCollectionConfiguration> =
-            configuration.map(|c| c.try_into()).transpose()?;
+
+        let supported_segment_types: HashSet<SegmentType> =
+            self.get_supported_segment_types().into_iter().collect();
+
+        if let Some(config) = configuration.as_ref() {
+            match &config.vector_index {
+                VectorIndexConfiguration::Spann { .. } => {
+                    if !supported_segment_types.contains(&SegmentType::Spann) {
+                        return Err(CreateCollectionError::SpannNotImplemented);
+                    }
+                }
+                VectorIndexConfiguration::Hnsw { .. } => {
+                    if !supported_segment_types.contains(&SegmentType::HnswDistributed)
+                        && !supported_segment_types.contains(&SegmentType::HnswLocalMemory)
+                        && !supported_segment_types.contains(&SegmentType::HnswLocalPersisted)
+                    {
+                        return Err(CreateCollectionError::HnswNotSupported);
+                    }
+                }
+            }
+        }
+
+        // Check default server configuration's index type
+        match self.default_knn_index {
+            KnnIndex::Spann => {
+                if !supported_segment_types.contains(&SegmentType::Spann) {
+                    return Err(CreateCollectionError::SpannNotImplemented);
+                }
+            }
+            KnnIndex::Hnsw => {
+                if !supported_segment_types.contains(&SegmentType::HnswDistributed)
+                    && !supported_segment_types.contains(&SegmentType::HnswLocalMemory)
+                    && !supported_segment_types.contains(&SegmentType::HnswLocalPersisted)
+                {
+                    return Err(CreateCollectionError::HnswNotSupported);
+                }
+            }
+        }
 
         let segments = match self.executor {
             Executor::Distributed(_) => {
@@ -495,6 +546,75 @@ impl ServiceBasedFrontend {
         Ok(DeleteCollectionRecordsResponse {})
     }
 
+    pub async fn retryable_fork(
+        &mut self,
+        ForkCollectionRequest {
+            source_collection_id,
+            target_collection_name,
+            ..
+        }: ForkCollectionRequest,
+    ) -> Result<ForkCollectionResponse, ForkCollectionError> {
+        let target_collection_id = CollectionUuid::new();
+        let log_offsets = self
+            .log_client
+            .fork_logs(source_collection_id, target_collection_id)
+            .await?;
+        let collection_and_segments = self
+            .sysdb_client
+            .fork_collection(
+                source_collection_id,
+                log_offsets.compaction_offset,
+                log_offsets.enumeration_offset,
+                target_collection_id,
+                target_collection_name,
+            )
+            .await?;
+        let collection = collection_and_segments.collection.clone();
+
+        // Update the cache.
+        self.collections_with_segments_provider
+            .set_collection_with_segments(collection_and_segments)
+            .await;
+
+        Ok(collection)
+    }
+
+    pub async fn fork_collection(
+        &mut self,
+        request: ForkCollectionRequest,
+    ) -> Result<ForkCollectionResponse, ForkCollectionError> {
+        let retries = Arc::new(AtomicUsize::new(0));
+        let fork_to_retry = || {
+            let mut self_clone = self.clone();
+            let request_clone = request.clone();
+            async move { self_clone.retryable_fork(request_clone).await }
+        };
+
+        let res = fork_to_retry
+            .retry(self.collections_with_segments_provider.get_retry_backoff())
+            // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
+            .when(|e| {
+                matches!(
+                    e.code(),
+                    ErrorCodes::FailedPrecondition | ErrorCodes::NotFound | ErrorCodes::Unknown
+                )
+            })
+            .notify(|_, _| {
+                let retried = retries.fetch_add(1, Ordering::Relaxed);
+                if retried > 0 {
+                    tracing::info!(
+                        "Retrying fork() request for collection {}",
+                        request.source_collection_id
+                    );
+                }
+            })
+            .await;
+        self.metrics
+            .fork_retries_counter
+            .add(retries.load(Ordering::Relaxed) as u64, &[]);
+        res
+    }
+
     pub async fn add(
         &mut self,
         AddCollectionRecordsRequest {
@@ -524,7 +644,13 @@ impl ServiceBasedFrontend {
         self.log_client
             .push_logs(collection_id, records)
             .await
-            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+            .map_err(|err| {
+                if err.code() == ErrorCodes::Unavailable {
+                    AddCollectionRecordsError::Backoff
+                } else {
+                    AddCollectionRecordsError::Other(Box::new(err) as _)
+                }
+            })?;
 
         // TODO: Submit event after the response is sent
         MeterEvent::CollectionWrite {
@@ -573,7 +699,13 @@ impl ServiceBasedFrontend {
         self.log_client
             .push_logs(collection_id, records)
             .await
-            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+            .map_err(|err| {
+                if err.code() == ErrorCodes::Unavailable {
+                    UpdateCollectionRecordsError::Backoff
+                } else {
+                    UpdateCollectionRecordsError::Other(Box::new(err) as _)
+                }
+            })?;
 
         // TODO: Submit event after the response is sent
         MeterEvent::CollectionWrite {
@@ -624,7 +756,13 @@ impl ServiceBasedFrontend {
         self.log_client
             .push_logs(collection_id, records)
             .await
-            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+            .map_err(|err| {
+                if err.code() == ErrorCodes::Unavailable {
+                    UpsertCollectionRecordsError::Backoff
+                } else {
+                    UpsertCollectionRecordsError::Other(Box::new(err) as _)
+                }
+            })?;
 
         // TODO: Submit event after the response is sent
         MeterEvent::CollectionWrite {
@@ -738,7 +876,13 @@ impl ServiceBasedFrontend {
         self.log_client
             .push_logs(collection_id, records)
             .await
-            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+            .map_err(|err| {
+                if err.code() == ErrorCodes::Unavailable {
+                    DeleteCollectionRecordsError::Backoff
+                } else {
+                    DeleteCollectionRecordsError::Internal(Box::new(err) as _)
+                }
+            })?;
 
         if let Some(event) = read_event {
             event.submit().await;
@@ -788,9 +932,16 @@ impl ServiceBasedFrontend {
         };
         let res = delete_to_retry
             .retry(self.collections_with_segments_provider.get_retry_backoff())
-            .when(|e| e.code() == ErrorCodes::NotFound)
+            // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
+            .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
             .notify(|_, _| {
-                retries.fetch_add(1, Ordering::Relaxed);
+                let retried = retries.fetch_add(1, Ordering::Relaxed);
+                if retried > 0 {
+                    tracing::info!(
+                        "Retrying delete() request for collection {}",
+                        request.collection_id
+                    );
+                }
             })
             .await;
         self.metrics
@@ -871,13 +1022,16 @@ impl ServiceBasedFrontend {
         };
         let res = count_to_retry
             .retry(self.collections_with_segments_provider.get_retry_backoff())
-            .when(|e| e.code() == ErrorCodes::NotFound)
+            // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
+            .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
             .notify(|_, _| {
-                tracing::info!(
-                    "Retrying count() request for collection {}",
-                    request.collection_id
-                );
-                retries.fetch_add(1, Ordering::Relaxed);
+                let retried = retries.fetch_add(1, Ordering::Relaxed);
+                if retried > 0 {
+                    tracing::info!(
+                        "Retrying count() request for collection {}",
+                        request.collection_id
+                    );
+                }
             })
             .await;
         self.metrics
@@ -986,13 +1140,16 @@ impl ServiceBasedFrontend {
         };
         let res = get_to_retry
             .retry(self.collections_with_segments_provider.get_retry_backoff())
-            .when(|e| e.code() == ErrorCodes::NotFound)
+            // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
+            .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
             .notify(|_, _| {
-                tracing::info!(
-                    "Retrying get() request for collection {}",
-                    request.collection_id
-                );
-                retries.fetch_add(1, Ordering::Relaxed);
+                let retried = retries.fetch_add(1, Ordering::Relaxed);
+                if retried > 0 {
+                    tracing::info!(
+                        "Retrying get() request for collection {}",
+                        request.collection_id
+                    );
+                }
             })
             .await;
         self.metrics
@@ -1114,13 +1271,16 @@ impl ServiceBasedFrontend {
         };
         let res = query_to_retry
             .retry(self.collections_with_segments_provider.get_retry_backoff())
-            .when(|e| e.code() == ErrorCodes::NotFound)
+            // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
+            .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
             .notify(|_, _| {
-                tracing::info!(
-                    "Retrying query() request for collection {}",
-                    request.collection_id
-                );
-                retries.fetch_add(1, Ordering::Relaxed);
+                let retried = retries.fetch_add(1, Ordering::Relaxed);
+                if retried > 0 {
+                    tracing::info!(
+                        "Retrying query() request for collection {}",
+                        request.collection_id
+                    );
+                }
             })
             .await;
         self.metrics
@@ -1187,6 +1347,7 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
             log,
             executor,
             max_batch_size,
+            config.default_knn_index,
         ))
     }
 }

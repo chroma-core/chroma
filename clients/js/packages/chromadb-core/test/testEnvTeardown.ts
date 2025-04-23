@@ -1,3 +1,3 @@
 export default async function testTeardown() {
-  await (globalThis as any).chromaContainer.stop();
+  await (globalThis as any).stopChromaServer();
 }

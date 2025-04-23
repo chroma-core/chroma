@@ -115,6 +115,8 @@ impl Configurable<SqliteDBConfig, SqliteCreationError> for SqliteDb {
                 .await?
         } else {
             SqlitePoolOptions::new()
+                .max_lifetime(None)
+                .idle_timeout(None)
                 .max_connections(1)
                 .connect_with(conn_options.in_memory(true).shared_cache(true))
                 .await?

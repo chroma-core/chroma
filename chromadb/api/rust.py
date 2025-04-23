@@ -31,9 +31,16 @@ from chromadb.telemetry.product.events import (
     ClientCreateCollectionEvent,
 )
 
+from chromadb.api.types import (
+    IncludeMetadataDocuments,
+    IncludeMetadataDocumentsDistances,
+    IncludeMetadataDocumentsEmbeddings,
+)
+
 # TODO(hammadb): Unify imports across types vs root __init__.py
 from chromadb.types import Database, Tenant, Collection as CollectionModel
 import chromadb_rust_bindings
+
 
 from typing import Optional, Sequence
 from overrides import override
@@ -299,6 +306,16 @@ class RustBindingsAPI(ServerAPI):
         )
 
     @override
+    def _fork(
+        self,
+        collection_id: UUID,
+        new_name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> CollectionModel:
+        raise NotImplementedError("Collection forking is not implemented for Local Chroma")
+
+    @override
     def _count(
         self,
         collection_id: UUID,
@@ -320,7 +337,7 @@ class RustBindingsAPI(ServerAPI):
             limit=n,
             tenant=tenant,
             database=database,
-            include=["embeddings", "metadatas", "documents"],
+            include=IncludeMetadataDocumentsEmbeddings,
         )
 
     @override
@@ -329,13 +346,10 @@ class RustBindingsAPI(ServerAPI):
         collection_id: UUID,
         ids: Optional[IDs] = None,
         where: Optional[Where] = None,
-        sort: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
-        page: Optional[int] = None,
-        page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = ["metadatas", "documents"],  # type: ignore[list-item]
+        include: Include = IncludeMetadataDocuments,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> GetResult:
@@ -471,7 +485,7 @@ class RustBindingsAPI(ServerAPI):
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = ["metadatas", "documents", "distances"],  # type: ignore[list-item]
+        include: Include = IncludeMetadataDocumentsDistances,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> QueryResult:

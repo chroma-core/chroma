@@ -13,6 +13,7 @@ collections_with_segments_provider:
   cache:
     lru:
       capacity: 1000
+  cache_ttl_secs: 60
   permitted_parallelism: 180
   cache_invalidation_retry_policy:
     delay_ms: 0
@@ -22,7 +23,7 @@ log:
     host: "logservice.chroma"
     port: 50051
     connect_timeout_ms: 5000
-    request_timeout_ms: 5000
+    request_timeout_ms: 60000 # 1 minute
     alt_host: "rust-log-service.chroma"
     #use_alt_host_for_everything: true
 
@@ -31,7 +32,7 @@ executor:
     connections_per_node: 5
     replication_factor: 2
     connect_timeout_ms: 5000
-    request_timeout_ms: 5000
+    request_timeout_ms: 60000 # 1 minute
     assignment:
       rendezvous_hashing:
         hasher: Murmur3
@@ -43,7 +44,14 @@ executor:
 scorecard_enabled: true
 scorecard:
   - patterns:
-      - "op:*"
-      - "collection_id:*"
-    score: 100
+      - "op:read"
+      - "collection:*"
+    score: 10
+  - patterns:
+      - "op:write"
+      - "collection:*"
+    score: 1
+circuit_breaker:
+  requests: 1000
 enable_span_indexing: true
+default_knn_index: "hnsw"

@@ -54,9 +54,7 @@ describe("get collections", () => {
     } catch (error: any) {
       expect(error).toBeDefined();
       expect(error).toBeInstanceOf(InvalidArgumentError);
-      expect(error.message).toMatchInlineSnapshot(
-        `"Expected where operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, got $contains"`,
-      );
+      expect(error.message).toMatchInlineSnapshot(`"Invalid where clause"`);
     }
   });
 

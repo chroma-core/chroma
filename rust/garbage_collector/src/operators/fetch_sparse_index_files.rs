@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_storage::Storage;
+use chroma_storage::{admissioncontrolleds3::StorageRequestPriority, GetOptions, Storage};
 use chroma_sysdb::SysDb;
 use chroma_system::{Operator, OperatorType};
 use chroma_types::chroma_proto::{CollectionVersionFile, VersionListForCollection};
@@ -125,7 +125,14 @@ impl Operator<FetchSparseIndexFilesInput, FetchSparseIndexFilesOutput>
                             // Attempt to fetch each file
                             for file_path in &file_paths.paths {
                                 let prefixed_path = format!("sparse_index/{}", file_path);
-                                match self.storage.get(&prefixed_path).await {
+                                match self
+                                    .storage
+                                    .get(
+                                        &prefixed_path,
+                                        GetOptions::new(StorageRequestPriority::P0),
+                                    )
+                                    .await
+                                {
                                     Ok(content) => {
                                         total_files_fetched += 1;
                                         total_bytes_fetched += content.len();

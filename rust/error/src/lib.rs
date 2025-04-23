@@ -56,6 +56,8 @@ pub enum ErrorCodes {
     Unauthenticated = 16,
     // VERSION_MISMATCH indicates a version mismatch. This is not from the gRPC spec and is specific to Chroma.
     VersionMismatch = 17,
+    // UNPROCESSABLE_ENTITY indicates the request is valid but cannot be processed.
+    UnprocessableEntity = 18,
 }
 
 impl ErrorCodes {
@@ -92,6 +94,7 @@ impl From<ErrorCodes> for http::StatusCode {
             ErrorCodes::DataLoss => http::StatusCode::INTERNAL_SERVER_ERROR,
             ErrorCodes::Unauthenticated => http::StatusCode::UNAUTHORIZED,
             ErrorCodes::VersionMismatch => http::StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorCodes::UnprocessableEntity => http::StatusCode::UNPROCESSABLE_ENTITY,
         }
     }
 }
@@ -112,6 +115,7 @@ impl From<http::StatusCode> for ErrorCodes {
             http::StatusCode::NOT_IMPLEMENTED => ErrorCodes::Unimplemented,
             http::StatusCode::GATEWAY_TIMEOUT => ErrorCodes::DeadlineExceeded,
             http::StatusCode::PRECONDITION_FAILED => ErrorCodes::FailedPrecondition,
+            http::StatusCode::UNPROCESSABLE_ENTITY => ErrorCodes::UnprocessableEntity,
             _ => ErrorCodes::Unknown,
         }
     }

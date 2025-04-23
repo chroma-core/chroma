@@ -17,8 +17,8 @@ from chromadb.api.types import (
     Embeddings,
     IDs,
     Include,
-    IncludeMetadataDocumentsEmbeddings,
-    IncludeMetadataDocumentsEmbeddingsDistances,
+    IncludeMetadataDocumentsDistances,
+    IncludeMetadataDocuments,
     Loadable,
     Metadatas,
     URIs,
@@ -223,27 +223,21 @@ class BaseAPI(ABC):
         collection_id: UUID,
         ids: Optional[IDs] = None,
         where: Optional[Where] = None,
-        sort: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
-        page: Optional[int] = None,
-        page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = IncludeMetadataDocumentsEmbeddings,
+        include: Include = IncludeMetadataDocuments,
     ) -> GetResult:
         """[Internal] Returns entries from a collection specified by UUID.
 
         Args:
             ids: The IDs of the entries to get. Defaults to None.
-            where: Conditional filtering on metadata. Defaults to {}.
-            sort: The column to sort the entries by. Defaults to None.
+            where: Conditional filtering on metadata. Defaults to None.
             limit: The maximum number of entries to return. Defaults to None.
             offset: The number of entries to skip before returning. Defaults to None.
-            page: The page number to return. Defaults to None.
-            page_size: The number of entries to return per page. Defaults to None.
-            where_document: Conditional filtering on documents. Defaults to {}.
+            where_document: Conditional filtering on documents. Defaults to None.
             include: The fields to include in the response.
-                          Defaults to ["embeddings", "metadatas", "documents"].
+                          Defaults to ["metadatas", "documents"].
         Returns:
             GetResult: The entries in the collection that match the query.
 
@@ -263,8 +257,8 @@ class BaseAPI(ABC):
         Args:
             collection_id: The UUID of the collection to delete the entries from.
             ids: The IDs of the entries to delete. Defaults to None.
-            where: Conditional filtering on metadata. Defaults to {}.
-            where_document: Conditional filtering on documents. Defaults to {}.
+            where: Conditional filtering on metadata. Defaults to None.
+            where_document: Conditional filtering on documents. Defaults to None.
 
         Returns:
             IDs: The list of IDs of the entries that were deleted.
@@ -279,7 +273,7 @@ class BaseAPI(ABC):
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = IncludeMetadataDocumentsEmbeddingsDistances,
+        include: Include = IncludeMetadataDocumentsDistances,
     ) -> QueryResult:
         """[Internal] Performs a nearest neighbors query on a collection specified by UUID.
 
@@ -287,10 +281,10 @@ class BaseAPI(ABC):
             collection_id: The UUID of the collection to query.
             query_embeddings: The embeddings to use as the query.
             n_results: The number of results to return. Defaults to 10.
-            where: Conditional filtering on metadata. Defaults to {}.
-            where_document: Conditional filtering on documents. Defaults to {}.
+            where: Conditional filtering on metadata. Defaults to None.
+            where_document: Conditional filtering on documents. Defaults to None.
             include: The fields to include in the response.
-                          Defaults to ["embeddings", "metadatas", "documents", "distances"].
+                          Defaults to ["metadatas", "documents", "distances"].
 
         Returns:
             QueryResult: The results of the query.
@@ -643,6 +637,16 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         pass
 
     @abstractmethod
+    def _fork(
+        self,
+        collection_id: UUID,
+        new_name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> CollectionModel:
+        pass
+
+    @abstractmethod
     @override
     def _count(
         self,
@@ -670,13 +674,10 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         collection_id: UUID,
         ids: Optional[IDs] = None,
         where: Optional[Where] = None,
-        sort: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
-        page: Optional[int] = None,
-        page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = ["metadatas", "documents"],  # type: ignore[list-item]
+        include: Include = IncludeMetadataDocuments,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> GetResult:
@@ -736,7 +737,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = ["metadatas", "documents", "distances"],  # type: ignore[list-item]
+        include: Include = IncludeMetadataDocumentsDistances,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> QueryResult:

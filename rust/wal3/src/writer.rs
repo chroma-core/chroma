@@ -3,11 +3,13 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use arrow::array::{ArrayRef, BinaryArray, RecordBatch, UInt64Array};
+use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
 use chroma_storage::{PutOptions, Storage, StorageError};
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
 use setsum::Setsum;
+use tracing::Instrument;
 
 use crate::{
     unprefixed_fragment_path, BatchManager, CursorStore, CursorStoreOptions, Error,
@@ -263,7 +265,7 @@ impl OnceLogWriter {
             writer,
         )
         .await?;
-        manifest_manager.recover().await?;
+        manifest_manager.recover(&*mark_dirty).await?;
         let flusher = Mutex::new(None);
         let this = Arc::new(Self {
             options,
@@ -337,7 +339,8 @@ impl OnceLogWriter {
             let this = Arc::clone(self);
             this.append_batch(fragment_seq_no, log_position, work).await
         }
-        rx.await.map_err(|_| Error::Internal)?
+        let span = tracing::info_span!("wait_for_durability");
+        rx.instrument(span).await.map_err(|_| Error::Internal)?
     }
 
     #[tracing::instrument(skip(self, work))]
@@ -417,12 +420,12 @@ impl OnceLogWriter {
         };
         self.manifest_manager.publish_fragment(fragment).await?;
         // Record the records/batches written.
-        self.batch_manager.update_average_batch_size(messages_len);
         self.batch_manager.finish_write();
         Ok(log_position)
     }
 }
 
+#[tracing::instrument(skip(messages))]
 pub fn construct_parquet(
     log_position: LogPosition,
     messages: &[Vec<u8>],
@@ -488,10 +491,14 @@ pub async fn upload_parquet(
     let exp_backoff: ExponentialBackoff = options.throttle_fragment.into();
     let start = Instant::now();
     loop {
-        tracing::info!("upload_parquet: {:?}", path);
         let (buffer, setsum) = construct_parquet(log_position, &messages)?;
+        tracing::info!("upload_parquet: {:?} with {} bytes", path, buffer.len());
         match storage
-            .put_bytes(&path, buffer.clone(), PutOptions::if_not_exists())
+            .put_bytes(
+                &path,
+                buffer.clone(),
+                PutOptions::if_not_exists(StorageRequestPriority::P0),
+            )
             .await
         {
             Ok(_) => {

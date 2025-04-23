@@ -44,6 +44,24 @@ func (s *logServer) PushLogs(ctx context.Context, req *logservicepb.PushLogsRequ
 	return
 }
 
+func (s *logServer) ScoutLogs(ctx context.Context, req *logservicepb.ScoutLogsRequest) (res *logservicepb.ScoutLogsResponse, err error) {
+	var collectionID types.UniqueID
+	collectionID, err = types.ToUniqueID(&req.CollectionId)
+	if err != nil {
+		return
+	}
+	var limit int64
+	_, limit, err = s.lr.GetBoundsForCollection(ctx, collectionID.String())
+	if err != nil {
+		return
+	}
+	// +1 to convert from the (] bound to a [) bound.
+	res = &logservicepb.ScoutLogsResponse{
+		FirstUninsertedRecordOffset: int64(limit + 1),
+	}
+	return
+}
+
 func (s *logServer) PullLogs(ctx context.Context, req *logservicepb.PullLogsRequest) (res *logservicepb.PullLogsResponse, err error) {
 	var collectionID types.UniqueID
 	collectionID, err = types.ToUniqueID(&req.CollectionId)
@@ -68,6 +86,30 @@ func (s *logServer) PullLogs(ctx context.Context, req *logservicepb.PullLogsRequ
 			LogOffset: records[index].Offset,
 			Record:    record,
 		}
+	}
+	return
+}
+
+func (s *logServer) ForkLogs(ctx context.Context, req *logservicepb.ForkLogsRequest) (res *logservicepb.ForkLogsResponse, err error) {
+	var sourceCollectionID types.UniqueID
+	var targetCollectionID types.UniqueID
+	sourceCollectionID, err = types.ToUniqueID(&req.SourceCollectionId)
+	if err != nil {
+		return
+	}
+	targetCollectionID, err = types.ToUniqueID(&req.TargetCollectionId)
+	if err != nil {
+		return
+	}
+
+	compactionOffset, enumerationOffset, err := s.lr.ForkRecords(ctx, sourceCollectionID.String(), targetCollectionID.String())
+	if err != nil {
+		return
+	}
+
+	res = &logservicepb.ForkLogsResponse{
+		CompactionOffset:  compactionOffset,
+		EnumerationOffset: enumerationOffset,
 	}
 	return
 }

@@ -38,7 +38,7 @@ env:
 jobs:
   build:
     name: Build and publish container image
-    runs-on: depot-ubuntu-22.04
+    runs-on: blacksmith-4vcpu-ubuntu-2204
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -51,8 +51,6 @@ jobs:
           ghcr-password: ${{ secrets.GITHUB_TOKEN }}
           dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
           dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Set up Depot CLI
-        uses: depot/setup-action@v1
       - name: Compute tags
         shell: bash
         id: compute_tags
@@ -65,7 +63,7 @@ jobs:
           echo "tags=${tags}" >> $GITHUB_OUTPUT
 
       - name: Build and push image
-        uses: depot/build-push-action@v1
+        uses: useblacksmith/build-push-action@v1.1
         with:
           context: .
           file: rust/cli/Dockerfile
@@ -74,4 +72,3 @@ jobs:
           build-args: |
             RELEASE_MODE=1
           tags: ${{ steps.compute_tags.outputs.tags }}
-          project: ${{ vars.DEPOT_PROJECT_ID }}
