@@ -314,6 +314,7 @@ where
     cache_hit: opentelemetry::metrics::Counter<u64>,
     cache_miss: opentelemetry::metrics::Counter<u64>,
     get_latency: opentelemetry::metrics::Histogram<u64>,
+    obtain_latency: opentelemetry::metrics::Histogram<u64>,
     insert_latency: opentelemetry::metrics::Histogram<u64>,
     remove_latency: opentelemetry::metrics::Histogram<u64>,
     clear_latency: opentelemetry::metrics::Histogram<u64>,
@@ -427,6 +428,7 @@ where
         let cache_hit = meter.u64_counter("cache_hit").build();
         let cache_miss = meter.u64_counter("cache_miss").build();
         let get_latency = meter.u64_histogram("get_latency").build();
+        let obtain_latency = meter.u64_histogram("obtain_latency").build();
         let insert_latency = meter.u64_histogram("insert_latency").build();
         let remove_latency = meter.u64_histogram("remove_latency").build();
         let clear_latency = meter.u64_histogram("clear_latency").build();
@@ -435,6 +437,7 @@ where
             cache_hit,
             cache_miss,
             get_latency,
+            obtain_latency,
             insert_latency,
             remove_latency,
             clear_latency,
@@ -480,7 +483,7 @@ where
     }
 
     async fn obtain(&self, key: K) -> Result<Option<V>, CacheError> {
-        let _stopwatch = Stopwatch::new(&self.get_latency);
+        let _stopwatch = Stopwatch::new(&self.obtain_latency);
         let res = self.cache.obtain(key).await?.map(|v| v.value().clone());
         if res.is_some() {
             self.cache_hit.add(1, &[]);
@@ -508,6 +511,7 @@ where
     cache_hit: opentelemetry::metrics::Counter<u64>,
     cache_miss: opentelemetry::metrics::Counter<u64>,
     get_latency: opentelemetry::metrics::Histogram<u64>,
+    obtain_latency: opentelemetry::metrics::Histogram<u64>,
     insert_latency: opentelemetry::metrics::Histogram<u64>,
     remove_latency: opentelemetry::metrics::Histogram<u64>,
     clear_latency: opentelemetry::metrics::Histogram<u64>,
@@ -540,6 +544,7 @@ where
         let cache_hit = meter.u64_counter("cache_hit").build();
         let cache_miss = meter.u64_counter("cache_miss").build();
         let get_latency = meter.u64_histogram("get_latency").build();
+        let obtain_latency = meter.u64_histogram("obtain_latency").build();
         let insert_latency = meter.u64_histogram("insert_latency").build();
         let remove_latency = meter.u64_histogram("remove_latency").build();
         let clear_latency = meter.u64_histogram("clear_latency").build();
@@ -548,6 +553,7 @@ where
             cache_hit,
             cache_miss,
             get_latency,
+            obtain_latency,
             insert_latency,
             remove_latency,
             clear_latency,
@@ -592,6 +598,7 @@ where
         let cache_hit = meter.u64_counter("cache_hit").build();
         let cache_miss = meter.u64_counter("cache_miss").build();
         let get_latency = meter.u64_histogram("get_latency").build();
+        let obtain_latency = meter.u64_histogram("obtain_latency").build();
         let insert_latency = meter.u64_histogram("insert_latency").build();
         let remove_latency = meter.u64_histogram("remove_latency").build();
         let clear_latency = meter.u64_histogram("clear_latency").build();
@@ -600,6 +607,7 @@ where
             cache_hit,
             cache_miss,
             get_latency,
+            obtain_latency,
             insert_latency,
             remove_latency,
             clear_latency,
@@ -641,7 +649,7 @@ where
     }
 
     async fn obtain(&self, key: K) -> Result<Option<V>, CacheError> {
-        let _stopwatch = Stopwatch::new(&self.get_latency);
+        let _stopwatch = Stopwatch::new(&self.obtain_latency);
         let res = self.cache.get(&key).map(|v| v.value().clone());
         if res.is_some() {
             self.cache_hit.add(1, &[]);
