@@ -84,6 +84,7 @@ class RustBindingsAPI(ServerAPI):
 
     @override
     def start(self) -> None:
+        super().start()
         # Construct the SqliteConfig
         # TOOD: We should add a "config converter"
         if self._system.settings.require("is_persistent"):
@@ -119,16 +120,18 @@ class RustBindingsAPI(ServerAPI):
 
     @override
     def stop(self) -> None:
-        del self.bindings
+        super().stop()
 
     # ////////////////////////////// Admin API //////////////////////////////
 
     @override
     def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+        self.raise_if_stopped()
         return self.bindings.create_database(name, tenant)
 
     @override
     def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> Database:
+        self.raise_if_stopped()
         database = self.bindings.get_database(name, tenant)
         return {
             "id": database.id,
@@ -138,6 +141,7 @@ class RustBindingsAPI(ServerAPI):
 
     @override
     def delete_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+        self.raise_if_stopped()
         return self.bindings.delete_database(name, tenant)
 
     @override
@@ -147,6 +151,7 @@ class RustBindingsAPI(ServerAPI):
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
     ) -> Sequence[Database]:
+        self.raise_if_stopped()
         databases = self.bindings.list_databases(limit, offset, tenant)
         return [
             {
@@ -159,10 +164,12 @@ class RustBindingsAPI(ServerAPI):
 
     @override
     def create_tenant(self, name: str) -> None:
+        self.raise_if_stopped()
         return self.bindings.create_tenant(name)
 
     @override
     def get_tenant(self, name: str) -> Tenant:
+        self.raise_if_stopped()
         tenant = self.bindings.get_tenant(name)
         return Tenant(name=tenant.name)
 
@@ -170,12 +177,14 @@ class RustBindingsAPI(ServerAPI):
 
     @override
     def heartbeat(self) -> int:
+        self.raise_if_stopped()
         return self.bindings.heartbeat()
 
     @override
     def count_collections(
         self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
     ) -> int:
+        self.raise_if_stopped()
         return self.bindings.count_collections(tenant, database)
 
     @override
@@ -186,6 +195,7 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Sequence[CollectionModel]:
+        self.raise_if_stopped()
         collections = self.bindings.list_collections(limit, offset, tenant, database)
         return [
             CollectionModel(
@@ -214,6 +224,7 @@ class RustBindingsAPI(ServerAPI):
     ) -> CollectionModel:
         # TODO: This event doesn't capture the get_or_create case appropriately
         # TODO: Re-enable embedding function tracking in create_collection
+        self.raise_if_stopped()
         self.product_telemetry_client.capture(
             ClientCreateCollectionEvent(
                 collection_uuid=str(id),
@@ -250,6 +261,7 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
+        self.raise_if_stopped()
         collection = self.bindings.get_collection(name, tenant, database)
         return CollectionModel(
             id=collection.id,
@@ -272,6 +284,7 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
+        self.raise_if_stopped()
         return self.create_collection(
             name, configuration, metadata, True, tenant, database
         )
@@ -283,6 +296,7 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
+        self.raise_if_stopped()
         self.bindings.delete_collection(name, tenant, database)
 
     @override
@@ -295,6 +309,7 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
+        self.raise_if_stopped()
         if new_configuration:
             new_configuration_json_str = update_collection_configuration_to_json_str(
                 new_configuration
@@ -313,7 +328,10 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
-        raise NotImplementedError("Collection forking is not implemented for Local Chroma")
+        self.raise_if_stopped()
+        raise NotImplementedError(
+            "Collection forking is not implemented for Local Chroma"
+        )
 
     @override
     def _count(
@@ -322,6 +340,7 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> int:
+        self.raise_if_stopped()
         return self.bindings.count(str(collection_id), tenant, database)
 
     @override
@@ -332,6 +351,7 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> GetResult:
+        self.raise_if_stopped()
         return self._get(
             str(collection_id),
             limit=n,
@@ -353,6 +373,7 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> GetResult:
+        self.raise_if_stopped()
         ids_amount = len(ids) if ids else 0
         self.product_telemetry_client.capture(
             CollectionGetEvent(
@@ -364,7 +385,6 @@ class RustBindingsAPI(ServerAPI):
                 include_uris=ids_amount if "uris" in include else 0,
             )
         )
-
         rust_response = self.bindings.get(
             str(collection_id),
             ids,
@@ -399,6 +419,7 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
+        self.raise_if_stopped()
         self.product_telemetry_client.capture(
             CollectionAddEvent(
                 collection_uuid=str(collection_id),
@@ -432,6 +453,7 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
+        self.raise_if_stopped()
         self.product_telemetry_client.capture(
             CollectionUpdateEvent(
                 collection_uuid=str(collection_id),
@@ -466,6 +488,7 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
+        self.raise_if_stopped()
         return self.bindings.upsert(
             str(collection_id),
             ids,
@@ -489,6 +512,7 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> QueryResult:
+        self.raise_if_stopped()
         query_amount = len(query_embeddings)
         self.product_telemetry_client.capture(
             CollectionQueryEvent(
@@ -536,6 +560,7 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
+        self.raise_if_stopped()
         self.product_telemetry_client.capture(
             CollectionDeleteEvent(
                 # NOTE: the delete amount is not observable from python
@@ -556,25 +581,40 @@ class RustBindingsAPI(ServerAPI):
 
     @override
     def reset(self) -> bool:
+        self.raise_if_stopped()
         return self.bindings.reset()
 
     @override
     def get_version(self) -> str:
+        self.raise_if_stopped()
         return self.bindings.get_version()
 
     @override
     def get_settings(self) -> Settings:
+        self.raise_if_stopped()
         return self._system.settings
 
     @override
     def get_max_batch_size(self) -> int:
+        self.raise_if_stopped()
         return self.bindings.get_max_batch_size()
 
     # TODO: Remove this if it's not planned to be used
     @override
     def get_user_identity(self) -> UserIdentity:
+        self.raise_if_stopped()
         return UserIdentity(
             user_id="",
             tenant=DEFAULT_TENANT,
             databases=[DEFAULT_DATABASE],
         )
+
+    @override
+    def close(self) -> None:
+        if not self.is_running():
+            return
+        super().stop()
+
+        # Clean up bindings if they exist
+        if hasattr(self, "bindings"):
+            del self.bindings

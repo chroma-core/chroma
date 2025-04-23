@@ -283,6 +283,8 @@ impl FrontendServer {
             .layer(axum::middleware::from_fn(
                 default_json_content_type_middleware,
             ))
+            // .layer(tower_http::compression::CompressionLayer::new())
+            // .layer(tower_http::decompression::DecompressionLayer::new())
             .layer(axum::middleware::from_fn(always_json_errors_middleware));
 
         let mut app = add_tracing_middleware(app);

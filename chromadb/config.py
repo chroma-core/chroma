@@ -364,6 +364,15 @@ class Component(ABC, EnforceOverrides):
         called from tests."""
         logger.debug(f"Resetting component {self.__class__.__name__}")
 
+    def is_running(self) -> bool:
+        """Return True if the component is running, False otherwise."""
+        return self._running
+
+    def raise_if_stopped(self) -> None:
+        """Raise an exception if the component is not running."""
+        if not self.is_running():
+            raise RuntimeError(f"Component {self.__class__.__name__} is not running")
+
 
 class System(Component):
     settings: Settings

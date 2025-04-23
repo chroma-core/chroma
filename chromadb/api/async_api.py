@@ -327,6 +327,11 @@ class AsyncBaseAPI(ABC):
         """
         pass
 
+    @abstractmethod
+    async def close(self) -> None:
+        """Close the client, releasing all resources."""
+        pass
+
 
 class AsyncClientAPI(AsyncBaseAPI, ABC):
     tenant: str
@@ -551,6 +556,11 @@ class AsyncAdminAPI(ABC):
             tenant: The name of the tenant to get.
 
         """
+        pass
+
+    @abstractmethod
+    async def close(self) -> None:
+        """Close the client, releasing all resources."""
         pass
 
 

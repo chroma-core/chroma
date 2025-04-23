@@ -92,6 +92,10 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         await self._cleanup()
 
     @override
+    def start(self) -> None:
+        super().start()
+
+    @override
     def stop(self) -> None:
         super().stop()
 
@@ -152,6 +156,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     @trace_method("AsyncFastAPI.heartbeat", OpenTelemetryGranularity.OPERATION)
     @override
     async def heartbeat(self) -> int:
+        self.raise_if_stopped()
         response = await self._make_request("get", "")
         return int(response["nanosecond heartbeat"])
 
@@ -162,6 +167,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         name: str,
         tenant: str = DEFAULT_TENANT,
     ) -> None:
+        self.raise_if_stopped()
         await self._make_request(
             "post",
             f"/tenants/{tenant}/databases",
@@ -175,6 +181,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         name: str,
         tenant: str = DEFAULT_TENANT,
     ) -> Database:
+        self.raise_if_stopped()
         response = await self._make_request(
             "get",
             f"/tenants/{tenant}/databases/{name}",
@@ -192,6 +199,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         name: str,
         tenant: str = DEFAULT_TENANT,
     ) -> None:
+        self.raise_if_stopped()
         await self._make_request(
             "delete",
             f"/tenants/{tenant}/databases/{name}",
@@ -205,6 +213,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
     ) -> Sequence[Database]:
+        self.raise_if_stopped()
         response = await self._make_request(
             "get",
             f"/tenants/{tenant}/databases",
@@ -224,6 +233,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     @trace_method("AsyncFastAPI.create_tenant", OpenTelemetryGranularity.OPERATION)
     @override
     async def create_tenant(self, name: str) -> None:
+        self.raise_if_stopped()
         await self._make_request(
             "post",
             "/tenants",
@@ -233,6 +243,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     @trace_method("AsyncFastAPI.get_tenant", OpenTelemetryGranularity.OPERATION)
     @override
     async def get_tenant(self, name: str) -> Tenant:
+        self.raise_if_stopped()
         resp_json = await self._make_request(
             "get",
             "/tenants/" + name,
@@ -243,6 +254,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     @trace_method("AsyncFastAPI.get_user_identity", OpenTelemetryGranularity.OPERATION)
     @override
     async def get_user_identity(self) -> UserIdentity:
+        self.raise_if_stopped()
         return UserIdentity(**(await self._make_request("get", "/auth/identity")))
 
     @trace_method("AsyncFastAPI.list_collections", OpenTelemetryGranularity.OPERATION)
@@ -275,6 +287,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     async def count_collections(
         self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
     ) -> int:
+        self.raise_if_stopped()
         resp_json = await self._make_request(
             "get",
             f"/tenants/{tenant}/databases/{database}/collections_count",
@@ -294,6 +307,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
         """Creates a collection"""
+        self.raise_if_stopped()
         config_json = (
             create_collection_configuration_to_json(configuration)
             if configuration
@@ -321,6 +335,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
+        self.raise_if_stopped()
         resp_json = await self._make_request(
             "get",
             f"/tenants/{tenant}/databases/{database}/collections/{name}",
@@ -342,6 +357,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
+        self.raise_if_stopped()
         return await self.create_collection(
             name=name,
             configuration=configuration,
@@ -362,6 +378,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
+        self.raise_if_stopped()
         await self._make_request(
             "put",
             f"/tenants/{tenant}/databases/{database}/collections/{id}",
@@ -385,6 +402,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
+        self.raise_if_stopped()
         resp_json = await self._make_request(
             "post",
             f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/fork",
@@ -401,6 +419,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
+        self.raise_if_stopped()
         await self._make_request(
             "delete",
             f"/tenants/{tenant}/databases/{database}/collections/{name}",
@@ -415,6 +434,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> int:
         """Returns the number of embeddings in the database"""
+        self.raise_if_stopped()
         resp_json = await self._make_request(
             "get",
             f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/count",
@@ -431,6 +451,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> GetResult:
+        self.raise_if_stopped()
         resp = await self._get(
             collection_id,
             tenant=tenant,
@@ -492,6 +513,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
+        self.raise_if_stopped()
         await self._make_request(
             "post",
             f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/delete",
@@ -514,6 +536,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         """
         Submits a batch of embeddings to the database
         """
+        self.raise_if_stopped()
         return await self._make_request(
             "post",
             url,
@@ -539,6 +562,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
+        self.raise_if_stopped()
         batch = (
             ids,
             convert_np_embeddings_to_list(embeddings),
@@ -566,6 +590,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
+        self.raise_if_stopped()
         batch = (
             ids,
             convert_np_embeddings_to_list(embeddings)
@@ -597,6 +622,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
+        self.raise_if_stopped()
         batch = (
             ids,
             convert_np_embeddings_to_list(embeddings),
@@ -624,6 +650,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> QueryResult:
+        self.raise_if_stopped()
         # Servers do not support the "data" include, as that is hydrated on the client side
         filtered_include = [i for i in include if i != "data"]
 
@@ -655,23 +682,50 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     @trace_method("AsyncFastAPI.reset", OpenTelemetryGranularity.ALL)
     @override
     async def reset(self) -> bool:
+        self.raise_if_stopped()
         resp_json = await self._make_request("post", "/reset")
         return cast(bool, resp_json)
 
     @trace_method("AsyncFastAPI.get_version", OpenTelemetryGranularity.OPERATION)
     @override
     async def get_version(self) -> str:
+        self.raise_if_stopped()
         resp_json = await self._make_request("get", "/version")
         return cast(str, resp_json)
 
     @override
     def get_settings(self) -> Settings:
+        self.raise_if_stopped()
         return self._settings
 
     @trace_method("AsyncFastAPI.get_max_batch_size", OpenTelemetryGranularity.OPERATION)
     @override
     async def get_max_batch_size(self) -> int:
+        self.raise_if_stopped()
         if self._max_batch_size == -1:
             resp_json = await self._make_request("get", "/pre-flight-checks")
             self._max_batch_size = cast(int, resp_json["max_batch_size"])
         return self._max_batch_size
+
+    @trace_method("AsyncFastAPI.close", OpenTelemetryGranularity.OPERATION)
+    @override
+    async def close(self) -> None:
+        # If already stopped, don't raise exception
+        if not self.is_running():
+            return
+
+        loop_hash = None
+        try:
+            loop = asyncio.get_event_loop()
+            loop_hash = loop.__hash__()
+        except RuntimeError:
+            loop_hash = 0
+
+        if loop_hash in self._clients:
+            client_to_close = self._clients.pop(loop_hash)
+            await client_to_close.aclose()
+        elif loop_hash == 0 and 0 in self._clients:  # Handle fallback case
+            client_to_close = self._clients.pop(0)
+            await client_to_close.aclose()
+
+        super().stop()
