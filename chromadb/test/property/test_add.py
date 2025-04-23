@@ -183,7 +183,7 @@ def create_large_recordset(
 
 
 @given(collection=collection_st, should_compact=st.booleans())
-@settings(deadline=None, max_examples=5)
+@settings(deadline=None, max_examples=30)
 def test_add_large(
     client: ClientAPI, collection: strategies.Collection, should_compact: bool
 ) -> None:

@@ -663,6 +663,7 @@ impl LogService for LogServer {
         let span = tracing::info_span!("scouting logs", collection_id = collection_id.to_string());
         async move {
             let prefix = storage_prefix_for_log(collection_id);
+            tracing::info!("scouting {}", prefix);
             let log_reader = LogReader::new(
                 self.config.reader.clone(),
                 Arc::clone(&self.storage),
@@ -679,6 +680,7 @@ impl LogService for LogServer {
                 }
             };
             let limit_offset = limit_position.offset() as i64;
+            tracing::info!("scouted to {}", limit_offset);
             Ok(Response::new(ScoutLogsResponse {
                 first_uninserted_record_offset: limit_offset,
             }))
