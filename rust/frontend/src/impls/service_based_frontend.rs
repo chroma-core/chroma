@@ -357,8 +357,8 @@ impl ServiceBasedFrontend {
         let supported_segment_types: HashSet<SegmentType> =
             self.get_supported_segment_types().into_iter().collect();
 
-        if let Some(config) = configuration.as_ref() {
-            match &config.vector_index {
+        match configuration.as_ref() {
+            Some(config) => match &config.vector_index {
                 VectorIndexConfiguration::Spann { .. } => {
                     if !supported_segment_types.contains(&SegmentType::Spann) {
                         return Err(CreateCollectionError::SpannNotImplemented);
@@ -372,6 +372,9 @@ impl ServiceBasedFrontend {
                         return Err(CreateCollectionError::HnswNotSupported);
                     }
                 }
+            },
+            None => {
+                return Err(CreateCollectionError::VectorSegmentConfigNotSet);
             }
         }
 
@@ -394,12 +397,15 @@ impl ServiceBasedFrontend {
 
         let segments = match self.executor {
             Executor::Distributed(_) => {
-                let mut vector_segment_type = SegmentType::HnswDistributed;
-                if let Some(config) = configuration.as_ref() {
-                    if matches!(config.vector_index, VectorIndexConfiguration::Spann(_)) {
-                        vector_segment_type = SegmentType::Spann;
+                let vector_segment_type = match configuration.as_ref() {
+                    Some(config) => match config.vector_index {
+                        VectorIndexConfiguration::Hnsw(_) => SegmentType::HnswDistributed,
+                        VectorIndexConfiguration::Spann(_) => SegmentType::Spann,
+                    },
+                    None => {
+                        return Err(CreateCollectionError::VectorSegmentConfigNotSet);
                     }
-                }
+                };
 
                 vec![
                     Segment {
