@@ -157,6 +157,7 @@ jobs:
                     "chromadb/test/property/test_collections.py",
                     "chromadb/test/property/test_add.py",
                     "chromadb/test/property/test_filtering.py",
+                    "chromadb/test/property/test_fork.py",
                     "chromadb/test/property/test_embeddings.py",
                     "chromadb/test/property/test_collections_with_database_tenant.py",
                     "chromadb/test/property/test_collections_with_database_tenant_overwrite.py",
