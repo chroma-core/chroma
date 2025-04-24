@@ -246,6 +246,7 @@ def fd_not_exceeding_threadpool_size(threadpool_size: int) -> None:
     )
 
 def get_space(collection: Collection):
+    print(f"(Sanket-temp) Collection config json {collection._model.configuration_json}")
     if 'spann' in collection._model.configuration_json and collection._model.configuration_json.get('spann') is not None:
         return collection._model.configuration_json.get('spann').get('space')
     else:
