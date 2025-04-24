@@ -274,7 +274,6 @@ pub(super) struct BlockManager {
     block_cache: Arc<dyn PersistentCache<Uuid, Block>>,
     storage: Storage,
     max_block_size_bytes: usize,
-    write_mutex: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl BlockManager {
@@ -288,7 +287,6 @@ impl BlockManager {
             block_cache,
             storage,
             max_block_size_bytes,
-            write_mutex: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -339,7 +337,7 @@ impl BlockManager {
         id: &Uuid,
         priority: StorageRequestPriority,
     ) -> Result<Option<Block>, GetError> {
-        let block = self.block_cache.get(id).await.ok().flatten();
+        let block = self.block_cache.obtain(*id).await.ok().flatten();
         match block {
             Some(block) => Ok(Some(block)),
             None => async {
@@ -358,20 +356,8 @@ impl BlockManager {
                             deserialization_span.in_scope(|| Block::from_bytes(&bytes, *id));
                         match block {
                             Ok(block) => {
-                                let _guard = self.write_mutex.lock().await;
-                                match self.block_cache.get(id).await {
-                                    Ok(Some(b)) => {
-                                        Ok(Some(b))
-                                    }
-                                    Ok(None) => {
-                                        self.block_cache.insert(*id, block.clone()).await;
-                                        Ok(Some(block))
-                                    }
-                                    Err(e) => {
-                                        tracing::error!("Error getting block from cache {:?}", e);
-                                        Err(GetError::BlockLoadError(e.into()))
-                                    }
-                                }
+                                self.block_cache.insert(*id, block.clone()).await;
+                                Ok(Some(block))
                             }
                             Err(e) => {
                                 tracing::error!(
@@ -497,7 +483,7 @@ impl RootManager {
         &self,
         id: &Uuid,
     ) -> Result<Option<RootReader>, RootManagerError> {
-        let index = self.cache.get(id).await.ok().flatten();
+        let index = self.cache.obtain(*id).await.ok().flatten();
         match index {
             Some(index) => Ok(Some(index)),
             None => {
