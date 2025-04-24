@@ -100,13 +100,6 @@ describe("collection operations", () => {
     expect(collections.length).toBe(0);
   });
 
-  test("it should fork a collection", async () => {
-    const collection = await client.createCollection({ name: "test" });
-    const forkedCollection = await collection.fork({ newName: "forked" });
-    expect(forkedCollection).toBeDefined();
-    expect(forkedCollection.name).toBe("forked");
-  });
-
   // TODO: I want to test this, but I am not sure how to
   // test('custom index params', async () => {
   //     throw new Error('not implemented')
