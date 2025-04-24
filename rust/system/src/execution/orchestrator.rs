@@ -40,7 +40,7 @@ pub trait Orchestrator: Debug + Send + Sized + 'static {
     /// Sends a task to the dispatcher and return whether the task is successfully sent
     async fn send(&mut self, task: TaskMessage, ctx: &ComponentContext<Self>) -> bool {
         let res = self.dispatcher().send(task, Some(Span::current())).await;
-        self.ok_or_terminate(res, ctx).is_some()
+        self.ok_or_terminate(res, ctx).await.is_some()
     }
 
     /// Sets the result channel of the orchestrator
@@ -49,8 +49,7 @@ pub trait Orchestrator: Debug + Send + Sized + 'static {
     /// Takes the result channel of the orchestrator. The channel should have been set when this is invoked
     fn take_result_channel(&mut self) -> Sender<Result<Self::Output, Self::Error>>;
 
-    /// Terminate the orchestrator with a result
-    fn terminate_with_result(
+    async fn default_terminate_with_result(
         &mut self,
         res: Result<Self::Output, Self::Error>,
         ctx: &ComponentContext<Self>,
@@ -72,8 +71,38 @@ pub trait Orchestrator: Debug + Send + Sized + 'static {
         }
     }
 
+    async fn cleanup(&mut self) {
+        // Default cleanup does nothing
+    }
+
+    /// Terminate the orchestrator with a result
+    /// Ideally no types that implement this trait should
+    /// need to override this method.
+    async fn terminate_with_result(
+        &mut self,
+        res: Result<Self::Output, Self::Error>,
+        ctx: &ComponentContext<Self>,
+    ) {
+        self.cleanup().await;
+        let cancel = if let Err(err) = &res {
+            tracing::error!("Error running {}: {}", Self::name(), err);
+            true
+        } else {
+            false
+        };
+
+        let channel = self.take_result_channel();
+        if channel.send(res).is_err() {
+            tracing::error!("Error sending result for {}", Self::name());
+        };
+
+        if cancel {
+            ctx.cancellation_token.cancel();
+        }
+    }
+
     /// Terminate the orchestrator if the result is an error. Returns the output if any.
-    fn ok_or_terminate<O, E: Into<Self::Error>>(
+    async fn ok_or_terminate<O: Send, E: Into<Self::Error> + Send>(
         &mut self,
         res: Result<O, E>,
         ctx: &ComponentContext<Self>,
@@ -81,7 +110,7 @@ pub trait Orchestrator: Debug + Send + Sized + 'static {
         match res {
             Ok(output) => Some(output),
             Err(error) => {
-                self.terminate_with_result(Err(error.into()), ctx);
+                self.terminate_with_result(Err(error.into()), ctx).await;
                 None
             }
         }

@@ -241,7 +241,7 @@ impl Handler<TaskResult<FetchVersionFileOutput, FetchVersionFileError>>
         tracing::info!("Processing FetchVersionFile result");
 
         // Stage 1: Process fetched version file and initiate version computation
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(output) => {
                 tracing::info!(
                     content_size = output.version_file_content().len(),
@@ -266,7 +266,7 @@ impl Handler<TaskResult<FetchVersionFileOutput, FetchVersionFileError>>
                     Err(GarbageCollectorError::ComputeVersionsToDelete(
                         ComputeVersionsToDeleteError::ParseError(e),
                     ));
-                self.ok_or_terminate(result, ctx);
+                self.ok_or_terminate(result, ctx).await;
                 return;
             }
         };
@@ -289,7 +289,8 @@ impl Handler<TaskResult<FetchVersionFileOutput, FetchVersionFileError>>
             .await
         {
             tracing::error!(error = ?e, "Failed to send compute task to dispatcher");
-            self.terminate_with_result(Err(GarbageCollectorError::Channel(e)), ctx);
+            self.terminate_with_result(Err(GarbageCollectorError::Channel(e)), ctx)
+                .await;
             return;
         }
         tracing::info!("Successfully sent compute versions task");
@@ -308,7 +309,7 @@ impl Handler<TaskResult<ComputeVersionsToDeleteOutput, ComputeVersionsToDeleteEr
         ctx: &ComponentContext<GarbageCollectorOrchestrator>,
     ) {
         // Stage 2: Process computed versions and initiate marking in SysDB
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(output) => output,
             None => return,
         };
@@ -323,7 +324,7 @@ impl Handler<TaskResult<ComputeVersionsToDeleteOutput, ComputeVersionsToDeleteEr
                 deletion_list: Vec::new(),
             };
             tracing::info!(?response, "Garbage collection completed early");
-            self.terminate_with_result(Ok(response), ctx);
+            self.terminate_with_result(Ok(response), ctx).await;
             // Signal the dispatcher to shut down
             return;
         }
@@ -349,7 +350,8 @@ impl Handler<TaskResult<ComputeVersionsToDeleteOutput, ComputeVersionsToDeleteEr
             .send(mark_task, Some(Span::current()))
             .await
         {
-            self.terminate_with_result(Err(GarbageCollectorError::Channel(e)), ctx);
+            self.terminate_with_result(Err(GarbageCollectorError::Channel(e)), ctx)
+                .await;
             // Signal the dispatcher to shut down
             return;
         }
@@ -368,7 +370,7 @@ impl Handler<TaskResult<MarkVersionsAtSysDbOutput, MarkVersionsAtSysDbError>>
         ctx: &ComponentContext<GarbageCollectorOrchestrator>,
     ) {
         // Stage 3: After marking versions, compute unused files
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(output) => output,
             None => return,
         };
@@ -392,7 +394,8 @@ impl Handler<TaskResult<MarkVersionsAtSysDbOutput, MarkVersionsAtSysDbError>>
             .send(compute_task, Some(Span::current()))
             .await
         {
-            self.terminate_with_result(Err(GarbageCollectorError::Channel(e)), ctx);
+            self.terminate_with_result(Err(GarbageCollectorError::Channel(e)), ctx)
+                .await;
             return;
         }
     }
@@ -410,7 +413,7 @@ impl Handler<TaskResult<ComputeUnusedFilesOutput, ComputeUnusedFilesError>>
         ctx: &ComponentContext<GarbageCollectorOrchestrator>,
     ) {
         // Stage 4: After identifying unused files, delete them
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(output) => output,
             None => return,
         };
@@ -434,7 +437,8 @@ impl Handler<TaskResult<ComputeUnusedFilesOutput, ComputeUnusedFilesError>>
             .send(delete_task, Some(Span::current()))
             .await
         {
-            self.terminate_with_result(Err(GarbageCollectorError::Channel(e)), ctx);
+            self.terminate_with_result(Err(GarbageCollectorError::Channel(e)), ctx)
+                .await;
             return;
         }
 
@@ -455,7 +459,7 @@ impl Handler<TaskResult<DeleteUnusedFilesOutput, DeleteUnusedFilesError>>
         ctx: &ComponentContext<GarbageCollectorOrchestrator>,
     ) {
         // Stage 6: After deleting unused files, delete the versions
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(output) => output,
             None => return,
         };
@@ -468,7 +472,7 @@ impl Handler<TaskResult<DeleteUnusedFilesOutput, DeleteUnusedFilesError>>
                 num_versions_deleted: 0,
                 deletion_list: Vec::new(),
             };
-            self.terminate_with_result(Ok(response), ctx);
+            self.terminate_with_result(Ok(response), ctx).await;
             return;
         }
 
@@ -508,7 +512,8 @@ impl Handler<TaskResult<DeleteUnusedFilesOutput, DeleteUnusedFilesError>>
             .send(delete_versions_task, Some(Span::current()))
             .await
         {
-            self.terminate_with_result(Err(GarbageCollectorError::Channel(e)), ctx);
+            self.terminate_with_result(Err(GarbageCollectorError::Channel(e)), ctx)
+                .await;
             return;
         }
     }
@@ -526,7 +531,7 @@ impl Handler<TaskResult<DeleteVersionsAtSysDbOutput, DeleteVersionsAtSysDbError>
         ctx: &ComponentContext<GarbageCollectorOrchestrator>,
     ) {
         // Stage 6: Final stage - versions deleted, complete the garbage collection process
-        let _output = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let _output = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(output) => output,
             None => return,
         };
@@ -538,7 +543,7 @@ impl Handler<TaskResult<DeleteVersionsAtSysDbOutput, DeleteVersionsAtSysDbError>
             deletion_list: self.deletion_list.clone(),
         };
 
-        self.terminate_with_result(Ok(response), ctx);
+        self.terminate_with_result(Ok(response), ctx).await;
     }
 }
 
