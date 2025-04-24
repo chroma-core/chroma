@@ -3,7 +3,7 @@
 use clap::Parser;
 
 use chroma_load::rest::StartRequest;
-use chroma_load::{humanize_expires, Throughput, Workload};
+use chroma_load::{humanize_expires, Connection, Throughput, Workload};
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -16,9 +16,15 @@ struct Args {
     #[arg(long)]
     delay: Option<String>,
     #[arg(long)]
+    workload: String,
+    #[arg(long)]
     data_set: String,
     #[arg(long)]
-    workload: String,
+    url: String,
+    #[arg(long)]
+    database: String,
+    #[arg(long)]
+    api_key: String,
     #[arg(long)]
     constant_throughput: Option<f64>,
     #[arg(long)]
@@ -98,8 +104,13 @@ async fn main() {
     let req = StartRequest {
         name: args.name,
         expires: humanize_expires(&args.expires).unwrap_or(args.expires),
-        data_set: args.data_set,
         workload,
+        data_set: args.data_set,
+        connection: Connection {
+            url: args.url,
+            api_key: args.api_key,
+            database: args.database,
+        },
         throughput,
     };
     match client
