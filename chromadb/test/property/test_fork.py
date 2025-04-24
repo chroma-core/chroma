@@ -8,9 +8,6 @@ import pytest
 
 from chromadb.api.models.Collection import Collection
 from chromadb.test.conftest import reset, skip_if_not_cluster
-from overrides import overrides
-from typing import Dict, cast, Union, Tuple, Set
-
 from hypothesis.stateful import (
     Bundle,
     RuleBasedStateMachine,
@@ -21,6 +18,8 @@ from hypothesis.stateful import (
     run_state_machine_as_test,
     MultipleResults,
 )
+from overrides import overrides
+from typing import Dict, cast, Union, Tuple, Set
 
 collection_st = hyst.shared(strategies.collections(with_hnsw_params=True), key="source")
 
@@ -168,6 +167,21 @@ class ForkStateMachine(RuleBasedStateMachine):
         record_set_state["metadatas"] = record_set_state["metadatas"][boundary:]
         record_set_state["documents"] = record_set_state["documents"][boundary:]
         return collection, record_set_state
+
+    @rule(
+        cursor=forked_collections,
+    )
+    def verify(
+        self, cursor: Tuple[Collection, strategies.StateMachineRecordSet]
+    ) -> None:
+        collection, record_set_state = cursor
+        if len(record_set_state["ids"]) == 0:
+            assert collection.count() == 0
+        else:
+            record_set = cast(strategies.RecordSet, record_set_state)
+            invariants.embeddings_match(collection, record_set)
+            invariants.metadatas_match(collection, record_set)
+            invariants.documents_match(collection, record_set)
 
 
 @skip_if_not_cluster()
