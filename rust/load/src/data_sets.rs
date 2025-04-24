@@ -972,6 +972,37 @@ impl DataSet for VerifyingDataSet {
         self.reference_data_set.cardinality()
     }
 
+    // Reset the test collection to an empty state by deleting and recreating it.
+    async fn initialize(
+        &self,
+        client: &ChromaClient,
+    ) -> Result<(), Box<dyn std::error::Error + Send>> {
+        // Attempt to delete the collection. If it doesn't exist, ignore the error.
+        match client.delete_collection(&self.test_data_set).await {
+            Ok(_) => (),
+            Err(err) => {
+                if !format!("{err:?}").contains("404") {
+                    return Err(Box::new(Error::InvalidRequest(format!(
+                        "failed to delete collection: {err:?}"
+                    ))));
+                }
+            }
+        };
+
+        // Create the collection.
+        match client
+            .create_collection(&self.test_data_set, None, true)
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(err) => {
+                return Err(Box::new(Error::InvalidRequest(format!(
+                    "failed to create collection: {err:?}"
+                ))));
+            }
+        }
+    }
+
     async fn get(
         &self,
         client: &ChromaClient,
