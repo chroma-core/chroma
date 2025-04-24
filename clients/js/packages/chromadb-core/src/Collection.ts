@@ -16,6 +16,7 @@ import {
   CollectionParams,
   IncludeEnum,
   Metadata,
+  ForkCollectionParams,
 } from "./types";
 import { prepareRecordRequest, toArray, toArrayOfArrays } from "./utils";
 import { Api as GeneratedApi, Api } from "./generated";
@@ -449,5 +450,46 @@ export class Collection {
       },
       this.client.api.options,
     );
+  }
+
+  /**
+   * Forks the collection into a new collection with a new name and configuration.
+   *
+   * @param {Object} params - The parameters for forking the collection.
+   * @param {string} params.newName - The name for the new forked collection.
+   *
+   * @returns {Promise<Collection>} A promise that resolves to the new forked Collection object.
+   * @throws {Error} If there is an issue forking the collection.
+   *
+   * @example
+   * ```typescript
+   * const newCollection = await collection.fork({
+   *   newName: "my_forked_collection",
+   * });
+   * ```
+   */
+  async fork({ newName }: ForkCollectionParams): Promise<Collection> {
+    await this.client.init();
+
+    const resp = await this.client.api.forkCollection(
+      this.client.tenant,
+      this.client.database,
+      this.id,
+      {
+        new_name: newName,
+      },
+      this.client.api.options,
+    );
+
+    // The API returns an Api.Collection, we wrap it in our Collection class
+    const newCollection = new Collection(
+      resp.name,
+      resp.id,
+      this.client,
+      this.embeddingFunction,
+      resp.metadata as CollectionMetadata | undefined,
+    );
+
+    return newCollection;
   }
 }

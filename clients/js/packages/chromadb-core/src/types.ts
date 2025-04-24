@@ -214,6 +214,10 @@ export type ModifyCollectionParams = {
   metadata?: CollectionMetadata;
 };
 
+export type ForkCollectionParams = {
+  newName: string;
+};
+
 export type BaseQueryParams = {
   nResults?: PositiveInteger;
   where?: Where;
