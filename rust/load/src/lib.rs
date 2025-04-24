@@ -237,6 +237,11 @@ pub trait DataSet: std::fmt::Debug + Send + Sync {
         self.cardinality()
     }
 
+    // Hook to perform initialization of the data set, if necessary.
+    async fn initialize(&self, _: &ChromaClient) -> Result<(), Box<dyn std::error::Error + Send>> {
+        Ok(())
+    }
+
     /// Get documents by key.  This is used when one workload references another.  Return None to
     /// indicate the data set does not support referencing by index.
     async fn get_by_key(
@@ -1302,6 +1307,14 @@ impl LoadService {
                 }
             }
         });
+
+        // Initialize the data set.
+        let data_set = Arc::clone(&spec.data_set);
+        if let Err(err) = data_set.initialize(&client).await {
+            tracing::error!("failed to initialize data set: {err:?}");
+            return;
+        }
+
         let seq_no = Arc::new(TokioMutex::new(0u64));
         let start = Instant::now();
         while !done.load(std::sync::atomic::Ordering::Relaxed) {
