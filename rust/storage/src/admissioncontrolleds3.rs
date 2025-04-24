@@ -526,23 +526,23 @@ impl CountBasedPolicy {
         priority: Arc<AtomicUsize>,
         mut channel_receiver: Option<tokio::sync::mpsc::Receiver<()>>,
     ) -> SemaphorePermit<'_> {
-        let timeout_duration = std::time::Duration::from_secs(10);
-        let (timeout_tx, mut timeout_rx) = tokio::sync::oneshot::channel();
-        tokio::spawn(async move {
-            tokio::time::sleep(timeout_duration).await;
-            let did_timeout = timeout_rx.try_recv();
-            match did_timeout {
-                Ok(_) => {}
-                Err(e) => match e {
-                    tokio::sync::oneshot::error::TryRecvError::Closed => {
-                        tracing::error!("Timeout channel closed");
-                    }
-                    tokio::sync::oneshot::error::TryRecvError::Empty => {
-                        tracing::error!("Timeout channel shutdown");
-                    }
-                },
-            }
-        });
+        // let timeout_duration = std::time::Duration::from_secs(10);
+        // let (timeout_tx, mut timeout_rx) = tokio::sync::oneshot::channel();
+        // tokio::spawn(async move {
+        //     tokio::time::sleep(timeout_duration).await;
+        //     let did_timeout = timeout_rx.try_recv();
+        //     match did_timeout {
+        //         Ok(_) => {}
+        //         Err(e) => match e {
+        //             tokio::sync::oneshot::error::TryRecvError::Closed => {
+        //                 tracing::error!("Timeout channel closed");
+        //             }
+        //             tokio::sync::oneshot::error::TryRecvError::Empty => {
+        //                 tracing::error!("Timeout channel shutdown");
+        //             }
+        //         },
+        //     }
+        // });
 
         loop {
             let current_priority = priority.load(Ordering::SeqCst);
@@ -556,7 +556,7 @@ impl CountBasedPolicy {
             {
                 match self.remaining_tokens[pri].try_acquire() {
                     Ok(token) => {
-                        let _ = timeout_tx.send(());
+                        // let _ = timeout_tx.send(());
                         return token;
                     }
                     Err(TryAcquireError::NoPermits) => continue,
@@ -575,7 +575,7 @@ impl CountBasedPolicy {
                             match token {
                                 Ok(token) => {
                                     // If we got a token, return it.
-                                    let _ = timeout_tx.send(());
+                                    // let _ = timeout_tx.send(());
                                     return token;
                                 },
                                 Err(e) => {
@@ -594,7 +594,7 @@ impl CountBasedPolicy {
                     match token {
                         Ok(token) => {
                             // If we got a token, return it.
-                            let _ = timeout_tx.send(());
+                            // let _ = timeout_tx.send(());
                             return token;
                         }
                         Err(e) => {
