@@ -547,18 +547,12 @@ impl Orchestrator for CompactOrchestrator {
             .expect("The result channel should be set before take")
     }
 
-    async fn terminate_with_result(
-        &mut self,
-        res: Result<CompactionResponse, CompactionError>,
-        ctx: &ComponentContext<Self>,
-    ) {
-        // Cleanup first.
+    async fn cleanup(&mut self) {
         Self::try_purge_hnsw(
             &self.hnsw_provider.temporary_storage_path,
             self.hnsw_index_uuid,
         )
-        .await;
-        self.default_terminate_with_result(res, ctx).await
+        .await
     }
 }
 

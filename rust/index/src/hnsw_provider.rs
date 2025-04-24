@@ -346,6 +346,8 @@ impl HnswIndexProvider {
         };
 
         // Cleanup directory.
+        // Readers don't modify the index, so we can delete the files on disk
+        // once the index is fully loaded in memory.
         Self::purge_one_id(&self.temporary_storage_path, *id)
             .await
             .map_err(|e| {

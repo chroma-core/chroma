@@ -71,13 +71,34 @@ pub trait Orchestrator: Debug + Send + Sized + 'static {
         }
     }
 
+    async fn cleanup(&mut self) {
+        // Default cleanup does nothing
+    }
+
     /// Terminate the orchestrator with a result
+    /// Ideally no types that implement this trait should
+    /// need to override this method.
     async fn terminate_with_result(
         &mut self,
         res: Result<Self::Output, Self::Error>,
         ctx: &ComponentContext<Self>,
     ) {
-        self.default_terminate_with_result(res, ctx).await
+        self.cleanup().await;
+        let cancel = if let Err(err) = &res {
+            tracing::error!("Error running {}: {}", Self::name(), err);
+            true
+        } else {
+            false
+        };
+
+        let channel = self.take_result_channel();
+        if channel.send(res).is_err() {
+            tracing::error!("Error sending result for {}", Self::name());
+        };
+
+        if cancel {
+            ctx.cancellation_token.cancel();
+        }
     }
 
     /// Terminate the orchestrator if the result is an error. Returns the output if any.
