@@ -55,7 +55,7 @@ If you're unsure about your contribution idea, feel free to chat with us (@chrom
 
 We can always use [more integrations](../../integrations/chroma-integrations) with the rest of the AI ecosystem. Please let us know if you're working on one and need help!
 
-Other great starting points for Chroma (please send PRs for more [here](https://github.com/chroma-core/docs/tree/swyx/addRoadmap/docs)):
+Other great starting points for Chroma:
 - [Google Colab](https://colab.research.google.com/drive/1QEzFyqnoFxq7LUGyP1vzR4iLt9PpCDXv?usp=sharing)
 - [Replit Template](https://replit.com/@swyx/BasicChromaStarter?v=1)
 
