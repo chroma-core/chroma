@@ -250,7 +250,7 @@ where
                         err
                     );
                 } else {
-                    tracing::debug!(
+                    tracing::info!(
                         "Failed to send task result for task {} to reply channel: {}",
                         self.task_id,
                         err

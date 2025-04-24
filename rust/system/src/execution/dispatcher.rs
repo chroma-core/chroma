@@ -102,7 +102,13 @@ impl Dispatcher {
     /// # Parameters
     /// - task: The task to enqueue
     async fn enqueue_task(&mut self, mut task: TaskMessage) {
-        tracing::info!(task_name = task.get_name(), "Enqueueing task");
+        tracing::info!(
+            task_name = task.get_name(),
+            task_id = task.id().to_string(),
+            "Enqueueing task"
+        );
+        let task_name = task.get_name();
+        let task_id = task.id().to_string();
         match task.get_type() {
             OperatorType::IO => {
                 let child_span = trace_span!(parent: Span::current(), "IO task execution", name = task.get_name());
@@ -145,15 +151,30 @@ impl Dispatcher {
                 match self.waiters.pop() {
                     Some(channel) => match channel.reply_to.send(task, Some(Span::current())).await
                     {
-                        Ok(_) => {}
+                        Ok(_) => {
+                            tracing::info!(
+                                task_name = task_name,
+                                "Sending task to worker from waiters"
+                            );
+                        }
                         Err(e) => {
                             tracing::error!("Error sending task to worker: {:?}", e);
                         }
                     },
                     None => {
                         if self.task_queue.len() >= self.config.task_queue_limit {
+                            tracing::info!(
+                                task_name = task_name,
+                                task_id = task_id,
+                                "Task queue is full, aborting task"
+                            );
                             task.abort().await;
                         } else {
+                            tracing::info!(
+                                task_name = task_name,
+                                task_id = task_id,
+                                "Adding task to queue"
+                            );
                             self.task_queue.push_back((task, Span::current()));
                         }
                     }
