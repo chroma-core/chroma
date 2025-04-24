@@ -250,8 +250,10 @@ def get_space(collection: Collection):
         return collection._model.configuration_json.get('spann').get('space')
     elif 'hnsw' in collection._model.configuration_json and collection._model.configuration_json.get('hnsw') is not None:
         return collection._model.configuration_json.get('hnsw').get('space')
-    else:
+    elif "hnsw:space" in collection.metadata:
         return collection.metadata["hnsw:space"]
+    else:
+        return None
 
 def ann_accuracy(
     collection: Collection,
@@ -278,14 +280,15 @@ def ann_accuracy(
         embeddings = embedding_function(normalized_record_set["documents"])
     
     space = get_space(collection)
-    if space == "cosine":
+    if space is None:
+        distance_function = distance_functions.l2
+    elif space == "cosine":
         distance_function = distance_functions.cosine
-    if space == "ip":
+    elif space == "ip":
         distance_function = distance_functions.ip
-    if space == "l2":
+    elif space == "l2":
         distance_function = distance_functions.l2
 
-    # l2 is the default distance function
     accuracy_threshold = 1e-6
     assert collection.metadata is not None
     assert embeddings is not None
