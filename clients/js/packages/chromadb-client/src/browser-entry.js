@@ -1,4 +1,3 @@
-
-import * as punycode from 'punycode';
+import * as punycode from "punycode";
 globalThis.punycode = punycode;
-export * from './index';
+export * from "./index";

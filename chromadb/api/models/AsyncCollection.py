@@ -256,6 +256,32 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
 
         self._update_model_after_modify_success(name, metadata, configuration)
 
+    async def fork(
+        self,
+        new_name: str,
+    ) -> "AsyncCollection":
+        """Fork the current collection under a new name. The returning collection should contain identical data to the current collection.
+        This is an experimental API that only works for Hosted Chroma for now.
+
+        Args:
+            new_name: The name of the new collection.
+
+        Returns:
+            Collection: A new collection with the specified name and containing identical data to the current collection.
+        """
+        model = await self._client._fork(
+            collection_id=self.id,
+            new_name=new_name,
+            tenant=self.tenant,
+            database=self.database,
+        )
+        return AsyncCollection(
+            client=self._client,
+            model=model,
+            embedding_function=self._embedding_function,
+            data_loader=self._data_loader
+        )
+
     async def update(
         self,
         ids: OneOrMany[ID],

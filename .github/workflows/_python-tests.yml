@@ -20,7 +20,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: [depot-ubuntu-24.04-8, depot-windows-2022-8]
+        platform: [blacksmith-8vcpu-ubuntu-2204, 16core-64gb-windows-latest]
         test-globs:
           - "--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*'"
           - "chromadb/test/property --ignore-glob chromadb/test/property/test_cross_version_persist.py"
@@ -70,9 +70,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        # NOTE(hammadb): For some reason depot-windows fails so leaving default windows-latest
-        # on chromadb/test/client/test_multiple_clients_concurrency.py::test_multiple_clients_concurrently
-        platform: [depot-ubuntu-24.04, windows-latest]
+        platform: [blacksmith-4vcpu-ubuntu-2204, windows-latest]
         test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore='chromadb/test/test_cli.py' --ignore-glob 'chromadb/test/distributed/*'",
                     "chromadb/test/property/test_add.py",
                     "chromadb/test/property/test_collections.py",
@@ -83,7 +81,7 @@ jobs:
                     "chromadb/test/property/test_persist.py",
                     "chromadb/test/stress"]
         include:
-          - platform: depot-ubuntu-24.04
+          - platform: blacksmith-4vcpu-ubuntu-2204
             env-file: compose-env.linux
     runs-on: ${{ matrix.platform }}
     steps:
@@ -114,7 +112,7 @@ jobs:
     strategy:
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: [depot-ubuntu-24.04, depot-windows-2022]
+        platform: [blacksmith-4vcpu-ubuntu-2204, windows-latest]
         test-globs: ["chromadb/test/property/test_add.py",
                     "chromadb/test/property/test_collections.py",
                     "chromadb/test/property/test_collections_with_database_tenant.py",
@@ -152,7 +150,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: ["depot-ubuntu-22.04-4"]
+        platform: ["blacksmith-16vcpu-ubuntu-2204"]
         test-globs: ["chromadb/test/api",
                     "chromadb/test/api/test_collection.py",
                     "chromadb/test/api/test_limit_offset.py",
@@ -164,7 +162,7 @@ jobs:
                     "chromadb/test/property/test_collections_with_database_tenant_overwrite.py",
                     "chromadb/test/distributed/test_sanity.py"]
     runs-on: ${{ matrix.platform }}
-    # OIDC token auth for Depot & AWS
+    # OIDC token auth for AWS
     permissions:
       contents: read
       id-token: write
@@ -173,15 +171,17 @@ jobs:
       - uses: ./.github/actions/python
         with:
           python-version: ${{ matrix.python }}
-      - name: Configure pytest to upload results to Datadog
-        uses: datadog/test-visibility-github-action@v2
+      # TODO(adityamaru): Add Datadog test visibility when running in Chroma's repo.
+      # - name: Configure pytest to upload results to Datadog
+      #   uses: datadog/test-visibility-github-action@v2
+      #   with:
+      #     languages: python
+      #     api_key: ${{ secrets.DD_API_KEY }}
+      #     site: ${{ vars.DD_SITE }}
+      - uses: useblacksmith/build-push-action@v1.1
         with:
-          languages: python
-          api_key: ${{ secrets.DD_API_KEY }}
-          site: ${{ vars.DD_SITE }}
+          setup-only: true
       - uses: ./.github/actions/tilt
-        with:
-          depot-project-id: ${{ vars.DEPOT_PROJECT_ID }}
       - name: Test
         run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.test-globs }}"' --durations 10
         shell: bash
@@ -200,7 +200,7 @@ jobs:
           artifact-name: ${{ steps.compute-artifact-name.outputs.artifact_name }}
 
   merge-cluster-logs:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2204
     needs: test-cluster-rust-frontend
     steps:
       - name: Merge
@@ -215,7 +215,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: [depot-ubuntu-24.04-16, depot-windows-2022-16]
+        platform: [blacksmith-16vcpu-ubuntu-2204, 16core-64gb-windows-latest]
         test-globs: ["chromadb/test/stress"]
     runs-on: ${{ matrix.platform }}
     steps:
@@ -256,10 +256,10 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: [depot-ubuntu-24.04, windows-latest]
+        platform: [blacksmith-4vcpu-ubuntu-2204, windows-latest]
         test-globs: ["chromadb/test/test_cli.py"]
         include:
-          - platform: depot-ubuntu-24.04
+          - platform: blacksmith-4vcpu-ubuntu-2204
             env-file: compose-env.linux
           - platform: windows-latest
             env-file: compose-env.windows

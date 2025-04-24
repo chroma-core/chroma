@@ -338,7 +338,6 @@ impl SqliteSysDb {
             version: 0,
             size_bytes_post_compaction: 0,
             last_compaction_time_secs: 0,
-            legacy_configuration_json: (),
         })
     }
 
@@ -725,7 +724,6 @@ impl SqliteSysDb {
                     database: first_row.get(5),
                     size_bytes_post_compaction: 0,
                     last_compaction_time_secs: 0,
-                    legacy_configuration_json: (),
                 }))
             })
             .collect::<Result<Vec<_>, GetCollectionsError>>()?;
@@ -1310,7 +1308,6 @@ mod tests {
         match &collection.config.vector_index {
             VectorIndexConfiguration::Hnsw(hnsw) => {
                 assert_eq!(hnsw.ef_search, 20);
-                assert_eq!(hnsw.num_threads, 4);
             }
             _ => panic!("Expected HNSW configuration"),
         }

@@ -1,9 +1,4 @@
-import {
-  beforeEach,
-  describe,
-  expect,
-  test,
-} from "@jest/globals";
+import { beforeEach, describe, expect, test } from "@jest/globals";
 import { IncludeEnum } from "../src/types";
 import { EMBEDDINGS, IDS, METADATAS, DOCUMENTS } from "./data";
 
@@ -45,7 +40,7 @@ describe("query records", () => {
     expect(results.ids[0]).toEqual(expect.arrayContaining(["test1", "test2"]));
     expect(results.ids[0]).not.toContain("test3");
     expect(results.included).toEqual(
-      expect.arrayContaining(["metadatas", "documents"]),
+      expect.arrayContaining(["metadatas", "documents", "distances"]),
     );
   });
 
@@ -66,7 +61,7 @@ describe("query records", () => {
     expect(results.ids[1]).toEqual(expect.arrayContaining(["test1", "test2"]));
     expect(results.ids[1]).not.toContain("test3");
     expect(results.included).toEqual(
-      expect.arrayContaining(["metadatas", "documents"]),
+      expect.arrayContaining(["metadatas", "documents", "distances"]),
     );
   });
 

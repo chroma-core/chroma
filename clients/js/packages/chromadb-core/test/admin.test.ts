@@ -114,9 +114,19 @@ describe("AdminClient", () => {
   });
 
   test("it should throw well-formatted errors", async () => {
+    // Create it once, should succeed (or use a unique name guaranteed not to exist)
+    const dbName = "test_unique_error_" + Date.now(); // Ensure unique name for first creation
+    const tenantName = "foo";
+    await adminClient.createDatabase({ name: dbName, tenantName: tenantName });
+
+    // Attempt to create it again, should fail
     try {
-      await adminClient.createDatabase({ name: "test", tenantName: "foo" });
-      expect(false).toBe(true);
+      await adminClient.createDatabase({
+        name: dbName,
+        tenantName: tenantName,
+      });
+      // If it reaches here, the test failed because no error was thrown
+      expect(true).toBe(false);
     } catch (error) {
       expect(error).toBeInstanceOf(Error);
       expect(error).toBeInstanceOf(ChromaUniqueError);

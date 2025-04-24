@@ -11,7 +11,7 @@ export default defineConfig((options: Options) => {
     dts: true,
     target: "es2020",
     // Tell esbuild to bundle and handle CommonJS dependencies correctly
-    platform: 'node',
+    platform: "node",
     // Ensure Node.js polyfills are included
     shims: true,
     // Handle dynamic requires
@@ -34,7 +34,10 @@ export default defineConfig((options: Options) => {
       clean: true,
       async onSuccess() {
         // Support Webpack 4 by pointing `"module"` to a file with a `.js` extension
-        fs.copyFileSync("dist/chromadb-core.mjs", "dist/chromadb-core.legacy-esm.js");
+        fs.copyFileSync(
+          "dist/chromadb-core.mjs",
+          "dist/chromadb-core.legacy-esm.js",
+        );
       },
     },
     {

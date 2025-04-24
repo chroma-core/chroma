@@ -8,12 +8,24 @@ inputs:
 runs:
   using: "composite"
   steps:
+
     - name: Set up Python 3.9 for protos
+      uses: useblacksmith/setup-python@v6
+      # NOTE(hammadb) Blacksmith does not support windows, so we use the official action for windows and
+      # skip it on other platforms
+      if: runner.os != 'Windows'
+      with:
+        python-version: "3.9"
+        cache: "pip"
+        cache-dependency-path: "requirements*.txt"
+    - name: Set up Python 3.9 for protos (Windows)
+      if: runner.os == 'Windows'
       uses: actions/setup-python@v5
       with:
         python-version: "3.9"
         cache: "pip"
         cache-dependency-path: "requirements*.txt"
+
     - name: Install proto dependencies
       run: |
         python -m pip install grpcio==1.58.0 grpcio-tools==1.58.0
@@ -31,6 +43,13 @@ runs:
         python -m pip uninstall -y grpcio grpcio-tools
       shell: bash
     - name: Set up Python ${{ inputs.python-version }}
+      uses: useblacksmith/setup-python@v6
+      with:
+        python-version: ${{ inputs.python-version }}
+        cache: "pip"
+        cache-dependency-path: "requirements*.txt"
+    - name: Set up Python ${{ inputs.python-version }} (Windows)
+      if: runner.os == 'Windows'
       uses: actions/setup-python@v5
       with:
         python-version: ${{ inputs.python-version }}

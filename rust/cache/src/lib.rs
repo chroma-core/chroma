@@ -71,6 +71,7 @@ where
     async fn get(&self, key: &K) -> Result<Option<V>, CacheError>;
     async fn remove(&self, key: &K);
     async fn clear(&self) -> Result<(), CacheError>;
+    async fn obtain(&self, key: K) -> Result<Option<V>, CacheError>;
 }
 
 /// A persistent cache extends the traits of a cache to require StorageKey and StorageValue.

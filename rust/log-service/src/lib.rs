@@ -18,6 +18,7 @@ use chroma_types::chroma_proto::{
     PushLogsRequest, PushLogsResponse, ScoutLogsRequest, ScoutLogsResponse,
     UpdateCollectionLogOffsetRequest, UpdateCollectionLogOffsetResponse,
 };
+use chroma_types::chroma_proto::{ForkLogsRequest, ForkLogsResponse};
 use chroma_types::CollectionUuid;
 use figment::providers::{Env, Format, Yaml};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
@@ -596,7 +597,7 @@ pub struct LogServer {
 
 #[async_trait::async_trait]
 impl LogService for LogServer {
-    #[tracing::instrument(skip(self, request), err(Display))]
+    #[tracing::instrument(skip(self, request))]
     async fn push_logs(
         &self,
         request: Request<PushLogsRequest>,
@@ -638,9 +639,16 @@ impl LogService for LogServer {
             messages.push(buf);
         }
         let record_count = messages.len() as i32;
-        log.append_many(messages)
-            .await
-            .map_err(|err| Status::unknown(err.to_string()))?;
+        log.append_many(messages).await.map_err(|err| {
+            if let wal3::Error::Backoff = err {
+                Status::new(
+                    chroma_error::ErrorCodes::Unavailable.into(),
+                    err.to_string(),
+                )
+            } else {
+                Status::new(err.code().into(), err.to_string())
+            }
+        })?;
         Ok(Response::new(PushLogsResponse { record_count }))
     }
 
@@ -671,7 +679,9 @@ impl LogService for LogServer {
                 }
             };
             let limit_offset = limit_position.offset() as i64;
-            Ok(Response::new(ScoutLogsResponse { limit_offset }))
+            Ok(Response::new(ScoutLogsResponse {
+                first_uninserted_record_offset: limit_offset,
+            }))
         }
         .instrument(span)
         .await
@@ -700,7 +710,7 @@ impl LogService for LogServer {
             );
             let limits = Limits {
                 max_files: Some(pull_logs.batch_size as u64 + 1),
-                max_bytes: Some(pull_logs.batch_size as u64 * 100_000),
+                max_bytes: None,
             };
             let fragments = match log_reader
                 .scan(
@@ -730,6 +740,12 @@ impl LogService for LogServer {
             for parquet in parquets {
                 let this = parquet_to_records(parquet)?;
                 for record in this {
+                    if record.0.offset() < pull_logs.start_from_offset as u64
+                        || record.0.offset()
+                            >= pull_logs.start_from_offset as u64 + pull_logs.batch_size as u64
+                    {
+                        continue;
+                    }
                     if records.len() >= pull_logs.batch_size as usize {
                         break;
                     }
@@ -746,6 +762,13 @@ impl LogService for LogServer {
         }
         .instrument(span)
         .await
+    }
+
+    async fn fork_logs(
+        &self,
+        _request: Request<ForkLogsRequest>,
+    ) -> Result<Response<ForkLogsResponse>, Status> {
+        unimplemented!("Log forking is unimplemented for WAL3 for now")
     }
 
     #[tracing::instrument(info, skip(self, request), err(Display))]
