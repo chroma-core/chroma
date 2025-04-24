@@ -140,6 +140,21 @@ else:
     target='garbage_collector'
   )
 
+if config.tilt_subcommand == "ci":
+  custom_build(
+    'load-service',
+    'docker buildx build --load -t $EXPECTED_REF --target load_service -f ./rust/load/Dockerfile .',
+    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
+  )
+else:
+  docker_build(
+    'load-service',
+    '.',
+    only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
+    dockerfile='./rust/load/Dockerfile',
+    target='load_service'
+  )
+
 
 # First install the CRD
 k8s_yaml(
@@ -169,6 +184,7 @@ k8s_yaml([
   'k8s/test/grafana.yaml',
   'k8s/test/jaeger-service.yaml',
   'k8s/test/jaeger.yaml',
+  'k8s/test/load-service.yaml',
   'k8s/test/minio.yaml',
   'k8s/test/prometheus.yaml',
   'k8s/test/test-memberlist-cr.yaml',
@@ -226,6 +242,7 @@ k8s_resource('sysdb', resource_deps=['sysdb-migration-latest'], labels=["chroma"
 k8s_resource('rust-frontend-service', resource_deps=['sysdb', 'logservice', 'rust-log-service'], labels=["chroma"], port_forwards='3000:8000')
 k8s_resource('query-service', resource_deps=['sysdb'], labels=["chroma"], port_forwards='50053:50051')
 k8s_resource('compaction-service', resource_deps=['sysdb'], labels=["chroma"])
+k8s_resource('load-service', resource_deps=['k8s_setup'], labels=["infrastructure"], port_forwards='3001:3001')
 k8s_resource('jaeger', resource_deps=['k8s_setup'], labels=["observability"])
 k8s_resource('grafana', resource_deps=['k8s_setup'], labels=["observability"])
 k8s_resource('prometheus', resource_deps=['k8s_setup'], labels=["observability"])
