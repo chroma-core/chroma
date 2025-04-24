@@ -402,7 +402,7 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
     type Error = FilterError;
 
     async fn run(&self, input: &FilterInput) -> Result<FilterOutput, FilterError> {
-        tracing::info!("[{}]: {:?}", self.get_name(), input);
+        tracing::info!("Running filter operator");
 
         let record_segment_reader = match RecordSegmentReader::from_segment(
             &input.record_segment,
