@@ -102,7 +102,6 @@ impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
                 .map(|x| (x, std::cmp::min(x + window_size as u64, limit_offset)))
                 .collect::<Vec<_>>();
             let sema = Arc::new(tokio::sync::Semaphore::new(10));
-            tracing::info!("Fetching logs in {} batches", ranges.len());
             let batch_readers = ranges
                 .into_iter()
                 .map(|(start, limit)| {
@@ -112,26 +111,14 @@ impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
                     let start = start as i64;
                     let sema = Arc::clone(&sema);
                     async move {
-                        let timeout = tokio::time::sleep(tokio::time::Duration::from_secs(10));
-                        tokio::pin!(timeout);
-                        let res = tokio::select! {
-                            _ = &mut timeout => {
-                                panic!("Timeout while waiting for semaphore");
-                            }
-                            permit = sema.acquire() => {
-                                let _permit = permit.unwrap();
-                                tracing::info!("Acquired semaphore");
-                                log_client
-                                    .read(collection_uuid, start, num_records, Some(timestamp))
-                                    .await
-                            }
-                        };
-                        res
+                        let _permit = sema.acquire().await.unwrap();
+                        log_client
+                            .read(collection_uuid, start, num_records, Some(timestamp))
+                            .await
                     }
                 })
                 .collect::<Vec<_>>();
             let batches = futures::future::join_all(batch_readers).await;
-            tracing::info!("Fetched {} batches", batches.len());
             for batch in batches {
                 match batch {
                     Ok(batch) => fetched.extend(batch),
@@ -141,7 +128,6 @@ impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
                 }
             }
             fetched.sort_by_key(|f| f.log_offset);
-            tracing::info!(name: "Returning log records", num_records = fetched.len());
             Ok(Chunk::new(fetched.into()))
         } else {
             // old behavior that we fall back to if the scout is not implemented

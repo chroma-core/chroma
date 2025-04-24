@@ -151,30 +151,15 @@ impl Dispatcher {
                 match self.waiters.pop() {
                     Some(channel) => match channel.reply_to.send(task, Some(Span::current())).await
                     {
-                        Ok(_) => {
-                            tracing::info!(
-                                task_name = task_name,
-                                "Sending task to worker from waiters"
-                            );
-                        }
+                        Ok(_) => {}
                         Err(e) => {
                             tracing::error!("Error sending task to worker: {:?}", e);
                         }
                     },
                     None => {
                         if self.task_queue.len() >= self.config.task_queue_limit {
-                            tracing::info!(
-                                task_name = task_name,
-                                task_id = task_id,
-                                "Task queue is full, aborting task"
-                            );
                             task.abort().await;
                         } else {
-                            tracing::info!(
-                                task_name = task_name,
-                                task_id = task_id,
-                                "Adding task to queue"
-                            );
                             self.task_queue.push_back((task, Span::current()));
                         }
                     }

@@ -71,7 +71,7 @@ impl Handler<TaskMessage> for WorkerThread {
             let attempted_recv = mark_done_rx.try_recv();
             match attempted_recv {
                 Ok(_) => {
-                    tracing::info!("Task {} completed", task_name)
+                    //tracing::info!("Task {} completed", task_name)
                 }
                 Err(e) => match e {
                     tokio::sync::oneshot::error::TryRecvError::Empty => {

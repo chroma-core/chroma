@@ -57,7 +57,7 @@ impl Operator<PrefetchRecordInput, PrefetchRecordOutput> for PrefetchRecordOpera
         &self,
         input: &PrefetchRecordInput,
     ) -> Result<PrefetchRecordOutput, PrefetchRecordError> {
-        trace!("[{}]", self.get_name());
+        tracing::info!("RUNNING THE PREFETCH [{}]", self.get_name());
 
         let record_segment_reader = match RecordSegmentReader::from_segment(
             &input.record_segment,
@@ -95,7 +95,7 @@ impl Operator<PrefetchRecordInput, PrefetchRecordOutput> for PrefetchRecordOpera
         false
     }
 
-    fn get_type(&self) -> OperatorType {
-        OperatorType::IO
-    }
+    // fn get_type(&self) -> OperatorType {
+    //     OperatorType::IO
+    // }
 }
