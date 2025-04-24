@@ -989,6 +989,89 @@ export const ApiApiFetchParamCreator = function (
       };
     },
     /**
+     * @summary Forks an existing collection.
+     * @param {string} tenant <p>Tenant ID</p>
+     * @param {string} database <p>Database name</p>
+     * @param {string} collectionId <p>UUID of the collection to update</p>
+     * @param {Api.ForkCollectionPayload} request
+     * @param {RequestInit} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    forkCollection(
+      tenant: string,
+      database: string,
+      collectionId: string,
+      request: Api.ForkCollectionPayload,
+      options: RequestInit = {},
+    ): FetchArgs {
+      // verify required parameter 'tenant' is not null or undefined
+      if (tenant === null || tenant === undefined) {
+        throw new RequiredError(
+          "tenant",
+          "Required parameter tenant was null or undefined when calling forkCollection.",
+        );
+      }
+      // verify required parameter 'database' is not null or undefined
+      if (database === null || database === undefined) {
+        throw new RequiredError(
+          "database",
+          "Required parameter database was null or undefined when calling forkCollection.",
+        );
+      }
+      // verify required parameter 'collectionId' is not null or undefined
+      if (collectionId === null || collectionId === undefined) {
+        throw new RequiredError(
+          "collectionId",
+          "Required parameter collectionId was null or undefined when calling forkCollection.",
+        );
+      }
+      // verify required parameter 'request' is not null or undefined
+      if (request === null || request === undefined) {
+        throw new RequiredError(
+          "request",
+          "Required parameter request was null or undefined when calling forkCollection.",
+        );
+      }
+      let localVarPath =
+        `/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/fork`
+          .replace("{tenant}", encodeURIComponent(String(tenant)))
+          .replace("{database}", encodeURIComponent(String(database)))
+          .replace("{collection_id}", encodeURIComponent(String(collectionId)));
+      const localVarPathQueryStart = localVarPath.indexOf("?");
+      const localVarRequestOptions: RequestInit = Object.assign(
+        { method: "POST" },
+        options,
+      );
+      const localVarHeaderParameter: Headers = options.headers
+        ? new Headers(options.headers)
+        : new Headers();
+      const localVarQueryParameter = new URLSearchParams(
+        localVarPathQueryStart !== -1
+          ? localVarPath.substring(localVarPathQueryStart + 1)
+          : "",
+      );
+      if (localVarPathQueryStart !== -1) {
+        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
+      }
+
+      localVarHeaderParameter.set("Content-Type", "application/json");
+
+      localVarRequestOptions.headers = localVarHeaderParameter;
+
+      if (request !== undefined) {
+        localVarRequestOptions.body = JSON.stringify(request || {});
+      }
+
+      const localVarQueryParameterString = localVarQueryParameter.toString();
+      if (localVarQueryParameterString) {
+        localVarPath += "?" + localVarQueryParameterString;
+      }
+      return {
+        url: localVarPath,
+        options: localVarRequestOptions,
+      };
+    },
+    /**
      * @summary Retrieves a collection by ID or name.
      * @param {string} tenant <p>Tenant ID</p>
      * @param {string} database <p>Database name</p>
@@ -2292,6 +2375,63 @@ export const ApiApiFp = function (configuration?: Configuration) {
       };
     },
     /**
+     * @summary Forks an existing collection.
+     * @param {string} tenant <p>Tenant ID</p>
+     * @param {string} database <p>Database name</p>
+     * @param {string} collectionId <p>UUID of the collection to update</p>
+     * @param {Api.ForkCollectionPayload} request
+     * @param {RequestInit} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    forkCollection(
+      tenant: string,
+      database: string,
+      collectionId: string,
+      request: Api.ForkCollectionPayload,
+      options?: RequestInit,
+    ): (fetch?: FetchAPI, basePath?: string) => Promise<Api.Collection> {
+      const localVarFetchArgs = ApiApiFetchParamCreator(
+        configuration,
+      ).forkCollection(tenant, database, collectionId, request, options);
+      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
+        return fetch(
+          basePath + localVarFetchArgs.url,
+          localVarFetchArgs.options,
+        ).then((response) => {
+          const contentType = response.headers.get("Content-Type");
+          const mimeType = contentType
+            ? contentType.replace(/;.*/, "")
+            : undefined;
+
+          if (response.status === 200) {
+            if (mimeType === "application/json") {
+              return response.json() as any;
+            }
+            throw response;
+          }
+          if (response.status === 401) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          if (response.status === 404) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          if (response.status === 500) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          throw response;
+        });
+      };
+    },
+    /**
      * @summary Retrieves a collection by ID or name.
      * @param {string} tenant <p>Tenant ID</p>
      * @param {string} database <p>Database name</p>
@@ -3139,6 +3279,31 @@ export class ApiApi extends BaseAPI {
     return ApiApiFp(this.configuration).deleteDatabase(
       tenant,
       database,
+      options,
+    )(this.fetch, this.basePath);
+  }
+
+  /**
+   * @summary Forks an existing collection.
+   * @param {string} tenant <p>Tenant ID</p>
+   * @param {string} database <p>Database name</p>
+   * @param {string} collectionId <p>UUID of the collection to update</p>
+   * @param {Api.ForkCollectionPayload} request
+   * @param {RequestInit} [options] Override http request option.
+   * @throws {RequiredError}
+   */
+  public forkCollection(
+    tenant: string,
+    database: string,
+    collectionId: string,
+    request: Api.ForkCollectionPayload,
+    options?: RequestInit,
+  ) {
+    return ApiApiFp(this.configuration).forkCollection(
+      tenant,
+      database,
+      collectionId,
+      request,
       options,
     )(this.fetch, this.basePath);
   }

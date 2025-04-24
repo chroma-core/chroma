@@ -316,6 +316,10 @@ impl SpannSegmentWriter {
             }),
         }
     }
+
+    pub fn hnsw_index_uuid(&self) -> IndexUuid {
+        self.index.hnsw_index.inner.read().id
+    }
 }
 
 pub struct SpannSegmentFlusher {
@@ -589,13 +593,11 @@ mod test {
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let hnsw_cache = new_non_persistent_cache_for_test();
-        let (_, rx) = tokio::sync::mpsc::unbounded_channel();
         let hnsw_provider = HnswIndexProvider::new(
             storage.clone(),
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
-            rx,
         );
         let collection_id = CollectionUuid::new();
         let segment_id = SegmentUuid::new();
@@ -702,13 +704,11 @@ mod test {
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let hnsw_cache = new_non_persistent_cache_for_test();
-        let (_, rx) = tokio::sync::mpsc::unbounded_channel();
         let hnsw_provider = HnswIndexProvider::new(
             storage,
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
-            rx,
         );
         let gc_context = GarbageCollectionContext::try_from_config(
             &(
@@ -812,13 +812,11 @@ mod test {
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let hnsw_cache = new_non_persistent_cache_for_test();
-        let (_, rx) = tokio::sync::mpsc::unbounded_channel();
         let hnsw_provider = HnswIndexProvider::new(
             storage.clone(),
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
-            rx,
         );
         let collection_id = CollectionUuid::new();
         let segment_id = SegmentUuid::new();
@@ -916,13 +914,11 @@ mod test {
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let hnsw_cache = new_non_persistent_cache_for_test();
-        let (_, rx) = tokio::sync::mpsc::unbounded_channel();
         let hnsw_provider = HnswIndexProvider::new(
             storage,
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
-            rx,
         );
         let spann_reader = SpannSegmentReader::from_segment(
             &collection,
@@ -979,13 +975,11 @@ mod test {
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let hnsw_cache = new_non_persistent_cache_for_test();
-        let (_, rx) = tokio::sync::mpsc::unbounded_channel();
         let hnsw_provider = HnswIndexProvider::new(
             storage.clone(),
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
-            rx,
         );
         let collection_id = CollectionUuid::new();
 
@@ -1087,13 +1081,11 @@ mod test {
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let hnsw_cache = new_non_persistent_cache_for_test();
-        let (_, rx) = tokio::sync::mpsc::unbounded_channel();
         let hnsw_provider = HnswIndexProvider::new(
             storage,
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
-            rx,
         );
         let gc_context = GarbageCollectionContext::try_from_config(
             &(

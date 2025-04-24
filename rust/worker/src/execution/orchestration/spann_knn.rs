@@ -141,7 +141,7 @@ impl SpannKnnOrchestrator {
             self.knn_filter_output.dimension,
         )
         .await;
-        let reader = match self.ok_or_terminate(reader_res, ctx) {
+        let reader = match self.ok_or_terminate(reader_res, ctx).await {
             Some(reader) => reader,
             None => {
                 tracing::error!("Failed to create SpannSegmentReader");
@@ -247,7 +247,7 @@ impl Handler<TaskResult<KnnLogOutput, KnnLogError>> for SpannKnnOrchestrator {
         message: TaskResult<KnnLogOutput, KnnLogError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(output) => output,
             None => return,
         };
@@ -268,7 +268,7 @@ impl Handler<TaskResult<SpannCentersSearchOutput, SpannCentersSearchError>>
         message: TaskResult<SpannCentersSearchOutput, SpannCentersSearchError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(output) => output,
             None => return,
         };
@@ -301,7 +301,7 @@ impl Handler<TaskResult<SpannFetchPlOutput, SpannFetchPlError>> for SpannKnnOrch
         message: TaskResult<SpannFetchPlOutput, SpannFetchPlError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(output) => output,
             None => return,
         };
@@ -335,7 +335,7 @@ impl Handler<TaskResult<SpannBfPlOutput, SpannBfPlError>> for SpannKnnOrchestrat
         message: TaskResult<SpannBfPlOutput, SpannBfPlError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(output) => output,
             None => return,
         };
@@ -356,7 +356,7 @@ impl Handler<TaskResult<SpannKnnMergeOutput, SpannKnnMergeError>> for SpannKnnOr
         message: TaskResult<SpannKnnMergeOutput, SpannKnnMergeError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(output) => output,
             None => return,
         };
@@ -414,6 +414,7 @@ impl Handler<TaskResult<KnnProjectionOutput, KnnProjectionError>> for SpannKnnOr
         message: TaskResult<KnnProjectionOutput, KnnProjectionError>,
         ctx: &ComponentContext<Self>,
     ) {
-        self.terminate_with_result(message.into_inner().map_err(|e| e.into()), ctx);
+        self.terminate_with_result(message.into_inner().map_err(|e| e.into()), ctx)
+            .await;
     }
 }

@@ -46,9 +46,7 @@ FROM record_log r
 WHERE r.collection_id = $1;
 
 -- name: GetBoundsForCollection :one
-SELECT
-	COALESCE(record_compaction_offset_position, 0) AS record_compaction_offset_position,
-	COALESCE(record_enumeration_offset_position, 0) AS record_enumeration_offset_position
+SELECT CAST(COALESCE(MIN(record_compaction_offset_position), 0) as bigint) AS record_compaction_offset_position, CAST(COALESCE(MAX(record_enumeration_offset_position), 0) as bigint) AS record_enumeration_offset_position
 FROM collection
 WHERE id = $1;
 

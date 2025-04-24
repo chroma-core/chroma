@@ -264,6 +264,10 @@ impl DistributedHNSWSegmentWriter {
         flushed_files.insert(HNSW_INDEX.to_string(), vec![hnsw_index_id.to_string()]);
         Ok(flushed_files)
     }
+
+    pub fn index_uuid(&self) -> IndexUuid {
+        self.index.inner.read().id
+    }
 }
 
 #[derive(Clone)]

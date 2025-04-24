@@ -881,20 +881,34 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 			return err
 		}
 		if rootCollectionID != forkCollection.SourceCollectionID {
-			rootCollection, err = tc.GetCollection(txCtx, rootCollectionID, nil, "", "")
+			limit := int32(1)
+			collections, err := tc.GetCollections(txCtx, rootCollectionID, nil, "", "", &limit, nil)
 			if err != nil {
 				return err
 			}
+			if len(collections) == 0 {
+				return common.ErrCollectionNotFound
+			}
+			rootCollection = collections[0]
 		} else {
 			rootCollection = sourceCollection
 		}
+		databases, err := tc.metaDomain.DatabaseDb(txCtx).GetDatabases(sourceCollection.TenantID, sourceCollection.DatabaseName)
+		if err != nil {
+			return err
+		}
+		if len(databases) == 0 {
+			return common.ErrDatabaseNotFound
+		}
+
+		databaseID := databases[0].ID
 
 		// Verify that the source collection log position is between the compaction offset (inclusive) and enumeration offset (inclusive)
 		// This check is necessary for next compaction to fetch the right logs
 		// This scenario could occur during fork because we will reach out to log service first to fork logs. For exampls:
 		// t0: Fork source collection in log with offset [200, 300] (i.e. compaction offset 200, enumeration offset 300)
 		// t1: User writes to source collection, compaction takes place, source collection log offset become [400, 500]
-		// t2: Fork source collection in sysdb, the latest source collection compaction offset is 400. We could not fork this version unless we update the log offsets of the forking collection
+		// t2: Fork source collection in sysdb, the latest source collection compaction offset is 400. If we add new logs, it will start after offset 300, and the data is lost after compaction.
 		latestSourceCompactionOffset := uint64(sourceCollection.LogPosition)
 		if forkCollection.SourceCollectionLogEnumerationOffset < latestSourceCompactionOffset || latestSourceCompactionOffset < forkCollection.SourceCollectionLogCompactionOffset {
 			return common.ErrCollectionLogPositionStale
@@ -953,14 +967,19 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 		if err != nil {
 			return err
 		}
+		// NOTE: This is a temporary hardcoded limit for the size of the lineage file
+		// TODO: Load the limit value from quota / scorecard, and/or improve the lineage file design to avoid large lineage file
+		if len(lineageFile.Dependencies) > 1000000 {
+			return common.ErrCollectionTooManyFork
+		}
 		lineageFile.Dependencies = append(lineageFile.Dependencies, &coordinatorpb.CollectionVersionDependency{
 			SourceCollectionId:      sourceCollectionIDStr,
 			SourceCollectionVersion: uint64(sourceCollection.Version),
 			TargetCollectionId:      forkCollection.TargetCollectionID.String(),
 		})
 
-		newLineageFileBaseName := fmt.Sprintf("%d/%d/%d/%d-%d-%d-%s-%d-%s.binpb", ts.Year(), ts.Month(), ts.Day(), ts.Hour(), ts.Minute(), ts.Second(), sourceCollectionIDStr, sourceCollection.Version, forkCollection.TargetCollectionID.String())
-		newLineageFileFullName, err = tc.s3Store.PutLineageFile(rootCollection.TenantID, rootCollection.DatabaseName, rootCollectionIDStr, newLineageFileBaseName, lineageFile)
+		newLineageFileBaseName := fmt.Sprintf("%s/%d/%s.binpb", sourceCollectionIDStr, sourceCollection.Version, forkCollection.TargetCollectionID)
+		newLineageFileFullName, err = tc.s3Store.PutLineageFile(rootCollection.TenantID, databaseID, rootCollectionIDStr, newLineageFileBaseName, lineageFile)
 		if err != nil {
 			return err
 		}
