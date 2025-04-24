@@ -3,15 +3,17 @@
 import React from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
+import { slugToPath } from "@/lib/content";
 
 const PageLink: React.FC<{
   id: string;
   name: string;
-  path: string;
+  slug: string;
   sectionPage: boolean;
-}> = ({ id, name, path, sectionPage = true }) => {
+}> = ({ id, name, slug, sectionPage = true }) => {
   const pathName = usePathname();
   const searchParams = useSearchParams();
+  const path = slugToPath(slug);
   const active = pathName === path;
   const lang = searchParams?.get("lang");
 
