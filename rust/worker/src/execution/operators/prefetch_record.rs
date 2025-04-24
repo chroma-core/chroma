@@ -57,7 +57,7 @@ impl Operator<PrefetchRecordInput, PrefetchRecordOutput> for PrefetchRecordOpera
         &self,
         input: &PrefetchRecordInput,
     ) -> Result<PrefetchRecordOutput, PrefetchRecordError> {
-        trace!("[{}]: {:?}", self.get_name(), input);
+        trace!("[{}]", self.get_name());
 
         let record_segment_reader = match RecordSegmentReader::from_segment(
             &input.record_segment,
