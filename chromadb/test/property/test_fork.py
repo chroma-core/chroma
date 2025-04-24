@@ -106,7 +106,8 @@ class ForkStateMachine(RuleBasedStateMachine):
                     ]
                 if normalized_delta["metadatas"] is not None:
                     record_set_state_metadata = cast(
-                        Dict[str, Union[str, int, float]], record_set_state["metadatas"]
+                        Dict[str, Union[str, int, float]],
+                        record_set_state["metadatas"][target_idx],
                     )
                     if record_set_state_metadata is not None:
                         if normalized_delta["metadatas"][idx] is not None:
