@@ -127,7 +127,6 @@ def test_persist(
             metadata=collection_strategy.metadata,  # type: ignore[arg-type]
             embedding_function=collection_strategy.embedding_function,
         )
-        print(f"(Sanket-temp) Collection config {coll.configuration}")
 
         coll.add(**recordset_strategy)  # type: ignore[arg-type]
 
