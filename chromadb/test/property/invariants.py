@@ -257,7 +257,8 @@ def get_space(collection: Collection):
     if 'spann' in collection._model.configuration_json and collection._model.configuration_json.get('spann') is not None and 'space' in collection._model.configuration_json.get('spann'):
         space = collection._model.configuration_json.get('spann').get('space')
     elif 'hnsw' in collection._model.configuration_json and collection._model.configuration_json.get('hnsw') is not None and 'space' in collection._model.configuration_json.get('hnsw'):
-        space = collection._model.configuration_json.get('hnsw').get('space')
+        if space is None:
+            space = collection._model.configuration_json.get('hnsw').get('space')
     return space
 
 def ann_accuracy(
