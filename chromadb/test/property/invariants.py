@@ -245,6 +245,21 @@ def fd_not_exceeding_threadpool_size(threadpool_size: int) -> None:
         len([p.path for p in open_files if "sqlite3" in p.path]) - 1 <= threadpool_size
     )
 
+def get_space(collection: Collection):
+    # TODO: this is a hack to get the space
+    # We should update the tests to not pass space via metadata instead use collection
+    # configuration_json
+    space = None
+    if "hnsw:space" in collection.metadata:
+        space = collection.metadata["hnsw:space"]
+    if collection._model.configuration_json is None:
+        return space
+    if 'spann' in collection._model.configuration_json and collection._model.configuration_json.get('spann') is not None and 'space' in collection._model.configuration_json.get('spann'):
+        space = collection._model.configuration_json.get('spann').get('space')
+    elif 'hnsw' in collection._model.configuration_json and collection._model.configuration_json.get('hnsw') is not None and 'space' in collection._model.configuration_json.get('hnsw'):
+        if space is None:
+            space = collection._model.configuration_json.get('hnsw').get('space')
+    return space
 
 def ann_accuracy(
     collection: Collection,
@@ -269,26 +284,27 @@ def ann_accuracy(
         assert isinstance(normalized_record_set["documents"], list)
         # Compute the embeddings for the documents
         embeddings = embedding_function(normalized_record_set["documents"])
+    
+    space = get_space(collection)
+    if space is None:
+        distance_function = distance_functions.l2
+    elif space == "cosine":
+        distance_function = distance_functions.cosine
+    elif space == "ip":
+        distance_function = distance_functions.ip
+    elif space == "l2":
+        distance_function = distance_functions.l2
 
-    # l2 is the default distance function
-    distance_function = distance_functions.l2
     accuracy_threshold = 1e-6
     assert collection.metadata is not None
     assert embeddings is not None
-    if "hnsw:space" in collection.metadata:
-        space = collection.metadata["hnsw:space"]
-        # TODO: ip and cosine are numerically unstable in HNSW.
-        # The higher the dimensionality, the more noise is introduced, since each float element
-        # of the vector has noise added, which is then subsequently included in all normalization calculations.
-        # This means that higher dimensions will have more noise, and thus more error.
-        assert all(isinstance(e, (list, np.ndarray)) for e in embeddings)
-        dim = len(embeddings[0])
-        accuracy_threshold = accuracy_threshold * math.pow(10, int(math.log10(dim)))
-
-        if space == "cosine":
-            distance_function = distance_functions.cosine
-        if space == "ip":
-            distance_function = distance_functions.ip
+    # TODO: ip and cosine are numerically unstable in HNSW.
+    # The higher the dimensionality, the more noise is introduced, since each float element
+    # of the vector has noise added, which is then subsequently included in all normalization calculations.
+    # This means that higher dimensions will have more noise, and thus more error.
+    assert all(isinstance(e, (list, np.ndarray)) for e in embeddings)
+    dim = len(embeddings[0])
+    accuracy_threshold = accuracy_threshold * math.pow(10, int(math.log10(dim)))
 
     # Perform exact distance computation
     if query_embeddings is None:

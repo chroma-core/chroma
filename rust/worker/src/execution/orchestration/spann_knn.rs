@@ -1,6 +1,9 @@
 use async_trait::async_trait;
 use chroma_distance::{normalize, DistanceFunction};
-use chroma_segment::{distributed_spann::SpannSegmentReader, spann_provider::SpannProvider};
+use chroma_segment::{
+    distributed_spann::{SpannSegmentReader, SpannSegmentReaderError},
+    spann_provider::SpannProvider,
+};
 use chroma_system::{
     wrap, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator, TaskMessage,
     TaskResult,
@@ -131,25 +134,6 @@ impl SpannKnnOrchestrator {
             self.send(task, ctx).await;
         }
     }
-
-    async fn set_spann_reader(&mut self, ctx: &ComponentContext<Self>) {
-        let reader_res = SpannSegmentReader::from_segment(
-            &self.collection,
-            &self.knn_filter_output.vector_segment,
-            &self.spann_provider.blockfile_provider,
-            &self.spann_provider.hnsw_provider,
-            self.knn_filter_output.dimension,
-        )
-        .await;
-        let reader = match self.ok_or_terminate(reader_res, ctx) {
-            Some(reader) => reader,
-            None => {
-                tracing::error!("Failed to create SpannSegmentReader");
-                return;
-            }
-        };
-        self.spann_reader = Some(reader);
-    }
 }
 
 #[async_trait]
@@ -176,16 +160,42 @@ impl Orchestrator for SpannKnnOrchestrator {
             ctx.receiver(),
         );
         tasks.push(knn_log_task);
-        self.set_spann_reader(ctx).await;
-        let head_search_task = wrap(
-            Box::new(self.head_search.clone()),
-            SpannCentersSearchInput {
-                reader: self.spann_reader.clone(),
-                normalized_query: self.normalized_query_emb.clone(),
+        let reader_res = SpannSegmentReader::from_segment(
+            &self.collection,
+            &self.knn_filter_output.vector_segment,
+            &self.spann_provider.blockfile_provider,
+            &self.spann_provider.hnsw_provider,
+            self.knn_filter_output.dimension,
+        )
+        .await;
+        match reader_res {
+            Ok(reader) => {
+                self.spann_reader = Some(reader.clone());
+                // Spawn the centers search task if reader is found.
+                let head_search_task = wrap(
+                    Box::new(self.head_search.clone()),
+                    SpannCentersSearchInput {
+                        reader: Some(reader),
+                        normalized_query: self.normalized_query_emb.clone(),
+                    },
+                    ctx.receiver(),
+                );
+                tasks.push(head_search_task);
+            }
+            Err(e) => match e {
+                // Segment uninited means no compaction yet.
+                SpannSegmentReaderError::UninitializedSegment => {
+                    // If the segment is uninitialized, we can skip the head search.
+                    self.spann_reader = None;
+                    self.heads_searched = true;
+                }
+                _ => {
+                    let _: Option<()> = self
+                        .ok_or_terminate(Err(KnnError::SpannSegmentReaderCreationError(e)), ctx)
+                        .await;
+                }
             },
-            ctx.receiver(),
-        );
-        tasks.push(head_search_task);
+        }
 
         let prefetch_task = wrap(
             Box::new(PrefetchSegmentOperator::new()),
@@ -247,7 +257,7 @@ impl Handler<TaskResult<KnnLogOutput, KnnLogError>> for SpannKnnOrchestrator {
         message: TaskResult<KnnLogOutput, KnnLogError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(output) => output,
             None => return,
         };
@@ -268,7 +278,7 @@ impl Handler<TaskResult<SpannCentersSearchOutput, SpannCentersSearchError>>
         message: TaskResult<SpannCentersSearchOutput, SpannCentersSearchError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(output) => output,
             None => return,
         };
@@ -301,7 +311,7 @@ impl Handler<TaskResult<SpannFetchPlOutput, SpannFetchPlError>> for SpannKnnOrch
         message: TaskResult<SpannFetchPlOutput, SpannFetchPlError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(output) => output,
             None => return,
         };
@@ -335,7 +345,7 @@ impl Handler<TaskResult<SpannBfPlOutput, SpannBfPlError>> for SpannKnnOrchestrat
         message: TaskResult<SpannBfPlOutput, SpannBfPlError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(output) => output,
             None => return,
         };
@@ -356,7 +366,7 @@ impl Handler<TaskResult<SpannKnnMergeOutput, SpannKnnMergeError>> for SpannKnnOr
         message: TaskResult<SpannKnnMergeOutput, SpannKnnMergeError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(output) => output,
             None => return,
         };
@@ -414,6 +424,7 @@ impl Handler<TaskResult<KnnProjectionOutput, KnnProjectionError>> for SpannKnnOr
         message: TaskResult<KnnProjectionOutput, KnnProjectionError>,
         ctx: &ComponentContext<Self>,
     ) {
-        self.terminate_with_result(message.into_inner().map_err(|e| e.into()), ctx);
+        self.terminate_with_result(message.into_inner().map_err(|e| e.into()), ctx)
+            .await;
     }
 }

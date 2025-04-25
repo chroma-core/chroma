@@ -139,7 +139,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CountOrchestrator {
         ctx: &ComponentContext<Self>,
     ) {
         tracing::info!("CountOrchestrator: FetchLogOperator finished");
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(output) => output,
             None => return,
         };
@@ -178,6 +178,7 @@ impl Handler<TaskResult<CountRecordsOutput, CountRecordsError>> for CountOrchest
                 )
             }),
             ctx,
-        );
+        )
+        .await;
     }
 }

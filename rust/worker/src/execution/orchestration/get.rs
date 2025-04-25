@@ -205,7 +205,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for GetOrchestrator {
         ctx: &ComponentContext<Self>,
     ) {
         tracing::info!("GetOrchestrator: FetchLogOperator finished");
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(output) => output,
             None => return,
         };
@@ -236,7 +236,7 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for GetOrchestrator {
         ctx: &ComponentContext<Self>,
     ) {
         tracing::info!("GetOrchestrator: FilterOperator finished");
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(output) => output,
             None => return,
         };
@@ -269,7 +269,7 @@ impl Handler<TaskResult<LimitOutput, LimitError>> for GetOrchestrator {
         ctx: &ComponentContext<Self>,
     ) {
         tracing::info!("GetOrchestrator: LimitOperator finished");
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(output) => output,
             None => return,
         };
@@ -324,7 +324,7 @@ impl Handler<TaskResult<ProjectionOutput, ProjectionError>> for GetOrchestrator 
         ctx: &ComponentContext<Self>,
     ) {
         tracing::info!("GetOrchestrator: ProjectionOperator finished");
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(output) => output,
             None => return,
         };
@@ -337,6 +337,7 @@ impl Handler<TaskResult<ProjectionOutput, ProjectionError>> for GetOrchestrator 
             .map(|(l, _)| l.size_bytes())
             .sum();
 
-        self.terminate_with_result(Ok((output, fetch_log_size_bytes)), ctx);
+        self.terminate_with_result(Ok((output, fetch_log_size_bytes)), ctx)
+            .await;
     }
 }

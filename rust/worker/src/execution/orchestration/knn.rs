@@ -246,7 +246,7 @@ impl Handler<TaskResult<KnnLogOutput, KnnLogError>> for KnnOrchestrator {
         message: TaskResult<KnnLogOutput, KnnLogError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(output) => output,
             None => return,
         };
@@ -264,7 +264,7 @@ impl Handler<TaskResult<KnnHnswOutput, KnnHnswError>> for KnnOrchestrator {
         message: TaskResult<KnnHnswOutput, KnnHnswError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(output) => output,
             None => return,
         };
@@ -282,7 +282,7 @@ impl Handler<TaskResult<KnnMergeOutput, KnnMergeError>> for KnnOrchestrator {
         message: TaskResult<KnnMergeOutput, KnnMergeError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(output) => output,
             None => return,
         };
@@ -340,6 +340,7 @@ impl Handler<TaskResult<KnnProjectionOutput, KnnProjectionError>> for KnnOrchest
         message: TaskResult<KnnProjectionOutput, KnnProjectionError>,
         ctx: &ComponentContext<Self>,
     ) {
-        self.terminate_with_result(message.into_inner().map_err(|e| e.into()), ctx);
+        self.terminate_with_result(message.into_inner().map_err(|e| e.into()), ctx)
+            .await;
     }
 }

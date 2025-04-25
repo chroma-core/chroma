@@ -150,6 +150,10 @@ export namespace Api {
     message: string;
   }
 
+  export interface ForkCollectionPayload {
+    new_name: string;
+  }
+
   export interface GetRequestPayload extends Api.RawWhereFields {
     ids?: string[] | null;
     include?: Api.Include[];

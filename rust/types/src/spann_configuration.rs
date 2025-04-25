@@ -6,7 +6,7 @@ use utoipa::ToSchema;
 use validator::Validate;
 
 fn default_search_nprobe() -> u32 {
-    128
+    64
 }
 
 fn default_search_rng_factor() -> f32 {
@@ -18,7 +18,7 @@ fn default_search_rng_epsilon() -> f32 {
 }
 
 fn default_write_nprobe() -> u32 {
-    128
+    64
 }
 
 fn default_write_rng_factor() -> f32 {

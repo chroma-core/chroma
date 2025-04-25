@@ -2022,6 +2022,11 @@ impl<'me> SpannIndexReader<'me> {
         dimensionality: usize,
         ef_search: usize,
     ) -> Result<HnswIndexRef, SpannIndexReaderError> {
+        // We take a lock here to synchronize concurrent open of the same index.
+        // Otherwise, we could end up with a corrupted index since the filesystem
+        // operations are not guaranteed to be atomic.
+        // The lock is a partitioned mutex to allow for higher concurrency across collections.
+        let _guard = hnsw_provider.write_mutex.lock(id).await;
         match hnsw_provider.get(id, cache_key).await {
             Some(index) => Ok(index),
             None => {
@@ -2298,13 +2303,11 @@ mod tests {
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let hnsw_cache = new_non_persistent_cache_for_test();
-        let (_, rx) = tokio::sync::mpsc::unbounded_channel();
         let hnsw_provider = HnswIndexProvider::new(
             storage.clone(),
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
-            rx,
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
@@ -2504,13 +2507,11 @@ mod tests {
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let hnsw_cache = new_non_persistent_cache_for_test();
-        let (_, rx) = tokio::sync::mpsc::unbounded_channel();
         let hnsw_provider = HnswIndexProvider::new(
             storage.clone(),
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
-            rx,
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
@@ -2752,13 +2753,11 @@ mod tests {
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let hnsw_cache = new_non_persistent_cache_for_test();
-        let (_, rx) = tokio::sync::mpsc::unbounded_channel();
         let hnsw_provider = HnswIndexProvider::new(
             storage.clone(),
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
-            rx,
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
@@ -2975,13 +2974,11 @@ mod tests {
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let hnsw_cache = new_non_persistent_cache_for_test();
-        let (_, rx) = tokio::sync::mpsc::unbounded_channel();
         let hnsw_provider = HnswIndexProvider::new(
             storage.clone(),
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
-            rx,
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
@@ -3227,13 +3224,11 @@ mod tests {
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let hnsw_cache = new_non_persistent_cache_for_test();
-        let (_, rx) = tokio::sync::mpsc::unbounded_channel();
         let hnsw_provider = HnswIndexProvider::new(
             storage.clone(),
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
-            rx,
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
@@ -3509,13 +3504,11 @@ mod tests {
 
     fn new_hnsw_provider_for_tests(storage: Storage, temp_dir: &TempDir) -> HnswIndexProvider {
         let hnsw_cache = new_non_persistent_cache_for_test();
-        let (_, rx) = tokio::sync::mpsc::unbounded_channel();
         HnswIndexProvider::new(
             storage,
             PathBuf::from(temp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
-            rx,
         )
     }
 

@@ -881,13 +881,27 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 			return err
 		}
 		if rootCollectionID != forkCollection.SourceCollectionID {
-			rootCollection, err = tc.GetCollection(txCtx, rootCollectionID, nil, "", "")
+			limit := int32(1)
+			collections, err := tc.GetCollections(txCtx, rootCollectionID, nil, "", "", &limit, nil)
 			if err != nil {
 				return err
 			}
+			if len(collections) == 0 {
+				return common.ErrCollectionNotFound
+			}
+			rootCollection = collections[0]
 		} else {
 			rootCollection = sourceCollection
 		}
+		databases, err := tc.metaDomain.DatabaseDb(txCtx).GetDatabases(sourceCollection.TenantID, sourceCollection.DatabaseName)
+		if err != nil {
+			return err
+		}
+		if len(databases) == 0 {
+			return common.ErrDatabaseNotFound
+		}
+
+		databaseID := databases[0].ID
 
 		// Verify that the source collection log position is between the compaction offset (inclusive) and enumeration offset (inclusive)
 		// This check is necessary for next compaction to fetch the right logs
@@ -964,8 +978,8 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 			TargetCollectionId:      forkCollection.TargetCollectionID.String(),
 		})
 
-		newLineageFileBaseName := fmt.Sprintf("%d/%d/%d/%d-%d-%d-%s-%d-%s.binpb", ts.Year(), ts.Month(), ts.Day(), ts.Hour(), ts.Minute(), ts.Second(), sourceCollectionIDStr, sourceCollection.Version, forkCollection.TargetCollectionID.String())
-		newLineageFileFullName, err = tc.s3Store.PutLineageFile(rootCollection.TenantID, rootCollection.DatabaseName, rootCollectionIDStr, newLineageFileBaseName, lineageFile)
+		newLineageFileBaseName := fmt.Sprintf("%s/%d/%s.binpb", sourceCollectionIDStr, sourceCollection.Version, forkCollection.TargetCollectionID)
+		newLineageFileFullName, err = tc.s3Store.PutLineageFile(rootCollection.TenantID, databaseID, rootCollectionIDStr, newLineageFileBaseName, lineageFile)
 		if err != nil {
 			return err
 		}

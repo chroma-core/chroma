@@ -916,7 +916,14 @@ async fn create_collection(
             c,
             server.config.frontend.default_knn_index,
         )?),
-        None => None,
+        None => Some(InternalCollectionConfiguration::try_from_config(
+            CollectionConfiguration {
+                hnsw: None,
+                spann: None,
+                embedding_function: None,
+            },
+            server.config.frontend.default_knn_index,
+        )?),
     };
 
     let request = CreateCollectionRequest::try_new(
@@ -1164,7 +1171,7 @@ async fn fork_collection(
     //     )
     //     .await?;
     let _guard =
-        server.scorecard_request(&["op:fork_collection", format!("tenant:{}", tenant).as_str()]);
+        server.scorecard_request(&["op:fork_collection", format!("tenant:{}", tenant).as_str()])?;
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
 
@@ -1818,6 +1825,7 @@ impl Modify for ChromaTokenSecurityAddon {
         get_collection,
         update_collection,
         delete_collection,
+        fork_collection,
         collection_add,
         collection_update,
         collection_upsert,

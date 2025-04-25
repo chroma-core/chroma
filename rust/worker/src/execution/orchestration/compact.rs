@@ -1,13 +1,14 @@
 use std::{
     cell::OnceCell,
     collections::HashMap,
+    path::Path,
     sync::{atomic::AtomicU32, Arc},
 };
 
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_index::hnsw_provider::HnswIndexProvider;
+use chroma_index::{hnsw_provider::HnswIndexProvider, IndexUuid};
 use chroma_log::Log;
 use chroma_segment::{
     blockfile_metadata::{MetadataSegmentError, MetadataSegmentWriter},
@@ -104,6 +105,7 @@ pub(crate) struct CompactWriters {
 #[derive(Debug)]
 pub struct CompactOrchestrator {
     collection_id: CollectionUuid,
+    hnsw_index_uuid: Option<IndexUuid>,
     rebuild: bool,
     fetch_log_batch_size: u32,
     max_compaction_size: usize,
@@ -224,6 +226,7 @@ impl CompactOrchestrator {
     ) -> Self {
         CompactOrchestrator {
             collection_id,
+            hnsw_index_uuid: None,
             rebuild,
             fetch_log_batch_size,
             max_compaction_size,
@@ -245,6 +248,12 @@ impl CompactOrchestrator {
             state: ExecutionState::Pending,
             total_records_post_compaction: 0,
             segment_spans: HashMap::new(),
+        }
+    }
+
+    async fn try_purge_hnsw(path: &Path, hnsw_index_uuid: Option<IndexUuid>) {
+        if let Some(hnsw_index_uuid) = hnsw_index_uuid {
+            let _ = HnswIndexProvider::purge_one_id(path, hnsw_index_uuid).await;
         }
     }
 
@@ -299,7 +308,7 @@ impl CompactOrchestrator {
         materialized_logs: MaterializeLogsResult,
         ctx: &ComponentContext<CompactOrchestrator>,
     ) {
-        let writers = match self.ok_or_terminate(self.get_segment_writers(), ctx) {
+        let writers = match self.ok_or_terminate(self.get_segment_writers(), ctx).await {
             Some(writers) => writers,
             None => return,
         };
@@ -322,7 +331,7 @@ impl CompactOrchestrator {
             );
             let task = wrap(operator, input, ctx.receiver());
             let res = self.dispatcher().send(task, Some(span)).await;
-            if self.ok_or_terminate(res, ctx).is_none() {
+            if self.ok_or_terminate(res, ctx).await.is_none() {
                 return;
             }
         }
@@ -345,7 +354,7 @@ impl CompactOrchestrator {
             );
             let task = wrap(operator, input, ctx.receiver());
             let res = self.dispatcher().send(task, Some(span)).await;
-            if self.ok_or_terminate(res, ctx).is_none() {
+            if self.ok_or_terminate(res, ctx).await.is_none() {
                 return;
             }
         }
@@ -365,7 +374,7 @@ impl CompactOrchestrator {
                 ApplyLogToSegmentWriterInput::new(writer, materialized_logs, writers.record_reader);
             let task = wrap(operator, input, ctx.receiver());
             let res = self.dispatcher().send(task, Some(span)).await;
-            self.ok_or_terminate(res, ctx);
+            self.ok_or_terminate(res, ctx).await;
         }
     }
 
@@ -379,7 +388,7 @@ impl CompactOrchestrator {
         let input = CommitSegmentWriterInput::new(segment_writer);
         let task = wrap(operator, input, ctx.receiver());
         let res = self.dispatcher().send(task, Some(span)).await;
-        self.ok_or_terminate(res, ctx);
+        self.ok_or_terminate(res, ctx).await;
     }
 
     async fn dispatch_segment_flush(
@@ -392,7 +401,7 @@ impl CompactOrchestrator {
         let input = FlushSegmentWriterInput::new(segment_flusher);
         let task = wrap(operator, input, ctx.receiver());
         let res = self.dispatcher().send(task, Some(span)).await;
-        self.ok_or_terminate(res, ctx);
+        self.ok_or_terminate(res, ctx).await;
     }
 
     async fn register(&mut self, ctx: &ComponentContext<CompactOrchestrator>) {
@@ -404,7 +413,7 @@ impl CompactOrchestrator {
                 .ok_or(CompactionError::InvariantViolation(
                     "Collection information should have been obtained",
                 ));
-        let collection = match self.ok_or_terminate(collection_cell, ctx) {
+        let collection = match self.ok_or_terminate(collection_cell, ctx).await {
             Some(collection) => collection,
             None => return,
         };
@@ -417,7 +426,8 @@ impl CompactOrchestrator {
                             "The collection size delta after rebuild should be non-negative",
                         )),
                         ctx,
-                    );
+                    )
+                    .await;
                     return;
                 }
             }
@@ -536,6 +546,14 @@ impl Orchestrator for CompactOrchestrator {
             .take()
             .expect("The result channel should be set before take")
     }
+
+    async fn cleanup(&mut self) {
+        Self::try_purge_hnsw(
+            &self.hnsw_provider.temporary_storage_path,
+            self.hnsw_index_uuid,
+        )
+        .await
+    }
 }
 
 // ============== Handlers ==============
@@ -550,7 +568,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         message: TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegmentsError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(output) => output,
             None => return,
         };
@@ -562,27 +580,31 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                     "Collection information should not have been initialized",
                 )),
                 ctx,
-            );
+            )
+            .await;
             return;
         };
 
         self.pulled_log_offset = collection.log_position;
 
-        let record_reader = match self.ok_or_terminate(
-            match RecordSegmentReader::from_segment(
-                &output.record_segment,
-                &self.blockfile_provider,
+        let record_reader = match self
+            .ok_or_terminate(
+                match RecordSegmentReader::from_segment(
+                    &output.record_segment,
+                    &self.blockfile_provider,
+                )
+                .await
+                {
+                    Ok(reader) => Ok(Some(reader)),
+                    Err(err) => match *err {
+                        RecordSegmentReaderCreationError::UninitializedSegment => Ok(None),
+                        _ => Err(*err),
+                    },
+                },
+                ctx,
             )
             .await
-            {
-                Ok(reader) => Ok(Some(reader)),
-                Err(err) => match *err {
-                    RecordSegmentReaderCreationError::UninitializedSegment => Ok(None),
-                    _ => Err(*err),
-                },
-            },
-            ctx,
-        ) {
+        {
             Some(reader) => reader,
             None => return,
         };
@@ -630,42 +652,64 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             vector_segment.file_path = Default::default();
         }
 
-        let record_writer = match self.ok_or_terminate(
-            RecordSegmentWriter::from_segment(&record_segment, &self.blockfile_provider).await,
-            ctx,
-        ) {
+        let record_writer = match self
+            .ok_or_terminate(
+                RecordSegmentWriter::from_segment(&record_segment, &self.blockfile_provider).await,
+                ctx,
+            )
+            .await
+        {
             Some(writer) => writer,
             None => return,
         };
-        let metadata_writer = match self.ok_or_terminate(
-            MetadataSegmentWriter::from_segment(&metadata_segment, &self.blockfile_provider).await,
-            ctx,
-        ) {
-            Some(writer) => writer,
-            None => return,
-        };
-        let (vector_writer, is_vector_segment_spann) = match vector_segment.r#type {
-            SegmentType::Spann => match self.ok_or_terminate(
-                self.spann_provider
-                    .write(&collection, &vector_segment, dimension)
+        let metadata_writer = match self
+            .ok_or_terminate(
+                MetadataSegmentWriter::from_segment(&metadata_segment, &self.blockfile_provider)
                     .await,
                 ctx,
-            ) {
-                Some(writer) => (VectorSegmentWriter::Spann(writer), true),
-                None => return,
-            },
-            _ => match self.ok_or_terminate(
-                DistributedHNSWSegmentWriter::from_segment(
-                    &collection,
-                    &vector_segment,
-                    dimension,
-                    self.hnsw_provider.clone(),
+            )
+            .await
+        {
+            Some(writer) => writer,
+            None => return,
+        };
+        let (hnsw_index_uuid, vector_writer, is_vector_segment_spann) = match vector_segment.r#type
+        {
+            SegmentType::Spann => match self
+                .ok_or_terminate(
+                    self.spann_provider
+                        .write(&collection, &vector_segment, dimension)
+                        .await,
+                    ctx,
                 )
                 .await
-                .map_err(|err| *err),
-                ctx,
-            ) {
-                Some(writer) => (VectorSegmentWriter::Hnsw(writer), false),
+            {
+                Some(writer) => (
+                    writer.hnsw_index_uuid(),
+                    VectorSegmentWriter::Spann(writer),
+                    true,
+                ),
+                None => return,
+            },
+            _ => match self
+                .ok_or_terminate(
+                    DistributedHNSWSegmentWriter::from_segment(
+                        &collection,
+                        &vector_segment,
+                        dimension,
+                        self.hnsw_provider.clone(),
+                    )
+                    .await
+                    .map_err(|err| *err),
+                    ctx,
+                )
+                .await
+            {
+                Some(writer) => (
+                    writer.index_uuid(),
+                    VectorSegmentWriter::Hnsw(writer),
+                    false,
+                ),
                 None => return,
             },
         };
@@ -683,9 +727,12 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                     "Segment writers should not have been initialized",
                 )),
                 ctx,
-            );
+            )
+            .await;
             return;
         }
+
+        self.hnsw_index_uuid = Some(hnsw_index_uuid);
 
         // Prefetch segments
         let prefetch_segments = match self.rebuild {
@@ -720,7 +767,7 @@ impl Handler<TaskResult<PrefetchSegmentOutput, PrefetchSegmentError>> for Compac
         message: TaskResult<PrefetchSegmentOutput, PrefetchSegmentError>,
         ctx: &ComponentContext<CompactOrchestrator>,
     ) {
-        self.ok_or_terminate(message.into_inner(), ctx);
+        self.ok_or_terminate(message.into_inner(), ctx).await;
     }
 }
 
@@ -733,7 +780,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
         message: TaskResult<FetchLogOutput, FetchLogError>,
         ctx: &ComponentContext<CompactOrchestrator>,
     ) {
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(recs) => recs,
             None => {
                 tracing::info!("cancelled fetch log task");
@@ -752,7 +799,8 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
                         "Logs should be present for compaction",
                     )),
                     ctx,
-                );
+                )
+                .await;
                 return;
             }
         }
@@ -771,7 +819,7 @@ impl Handler<TaskResult<SourceRecordSegmentOutput, SourceRecordSegmentError>>
         message: TaskResult<SourceRecordSegmentOutput, SourceRecordSegmentError>,
         ctx: &ComponentContext<CompactOrchestrator>,
     ) {
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(output) => output,
             None => return,
         };
@@ -779,7 +827,7 @@ impl Handler<TaskResult<SourceRecordSegmentOutput, SourceRecordSegmentError>>
         // Each record should corresond to a log
         self.total_records_post_compaction = output.len() as u64;
         if output.is_empty() {
-            let writers = match self.ok_or_terminate(self.get_segment_writers(), ctx) {
+            let writers = match self.ok_or_terminate(self.get_segment_writers(), ctx).await {
                 Some(writer) => writer,
                 None => return,
             };
@@ -808,7 +856,7 @@ impl Handler<TaskResult<PartitionOutput, PartitionError>> for CompactOrchestrato
         message: TaskResult<PartitionOutput, PartitionError>,
         ctx: &ComponentContext<CompactOrchestrator>,
     ) {
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(recs) => recs.records,
             None => return,
         };
@@ -827,7 +875,7 @@ impl Handler<TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>>
         message: TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>,
         ctx: &ComponentContext<CompactOrchestrator>,
     ) {
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(res) => res,
             None => return,
         };
@@ -861,7 +909,7 @@ impl Handler<TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOp
         message: TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOperatorError>,
         ctx: &ComponentContext<CompactOrchestrator>,
     ) {
-        let message = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let message = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(message) => message,
             None => return,
         };
@@ -880,7 +928,7 @@ impl Handler<TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOp
                     "Invariant violation: segment writer task count not found",
                 ))
                 .cloned();
-            match self.ok_or_terminate(num_tasks_left, ctx) {
+            match self.ok_or_terminate(num_tasks_left, ctx).await {
                 Some(num_tasks_left) => num_tasks_left,
                 None => return,
             }
@@ -888,7 +936,7 @@ impl Handler<TaskResult<ApplyLogToSegmentWriterOutput, ApplyLogToSegmentWriterOp
 
         if num_tasks_left == 0 && self.num_uncompleted_materialization_tasks == 0 {
             let segment_writer = self.get_segment_writer_by_id(message.segment_id).await;
-            let segment_writer = match self.ok_or_terminate(segment_writer, ctx) {
+            let segment_writer = match self.ok_or_terminate(segment_writer, ctx).await {
                 Some(writer) => writer,
                 None => return,
             };
@@ -910,7 +958,7 @@ impl Handler<TaskResult<CommitSegmentWriterOutput, CommitSegmentWriterOperatorEr
         message: TaskResult<CommitSegmentWriterOutput, CommitSegmentWriterOperatorError>,
         ctx: &ComponentContext<CompactOrchestrator>,
     ) {
-        let message = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let message = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(message) => message,
             None => return,
         };
@@ -935,7 +983,7 @@ impl Handler<TaskResult<FlushSegmentWriterOutput, FlushSegmentWriterOperatorErro
         message: TaskResult<FlushSegmentWriterOutput, FlushSegmentWriterOperatorError>,
         ctx: &ComponentContext<CompactOrchestrator>,
     ) {
-        let message = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let message = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(message) => message,
             None => return,
         };
@@ -971,7 +1019,8 @@ impl Handler<TaskResult<RegisterOutput, RegisterError>> for CompactOrchestrator 
                     collection_id: self.collection_id,
                 }),
             ctx,
-        );
+        )
+        .await;
     }
 }
 
