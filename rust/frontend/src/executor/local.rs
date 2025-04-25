@@ -335,8 +335,7 @@ mod tests {
     use chroma_config::Configurable;
     use chroma_system::System;
     use chroma_types::{
-        AddCollectionRecordsRequest, CreateCollectionRequest, IncludeList,
-        InternalCollectionConfiguration, QueryRequest,
+        AddCollectionRecordsRequest, CreateCollectionRequest, IncludeList, QueryRequest,
     };
 
     use crate::{Frontend, FrontendConfig};
@@ -359,7 +358,7 @@ mod tests {
                     "default_database".to_string(),
                     "test".to_string(),
                     None,
-                    Some(InternalCollectionConfiguration::default_hnsw()),
+                    None,
                     false,
                 )
                 .unwrap(),

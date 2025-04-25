@@ -4,10 +4,7 @@ use chroma_config::{registry::Registry, Configurable};
 use chroma_frontend::{config::FrontendServerConfig, Frontend};
 use chroma_sqlite::config::SqliteDBConfig;
 use chroma_system::System;
-use chroma_types::{
-    Collection, CountRequest, CreateCollectionRequest, GetRequest, IncludeList,
-    InternalCollectionConfiguration,
-};
+use chroma_types::{Collection, CountRequest, CreateCollectionRequest, GetRequest, IncludeList};
 use proptest_state_machine::{ReferenceStateMachine, StateMachineTest};
 use std::sync::Arc;
 
@@ -64,7 +61,7 @@ impl StateMachineTest for FrontendUnderTest {
                                 "default_database".to_string(),
                                 "test".to_string(),
                                 None,
-                                Some(InternalCollectionConfiguration::default_hnsw()),
+                                None,
                                 false,
                             )
                             .unwrap(),

@@ -597,8 +597,6 @@ pub enum CreateCollectionError {
     SpannNotImplemented,
     #[error("HNSW is not supported on this platform")]
     HnswNotSupported,
-    #[error("Invariant violation: Vector segment config must be set by now even if client didn't set it")]
-    VectorSegmentConfigNotSet,
 }
 
 impl ChromaError for CreateCollectionError {
@@ -614,7 +612,6 @@ impl ChromaError for CreateCollectionError {
             CreateCollectionError::Internal(err) => err.code(),
             CreateCollectionError::SpannNotImplemented => ErrorCodes::InvalidArgument,
             CreateCollectionError::HnswNotSupported => ErrorCodes::InvalidArgument,
-            CreateCollectionError::VectorSegmentConfigNotSet => ErrorCodes::Internal,
         }
     }
 }
