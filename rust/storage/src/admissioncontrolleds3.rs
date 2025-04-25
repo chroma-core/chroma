@@ -569,7 +569,7 @@ impl CountBasedPolicy {
             {
                 match self.remaining_tokens[pri].try_acquire() {
                     Ok(token) => {
-                        let _ = timeout_tx.send(());
+                        // let _ = timeout_tx.send(());
                         return token;
                     }
                     Err(TryAcquireError::NoPermits) => continue,
@@ -589,7 +589,7 @@ impl CountBasedPolicy {
                             match token {
                                 Ok(token) => {
                                     // If we got a token, return it.
-                                    let _ = timeout_tx.send(());
+                                    // let _ = timeout_tx.send(());
                                     return token;
                                 },
                                 Err(e) => {
@@ -608,7 +608,7 @@ impl CountBasedPolicy {
                     match token {
                         Ok(token) => {
                             // If we got a token, return it.
-                            let _ = timeout_tx.send(());
+                            // let _ = timeout_tx.send(());
                             return token;
                         }
                         Err(e) => {
