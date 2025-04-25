@@ -246,12 +246,12 @@ def fd_not_exceeding_threadpool_size(threadpool_size: int) -> None:
     )
 
 def get_space(collection: Collection):
-    if 'spann' in collection._model.configuration_json and collection._model.configuration_json.get('spann') is not None:
+    if "hnsw:space" in collection.metadata:
+        return collection.metadata["hnsw:space"]
+    elif 'spann' in collection._model.configuration_json and collection._model.configuration_json.get('spann') is not None:
         return collection._model.configuration_json.get('spann').get('space')
     elif 'hnsw' in collection._model.configuration_json and collection._model.configuration_json.get('hnsw') is not None:
         return collection._model.configuration_json.get('hnsw').get('space')
-    elif "hnsw:space" in collection.metadata:
-        return collection.metadata["hnsw:space"]
     else:
         return None
 
