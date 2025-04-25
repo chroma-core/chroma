@@ -1,0 +1,142 @@
+name: Rust release tests
+
+on:
+  workflow_call:
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        platform: [blacksmith-4vcpu-ubuntu-2204]
+    runs-on: ${{ matrix.platform }}
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: 1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup
+        uses: ./.github/actions/rust
+        with:
+          github-token: ${{ github.token }}
+      - name: Build CLI
+        run: cargo build --bin chroma
+      - name: Test
+        run: cargo nextest run --no-capture --profile ci
+      # TODO(adityamaru): Add Datadog test visibility when running in Chroma's repo.
+      # - name: Upload test results
+      #   uses: datadog/junit-upload-github-action@v1
+      #   with:
+      #       api_key: ${{ secrets.DD_API_KEY }}
+      #       site: ${{ vars.DD_SITE }}
+      #       service: chroma
+      #       files: target/nextest/ci/junit.xml
+      #       logs: true
+  test-long:
+    strategy:
+      matrix:
+        platform: [blacksmith-4vcpu-ubuntu-2204]
+    runs-on: ${{ matrix.platform }}
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: 1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup
+        uses: ./.github/actions/rust
+        with:
+          github-token: ${{ github.token }}
+      - name: Build CLI
+        run: cargo build --bin chroma
+      - name: Test
+        run: cargo nextest run --no-capture --profile ci_long_running
+      # TODO(adityamaru): Add Datadog test visibility when running in Chroma's repo.
+      # - name: Upload test results
+      #   uses: datadog/junit-upload-github-action@v1
+      #   with:
+      #       api_key: ${{ secrets.DD_API_KEY }}
+      #       site: ${{ vars.DD_SITE }}
+      #       service: chroma
+      #       files: target/nextest/ci/junit.xml
+      #       logs: true
+
+  test-integration:
+    strategy:
+      matrix:
+        platform: [blacksmith-16vcpu-ubuntu-2204]
+    runs-on: ${{ matrix.platform }}
+    # OIDC token auth for AWS
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup
+        uses: ./.github/actions/rust
+        with:
+          github-token: ${{ github.token }}
+      - uses: useblacksmith/build-push-action@v1.1
+        with:
+          setup-only: true
+      - name: Start services in Tilt
+        uses: ./.github/actions/tilt
+      - name: Build CLI
+        run: cargo build --bin chroma
+      - name: Run tests
+        run: cargo nextest run --profile ci_k8s_integration
+      # TODO(adityamaru): Add Datadog test visibility when running in Chroma's repo.
+      # - name: Upload test results
+      #   uses: datadog/junit-upload-github-action@v1
+      #   with:
+      #       api_key: ${{ secrets.DD_API_KEY }}
+      #       site: ${{ vars.DD_SITE }}
+      #       service: chroma
+      #       files: target/nextest/ci/junit.xml
+      #       logs: true
+      - name: Save service logs to artifact
+        if: always()
+        uses: ./.github/actions/export-tilt-logs
+        with:
+          artifact-name: "rust-integration-test"
+  test-benches:
+    strategy:
+      matrix:
+        platform: [blacksmith-16vcpu-ubuntu-2204]
+        bench-command:
+          - "--bench blockfile_writer -- --sample-size 10"
+          - "--bench distance_metrics"
+          - "--bench filter"
+          - "--bench get"
+          - "--bench limit"
+          - "--bench query"
+    runs-on: ${{ matrix.platform }}
+    env:
+      RUST_BACKTRACE: 1
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup
+        uses: ./.github/actions/rust
+        with:
+          github-token: ${{ github.token }}
+      - name: Run benchmark
+        run: cargo bench ${{ matrix.bench-command }}
+
+  can-build-release:
+    runs-on: blacksmith-16vcpu-ubuntu-2204
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup
+        uses: ./.github/actions/rust
+        with:
+          github-token: ${{ github.token }}
+      - name: Build in release mode
+        run: cargo build --release

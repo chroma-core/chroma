@@ -53,9 +53,9 @@ jobs:
     name: JavaScript client tests
     uses: ./.github/workflows/_javascript-client-tests.yml
 
-  rust-tests:
+  rust-release-tests:
     name: Rust tests
-    uses: ./.github/workflows/_rust-tests.yml
+    uses: ./.github/workflows/_rust-release-tests.yml
     secrets: inherit
 
   go-tests:
@@ -69,7 +69,7 @@ jobs:
       - get-version
       - python-tests
       - javascript-client-tests
-      - rust-tests
+      - rust-release-tests
       - go-tests
     uses: ./.github/workflows/_build_release_container.yml
     secrets: inherit
@@ -84,7 +84,7 @@ jobs:
       - get-version
       - python-tests
       - javascript-client-tests
-      - rust-tests
+      - rust-release-tests
       - go-tests
     uses: ./.github/workflows/_build_release_pypi.yml
     secrets: inherit
@@ -100,7 +100,7 @@ jobs:
       - check-tag
       - python-tests
       - javascript-client-tests
-      - rust-tests
+      - rust-release-tests
       - go-tests
     steps:
       - name: Checkout
