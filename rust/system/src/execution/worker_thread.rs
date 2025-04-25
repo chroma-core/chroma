@@ -66,23 +66,23 @@ impl Handler<TaskMessage> for WorkerThread {
         let task_timeout = Duration::from_secs(15);
         let (mark_done_tx, mut mark_done_rx) = tokio::sync::oneshot::channel();
         let task_name = task.get_name().to_string();
-        tokio::spawn(async move {
-            tokio::time::sleep(task_timeout).await;
-            let attempted_recv = mark_done_rx.try_recv();
-            match attempted_recv {
-                Ok(_) => {
-                    //tracing::info!("Task {} completed", task_name)
-                }
-                Err(e) => match e {
-                    tokio::sync::oneshot::error::TryRecvError::Empty => {
-                        tracing::info!("Task {} timed out", task_name);
-                    }
-                    tokio::sync::oneshot::error::TryRecvError::Closed => {
-                        tracing::error!("Never got confirmation for task {}", task_name);
-                    }
-                },
-            };
-        });
+        // tokio::spawn(async move {
+        //     tokio::time::sleep(task_timeout).await;
+        //     let attempted_recv = mark_done_rx.try_recv();
+        //     match attempted_recv {
+        //         Ok(_) => {
+        //             //tracing::info!("Task {} completed", task_name)
+        //         }
+        //         Err(e) => match e {
+        //             tokio::sync::oneshot::error::TryRecvError::Empty => {
+        //                 tracing::info!("Task {} timed out", task_name);
+        //             }
+        //             tokio::sync::oneshot::error::TryRecvError::Closed => {
+        //                 tracing::error!("Never got confirmation for task {}", task_name);
+        //             }
+        //         },
+        //     };
+        // });
         task.run().instrument(child_span).await;
         mark_done_tx.send(()).unwrap_or_else(|_| {
             tracing::error!("Failed to send task completion signal");

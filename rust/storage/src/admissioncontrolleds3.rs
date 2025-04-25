@@ -231,7 +231,7 @@ impl AdmissionControlledS3Storage {
             let maybe_inflight = requests.get(&key).cloned();
             future_to_await = match maybe_inflight {
                 Some(fut) => {
-                    tracing::info!("[AdmissionControlledS3] Found inflight request to s3 for key: {:?}. Deduping", key);
+                    tracing::debug!("[AdmissionControlledS3] Found inflight request to s3 for key: {:?}. Deduping", key);
                     fut.update_priority(options.priority).await;
                     fut.future
                 }
