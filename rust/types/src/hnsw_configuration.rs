@@ -71,8 +71,7 @@ fn default_batch_size() -> usize {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Validate, ToSchema)]
 #[serde(deny_unknown_fields)]
-#[cfg_attr(feature = "pyo3", pyo3::pyclass)]
-pub struct HnswConfiguration {
+pub struct InternalHnswConfiguration {
     #[serde(default)]
     pub space: HnswSpace,
     #[serde(default = "default_construction_ef")]
@@ -95,13 +94,68 @@ pub struct HnswConfiguration {
     pub batch_size: usize,
 }
 
+impl Default for InternalHnswConfiguration {
+    fn default() -> Self {
+        serde_json::from_str("{}").unwrap()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Validate, ToSchema)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "pyo3", pyo3::pyclass)]
+pub struct HnswConfiguration {
+    #[serde(default)]
+    pub space: HnswSpace,
+    pub ef_construction: Option<usize>,
+    pub ef_search: Option<usize>,
+    pub max_neighbors: Option<usize>,
+    #[serde(skip_serializing)]
+    pub num_threads: Option<usize>,
+    pub resize_factor: Option<f64>,
+    #[validate(range(min = 2))]
+    pub sync_threshold: Option<usize>,
+    #[validate(range(min = 2))]
+    #[serde(skip_serializing)]
+    pub batch_size: Option<usize>,
+}
+
+impl From<InternalHnswConfiguration> for HnswConfiguration {
+    fn from(config: InternalHnswConfiguration) -> Self {
+        Self {
+            space: config.space,
+            ef_construction: Some(config.ef_construction),
+            ef_search: Some(config.ef_search),
+            max_neighbors: Some(config.max_neighbors),
+            num_threads: Some(config.num_threads),
+            resize_factor: Some(config.resize_factor),
+            sync_threshold: Some(config.sync_threshold),
+            batch_size: Some(config.batch_size),
+        }
+    }
+}
+
+impl From<HnswConfiguration> for InternalHnswConfiguration {
+    fn from(config: HnswConfiguration) -> Self {
+        Self {
+            space: config.space,
+            ef_construction: config.ef_construction.unwrap_or(default_construction_ef()),
+            ef_search: config.ef_search.unwrap_or(default_search_ef()),
+            max_neighbors: config.max_neighbors.unwrap_or(default_m()),
+            num_threads: config.num_threads.unwrap_or(default_num_threads()),
+            resize_factor: config.resize_factor.unwrap_or(default_resize_factor()),
+            sync_threshold: config.sync_threshold.unwrap_or(default_sync_threshold()),
+            batch_size: config.batch_size.unwrap_or(default_batch_size()),
+        }
+    }
+}
+
 impl Default for HnswConfiguration {
     fn default() -> Self {
         serde_json::from_str("{}").unwrap()
     }
 }
 
-impl HnswConfiguration {
+impl InternalHnswConfiguration {
     pub(crate) fn from_legacy_segment_metadata(
         segment_metadata: &Option<Metadata>,
     ) -> Result<Self, HnswParametersFromSegmentError> {
@@ -135,7 +189,7 @@ impl HnswConfiguration {
 
             let metadata_str = serde_json::to_string(&filtered_metadata)?;
             let parsed = serde_json::from_str::<LegacyMetadataLocalHnswParameters>(&metadata_str)?;
-            let params = HnswConfiguration {
+            let params = InternalHnswConfiguration {
                 space: parsed.space,
                 ef_construction: parsed.construction_ef,
                 ef_search: parsed.search_ef,
@@ -148,7 +202,7 @@ impl HnswConfiguration {
             params.validate()?;
             Ok(params)
         } else {
-            Ok(HnswConfiguration::default())
+            Ok(InternalHnswConfiguration::default())
         }
     }
 }

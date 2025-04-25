@@ -623,7 +623,7 @@ mod tests {
     use super::*;
     use chroma_cache::new_non_persistent_cache_for_test;
     use chroma_storage::local::LocalStorage;
-    use chroma_types::HnswConfiguration;
+    use chroma_types::InternalHnswConfiguration;
 
     #[tokio::test]
     async fn test_fork() {
@@ -640,7 +640,7 @@ mod tests {
 
         let dimensionality = 128;
         let distance_function = DistanceFunction::Euclidean;
-        let default_hnsw_params = HnswConfiguration::default();
+        let default_hnsw_params = InternalHnswConfiguration::default();
         let created_index = provider
             .create(
                 &collection_id,
@@ -683,7 +683,7 @@ mod tests {
 
         let dimensionality = 2;
         let distance_function = DistanceFunction::Euclidean;
-        let default_hnsw_params = HnswConfiguration::default();
+        let default_hnsw_params = InternalHnswConfiguration::default();
         let created_index = provider
             .create(
                 &collection_id,

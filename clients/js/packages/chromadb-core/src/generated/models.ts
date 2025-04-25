@@ -203,35 +203,35 @@ export namespace Api {
 
   export interface HnswConfiguration {
     /**
-     * @type {number}
+     * @type {number | null}
      * @memberof HnswConfiguration
      * minimum: 0
      */
-    ef_construction?: number;
+    ef_construction?: number | null;
     /**
-     * @type {number}
+     * @type {number | null}
      * @memberof HnswConfiguration
      * minimum: 0
      */
-    ef_search?: number;
+    ef_search?: number | null;
     /**
-     * @type {number}
+     * @type {number | null}
      * @memberof HnswConfiguration
      * minimum: 0
      */
-    max_neighbors?: number;
+    max_neighbors?: number | null;
     /**
-     * @type {number}
+     * @type {number | null}
      * @memberof HnswConfiguration
      */
-    resize_factor?: number;
+    resize_factor?: number | null;
     space?: Api.HnswSpace;
     /**
-     * @type {number}
+     * @type {number | null}
      * @memberof HnswConfiguration
      * minimum: 0
      */
-    sync_threshold?: number;
+    sync_threshold?: number | null;
   }
 
   export enum HnswSpace {
@@ -279,54 +279,54 @@ export namespace Api {
 
   export interface SpannConfiguration {
     /**
-     * @type {number}
+     * @type {number | null}
      * @memberof SpannConfiguration
      * minimum: 0
      */
-    ef_construction?: number;
+    ef_construction?: number | null;
     /**
-     * @type {number}
+     * @type {number | null}
      * @memberof SpannConfiguration
      * minimum: 0
      */
-    ef_search?: number;
+    ef_search?: number | null;
     /**
-     * @type {number}
+     * @type {number | null}
      * @memberof SpannConfiguration
      * minimum: 0
      */
-    max_neighbors?: number;
+    max_neighbors?: number | null;
     /**
-     * @type {number}
+     * @type {number | null}
      * @memberof SpannConfiguration
      * minimum: 0
      */
-    merge_threshold?: number;
+    merge_threshold?: number | null;
     /**
-     * @type {number}
+     * @type {number | null}
      * @memberof SpannConfiguration
      * minimum: 0
      */
-    reassign_neighbor_count?: number;
+    reassign_neighbor_count?: number | null;
     /**
-     * @type {number}
+     * @type {number | null}
      * @memberof SpannConfiguration
      * minimum: 0
      */
-    search_nprobe?: number;
+    search_nprobe?: number | null;
     space?: Api.HnswSpace;
     /**
-     * @type {number}
+     * @type {number | null}
      * @memberof SpannConfiguration
      * minimum: 0
      */
-    split_threshold?: number;
+    split_threshold?: number | null;
     /**
-     * @type {number}
+     * @type {number | null}
      * @memberof SpannConfiguration
      * minimum: 0
      */
-    write_nprobe?: number;
+    write_nprobe?: number | null;
   }
 
   export interface UpdateCollectionConfiguration {

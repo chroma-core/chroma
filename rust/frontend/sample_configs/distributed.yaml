@@ -47,3 +47,4 @@ scorecard:
     score: 100
 enable_span_indexing: true
 default_knn_index: "spann"
+enable_set_index_params: false

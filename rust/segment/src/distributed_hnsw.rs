@@ -379,8 +379,8 @@ pub mod test {
 
     use chroma_index::{HnswIndexConfig, DEFAULT_MAX_ELEMENTS};
     use chroma_types::{
-        Collection, CollectionUuid, HnswConfiguration, InternalCollectionConfiguration, Segment,
-        SegmentUuid,
+        Collection, CollectionUuid, InternalCollectionConfiguration, InternalHnswConfiguration,
+        Segment, SegmentUuid,
     };
     use tempfile::tempdir;
     use uuid::Uuid;
@@ -389,7 +389,7 @@ pub mod test {
     fn parameter_defaults() {
         let persist_path = tempdir().unwrap().path().to_owned();
 
-        let hnsw_configuration = HnswConfiguration::default();
+        let hnsw_configuration = InternalHnswConfiguration::default();
         let config = HnswIndexConfig::new_persistent(
             hnsw_configuration.max_neighbors,
             hnsw_configuration.ef_construction,
@@ -398,7 +398,7 @@ pub mod test {
         )
         .expect("Error creating hnsw index config");
 
-        let default_hnsw_params = HnswConfiguration::default();
+        let default_hnsw_params = InternalHnswConfiguration::default();
 
         assert_eq!(config.max_elements, DEFAULT_MAX_ELEMENTS);
         assert_eq!(config.m, default_hnsw_params.max_neighbors);
@@ -413,10 +413,12 @@ pub mod test {
         // Try partial override
         let collection = Collection {
             config: InternalCollectionConfiguration {
-                vector_index: chroma_types::VectorIndexConfiguration::Hnsw(HnswConfiguration {
-                    max_neighbors: 10,
-                    ..Default::default()
-                }),
+                vector_index: chroma_types::VectorIndexConfiguration::Hnsw(
+                    InternalHnswConfiguration {
+                        max_neighbors: 10,
+                        ..Default::default()
+                    },
+                ),
                 embedding_function: None,
             },
             ..Default::default()
