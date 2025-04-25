@@ -1362,7 +1362,7 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
 mod tests {
     use chroma_config::registry::Registry;
     use chroma_sysdb::GrpcSysDbConfig;
-    use chroma_types::Collection;
+    use chroma_types::{Collection, InternalCollectionConfiguration};
     use uuid::Uuid;
 
     use crate::server::CreateCollectionPayload;
@@ -1386,7 +1386,7 @@ mod tests {
                     "default_database".to_string(),
                     "test".to_string(),
                     None,
-                    None,
+                    Some(InternalCollectionConfiguration::default_hnsw()),
                     false,
                 )
                 .unwrap(),
