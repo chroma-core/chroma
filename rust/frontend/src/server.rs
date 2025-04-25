@@ -2047,6 +2047,50 @@ mod tests {
             .as_str()
             .expect("error message to be present")
             .contains("starting and ending with an alphanumeric character in"));
-        println!("response_json: {:?}", response_json);
+    }
+
+    #[tokio::test]
+    async fn test_delete_collection_with_name_validation() {
+        let port = test_server().await;
+        let client = reqwest::Client::new();
+        let res = client
+            .delete(format!(
+                "http://localhost:{}/api/v2/tenants/default_tenant/databases/default_database/collections/{}",
+                port, "i"
+            ))
+            .header("content-type", "application/json")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status().clone(), 400);
+        let response_json = res.json::<serde_json::Value>().await.unwrap();
+        assert_eq!(
+            response_json["error"],
+            serde_json::Value::String("InvalidArgumentError".to_string())
+        );
+        assert!(response_json["message"]
+            .as_str()
+            .expect("error message to be present")
+            .contains("Expected a name containing 3-512 characters"));
+
+        let res = client
+            .delete(format!(
+                "http://localhost:{}/api/v2/tenants/default_tenant/databases/default_database/collections/{}",
+                port, "_invalid_name"
+            ))
+            .header("content-type", "application/json")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status().clone(), 400);
+        let response_json = res.json::<serde_json::Value>().await.unwrap();
+        assert_eq!(
+            response_json["error"],
+            serde_json::Value::String("InvalidArgumentError".to_string())
+        );
+        assert!(response_json["message"]
+            .as_str()
+            .expect("error message to be present")
+            .contains("starting and ending with an alphanumeric character in"));
     }
 }
