@@ -37,9 +37,7 @@ def test_unavailable_provider_multiple(providers: List[str]) -> None:
 
 @given(
     providers=st.lists(
-        st.sampled_from(onnxruntime.get_all_providers()).filter(
-            lambda x: x in onnxruntime.get_available_providers()
-        ),
+        st.sampled_from(onnxruntime.get_available_providers()),
         min_size=1,
         unique_by=unique_by,
     )
@@ -56,9 +54,7 @@ def test_warning_no_providers_supplied() -> None:
 
 @given(
     providers=st.lists(
-        st.sampled_from(onnxruntime.get_all_providers()).filter(
-            lambda x: x in onnxruntime.get_available_providers()
-        ),
+        st.sampled_from(onnxruntime.get_available_providers()),
         min_size=1,
     ).filter(lambda x: len(x) > len(set(x)))
 )
