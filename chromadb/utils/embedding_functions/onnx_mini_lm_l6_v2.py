@@ -38,10 +38,10 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
     DOWNLOAD_PATH = Path.home() / ".cache" / "chroma" / "onnx_models" / MODEL_NAME
     EXTRACTED_FOLDER_NAME = "onnx"
     ARCHIVE_FILENAME = "onnx.tar.gz"
-    MODEL_DOWNLOAD_URL = (
+    MODEL_DOWNLOAD_URL = os.getenv("CHROMA_MODEL_ONNX_URL",
         "https://chroma-onnx-models.s3.amazonaws.com/all-MiniLM-L6-v2/onnx.tar.gz"
     )
-    _MODEL_SHA256 = "913d7300ceae3b2dbc2c50d1de4baacab4be7b9380491c27fab7418616a16ec3"
+    _MODEL_SHA256 = os.getenv("CHROMA_MODEL_ONNX_SHA256", "913d7300ceae3b2dbc2c50d1de4baacab4be7b9380491c27fab7418616a16ec3")
 
     def __init__(self, preferred_providers: Optional[List[str]] = None) -> None:
         """
