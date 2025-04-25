@@ -289,8 +289,6 @@ impl HnswIndexProvider {
         Ok(())
     }
 
-    // There is no synchronization here. Assumes the caller synchronizes concurrent open()
-    // for the same index uuid.
     pub async fn open(
         &self,
         id: &IndexUuid,
@@ -299,6 +297,19 @@ impl HnswIndexProvider {
         distance_function: DistanceFunction,
         ef_search: usize,
     ) -> Result<HnswIndexRef, Box<HnswIndexProviderOpenError>> {
+        // This is the double checked locking pattern. This avoids taking the
+        // async mutex in the common case where the index is already in the cache.
+        if let Some(index) = self.get(id, cache_key).await {
+            return Ok(index);
+        }
+        // We take a lock here to synchronize concurrent forks of the same index.
+        // Otherwise, we could end up with a corrupted index since the filesystem
+        // operations are not guaranteed to be atomic.
+        // The lock is a partitioned mutex to allow for higher concurrency across collections.
+        let _guard = self.write_mutex.lock(id).await;
+        if let Some(index) = self.get(id, cache_key).await {
+            return Ok(index);
+        }
         let index_storage_path = self.temporary_storage_path.join(id.to_string());
 
         match self.create_dir_all(&index_storage_path).await {
@@ -695,6 +706,12 @@ mod tests {
             .flush(&created_index_id)
             .await
             .expect("Expected to flush");
+        // clear the cache.
+        provider
+            .cache
+            .clear()
+            .await
+            .expect("Expected to clear cache");
         let open_index = provider
             .open(
                 &created_index_id,

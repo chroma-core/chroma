@@ -333,37 +333,23 @@ impl DistributedHNSWSegmentReader {
                 }
             };
             let index_uuid = IndexUuid(index_uuid);
-            // We take a lock here to synchronize concurrent forks of the same index.
-            // Otherwise, we could end up with a corrupted index since the filesystem
-            // operations are not guaranteed to be atomic.
-            // The lock is a partitioned mutex to allow for higher concurrency across collections.
-            let _guard = hnsw_index_provider.write_mutex.lock(&index_uuid).await;
-            let index =
-                match hnsw_index_provider
-                    .get(&index_uuid, &segment.collection)
-                    .await
-                {
-                    Some(index) => index,
-                    None => {
-                        match hnsw_index_provider
-                            .open(
-                                &index_uuid,
-                                &segment.collection,
-                                dimensionality as i32,
-                                hnsw_configuration.space.clone().into(),
-                                hnsw_configuration.ef_search,
-                            )
-                            .await
-                        {
-                            Ok(index) => index,
-                            Err(e) => return Err(Box::new(
-                                DistributedHNSWSegmentFromSegmentError::HnswIndexProviderOpenError(
-                                    *e,
-                                ),
-                            )),
-                        }
-                    }
-                };
+            let index = match hnsw_index_provider
+                .open(
+                    &index_uuid,
+                    &segment.collection,
+                    dimensionality as i32,
+                    hnsw_configuration.space.clone().into(),
+                    hnsw_configuration.ef_search,
+                )
+                .await
+            {
+                Ok(index) => index,
+                Err(e) => {
+                    return Err(Box::new(
+                        DistributedHNSWSegmentFromSegmentError::HnswIndexProviderOpenError(*e),
+                    ))
+                }
+            };
 
             Ok(Box::new(DistributedHNSWSegmentReader::new(
                 index, segment.id,

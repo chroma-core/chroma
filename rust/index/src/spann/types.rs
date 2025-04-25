@@ -2022,30 +2022,20 @@ impl<'me> SpannIndexReader<'me> {
         dimensionality: usize,
         ef_search: usize,
     ) -> Result<HnswIndexRef, SpannIndexReaderError> {
-        // We take a lock here to synchronize concurrent open of the same index.
-        // Otherwise, we could end up with a corrupted index since the filesystem
-        // operations are not guaranteed to be atomic.
-        // The lock is a partitioned mutex to allow for higher concurrency across collections.
-        let _guard = hnsw_provider.write_mutex.lock(id).await;
-        match hnsw_provider.get(id, cache_key).await {
-            Some(index) => Ok(index),
-            None => {
-                match hnsw_provider
-                    .open(
-                        id,
-                        cache_key,
-                        dimensionality as i32,
-                        distance_function,
-                        ef_search,
-                    )
-                    .await
-                {
-                    Ok(index) => Ok(index),
-                    Err(e) => {
-                        tracing::error!("Error opening hnsw index{}: {}", id, e);
-                        Err(SpannIndexReaderError::HnswIndexConstructionError(*e))
-                    }
-                }
+        match hnsw_provider
+            .open(
+                id,
+                cache_key,
+                dimensionality as i32,
+                distance_function,
+                ef_search,
+            )
+            .await
+        {
+            Ok(index) => Ok(index),
+            Err(e) => {
+                tracing::error!("Error opening hnsw index{}: {}", id, e);
+                Err(SpannIndexReaderError::HnswIndexConstructionError(*e))
             }
         }
     }
