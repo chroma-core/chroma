@@ -1,6 +1,6 @@
 # Full Text Search
 
-In order to filter on document contents, you must supply a `where_document` filter dictionary to the query. (This will match on sub-strings, but is case-sensitive.) We support two filtering keys: `$contains` and `$not_contains`. The dictionary must have the following structure:
+In order to filter on document contents, you must supply a `where_document` filter dictionary to the query. (NOTE: The supplied value will match on sub-strings, but is case-sensitive.) We support two filtering keys: `$contains` and `$not_contains`. The dictionary must have the following structure:
 
 ```python
 # Filtering for a search_string
