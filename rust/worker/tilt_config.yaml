@@ -33,7 +33,7 @@ query_service:
                 download_part_size_bytes: 8388608 # 8MiB
             rate_limiting_policy:
                 count_based_policy:
-                    max_concurrent_requests: 10
+                    max_concurrent_requests: 30
                     bandwidth_allocation: [0.7, 0.3]
     log:
         grpc:
