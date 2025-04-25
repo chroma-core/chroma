@@ -27,9 +27,5 @@ path = "junit.xml"
 [profile.ci_long_running]
 default-filter = "test(/test_long_running_/)"
 
-[[profile.ci_long_running.overrides]]
-filter = "all()"
-test-group = "against-tilt"
-
 [profile.ci_long_running.junit]
 path = "junit.xml"
