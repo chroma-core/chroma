@@ -706,6 +706,12 @@ mod tests {
             .flush(&created_index_id)
             .await
             .expect("Expected to flush");
+        // clear the cache.
+        provider
+            .cache
+            .clear()
+            .await
+            .expect("Expected to clear cache");
         let open_index = provider
             .open(
                 &created_index_id,
