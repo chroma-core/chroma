@@ -539,23 +539,23 @@ impl CountBasedPolicy {
         priority: Arc<AtomicUsize>,
         mut channel_receiver: Option<tokio::sync::mpsc::Receiver<()>>,
     ) -> SemaphorePermit<'_> {
-        let timeout_duration = std::time::Duration::from_secs(10);
-        let (timeout_tx, mut timeout_rx) = tokio::sync::oneshot::channel();
-        tokio::spawn(async move {
-            tokio::time::sleep(timeout_duration).await;
-            let did_timeout = timeout_rx.try_recv();
-            match did_timeout {
-                Ok(_) => {}
-                Err(e) => match e {
-                    tokio::sync::oneshot::error::TryRecvError::Closed => {
-                        tracing::error!("Timeout channel closed");
-                    }
-                    tokio::sync::oneshot::error::TryRecvError::Empty => {
-                        tracing::error!("Timeout channel empty");
-                    }
-                },
-            }
-        });
+        // let timeout_duration = std::time::Duration::from_secs(10);
+        // let (timeout_tx, mut timeout_rx) = tokio::sync::oneshot::channel();
+        // tokio::spawn(async move {
+        //     tokio::time::sleep(timeout_duration).await;
+        //     let did_timeout = timeout_rx.try_recv();
+        //     match did_timeout {
+        //         Ok(_) => {}
+        //         Err(e) => match e {
+        //             tokio::sync::oneshot::error::TryRecvError::Closed => {
+        //                 tracing::error!("Timeout channel closed");
+        //             }
+        //             tokio::sync::oneshot::error::TryRecvError::Empty => {
+        //                 tracing::error!("Timeout channel empty");
+        //             }
+        //         },
+        //     }
+        // });
 
         loop {
             let current_priority = priority.load(Ordering::SeqCst);
