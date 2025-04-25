@@ -248,13 +248,14 @@ def fd_not_exceeding_threadpool_size(threadpool_size: int) -> None:
 def get_space(collection: Collection):
     if "hnsw:space" in collection.metadata:
         return collection.metadata["hnsw:space"]
-
-    config = collection._model.configuration_json or {}
-
-    return (
-        config.get("spann", {}).get("space")
-        or config.get("hnsw", {}).get("space")
-    )
+    if collection._model.configuration_json is None:
+        return None
+    if 'spann' in collection._model.configuration_json and collection._model.configuration_json.get('spann') is not None and 'space' in collection._model.configuration_json.get('spann'):
+        return collection._model.configuration_json.get('spann').get('space')
+    elif 'hnsw' in collection._model.configuration_json and collection._model.configuration_json.get('hnsw') is not None and 'space' in collection._model.configuration_json.get('hnsw'):
+        return collection._model.configuration_json.get('hnsw').get('space')
+    else:
+        return None
 
 def ann_accuracy(
     collection: Collection,
