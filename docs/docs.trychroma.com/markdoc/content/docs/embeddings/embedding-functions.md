@@ -13,6 +13,7 @@ Chroma provides lightweight wrappers around popular embedding providers, making 
 | [Instructor](../../integrations/embedding-models/instructor)                             | ✓      | -          |
 | [Hugging Face Embedding Server](../../integrations/embedding-models/hugging-face-server) | ✓      | ✓          |
 | [Jina AI](../../integrations/embedding-models/jina-ai)                                   | ✓      | ✓          |
+| [Cloudflare Workers AI](../../integrations/embedding-models/cloudflare-workers-ai.md)    | ✓      | ✓          |
 
 We welcome pull requests to add new Embedding Functions to the community.
 
