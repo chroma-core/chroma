@@ -1,5 +1,4 @@
 bcrypt>=4.0.1
-chroma-hnswlib==0.7.6
 fastapi==0.115.9
 graphlib_backport==1.0.3; python_version < '3.9'
 grpcio>=1.58.0

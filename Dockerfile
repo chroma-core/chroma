@@ -69,4 +69,3 @@ EXPOSE 8000
 
 ENTRYPOINT ["/docker_entrypoint.sh"]
 CMD [ "--workers ${CHROMA_WORKERS} --host ${CHROMA_HOST_ADDR} --port ${CHROMA_HOST_PORT} --proxy-headers --reload --log-config ${CHROMA_LOG_CONFIG} --timeout-keep-alive ${CHROMA_TIMEOUT_KEEP_ALIVE}"]
-
