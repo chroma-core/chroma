@@ -63,9 +63,9 @@ impl Handler<TaskMessage> for WorkerThread {
         tracing::info!("Worker thread: executing task {}", task.get_name());
         let child_span =
             trace_span!(parent: Span::current(), "Task execution", name = task.get_name());
-        let task_timeout = Duration::from_secs(15);
-        let (mark_done_tx, mut mark_done_rx) = tokio::sync::oneshot::channel();
-        let task_name = task.get_name().to_string();
+        // let task_timeout = Duration::from_secs(15);
+        // let (mark_done_tx, mut mark_done_rx) = tokio::sync::oneshot::channel();
+        // let task_name = task.get_name().to_string();
         // tokio::spawn(async move {
         //     tokio::time::sleep(task_timeout).await;
         //     let attempted_recv = mark_done_rx.try_recv();
@@ -84,13 +84,14 @@ impl Handler<TaskMessage> for WorkerThread {
         //     };
         // });
         task.run().instrument(child_span).await;
-        mark_done_tx.send(()).unwrap_or_else(|_| {
-            tracing::error!("Failed to send task completion signal");
-        });
+        // mark_done_tx.send(()).unwrap_or_else(|_| {
+        //     tracing::error!("Failed to send task completion signal");
+        // });
         let req: TaskRequestMessage = TaskRequestMessage::new(ctx.receiver());
         let res = self.dispatcher.send(req, None).await;
         if let Err(err) = res {
             tracing::error!("Error sending task request: {}", err);
+            tracing::error!("Worker thread error");
         }
         // TODO: task run should be able to error and we should send it as part of the result
     }
