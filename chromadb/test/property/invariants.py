@@ -246,16 +246,20 @@ def fd_not_exceeding_threadpool_size(threadpool_size: int) -> None:
     )
 
 def get_space(collection: Collection):
+    # TODO: this is a hack to get the space
+    # We should update the tests to not pass space via metadata instead use collection
+    # configuration_json
+    space = None
     if "hnsw:space" in collection.metadata:
-        return collection.metadata["hnsw:space"]
+        space = collection.metadata["hnsw:space"]
     if collection._model.configuration_json is None:
-        return None
+        return space
     if 'spann' in collection._model.configuration_json and collection._model.configuration_json.get('spann') is not None and 'space' in collection._model.configuration_json.get('spann'):
-        return collection._model.configuration_json.get('spann').get('space')
+        space = collection._model.configuration_json.get('spann').get('space')
     elif 'hnsw' in collection._model.configuration_json and collection._model.configuration_json.get('hnsw') is not None and 'space' in collection._model.configuration_json.get('hnsw'):
-        return collection._model.configuration_json.get('hnsw').get('space')
-    else:
-        return None
+        if space is None:
+            space = collection._model.configuration_json.get('hnsw').get('space')
+    return space
 
 def ann_accuracy(
     collection: Collection,
