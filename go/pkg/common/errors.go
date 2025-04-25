@@ -26,6 +26,7 @@ var (
 	ErrCollectionVersionInvalid              = errors.New("collection version invalid")
 	ErrCollectionVersionFileNameStale        = errors.New("collection version file name stale")
 	ErrCollectionEntryIsStale                = errors.New("collection entry is stale - one of version, version_file_name, or log_position is stale")
+	ErrCollectionTooManyFork                 = errors.New("collection entry has too many forks")
 
 	// Collection metadata errors
 	ErrUnknownCollectionMetadataType = errors.New("collection metadata value type not supported")

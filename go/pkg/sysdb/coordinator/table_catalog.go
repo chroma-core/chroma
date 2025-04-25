@@ -894,7 +894,7 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 		// This scenario could occur during fork because we will reach out to log service first to fork logs. For exampls:
 		// t0: Fork source collection in log with offset [200, 300] (i.e. compaction offset 200, enumeration offset 300)
 		// t1: User writes to source collection, compaction takes place, source collection log offset become [400, 500]
-		// t2: Fork source collection in sysdb, the latest source collection compaction offset is 400. We could not fork this version unless we update the log offsets of the forking collection
+		// t2: Fork source collection in sysdb, the latest source collection compaction offset is 400. If we add new logs, it will start after offset 300, and the data is lost after compaction.
 		latestSourceCompactionOffset := uint64(sourceCollection.LogPosition)
 		if forkCollection.SourceCollectionLogEnumerationOffset < latestSourceCompactionOffset || latestSourceCompactionOffset < forkCollection.SourceCollectionLogCompactionOffset {
 			return common.ErrCollectionLogPositionStale
@@ -952,6 +952,11 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 		lineageFile, err := tc.getLineageFile(txCtx, rootCollection)
 		if err != nil {
 			return err
+		}
+		// NOTE: This is a temporary hardcoded limit for the size of the lineage file
+		// TODO: Load the limit value from quota / scorecard, and/or improve the lineage file design to avoid large lineage file
+		if len(lineageFile.Dependencies) > 1000000 {
+			return common.ErrCollectionTooManyFork
 		}
 		lineageFile.Dependencies = append(lineageFile.Dependencies, &coordinatorpb.CollectionVersionDependency{
 			SourceCollectionId:      sourceCollectionIDStr,

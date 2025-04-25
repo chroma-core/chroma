@@ -109,5 +109,20 @@ pub fn all_workloads() -> HashMap<String, Workload> {
             "random-upsert".to_string(),
             Workload::RandomUpsert(KeySelector::Random(Skew::Zipf { theta: 0.999 })),
         ),
+        (
+            "verify".to_string(),
+            Workload::Hybrid(vec![
+                (
+                    0.9,
+                    Workload::Get(GetQuery {
+                        skew: Skew::Uniform,
+                        limit: Distribution::Constant(10),
+                        metadata: None,
+                        document: None,
+                    }),
+                ),
+                (0.1, Workload::Load),
+            ]),
+        ),
     ])
 }
