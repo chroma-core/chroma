@@ -500,6 +500,7 @@ pub type CountCollectionsResponse = u32;
 pub struct GetCollectionRequest {
     pub tenant_id: String,
     pub database_name: String,
+    #[validate(custom(function = "validate_name"))]
     pub collection_name: String,
 }
 
@@ -722,6 +723,7 @@ impl ChromaError for UpdateCollectionError {
 pub struct DeleteCollectionRequest {
     pub tenant_id: String,
     pub database_name: String,
+    #[validate(custom(function = "validate_name"))]
     pub collection_name: String,
 }
 
