@@ -3,6 +3,7 @@ import importlib
 import logging
 import os
 import tarfile
+import sys
 from functools import cached_property
 from pathlib import Path
 from typing import List, Dict, Any, Optional, cast
@@ -305,7 +306,13 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
                 name=os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME),
                 mode="r:gz",
             ) as tar:
-                tar.extractall(path=self.DOWNLOAD_PATH)
+                if sys.version_info >= (3, 12):
+                    tar.extractall(path=self.DOWNLOAD_PATH, filter="data")
+                else:
+                    # filter argument was added in Python 3.12
+                    # https://docs.python.org/3/library/tarfile.html#tarfile.TarFile.extractall
+                    # In versions prior to 3.12, this provides the same behavior as filter="data"
+                    tar.extractall(path=self.DOWNLOAD_PATH)
 
     @staticmethod
     def name() -> str:
