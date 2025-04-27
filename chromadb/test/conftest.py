@@ -47,7 +47,7 @@ from chromadb.api.types import Documents, Embeddings
 logger = logging.getLogger(__name__)
 
 VALID_PRESETS = ["fast", "normal", "slow"]
-CURRENT_PRESET = os.getenv("PROPERTY_TESTING_PRESET", "fast")
+CURRENT_PRESET = os.getenv("PROPERTY_TESTING_PRESET", "normal")
 
 if CURRENT_PRESET not in VALID_PRESETS:
     raise ValueError(
@@ -62,7 +62,7 @@ hypothesis.settings.register_profile(
         hypothesis.HealthCheck.large_base_example,
         hypothesis.HealthCheck.function_scoped_fixture,
     ],
-    verbosity=hypothesis.Verbosity.verbose
+    verbosity=hypothesis.Verbosity.verbose,
 )
 
 hypothesis.settings.register_profile(

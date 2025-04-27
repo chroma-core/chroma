@@ -36,6 +36,12 @@ collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="co
         normal=hypothesis.settings(max_examples=500),
         fast=hypothesis.settings(max_examples=200),
     ),
+    phases=[
+        hypothesis.Phase.explicit,
+        hypothesis.Phase.reuse,
+        hypothesis.Phase.generate,
+        hypothesis.Phase.target,
+    ],
 )
 def test_add_small(
     client: ClientAPI,
@@ -76,6 +82,12 @@ def test_add_small(
         hypothesis.HealthCheck.data_too_large,
         hypothesis.HealthCheck.large_base_example,
         hypothesis.HealthCheck.function_scoped_fixture,
+    ],
+    phases=[
+        hypothesis.Phase.explicit,
+        hypothesis.Phase.reuse,
+        hypothesis.Phase.generate,
+        hypothesis.Phase.target,
     ],
 )
 def test_add_medium(
@@ -183,7 +195,16 @@ def create_large_recordset(
 
 
 @given(collection=collection_st, should_compact=st.booleans())
-@settings(deadline=None, max_examples=5)
+@settings(
+    deadline=None,
+    max_examples=5,
+    phases=[
+        hypothesis.Phase.explicit,
+        hypothesis.Phase.reuse,
+        hypothesis.Phase.generate,
+        hypothesis.Phase.target,
+    ],
+)
 def test_add_large(
     client: ClientAPI, collection: strategies.Collection, should_compact: bool
 ) -> None:

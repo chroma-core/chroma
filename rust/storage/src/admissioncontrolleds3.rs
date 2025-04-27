@@ -319,17 +319,17 @@ impl AdmissionControlledS3Storage {
         {
             let mut requests = self.outstanding_read_requests.lock().await;
             // debug requests
-            // let mut requests_per_priority_level = HashMap::new();
-            // for (_key, request) in requests.iter() {
-            //     let priority = request.priority.load(Ordering::SeqCst);
-            //     let curr_count = requests_per_priority_level.entry(priority).or_insert(0);
-            //     *curr_count += 1;
-            // }
-            // for (priority, count) in requests_per_priority_level.iter() {
-            //     if *count > 30 {
-            //         tracing::info!("There are {} requests with priority {}", count, priority);
-            //     }
-            // }
+            let mut requests_per_priority_level = HashMap::new();
+            for (_key, request) in requests.iter() {
+                let priority = request.priority.load(Ordering::SeqCst);
+                let curr_count = requests_per_priority_level.entry(priority).or_insert(0);
+                *curr_count += 1;
+            }
+            for (priority, count) in requests_per_priority_level.iter() {
+                if *count > 30 {
+                    tracing::info!("There are {} requests with priority {}", count, priority);
+                }
+            }
             requests.remove(key);
         }
 
