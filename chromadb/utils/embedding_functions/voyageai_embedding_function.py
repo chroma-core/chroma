@@ -55,7 +55,9 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
         embeddings = self._client.embed(texts=input, model=self.model_name)
 
         # Convert to numpy arrays
-        return [np.array(embedding, dtype=np.float32) for embedding in embeddings]
+        return [
+            np.array(embedding, dtype=np.float32) for embedding in embeddings.embeddings
+        ]
 
     @staticmethod
     def name() -> str:
