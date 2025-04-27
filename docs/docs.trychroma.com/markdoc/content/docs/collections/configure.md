@@ -40,7 +40,7 @@ Here's how to configure the Cohere embedding function:
 import os
 assert os.environ.get("CHROMA_COHERE_API_KEY"), "CHROMA_COHERE_API_KEY environment variable not set"
 
-from chromadb.utils.embedding_functions import CohereEmbeddingFunction
+from chromadb.utils.embedding_functions.cohere_embedding_function import CohereEmbeddingFunction
 
 # Create the Cohere embedding function (API key is read from environment variable)
 # By default, it reads from 'CHROMA_COHERE_API_KEY'
@@ -109,7 +109,7 @@ Here is an example showing how to configure both the HNSW index and embedding fu
 import os
 assert os.environ.get("COHERE_API_KEY"), "COHERE_API_KEY environment variable not set"
 
-from chromadb.utils.embedding_functions import CohereEmbeddingFunction
+from chromadb.utils.embedding_functions.cohere_embedding_function import CohereEmbeddingFunction
 
 # Create the Cohere embedding function
 cohere_ef = CohereEmbeddingFunction(model_name="embed-english-light-v2.0")
