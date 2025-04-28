@@ -1,5 +1,8 @@
 use super::{Metadata, MetadataValueConversionError};
-use crate::{chroma_proto, test_segment, InternalCollectionConfiguration, Segment, SegmentScope};
+use crate::{
+    chroma_proto, test_segment, CollectionConfiguration, InternalCollectionConfiguration, Segment,
+    SegmentScope,
+};
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -49,13 +52,21 @@ impl std::fmt::Display for CollectionUuid {
     }
 }
 
-const CONFIGURATION_JSON_STR: &str = r#"{"hnsw_configuration": {"space": "l2", "ef_construction": 100, "ef_search": 100, "num_threads": 16, "M": 16, "resize_factor": 1.2, "batch_size": 100, "sync_threshold": 1000, "_type": "HNSWConfigurationInternal"}, "_type": "CollectionConfigurationInternal"}"#;
+fn serialize_internal_collection_configuration<S: serde::Serializer>(
+    config: &InternalCollectionConfiguration,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    let collection_config: CollectionConfiguration = config.clone().into();
+    collection_config.serialize(serializer)
+}
 
-fn emit_legacy_config_json_str<S: serde::Serializer>(_: &(), s: S) -> Result<S::Ok, S::Error> {
-    serde_json::from_str::<serde_json::Value>(CONFIGURATION_JSON_STR)
-        .unwrap()
-        .serialize(s)
-        .map_err(serde::ser::Error::custom)
+fn deserialize_internal_collection_configuration<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<InternalCollectionConfiguration, D::Error> {
+    let collection_config = CollectionConfiguration::deserialize(deserializer)?;
+    collection_config
+        .try_into()
+        .map_err(serde::de::Error::custom)
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
@@ -64,7 +75,12 @@ pub struct Collection {
     #[serde(rename = "id")]
     pub collection_id: CollectionUuid,
     pub name: String,
-    #[serde(skip, default = "InternalCollectionConfiguration::default_hnsw")]
+    #[serde(
+        serialize_with = "serialize_internal_collection_configuration",
+        deserialize_with = "deserialize_internal_collection_configuration",
+        rename = "configuration_json"
+    )]
+    #[schema(value_type = CollectionConfiguration)]
     pub config: InternalCollectionConfiguration,
     pub metadata: Option<Metadata>,
     pub dimension: Option<i32>,
@@ -78,12 +94,6 @@ pub struct Collection {
     pub size_bytes_post_compaction: u64,
     #[serde(skip)]
     pub last_compaction_time_secs: u64,
-    #[serde(
-        serialize_with = "emit_legacy_config_json_str",
-        skip_deserializing,
-        rename = "configuration_json"
-    )]
-    pub legacy_configuration_json: (),
 }
 
 impl Default for Collection {
@@ -92,7 +102,6 @@ impl Default for Collection {
             collection_id: CollectionUuid::new(),
             name: "".to_string(),
             config: InternalCollectionConfiguration::default_hnsw(),
-            legacy_configuration_json: (),
             metadata: None,
             dimension: None,
             tenant: "".to_string(),
@@ -217,7 +226,6 @@ impl TryFrom<chroma_proto::Collection> for Collection {
             total_records_post_compaction: proto_collection.total_records_post_compaction,
             size_bytes_post_compaction: proto_collection.size_bytes_post_compaction,
             last_compaction_time_secs: proto_collection.last_compaction_time_secs,
-            legacy_configuration_json: (),
         })
     }
 }

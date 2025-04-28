@@ -35,6 +35,7 @@ export namespace Api {
   }
 
   export interface Collection {
+    configuration_json: Api.CollectionConfiguration;
     database: string;
     /**
      * @type {number | null}
@@ -149,6 +150,10 @@ export namespace Api {
     message: string;
   }
 
+  export interface ForkCollectionPayload {
+    new_name: string;
+  }
+
   export interface GetRequestPayload extends Api.RawWhereFields {
     ids?: string[] | null;
     include?: Api.Include[];
@@ -198,47 +203,35 @@ export namespace Api {
 
   export interface HnswConfiguration {
     /**
-     * @type {number}
+     * @type {number | null}
      * @memberof HnswConfiguration
      * minimum: 0
      */
-    batch_size?: number;
+    ef_construction?: number | null;
     /**
-     * @type {number}
+     * @type {number | null}
      * @memberof HnswConfiguration
      * minimum: 0
      */
-    ef_construction?: number;
+    ef_search?: number | null;
     /**
-     * @type {number}
+     * @type {number | null}
      * @memberof HnswConfiguration
      * minimum: 0
      */
-    ef_search?: number;
+    max_neighbors?: number | null;
     /**
-     * @type {number}
-     * @memberof HnswConfiguration
-     * minimum: 0
-     */
-    max_neighbors?: number;
-    /**
-     * @type {number}
-     * @memberof HnswConfiguration
-     * minimum: 0
-     */
-    num_threads?: number;
-    /**
-     * @type {number}
+     * @type {number | null}
      * @memberof HnswConfiguration
      */
-    resize_factor?: number;
+    resize_factor?: number | null;
     space?: Api.HnswSpace;
     /**
-     * @type {number}
+     * @type {number | null}
      * @memberof HnswConfiguration
      * minimum: 0
      */
-    sync_threshold?: number;
+    sync_threshold?: number | null;
   }
 
   export enum HnswSpace {
@@ -286,36 +279,54 @@ export namespace Api {
 
   export interface SpannConfiguration {
     /**
-     * @type {number}
+     * @type {number | null}
      * @memberof SpannConfiguration
      * minimum: 0
      */
-    construction_ef: number;
+    ef_construction?: number | null;
     /**
-     * @type {number}
+     * @type {number | null}
      * @memberof SpannConfiguration
      * minimum: 0
      */
-    m: number;
+    ef_search?: number | null;
     /**
-     * @type {number}
+     * @type {number | null}
      * @memberof SpannConfiguration
      * minimum: 0
      */
-    search_ef: number;
+    max_neighbors?: number | null;
     /**
-     * @type {number}
+     * @type {number | null}
      * @memberof SpannConfiguration
      * minimum: 0
      */
-    search_nprobe: number;
-    space: Api.HnswSpace;
+    merge_threshold?: number | null;
     /**
-     * @type {number}
+     * @type {number | null}
      * @memberof SpannConfiguration
      * minimum: 0
      */
-    write_nprobe: number;
+    reassign_neighbor_count?: number | null;
+    /**
+     * @type {number | null}
+     * @memberof SpannConfiguration
+     * minimum: 0
+     */
+    search_nprobe?: number | null;
+    space?: Api.HnswSpace;
+    /**
+     * @type {number | null}
+     * @memberof SpannConfiguration
+     * minimum: 0
+     */
+    split_threshold?: number | null;
+    /**
+     * @type {number | null}
+     * @memberof SpannConfiguration
+     * minimum: 0
+     */
+    write_nprobe?: number | null;
   }
 
   export interface UpdateCollectionConfiguration {
@@ -397,6 +408,7 @@ export namespace Api {
   export interface UpsertCollectionRecordsResponse {}
 
   export interface Vec2 {
+    configuration_json: Api.CollectionConfiguration;
     database: string;
     /**
      * @type {number | null}

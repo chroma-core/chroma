@@ -6,6 +6,7 @@ use chroma_log::config::LogConfig;
 use chroma_segment::local_segment_manager::LocalSegmentManagerConfig;
 use chroma_sqlite::config::SqliteDBConfig;
 use chroma_sysdb::SysDbConfig;
+use chroma_types::{default_default_knn_index, KnnIndex};
 use figment::providers::{Env, Format, Yaml};
 use mdac::CircuitBreakerConfig;
 use rust_embed::Embed;
@@ -61,6 +62,8 @@ pub struct FrontendConfig {
     pub log: LogConfig,
     #[serde(default = "default_executor_config")]
     pub executor: ExecutorConfig,
+    #[serde(default = "default_default_knn_index")]
+    pub default_knn_index: KnnIndex,
 }
 
 impl FrontendConfig {
@@ -76,6 +79,7 @@ impl FrontendConfig {
             collections_with_segments_provider: Default::default(),
             log: default_log_config(),
             executor: default_executor_config(),
+            default_knn_index: default_default_knn_index(),
         }
     }
 }
@@ -115,6 +119,10 @@ fn default_enable_span_indexing() -> bool {
     false
 }
 
+fn default_enable_set_index_params() -> bool {
+    true
+}
+
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct FrontendServerConfig {
     #[serde(flatten)]
@@ -140,6 +148,8 @@ pub struct FrontendServerConfig {
     pub cors_allow_origins: Option<Vec<String>>,
     #[serde(default = "default_enable_span_indexing")]
     pub enable_span_indexing: bool,
+    #[serde(default = "default_enable_set_index_params")]
+    pub enable_set_index_params: bool,
 }
 
 const DEFAULT_CONFIG_PATH: &str = "sample_configs/distributed.yaml";
@@ -156,6 +166,11 @@ impl FrontendServerConfig {
     }
 
     pub fn load_from_path(path: &str) -> Self {
+        // SAFETY(rescrv): If we cannot read the config, we panic anyway.
+        eprintln!(
+            "==========\n{}\n==========\n",
+            std::fs::read_to_string(path).unwrap()
+        );
         // Unfortunately, figment doesn't support environment variables with underscores. So we have to map and replace them.
         // Excluding our own environment variables, which are prefixed with CHROMA_.
         let mut f = figment::Figment::from(

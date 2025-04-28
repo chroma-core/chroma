@@ -306,6 +306,16 @@ class RustBindingsAPI(ServerAPI):
         )
 
     @override
+    def _fork(
+        self,
+        collection_id: UUID,
+        new_name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> CollectionModel:
+        raise NotImplementedError("Collection forking is not implemented for Local Chroma")
+
+    @override
     def _count(
         self,
         collection_id: UUID,

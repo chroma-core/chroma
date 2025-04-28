@@ -24,10 +24,10 @@ pub enum ValidationError {
     GetCollection(#[from] GetCollectionError),
     #[error("Error updating collection: {0}")]
     UpdateCollection(#[from] UpdateCollectionError),
-    #[error("SPANN is still in development. Not allowed to created spann indexes")]
-    SpannNotImplemented,
     #[error("Error parsing collection configuration: {0}")]
     ParseCollectionConfiguration(#[from] CollectionConfigurationToInternalConfigurationError),
+    #[error("For optimal performance and accuracy, can't set parameters other than space for index type {0}")]
+    SpaceConfigurationForVectorIndexType(String),
 }
 
 impl ChromaError for ValidationError {
@@ -38,8 +38,8 @@ impl ChromaError for ValidationError {
             ValidationError::DimensionMismatch(_, _) => ErrorCodes::InvalidArgument,
             ValidationError::GetCollection(err) => err.code(),
             ValidationError::UpdateCollection(err) => err.code(),
-            ValidationError::SpannNotImplemented => ErrorCodes::Unimplemented,
             ValidationError::ParseCollectionConfiguration(_) => ErrorCodes::InvalidArgument,
+            ValidationError::SpaceConfigurationForVectorIndexType(_) => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -73,7 +73,6 @@ impl ErrorResponse {
 
 impl IntoResponse for ServerError {
     fn into_response(self) -> Response {
-        tracing::error!("Error: {:?}", self.0);
         let status_code: StatusCode = self.0.code().into();
 
         let error = ErrorResponse {

@@ -68,18 +68,16 @@ fn add_to_index_and_get_reader<'a>(
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let hnsw_cache = new_non_persistent_cache_for_test();
-        let (_, rx) = tokio::sync::mpsc::unbounded_channel();
         let hnsw_provider = HnswIndexProvider::new(
             storage.clone(),
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
-            rx,
         );
         let collection_id = CollectionUuid::new();
         let dimensionality = 128;
         let params = InternalSpannConfiguration::default();
-        let ef_search = params.search_ef;
+        let ef_search = params.ef_search;
         let gc_context = GarbageCollectionContext::try_from_config(
             &(
                 PlGarbageCollectionConfig::default(),

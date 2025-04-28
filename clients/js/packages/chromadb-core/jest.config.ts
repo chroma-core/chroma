@@ -10,9 +10,12 @@ export default {
   coverageDirectory: "./test/coverage",
   coverageReporters: ["json", "html", "lcov"],
   transform: {
-    "^.+\\.(ts|tsx)$": ["ts-jest", {
-      tsconfig: "tsconfig.json"
-    }]
+    "^.+\\.(ts|tsx)$": [
+      "ts-jest",
+      {
+        tsconfig: "tsconfig.json",
+      },
+    ],
   },
   collectCoverageFrom: [
     "./src/**/*.{js,ts}",
@@ -21,9 +24,7 @@ export default {
   ],
   // Make tests find the src modules
   moduleNameMapper: {
-    "^@src/(.*)$": "<rootDir>/src/$1"
+    "^@src/(.*)$": "<rootDir>/src/$1",
   },
-  testPathIgnorePatterns: [
-    "node_modules/"
-  ]
+  testPathIgnorePatterns: ["node_modules/"],
 };

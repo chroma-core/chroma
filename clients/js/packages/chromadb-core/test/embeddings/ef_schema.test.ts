@@ -1,4 +1,11 @@
-import { describe, expect, test, beforeAll, afterAll, jest } from "@jest/globals";
+import {
+  describe,
+  expect,
+  test,
+  beforeAll,
+  afterAll,
+  jest,
+} from "@jest/globals";
 import {
   loadSchema,
   validateConfigSchema,

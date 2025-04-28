@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"testing"
 	"time"
@@ -157,21 +158,42 @@ func TestCatalog_GetCollectionSize(t *testing.T) {
 }
 
 type mockS3MetaStore struct {
-	mu    sync.RWMutex
-	files map[string]*coordinatorpb.CollectionVersionFile
+	mu           sync.RWMutex
+	lineageFiles map[string]*coordinatorpb.CollectionLineageFile
+	versionFiles map[string]*coordinatorpb.CollectionVersionFile
 }
 
 func newMockS3MetaStore() *mockS3MetaStore {
 	return &mockS3MetaStore{
-		files: make(map[string]*coordinatorpb.CollectionVersionFile),
+		versionFiles: make(map[string]*coordinatorpb.CollectionVersionFile),
 	}
 }
 
-func (m *mockS3MetaStore) GetVersionFile(tenantID, collectionID string, version int64, fileName string) (*coordinatorpb.CollectionVersionFile, error) {
+func (m *mockS3MetaStore) GetLineageFile(fileName string) (*coordinatorpb.CollectionLineageFile, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	if file, exists := m.files[fileName]; exists {
+	if file, exists := m.lineageFiles[fileName]; exists {
+		return file, nil
+	}
+	return &coordinatorpb.CollectionLineageFile{
+		Dependencies: []*coordinatorpb.CollectionVersionDependency{},
+	}, nil
+}
+
+func (m *mockS3MetaStore) PutLineageFile(tenantID, databaseID, collectionID, fileName string, file *coordinatorpb.CollectionLineageFile) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.lineageFiles[fileName] = file
+	return fileName, nil
+}
+
+func (m *mockS3MetaStore) GetVersionFile(fileName string) (*coordinatorpb.CollectionVersionFile, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if file, exists := m.versionFiles[fileName]; exists {
 		return file, nil
 	}
 	return &coordinatorpb.CollectionVersionFile{
@@ -185,7 +207,7 @@ func (m *mockS3MetaStore) PutVersionFile(tenantID, databaseID, collectionID, fil
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.files[fileName] = file
+	m.versionFiles[fileName] = file
 	return fileName, nil
 }
 
@@ -197,7 +219,7 @@ func (m *mockS3MetaStore) DeleteVersionFile(tenantID, databaseID, collectionID, 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	delete(m.files, fileName)
+	delete(m.versionFiles, fileName)
 	return nil
 }
 
@@ -298,7 +320,7 @@ func TestCatalog_FlushCollectionCompactionForVersionedCollection(t *testing.T) {
 	mockSegmentDb.AssertExpectations(t)
 
 	// Verify S3 store has the new version file
-	assert.Greater(t, len(mockS3Store.files), 0)
+	assert.Greater(t, len(mockS3Store.versionFiles), 0)
 }
 
 func TestCatalog_DeleteCollectionVersion(t *testing.T) {
@@ -379,9 +401,6 @@ func TestCatalog_DeleteCollectionVersion(t *testing.T) {
 	assert.NoError(t, err)
 	// Verify the version file was updated correctly
 	updatedFile, err := mockS3Store.GetVersionFile(
-		tenantID,
-		collectionID,
-		int64(currentVersion),
 		existingVersionFileName,
 	)
 	assert.NoError(t, err)
@@ -513,9 +532,6 @@ func TestCatalog_MarkVersionForDeletion(t *testing.T) {
 	existingVersionFileName, err = catalog.GetVersionFileNamesForCollection(context.Background(), tenantID, collectionID)
 	assert.NoError(t, err)
 	updatedFile, err := mockS3Store.GetVersionFile(
-		tenantID,
-		collectionID,
-		int64(currentVersion),
 		existingVersionFileName,
 	)
 	assert.NoError(t, err)
@@ -751,4 +767,276 @@ func TestCatalog_ListCollectionsToGc_NilParameters(t *testing.T) {
 	// Verify mock expectations
 	mockMetaDomain.AssertExpectations(t)
 	mockCollectionDb.AssertExpectations(t)
+}
+
+func TestUpdateCollectionConfiguration(t *testing.T) {
+	// Create a new catalog instance
+	catalog := NewTableCatalog(nil, nil, nil, false)
+
+	tests := []struct {
+		name                string
+		existingConfigJson  *string
+		updateConfigJson    *string
+		collectionMetadata  []*dbmodel.CollectionMetadata
+		expectedError       bool
+		expectedHnswConfig  *model.HnswConfiguration
+		expectedSpannConfig *model.SpannConfiguration
+	}{
+		{
+			name: "Update HNSW configuration",
+			existingConfigJson: strPtr(`{
+				"vector_index": {
+					"type": "hnsw",
+					"hnsw": {
+						"space": "l2",
+						"ef_construction": 100,
+						"ef_search": 100,
+						"max_neighbors": 16,
+						"num_threads": 16,
+						"resize_factor": 1.2,
+						"batch_size": 100,
+						"sync_threshold": 1000
+					}
+				}
+			}`),
+			updateConfigJson: strPtr(`{
+				"vector_index": {
+					"type": "hnsw",
+					"hnsw": {
+						"ef_search": 20,
+						"num_threads": 4
+					}
+				}
+			}`),
+			expectedHnswConfig: &model.HnswConfiguration{
+				Space:          "l2",
+				EfConstruction: 100,
+				EfSearch:       20,
+				MaxNeighbors:   16,
+				NumThreads:     4,
+				ResizeFactor:   1.2,
+				BatchSize:      100,
+				SyncThreshold:  1000,
+			},
+		},
+		{
+			name:               "Update from legacy metadata",
+			existingConfigJson: nil,
+			collectionMetadata: []*dbmodel.CollectionMetadata{
+				{
+					Key:      strPtr("hnsw:ef"),
+					IntValue: int64Ptr(50),
+				},
+				{
+					Key:      strPtr("hnsw:num_threads"),
+					IntValue: int64Ptr(8),
+				},
+				{
+					Key:        strPtr("hnsw:resize_factor"),
+					FloatValue: float64Ptr(1.2),
+				},
+				{
+					Key:      strPtr("hnsw:batch_size"),
+					IntValue: int64Ptr(100),
+				},
+				{
+					Key:      strPtr("hnsw:sync_threshold"),
+					IntValue: int64Ptr(1000),
+				},
+			},
+			updateConfigJson: strPtr(`{
+				"vector_index": {
+					"type": "hnsw",
+					"hnsw": {
+						"ef_search": 20
+					}
+				}
+			}`),
+			expectedHnswConfig: &model.HnswConfiguration{
+				Space:          "l2",
+				EfConstruction: 100,
+				EfSearch:       20,
+				MaxNeighbors:   16,
+				NumThreads:     8,
+				ResizeFactor:   1.2,
+				BatchSize:      100,
+				SyncThreshold:  1000,
+			},
+		},
+		{
+			name: "Update SPANN configuration",
+			existingConfigJson: strPtr(`{
+				"vector_index": {
+					"type": "spann",
+					"spann": {
+						"search_nprobe": 10,
+						"write_nprobe": 5,
+						"space": "l2",
+						"ef_construction": 100,
+						"ef_search": 50,
+						"max_neighbors": 16
+					}
+				}
+			}`),
+			updateConfigJson: strPtr(`{
+				"vector_index": {
+					"type": "spann",
+					"spann": {
+						"ef_search": 75,
+						"search_nprobe": 15
+					}
+				}
+			}`),
+			expectedSpannConfig: &model.SpannConfiguration{
+				SearchNprobe:   15, // Updated
+				WriteNprobe:    5,
+				Space:          "l2",
+				EfConstruction: 100,
+				EfSearch:       75, // Updated
+				MaxNeighbors:   16,
+			},
+		},
+		{
+			name: "Convert from HNSW to SPANN",
+			existingConfigJson: strPtr(`{
+				"vector_index": {
+					"type": "hnsw",
+					"hnsw": {
+						"space": "l2",
+						"ef_construction": 100,
+						"ef_search": 100,
+						"max_neighbors": 16,
+						"num_threads": 16,
+						"resize_factor": 1.2,
+						"batch_size": 100,
+						"sync_threshold": 1000
+					}
+				}
+			}`),
+			updateConfigJson: strPtr(`{
+				"vector_index": {
+					"type": "spann",
+					"spann": {
+						"search_nprobe": 10,
+						"write_nprobe": 5,
+						"space": "l2",
+						"ef_construction": 100,
+						"ef_search": 50,
+						"max_neighbors": 16
+					}
+				}
+			}`),
+			// Expect the original HNSW config because type change is ignored
+			expectedHnswConfig: &model.HnswConfiguration{
+				Space:          "l2",
+				EfConstruction: 100,
+				EfSearch:       100,
+				MaxNeighbors:   16,
+				NumThreads:     16,
+				ResizeFactor:   1.2,
+				BatchSize:      100,
+				SyncThreshold:  1000,
+			},
+		},
+		{
+			name: "Convert from SPANN to HNSW",
+			existingConfigJson: strPtr(`{
+				"vector_index": {
+					"type": "spann",
+					"spann": {
+						"search_nprobe": 10,
+						"write_nprobe": 5,
+						"space": "l2",
+						"ef_construction": 100,
+						"ef_search": 50,
+						"max_neighbors": 16
+					}
+				}
+			}`),
+			updateConfigJson: strPtr(`{
+				"vector_index": {
+					"type": "hnsw",
+					"hnsw": {
+						"ef_search": 20,
+						"num_threads": 4
+					}
+				}
+			}`),
+			// Expect the original SPANN config because type change is ignored
+			expectedSpannConfig: &model.SpannConfiguration{
+				SearchNprobe:   10,
+				WriteNprobe:    5,
+				Space:          "l2",
+				EfConstruction: 100,
+				EfSearch:       50,
+				MaxNeighbors:   16, // Corresponds to 'max_neighbors' in the input JSON
+			},
+		},
+		{
+			name: "Invalid update configuration JSON",
+			existingConfigJson: strPtr(`{
+				"vector_index": {
+					"type": "hnsw",
+					"hnsw": {
+						"space": "l2",
+						"ef_construction": 100,
+						"ef_search": 100,
+						"max_neighbors": 16,
+						"num_threads": 16,
+						"resize_factor": 1.2,
+						"batch_size": 100,
+						"sync_threshold": 1000
+					}
+				}
+			}`),
+			updateConfigJson: strPtr(`{invalid json`),
+			expectedError:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := catalog.updateCollectionConfiguration(
+				tt.existingConfigJson,
+				tt.updateConfigJson,
+				tt.collectionMetadata,
+			)
+
+			if tt.expectedError {
+				assert.Error(t, err)
+				return
+			}
+
+			assert.NoError(t, err)
+			assert.NotNil(t, result)
+
+			// Parse the result to verify the configuration
+			var config model.InternalCollectionConfiguration
+			err = json.Unmarshal([]byte(*result), &config)
+			assert.NoError(t, err)
+
+			if tt.expectedHnswConfig != nil {
+				assert.Equal(t, "hnsw", config.VectorIndex.Type)
+				assert.Equal(t, tt.expectedHnswConfig, config.VectorIndex.Hnsw)
+			}
+
+			if tt.expectedSpannConfig != nil {
+				assert.Equal(t, "spann", config.VectorIndex.Type)
+				assert.Equal(t, tt.expectedSpannConfig, config.VectorIndex.Spann)
+			}
+		})
+	}
+}
+
+// Helper functions
+func strPtr(s string) *string {
+	return &s
+}
+
+func int64Ptr(i int64) *int64 {
+	return &i
+}
+
+func float64Ptr(f float64) *float64 {
+	return &f
 }

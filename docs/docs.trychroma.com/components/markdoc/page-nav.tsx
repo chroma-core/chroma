@@ -3,15 +3,16 @@
 import React from "react";
 import Link from "next/link";
 import { ArrowLeft, ArrowRight } from "lucide-react";
+import { slugToPath } from "@/lib/content";
 
 const PageNav: React.FC<{
-  path: string;
+  slug: string;
   name: string;
   type: "prev" | "next";
-}> = ({ path, name, type }) => {
+}> = ({ slug, name, type }) => {
   return (
     <Link
-      href={path}
+      href={slugToPath(slug)}
       onClick={() => {
         sessionStorage.removeItem("sidebarScrollPosition");
       }}

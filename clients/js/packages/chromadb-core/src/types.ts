@@ -1,5 +1,7 @@
 import { AuthOptions } from "./auth";
+import { CreateCollectionConfiguration } from "./CollectionConfiguration";
 import { IEmbeddingFunction } from "./embeddings/IEmbeddingFunction";
+import { Api } from "./generated";
 
 export enum IncludeEnum {
   Documents = "documents",
@@ -32,8 +34,8 @@ type WhereOperator = "$gt" | "$gte" | "$lt" | "$lte" | "$ne" | "$eq";
 
 type OperatorExpression = {
   [key in WhereOperator | InclusionOperator | LogicalOperator]?:
-  | LiteralValue
-  | ListLiteralValue;
+    | LiteralValue
+    | ListLiteralValue;
 };
 
 type BaseWhere = {
@@ -50,9 +52,9 @@ type WhereDocumentOperator = "$contains" | "$not_contains" | LogicalOperator;
 
 export type WhereDocument = {
   [key in WhereDocumentOperator]?:
-  | LiteralValue
-  | LiteralNumber
-  | WhereDocument[];
+    | LiteralValue
+    | LiteralNumber
+    | WhereDocument[];
 };
 
 export type MultiGetResponse = {
@@ -92,6 +94,7 @@ export interface CollectionParams {
   id: string;
   metadata: CollectionMetadata | undefined;
   embeddingFunction: IEmbeddingFunction;
+  configuration: Api.CollectionConfiguration | undefined;
 }
 
 export type CollectionMetadata = Record<string, boolean | number | string>;
@@ -138,13 +141,14 @@ export type CreateCollectionParams = {
   name: string;
   metadata?: CollectionMetadata;
   embeddingFunction?: IEmbeddingFunction;
+  configuration?: CreateCollectionConfiguration;
 };
 
 export type GetOrCreateCollectionParams = CreateCollectionParams;
 
 export type GetCollectionParams = {
   name: string;
-  embeddingFunction: IEmbeddingFunction;
+  embeddingFunction?: IEmbeddingFunction;
 };
 
 export type DeleteCollectionParams = {
@@ -208,6 +212,10 @@ export type UpdateRecordsParams =
 export type ModifyCollectionParams = {
   name?: string;
   metadata?: CollectionMetadata;
+};
+
+export type ForkCollectionParams = {
+  newName: string;
 };
 
 export type BaseQueryParams = {

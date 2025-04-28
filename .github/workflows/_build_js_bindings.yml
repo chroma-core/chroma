@@ -24,7 +24,7 @@ jobs:
           version: 9
           run_install: false
       - name: Setup node
-        uses: actions/setup-node@v4
+        uses: useblacksmith/setup-node@v5
         with:
           node-version: 20
           cache: pnpm
@@ -72,7 +72,7 @@ jobs:
           name: bindings-x86_64-apple-darwin
           path: rust/js_bindings/chromadb-js-bindings.darwin-x64.node
           if-no-files-found: error
-          
+
   build-windows:
     name: Build Windows bindings
     runs-on: windows-latest
@@ -87,7 +87,7 @@ jobs:
           version: 9
           run_install: false
       - name: Setup node
-        uses: actions/setup-node@v4
+        uses: useblacksmith/setup-node@v5
         with:
           node-version: 20
           cache: pnpm
@@ -98,7 +98,7 @@ jobs:
           toolchain: stable
           override: true
       - name: Install Protoc
-        uses: arduino/setup-protoc@v2
+        uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Add target
@@ -125,10 +125,10 @@ jobs:
           name: bindings-x86_64-pc-windows-msvc
           path: rust/js_bindings/chromadb-js-bindings.win32-x64-msvc.node
           if-no-files-found: error
-          
+
   build-linux:
     name: Build Linux bindings
-    runs-on: depot-ubuntu-22.04-16
+    runs-on: blacksmith-16vcpu-ubuntu-2204
     defaults:
       run:
         working-directory: rust/js_bindings
@@ -140,7 +140,7 @@ jobs:
           version: 9
           run_install: false
       - name: Setup node
-        uses: actions/setup-node@v4
+        uses: useblacksmith/setup-node@v5
         with:
           node-version: 20
           cache: pnpm
@@ -151,7 +151,7 @@ jobs:
           toolchain: stable
           override: true
       - name: Install Protoc
-        uses: arduino/setup-protoc@v2
+        uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Add targets
@@ -221,7 +221,7 @@ jobs:
           version: 9
           run_install: false
       - name: Setup node
-        uses: actions/setup-node@v4
+        uses: useblacksmith/setup-node@v5
         with:
           node-version: 20
           cache: pnpm
@@ -241,7 +241,7 @@ jobs:
         run: |
           set -e
           npm config set provenance true
-          echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc          
+          echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc
           for dir in npm/*; do
             if [ -d "$dir" ]; then
               cd "$dir" && npm publish --access public && cd -
