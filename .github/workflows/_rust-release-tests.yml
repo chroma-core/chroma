@@ -5,10 +5,7 @@ on:
 
 jobs:
   test:
-    strategy:
-      matrix:
-        platform: [blacksmith-4vcpu-ubuntu-2204]
-    runs-on: ${{ matrix.platform }}
+    runs-on: blacksmith-4vcpu-ubuntu-2204
     env:
       CARGO_TERM_COLOR: always
       RUST_BACKTRACE: 1
@@ -33,10 +30,7 @@ jobs:
       #       files: target/nextest/ci/junit.xml
       #       logs: true
   test-long:
-    strategy:
-      matrix:
-        platform: [blacksmith-4vcpu-ubuntu-2204]
-    runs-on: ${{ matrix.platform }}
+    runs-on: blacksmith-4vcpu-ubuntu-2204
     env:
       CARGO_TERM_COLOR: always
       RUST_BACKTRACE: 1
@@ -62,10 +56,7 @@ jobs:
       #       logs: true
 
   test-integration:
-    strategy:
-      matrix:
-        platform: [blacksmith-16vcpu-ubuntu-2204]
-    runs-on: ${{ matrix.platform }}
+    runs-on: blacksmith-16vcpu-ubuntu-2204
     # OIDC token auth for AWS
     permissions:
       contents: read
