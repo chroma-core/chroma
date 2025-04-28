@@ -26,6 +26,12 @@ pub enum WriteAction {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "event_name")]
 pub enum MeterEvent {
+    CollectionFork {
+        tenant: String,
+        database: String,
+        collection_id: Uuid,
+        latest_collection_logical_size_bytes: u64,
+    },
     CollectionRead {
         tenant: String,
         database: String,

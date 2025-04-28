@@ -549,6 +549,8 @@ impl ServiceBasedFrontend {
     pub async fn retryable_fork(
         &mut self,
         ForkCollectionRequest {
+            tenant_id,
+            database_name,
             source_collection_id,
             target_collection_name,
             ..
@@ -570,11 +572,24 @@ impl ServiceBasedFrontend {
             )
             .await?;
         let collection = collection_and_segments.collection.clone();
+        let latest_collection_logical_size_bytes = collection_and_segments
+            .collection
+            .size_bytes_post_compaction;
 
         // Update the cache.
         self.collections_with_segments_provider
             .set_collection_with_segments(collection_and_segments)
             .await;
+
+        // TODO: Submit event after the response is sent
+        MeterEvent::CollectionFork {
+            tenant: tenant_id,
+            database: database_name,
+            collection_id: source_collection_id.0,
+            latest_collection_logical_size_bytes,
+        }
+        .submit()
+        .await;
 
         Ok(collection)
     }
