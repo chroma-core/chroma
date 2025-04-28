@@ -644,12 +644,12 @@ impl SqliteMetadataReader {
 
         if let Some(whr) = &where_clause {
             filter_limit_query
-                .left_join(
+                .inner_join(
                     EmbeddingMetadata::Table,
                     Expr::col((Embeddings::Table, Embeddings::Id))
                         .equals((EmbeddingMetadata::Table, EmbeddingMetadata::Id)),
                 )
-                .left_join(
+                .inner_join(
                     EmbeddingFulltextSearch::Table,
                     Expr::col((Embeddings::Table, Embeddings::Id)).equals((
                         EmbeddingFulltextSearch::Table,
@@ -683,7 +683,7 @@ impl SqliteMetadataReader {
 
         if document || metadata {
             projection_query
-                .left_join(
+                .inner_join(
                     EmbeddingMetadata::Table,
                     Expr::col((alias.clone(), Embeddings::Id))
                         .equals((EmbeddingMetadata::Table, EmbeddingMetadata::Id)),
