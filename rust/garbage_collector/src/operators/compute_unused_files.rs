@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use chroma_blockstore::RootManager;
+use chroma_blockstore::{arrow::provider::RootManagerError, RootManager};
 use chroma_cache::nop::NopCache;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::Storage;
@@ -145,14 +145,14 @@ impl ComputeUnusedFilesOperator {
         for si_id in si_ids {
             let uuid = Uuid::parse_str(&si_id).map_err(|e| {
                 tracing::error!(error = %e, "Failed to parse UUID");
-                ComputeUnusedFilesError::ParseError(si_id.clone(), e.to_string())
+                ComputeUnusedFilesError::InvalidUuid(e, si_id.clone())
             })?;
 
             let block_ids = match self.root_manager.get_all_block_ids(&uuid).await {
                 Ok(ids) => ids,
                 Err(e) => {
                     tracing::error!(error = %e, "Failed to get block IDs");
-                    return Err(ComputeUnusedFilesError::ParseError(si_id, e.to_string()));
+                    return Err(ComputeUnusedFilesError::FailedToFetchBlockIDs(e));
                 }
             };
             tracing::debug!(
@@ -193,8 +193,10 @@ pub struct ComputeUnusedFilesOutput {
 
 #[derive(Error, Debug)]
 pub enum ComputeUnusedFilesError {
-    #[error("Error parsing sparse index file: {0}")]
-    ParseError(String, String),
+    #[error("Error parsing UUID: {0} from {1}")]
+    InvalidUuid(uuid::Error, String),
+    #[error("Failed to fetch block IDs: {0}")]
+    FailedToFetchBlockIDs(RootManagerError),
     #[error("Version file has missing content")]
     VersionFileMissingContent(i64),
     #[error("Version history is missing")]
