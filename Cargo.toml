@@ -34,7 +34,7 @@ members = [
 [workspace.dependencies]
 arrow = "52.2.0"
 async-trait = "0.1"
-axum = { version = "0.8", features = ["macros"] }
+axum = { version = "0.8", features = ["macros", "http1", "http2"] }
 bytes = "1.10"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }

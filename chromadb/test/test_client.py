@@ -8,6 +8,7 @@ import chromadb.server.fastapi
 import pytest
 import tempfile
 import os
+from chromadb.api.async_client import AsyncClient
 
 
 @pytest.fixture
@@ -110,3 +111,53 @@ def test_http_client_with_inconsistent_port_settings(
             str(e)
             == "Chroma server http port provided in settings[8001] is different to the one provided in HttpClient: [8002]"
         )
+
+
+@pytest.mark.parametrize(
+    "client_fixture",
+    [
+        pytest.param("ephemeral_api", id="ephemeral"),
+        pytest.param("persistent_api", id="persistent"),
+        pytest.param(
+            "http_api",
+            id="http",
+            marks=pytest.mark.skipif(
+                os.environ.get("CHROMA_SERVER_HTTP_PORT") is None,
+                reason="HTTP tests not applicable without a running Chroma server",
+            ),
+        ),
+    ],
+)
+def test_client_close(
+    client_fixture: str,
+    request: pytest.FixtureRequest,
+    http_api_factory: HttpAPIFactory,
+) -> None:
+    """Test that operations fail after a client is closed."""
+    client = request.getfixturevalue(client_fixture)
+
+    # Check if this is an async client
+    is_async = hasattr(client, "_admin_client") and asyncio.iscoroutinefunction(
+        client.heartbeat
+    )
+
+    if is_async:
+
+        async def _test_async_client() -> None:
+            client_async = cast(AsyncClient, client)
+            await client_async.heartbeat()
+            await client_async.close()
+            # Should fail after close
+            with pytest.raises(RuntimeError):
+                await client_async.heartbeat()
+            await client_async.close()
+
+        # Run the async test
+        asyncio.run(_test_async_client())
+    else:
+        client.heartbeat()
+        client.close()
+        # Should fail after close
+        with pytest.raises(RuntimeError):
+            client.heartbeat()
+        client.close()

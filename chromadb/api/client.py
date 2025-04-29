@@ -406,6 +406,22 @@ class Client(SharedSystemClient, ClientAPI):
     def get_max_batch_size(self) -> int:
         return self._server.get_max_batch_size()
 
+    @override
+    def close(self) -> None:
+        # Close methods can be called multiple times, so we need to handle the case
+        # where one of these components is already stopped
+        try:
+            self._server.close()
+        except RuntimeError:
+            # Server may already be closed
+            pass
+
+        try:
+            self._admin_client.close()
+        except RuntimeError:
+            # Admin client may already be closed
+            pass
+
     # endregion
 
     # region ClientAPI Methods
@@ -491,3 +507,11 @@ class AdminClient(SharedSystemClient, AdminAPI):
         SharedSystemClient._populate_data_from_system(system)
         instance = cls(settings=system.settings)
         return instance
+
+    @override
+    def close(self) -> None:
+        try:
+            self._server.close()
+        except RuntimeError:
+            # Server may already be closed
+            pass

@@ -25,7 +25,7 @@ dependencies = [
   'tenacity>=8.2.3',
   'PyYAML>=6.0.0',
   'orjson>=3.9.12',
-  'httpx>=0.27.0',
+  'httpx[http2]>=0.27.0',
   'jsonschema>=4.19.0',
 ]
 

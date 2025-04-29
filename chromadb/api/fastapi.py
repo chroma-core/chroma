@@ -6,7 +6,6 @@ from uuid import UUID
 import httpx
 import urllib.parse
 from overrides import override
-
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
     UpdateCollectionConfiguration,
@@ -17,7 +16,6 @@ from chromadb import __version__
 from chromadb.api.base_http_client import BaseHTTPClient
 from chromadb.types import Database, Tenant, Collection as CollectionModel
 from chromadb.api import ServerAPI
-
 from chromadb.api.types import (
     Documents,
     Embeddings,
@@ -57,11 +55,9 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         super().__init__(system)
         system.settings.require("chroma_server_host")
         system.settings.require("chroma_server_http_port")
-
         self._opentelemetry_client = self.require(OpenTelemetryClient)
         self._product_telemetry_client = self.require(ProductTelemetryClient)
         self._settings = system.settings
-
         self._api_url = FastAPI.resolve_url(
             chroma_server_host=str(system.settings.chroma_server_host),
             chroma_server_http_port=system.settings.chroma_server_http_port,
@@ -97,7 +93,6 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         if "json" in kwargs:
             data = orjson.dumps(kwargs.pop("json"))
             kwargs["content"] = data
-
         # Unlike requests, httpx does not automatically escape the path
         escaped_path = urllib.parse.quote(path, safe="/", encoding=None, errors=None)
         url = self._api_url + escaped_path
@@ -110,6 +105,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     @override
     def heartbeat(self) -> int:
         """Returns the current server time in nanoseconds to check if the server is alive"""
+        self.raise_if_stopped()
         resp_json = self._make_request("get", "/heartbeat")
         return int(resp_json["nanosecond heartbeat"])
 
@@ -122,6 +118,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         tenant: str = DEFAULT_TENANT,
     ) -> None:
         """Creates a database"""
+        self.raise_if_stopped()
         self._make_request(
             "post",
             f"/tenants/{tenant}/databases",
@@ -153,6 +150,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         tenant: str = DEFAULT_TENANT,
     ) -> None:
         """Deletes a database"""
+        self.raise_if_stopped()
         self._make_request(
             "delete",
             f"/tenants/{tenant}/databases/{name}",
@@ -167,6 +165,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         tenant: str = DEFAULT_TENANT,
     ) -> Sequence[Database]:
         """Returns a list of all databases"""
+        self.raise_if_stopped()
         json_databases = self._make_request(
             "get",
             f"/tenants/{tenant}/databases",
@@ -186,17 +185,20 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     @trace_method("FastAPI.create_tenant", OpenTelemetryGranularity.OPERATION)
     @override
     def create_tenant(self, name: str) -> None:
+        self.raise_if_stopped()
         self._make_request("post", "/tenants", json={"name": name})
 
     @trace_method("FastAPI.get_tenant", OpenTelemetryGranularity.OPERATION)
     @override
     def get_tenant(self, name: str) -> Tenant:
+        self.raise_if_stopped()
         resp_json = self._make_request("get", "/tenants/" + name)
         return Tenant(name=resp_json["name"])
 
     @trace_method("FastAPI.get_user_identity", OpenTelemetryGranularity.OPERATION)
     @override
     def get_user_identity(self) -> UserIdentity:
+        self.raise_if_stopped()
         return UserIdentity(**self._make_request("get", "/auth/identity"))
 
     @trace_method("FastAPI.list_collections", OpenTelemetryGranularity.OPERATION)
@@ -209,6 +211,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> Sequence[CollectionModel]:
         """Returns a list of all collections"""
+        self.raise_if_stopped()
         json_collections = self._make_request(
             "get",
             f"/tenants/{tenant}/databases/{database}/collections",
@@ -232,6 +235,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
     ) -> int:
         """Returns a count of collections"""
+        self.raise_if_stopped()
         resp_json = self._make_request(
             "get",
             f"/tenants/{tenant}/databases/{database}/collections_count",
@@ -250,6 +254,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
         """Creates a collection"""
+        self.raise_if_stopped()
         resp_json = self._make_request(
             "post",
             f"/tenants/{tenant}/databases/{database}/collections",
@@ -275,6 +280,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
         """Returns a collection"""
+        self.raise_if_stopped()
         resp_json = self._make_request(
             "get",
             f"/tenants/{tenant}/databases/{database}/collections/{name}",
@@ -295,6 +301,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
+        self.raise_if_stopped()
         return self.create_collection(
             name=name,
             metadata=metadata,
@@ -316,6 +323,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> None:
         """Updates a collection"""
+        self.raise_if_stopped()
         self._make_request(
             "put",
             f"/tenants/{tenant}/databases/{database}/collections/{id}",
@@ -340,6 +348,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
         """Forks a collection"""
+        self.raise_if_stopped()
         resp_json = self._make_request(
             "post",
             f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/fork",
@@ -357,6 +366,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> None:
         """Deletes a collection"""
+        self.raise_if_stopped()
         self._make_request(
             "delete",
             f"/tenants/{tenant}/databases/{database}/collections/{name}",
@@ -371,6 +381,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> int:
         """Returns the number of embeddings in the database"""
+        self.raise_if_stopped()
         resp_json = self._make_request(
             "get",
             f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/count",
@@ -386,6 +397,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> GetResult:
+        self.raise_if_stopped()
         return cast(
             GetResult,
             self._get(
@@ -449,6 +461,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> None:
         """Deletes embeddings from the database"""
+        self.raise_if_stopped()
         self._make_request(
             "post",
             f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/delete",
@@ -475,6 +488,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         """
         Submits a batch of embeddings to the database
         """
+        self.raise_if_stopped()
         self._make_request(
             "post",
             url,
@@ -504,6 +518,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         Adds a batch of embeddings to the database
         - pass in column oriented data lists
         """
+        self.raise_if_stopped()
         batch = (
             ids,
             convert_np_embeddings_to_list(embeddings),
@@ -535,6 +550,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         Updates a batch of embeddings in the database
         - pass in column oriented data lists
         """
+        self.raise_if_stopped()
         batch = (
             ids,
             convert_np_embeddings_to_list(embeddings)
@@ -568,6 +584,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         Upserts a batch of embeddings in the database
         - pass in column oriented data lists
         """
+        self.raise_if_stopped()
         batch = (
             ids,
             convert_np_embeddings_to_list(embeddings),
@@ -599,6 +616,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         filtered_include = [i for i in include if i != "data"]
 
         """Gets the nearest neighbors of a single embedding"""
+        self.raise_if_stopped()
         resp_json = self._make_request(
             "post",
             f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/query",
@@ -628,6 +646,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     @override
     def reset(self) -> bool:
         """Resets the database"""
+        self.raise_if_stopped()
         resp_json = self._make_request("post", "/reset")
         return cast(bool, resp_json)
 
@@ -635,18 +654,28 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     @override
     def get_version(self) -> str:
         """Returns the version of the server"""
+        self.raise_if_stopped()
         resp_json = self._make_request("get", "/version")
         return cast(str, resp_json)
 
     @override
     def get_settings(self) -> Settings:
         """Returns the settings of the client"""
+        self.raise_if_stopped()
         return self._settings
 
     @trace_method("FastAPI.get_max_batch_size", OpenTelemetryGranularity.OPERATION)
     @override
     def get_max_batch_size(self) -> int:
+        self.raise_if_stopped()
         if self._max_batch_size == -1:
             resp_json = self._make_request("get", "/pre-flight-checks")
             self._max_batch_size = cast(int, resp_json["max_batch_size"])
         return self._max_batch_size
+
+    @trace_method("FastAPI.close", OpenTelemetryGranularity.OPERATION)
+    @override
+    def close(self) -> None:
+        self.raise_if_stopped()
+        self._session.close()
+        super().stop()

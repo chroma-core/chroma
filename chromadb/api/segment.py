@@ -413,7 +413,9 @@ class SegmentAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
-        raise NotImplementedError("Collection forking is not implemented for SegmentAPI")
+        raise NotImplementedError(
+            "Collection forking is not implemented for SegmentAPI"
+        )
 
     @trace_method("SegmentAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
     @override
@@ -882,6 +884,12 @@ class SegmentAPI(ServerAPI):
     @override
     def get_max_batch_size(self) -> int:
         return self._producer.max_batch_size
+
+    @override
+    def close(self) -> None:
+        """Stop the SegmentAPI component."""
+        # This is just to implement the base class method, segment isn't used anymore
+        super().stop()
 
     # TODO: This could potentially cause race conditions in a distributed version of the
     # system, since the cache is only local.
