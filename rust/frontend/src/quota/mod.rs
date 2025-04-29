@@ -82,6 +82,7 @@ pub struct QuotaPayload<'other> {
     pub offset: Option<u32>,
     pub n_results: Option<u32>,
     pub query_embeddings: Option<&'other [Vec<f32>]>,
+    pub query_ids: Option<&'other [String]>,
     pub collection_uuid: Option<CollectionUuid>,
 }
 
@@ -107,6 +108,7 @@ impl<'other> QuotaPayload<'other> {
             offset: None,
             n_results: None,
             query_embeddings: None,
+            query_ids: None,
             collection_uuid: None,
         }
     }
@@ -203,6 +205,11 @@ impl<'other> QuotaPayload<'other> {
         self
     }
 
+    pub fn with_query_ids(mut self, query_ids: &'other [String]) -> Self {
+        self.query_ids = Some(query_ids);
+        self
+    }
+
     pub fn with_collection_uuid(mut self, collection_uuid: CollectionUuid) -> Self {
         self.collection_uuid = Some(collection_uuid);
         self
@@ -232,6 +239,7 @@ pub enum UsageType {
     CollectionSizeRecords, // Number of records in the collection
     NumCollections,        // Total number of collections for a tenant
     NumDatabases,          // Total number of databases for a tenant
+    NumQueryIDs,           // Number of IDs to filter by in a query
 }
 
 impl fmt::Display for UsageType {
@@ -260,6 +268,7 @@ impl fmt::Display for UsageType {
             UsageType::CollectionSizeRecords => write!(f, "Collection size (records)"),
             UsageType::NumCollections => write!(f, "Number of collections"),
             UsageType::NumDatabases => write!(f, "Number of databases"),
+            UsageType::NumQueryIDs => write!(f, "Number of IDs to filter by in a query"),
         }
     }
 }
@@ -288,6 +297,7 @@ impl TryFrom<&str> for UsageType {
             "collection_size_records" => Ok(UsageType::CollectionSizeRecords),
             "num_collections" => Ok(UsageType::NumCollections),
             "num_databases" => Ok(UsageType::NumDatabases),
+            "num_query_ids" => Ok(UsageType::NumQueryIDs),
             _ => Err(format!("Invalid UsageType: {}", value)),
         }
     }
@@ -315,6 +325,7 @@ lazy_static::lazy_static! {
         m.insert(UsageType::CollectionSizeRecords, 1_000_000);
         m.insert(UsageType::NumCollections, 1_000_000);
         m.insert(UsageType::NumDatabases, 10);
+        m.insert(UsageType::NumQueryIDs, 1000);
         m
     };
 }
