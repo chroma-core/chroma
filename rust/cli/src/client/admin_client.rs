@@ -1,6 +1,7 @@
 use crate::client::utils::{send_request, EmptyResponse};
 use crate::utils::{get_address_book, Profile};
 use axum::http::{HeaderMap, HeaderValue, Method};
+use serde::Deserialize;
 use chroma_frontend::server::CreateDatabasePayload;
 use chroma_types::{Database, GetDatabaseResponse, GetUserIdentityResponse, ListDatabasesResponse};
 use thiserror::Error;
@@ -21,6 +22,12 @@ pub enum AdminClientError {
     Healthcheck,
     #[error("DB {0} not found")]
     DbNotFound(String),
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct HealthcheckResponse {
+    #[allow(dead_code)]
+    is_executor_ready: bool,
 }
 
 #[derive(Default, Debug, Clone)]
@@ -151,7 +158,7 @@ impl AdminClient {
     pub async fn healthcheck(&self) -> Result<(), AdminClientError> {
         let route = "/api/v2/healthcheck";
         let _response =
-            send_request::<(), String>(&self.host, Method::GET, route, self.headers()?, None)
+            send_request::<(), HealthcheckResponse>(&self.host, Method::GET, route, self.headers()?, None)
                 .await
                 .map_err(|_| AdminClientError::Healthcheck)?;
         Ok(())
