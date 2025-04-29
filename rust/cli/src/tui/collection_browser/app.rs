@@ -1,10 +1,10 @@
-use std::collections::BTreeMap;
 use crate::client::collection::{Collection, CollectionAPIError};
 use crate::tui::collection_browser::query_editor::QueryEditor;
 use chroma_types::{GetResponse, IncludeList, Metadata};
 use ratatui::crossterm::event;
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::widgets::TableState;
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::sync::Arc;
 use tokio::spawn;
@@ -189,14 +189,13 @@ impl App {
                     Screen::SearchEditor => self.handle_query_editor_events(key)?,
                     Screen::SearchResults => self.handle_search_result_events(key)?,
                 };
-                
-            },
+            }
             // Handle paste events directly
             Event::Paste(text) => {
                 if self.current_screen == Screen::SearchEditor {
                     self.query_editor.handle_paste(&text);
                 }
-            },
+            }
             // Ignore other events
             _ => {}
         }
@@ -371,7 +370,8 @@ impl App {
                     Some(100),
                     None,
                 )
-                .await.map_err(|_| CollectionAPIError::Get(collection.name.clone()));
+                .await
+                .map_err(|_| CollectionAPIError::Get(collection.name.clone()));
 
             let mut app = app_clone.lock().await;
             match response {
@@ -430,13 +430,13 @@ impl App {
             let (row, column) = cell;
             return self.records.get(row).map(|record| (record, column));
         }
-        
+
         let search_cell = self.query_table_state.selected_cell();
         if let Some(cell) = search_cell {
             let (row, column) = cell;
             return self.query_records.get(row).map(|record| (record, column));
         }
-        
+
         None
     }
 

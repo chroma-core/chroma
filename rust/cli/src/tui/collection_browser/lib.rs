@@ -1,17 +1,17 @@
-use ratatui::Terminal;
+use crate::client::collection::Collection;
+use crate::tui::collection_browser::app::{App, Screen};
+use crate::tui::collection_browser::ui::UI;
 use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::terminal::{
-    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use ratatui::crossterm::{event, execute};
+use ratatui::Terminal;
 use std::error::Error;
 use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
-use crate::client::collection::Collection;
-use crate::tui::collection_browser::app::{App, Screen};
-use crate::tui::collection_browser::ui::UI;
 
 pub struct CollectionBrowser {
     app: Arc<Mutex<App>>,
@@ -42,7 +42,7 @@ impl CollectionBrowser {
         terminal.show_cursor()?;
         Ok(())
     }
-    
+
     pub async fn run(&mut self) -> Result<(), Box<dyn Error>> {
         let mut terminal = Self::get_terminal()?;
 
@@ -52,7 +52,7 @@ impl CollectionBrowser {
         } {
             // Default poll timeout
             let poll_timeout = Duration::from_millis(50);
-            
+
             // Only sleep if no events are waiting to be processed
             if !event::poll(Duration::ZERO)? {
                 tokio::time::sleep(Duration::from_millis(25)).await;

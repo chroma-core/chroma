@@ -31,7 +31,7 @@ where
     if let Some(b) = body {
         request_builder = request_builder.json(b);
     }
-    
+
     let response = request_builder.send().await?.error_for_status()?;
     let parsed_response = response.json::<R>().await?;
     Ok(parsed_response)

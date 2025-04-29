@@ -4,9 +4,9 @@ use crate::client::utils::send_request;
 use chroma_frontend::server::GetRequestPayload;
 use chroma_types::{CountResponse, GetResponse, IncludeList, RawWhereFields};
 use reqwest::Method;
+use serde_json::{json, Map, Value};
 use std::error::Error;
 use std::ops::Deref;
-use serde_json::{json, Map, Value};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -80,7 +80,7 @@ impl Collection {
         if let Some(offset) = offset {
             payload.insert("offset".to_string(), json!(offset));
         }
-        
+
         let response = send_request::<Map<String, Value>, GetResponse>(
             &self.chroma_client.host,
             Method::POST,
@@ -89,9 +89,7 @@ impl Collection {
             Some(&payload),
         )
         .await
-        .map_err(|e| {
-            CollectionAPIError::Get(self.collection.name.clone())
-        })?;
+        .map_err(|e| CollectionAPIError::Get(self.collection.name.clone()))?;
         Ok(response)
     }
 
@@ -114,36 +112,40 @@ impl Collection {
 }
 
 mod tests {
-    use futures_util::TryStreamExt;
-    use serde_json::{Map, Value};
-    use chroma_types::RawWhereFields;
     use crate::client::admin_client::AdminClient;
     use crate::client::chroma_client::ChromaClient;
     use crate::tui::collection_browser::app::App;
     use crate::tui::collection_browser::query_editor::Operator;
     use crate::utils::{get_current_profile, AddressBook};
-    
+    use chroma_types::RawWhereFields;
+    use futures_util::TryStreamExt;
+    use serde_json::{Map, Value};
+
     #[tokio::test]
     async fn test_get() {
         let profile = get_current_profile().expect("Failed to get current profile");
         let admin_client = AdminClient::from_profile(AddressBook::cloud().frontend_url, &profile.1);
         let chrom_client = ChromaClient::with_admin_client(admin_client, String::from("docs"));
-        
-        let collection = chrom_client.get_collection(String::from("docs-content")).await.expect("Failed to get collection");
-        
+
+        let collection = chrom_client
+            .get_collection(String::from("docs-content"))
+            .await
+            .expect("Failed to get collection");
+
         let mut app = App::default();
         app.query_editor.operators = vec![Operator::Equal];
         app.query_editor.metadata_key = "page".to_string();
         app.query_editor.metadata_value = "add-data".to_string();
-        
+
         let x = app.query_editor.parse_metadata();
         println!("{:?}", x);
-        
-        let records = collection.get(
-            None,x.as_deref(), None, None, None, None
-        ).await.map_err(|e| {
-            println!("{}", e);
-        });
+
+        let records = collection
+            .get(None, x.as_deref(), None, None, None, None)
+            .await
+            .map_err(|e| {
+                println!("{}", e);
+            });
         println!("{:#?}", records);
     }
 }

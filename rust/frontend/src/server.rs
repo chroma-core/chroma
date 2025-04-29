@@ -1505,13 +1505,19 @@ pub struct GetRequestPayload {
 
 impl GetRequestPayload {
     pub fn new(
-        ids: Option<Vec<String>>, 
+        ids: Option<Vec<String>>,
         where_fields: RawWhereFields,
         limit: Option<u32>,
         offset: Option<u32>,
         include: IncludeList,
     ) -> Self {
-        Self {ids, where_fields, limit, offset, include}
+        Self {
+            ids,
+            where_fields,
+            limit,
+            offset,
+            include,
+        }
     }
 }
 

@@ -2,6 +2,7 @@ use crate::client::admin_client::AdminClient;
 use crate::client::chroma_client::ChromaClient;
 use crate::commands::db::get_db_name;
 use crate::commands::install::InstallError;
+use crate::tui::collection_browser::lib::CollectionBrowser;
 use crate::utils::{find_available_port, get_current_profile, AddressBook, CliError};
 use chroma_frontend::config::FrontendServerConfig;
 use chroma_frontend::frontend_service_entrypoint_with_config;
@@ -11,7 +12,6 @@ use std::sync::Arc;
 use thiserror::Error;
 use tokio::spawn;
 use tokio::task::JoinHandle;
-use crate::tui::collection_browser::lib::CollectionBrowser;
 
 #[derive(Parser, Debug, Clone)]
 pub struct BrowseArgs {
@@ -38,7 +38,7 @@ pub enum BrowseError {
     #[error("Collection {0} not found")]
     CollectionNotFound(String),
     #[error("Failed to run collection browser app")]
-    BrowserApp
+    BrowserApp,
 }
 
 fn input_db_prompt(collection_name: &str) -> String {
@@ -166,7 +166,10 @@ pub fn browse(args: BrowseArgs) -> Result<(), CliError> {
             .map_err(|_| BrowseError::CollectionNotFound(args.collection_name))?;
 
         let mut collection_browser = CollectionBrowser::new(collection);
-        collection_browser.run().await.map_err(|_| BrowseError::BrowserApp)?;
+        collection_browser
+            .run()
+            .await
+            .map_err(|_| BrowseError::BrowserApp)?;
 
         Ok::<(), CliError>(())
     })?;

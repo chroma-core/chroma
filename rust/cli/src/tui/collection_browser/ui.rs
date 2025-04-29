@@ -1,18 +1,18 @@
-use std::collections::BTreeMap;
-use ratatui::Frame;
+use crate::tui::collection_browser::app::{App, Record, Screen};
+use crate::tui::collection_browser::query_editor::{Input, QueryEditor};
+use chroma_types::Metadata;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{
     Block, Borders, Cell, HighlightSpacing, Padding, Paragraph, Row, Table, TableState, Wrap,
 };
+use ratatui::Frame;
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::iter;
 use std::time::{Duration, Instant};
 use throbber_widgets_tui::{Throbber, ThrobberState};
-use chroma_types::Metadata;
-use crate::tui::collection_browser::app::{App, Record, Screen};
-use crate::tui::collection_browser::query_editor::{Input, QueryEditor};
 
 #[derive(Debug)]
 pub struct UserInput {
@@ -106,9 +106,14 @@ impl UI {
             Screen::SearchEditor => self.render_query_editor(frame, inner_area, &app.query_editor),
             Screen::SearchResults => {
                 if !app.loading {
-                    self.render_table(frame, inner_area, &app.query_records, &mut app.query_table_state)
+                    self.render_table(
+                        frame,
+                        inner_area,
+                        &app.query_records,
+                        &mut app.query_table_state,
+                    )
                 }
-            },
+            }
         }
 
         if app.loading {
@@ -177,7 +182,7 @@ impl UI {
             Some(metadata) => {
                 let sorted: BTreeMap<_, _> = metadata.into_iter().collect();
                 Ok(serde_json::to_string(&sorted)?)
-            },
+            }
             None => Ok(String::new()),
         }
     }
@@ -290,11 +295,11 @@ impl UI {
                 Constraint::Percentage(40),
             ],
         )
-            .header(header)
-            .column_spacing(2)
-            .cell_highlight_style(selected_cell_style)
-            .highlight_symbol(Text::from(vec![bar.into()]).style(Style::default().fg(Color::LightRed)))
-            .highlight_spacing(HighlightSpacing::Always);
+        .header(header)
+        .column_spacing(2)
+        .cell_highlight_style(selected_cell_style)
+        .highlight_symbol(Text::from(vec![bar.into()]).style(Style::default().fg(Color::LightRed)))
+        .highlight_spacing(HighlightSpacing::Always);
         frame.render_stateful_widget(table, area, table_state);
     }
 
@@ -319,10 +324,7 @@ impl UI {
     }
 
     fn expand_view_instructions(&self) -> Vec<(&str, &str)> {
-        vec![
-            ("↑/↓", "Scroll"),
-            ("q/Esc", "Quit"),
-        ]
+        vec![("↑/↓", "Scroll"), ("q/Esc", "Quit")]
     }
 
     fn render_expand_view(&mut self, frame: &mut Frame, area: Rect, app: &App) {
@@ -498,5 +500,4 @@ impl UI {
             ("q/Esc", "Back"),
         ]
     }
-
 }
