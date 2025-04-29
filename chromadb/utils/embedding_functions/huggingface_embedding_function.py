@@ -122,12 +122,19 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
     The embedding model is configured in the server.
     """
 
-    def __init__(self, url: str):
+    def __init__(
+        self,
+        url: str,
+        api_key_env_var: Optional[str] = None,
+        api_key: Optional[str] = None,
+    ):
         """
         Initialize the HuggingFaceEmbeddingServer.
 
         Args:
             url (str): The URL of the HuggingFace Embedding Server.
+            api_key (Optional[str]): The API key for the HuggingFace Embedding Server.
+            api_key_env_var (str, optional): Environment variable name that contains your API key for the HuggingFace API.
         """
         try:
             import httpx
@@ -137,8 +144,18 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
             )
 
         self.url = url
+
+        self.api_key_env_var = api_key_env_var
+        if self.api_key_env_var is not None:
+            self.api_key = api_key or os.getenv(self.api_key_env_var)
+        else:
+            self.api_key = api_key
+
         self._api_url = f"{url}"
         self._session = httpx.Client()
+
+        if self.api_key is not None:
+            self._session.headers.update({"Authorization": f"Bearer {self.api_key}"})
 
     def __call__(self, input: Documents) -> Embeddings:
         """
@@ -174,13 +191,14 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
         url = config.get("url")
+        api_key_env_var = config.get("api_key_env_var")
         if url is None:
             raise ValueError("URL must be provided for HuggingFaceEmbeddingServer")
 
-        return HuggingFaceEmbeddingServer(url=url)
+        return HuggingFaceEmbeddingServer(url=url, api_key_env_var=api_key_env_var)
 
     def get_config(self) -> Dict[str, Any]:
-        return {"url": self.url}
+        return {"url": self.url, "api_key_env_var": self.api_key_env_var}
 
     def validate_config_update(
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]

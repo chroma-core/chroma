@@ -43,7 +43,7 @@ huggingface_ef = HuggingFaceEmbeddingServer(url="http://localhost:8001/embed")
 
 ```typescript
 import  {HuggingFaceEmbeddingServerFunction} from 'chromadb';
-const embedder = new HuggingFaceEmbeddingServerFunction({url:"http://localhost:8001/embed"})
+const embedder = new HuggingFaceEmbeddingServerFunction({ url: "http://localhost:8001/embed" })
 
 // use directly
 const embeddings = embedder.generate(["document1","document2"])
@@ -57,3 +57,30 @@ collection = await client.getCollection({name: "name", embeddingFunction: embedd
 {% /TabbedCodeBlock %}
 
 The embedding model is configured on the server side. Check the docker-compose file in `examples/server_side_embeddings/huggingface/docker-compose.yml` for an example of how to configure the server.
+
+## Authentication
+
+The embedding server can be configured to only allow usage with API keys. 
+You can use authentication in the chroma clients:
+
+{% TabbedCodeBlock %}
+
+{% Tab label="python" %}
+
+```python
+from chromadb.utils.embedding_functions import HuggingFaceEmbeddingServer
+huggingface_ef = HuggingFaceEmbeddingServer(url="http://localhost:8001/embed", api_key="your secret key")
+```
+
+{% /Tab %}
+
+{% Tab label="typescript" %}
+
+
+```typescript
+import  {HuggingFaceEmbeddingServerFunction} from 'chromadb';
+const embedder = new HuggingFaceEmbeddingServerFunction({ url: "http://localhost:8001/embed", apiKey: "your secret key" })
+```
+
+{% /Tab %}
+{% /TabbedCodeBlock %}
