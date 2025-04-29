@@ -321,7 +321,7 @@ impl S3Storage {
             .await?;
         let read_block_span = tracing::trace_span!("S3 read bytes to end");
         // add some additional latency to try to trigger the issue
-        tokio::time::sleep(Duration::from_millis(300)).await;
+        tokio::time::sleep(Duration::from_millis(20)).await;
         let buf = async {
             let mut buf: Vec<u8> = Vec::new();
             while let Some(res) = stream.next().await {
