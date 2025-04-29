@@ -1503,24 +1503,6 @@ pub struct GetRequestPayload {
     include: IncludeList,
 }
 
-impl GetRequestPayload {
-    pub fn new(
-        ids: Option<Vec<String>>,
-        where_fields: RawWhereFields,
-        limit: Option<u32>,
-        offset: Option<u32>,
-        include: IncludeList,
-    ) -> Self {
-        Self {
-            ids,
-            where_fields,
-            limit,
-            offset,
-            include,
-        }
-    }
-}
-
 /// Retrieves records from a collection by ID or metadata filter.
 #[utoipa::path(
     post,

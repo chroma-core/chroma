@@ -268,15 +268,15 @@ impl UI {
             .style(header_style)
             .height(1);
 
-        let rows = records.iter().enumerate().map(|(_i, record)| {
+        let rows = records.iter().map(|record| {
             let contents = [
                 record.id.clone(),
                 record
                     .document
                     .clone()
-                    .unwrap_or(String::new())
+                    .unwrap_or_default()
                     .replace("\n", "\\n"),
-                Self::metadata_inline_json(record.metadata.clone()).unwrap_or(String::new()),
+                Self::metadata_inline_json(record.metadata.clone()).unwrap_or_default(),
             ];
 
             contents

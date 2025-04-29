@@ -1,8 +1,7 @@
 use crate::client::chroma_client::ChromaClient;
 use crate::client::prelude::CollectionModel;
 use crate::client::utils::send_request;
-use chroma_frontend::server::GetRequestPayload;
-use chroma_types::{CountResponse, GetResponse, IncludeList, RawWhereFields};
+use chroma_types::{CountResponse, GetResponse, IncludeList};
 use reqwest::Method;
 use serde_json::{json, Map, Value};
 use std::error::Error;
@@ -89,7 +88,7 @@ impl Collection {
             Some(&payload),
         )
         .await
-        .map_err(|e| CollectionAPIError::Get(self.collection.name.clone()))?;
+        .map_err(|_| CollectionAPIError::Get(self.collection.name.clone()))?;
         Ok(response)
     }
 
@@ -108,44 +107,5 @@ impl Collection {
         .await
         .map_err(|_| CollectionAPIError::Count(self.collection.name.clone()))?;
         Ok(response)
-    }
-}
-
-mod tests {
-    use crate::client::admin_client::AdminClient;
-    use crate::client::chroma_client::ChromaClient;
-    use crate::tui::collection_browser::app::App;
-    use crate::tui::collection_browser::query_editor::Operator;
-    use crate::utils::{get_current_profile, AddressBook};
-    use chroma_types::RawWhereFields;
-    use futures_util::TryStreamExt;
-    use serde_json::{Map, Value};
-
-    #[tokio::test]
-    async fn test_get() {
-        let profile = get_current_profile().expect("Failed to get current profile");
-        let admin_client = AdminClient::from_profile(AddressBook::cloud().frontend_url, &profile.1);
-        let chrom_client = ChromaClient::with_admin_client(admin_client, String::from("docs"));
-
-        let collection = chrom_client
-            .get_collection(String::from("docs-content"))
-            .await
-            .expect("Failed to get collection");
-
-        let mut app = App::default();
-        app.query_editor.operators = vec![Operator::Equal];
-        app.query_editor.metadata_key = "page".to_string();
-        app.query_editor.metadata_value = "add-data".to_string();
-
-        let x = app.query_editor.parse_metadata();
-        println!("{:?}", x);
-
-        let records = collection
-            .get(None, x.as_deref(), None, None, None, None)
-            .await
-            .map_err(|e| {
-                println!("{}", e);
-            });
-        println!("{:#?}", records);
     }
 }
