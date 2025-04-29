@@ -471,7 +471,7 @@ impl CheckRecord for DocumentExpression {
         let contains = record
             .document
             .as_ref()
-            .is_some_and(|doc| doc.contains(&self.text.replace("%", "")));
+            .is_some_and(|doc| doc.contains(&self.text));
         match self.operator {
             DocumentOperator::Contains => contains,
             DocumentOperator::NotContains => !contains,

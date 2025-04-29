@@ -20,8 +20,8 @@ use chroma_types::{
     SetOperator, UpdateMetadataValue, Where, CHROMA_DOCUMENT_KEY,
 };
 use sea_query::{
-    Alias, DeleteStatement, Expr, ExprTrait, Func, InsertStatement, OnConflict, Query, SimpleExpr,
-    SqliteQueryBuilder, UpdateStatement,
+    Alias, DeleteStatement, Expr, ExprTrait, Func, InsertStatement, LikeExpr, OnConflict, Query,
+    SimpleExpr, SqliteQueryBuilder, UpdateStatement,
 };
 use sea_query_binder::SqlxBinder;
 use sqlx::{Row, Sqlite, Transaction};
@@ -481,7 +481,16 @@ impl IntoSqliteExpr for DocumentExpression {
             EmbeddingFulltextSearch::StringValue,
         ));
         let doc_contains = doc_col
-            .like(format!("%{}%", self.text.replace("%", "")))
+            .like(
+                LikeExpr::new(format!(
+                    "%{}%",
+                    self.text
+                        .replace("\\", "\\\\") // escape user-provided backslashes
+                        .replace("%", "\\%") // escape % characters
+                        .replace("_", "\\_") // escape _ characters
+                ))
+                .escape('\\'),
+            )
             .is(true);
         match self.operator {
             DocumentOperator::Contains => doc_contains,
