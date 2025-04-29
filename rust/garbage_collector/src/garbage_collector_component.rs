@@ -464,7 +464,7 @@ mod tests {
         let collection_name = format!("test_collection_{}", test_uuid);
 
         let collection_id = clients
-            .create_database_and_collection(&tenant_id, &database_name, &collection_name)
+            .create_database_and_collection(&tenant_id, &database_name, &collection_name, true)
             .await
             .unwrap();
 

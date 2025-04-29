@@ -649,7 +649,10 @@ mod tests {
         }
     }
 
-    async fn create_test_collection(clients: &mut ChromaGrpcClients) -> (CollectionUuid, String) {
+    async fn create_test_collection(
+        clients: &mut ChromaGrpcClients,
+        enable_spann: bool,
+    ) -> (CollectionUuid, String) {
         // Create unique identifiers for tenant and database
         let test_uuid = uuid::Uuid::new_v4();
         let tenant_id = format!("test_tenant_{}", test_uuid);
@@ -664,7 +667,12 @@ mod tests {
         );
 
         let collection_id = clients
-            .create_database_and_collection(&tenant_id, &database_name, &collection_name)
+            .create_database_and_collection(
+                &tenant_id,
+                &database_name,
+                &collection_name,
+                enable_spann,
+            )
             .await
             .unwrap();
 
@@ -790,9 +798,7 @@ mod tests {
             .collect()
     }
 
-    #[tokio::test]
-    #[traced_test]
-    async fn test_k8s_integration_check_end_to_end() {
+    async fn test_k8s_integration_check_end_to_end(use_spann: bool) {
         // Create storage config and storage client
         let storage_config = StorageConfig::ObjectStore(ObjectStoreConfig {
             bucket: ObjectStoreBucketConfig {
@@ -810,7 +816,7 @@ mod tests {
             .unwrap();
 
         let mut clients = ChromaGrpcClients::new().await.unwrap();
-        let (collection_id, tenant_id) = create_test_collection(&mut clients).await;
+        let (collection_id, tenant_id) = create_test_collection(&mut clients, use_spann).await;
 
         let hnsw_index_ids_before_gc = get_hnsw_index_ids(&storage).await;
 
@@ -928,6 +934,18 @@ mod tests {
 
     #[tokio::test]
     #[traced_test]
+    async fn test_k8s_integration_check_end_to_end_hnsw() {
+        test_k8s_integration_check_end_to_end(false).await;
+    }
+
+    #[tokio::test]
+    #[traced_test]
+    async fn test_k8s_integration_check_end_to_end_spann() {
+        test_k8s_integration_check_end_to_end(true).await;
+    }
+
+    #[tokio::test]
+    #[traced_test]
     async fn test_k8s_integration_soft_delete() {
         // Create storage config and storage client
         let storage_config = StorageConfig::ObjectStore(ObjectStoreConfig {
@@ -954,7 +972,7 @@ mod tests {
             .collect();
 
         let mut clients = ChromaGrpcClients::new().await.unwrap();
-        let (collection_id, tenant_id) = create_test_collection(&mut clients).await;
+        let (collection_id, tenant_id) = create_test_collection(&mut clients, true).await;
 
         let hnsw_index_ids_before_gc = get_hnsw_index_ids(&storage).await;
 
@@ -1112,7 +1130,7 @@ mod tests {
             .unwrap();
 
         let mut clients = ChromaGrpcClients::new().await.unwrap();
-        let (collection_id, tenant_id) = create_test_collection(&mut clients).await;
+        let (collection_id, tenant_id) = create_test_collection(&mut clients, true).await;
 
         let hnsw_index_ids_before_gc = get_hnsw_index_ids(&storage).await;
 
