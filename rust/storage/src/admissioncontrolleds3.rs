@@ -70,6 +70,10 @@ impl InflightRequest {
                     .store(priority.as_usize(), std::sync::atomic::Ordering::SeqCst);
                 // Ignore send errors since it can happen that the receiver is dropped
                 // and the task is busy reading the data from s3.
+                tracing::info!(
+                    "Sending notification to reprioritize request for key with priority {}",
+                    priority.as_usize()
+                );
                 let _ = channel.send(()).await;
             }
         }
