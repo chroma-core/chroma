@@ -601,19 +601,20 @@ impl CountBasedPolicy {
             match &mut channel_receiver {
                 Some(rx) => {
                     select! {
-                        _msg = rx.recv() => {
+                        msg = rx.recv() => {
                             // Reevaluate priority if we got a notification.
-                            // tracing::info!("Got notification to reevaluate priority, repriority count: {}", repri_count);
+                            // WITHOUT the changes below, this will spin forever
+                            tracing::info!("Got notification to reevaluate priority, repriority count: {}", repri_count);
                             repri_count += 1;
-                            // match msg {
-                            //     Some(_) => {
-                            //        continue;
-                            //     }
-                            //     None => {
-                            //        // Sender dropped, exit loop.
-                            //        channel_receiver = None;
-                            //     }
-                            // }
+                            match msg {
+                                Some(_) => {
+                                   continue;
+                                }
+                                None => {
+                                   // Sender dropped, exit loop.
+                                   channel_receiver = None;
+                                }
+                            }
                             continue;
                         }
                         token = self.remaining_tokens[current_priority.as_usize()].acquire() => {
