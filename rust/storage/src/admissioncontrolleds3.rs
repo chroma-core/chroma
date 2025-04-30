@@ -329,14 +329,14 @@ impl AdmissionControlledS3Storage {
         options: GetOptions,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
         let atomic_priority = Arc::new(AtomicUsize::new(options.priority.as_usize()));
-        let get_storage_future = AdmissionControlledS3Storage::read_from_storage(
+        AdmissionControlledS3Storage::read_from_storage(
             self.storage.clone(),
             self.rate_limiter.clone(),
             key.to_string(),
             atomic_priority,
             None,
-        );
-        get_storage_future.await
+        )
+        .await
     }
 
     async fn oneshot_upload(
