@@ -246,7 +246,7 @@ impl Storage {
             Storage::ObjectStore(object_store) => {
                 object_store.strongly_consistent_get_with_e_tag(key).await
             }
-            Storage::S3(s3) => s3.strongly_consistent_get_with_e_tag(key).await,
+            Storage::S3(s3) => s3.get_with_e_tag(key).await,
             Storage::Local(local) => local.strongly_consistent_get_with_e_tag(key).await,
             Storage::AdmissionControlledS3(admission_controlled_storage) => {
                 admission_controlled_storage

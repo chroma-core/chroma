@@ -310,15 +310,9 @@ impl S3Storage {
         self.get_with_e_tag(key).await.map(|(buf, _)| buf)
     }
 
+    /// Perform a strongly consistent get and return the e_tag.
     #[tracing::instrument(skip(self))]
     pub async fn get_with_e_tag(
-        &self,
-        key: &str,
-    ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
-        self.strongly_consistent_get_with_e_tag(key).await
-    }
-
-    pub async fn strongly_consistent_get_with_e_tag(
         &self,
         key: &str,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
