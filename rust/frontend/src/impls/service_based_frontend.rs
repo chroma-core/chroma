@@ -1438,9 +1438,13 @@ mod tests {
         assert!(segments.iter().any(
             |s| s.r#type == SegmentType::BlockfileMetadata && s.scope == SegmentScope::METADATA
         ));
-        assert!(segments
-            .iter()
-            .any(|s| s.r#type == SegmentType::HnswDistributed && s.scope == SegmentScope::VECTOR));
+        assert!(
+            segments.iter().any(
+                |s| s.r#type == SegmentType::HnswDistributed && s.scope == SegmentScope::VECTOR
+            ) || segments
+                .iter()
+                .any(|s| s.r#type == SegmentType::Spann && s.scope == SegmentScope::VECTOR)
+        );
         assert!(segments
             .iter()
             .any(|s| s.r#type == SegmentType::BlockfileRecord && s.scope == SegmentScope::RECORD));

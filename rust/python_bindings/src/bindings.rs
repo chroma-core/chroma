@@ -273,7 +273,14 @@ impl Bindings {
                 c,
                 self.frontend.get_default_knn_index(),
             )?),
-            None => None,
+            None => Some(InternalCollectionConfiguration::try_from_config(
+                CollectionConfiguration {
+                    hnsw: None,
+                    spann: None,
+                    embedding_function: None,
+                },
+                self.frontend.get_default_knn_index(),
+            )?),
         };
 
         let request = CreateCollectionRequest::try_new(
