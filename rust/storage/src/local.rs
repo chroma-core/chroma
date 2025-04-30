@@ -39,13 +39,6 @@ impl LocalStorage {
         Err(StorageError::NotImplemented)
     }
 
-    pub async fn strongly_consistent_get_with_e_tag(
-        &self,
-        _: &str,
-    ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
-        Err(StorageError::NotImplemented)
-    }
-
     pub async fn put_bytes(
         &self,
         key: &str,

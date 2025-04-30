@@ -277,6 +277,9 @@ impl AdmissionControlledS3Storage {
         key: &str,
         options: GetOptions,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
+        if options.requires_strong_consistency {
+            return self.strongly_consistent_get_with_e_tag(key, options).await;
+        }
         // If there is a duplicate request and the original request finishes
         // before we look it up in the map below then we will end up with another
         // request to S3.
