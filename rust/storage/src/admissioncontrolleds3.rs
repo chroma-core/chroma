@@ -249,7 +249,7 @@ impl AdmissionControlledS3Storage {
                     )
                     .boxed()
                     .shared();
-                    requests.insert(
+                    let old_val = requests.insert(
                         key.clone(),
                         InflightRequest {
                             priority: atomic_priority,
@@ -257,6 +257,13 @@ impl AdmissionControlledS3Storage {
                             notify_channel: None,
                         },
                     );
+                    if old_val.is_some() {
+                        tracing::error!(
+                            "There was already an inflight request for key: {:?}. This should not happen.",
+                            key
+                        );
+                        panic!("There was already an inflight request for key: {:?}. This should not happen.", key);
+                    }
                     get_parallel_storage_future
                 }
             };
@@ -306,7 +313,7 @@ impl AdmissionControlledS3Storage {
                     )
                     .boxed()
                     .shared();
-                    requests.insert(
+                    let old_val = requests.insert(
                         key.to_string(),
                         InflightRequest {
                             priority: atomic_priority,
@@ -314,6 +321,13 @@ impl AdmissionControlledS3Storage {
                             notify_channel: Some(tx),
                         },
                     );
+                    if old_val.is_some() {
+                        tracing::error!(
+                            "There was already an inflight request for key: {:?}. This should not happen.",
+                            key
+                        );
+                        panic!("There was already an inflight request for key: {:?}. This should not happen.", key);
+                    }
                     get_storage_future
                 }
             };
@@ -587,19 +601,19 @@ impl CountBasedPolicy {
             match &mut channel_receiver {
                 Some(rx) => {
                     select! {
-                        msg = rx.recv() => {
+                        _msg = rx.recv() => {
                             // Reevaluate priority if we got a notification.
-                            tracing::info!("Got notification to reevaluate priority, repriority count: {}", repri_count);
+                            // tracing::info!("Got notification to reevaluate priority, repriority count: {}", repri_count);
                             repri_count += 1;
-                            match msg {
-                                Some(_) => {
-                                   continue;
-                                }
-                                None => {
-                                   // Sender dropped, exit loop.
-                                   channel_receiver = None;
-                                }
-                            }
+                            // match msg {
+                            //     Some(_) => {
+                            //        continue;
+                            //     }
+                            //     None => {
+                            //        // Sender dropped, exit loop.
+                            //        channel_receiver = None;
+                            //     }
+                            // }
                             continue;
                         }
                         token = self.remaining_tokens[current_priority.as_usize()].acquire() => {
