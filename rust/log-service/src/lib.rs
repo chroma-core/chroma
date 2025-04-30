@@ -454,11 +454,6 @@ impl DirtyMarker {
                         None
                     }
                     Ordering::Greater => {
-                        tracing::info!(
-                            "{collection_id} has cursor={:?} manifest={:?}",
-                            cursor.position,
-                            manifest.maximum_log_position(),
-                        );
                         if maximum_log_position - cursor.position >= record_count_threshold {
                             Some(CollectionInfo {
                                 collection_id: collection_id.to_string(),
