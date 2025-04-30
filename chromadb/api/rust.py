@@ -313,7 +313,9 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
-        raise NotImplementedError("Collection forking is not implemented for Local Chroma")
+        raise NotImplementedError(
+            "Collection forking is not implemented for Local Chroma"
+        )
 
     @override
     def _count(
@@ -333,7 +335,7 @@ class RustBindingsAPI(ServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> GetResult:
         return self._get(
-            str(collection_id),
+            collection_id,
             limit=n,
             tenant=tenant,
             database=database,

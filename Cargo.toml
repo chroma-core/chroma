@@ -53,6 +53,8 @@ parking_lot = { version = "0.12.3", features = ["serde"] }
 parquet = "52"
 prost = "0.13"
 prost-types = "0.13.5"
+regex = "1.11.1"
+regex_syntax = "0.8.5"
 roaring = "0.10.6"
 sea-query = "0.32"
 sea-query-binder = "0.7"
@@ -76,7 +78,6 @@ utoipa = { version = "5.0.0", features = ["macros", "axum_extras", "debug", "uui
 sqlx = { version = "0.8.3", features = ["runtime-tokio", "sqlite"] }
 sha2 = "0.10.8"
 md5 = "0.7.0"
-regex = "1.11.1"
 pyo3 = { version = "0.23.3", features = ["abi3-py39"] }
 http = "1.1.0"
 tower-http = { version = "0.6.2", features = ["trace", "cors"] }

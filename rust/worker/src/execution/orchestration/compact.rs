@@ -1140,7 +1140,7 @@ mod tests {
                 }),
                 Where::Document(DocumentExpression {
                     operator: DocumentOperator::Contains,
-                    text: "<cat>".to_string(),
+                    pattern: "<cat>".to_string(),
                 }),
             ])),
         };
