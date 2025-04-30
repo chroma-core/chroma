@@ -235,7 +235,7 @@ impl<'me> MetadataProvider<'me> {
                     .document
                     .iter()
                     .filter_map(|(offset_id, document)| {
-                        regex.is_match(&document).then_some(offset_id)
+                        regex.is_match(document).then_some(offset_id)
                     })
                     .collect())
             }
