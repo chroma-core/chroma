@@ -344,6 +344,7 @@ impl Manifest {
             }
             if snapshots.len() >= snapshot_options.snapshot_rollover_threshold {
                 let path = unprefixed_snapshot_path(setsum);
+                tracing::info!("generating snapshot {path}");
                 return Some(Snapshot {
                     path,
                     depth: snapshot_depth + 1,
@@ -382,6 +383,7 @@ impl Manifest {
             }
             if fragments.len() >= snapshot_options.fragment_rollover_threshold {
                 let path = unprefixed_snapshot_path(setsum);
+                tracing::info!("generating snapshot {path}");
                 return Some(Snapshot {
                     path,
                     depth: 1,
@@ -641,6 +643,12 @@ impl Manifest {
         let exp_backoff = crate::backoff::ExponentialBackoff::new(
             options.throughput as f64,
             options.headroom as f64,
+        );
+        tracing::info!(
+            "installing manifest at {} {:?} {:?}",
+            prefix,
+            new.maximum_log_position(),
+            current,
         );
         loop {
             let payload = serde_json::to_string(&new)
