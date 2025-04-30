@@ -223,6 +223,7 @@ impl ManifestManager {
     }
 
     /// Given a fragment, add it to the manifest, batch its application and wait for it to apply.
+    #[tracing::instrument(skip(self, fragment))]
     pub async fn publish_fragment(&self, fragment: Fragment) -> Result<(), Error> {
         assert_ne!(fragment.setsum, Setsum::default(), "TODO(rescrv): remove");
         let (tx, rx) = tokio::sync::oneshot::channel();
