@@ -283,7 +283,8 @@ impl AdmissionControlledS3Storage {
         let future_to_await;
         {
             let mut requests = self.outstanding_read_requests.lock().await;
-            let maybe_inflight = requests.get(key).cloned();
+            let mut maybe_inflight = requests.get(key).cloned();
+            maybe_inflight.take();
             future_to_await = match maybe_inflight {
                 Some(fut) => {
                     // Update the priority if the new request has higher priority.
