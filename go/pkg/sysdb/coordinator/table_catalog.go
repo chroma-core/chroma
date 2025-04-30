@@ -1555,6 +1555,10 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 				return nil, err
 			}
 
+			// There was previously a bug that resulted in the tenant ID missing from some version files (https://github.com/chroma-core/chroma/pull/4408).
+			// This line can be removed once all corrupted version files are fixed.
+			existingVersionFilePb.CollectionInfoImmutable.TenantId = collectionEntry.Tenant
+
 			// Do a simple validation of the version file.
 			err = tc.validateVersionFile(existingVersionFilePb, collectionEntry.ID, existingVersion)
 			if err != nil {
