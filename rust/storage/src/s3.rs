@@ -315,6 +315,13 @@ impl S3Storage {
         &self,
         key: &str,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
+        self.strongly_consistent_get_with_e_tag(key).await
+    }
+
+    pub async fn strongly_consistent_get_with_e_tag(
+        &self,
+        key: &str,
+    ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
         let (mut stream, e_tag) = self
             .get_stream_and_e_tag(key)
             .instrument(tracing::trace_span!("S3 get stream"))

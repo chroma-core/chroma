@@ -237,6 +237,25 @@ impl Storage {
         }
     }
 
+    pub async fn strongly_consistent_get_with_e_tag(
+        &self,
+        key: &str,
+        options: GetOptions,
+    ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
+        match self {
+            Storage::ObjectStore(object_store) => {
+                object_store.strongly_consistent_get_with_e_tag(key).await
+            }
+            Storage::S3(s3) => s3.strongly_consistent_get_with_e_tag(key).await,
+            Storage::Local(local) => local.strongly_consistent_get_with_e_tag(key).await,
+            Storage::AdmissionControlledS3(admission_controlled_storage) => {
+                admission_controlled_storage
+                    .strongly_consistent_get_with_e_tag(key, options)
+                    .await
+            }
+        }
+    }
+
     pub async fn get_parallel(
         &self,
         key: &str,

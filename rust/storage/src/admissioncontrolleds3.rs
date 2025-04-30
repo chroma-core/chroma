@@ -323,6 +323,23 @@ impl AdmissionControlledS3Storage {
         res
     }
 
+    pub async fn strongly_consistent_get_with_e_tag(
+        &self,
+        key: &str,
+        options: GetOptions,
+    ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
+        let (_tx, rx) = tokio::sync::mpsc::channel(100);
+        let atomic_priority = Arc::new(AtomicUsize::new(options.priority.as_usize()));
+        let get_storage_future = AdmissionControlledS3Storage::read_from_storage(
+            self.storage.clone(),
+            self.rate_limiter.clone(),
+            key.to_string(),
+            atomic_priority,
+            rx,
+        );
+        get_storage_future.await
+    }
+
     async fn oneshot_upload(
         &self,
         key: &str,
