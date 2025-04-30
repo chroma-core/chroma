@@ -235,6 +235,50 @@ impl Snapshot {
             }
         }
     }
+
+    /// Return the lowest addressable offset in the log.
+    pub fn maximum_log_position(&self) -> LogPosition {
+        let frags = self
+            .fragments
+            .iter()
+            .map(|f| f.limit)
+            .max_by_key(|p| p.offset());
+        let snaps = self
+            .snapshots
+            .iter()
+            .map(|s| s.limit)
+            .max_by_key(|p| p.offset());
+        match (frags, snaps) {
+            (Some(f), Some(s)) => LogPosition {
+                offset: std::cmp::max(f.offset, s.offset),
+            },
+            (Some(f), None) => f,
+            (None, Some(s)) => s,
+            (None, None) => LogPosition::from_offset(1),
+        }
+    }
+
+    /// Return the lowest addressable offset in the log.
+    pub fn minimum_log_position(&self) -> LogPosition {
+        let frags = self
+            .fragments
+            .iter()
+            .map(|f| f.start)
+            .min_by_key(|p| p.offset());
+        let snaps = self
+            .snapshots
+            .iter()
+            .map(|s| s.start)
+            .min_by_key(|p| p.offset());
+        match (frags, snaps) {
+            (Some(f), Some(s)) => LogPosition {
+                offset: std::cmp::min(f.offset, s.offset),
+            },
+            (Some(f), None) => f,
+            (None, Some(s)) => s,
+            (None, None) => LogPosition::default(),
+        }
+    }
 }
 
 ///////////////////////////////////////////// Manifest /////////////////////////////////////////////
@@ -372,18 +416,8 @@ impl Manifest {
             setsum: snapshot.setsum,
             path_to_snapshot: snapshot.path.clone(),
             depth: snapshot.depth,
-            start: snapshot
-                .fragments
-                .iter()
-                .map(|f| f.start)
-                .min_by_key(|p| p.offset())
-                .unwrap_or(LogPosition::default()),
-            limit: snapshot
-                .fragments
-                .iter()
-                .map(|f| f.limit)
-                .max_by_key(|p| p.offset())
-                .unwrap_or(LogPosition::default()),
+            start: snapshot.minimum_log_position(),
+            limit: snapshot.maximum_log_position(),
             num_bytes: snapshot.num_bytes(),
         });
         Ok(())
@@ -853,6 +887,79 @@ mod tests {
                         .unwrap()
                     }
                 ],
+            },
+            manifest
+        );
+    }
+
+    #[test]
+    fn apply_fragment_with_snapshots() {
+        let fragment1 = Fragment {
+            path: "path1".to_string(),
+            seq_no: FragmentSeqNo(1),
+            start: LogPosition::from_offset(1),
+            limit: LogPosition::from_offset(22),
+            num_bytes: 41,
+            setsum: Setsum::from_hexdigest(
+                "4eec78e0b5cd15df7b36fd42cdc3aecb1986ffa3655c338201db88f80d855465",
+            )
+            .unwrap(),
+        };
+        let fragment2 = Fragment {
+            path: "path2".to_string(),
+            seq_no: FragmentSeqNo(2),
+            start: LogPosition::from_offset(22),
+            limit: LogPosition::from_offset(42),
+            num_bytes: 42,
+            setsum: Setsum::from_hexdigest(
+                "dd901afef0e5d336aaa52a2df7f785c909091fd0aa011980de443a61a889d3e1",
+            )
+            .unwrap(),
+        };
+        let fragment3 = Fragment {
+            path: "path3".to_string(),
+            seq_no: FragmentSeqNo(3),
+            start: LogPosition::from_offset(42),
+            limit: LogPosition::from_offset(84),
+            num_bytes: 100,
+            setsum: Setsum::from_hexdigest(
+                "3b82c2baba815ec0f7ead22dc91939cc31bf338bb599ff0435251380fd0722ad",
+            )
+            .unwrap(),
+        };
+        let mut manifest = Manifest {
+            writer: "manifest writer 1".to_string(),
+            setsum: fragment1.setsum + fragment2.setsum,
+            acc_bytes: 83,
+            snapshots: vec![SnapshotPointer {
+                path_to_snapshot: "snap.1".to_string(),
+                setsum: fragment1.setsum,
+                start: fragment1.start,
+                limit: fragment1.limit,
+                depth: 1,
+                num_bytes: fragment1.num_bytes,
+            }],
+            fragments: vec![fragment2.clone()],
+        };
+        assert!(manifest.can_apply_fragment(&fragment3));
+        manifest.apply_fragment(fragment3.clone());
+        assert_eq!(
+            Manifest {
+                writer: "manifest writer 1".to_string(),
+                setsum: Setsum::from_hexdigest(
+                    "70ff5599703548d61cc7fa9d53d66d61be4e52ff4bf84b07ad45d6d96b174af4"
+                )
+                .unwrap(),
+                acc_bytes: 183,
+                snapshots: vec![SnapshotPointer {
+                    path_to_snapshot: "snap.1".to_string(),
+                    setsum: fragment1.setsum,
+                    start: fragment1.start,
+                    limit: fragment1.limit,
+                    depth: 1,
+                    num_bytes: fragment1.num_bytes,
+                }],
+                fragments: vec![fragment2.clone(), fragment3.clone()],
             },
             manifest
         );
