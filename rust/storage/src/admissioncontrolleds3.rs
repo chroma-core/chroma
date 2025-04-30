@@ -558,6 +558,8 @@ impl CountBasedPolicy {
             }
         });
 
+        let mut repri_count = 0;
+
         loop {
             let current_priority = priority.load(Ordering::SeqCst);
             let current_priority: StorageRequestPriority = current_priority.into();
@@ -583,7 +585,8 @@ impl CountBasedPolicy {
                     select! {
                         _ = rx.recv() => {
                             // Reevaluate priority if we got a notification.
-                            //tracing::info!("Got notification to reevaluate priority");
+                            tracing::info!("Got notification to reevaluate priority, repriority count: {}", repri_count);
+                            repri_count += 1;
                             continue;
                         }
                         token = self.remaining_tokens[current_priority.as_usize()].acquire() => {
