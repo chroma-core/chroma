@@ -46,5 +46,5 @@ scorecard:
       - "collection_id:*"
     score: 100
 enable_span_indexing: true
-default_knn_index: "spann"
+default_knn_index: "hnsw"
 enable_set_index_params: false
