@@ -583,7 +583,7 @@ impl CountBasedPolicy {
                     select! {
                         _ = rx.recv() => {
                             // Reevaluate priority if we got a notification.
-                            tracing::info!("Got notification to reevaluate priority");
+                            //tracing::info!("Got notification to reevaluate priority");
                             continue;
                         }
                         token = self.remaining_tokens[current_priority.as_usize()].acquire() => {
