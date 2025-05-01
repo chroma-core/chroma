@@ -21,15 +21,15 @@ use crate::{
 
 /////////////////////////////////////////////// paths //////////////////////////////////////////////
 
-fn manifest_path(prefix: &str) -> String {
+pub fn manifest_path(prefix: &str) -> String {
     format!("{prefix}/manifest/MANIFEST")
 }
 
-fn unprefixed_snapshot_path(setsum: Setsum) -> String {
+pub fn unprefixed_snapshot_path(setsum: Setsum) -> String {
     format!("snapshot/SNAPSHOT.{}", setsum.hexdigest())
 }
 
-fn snapshot_setsum(path: &str) -> Result<Setsum, Error> {
+pub fn snapshot_setsum(path: &str) -> Result<Setsum, Error> {
     let setsum = path
         .strip_prefix("snapshot/SNAPSHOT.")
         .ok_or_else(|| Error::CorruptManifest(format!("unparseable snapshot path: {}", path,)))?;
@@ -199,7 +199,7 @@ impl Snapshot {
         options: &ThrottleOptions,
         storage: &Storage,
         prefix: &str,
-    ) -> Result<(), Error> {
+    ) -> Result<SnapshotPointer, Error> {
         let exp_backoff = crate::backoff::ExponentialBackoff::new(
             options.throughput as f64,
             options.headroom as f64,
@@ -214,7 +214,7 @@ impl Snapshot {
             let options = PutOptions::if_not_exists(StorageRequestPriority::P0);
             match storage.put_bytes(&path, payload, options).await {
                 Ok(_) => {
-                    return Ok(());
+                    return Ok(self.to_pointer());
                 }
                 Err(StorageError::Precondition { path: _, source: _ }) => {
                     // NOTE(rescrv):  This is something of a lie.  We know that someone put the
@@ -222,7 +222,7 @@ impl Snapshot {
                     // Because the setsum is only calculable if you have the file and we assume
                     // non-malicious code, anyone who puts the same setsum as us has, in all
                     // likelihood, put something referencing the same content as us.
-                    return Ok(());
+                    return Ok(self.to_pointer());
                 }
                 Err(e) => {
                     tracing::error!("error uploading manifest: {e:?}");
@@ -277,6 +277,17 @@ impl Snapshot {
             (Some(f), None) => f,
             (None, Some(s)) => s,
             (None, None) => LogPosition::default(),
+        }
+    }
+
+    pub fn to_pointer(&self) -> SnapshotPointer {
+        SnapshotPointer {
+            setsum: self.setsum,
+            path_to_snapshot: self.path.clone(),
+            depth: self.depth,
+            start: self.minimum_log_position(),
+            limit: self.maximum_log_position(),
+            num_bytes: self.num_bytes(),
         }
     }
 }
@@ -533,7 +544,7 @@ impl Manifest {
     /// Initialize the log with an empty manifest.
     #[tracing::instrument(skip(storage), err(Display))]
     pub async fn initialize(
-        _: &LogWriterOptions,
+        options: &LogWriterOptions,
         storage: &Storage,
         prefix: &str,
         writer: &str,
@@ -546,6 +557,17 @@ impl Manifest {
             snapshots: vec![],
             fragments: vec![],
         };
+        Self::initialize_from_manifest(options, storage, prefix, initial).await
+    }
+
+    /// Initialize the log with an empty manifest.
+    #[tracing::instrument(skip(storage), err(Display))]
+    pub async fn initialize_from_manifest(
+        _: &LogWriterOptions,
+        storage: &Storage,
+        prefix: &str,
+        initial: Manifest,
+    ) -> Result<(), Error> {
         let payload = serde_json::to_string(&initial)
             .map_err(|e| Error::CorruptManifest(format!("could not encode JSON manifest: {e:?}")))?
             .into_bytes();
