@@ -96,9 +96,10 @@ pub async fn copy(
     offset: LogPosition,
     target: String,
 ) -> Result<(), Error> {
-    let Some(manifest) = reader.manifest().await? else {
-        return Err(Error::UninitializedLog);
-    };
+    let manifest = reader
+        .manifest()
+        .await?
+        .unwrap_or(Manifest::new_empty("copy task"));
     let mut snapshots = vec![];
     for snapshot in &manifest.snapshots {
         snapshots.push(copy_snapshot(storage, options, reader, snapshot, offset, &target).await?);

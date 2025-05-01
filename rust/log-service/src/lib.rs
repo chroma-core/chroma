@@ -597,7 +597,6 @@ pub struct LogServer {
 
 #[async_trait::async_trait]
 impl LogService for LogServer {
-    #[tracing::instrument(skip(self, request))]
     async fn push_logs(
         &self,
         request: Request<PushLogsRequest>,
@@ -613,43 +612,49 @@ impl LogService for LogServer {
         if push_logs.records.is_empty() {
             return Err(Status::invalid_argument("Too few records"));
         }
-        let prefix = storage_prefix_for_log(collection_id);
-        let key = LogKey { collection_id };
-        let handle = self.open_logs.get_or_create_state(key);
-        let mark_dirty = MarkDirty {
-            collection_id,
-            dirty_log: Arc::clone(&self.dirty_log),
-        };
-        let log = get_log_from_handle(
-            &handle,
-            &self.config.writer,
-            &self.storage,
-            &prefix,
-            mark_dirty,
-        )
-        .await
-        // TODO(rescrv): better error handling.
-        .map_err(|err| Status::unknown(err.to_string()))?;
-        let mut messages = Vec::with_capacity(push_logs.records.len());
-        for record in push_logs.records {
-            let mut buf = vec![];
-            record
-                .encode(&mut buf)
-                .map_err(|err| Status::unknown(err.to_string()))?;
-            messages.push(buf);
-        }
-        let record_count = messages.len() as i32;
-        log.append_many(messages).await.map_err(|err| {
-            if let wal3::Error::Backoff = err {
-                Status::new(
-                    chroma_error::ErrorCodes::Unavailable.into(),
-                    err.to_string(),
-                )
-            } else {
-                Status::new(err.code().into(), err.to_string())
+        let span = tracing::info_span!("push_logs");
+
+        async move {
+            let prefix = storage_prefix_for_log(collection_id);
+            let key = LogKey { collection_id };
+            let handle = self.open_logs.get_or_create_state(key);
+            let mark_dirty = MarkDirty {
+                collection_id,
+                dirty_log: Arc::clone(&self.dirty_log),
+            };
+            let log = get_log_from_handle(
+                &handle,
+                &self.config.writer,
+                &self.storage,
+                &prefix,
+                mark_dirty,
+            )
+            .await
+            // TODO(rescrv): better error handling.
+            .map_err(|err| Status::unknown(err.to_string()))?;
+            let mut messages = Vec::with_capacity(push_logs.records.len());
+            for record in push_logs.records {
+                let mut buf = vec![];
+                record
+                    .encode(&mut buf)
+                    .map_err(|err| Status::unknown(err.to_string()))?;
+                messages.push(buf);
             }
-        })?;
-        Ok(Response::new(PushLogsResponse { record_count }))
+            let record_count = messages.len() as i32;
+            log.append_many(messages).await.map_err(|err| {
+                if let wal3::Error::Backoff = err {
+                    Status::new(
+                        chroma_error::ErrorCodes::Unavailable.into(),
+                        err.to_string(),
+                    )
+                } else {
+                    Status::new(err.code().into(), err.to_string())
+                }
+            })?;
+            Ok(Response::new(PushLogsResponse { record_count }))
+        }
+        .instrument(span)
+        .await
     }
 
     async fn scout_logs(

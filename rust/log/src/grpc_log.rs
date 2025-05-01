@@ -43,7 +43,7 @@ impl ChromaError for GrpcPullLogsError {
 pub enum GrpcPushLogsError {
     #[error("Please backoff exponentially and retry")]
     Backoff,
-    #[error("Failed to push logs")]
+    #[error("Failed to push logs: {0}")]
     FailedToPushLogs(#[from] tonic::Status),
     #[error("Failed to convert records to proto")]
     ConversionError(#[from] RecordConversionError),
@@ -63,7 +63,7 @@ impl ChromaError for GrpcPushLogsError {
 pub enum GrpcForkLogsError {
     #[error("Please backoff exponentially and retry")]
     Backoff,
-    #[error("Failed to push logs")]
+    #[error("Failed to push logs: {0}")]
     FailedToForkLogs(#[from] tonic::Status),
 }
 
