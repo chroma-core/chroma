@@ -1,4 +1,6 @@
-use crate::client::ChromaClientError;
+use crate::client::admin_client::AdminClientError;
+use crate::client::chroma_client::ChromaClientError;
+use crate::client::dashboard_client::DashboardClientError;
 use crate::commands::db::DbError;
 use crate::commands::install::InstallError;
 use crate::commands::login::LoginError;
@@ -6,7 +8,6 @@ use crate::commands::profile::ProfileError;
 use crate::commands::run::RunError;
 use crate::commands::update::UpdateError;
 use crate::commands::vacuum::VacuumError;
-use crate::dashboard_client::DashboardClientError;
 use arboard::Clipboard;
 use colored::Colorize;
 use crossterm::{
@@ -16,9 +17,6 @@ use crossterm::{
     ExecutableCommand,
 };
 use regex::Regex;
-use reqwest::header::HeaderMap;
-use reqwest::{Client, Method};
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
@@ -68,6 +66,8 @@ pub enum CliError {
     DashboardClient(#[from] DashboardClientError),
     #[error("{0}")]
     Install(#[from] InstallError),
+    #[error("{0}")]
+    AdminClient(#[from] AdminClientError),
 }
 
 #[derive(Debug, Error)]
@@ -314,35 +314,6 @@ pub fn validate_uri(input: String) -> Result<String, UtilsError> {
     }
 
     Ok(input)
-}
-
-pub async fn send_request<T, R>(
-    url: &String,
-    method: Method,
-    route: &str,
-    headers: Option<HeaderMap>,
-    body: Option<&T>,
-) -> Result<R, Box<dyn Error>>
-where
-    T: Serialize,
-    R: DeserializeOwned + Default,
-{
-    let url = format!("{}{}", url, route);
-
-    let client = Client::new();
-    let mut request_builder = client.request(method, url);
-
-    if let Some(headers) = headers {
-        request_builder = request_builder.headers(headers);
-    }
-
-    if let Some(b) = body {
-        request_builder = request_builder.json(b);
-    }
-
-    let response = request_builder.send().await?.error_for_status()?;
-    let parsed_response = response.json::<R>().await?;
-    Ok(parsed_response)
 }
 
 pub fn read_secret(prompt: &str) -> io::Result<String> {

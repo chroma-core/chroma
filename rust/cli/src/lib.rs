@@ -1,6 +1,5 @@
 mod client;
 mod commands;
-mod dashboard_client;
 mod utils;
 
 use crate::commands::db::{db_command, DbCommand};

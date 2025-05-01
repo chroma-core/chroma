@@ -82,7 +82,7 @@ async fn graceful_shutdown(system: System) {
             system.stop().await;
             system.join().await;
         },
-    };
+    }
 }
 
 pub struct Metrics {
