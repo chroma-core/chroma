@@ -82,7 +82,7 @@ async fn graceful_shutdown(system: System) {
             system.stop().await;
             system.join().await;
         },
-    };
+    }
 }
 
 pub struct Metrics {
@@ -1224,7 +1224,7 @@ async fn fork_collection(
     tracing::info!(
         "Forking collection [{collection_id}] in database [{database}] for tenant [{tenant}]"
     );
-    // NOTE: The quota check if skipped for fork collection for now, and we rely on the scorecard to limit access to certain tenents
+    // NOTE: The quota check if skipped for fork collection for now, and we rely on the scorecard to limit access to certain tenants
     // TODO: Unify the quota and scorecard
     // server
     //     .authenticate_and_authorize(
