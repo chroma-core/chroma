@@ -20,6 +20,7 @@ use chroma_types::{
     PrimitiveOperator, Segment, SegmentScope, SegmentUuid, SetOperator, UpdateMetadata, Where,
     CHROMA_KEY,
 };
+use regex::Regex;
 use std::collections::BinaryHeap;
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
@@ -468,13 +469,20 @@ impl CheckRecord for CompositeExpression {
 
 impl CheckRecord for DocumentExpression {
     fn eval(&self, record: &ProjectionRecord) -> bool {
-        let contains = record
-            .document
-            .as_ref()
-            .is_some_and(|doc| doc.contains(&self.text.replace("%", "")));
+        let document = record.document.as_ref();
         match self.operator {
-            DocumentOperator::Contains => contains,
-            DocumentOperator::NotContains => !contains,
+            DocumentOperator::Contains => {
+                document.is_some_and(|doc| doc.contains(&self.pattern.replace("%", "")))
+            }
+            DocumentOperator::NotContains => {
+                !document.is_some_and(|doc| doc.contains(&self.pattern.replace("%", "")))
+            }
+            DocumentOperator::Matches => {
+                document.is_some_and(|doc| Regex::new(&self.pattern).unwrap().is_match(doc))
+            }
+            DocumentOperator::NotMatches => {
+                !document.is_some_and(|doc| Regex::new(&self.pattern).unwrap().is_match(doc))
+            }
         }
     }
 }

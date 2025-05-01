@@ -822,7 +822,14 @@ def validate_where_document(where_document: WhereDocument) -> None:
             f"Expected where document to have exactly one operator, got {where_document}"
         )
     for operator, operand in where_document.items():
-        if operator not in ["$contains", "$not_contains", "$and", "$or"]:
+        if operator not in [
+            "$contains",
+            "$not_contains",
+            "$matches",
+            "$not_matches",
+            "$and",
+            "$or",
+        ]:
             raise ValueError(
                 f"Expected where document operator to be one of $contains, $and, $or, got {operator}"
             )

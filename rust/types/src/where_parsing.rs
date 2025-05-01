@@ -137,17 +137,16 @@ pub fn parse_where_document(json_payload: &Value) -> Result<Where, WhereValidati
         return Err(WhereValidationError::WhereDocumentClause);
     }
     let value_str = value.as_str().unwrap();
-    let operator_type;
-    if key == "$contains" {
-        operator_type = DocumentOperator::Contains;
-    } else if key == "$not_contains" {
-        operator_type = DocumentOperator::NotContains;
-    } else {
-        return Err(WhereValidationError::WhereDocumentClause);
-    }
+    let operator_type = match key.as_str() {
+        "$contains" => DocumentOperator::Contains,
+        "$not_contains" => DocumentOperator::NotContains,
+        "$matches" => DocumentOperator::Matches,
+        "$not_matches" => DocumentOperator::NotMatches,
+        _ => return Err(WhereValidationError::WhereDocumentClause),
+    };
     Ok(Where::Document(crate::DocumentExpression {
         operator: operator_type,
-        text: value_str.to_string(),
+        pattern: value_str.to_string(),
     }))
 }
 
@@ -446,18 +445,18 @@ mod tests {
                 children: vec![
                     Where::Document(crate::DocumentExpression {
                         operator: DocumentOperator::Contains,
-                        text: "value1".to_string(),
+                        pattern: "value1".to_string(),
                     }),
                     Where::Composite(CompositeExpression {
                         operator: crate::BooleanOperator::Or,
                         children: vec![
                             Where::Document(crate::DocumentExpression {
                                 operator: DocumentOperator::Contains,
-                                text: "value2".to_string(),
+                                pattern: "value2".to_string(),
                             }),
                             Where::Document(crate::DocumentExpression {
                                 operator: DocumentOperator::Contains,
-                                text: "value3".to_string(),
+                                pattern: "value3".to_string(),
                             }),
                         ],
                     }),
@@ -466,7 +465,7 @@ mod tests {
             // $not_contains
             Where::Document(crate::DocumentExpression {
                 operator: DocumentOperator::NotContains,
-                text: "value1".to_string(),
+                pattern: "value1".to_string(),
             }),
         ];
 

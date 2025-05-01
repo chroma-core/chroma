@@ -1751,6 +1751,7 @@ dependencies = [
  "parking_lot",
  "proptest",
  "rayon",
+ "regex",
  "roaring",
  "sea-query",
  "sea-query-binder",

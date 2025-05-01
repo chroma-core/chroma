@@ -18,6 +18,7 @@ use chroma_types::{
     MaterializedLogOperation, MetadataComparison, MetadataExpression, MetadataSetValue,
     MetadataValue, PrimitiveOperator, Segment, SetOperator, SignedRoaringBitmap, Where,
 };
+use regex::Regex;
 use roaring::RoaringBitmap;
 use thiserror::Error;
 use tracing::{Instrument, Span};
@@ -71,6 +72,8 @@ pub enum FilterError {
     MetadataReader(#[from] MetadataSegmentError),
     #[error("Error creating record segment reader: {0}")]
     RecordReader(#[from] RecordSegmentReaderCreationError),
+    #[error("Error parsing regular expression: {0}")]
+    Regex(#[from] regex::Error),
     #[error("Error getting record: {0}")]
     GetError(Box<dyn ChromaError>),
 }
@@ -82,6 +85,7 @@ impl ChromaError for FilterError {
             FilterError::LogMaterializer(e) => e.code(),
             FilterError::MetadataReader(e) => e.code(),
             FilterError::RecordReader(e) => e.code(),
+            FilterError::Regex(_) => ErrorCodes::InvalidArgument,
             FilterError::GetError(e) => e.code(),
         }
     }
@@ -194,7 +198,7 @@ impl<'me> MetadataProvider<'me> {
         Self::Log(reader)
     }
 
-    pub(crate) async fn filter_by_document(
+    pub(crate) async fn filter_by_document_contains(
         &self,
         query: &str,
     ) -> Result<RoaringBitmap, FilterError> {
@@ -214,6 +218,27 @@ impl<'me> MetadataProvider<'me> {
                 .iter()
                 .filter_map(|(offset_id, document)| document.contains(query).then_some(offset_id))
                 .collect()),
+        }
+    }
+
+    pub(crate) async fn filter_by_document_matches(
+        &self,
+        query: &str,
+    ) -> Result<RoaringBitmap, FilterError> {
+        match self {
+            MetadataProvider::CompactData(_metadata_segment_reader) => {
+                todo!("Implement regex search on fts index")
+            }
+            MetadataProvider::Log(metadata_log_reader) => {
+                let regex = Regex::new(query)?;
+                Ok(metadata_log_reader
+                    .document
+                    .iter()
+                    .filter_map(|(offset_id, document)| {
+                        regex.is_match(document).then_some(offset_id)
+                    })
+                    .collect())
+            }
         }
     }
 
@@ -367,12 +392,27 @@ impl<'me> RoaringMetadataFilter<'me> for DocumentExpression {
         &'me self,
         metadata_provider: &MetadataProvider<'me>,
     ) -> Result<SignedRoaringBitmap, FilterError> {
-        let contain = metadata_provider
-            .filter_by_document(self.text.as_str())
-            .await?;
         match self.operator {
-            DocumentOperator::Contains => Ok(SignedRoaringBitmap::Include(contain)),
-            DocumentOperator::NotContains => Ok(SignedRoaringBitmap::Exclude(contain)),
+            DocumentOperator::Contains => Ok(SignedRoaringBitmap::Include(
+                metadata_provider
+                    .filter_by_document_contains(self.pattern.as_str())
+                    .await?,
+            )),
+            DocumentOperator::NotContains => Ok(SignedRoaringBitmap::Exclude(
+                metadata_provider
+                    .filter_by_document_contains(self.pattern.as_str())
+                    .await?,
+            )),
+            DocumentOperator::Matches => Ok(SignedRoaringBitmap::Include(
+                metadata_provider
+                    .filter_by_document_matches(self.pattern.as_str())
+                    .await?,
+            )),
+            DocumentOperator::NotMatches => Ok(SignedRoaringBitmap::Exclude(
+                metadata_provider
+                    .filter_by_document_matches(self.pattern.as_str())
+                    .await?,
+            )),
         }
     }
 }
@@ -746,7 +786,7 @@ mod tests {
 
         let where_clause = Where::Document(DocumentExpression {
             operator: chroma_types::DocumentOperator::Contains,
-            text: "<cat>".to_string(),
+            pattern: "<cat>".to_string(),
         });
 
         let filter_operator = FilterOperator {
@@ -775,7 +815,7 @@ mod tests {
 
         let where_clause = Where::Document(DocumentExpression {
             operator: chroma_types::DocumentOperator::NotContains,
-            text: "<dog>".to_string(),
+            pattern: "<dog>".to_string(),
         });
 
         let filter_operator = FilterOperator {
@@ -899,7 +939,7 @@ mod tests {
 
         let where_sub_clause_1 = Where::Document(DocumentExpression {
             operator: chroma_types::DocumentOperator::NotContains,
-            text: "<dog>".to_string(),
+            pattern: "<dog>".to_string(),
         });
 
         let where_sub_clause_2 = Where::Metadata(MetadataExpression {

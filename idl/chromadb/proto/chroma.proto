@@ -155,7 +155,7 @@ message WhereDocument {
 
 // A leaf-node `WhereDocument` clause may compare a document to a single value.
 message DirectWhereDocument {
-    string document = 1;
+    string pattern = 1;
     WhereDocumentOperator operator = 2;
 }
 
@@ -165,6 +165,8 @@ message DirectWhereDocument {
 enum WhereDocumentOperator {
     CONTAINS = 0;
     NOT_CONTAINS = 1;
+    MATCHES = 2;
+    NOT_MATCHES = 3;
 }
 
 // A branch-node `WhereDocument` node has a list of children.
