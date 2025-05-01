@@ -127,6 +127,7 @@ impl AdminClient {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub async fn get_database(&self, db_name: String) -> Result<Database, AdminClientError> {
         let route = format!("/api/v2/tenants/{}/databases/{}", self.tenant_id, db_name);
         let response = send_request::<(), GetDatabaseResponse>(
@@ -155,6 +156,7 @@ impl AdminClient {
         Ok(response.tenant)
     }
 
+    #[allow(dead_code)]
     pub async fn healthcheck(&self) -> Result<(), AdminClientError> {
         let route = "/api/v2/healthcheck";
         let _response = send_request::<(), HealthcheckResponse>(

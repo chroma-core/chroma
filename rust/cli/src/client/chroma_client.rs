@@ -27,6 +27,7 @@ impl ChromaClient {
         Self { admin_client, db }
     }
 
+    #[allow(dead_code)]
     pub fn with_admin_client(admin_client: AdminClient, db: String) -> Self {
         Self { admin_client, db }
     }
@@ -55,6 +56,7 @@ impl ChromaClient {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn get_collection(&self, name: String) -> Result<Collection, Box<dyn Error>> {
         let route = format!(
             "/api/v2/tenants/{}/databases/{}/collections/{}",

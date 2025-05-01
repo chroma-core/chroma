@@ -31,6 +31,7 @@ impl Deref for Collection {
 }
 
 impl Collection {
+    #[allow(dead_code)]
     pub fn new(chroma_client: ChromaClient, collection: CollectionModel) -> Self {
         Self {
             chroma_client,
@@ -38,6 +39,7 @@ impl Collection {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn get(
         &self,
         ids: Option<Vec<String>>,
@@ -92,6 +94,7 @@ impl Collection {
         Ok(response)
     }
 
+    #[allow(dead_code)]
     pub async fn count(&self) -> Result<CountResponse, Box<dyn Error>> {
         let route = format!(
             "/api/v2/tenants/{}/databases/{}/collections/{}/count",
