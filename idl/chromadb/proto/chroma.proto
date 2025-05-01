@@ -155,10 +155,8 @@ message WhereDocument {
 
 // A leaf-node `WhereDocument` clause may compare a document to a single value.
 message DirectWhereDocument {
-    // Reserve for deprecated fields
-    reserved 1;
+    string pattern = 1;
     WhereDocumentOperator operator = 2;
-    string pattern = 3;
 }
 
 // Types of operators for `WhereDocument` clauses. A `WhereDocument` clause can
