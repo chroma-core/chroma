@@ -8,7 +8,7 @@ use wal3::{
 };
 
 #[tokio::test]
-async fn test_k8s_integration_80_copy() {
+async fn test_k8s_integration_81_copy_then_update_src() {
     // Appending to a log that has failed to write its manifest fails with log contention.
     // Subsequent writes will repair the log and continue to make progress.
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
@@ -71,5 +71,21 @@ async fn test_k8s_integration_80_copy() {
     assert_eq!(
         scrubbed_source.calculated_setsum,
         scrubbed_target.calculated_setsum,
+    );
+    // Append to the old log
+    log.append_many(vec![Vec::from("late-arrival".to_string())])
+        .await
+        .unwrap();
+    // Scrub the new old log.
+    let scrubbed_source2 = reader.scrub().await.unwrap();
+    assert_ne!(
+        scrubbed_source.calculated_setsum,
+        scrubbed_source2.calculated_setsum
+    );
+    // Scrub the new log.
+    let scrubbed_target2 = copied.scrub().await.unwrap();
+    assert_eq!(
+        scrubbed_target.calculated_setsum,
+        scrubbed_target2.calculated_setsum
     );
 }

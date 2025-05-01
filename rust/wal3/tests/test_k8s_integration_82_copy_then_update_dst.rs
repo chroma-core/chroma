@@ -8,7 +8,7 @@ use wal3::{
 };
 
 #[tokio::test]
-async fn test_k8s_integration_80_copy() {
+async fn test_k8s_integration_82_copy_then_update_dst() {
     // Appending to a log that has failed to write its manifest fails with log contention.
     // Subsequent writes will repair the log and continue to make progress.
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
@@ -71,5 +71,36 @@ async fn test_k8s_integration_80_copy() {
     assert_eq!(
         scrubbed_source.calculated_setsum,
         scrubbed_target.calculated_setsum,
+    );
+    // Append to the new log
+    let log = LogWriter::open(
+        LogWriterOptions {
+            snapshot_manifest: SnapshotOptions {
+                snapshot_rollover_threshold: 2,
+                fragment_rollover_threshold: 2,
+            },
+            ..LogWriterOptions::default()
+        },
+        Arc::clone(&storage),
+        "test_k8s_integration_80_copy_target",
+        "load and scrub writer",
+        (),
+    )
+    .await
+    .unwrap();
+    log.append_many(vec![Vec::from("fresh-write".to_string())])
+        .await
+        .unwrap();
+    // Scrub the old log.
+    let scrubbed_source2 = reader.scrub().await.unwrap();
+    assert_eq!(
+        scrubbed_source.calculated_setsum,
+        scrubbed_source2.calculated_setsum
+    );
+    // Scrub the new log.
+    let scrubbed_target2 = copied.scrub().await.unwrap();
+    assert_ne!(
+        scrubbed_target.calculated_setsum,
+        scrubbed_target2.calculated_setsum
     );
 }
