@@ -599,7 +599,10 @@ impl Manifest {
         let path = manifest_path(prefix);
         loop {
             match storage
-                .get_with_e_tag(&path, GetOptions::new(StorageRequestPriority::P0))
+                .get_with_e_tag(
+                    &path,
+                    GetOptions::new(StorageRequestPriority::P0).with_strong_consistency(),
+                )
                 .await
                 .map_err(Arc::new)
             {
