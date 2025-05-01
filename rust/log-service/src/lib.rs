@@ -801,14 +801,16 @@ impl LogService for LogServer {
             let witness = cursors.load(cursor_name).await.map_err(|err| {
                 Status::new(err.code().into(), format!("Failed to load cursor: {}", err))
             })?;
+            // This is the existing compaction_offset, which is the last record that was compacted.
             let offset = witness
                 .map(|x| x.1.position)
-                .unwrap_or(LogPosition::from_offset(1));
+                .unwrap_or(LogPosition::from_offset(0));
             wal3::copy(
                 &storage,
                 &options,
                 &log_reader,
-                offset,
+                // + 1 to get to the first uncompacted record.
+                offset + 1u64,
                 target_prefix.clone(),
             )
             .await
@@ -820,6 +822,7 @@ impl LogService for LogServer {
                 Arc::clone(&storage),
                 target_prefix,
             );
+            // This is the next record to insert, so we'll have to adjust downwards.
             let max_offset = log_reader.maximum_log_position().await.map_err(|err| {
                 Status::new(err.code().into(), format!("Failed to copy log: {}", err))
             })?;
@@ -830,7 +833,7 @@ impl LogService for LogServer {
                 ));
             }
             Ok(Response::new(ForkLogsResponse {
-                compaction_offset: (offset - 1u64).offset(),
+                compaction_offset: offset.offset(),
                 enumeration_offset: (max_offset - 1u64).offset(),
             }))
         }
