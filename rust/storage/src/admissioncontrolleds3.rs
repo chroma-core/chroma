@@ -567,9 +567,19 @@ impl CountBasedPolicy {
             match &mut channel_receiver {
                 Some(rx) => {
                     select! {
-                        _ = rx.recv() => {
+                        did_recv = rx.recv() => {
                             // Reevaluate priority if we got a notification.
-                            continue;
+                            match did_recv {
+                                Some(_) => {
+                                    // If we got a notification, continue to acquire.
+                                    continue;
+                                }
+                                None => {
+                                    // If the channel was closed, break out of the loop.
+                                    channel_receiver = None;
+                                    continue;
+                                }
+                            }
                         }
                         token = self.remaining_tokens[current_priority.as_usize()].acquire() => {
                             match token {
