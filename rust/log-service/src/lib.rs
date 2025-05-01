@@ -799,6 +799,7 @@ impl LogService for LogServer {
             );
             let cursor_name = &COMPACTION;
             let witness = cursors.load(cursor_name).await.map_err(|err| {
+                tracing::info!("FINDME");
                 Status::new(err.code().into(), format!("Failed to load cursor: {}", err))
             })?;
             // This is the existing compaction_offset, which is the last record that was compacted.
@@ -815,6 +816,7 @@ impl LogService for LogServer {
             )
             .await
             .map_err(|err| {
+                tracing::info!("FINDME");
                 Status::new(err.code().into(), format!("Failed to copy log: {}", err))
             })?;
             let log_reader = LogReader::new(
@@ -824,9 +826,11 @@ impl LogService for LogServer {
             );
             // This is the next record to insert, so we'll have to adjust downwards.
             let max_offset = log_reader.maximum_log_position().await.map_err(|err| {
+                tracing::info!("FINDME");
                 Status::new(err.code().into(), format!("Failed to copy log: {}", err))
             })?;
             if max_offset < offset {
+                tracing::info!("FINDME");
                 return Err(Status::new(
                     chroma_error::ErrorCodes::Internal.into(),
                     format!("max_offset={:?} < offset={:?}", max_offset, offset),
