@@ -28,7 +28,7 @@ pub struct Limits {
 pub struct LogReader {
     options: LogReaderOptions,
     storage: Arc<Storage>,
-    prefix: String,
+    pub(crate) prefix: String,
 }
 
 impl LogReader {

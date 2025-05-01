@@ -2,17 +2,20 @@ use std::sync::Arc;
 
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
-use wal3::{LogReader, LogReaderOptions, LogWriter, LogWriterOptions, Manifest, SnapshotOptions};
+use wal3::{
+    LogPosition, LogReader, LogReaderOptions, LogWriter, LogWriterOptions, Manifest,
+    SnapshotOptions,
+};
 
 #[tokio::test]
-async fn test_k8s_integration_99_load_and_scrub() {
+async fn test_k8s_integration_80_copy() {
     // Appending to a log that has failed to write its manifest fails with log contention.
     // Subsequent writes will repair the log and continue to make progress.
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
     Manifest::initialize(
         &LogWriterOptions::default(),
         &storage,
-        "test_k8s_integration_99_load_and_scrub",
+        "test_k8s_integration_80_copy_source",
         "init",
     )
     .await
@@ -26,7 +29,7 @@ async fn test_k8s_integration_99_load_and_scrub() {
             ..LogWriterOptions::default()
         },
         Arc::clone(&storage),
-        "test_k8s_integration_99_load_and_scrub",
+        "test_k8s_integration_80_copy_source",
         "load and scrub writer",
         (),
     )
@@ -39,12 +42,33 @@ async fn test_k8s_integration_99_load_and_scrub() {
         }
         log.append_many(batch).await.unwrap();
     }
-    let log = LogReader::open(
+    let reader = LogReader::open(
         LogReaderOptions::default(),
         Arc::clone(&storage),
-        "test_k8s_integration_99_load_and_scrub".to_string(),
+        "test_k8s_integration_80_copy_source".to_string(),
     )
     .await
     .unwrap();
-    println!("{:?}", log.scrub().await.unwrap());
+    let scrubbed_source = reader.scrub().await.unwrap();
+    wal3::copy(
+        &storage,
+        &LogWriterOptions::default(),
+        &reader,
+        LogPosition::default(),
+        "test_k8s_integration_80_copy_target".to_string(),
+    )
+    .await
+    .unwrap();
+    let copied = LogReader::open(
+        LogReaderOptions::default(),
+        Arc::clone(&storage),
+        "test_k8s_integration_80_copy_target".to_string(),
+    )
+    .await
+    .unwrap();
+    let scrubbed_target = copied.scrub().await.unwrap();
+    assert_eq!(
+        scrubbed_source.calculated_setsum,
+        scrubbed_target.calculated_setsum,
+    );
 }
