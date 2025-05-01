@@ -475,13 +475,13 @@ impl CheckRecord for DocumentExpression {
                 document.is_some_and(|doc| doc.contains(&self.pattern.replace("%", "")))
             }
             DocumentOperator::NotContains => {
-                document.is_some_and(|doc| !doc.contains(&self.pattern.replace("%", "")))
+                !document.is_some_and(|doc| doc.contains(&self.pattern.replace("%", "")))
             }
             DocumentOperator::Matches => {
                 document.is_some_and(|doc| Regex::new(&self.pattern).unwrap().is_match(doc))
             }
             DocumentOperator::NotMatches => {
-                document.is_some_and(|doc| !Regex::new(&self.pattern).unwrap().is_match(doc))
+                !document.is_some_and(|doc| Regex::new(&self.pattern).unwrap().is_match(doc))
             }
         }
     }
