@@ -3503,7 +3503,7 @@ mod tests {
     }
 
     #[test]
-    fn test_data_integrity() {
+    fn test_long_running_data_integrity() {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .thread_stack_size(8 * 1024 * 1024)
             .build()
@@ -3613,7 +3613,7 @@ mod tests {
     // the construction of hnsw provider calls async tokio filesystem apis that also need
     // a runtime which is not supported by shuttle.
     #[test]
-    fn test_data_integrity_parallel() {
+    fn test_long_running_data_integrity_parallel() {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .thread_stack_size(8 * 1024 * 1024)
             .build()
@@ -3741,7 +3741,7 @@ mod tests {
     }
 
     #[test]
-    fn test_data_integrity_multiple_runs() {
+    fn test_long_running_integrity_multiple_runs() {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .thread_stack_size(8 * 1024 * 1024)
             .build()
@@ -3865,7 +3865,7 @@ mod tests {
     // the construction of hnsw provider calls async tokio filesystem apis that also need
     // a runtime which is not supported by shuttle.
     #[test]
-    fn test_data_integrity_multiple_parallel_runs() {
+    fn test_long_running_data_integrity_multiple_parallel_runs() {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .thread_stack_size(8 * 1024 * 1024)
             .build()
@@ -4012,7 +4012,7 @@ mod tests {
     // the construction of hnsw provider calls async tokio filesystem apis that also need
     // a runtime which is not supported by shuttle.
     #[test]
-    fn test_data_integrity_multiple_parallel_runs_with_updates_deletes() {
+    fn test_long_running_data_integrity_multiple_parallel_runs_with_updates_deletes() {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .thread_stack_size(8 * 1024 * 1024)
             .build()
