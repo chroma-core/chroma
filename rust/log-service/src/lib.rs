@@ -807,7 +807,7 @@ impl LogService for LogServer {
             wal3::copy(
                 &storage,
                 &options,
-                log_reader,
+                &log_reader,
                 offset,
                 target_prefix.clone(),
             )
