@@ -4,7 +4,7 @@ use setsum::Setsum;
 use crate::manifest::{unprefixed_snapshot_path, Manifest, Snapshot};
 use crate::reader::{read_parquet, LogReader};
 use crate::writer::upload_parquet;
-use crate::{Error, Fragment, LogPosition, LogWriterOptions, SnapshotPointer, ThrottleOptions};
+use crate::{Error, Fragment, LogPosition, LogWriterOptions, SnapshotPointer};
 
 pub async fn copy_snapshot(
     storage: &Storage,
