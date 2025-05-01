@@ -7,6 +7,7 @@ use setsum::Setsum;
 
 mod backoff;
 mod batch_manager;
+mod copy;
 mod cursors;
 mod manifest;
 mod manifest_manager;
@@ -15,6 +16,7 @@ mod writer;
 
 pub use backoff::ExponentialBackoff;
 pub use batch_manager::BatchManager;
+pub use copy::copy;
 pub use cursors::{Cursor, CursorName, CursorStore, Witness};
 pub use manifest::{Manifest, Snapshot, SnapshotPointer};
 pub use manifest_manager::ManifestManager;
@@ -215,6 +217,16 @@ impl std::ops::Add<usize> for LogPosition {
     fn add(self, rhs: usize) -> Self::Output {
         LogPosition {
             offset: self.offset.wrapping_add(rhs as u64),
+        }
+    }
+}
+
+impl std::ops::Sub<u64> for LogPosition {
+    type Output = LogPosition;
+
+    fn sub(self, rhs: u64) -> Self::Output {
+        LogPosition {
+            offset: self.offset.wrapping_sub(rhs),
         }
     }
 }

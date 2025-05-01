@@ -597,7 +597,6 @@ pub struct LogServer {
 
 #[async_trait::async_trait]
 impl LogService for LogServer {
-    #[tracing::instrument(skip(self, request))]
     async fn push_logs(
         &self,
         request: Request<PushLogsRequest>,
@@ -613,43 +612,49 @@ impl LogService for LogServer {
         if push_logs.records.is_empty() {
             return Err(Status::invalid_argument("Too few records"));
         }
-        let prefix = storage_prefix_for_log(collection_id);
-        let key = LogKey { collection_id };
-        let handle = self.open_logs.get_or_create_state(key);
-        let mark_dirty = MarkDirty {
-            collection_id,
-            dirty_log: Arc::clone(&self.dirty_log),
-        };
-        let log = get_log_from_handle(
-            &handle,
-            &self.config.writer,
-            &self.storage,
-            &prefix,
-            mark_dirty,
-        )
-        .await
-        // TODO(rescrv): better error handling.
-        .map_err(|err| Status::unknown(err.to_string()))?;
-        let mut messages = Vec::with_capacity(push_logs.records.len());
-        for record in push_logs.records {
-            let mut buf = vec![];
-            record
-                .encode(&mut buf)
-                .map_err(|err| Status::unknown(err.to_string()))?;
-            messages.push(buf);
-        }
-        let record_count = messages.len() as i32;
-        log.append_many(messages).await.map_err(|err| {
-            if let wal3::Error::Backoff = err {
-                Status::new(
-                    chroma_error::ErrorCodes::Unavailable.into(),
-                    err.to_string(),
-                )
-            } else {
-                Status::new(err.code().into(), err.to_string())
+        let span = tracing::info_span!("push_logs");
+
+        async move {
+            let prefix = storage_prefix_for_log(collection_id);
+            let key = LogKey { collection_id };
+            let handle = self.open_logs.get_or_create_state(key);
+            let mark_dirty = MarkDirty {
+                collection_id,
+                dirty_log: Arc::clone(&self.dirty_log),
+            };
+            let log = get_log_from_handle(
+                &handle,
+                &self.config.writer,
+                &self.storage,
+                &prefix,
+                mark_dirty,
+            )
+            .await
+            // TODO(rescrv): better error handling.
+            .map_err(|err| Status::unknown(err.to_string()))?;
+            let mut messages = Vec::with_capacity(push_logs.records.len());
+            for record in push_logs.records {
+                let mut buf = vec![];
+                record
+                    .encode(&mut buf)
+                    .map_err(|err| Status::unknown(err.to_string()))?;
+                messages.push(buf);
             }
-        })?;
-        Ok(Response::new(PushLogsResponse { record_count }))
+            let record_count = messages.len() as i32;
+            log.append_many(messages).await.map_err(|err| {
+                if let wal3::Error::Backoff = err {
+                    Status::new(
+                        chroma_error::ErrorCodes::Unavailable.into(),
+                        err.to_string(),
+                    )
+                } else {
+                    Status::new(err.code().into(), err.to_string())
+                }
+            })?;
+            Ok(Response::new(PushLogsResponse { record_count }))
+        }
+        .instrument(span)
+        .await
     }
 
     async fn scout_logs(
@@ -766,9 +771,83 @@ impl LogService for LogServer {
 
     async fn fork_logs(
         &self,
-        _request: Request<ForkLogsRequest>,
+        request: Request<ForkLogsRequest>,
     ) -> Result<Response<ForkLogsResponse>, Status> {
-        unimplemented!("Log forking is unimplemented for WAL3 for now")
+        let request = request.into_inner();
+        let source_collection_id = Uuid::parse_str(&request.source_collection_id)
+            .map(CollectionUuid)
+            .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+        let target_collection_id = Uuid::parse_str(&request.target_collection_id)
+            .map(CollectionUuid)
+            .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+        let source_prefix = storage_prefix_for_log(source_collection_id);
+        let target_prefix = storage_prefix_for_log(target_collection_id);
+        let span = tracing::info_span!(
+            "fork_logs",
+            source_collection_id = source_collection_id.to_string(),
+            target_collection_id = target_collection_id.to_string(),
+        );
+        let storage = Arc::clone(&self.storage);
+        let options = self.config.writer.clone();
+
+        async move {
+            let log_reader = LogReader::new(
+                self.config.reader.clone(),
+                Arc::clone(&storage),
+                source_prefix.clone(),
+            );
+            let cursors = CursorStore::new(
+                CursorStoreOptions::default(),
+                Arc::clone(&storage),
+                source_prefix,
+                "copy task".to_string(),
+            );
+            let cursor_name = &COMPACTION;
+            let witness = cursors.load(cursor_name).await.map_err(|err| {
+                tracing::info!("FINDME");
+                Status::new(err.code().into(), format!("Failed to load cursor: {}", err))
+            })?;
+            // This is the existing compaction_offset, which is the last record that was compacted.
+            let offset = witness
+                .map(|x| x.1.position)
+                .unwrap_or(LogPosition::from_offset(0));
+            wal3::copy(
+                &storage,
+                &options,
+                &log_reader,
+                // + 1 to get to the first uncompacted record.
+                offset + 1u64,
+                target_prefix.clone(),
+            )
+            .await
+            .map_err(|err| {
+                tracing::info!("FINDME");
+                Status::new(err.code().into(), format!("Failed to copy log: {}", err))
+            })?;
+            let log_reader = LogReader::new(
+                self.config.reader.clone(),
+                Arc::clone(&storage),
+                target_prefix,
+            );
+            // This is the next record to insert, so we'll have to adjust downwards.
+            let max_offset = log_reader.maximum_log_position().await.map_err(|err| {
+                tracing::info!("FINDME");
+                Status::new(err.code().into(), format!("Failed to copy log: {}", err))
+            })?;
+            if max_offset < offset {
+                tracing::info!("FINDME");
+                return Err(Status::new(
+                    chroma_error::ErrorCodes::Internal.into(),
+                    format!("max_offset={:?} < offset={:?}", max_offset, offset),
+                ));
+            }
+            Ok(Response::new(ForkLogsResponse {
+                compaction_offset: offset.offset(),
+                enumeration_offset: (max_offset - 1u64).offset(),
+            }))
+        }
+        .instrument(span)
+        .await
     }
 
     #[tracing::instrument(info, skip(self, request), err(Display))]
