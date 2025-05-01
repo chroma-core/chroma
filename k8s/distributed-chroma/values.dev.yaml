@@ -20,11 +20,6 @@ rustFrontendService:
     - name: CONFIG_PATH
       value: "tilt_config.yaml"
 
-frontendService:
-  otherEnvConfig: |
-    - name: CHROMA_ALLOW_RESET
-      value: "true"
-
 queryService:
   env:
     - name: RUST_BACKTRACE

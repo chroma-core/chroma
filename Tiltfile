@@ -81,22 +81,6 @@ else:
     target='sysdb-migration'
   )
 
-
-if config.tilt_subcommand == "ci":
-  custom_build(
-    'frontend-service',
-    'docker buildx build --load -t $EXPECTED_REF -f ./Dockerfile . ',
-    ['chromadb/', 'idl/', 'requirements.txt', 'bin/']
-  )
-else:
-  docker_build(
-    'frontend-service',
-    '.',
-    only=['chromadb/', 'idl/', 'requirements.txt', 'bin/'],
-    dockerfile='./Dockerfile',
-    ignore=['**/*.pyc', 'chromadb/test/'],
-  )
-
 if config.tilt_subcommand == "ci":
   custom_build(
     'rust-frontend-service',
@@ -239,7 +223,6 @@ k8s_resource('logservice-migration-latest', resource_deps=['postgres'], labels=[
 k8s_resource('logservice', resource_deps=['sysdb-migration-latest'], labels=["chroma"], port_forwards='50052:50051')
 k8s_resource('rust-log-service', labels=["chroma"], port_forwards='50054:50051')
 k8s_resource('sysdb', resource_deps=['sysdb-migration-latest'], labels=["chroma"], port_forwards='50051:50051')
-k8s_resource('frontend-service', resource_deps=['sysdb', 'logservice'],labels=["chroma"], port_forwards='8000:8000')
 k8s_resource('rust-frontend-service', resource_deps=['sysdb', 'logservice', 'rust-log-service'], labels=["chroma"], port_forwards='3000:8000')
 k8s_resource('query-service', resource_deps=['sysdb'], labels=["chroma"], port_forwards='50053:50051')
 k8s_resource('compaction-service', resource_deps=['sysdb'], labels=["chroma"])
