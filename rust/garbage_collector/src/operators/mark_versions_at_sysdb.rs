@@ -18,13 +18,7 @@ pub struct MarkVersionsAtSysDbInput {
 }
 
 #[derive(Debug)]
-pub struct MarkVersionsAtSysDbOutput {
-    pub version_file: CollectionVersionFile,
-    pub epoch_id: i64,
-    pub sysdb_client: SysDb,
-    pub versions_to_delete: VersionListForCollection,
-    pub oldest_version_to_keep: i64,
-}
+pub struct MarkVersionsAtSysDbOutput {}
 
 #[derive(Error, Debug)]
 pub enum MarkVersionsAtSysDbError {
@@ -60,13 +54,7 @@ impl Operator<MarkVersionsAtSysDbInput, MarkVersionsAtSysDbOutput> for MarkVersi
             }
         }
 
-        Ok(MarkVersionsAtSysDbOutput {
-            version_file: input.version_file.clone(),
-            epoch_id: input.epoch_id,
-            sysdb_client: input.sysdb_client.clone(),
-            versions_to_delete: input.versions_to_delete.clone(),
-            oldest_version_to_keep: input.oldest_version_to_keep,
-        })
+        Ok(MarkVersionsAtSysDbOutput {})
     }
 }
 
@@ -98,8 +86,6 @@ mod tests {
         let result = operator.run(&input).await;
 
         assert!(result.is_ok());
-        let output = result.unwrap();
-        assert_eq!(output.version_file, version_file);
     }
 
     #[tokio::test]
@@ -125,8 +111,6 @@ mod tests {
         let result = operator.run(&input).await;
 
         assert!(result.is_ok());
-        let output = result.unwrap();
-        assert_eq!(output.version_file, version_file);
     }
 
     #[tokio::test]

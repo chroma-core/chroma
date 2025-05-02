@@ -6,6 +6,8 @@ use crate::{
     types::CleanupMode,
 };
 use async_trait::async_trait;
+use chroma_blockstore::RootManager;
+use chroma_cache::nop::NopCache;
 use chroma_config::{
     assignment::assignment_policy::AssignmentPolicy, registry::Registry, Configurable,
 };
@@ -38,6 +40,7 @@ pub(crate) struct GarbageCollector {
     disabled_collections: HashSet<CollectionUuid>,
     sysdb_client: SysDb,
     storage: Storage,
+    root_manager: RootManager,
     dispatcher: Option<ComponentHandle<Dispatcher>>,
     system: Option<chroma_system::System>,
     assignment_policy: Box<dyn AssignmentPolicy>,
@@ -74,6 +77,7 @@ impl GarbageCollector {
         disabled_collections: HashSet<CollectionUuid>,
         sysdb_client: SysDb,
         storage: Storage,
+        root_manager: RootManager,
         default_cleanup_mode: CleanupMode,
         tenant_mode_overrides: Option<HashMap<String, CleanupMode>>,
         assignment_policy: Box<dyn AssignmentPolicy>,
@@ -88,6 +92,7 @@ impl GarbageCollector {
             disabled_collections,
             sysdb_client,
             storage,
+            root_manager,
             dispatcher: None,
             system: None,
             default_cleanup_mode,
@@ -134,10 +139,12 @@ impl GarbageCollector {
             let orchestrator = GarbageCollectorOrchestrator::new(
                 collection.id,
                 collection.version_file_path,
+                None, // todo
                 absolute_cutoff_time,
                 self.sysdb_client.clone(),
                 dispatcher.clone(),
                 self.storage.clone(),
+                self.root_manager.clone(),
                 cleanup_mode,
             );
 
@@ -368,6 +375,7 @@ impl Configurable<GarbageCollectorConfig> for GarbageCollector {
         let sysdb_config = SysDbConfig::Grpc(config.sysdb_config.clone());
         let sysdb_client = SysDb::try_from_config(&sysdb_config, registry).await?;
         let storage = Storage::try_from_config(&config.storage_config, registry).await?;
+        let root_manager = RootManager::new(storage.clone(), Box::new(NopCache)); // todo
 
         let mut disabled_collections = HashSet::new();
         for collection_id_str in config.disallow_collections.iter() {
@@ -393,6 +401,7 @@ impl Configurable<GarbageCollectorConfig> for GarbageCollector {
             disabled_collections,
             sysdb_client,
             storage,
+            root_manager,
             config.default_mode,
             config.tenant_mode_overrides.clone(),
             assignment_policy,

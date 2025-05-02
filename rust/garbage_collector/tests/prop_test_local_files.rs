@@ -37,6 +37,8 @@
 // Min versions to keep is 2. Make this configurable, and randomize it per collection.
 
 use chroma_blockstore::test_utils::sparse_index_test_utils::create_test_sparse_index;
+use chroma_blockstore::RootManager;
+use chroma_cache::nop::NopCache;
 use chroma_storage::local::LocalStorage;
 use chroma_storage::Storage;
 use chroma_sysdb::TestSysDb;
@@ -519,6 +521,7 @@ static INVARIANT_CHECK_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 struct GcTest {
     storage: Storage,
+    root_manager: RootManager,
     sysdb: chroma_sysdb::SysDb,
     last_cleanup_files: Vec<String>,
 }
@@ -530,6 +533,7 @@ impl Default for GcTest {
         let storage_dir = tmp_dir.path().to_str().unwrap();
         tracing::info!(line = line!(), "GcTest: storage_dir: {:?}", storage_dir);
         let storage = Storage::Local(LocalStorage::new(storage_dir));
+        let root_manager = RootManager::new(storage.clone(), Box::new(NopCache));
 
         // Create test sysdb instance
         let mut sysdb = chroma_sysdb::SysDb::Test(TestSysDb::new());
@@ -541,6 +545,7 @@ impl Default for GcTest {
 
         Self {
             storage,
+            root_manager,
             sysdb,
             last_cleanup_files: Vec::new(),
         }
@@ -724,6 +729,7 @@ impl GcTest {
     async fn cleanup_versions(mut self, id: String, cutoff_time: u64) -> Self {
         let mut sysdb = self.sysdb.clone();
         let storage = self.storage.clone();
+        let root_manager = self.root_manager.clone();
 
         // Do the actual Garbage Collection.
         let system = chroma_system::System::new();
@@ -758,10 +764,12 @@ impl GcTest {
         let orchestrator = GarbageCollectorOrchestrator::new(
             collection.collection_id,
             version_file_name,
+            None, // todo
             DateTime::from_timestamp(cutoff_time as i64, 0).unwrap(),
             sysdb,
             dispatcher_handle.clone(),
             storage,
+            root_manager,
             CleanupMode::Delete,
         );
 

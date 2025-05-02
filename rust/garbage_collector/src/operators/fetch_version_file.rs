@@ -7,22 +7,37 @@
 //! Output:
 //! - Version file content Vec<u8>
 
-use std::fmt::{Debug, Formatter};
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
 use chroma_storage::{GetOptions, Storage, StorageError};
 use chroma_system::{Operator, OperatorType};
+use chroma_types::chroma_proto::CollectionVersionFile;
+use prost::Message;
+use std::fmt::{Debug, Formatter};
 use thiserror::Error;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct FetchVersionFileOperator {}
 
+impl FetchVersionFileOperator {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
 pub struct FetchVersionFileInput {
-    pub version_file_path: String,
-    pub storage: Storage,
+    version_file_path: String,
+    storage: Storage,
+}
+
+impl FetchVersionFileInput {
+    pub fn new(version_file_path: String, storage: Storage) -> Self {
+        Self {
+            version_file_path,
+            storage,
+        }
+    }
 }
 
 impl Debug for FetchVersionFileInput {
@@ -35,28 +50,14 @@ impl Debug for FetchVersionFileInput {
 
 #[allow(dead_code)]
 #[derive(Debug)]
-pub struct FetchVersionFileOutput {
-    version_file_content: Vec<u8>,
-}
-
-impl FetchVersionFileOutput {
-    pub fn new(content: Arc<Vec<u8>>) -> Self {
-        Self {
-            version_file_content: (*content).clone(),
-        }
-    }
-
-    pub fn version_file_content(&self) -> &[u8] {
-        &self.version_file_content
-    }
-}
+pub struct FetchVersionFileOutput(pub CollectionVersionFile);
 
 #[derive(Error, Debug)]
 pub enum FetchVersionFileError {
     #[error("Error fetching version file: {0}")]
     StorageError(#[from] StorageError),
     #[error("Error parsing version file")]
-    ParseError,
+    ParseError(#[from] prost::DecodeError),
     #[error("Invalid storage configuration: {0}")]
     StorageConfigError(String),
 }
@@ -65,7 +66,7 @@ impl ChromaError for FetchVersionFileError {
     fn code(&self) -> ErrorCodes {
         match self {
             FetchVersionFileError::StorageError(e) => e.code(),
-            FetchVersionFileError::ParseError => ErrorCodes::Internal,
+            FetchVersionFileError::ParseError(_) => ErrorCodes::Internal,
             FetchVersionFileError::StorageConfigError(_) => ErrorCodes::Internal,
         }
     }
@@ -83,11 +84,6 @@ impl Operator<FetchVersionFileInput, FetchVersionFileOutput> for FetchVersionFil
         &self,
         input: &FetchVersionFileInput,
     ) -> Result<FetchVersionFileOutput, FetchVersionFileError> {
-        tracing::info!(
-            path = %input.version_file_path,
-            "Starting to fetch version file"
-        );
-
         let content = input
             .storage
             .get(
@@ -110,8 +106,8 @@ impl Operator<FetchVersionFileInput, FetchVersionFileOutput> for FetchVersionFil
             "Successfully fetched version file"
         );
 
-        let output = FetchVersionFileOutput::new(content);
-        Ok(output)
+        let version_file = CollectionVersionFile::decode(content.as_slice())?;
+        Ok(FetchVersionFileOutput(version_file))
     }
 }
 
@@ -124,7 +120,10 @@ mod tests {
         ObjectStoreBucketConfig, ObjectStoreConfig, ObjectStoreType, StorageConfig,
     };
     use chroma_storage::PutOptions;
+    use chroma_types::chroma_proto::CollectionInfoImmutable;
+    use chroma_types::chroma_proto::CollectionVersionHistory;
     use tracing_test::traced_test;
+    use uuid::Uuid;
 
     async fn setup_test_storage() -> Storage {
         // Create storage config for Minio
@@ -151,7 +150,20 @@ mod tests {
     #[traced_test]
     async fn test_k8s_integration_fetch_version_file() {
         let storage = setup_test_storage().await;
-        let test_content = vec![1, 2, 3, 4, 5];
+        let test_file = CollectionVersionFile {
+            collection_info_immutable: Some(CollectionInfoImmutable {
+                tenant_id: Uuid::new_v4().to_string(),
+                database_id: Uuid::new_v4().to_string(),
+                database_name: "test".to_string(),
+                is_deleted: false,
+                dimension: 3,
+                collection_id: Uuid::new_v4().to_string(),
+                collection_name: "test".to_string(),
+                collection_creation_secs: 0,
+            }),
+            version_history: Some(CollectionVersionHistory { versions: vec![] }),
+        };
+        let test_content = test_file.encode_to_vec();
         let test_file_path = "test_version_file.txt";
 
         // Add more detailed error handling for the put operation
@@ -177,7 +189,7 @@ mod tests {
         let result = operator.run(&input).await.expect("Failed to run operator");
 
         // Verify the content
-        assert_eq!(result.version_file_content(), &test_content);
+        assert_eq!(result.0, test_file);
 
         // Cleanup - Note: object_store doesn't have a delete method,
         // but the test bucket should be cleaned up between test runs

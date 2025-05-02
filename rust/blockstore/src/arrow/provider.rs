@@ -469,6 +469,12 @@ pub struct RootManager {
     prefetched_roots: Arc<parking_lot::Mutex<HashMap<Uuid, Duration>>>,
 }
 
+impl std::fmt::Debug for RootManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RootManager").finish()
+    }
+}
+
 impl RootManager {
     pub fn new(storage: Storage, cache: Box<dyn PersistentCache<Uuid, RootReader>>) -> Self {
         let cache: Arc<dyn PersistentCache<Uuid, RootReader>> = cache.into();
