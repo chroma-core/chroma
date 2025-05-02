@@ -21,10 +21,15 @@ impl From<Hir> for LiteralExpr {
             Hir::Empty => Self::Literal(Vec::new()),
             Hir::Literal(literal) => Self::Literal(literal.chars().map(Literal::Char).collect()),
             Hir::Class(class_unicode) => Self::Literal(vec![Literal::Class(class_unicode)]),
-            Hir::Repetition { min, max: _, sub } => Hir::Concat(vec![*sub; min as usize]).into(),
+            Hir::Repetition { min, max: _, sub } => {
+                let mut repeat = vec![*sub; min as usize];
+                // Append a breakpoint Hir to prevent merge with literal on the right
+                repeat.push(Hir::Alternation(vec![Hir::Empty]));
+                Hir::Concat(repeat).into()
+            }
             Hir::Concat(hirs) => {
                 let exprs = hirs.into_iter().fold(Vec::new(), |mut exprs, expr| {
-                    match (exprs.last_mut(), expr) {
+                    match (exprs.last_mut(), expr.into()) {
                         (Some(Self::Literal(literal)), Self::Literal(extra_literal)) => {
                             literal.extend(extra_literal)
                         }
