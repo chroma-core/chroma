@@ -381,10 +381,6 @@ trait IntoSqliteExpr {
     /// We need to use `Min` and `Max` as a workaround
     /// In SQLite, boolean can be implicitly treated as binary integer
     fn eval(&self) -> SimpleExpr;
-
-    fn one() -> SimpleExpr {
-        Expr::value(1)
-    }
 }
 
 impl IntoSqliteExpr for Where {
@@ -460,16 +456,21 @@ impl IntoSqliteExpr for Where {
 
 impl IntoSqliteExpr for CompositeExpression {
     fn eval(&self) -> SimpleExpr {
-        let mut expr = Self::one();
-        for child in &self.children {
-            expr = expr.mul(match self.operator {
-                BooleanOperator::And => child.eval(),
-                BooleanOperator::Or => Self::one().sub(child.eval()),
-            })
-        }
         match self.operator {
-            BooleanOperator::And => expr,
-            BooleanOperator::Or => Self::one().sub(expr),
+            BooleanOperator::And => {
+                let mut expr = SimpleExpr::Value(sea_query::Value::Bool(Some(true)));
+                for child in &self.children {
+                    expr = Expr::expr(expr).and(child.eval());
+                }
+                expr
+            }
+            BooleanOperator::Or => {
+                let mut expr = SimpleExpr::Value(sea_query::Value::Bool(Some(false)));
+                for child in &self.children {
+                    expr = Expr::expr(expr).or(child.eval());
+                }
+                expr
+            }
         }
     }
 }
@@ -506,24 +507,36 @@ impl IntoSqliteExpr for MetadataExpression {
                     MetadataValue::Str(s) => (EmbeddingMetadata::StringValue, Expr::val(s)),
                 };
                 let scol = Expr::col((EmbeddingMetadata::Table, col));
+                let mut subq = Query::select()
+                    .column(EmbeddingMetadata::Id)
+                    .from(EmbeddingMetadata::Table)
+                    .and_where(key_cond.clone())
+                    .to_owned();
+
                 match op {
                     PrimitiveOperator::Equal => {
-                        Expr::expr(key_cond.and(scol.eq(sval).is(true))).max()
+                        subq.and_where(scol.eq(sval));
+                        Expr::col((Embeddings::Table, Embeddings::Id)).in_subquery(subq)
                     }
                     PrimitiveOperator::NotEqual => {
-                        Expr::expr(key_cond.and(scol.eq(sval).is(true)).not()).min()
+                        subq.and_where(scol.eq(sval));
+                        Expr::col((Embeddings::Table, Embeddings::Id)).not_in_subquery(subq)
                     }
                     PrimitiveOperator::GreaterThan => {
-                        Expr::expr(key_cond.and(scol.gt(sval).is(true))).max()
+                        subq.and_where(scol.gt(sval));
+                        Expr::col((Embeddings::Table, Embeddings::Id)).in_subquery(subq)
                     }
                     PrimitiveOperator::GreaterThanOrEqual => {
-                        Expr::expr(key_cond.and(scol.gte(sval).is(true))).max()
+                        subq.and_where(scol.gte(sval));
+                        Expr::col((Embeddings::Table, Embeddings::Id)).in_subquery(subq)
                     }
                     PrimitiveOperator::LessThan => {
-                        Expr::expr(key_cond.and(scol.lt(sval).is(true))).max()
+                        subq.and_where(scol.lt(sval));
+                        Expr::col((Embeddings::Table, Embeddings::Id)).in_subquery(subq)
                     }
                     PrimitiveOperator::LessThanOrEqual => {
-                        Expr::expr(key_cond.and(scol.lte(sval).is(true))).max()
+                        subq.and_where(scol.lte(sval));
+                        Expr::col((Embeddings::Table, Embeddings::Id)).in_subquery(subq)
                     }
                 }
             }
@@ -547,10 +560,20 @@ impl IntoSqliteExpr for MetadataExpression {
                     ),
                 };
                 let scol = Expr::col((EmbeddingMetadata::Table, col));
-                let val_in = key_cond.and(scol.is_in(svals).is(true));
+                let subq = Query::select()
+                    .column(EmbeddingMetadata::Id)
+                    .from(EmbeddingMetadata::Table)
+                    .and_where(key_cond.clone())
+                    .and_where(scol.is_in(svals))
+                    .to_owned();
+
                 match op {
-                    SetOperator::In => Expr::expr(val_in).max(),
-                    SetOperator::NotIn => Expr::expr(val_in.not()).min(),
+                    SetOperator::In => {
+                        Expr::col((Embeddings::Table, Embeddings::Id)).in_subquery(subq)
+                    }
+                    SetOperator::NotIn => {
+                        Expr::col((Embeddings::Table, Embeddings::Id)).not_in_subquery(subq)
+                    }
                 }
             }
         }
@@ -658,15 +681,8 @@ impl SqliteMetadataReader {
                         EmbeddingFulltextSearch::Rowid,
                     )),
                 )
-                .add_group_by([
-                    Expr::col((Embeddings::Table, Embeddings::Id)).into(),
-                    Expr::col((
-                        EmbeddingFulltextSearch::Table,
-                        EmbeddingFulltextSearch::StringValue,
-                    ))
-                    .into(),
-                ])
-                .cond_having(whr.eval());
+                .distinct()
+                .cond_where(whr.eval());
         }
 
         filter_limit_query
