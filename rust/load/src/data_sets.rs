@@ -760,7 +760,10 @@ impl DataSet for ReferencingDataSet {
         let mut keys = vec![];
         let num_keys = gq.limit.sample(guac);
         for _ in 0..num_keys {
-            keys.push(KeySelector::Random(gq.skew).select(guac, self));
+            let key = KeySelector::Random(gq.skew).select(guac, self);
+            if !keys.contains(&key) {
+                keys.push(key);
+            }
         }
         let collection = client.get_collection(&self.operates_on).await?;
         // TODO(rescrv):  from the reference collection, pull the documents and embeddings and
@@ -787,7 +790,10 @@ impl DataSet for ReferencingDataSet {
         let mut keys = vec![];
         let num_keys = qq.limit.sample(guac);
         for _ in 0..num_keys {
-            keys.push(KeySelector::Random(qq.skew).select(guac, self));
+            let key = KeySelector::Random(qq.skew).select(guac, self);
+            if !keys.contains(&key) {
+                keys.push(key);
+            }
         }
         let keys = keys.iter().map(|k| k.as_str()).collect::<Vec<_>>();
         if let Some(res) = self.references.get_by_key(client, &keys).await? {
@@ -830,12 +836,15 @@ impl DataSet for ReferencingDataSet {
         &self,
         client: &ChromaClient,
         uq: UpsertQuery,
-        _: &mut Guacamole,
+        guac: &mut Guacamole,
     ) -> Result<(), Box<dyn std::error::Error + Send>> {
         let collection = client.get_collection(&self.operates_on).await?;
         let mut keys = vec![];
-        for offset in 0..uq.batch_size {
-            keys.push(uq.key.select_from_reference(self, offset));
+        for _ in 0..uq.batch_size {
+            let key = uq.key.select(guac, self);
+            if !keys.contains(&key) {
+                keys.push(key);
+            }
         }
         let keys = keys.iter().map(|k| k.as_str()).collect::<Vec<_>>();
         if let Some(res) = self.references.get_by_key(client, &keys).await? {
@@ -1019,7 +1028,10 @@ impl DataSet for VerifyingDataSet {
         }
 
         for _ in 0..num_keys {
-            keys.push(KeySelector::Random(gq.skew).select(guac, self));
+            let key = KeySelector::Random(gq.skew).select(guac, self);
+            if !keys.contains(&key) {
+                keys.push(key);
+            }
         }
 
         let reference_collection = client
@@ -1208,7 +1220,10 @@ impl DataSet for VerifyingDataSet {
         );
 
         for offset in 0..uq.batch_size {
-            keys.push(uq.key.select_from_reference(self, offset));
+            let key = uq.key.select_from_reference(self, offset);
+            if !keys.contains(&key) {
+                keys.push(key)
+            }
         }
         let keys = keys.iter().map(|k| k.as_str()).collect::<Vec<_>>();
         if let Some(res) = self.reference_data_set.get_by_key(client, &keys).await? {
