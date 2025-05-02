@@ -278,7 +278,7 @@ fn select_db(dbs: &[Database]) -> Result<String, CliError> {
     Ok(name)
 }
 
-fn get_db_name(dbs: &[Database], prompt: &str) -> Result<String, CliError> {
+pub fn get_db_name(dbs: &[Database], prompt: &str) -> Result<String, CliError> {
     if dbs.is_empty() {
         return Err(CliError::Db(DbError::NoDBs));
     }
