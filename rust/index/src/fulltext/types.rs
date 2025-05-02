@@ -110,11 +110,7 @@ impl FullTextIndexWriter {
                         .clone()
                         .token_stream(old_document)
                         .process(&mut |token| {
-                            match TokenInstance::encode(
-                                token.text.as_str(),
-                                offset_id,
-                                Some(token.offset_from as u32),
-                            ) {
+                            match TokenInstance::encode(token.text.as_str(), offset_id, None) {
                                 Ok(encoded) => {
                                     trigrams_to_delete.insert(encoded);
                                 }
@@ -166,11 +162,7 @@ impl FullTextIndexWriter {
                         .clone()
                         .token_stream(old_document)
                         .process(&mut |token| {
-                            match TokenInstance::encode(
-                                token.text.as_str(),
-                                offset_id,
-                                Some(token.offset_from as u32),
-                            ) {
+                            match TokenInstance::encode(token.text.as_str(), offset_id, None) {
                                 Ok(encoded) => {
                                     trigrams_to_delete.insert(encoded);
                                 }
