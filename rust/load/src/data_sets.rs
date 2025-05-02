@@ -836,12 +836,12 @@ impl DataSet for ReferencingDataSet {
         &self,
         client: &ChromaClient,
         uq: UpsertQuery,
-        _: &mut Guacamole,
+        guac: &mut Guacamole,
     ) -> Result<(), Box<dyn std::error::Error + Send>> {
         let collection = client.get_collection(&self.operates_on).await?;
         let mut keys = vec![];
-        for offset in 0..uq.batch_size {
-            let key = uq.key.select_from_reference(self, offset);
+        for _ in 0..uq.batch_size {
+            let key = uq.key.select(guac, self);
             if !keys.contains(&key) {
                 keys.push(key);
             }
