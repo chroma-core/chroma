@@ -795,6 +795,9 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
             }
             None => {
                 tracing::warn!("No logs were pulled from the log service, this can happen due to a recent fork or if the log failed to be updated.");
+                // TODO(hammadb): We can repair the log service's understanding of the offset here, as this only happens
+                // when the log service is not up to date on the latest compacted offset, which leads it to schedule an already
+                // compacted collection.
                 self.terminate_with_result(
                     Ok(CompactionResponse {
                         collection_id: self.collection_id,
