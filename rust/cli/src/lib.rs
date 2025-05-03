@@ -1,6 +1,7 @@
 mod client;
 mod commands;
 mod tui;
+mod ui_utils;
 mod utils;
 
 use crate::commands::browse::{browse, BrowseArgs};

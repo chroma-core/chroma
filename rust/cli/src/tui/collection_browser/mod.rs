@@ -2,7 +2,7 @@ use crate::client::collection::Collection;
 use crate::tui::collection_browser::app_state::AppState;
 use crate::tui::collection_browser::app_ui::AppUI;
 use crate::tui::collection_browser::events::{Action, EventsHandler};
-use crate::utils::Theme;
+use crate::ui_utils::Theme;
 use chroma_types::Metadata;
 use ratatui::DefaultTerminal;
 use thiserror::Error;

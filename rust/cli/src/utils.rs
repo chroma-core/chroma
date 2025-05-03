@@ -1,4 +1,4 @@
-use crate::client::admin_client::AdminClientError;
+use crate::client::admin_client::{AdminClient, AdminClientError};
 use crate::client::chroma_client::ChromaClientError;
 use crate::client::dashboard_client::DashboardClientError;
 use crate::commands::browse::BrowseError;
@@ -9,39 +9,21 @@ use crate::commands::profile::ProfileError;
 use crate::commands::run::RunError;
 use crate::commands::update::UpdateError;
 use crate::commands::vacuum::VacuumError;
-use arboard::Clipboard;
-use clap::ValueEnum;
-use colored::Colorize;
-use crossterm::{
-    cursor,
-    event::{self, Event, KeyCode, KeyEvent},
-    terminal::{disable_raw_mode, enable_raw_mode},
-    ExecutableCommand,
-};
+use crate::ui_utils::Theme;
+use chroma_frontend::config::FrontendServerConfig;
+use chroma_frontend::frontend_service_entrypoint_with_config;
+use clap::Parser;
 use rand::Rng;
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
-use std::io::{stdout, Write};
+use std::fs;
 use std::net::TcpListener;
 use std::path::PathBuf;
-use std::{fs, io};
+use std::sync::Arc;
 use thiserror::Error;
-
-pub const LOGO: &str = "
-                \x1b[38;5;069m(((((((((    \x1b[38;5;203m(((((\x1b[38;5;220m####
-             \x1b[38;5;069m(((((((((((((\x1b[38;5;203m(((((((((\x1b[38;5;220m#########
-           \x1b[38;5;069m(((((((((((((\x1b[38;5;203m(((((((((((\x1b[38;5;220m###########
-         \x1b[38;5;069m((((((((((((((\x1b[38;5;203m((((((((((((\x1b[38;5;220m############
-        \x1b[38;5;069m(((((((((((((\x1b[38;5;203m((((((((((((((\x1b[38;5;220m#############
-        \x1b[38;5;069m(((((((((((((\x1b[38;5;203m((((((((((((((\x1b[38;5;220m#############
-         \x1b[38;5;069m((((((((((((\x1b[38;5;203m(((((((((((((\x1b[38;5;220m##############
-         \x1b[38;5;069m((((((((((((\x1b[38;5;203m((((((((((((\x1b[38;5;220m##############
-           \x1b[38;5;069m((((((((((\x1b[38;5;203m(((((((((((\x1b[38;5;220m#############
-             \x1b[38;5;069m((((((((\x1b[38;5;203m((((((((\x1b[38;5;220m##############
-                \x1b[38;5;069m(((((\x1b[38;5;203m((((    \x1b[38;5;220m#########\x1b[0m
-";
+use tokio::spawn;
+use tokio::task::JoinHandle;
 
 pub const CHROMA_DIR: &str = ".chroma";
 pub const CREDENTIALS_FILE: &str = "credentials";
@@ -112,21 +94,14 @@ pub enum UtilsError {
     PortSearch,
 }
 
-pub enum ColorLevel {
-    Ansi256,
-    TrueColor,
-}
-
-#[derive(Debug, Clone, ValueEnum, Serialize, Deserialize, PartialEq, Eq)]
-pub enum Theme {
-    Dark,
-    Light,
-}
-
-impl Default for Theme {
-    fn default() -> Self {
-        Self::Dark
-    }
+#[derive(Parser, Debug, Clone)]
+pub struct LocalChromaArgs {
+    #[clap(long, conflicts_with_all = ["host", "config_path"], help = "The data path for your local Chroma server")]
+    pub path: Option<String>,
+    #[clap(long, conflicts_with_all = ["path", "config_path"], help = "The hostname for your local Chroma server")]
+    pub host: Option<String>,
+    #[clap(long = "config", conflicts_with_all = ["host", "path"], help = "The config path for your local Chroma server")]
+    pub config_path: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -320,69 +295,6 @@ pub fn get_current_profile() -> Result<(String, Profile), CliError> {
     Ok((profile_name, profile))
 }
 
-pub fn copy_to_clipboard(copy_string: &str) -> Result<(), CliError> {
-    let mut clipboard = Clipboard::new().map_err(|_| UtilsError::CopyToClipboardFailed)?;
-    clipboard
-        .set_text(copy_string)
-        .map_err(|_| UtilsError::CopyToClipboardFailed)?;
-    println!("\n{}", "Copied to clipboard!".blue().bold());
-    Ok(())
-}
-
-pub fn validate_uri(input: String) -> Result<String, UtilsError> {
-    if input.is_empty() {
-        return Err(UtilsError::InvalidName);
-    }
-
-    let re = Regex::new(r"^[a-zA-Z0-9_-]+$")
-        .map_err(|e| e.to_string())
-        .map_err(|_| UtilsError::NameValidationFailed)?;
-    if !re.is_match(&input) {
-        return Err(UtilsError::InvalidName);
-    }
-
-    Ok(input)
-}
-
-pub fn read_secret(prompt: &str) -> io::Result<String> {
-    let mut stdout = stdout();
-    let mut password = String::new();
-
-    stdout.write_all(prompt.as_bytes())?;
-    stdout.write_all(b": ")?;
-    stdout.flush()?;
-
-    enable_raw_mode()?;
-
-    loop {
-        if let Event::Key(KeyEvent { code, .. }) = event::read()? {
-            match code {
-                KeyCode::Enter => break,
-                KeyCode::Char(c) => {
-                    password.push(c);
-                    stdout.write_all(b"*")?;
-                }
-                KeyCode::Backspace => {
-                    if !password.is_empty() {
-                        password.pop();
-                        stdout.execute(cursor::MoveLeft(1))?;
-                        stdout.write_all(b" ")?;
-                        stdout.execute(cursor::MoveLeft(1))?;
-                    }
-                }
-                _ => {}
-            }
-            stdout.flush()?;
-        }
-    }
-
-    disable_raw_mode()?;
-    stdout.write_all(b"\n")?;
-    stdout.flush()?;
-
-    Ok(password)
-}
-
 pub fn find_available_port(min: u16, max: u16) -> Result<u16, CliError> {
     let mut rng = rand::thread_rng();
 
@@ -396,4 +308,46 @@ pub fn find_available_port(min: u16, max: u16) -> Result<u16, CliError> {
     }
 
     Err(UtilsError::PortSearch.into())
+}
+
+pub async fn parse_host(host: String) -> Result<AdminClient, CliError> {
+    let admin_client = AdminClient::local(host);
+    admin_client.healthcheck().await?;
+    Ok(admin_client)
+}
+
+pub async fn standup_local_chroma(
+    config: FrontendServerConfig,
+) -> Result<(AdminClient, JoinHandle<()>), CliError> {
+    let host = format!("http://localhost:{}", config.port);
+    let handle = spawn(async move {
+        frontend_service_entrypoint_with_config(Arc::new(()), Arc::new(()), &config).await;
+    });
+    let admin_client = AdminClient::local(host);
+    admin_client.healthcheck().await?;
+    Ok((admin_client, handle))
+}
+
+pub async fn parse_path(path: String) -> Result<(AdminClient, JoinHandle<()>), CliError> {
+    let mut config = FrontendServerConfig::single_node_default();
+    config.persist_path = path;
+    config.port = find_available_port(8000, 9000)?;
+    standup_local_chroma(config).await
+}
+
+pub async fn parse_config(config_path: String) -> Result<(AdminClient, JoinHandle<()>), CliError> {
+    let config = FrontendServerConfig::load_from_path(&config_path);
+    standup_local_chroma(config).await
+}
+
+pub async fn parse_local() -> Result<(AdminClient, Option<JoinHandle<()>>), CliError> {
+    let default_host = String::from("http://localhost:8000");
+    match parse_host(default_host).await {
+        Ok(admin_client) => Ok((admin_client, None)),
+        Err(_) => {
+            let default_config = String::from("chroma.config.yml");
+            let (admin_client, handle) = parse_config(default_config).await?;
+            Ok((admin_client, Some(handle)))
+        }
+    }
 }

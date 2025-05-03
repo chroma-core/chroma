@@ -1,7 +1,6 @@
 use crate::client::admin_client::get_admin_client;
-use crate::utils::{
-    copy_to_clipboard, get_current_profile, CliError, Profile, UtilsError, SELECTION_LIMIT,
-};
+use crate::ui_utils::copy_to_clipboard;
+use crate::utils::{get_current_profile, CliError, Profile, UtilsError, SELECTION_LIMIT};
 use chroma_types::Database;
 use clap::{Args, Subcommand, ValueEnum};
 use colored::Colorize;

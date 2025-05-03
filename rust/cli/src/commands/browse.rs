@@ -3,35 +3,28 @@ use crate::client::chroma_client::ChromaClient;
 use crate::commands::db::get_db_name;
 use crate::commands::install::InstallError;
 use crate::tui::collection_browser::CollectionBrowser;
+use crate::ui_utils::Theme;
 use crate::utils::{
-    find_available_port, get_current_profile, read_config, write_config, AddressBook, CliError,
-    Theme,
+    get_current_profile, parse_config, parse_host, parse_local, parse_path, read_config,
+    write_config, AddressBook, CliError, LocalChromaArgs,
 };
-use chroma_frontend::config::FrontendServerConfig;
-use chroma_frontend::frontend_service_entrypoint_with_config;
 use clap::Parser;
 use crossterm::style::Stylize;
-use std::sync::Arc;
 use thiserror::Error;
-use tokio::spawn;
 use tokio::task::JoinHandle;
 
 #[derive(Parser, Debug, Clone)]
 pub struct BrowseArgs {
     #[clap(index = 1, help = "The name of the collection to browse")]
     collection_name: String,
-    #[clap(long = "db", help = "The Chroma Cloud DB name housing your collection")]
+    #[clap(long = "db", help = "The Chroma Cloud DB name with your collection")]
     db_name: Option<String>,
-    #[clap(long, conflicts_with_all = ["host", "config_path"], help = "The data path for your local Chroma server")]
-    path: Option<String>,
-    #[clap(long, conflicts_with_all = ["path", "config_path"], help = "The hostname for your local Chroma server")]
-    host: Option<String>,
-    #[clap(long = "config", conflicts_with_all = ["host", "path"], help = "The config path for your local Chroma server")]
-    config_path: Option<String>,
     #[clap(long, help = "Find this collection on a local Chroma server")]
     local: bool,
     #[clap(long, help = "Dark or Light theme for the collection browser")]
     theme: Option<Theme>,
+    #[clap(flatten)]
+    local_chroma_args: LocalChromaArgs,
 }
 
 #[derive(Debug, Error)]
@@ -53,58 +46,17 @@ fn input_db_prompt(collection_name: &str) -> String {
         .to_string()
 }
 
-async fn parse_host(host: String) -> Result<AdminClient, CliError> {
-    let admin_client = AdminClient::local(host);
-    admin_client.healthcheck().await?;
-    Ok(admin_client)
-}
-
-async fn standup_local_chroma(
-    config: FrontendServerConfig,
-) -> Result<(AdminClient, JoinHandle<()>), CliError> {
-    let host = format!("http://localhost:{}", config.port);
-    let handle = spawn(async move {
-        frontend_service_entrypoint_with_config(Arc::new(()), Arc::new(()), &config).await;
-    });
-    let admin_client = AdminClient::local(host);
-    admin_client.healthcheck().await?;
-    Ok((admin_client, handle))
-}
-
-async fn parse_path(path: String) -> Result<(AdminClient, JoinHandle<()>), CliError> {
-    let mut config = FrontendServerConfig::single_node_default();
-    config.persist_path = path;
-    config.port = find_available_port(8000, 9000)?;
-    standup_local_chroma(config).await
-}
-
-async fn parse_config(config_path: String) -> Result<(AdminClient, JoinHandle<()>), CliError> {
-    let config = FrontendServerConfig::load_from_path(&config_path);
-    standup_local_chroma(config).await
-}
-
-async fn parse_local() -> Result<(AdminClient, Option<JoinHandle<()>>), CliError> {
-    let default_host = String::from("http://localhost:8000");
-    match parse_host(default_host).await {
-        Ok(admin_client) => Ok((admin_client, None)),
-        Err(_) => {
-            let default_config = String::from("chroma.config.yml");
-            let (admin_client, handle) = parse_config(default_config).await?;
-            Ok((admin_client, Some(handle)))
-        }
-    }
-}
-
 async fn parse_local_args(
     args: BrowseArgs,
 ) -> Result<(ChromaClient, Option<JoinHandle<()>>), CliError> {
-    let (admin_client, handle) = if args.host.is_some() {
-        (parse_host(args.host.unwrap()).await?, None)
-    } else if args.path.is_some() {
-        let (client, handle) = parse_path(args.path.unwrap()).await?;
+    let local_args = args.local_chroma_args;
+    let (admin_client, handle) = if local_args.host.is_some() {
+        (parse_host(local_args.host.unwrap()).await?, None)
+    } else if local_args.path.is_some() {
+        let (client, handle) = parse_path(local_args.path.unwrap()).await?;
         (client, Some(handle))
-    } else if args.config_path.is_some() {
-        let (client, handle) = parse_config(args.config_path.unwrap()).await?;
+    } else if local_args.config_path.is_some() {
+        let (client, handle) = parse_config(local_args.config_path.unwrap()).await?;
         (client, Some(handle))
     } else if args.local {
         parse_local().await?
@@ -151,7 +103,11 @@ pub async fn get_cloud_client(
 }
 
 fn local_setup(args: BrowseArgs) -> bool {
-    args.local || args.host.is_some() || args.path.is_some() || args.config_path.is_some()
+    let local_args = args.local_chroma_args;
+    args.local
+        || local_args.host.is_some()
+        || local_args.path.is_some()
+        || local_args.config_path.is_some()
 }
 
 pub fn browse(args: BrowseArgs) -> Result<(), CliError> {

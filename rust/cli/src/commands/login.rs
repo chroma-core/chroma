@@ -4,9 +4,10 @@ use crate::client::dashboard_client::{
 };
 use crate::commands::db::DbError;
 use crate::commands::login::LoginError::BrowserAuthFailed;
+use crate::ui_utils::validate_uri;
 use crate::utils::{
-    read_config, read_profiles, validate_uri, write_config, write_profiles, CliError, Profile,
-    Profiles, UtilsError, CHROMA_DIR, CREDENTIALS_FILE,
+    read_config, read_profiles, write_config, write_profiles, CliError, Profile, Profiles,
+    UtilsError, CHROMA_DIR, CREDENTIALS_FILE,
 };
 use clap::Parser;
 use colored::Colorize;

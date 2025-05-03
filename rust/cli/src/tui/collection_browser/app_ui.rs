@@ -2,7 +2,7 @@ use crate::tui::collection_browser::app_state::{AppState, ExpandContext};
 use crate::tui::collection_browser::query_editor::{Mode, QueryEditor, QueryEditorState};
 use crate::tui::collection_browser::table::{AppTable, CurrentCell};
 use crate::tui::collection_browser::{RecordField, Screen};
-use crate::utils::{ColorLevel, Theme};
+use crate::ui_utils::{ColorLevel, Theme};
 use ratatui::layout::Rect;
 use ratatui::style::{self, Color, Style, Stylize};
 use ratatui::text::{Line, Span, Text};
