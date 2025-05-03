@@ -1,6 +1,7 @@
 use crate::client::admin_client::AdminClientError;
 use crate::client::chroma_client::ChromaClientError;
 use crate::client::dashboard_client::DashboardClientError;
+use crate::commands::browse::BrowseError;
 use crate::commands::db::DbError;
 use crate::commands::install::InstallError;
 use crate::commands::login::LoginError;
@@ -9,6 +10,7 @@ use crate::commands::run::RunError;
 use crate::commands::update::UpdateError;
 use crate::commands::vacuum::VacuumError;
 use arboard::Clipboard;
+use clap::ValueEnum;
 use colored::Colorize;
 use crossterm::{
     cursor,
@@ -16,18 +18,16 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode},
     ExecutableCommand,
 };
+use rand::Rng;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
 use std::io::{stdout, Write};
+use std::net::TcpListener;
 use std::path::PathBuf;
 use std::{fs, io};
-use std::net::TcpListener;
-use clap::ValueEnum;
-use rand::Rng;
 use thiserror::Error;
-use crate::commands::browse::BrowseError;
 
 pub const LOGO: &str = "
                 \x1b[38;5;069m(((((((((    \x1b[38;5;203m(((((\x1b[38;5;220m####
@@ -397,4 +397,3 @@ pub fn find_available_port(min: u16, max: u16) -> Result<u16, CliError> {
 
     Err(UtilsError::PortSearch.into())
 }
-

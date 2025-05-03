@@ -1,12 +1,12 @@
+use crate::tui::collection_browser::app_ui::ColorPalette;
+use crate::tui::collection_browser::{Record, RecordField};
+use chroma_types::MetadataValue;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Rect};
 use ratatui::style::Style;
 use ratatui::text::Text;
 use ratatui::widgets::{Cell, HighlightSpacing, Row, StatefulWidget, Table, TableState};
 use std::collections::BTreeMap;
-use chroma_types::MetadataValue;
-use crate::tui::collection_browser::{Record, RecordField};
-use crate::tui::collection_browser::app_ui::ColorPalette;
 
 pub struct CurrentCell {
     pub id: String,
@@ -41,7 +41,9 @@ impl<'a> AppTable<'a> {
             header_style: Style::default()
                 .fg(palette.table_header_font)
                 .bg(palette.table_header_background),
-            current_cell_style: Style::default().fg(palette.current_cell_font).bg(palette.current_cell_background),
+            current_cell_style: Style::default()
+                .fg(palette.current_cell_font)
+                .bg(palette.current_cell_background),
             current_row_indicator_style: Style::default().fg(palette.current_row_indicator),
             widths: vec![
                 Constraint::Percentage(20),
@@ -159,7 +161,7 @@ impl<'a> StatefulWidget for AppTable<'a> {
             .style(self.header_style)
             .height(1);
 
-        let rows = self.records.iter().enumerate().map(|(i, record)| {
+        let rows = self.records.iter().map(|record| {
             Self::record_row_contents(record)
                 .into_iter()
                 .map(|content| Cell::from(Text::from(content)))

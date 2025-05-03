@@ -1,18 +1,18 @@
-use ratatui::DefaultTerminal;
-use thiserror::Error;
-use chroma_types::Metadata;
 use crate::client::collection::Collection;
 use crate::tui::collection_browser::app_state::AppState;
 use crate::tui::collection_browser::app_ui::AppUI;
 use crate::tui::collection_browser::events::{Action, EventsHandler};
 use crate::utils::Theme;
+use chroma_types::Metadata;
+use ratatui::DefaultTerminal;
+use thiserror::Error;
 
 mod app_state;
 mod app_ui;
 mod events;
-mod table;
-mod query_editor;
 mod input;
+mod query_editor;
+mod table;
 
 #[derive(Debug, Error)]
 pub enum CollectionBrowserError {

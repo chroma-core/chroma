@@ -1,8 +1,9 @@
 mod client;
 mod commands;
-mod utils;
 mod tui;
+mod utils;
 
+use crate::commands::browse::{browse, BrowseArgs};
 use crate::commands::db::{db_command, DbCommand};
 use crate::commands::install::{install, InstallArgs};
 use crate::commands::login::{login, LoginArgs};
@@ -14,7 +15,6 @@ use clap::{Parser, Subcommand};
 use colored::Colorize;
 use utils::CliError;
 use utils::UtilsError;
-use crate::commands::browse::{browse, BrowseArgs};
 
 #[derive(Subcommand, Debug)]
 enum Command {

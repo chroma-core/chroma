@@ -7,12 +7,16 @@ use tui_input::Input;
 pub struct InputBox {
     block: Block<'static>,
     active_style: Style,
-    active: bool
+    active: bool,
 }
 
 impl InputBox {
     pub fn new(active_style: Style) -> InputBox {
-        Self { block: Block::default().borders(Borders::ALL), active_style, active: false }
+        Self {
+            block: Block::default().borders(Borders::ALL),
+            active_style,
+            active: false,
+        }
     }
 
     pub fn active(mut self) -> Self {
@@ -37,7 +41,6 @@ impl StatefulWidget for InputBox {
             .block(self.block)
             .scroll((0, scroll as u16));
         p.render(area, buf);
-
     }
 }
 
@@ -61,11 +64,17 @@ pub struct ToggleButton<'a, T: ToString> {
 
 impl<'a, T: ToString> ToggleButton<'a, T> {
     pub fn new(options: &'a [T], active_style: Style) -> Self {
-        Self { options, block: Block::default().borders(Borders::ALL), active_style, active: false }
+        Self {
+            options,
+            block: Block::default().borders(Borders::ALL),
+            active_style,
+            active: false,
+        }
     }
 
     pub fn active(mut self) -> Self {
         self.block = self.block.border_style(self.active_style);
+        self.active = true;
         self
     }
 }

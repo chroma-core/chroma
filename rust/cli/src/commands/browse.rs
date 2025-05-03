@@ -2,7 +2,11 @@ use crate::client::admin_client::AdminClient;
 use crate::client::chroma_client::ChromaClient;
 use crate::commands::db::get_db_name;
 use crate::commands::install::InstallError;
-use crate::utils::{find_available_port, get_current_profile, read_config, write_config, AddressBook, CliError, Theme};
+use crate::tui::collection_browser::CollectionBrowser;
+use crate::utils::{
+    find_available_port, get_current_profile, read_config, write_config, AddressBook, CliError,
+    Theme,
+};
 use chroma_frontend::config::FrontendServerConfig;
 use chroma_frontend::frontend_service_entrypoint_with_config;
 use clap::Parser;
@@ -11,7 +15,6 @@ use std::sync::Arc;
 use thiserror::Error;
 use tokio::spawn;
 use tokio::task::JoinHandle;
-use crate::tui::collection_browser::CollectionBrowser;
 
 #[derive(Parser, Debug, Clone)]
 pub struct BrowseArgs {
@@ -28,7 +31,7 @@ pub struct BrowseArgs {
     #[clap(long)]
     local: bool,
     #[clap(long)]
-    theme: Option<Theme>
+    theme: Option<Theme>,
 }
 
 #[derive(Debug, Error)]
@@ -166,9 +169,9 @@ pub fn browse(args: BrowseArgs) -> Result<(), CliError> {
             .get_collection(args.collection_name.clone())
             .await
             .map_err(|_| BrowseError::CollectionNotFound(args.collection_name))?;
-        
+
         let mut config = read_config()?;
-        
+
         if let Some(theme) = args.theme {
             if config.theme != theme {
                 config.theme = theme;

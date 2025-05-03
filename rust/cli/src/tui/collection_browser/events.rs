@@ -1,11 +1,11 @@
-use crossterm::event::{Event, EventStream, KeyCode, KeyEvent};
-use futures::StreamExt;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
-use chroma_types::{GetResponse, IncludeList};
 use crate::client::collection::Collection;
 use crate::tui::collection_browser::app_state::AppState;
-use crate::tui::collection_browser::{Record, Screen};
 use crate::tui::collection_browser::query_editor::Mode;
+use crate::tui::collection_browser::{Record, Screen};
+use chroma_types::{GetResponse, IncludeList};
+use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers};
+use futures::StreamExt;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 pub enum MainAction {
     Quit,
@@ -104,12 +104,14 @@ impl EventsHandler {
         app_state.loading = true;
         tokio::spawn(async move {
             let count_response = collection.count().await;
-            if let Err(_) = count_response {
-                let _ = tx.send(Action::Error(String::from("Failed to get collection size")));
-                return;
-            }
 
-            let count = count_response.unwrap();
+            let count = count_response.unwrap_or_else(|e| {
+                let _ = tx.send(Action::Error(format!(
+                    "Failed to get collection size: {}",
+                    e
+                )));
+                0
+            });
 
             let records_response = collection
                 .get(
@@ -163,12 +165,23 @@ impl EventsHandler {
         let collection = self.collection.clone();
 
         tokio::spawn(async move {
-            let records_response = collection.get(ids, metadata.as_deref(), where_document.as_deref(), Some(IncludeList::default_get()), None, None).await;
+            let records_response = collection
+                .get(
+                    ids,
+                    metadata.as_deref(),
+                    where_document.as_deref(),
+                    Some(IncludeList::default_get()),
+                    None,
+                    None,
+                )
+                .await;
 
             match records_response {
                 Ok(response) => {
                     let records = Self::get_response_to_records(response);
-                    let _ = tx.send(Action::SearchResult(SearchResultAction::RecordsLoaded(records)));
+                    let _ = tx.send(Action::SearchResult(SearchResultAction::RecordsLoaded(
+                        records,
+                    )));
                 }
                 Err(_) => {
                     let _ = tx.send(Action::Error(String::from("Failed to submit search")));
@@ -206,11 +219,7 @@ impl EventsHandler {
             _ => None,
         };
 
-        if let Some(action) = expand_action {
-            Some(Action::Expand(action))
-        } else {
-            None
-        }
+        expand_action.map(Action::Expand)
     }
 
     pub fn search_events(key: KeyEvent) -> Option<Action> {
@@ -244,11 +253,7 @@ impl EventsHandler {
             _ => None,
         };
 
-        if let Some(action) = search_result_action {
-            Some(Action::SearchResult(action))
-        } else {
-            None
-        }
+        search_result_action.map(Action::SearchResult)
     }
 
     pub fn parse_key(key: KeyEvent, screen: &Screen) -> Option<Action> {
@@ -263,6 +268,12 @@ impl EventsHandler {
     pub async fn next(&mut self, app_state: &mut AppState) -> Option<Action> {
         tokio::select! {
             event = self.events.next() => {
+                if let Some(Ok(Event::Key(key))) = event {
+                    if key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('c') {
+                        return Some(Action::Quit);
+                    }
+                }
+
                 if app_state.query_editor_state.mode == Mode::Editing {
                     if let Some(Ok(Event::Key(key))) = event {
                         if key.code == KeyCode::Esc {

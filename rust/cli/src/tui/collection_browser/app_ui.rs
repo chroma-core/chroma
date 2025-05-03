@@ -1,15 +1,15 @@
-use ratatui::Frame;
+use crate::tui::collection_browser::app_state::{AppState, ExpandContext};
+use crate::tui::collection_browser::query_editor::{Mode, QueryEditor, QueryEditorState};
+use crate::tui::collection_browser::table::{AppTable, CurrentCell};
+use crate::tui::collection_browser::{RecordField, Screen};
+use crate::utils::{ColorLevel, Theme};
 use ratatui::layout::Rect;
 use ratatui::style::{self, Color, Style, Stylize};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Padding, Paragraph, Wrap};
+use ratatui::Frame;
 use style::palette::tailwind;
-use supports_color::{Stream, on};
-use crate::tui::collection_browser::app_state::{AppState, ExpandContext};
-use crate::tui::collection_browser::{RecordField, Screen};
-use crate::tui::collection_browser::query_editor::{Mode, QueryEditor, QueryEditorState};
-use crate::tui::collection_browser::table::{AppTable, CurrentCell};
-use crate::utils::{ColorLevel, Theme};
+use supports_color::{on, Stream};
 
 pub struct ColorPalette {
     pub table_header_font: Color,
@@ -17,7 +17,6 @@ pub struct ColorPalette {
     pub current_cell_font: Color,
     pub current_cell_background: Color,
     pub current_row_indicator: Color,
-    pub main_border: Color,
     pub form_active_field: Color,
     pub form_title: Color,
     pub error: Color,
@@ -29,7 +28,7 @@ impl ColorPalette {
             (ColorLevel::Ansi256, Theme::Dark) => Self::ansi256_dark(),
             (ColorLevel::Ansi256, Theme::Light) => Self::ansi256_dark(),
             (ColorLevel::TrueColor, Theme::Dark) => Self::true_color_dark(),
-            (ColorLevel::TrueColor, Theme::Light) => Self::true_color_dark(),
+            (ColorLevel::TrueColor, Theme::Light) => Self::true_color_light(),
         }
     }
 
@@ -40,9 +39,21 @@ impl ColorPalette {
             current_cell_font: tailwind::SLATE.c900,
             current_cell_background: tailwind::BLUE.c500,
             current_row_indicator: tailwind::ORANGE.c400,
-            main_border: tailwind::ORANGE.c200,
             form_active_field: tailwind::ORANGE.c400,
             form_title: tailwind::BLUE.c900,
+            error: tailwind::RED.c500,
+        }
+    }
+
+    pub fn true_color_light() -> Self {
+        Self {
+            table_header_font: tailwind::SLATE.c200,
+            table_header_background: tailwind::BLUE.c900,
+            current_cell_font: tailwind::SLATE.c900,
+            current_cell_background: tailwind::BLUE.c500,
+            current_row_indicator: tailwind::ORANGE.c400,
+            form_active_field: tailwind::ORANGE.c400,
+            form_title: tailwind::BLUE.c400,
             error: tailwind::RED.c500,
         }
     }
@@ -54,7 +65,6 @@ impl ColorPalette {
             current_cell_font: Color::White,
             current_cell_background: Color::Cyan,
             current_row_indicator: Color::LightRed,
-            main_border: Color::LightRed,
             form_active_field: Color::Yellow,
             form_title: Color::Blue,
             error: Color::Red,
@@ -63,7 +73,6 @@ impl ColorPalette {
 }
 
 pub struct AppUI {
-    theme: Theme,
     palette: ColorPalette,
 }
 
@@ -77,7 +86,6 @@ impl AppUI {
 
         Self {
             palette: ColorPalette::default(color_level, theme.clone()),
-            theme,
         }
     }
 
@@ -111,7 +119,7 @@ impl AppUI {
                 AppTable::current_cell_content(&app_state.records_table_state, &app_state.records),
             ),
             Screen::Search => self.search_title(&app_state.collection_name),
-            Screen::SearchResult => self.search_result_title(&app_state.collection_name)
+            Screen::SearchResult => self.search_result_title(&app_state.collection_name),
         };
 
         let title = format!(" {} ", content);
@@ -129,7 +137,7 @@ impl AppUI {
                 Screen::Main => self.main_instructions(),
                 Screen::Expand => self.expand_instructions(),
                 Screen::Search => self.search_instructions(&app_state.query_editor_state),
-                Screen::SearchResult => self.search_result_instructions()
+                Screen::SearchResult => self.search_result_instructions(),
             }
         };
 
@@ -143,7 +151,7 @@ impl AppUI {
 
         let mut style = Style::default();
 
-        if let Some(_) = &app_state.error {
+        if app_state.error.is_some() {
             style = style.fg(self.palette.error);
         }
 
@@ -200,11 +208,7 @@ impl AppUI {
     }
 
     fn expand_instructions(&self) -> Vec<(&str, &str)> {
-        vec![
-            ("↑/↓", "Scroll"),
-            ("←/→", "Nav cols"),
-            ("Esc", "Back")
-        ]
+        vec![("↑/↓", "Scroll"), ("←/→", "Nav cols"), ("Esc", "Back")]
     }
 
     // ======= Search Screen ========
@@ -224,7 +228,7 @@ impl AppUI {
                     ("Enter", "Submit"),
                     ("Esc", "Back"),
                 ]
-            },
+            }
             Mode::Editing => {
                 vec![("Esc", "Exit Edit Mode")]
             }
@@ -233,15 +237,22 @@ impl AppUI {
 
     fn render_expand(&self, frame: &mut Frame, area: Rect, app_state: &mut AppState) {
         let current_cell = match app_state.expand_context {
-            ExpandContext::Main => AppTable::current_cell_content(&app_state.records_table_state, &app_state.records),
-            ExpandContext::Query => AppTable::current_cell_content(&app_state.query_table_state, &app_state.query_records),
+            ExpandContext::Main => {
+                AppTable::current_cell_content(&app_state.records_table_state, &app_state.records)
+            }
+            ExpandContext::Query => AppTable::current_cell_content(
+                &app_state.query_table_state,
+                &app_state.query_records,
+            ),
         };
         if let Some(current_cell) = current_cell {
-            let paragraph = Paragraph::new(Text::from(current_cell.content)).style(Style::default()).wrap(Wrap { trim: true }).scroll((app_state.expand_scroll, 0));
+            let paragraph = Paragraph::new(Text::from(current_cell.content))
+                .style(Style::default())
+                .wrap(Wrap { trim: true })
+                .scroll((app_state.expand_scroll, 0));
             frame.render_widget(paragraph, area);
         }
     }
-
 
     fn render_search(&self, frame: &mut Frame, area: Rect, app_state: &mut AppState) {
         let query_editor = QueryEditor::new(&self.palette);

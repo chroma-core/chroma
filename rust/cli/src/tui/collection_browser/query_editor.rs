@@ -1,12 +1,12 @@
-use ratatui::Frame;
+use crate::tui::collection_browser::app_ui::ColorPalette;
+use crate::tui::collection_browser::input::{InputBox, ToggleButton, ToggleState};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::Text;
 use ratatui::widgets::Paragraph;
+use ratatui::Frame;
 use serde_json::{Map, Value};
 use tui_input::Input;
-use crate::tui::collection_browser::app_ui::ColorPalette;
-use crate::tui::collection_browser::input::{InputBox, ToggleButton, ToggleState};
 
 #[derive(Debug, Clone)]
 pub enum MetadataOperator {
@@ -39,20 +39,21 @@ impl std::fmt::Display for MetadataOperator {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         let s = match self {
             MetadataOperator::LessThan => "<",
-            MetadataOperator::LessThanOrEqual    => "<=",
-            MetadataOperator::Equal              => "=",
+            MetadataOperator::LessThanOrEqual => "<=",
+            MetadataOperator::Equal => "=",
             MetadataOperator::NotEqual => "!=",
             MetadataOperator::GreaterThanOrEqual => ">=",
-            MetadataOperator::GreaterThan        => ">",
-            MetadataOperator::In                 => "$in",
-            MetadataOperator::NotIn              => "$nin",
+            MetadataOperator::GreaterThan => ">",
+            MetadataOperator::In => "$in",
+            MetadataOperator::NotIn => "$nin",
         };
         write!(f, "{}", s)
     }
 }
 
-static OPERATORS: [MetadataOperator; 7] = [
+static OPERATORS: [MetadataOperator; 8] = [
     MetadataOperator::Equal,
+    MetadataOperator::NotEqual,
     MetadataOperator::LessThan,
     MetadataOperator::LessThanOrEqual,
     MetadataOperator::GreaterThan,
@@ -67,7 +68,7 @@ pub enum InputType {
     WhereDocument(Input),
     MetadataKey(Input),
     MetadataValue(Input),
-    MetadataOperator(ToggleState)
+    MetadataOperator(ToggleState),
 }
 
 impl std::fmt::Display for InputType {
@@ -77,7 +78,7 @@ impl std::fmt::Display for InputType {
             InputType::WhereDocument(_) => "Where Document",
             InputType::MetadataKey(_) => "Key",
             InputType::MetadataValue(_) => "Value",
-            InputType::MetadataOperator(_) => "Operator"
+            InputType::MetadataOperator(_) => "Operator",
         };
         write!(f, "{}", s)
     }
@@ -86,7 +87,10 @@ impl std::fmt::Display for InputType {
 impl InputType {
     pub fn as_input_mut(&mut self) -> Option<&mut Input> {
         match self {
-            InputType::IDs(i) | InputType::WhereDocument(i) | InputType::MetadataKey(i) | InputType::MetadataValue(i) => Some(i),
+            InputType::IDs(i)
+            | InputType::WhereDocument(i)
+            | InputType::MetadataKey(i)
+            | InputType::MetadataValue(i) => Some(i),
             _ => None,
         }
     }
@@ -102,8 +106,11 @@ impl InputType {
         match self {
             InputType::MetadataOperator(toggle_state) => {
                 toggle_state.selected = 0;
-            },
-            InputType::WhereDocument(i) | InputType::MetadataKey(i) | InputType::MetadataValue(i) | InputType::IDs(i) => {
+            }
+            InputType::WhereDocument(i)
+            | InputType::MetadataKey(i)
+            | InputType::MetadataValue(i)
+            | InputType::IDs(i) => {
                 let _ = i.value_and_reset();
             }
         }
@@ -119,7 +126,7 @@ pub enum Mode {
 pub struct QueryEditorState {
     pub inputs: Vec<InputType>,
     pub active: usize,
-    pub mode: Mode
+    pub mode: Mode,
 }
 
 impl Default for QueryEditorState {
@@ -130,10 +137,10 @@ impl Default for QueryEditorState {
                 InputType::WhereDocument(Input::default()),
                 InputType::MetadataKey(Input::default()),
                 InputType::MetadataOperator(ToggleState::new()),
-                InputType::MetadataValue(Input::default())
+                InputType::MetadataValue(Input::default()),
             ],
             active: 0,
-            mode: Mode::Normal
+            mode: Mode::Normal,
         }
     }
 }
@@ -144,7 +151,7 @@ impl QueryEditorState {
     }
 
     pub fn next_field(&mut self) {
-        self.active = self.active + 1;
+        self.active += 1;
         if self.active >= self.inputs.len() {
             self.active = 0;
         }
@@ -184,12 +191,15 @@ impl QueryEditorState {
         if ids_input.is_empty() {
             return None;
         }
-        let ids: Vec<String> = ids_input.split(',').map(|id| id.trim().to_string()).filter(|id| !id.is_empty()).collect();
+        let ids: Vec<String> = ids_input
+            .split(',')
+            .map(|id| id.trim().to_string())
+            .filter(|id| !id.is_empty())
+            .collect();
         if ids.is_empty() {
             return None;
         }
         Some(ids)
-
     }
 
     pub fn where_document(&self) -> Option<String> {
@@ -205,7 +215,10 @@ impl QueryEditorState {
             return None;
         }
         let mut map = Map::new();
-        map.insert("$contains".to_string(), Value::String(where_document_input.trim().to_string()));
+        map.insert(
+            "$contains".to_string(),
+            Value::String(where_document_input.trim().to_string()),
+        );
         Some(serde_json::to_string(&Value::Object(map)).unwrap_or_default())
     }
 
@@ -239,10 +252,16 @@ impl QueryEditorState {
         })?;
 
         let mut operator_map = Map::new();
-        operator_map.insert(metadata_operator.for_query(), Value::String(metadata_value_input.trim().to_string()));
+        operator_map.insert(
+            metadata_operator.for_query(),
+            Value::String(metadata_value_input.trim().to_string()),
+        );
 
         let mut map = Map::new();
-        map.insert(metadata_key_input.trim().to_string(), Value::Object(operator_map));
+        map.insert(
+            metadata_key_input.trim().to_string(),
+            Value::Object(operator_map),
+        );
         Some(serde_json::to_string(&Value::Object(map)).unwrap_or_default())
     }
 }
@@ -301,10 +320,8 @@ impl QueryEditor {
             let input = &mut state.inputs[i];
 
             let title = match input {
-                InputType::MetadataKey(_) | InputType::MetadataValue(_) => {
-                    Some(input.to_string())
-                },
-                _ => None
+                InputType::MetadataKey(_) | InputType::MetadataValue(_) => Some(input.to_string()),
+                _ => None,
             };
 
             if let Some(input_state) = input.as_input_mut() {
@@ -328,12 +345,11 @@ impl QueryEditor {
 
             if let Some(toggle_state) = input.as_toggle_mut() {
                 let mut toggle_button = ToggleButton::new(&OPERATORS, self.active_style);
-                if is_active { toggle_button = toggle_button.active() }
+                if is_active {
+                    toggle_button = toggle_button.active()
+                }
                 frame.render_stateful_widget(toggle_button, chunk, toggle_state);
             }
         });
     }
 }
-
-
-

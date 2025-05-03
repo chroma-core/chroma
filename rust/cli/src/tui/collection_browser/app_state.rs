@@ -1,20 +1,23 @@
+use crate::tui::collection_browser::events::{
+    Action, ExpandAction, MainAction, SearchAction, SearchResultAction,
+};
+use crate::tui::collection_browser::query_editor::{Mode, QueryEditorState};
+use crate::tui::collection_browser::table::AppTable;
+use crate::tui::collection_browser::{Record, Screen};
 use crossterm::event::{Event, KeyCode};
 use ratatui::widgets::TableState;
 use textwrap::wrap;
 use tui_input::backend::crossterm::EventHandler;
-use crate::tui::collection_browser::{Record, Screen};
-use crate::tui::collection_browser::events::{Action, ExpandAction, MainAction, SearchAction, SearchResultAction};
-use crate::tui::collection_browser::query_editor::{Mode, QueryEditorState};
-use crate::tui::collection_browser::table::AppTable;
 
 pub enum ScrollDirection {
-    Up, Down
+    Up,
+    Down,
 }
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum ExpandContext {
     Main,
-    Query
+    Query,
 }
 
 pub struct AppState {
@@ -74,15 +77,26 @@ impl AppState {
     fn handle_scroll(&mut self, direction: ScrollDirection) {
         let current_cell = AppTable::current_cell_content(&self.records_table_state, &self.records);
         if let Some(current_cell) = current_cell {
-            let wrapped: Vec<String> = current_cell.content.lines().flat_map(|l| wrap(l, self.frame_width as usize)).map(|w| w.to_string()).collect();
+            let wrapped: Vec<String> = current_cell
+                .content
+                .lines()
+                .flat_map(|l| wrap(l, self.frame_width as usize))
+                .map(|w| w.to_string())
+                .collect();
             let total_wrapped_lines = wrapped.len();
             let max_scroll = total_wrapped_lines.saturating_sub(self.frame_height as usize);
             match direction {
                 ScrollDirection::Up => {
-                    self.expand_scroll = self.expand_scroll.saturating_sub(1).clamp(0, max_scroll as u16);
+                    self.expand_scroll = self
+                        .expand_scroll
+                        .saturating_sub(1)
+                        .clamp(0, max_scroll as u16);
                 }
                 ScrollDirection::Down => {
-                    self.expand_scroll = self.expand_scroll.saturating_add(1).clamp(0, max_scroll as u16);
+                    self.expand_scroll = self
+                        .expand_scroll
+                        .saturating_add(1)
+                        .clamp(0, max_scroll as u16);
                 }
             }
         }
@@ -92,12 +106,13 @@ impl AppState {
         match action {
             Action::Error(error) => {
                 self.error = Some(error);
-                return;
             }
             Action::Main(main_action) => self.main_actions(main_action),
             Action::Expand(expand_action) => self.expand_actions(expand_action),
             Action::Search(search_action) => self.search_actions(search_action),
-            Action::SearchResult(search_result_action) => self.search_results_actions(search_result_action),
+            Action::SearchResult(search_result_action) => {
+                self.search_results_actions(search_result_action)
+            }
             _ => {}
         }
     }
@@ -117,13 +132,13 @@ impl AppState {
             MainAction::NextColumn => AppTable::next_column(&mut self.records_table_state),
             MainAction::PreviousColumn => AppTable::previous_column(&mut self.records_table_state),
             MainAction::Expand => {
-                if let Some(_) = self.records_table_state.selected_cell() {
+                if self.records_table_state.selected_cell().is_some() {
                     self.expand_context = ExpandContext::Main;
                     self.screen = Screen::Expand;
                 }
-            },
-            MainAction::Search => { self.screen = Screen::Search }
-            MainAction::Quit => {  }
+            }
+            MainAction::Search => self.screen = Screen::Search,
+            MainAction::Quit => {}
         }
     }
 
@@ -131,85 +146,77 @@ impl AppState {
         match action {
             ExpandAction::Quit => {
                 self.screen = match self.expand_context {
-                    ExpandContext::Main => { Screen::Main }
-                    ExpandContext::Query => { Screen::SearchResult }
-                }
-            },
-            ExpandAction::ScrollUp => self.handle_scroll(ScrollDirection::Up),
-            ExpandAction::ScrollDown => self.handle_scroll(ScrollDirection::Down),
-            ExpandAction::NextColumn => {
-                match self.expand_context {
-                    ExpandContext::Main => { AppTable::next_column(&mut self.records_table_state) },
-                    ExpandContext::Query => { AppTable::next_column(&mut self.query_table_state) },
-                }
-            },
-            ExpandAction::PreviousColumn => {
-                match self.expand_context {
-                    ExpandContext::Main => { AppTable::previous_column(&mut self.records_table_state) },
-                    ExpandContext::Query => { AppTable::previous_column(&mut self.query_table_state) },
+                    ExpandContext::Main => Screen::Main,
+                    ExpandContext::Query => Screen::SearchResult,
                 }
             }
+            ExpandAction::ScrollUp => self.handle_scroll(ScrollDirection::Up),
+            ExpandAction::ScrollDown => self.handle_scroll(ScrollDirection::Down),
+            ExpandAction::NextColumn => match self.expand_context {
+                ExpandContext::Main => AppTable::next_column(&mut self.records_table_state),
+                ExpandContext::Query => AppTable::next_column(&mut self.query_table_state),
+            },
+            ExpandAction::PreviousColumn => match self.expand_context {
+                ExpandContext::Main => AppTable::previous_column(&mut self.records_table_state),
+                ExpandContext::Query => AppTable::previous_column(&mut self.query_table_state),
+            },
         }
     }
 
     pub fn search_actions(&mut self, action: SearchAction) {
         match self.query_editor_state.mode {
-            Mode::Normal => {
-                match action {
-                    SearchAction::Quit => { self.screen = Screen::Main },
-                    SearchAction::NextField => { self.query_editor_state.next_field() },
-                    SearchAction::PreviousField => { self.query_editor_state.previous_field() },
-                    SearchAction::Submit => {},
-                    SearchAction::Edit => {
-                        let current_field = self.query_editor_state.current_field();
-                        if let Some(_) = current_field.as_input_mut() {
-                            self.query_editor_state.mode = Mode::Editing
-                        }
-                    },
-                    SearchAction::ToggleOperator => { self.query_editor_state.toggle_operator() },
-                    SearchAction::Reset => { self.query_editor_state.reset() },
-                    _ => {}
+            Mode::Normal => match action {
+                SearchAction::Quit => self.screen = Screen::Main,
+                SearchAction::NextField => self.query_editor_state.next_field(),
+                SearchAction::PreviousField => self.query_editor_state.previous_field(),
+                SearchAction::Submit => {}
+                SearchAction::Edit => {
+                    let current_field = self.query_editor_state.current_field();
+                    if current_field.as_input_mut().is_some() {
+                        self.query_editor_state.mode = Mode::Editing
+                    }
                 }
+                SearchAction::ToggleOperator => self.query_editor_state.toggle_operator(),
+                SearchAction::Reset => self.query_editor_state.reset(),
+                _ => {}
             },
-            Mode::Editing => {
-                match action {
-                    SearchAction::EditQuit => { self.query_editor_state.mode = Mode::Normal },
-                    SearchAction::Input(event) => {
-                        let input = self.query_editor_state.current_field();
-                        if let Event::Key(key) = event {
-                            let (mut at_start, mut at_end) = (false, false);
-
-                            if let Some(input_state) = input.as_input_mut() {
-                                at_start = input_state.cursor() == 0;
-                                at_end = input_state.cursor() == input_state.value().len();
-                            }
-
-                            if let Some(_) = input.as_toggle_mut() {
-                                (at_start, at_end) = (true, true);
-                                if key.code == KeyCode::Char(' ') {
-                                    self.query_editor_state.toggle_operator();
-                                    return;
-                                }
-                            }
-
-                            if key.code == KeyCode::Right && at_end {
-                                self.query_editor_state.next_field();
-                                return;
-                            }
-
-                            if key.code == KeyCode::Left && at_start {
-                                self.query_editor_state.previous_field();
-                                return;
-                            }
-                        }
+            Mode::Editing => match action {
+                SearchAction::EditQuit => self.query_editor_state.mode = Mode::Normal,
+                SearchAction::Input(event) => {
+                    let input = self.query_editor_state.current_field();
+                    if let Event::Key(key) = event {
+                        let (mut at_start, mut at_end) = (false, false);
 
                         if let Some(input_state) = input.as_input_mut() {
-                            input_state.handle_event(&event);
+                            at_start = input_state.cursor() == 0;
+                            at_end = input_state.cursor() == input_state.value().len();
+                        }
+
+                        if input.as_toggle_mut().is_some() {
+                            (at_start, at_end) = (true, true);
+                            if key.code == KeyCode::Char(' ') {
+                                self.query_editor_state.toggle_operator();
+                                return;
+                            }
+                        }
+
+                        if key.code == KeyCode::Right && at_end {
+                            self.query_editor_state.next_field();
+                            return;
+                        }
+
+                        if key.code == KeyCode::Left && at_start {
+                            self.query_editor_state.previous_field();
+                            return;
                         }
                     }
-                    _ => {}
+
+                    if let Some(input_state) = input.as_input_mut() {
+                        input_state.handle_event(&event);
+                    }
                 }
-            }
+                _ => {}
+            },
         }
     }
 
@@ -218,24 +225,30 @@ impl AppState {
             SearchResultAction::RecordsLoaded(records) => {
                 self.loading = false;
                 self.query_records = records;
-            },
+            }
             SearchResultAction::Quit => {
                 self.screen = Screen::Main;
                 self.query_records = vec![];
                 self.query_table_state = TableState::default().with_selected(0);
                 self.expand_context = ExpandContext::Main;
-            },
-            SearchResultAction::NextRow => {AppTable::next_row(&mut self.query_table_state, &self.query_records) },
-            SearchResultAction::PreviousRow => {AppTable::previous_row(&mut self.query_table_state, &self.query_records)},
-            SearchResultAction::NextColumn => { AppTable::next_column(&mut self.query_table_state) },
-            SearchResultAction::PreviousColumn => {AppTable::previous_column(&mut self.query_table_state) },
+            }
+            SearchResultAction::NextRow => {
+                AppTable::next_row(&mut self.query_table_state, &self.query_records)
+            }
+            SearchResultAction::PreviousRow => {
+                AppTable::previous_row(&mut self.query_table_state, &self.query_records)
+            }
+            SearchResultAction::NextColumn => AppTable::next_column(&mut self.query_table_state),
+            SearchResultAction::PreviousColumn => {
+                AppTable::previous_column(&mut self.query_table_state)
+            }
             SearchResultAction::Expand => {
-                if let Some(_) = self.query_table_state.selected_cell() {
+                if self.query_table_state.selected_cell().is_some() {
                     self.expand_context = ExpandContext::Query;
                     self.screen = Screen::Expand;
                 }
-            },
-            SearchResultAction::Search => { self.screen = Screen::Search }
+            }
+            SearchResultAction::Search => self.screen = Screen::Search,
         }
     }
 }
