@@ -54,7 +54,6 @@ parquet = "52"
 prost = "0.13"
 prost-types = "0.13.5"
 regex = "1.11.1"
-regex_syntax = "0.8.5"
 roaring = "0.10.6"
 sea-query = "0.32"
 sea-query-binder = "0.7"
@@ -131,7 +130,4 @@ debug = 2
 lto = "thin"
 
 [profile.test.package.proptest]
-opt-level = 3
-
-[profile.test.package.rand_chacha]
 opt-level = 3

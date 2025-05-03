@@ -23,7 +23,11 @@ use std::error::Error;
 use std::io::{stdout, Write};
 use std::path::PathBuf;
 use std::{fs, io};
+use std::net::TcpListener;
+use clap::ValueEnum;
+use rand::Rng;
 use thiserror::Error;
+use crate::commands::browse::BrowseError;
 
 pub const LOGO: &str = "
                 \x1b[38;5;069m(((((((((    \x1b[38;5;203m(((((\x1b[38;5;220m####
@@ -68,6 +72,8 @@ pub enum CliError {
     Install(#[from] InstallError),
     #[error("{0}")]
     AdminClient(#[from] AdminClientError),
+    #[error("{0}")]
+    Browse(#[from] BrowseError),
 }
 
 #[derive(Debug, Error)]
@@ -102,6 +108,25 @@ pub enum UtilsError {
     NameValidationFailed,
     #[error("name cannot be empty and must only contain alphanumerics, underscores, or hyphens")]
     InvalidName,
+    #[error("Failed to find an available port")]
+    PortSearch,
+}
+
+pub enum ColorLevel {
+    Ansi256,
+    TrueColor,
+}
+
+#[derive(Debug, Clone, ValueEnum, Serialize, Deserialize, PartialEq, Eq)]
+pub enum Theme {
+    Dark,
+    Light,
+}
+
+impl Default for Theme {
+    fn default() -> Self {
+        Self::Dark
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -141,6 +166,8 @@ impl Default for SampleAppsConfig {
 pub struct CliConfig {
     pub current_profile: String,
     pub sample_apps: SampleAppsConfig,
+    #[serde(default)]
+    pub theme: Theme,
 }
 
 #[derive(Debug, Deserialize)]
@@ -218,6 +245,7 @@ fn create_config_file(config_path: &PathBuf) -> Result<(), Box<dyn Error>> {
     let default_config = CliConfig {
         current_profile: String::new(),
         sample_apps: SampleAppsConfig::default(),
+        theme: Theme::default(),
     };
     let json_str = serde_json::to_string_pretty(&default_config)?;
     fs::write(config_path, json_str)?;
@@ -354,3 +382,19 @@ pub fn read_secret(prompt: &str) -> io::Result<String> {
 
     Ok(password)
 }
+
+pub fn find_available_port(min: u16, max: u16) -> Result<u16, CliError> {
+    let mut rng = rand::thread_rng();
+
+    for _ in 0..100 {
+        let port = rng.gen_range(min..=max);
+        let addr = format!("127.0.0.1:{}", port);
+
+        if TcpListener::bind(&addr).is_ok() {
+            return Ok(port);
+        }
+    }
+
+    Err(UtilsError::PortSearch.into())
+}
+
