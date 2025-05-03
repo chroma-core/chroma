@@ -66,19 +66,17 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
     fn initial_beam_width(&self) -> usize;
 
     // Return the documents containing the ngram and the positions of occurences
-    async fn lookup_ngram<'ngram>(
-        &self,
-        ngram: &'ngram [char; N],
-    ) -> Result<HashMap<u32, RoaringBitmap>, E>;
+    async fn lookup_ngram(&self, ngram: &str) -> Result<HashMap<u32, RoaringBitmap>, E>;
 
-    // Return the positions of occurences of a range of ngram in the document
-    async fn lookup_ngram_range_in_document<'ngram, NgramRange>(
-        &self,
+    // Return the (ngram, doc_id, positions) for a range of ngrams and documents
+    async fn lookup_ngram_document_range<'me, NgramRange, DocRange>(
+        &'me self,
         ngram_range: NgramRange,
-        document_id: u32,
-    ) -> Result<Vec<([char; N], RoaringBitmap)>, E>
+        doc_range: DocRange,
+    ) -> Result<Vec<(&'me str, u32, RoaringBitmap)>, E>
     where
-        NgramRange: RangeBounds<&'ngram [char; N]>;
+        NgramRange: RangeBounds<&'me str>,
+        DocRange: RangeBounds<u32>;
 
     // Return the documents containing the literals and the potential matching positions
     // If all documents could contain the literals, Ok(None) is returned
@@ -101,24 +99,27 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
             initial_ngrams =
                 initial_literals
                     .iter()
-                    .fold(Vec::<Vec<char>>::new(), |mut acc, lit| match lit {
-                        Literal::Char(c) => {
-                            acc.iter_mut().for_each(|s| s.push(*c));
-                            acc
-                        }
-                        Literal::Class(class_unicode) => acc
-                            .into_iter()
-                            .flat_map(|s| {
-                                class_unicode.iter().flat_map(|r| r.start()..r.end()).map(
-                                    move |c| {
-                                        let mut sc = s.clone();
-                                        sc.push(c);
-                                        sc
-                                    },
-                                )
-                            })
-                            .collect(),
-                    });
+                    .fold(
+                        Vec::<Vec<char>>::with_capacity(N),
+                        |mut acc, lit| match lit {
+                            Literal::Char(c) => {
+                                acc.iter_mut().for_each(|s| s.push(*c));
+                                acc
+                            }
+                            Literal::Class(class_unicode) => acc
+                                .into_iter()
+                                .flat_map(|s| {
+                                    class_unicode.iter().flat_map(|r| r.start()..=r.end()).map(
+                                        move |c| {
+                                            let mut sc = s.clone();
+                                            sc.push(c);
+                                            sc
+                                        },
+                                    )
+                                })
+                                .collect(),
+                        },
+                    );
             initial_position = Some(index);
             break;
         }
@@ -133,70 +134,91 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
         }
 
         // ngram suffix -> doc_id -> position
-        let mut ngram_suffix_mapping: HashMap<Vec<char>, HashMap<u32, RoaringBitmap>> =
-            HashMap::new();
+        let mut suffix_doc_pos: HashMap<Vec<char>, HashMap<u32, RoaringBitmap>> = HashMap::new();
         for ngram in initial_ngrams {
-            // SAFETY(sicheng): The window function above guarantees each ngram should have exactly N chars
-            let ngram_doc_pos = self
-                .lookup_ngram(
-                    ngram
-                        .as_slice()
-                        .try_into()
-                        .expect("Ngram should have the right size"),
-                )
-                .await?;
+            let ngram_string = ngram.iter().collect::<String>();
+            let doc_pos = self.lookup_ngram(&ngram_string).await?;
 
-            if ngram_doc_pos.is_empty() {
+            if doc_pos.is_empty() {
                 continue;
             }
 
-            let ngram_suffix = ngram[1..].to_vec();
-            ngram_suffix_mapping
-                .entry(ngram_suffix)
-                .and_modify(|doc_pos| {
-                    ngram_doc_pos
+            let suffix = ngram[1..].to_vec();
+            suffix_doc_pos
+                .entry(suffix)
+                .and_modify(|dp| {
+                    doc_pos
                         .iter()
-                        .for_each(|(doc, pos)| *doc_pos.entry(*doc).or_default() |= pos);
+                        .for_each(|(doc, pos)| *dp.entry(*doc).or_default() |= pos);
                 })
-                .or_insert(ngram_doc_pos);
+                .or_insert(doc_pos);
         }
 
         for literal in &literals {
-            let new_ngram_suffix_mapping = HashMap::new();
-            for (mut ngram_suffix, doc_pos) in ngram_suffix_mapping {
+            let mut new_suffix_doc_pos: HashMap<Vec<char>, HashMap<u32, RoaringBitmap>> =
+                HashMap::new();
+            for (mut suffix, doc_pos) in suffix_doc_pos {
                 let ngram_ranges = match literal {
                     Literal::Char(c) => {
-                        ngram_suffix.push(*c);
-                        vec![(ngram_suffix.clone(), ngram_suffix)]
+                        suffix.push(*c);
+                        vec![(suffix.clone(), suffix)]
                     }
                     Literal::Class(class_unicode) => class_unicode
                         .iter()
                         .map(|r| {
-                            let mut start = ngram_suffix.clone();
+                            let mut start = suffix.clone();
                             start.push(r.start());
-                            let mut end = ngram_suffix.clone();
+                            let mut end = suffix.clone();
                             end.push(r.end());
                             (start, end)
                         })
                         .collect(),
                 };
-                for (start_ngram, end_ngram) in ngram_ranges {
-                    // SAFETY(sicheng): The ngram is always constructed from suffix with length N-1 and an additional char
-                    let start = <[char; N]>::try_from(start_ngram)
-                        .expect("Ngram should have the right size");
-                    let end =
-                        <[char; N]>::try_from(end_ngram).expect("Ngram should have the right size");
-                    for (doc_id, pos) in &doc_pos {
-                        for (ngram, doc_pos) in self
-                            .lookup_ngram_range_in_document(&start..&end, *doc_id)
-                            .await?
-                        {}
+                let (min_doc_id, max_doc_id) = doc_pos
+                    .keys()
+                    .fold((u32::MAX, u32::MIN), |(min, max), doc_id| {
+                        (min.min(*doc_id), max.max(*doc_id))
+                    });
+                for (min_ngram, max_ngram) in ngram_ranges {
+                    let min_ngram_string = min_ngram.iter().collect::<String>();
+                    let max_ngram_string = max_ngram.iter().collect::<String>();
+                    for (ngram, doc_id, new_pos) in self
+                        .lookup_ngram_document_range(
+                            min_ngram_string.as_str()..=max_ngram_string.as_str(),
+                            min_doc_id..=max_doc_id,
+                        )
+                        .await?
+                    {
+                        if let Some(pos) = doc_pos.get(&doc_id) {
+                            // SAFETY(Sicheng): The RoaringBitmap iterator should be sorted
+                            let valid_pos = RoaringBitmap::from_sorted_iter(
+                                pos.into_iter()
+                                    .filter_map(|p| new_pos.contains(p + 1).then_some(p + 1)),
+                            )
+                            .expect("RoaringBitmap iterator should be sorted");
+                            if !valid_pos.is_empty() {
+                                let new_suffix = ngram.chars().skip(1).collect();
+                                *new_suffix_doc_pos
+                                    .entry(new_suffix)
+                                    .or_default()
+                                    .entry(doc_id)
+                                    .or_default() |= valid_pos;
+                            }
+                        }
                     }
                 }
             }
-            ngram_suffix_mapping = new_ngram_suffix_mapping;
+            suffix_doc_pos = new_suffix_doc_pos;
+            if suffix_doc_pos.is_empty() {
+                break;
+            }
         }
 
-        Ok(None)
+        let mut result = HashMap::new();
+        suffix_doc_pos
+            .into_values()
+            .flat_map(|doc_pos| doc_pos.into_iter())
+            .for_each(|(doc, pos)| *result.entry(doc).or_default() |= pos);
+        Ok(Some(result))
     }
 }
