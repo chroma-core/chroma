@@ -97,6 +97,23 @@ impl ChromaError for GetCollectionWithSegmentsError {
     }
 }
 
+#[derive(Debug, Error)]
+pub enum BatchGetCollectionVersionFilePathsError {
+    #[error("Grpc error: {0}")]
+    Grpc(#[from] Status),
+    #[error("Could not parse UUID from string {1}: {0}")]
+    Uuid(uuid::Error, String),
+}
+
+impl ChromaError for BatchGetCollectionVersionFilePathsError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            BatchGetCollectionVersionFilePathsError::Grpc(status) => status.code().into(),
+            BatchGetCollectionVersionFilePathsError::Uuid(_, _) => ErrorCodes::InvalidArgument,
+        }
+    }
+}
+
 #[derive(Serialize, ToSchema)]
 pub struct ResetResponse {}
 

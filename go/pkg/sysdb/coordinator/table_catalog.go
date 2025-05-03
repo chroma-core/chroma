@@ -1941,6 +1941,26 @@ func (tc *Catalog) DeleteCollectionVersion(ctx context.Context, req *coordinator
 	return &result, nil
 }
 
+func (tc *Catalog) BatchGetCollectionVersionFilePaths(ctx context.Context, req *coordinatorpb.BatchGetCollectionVersionFilePathsRequest) (*coordinatorpb.BatchGetCollectionVersionFilePathsResponse, error) {
+	result := coordinatorpb.BatchGetCollectionVersionFilePathsResponse{
+		CollectionIdToVersionFilePath: make(map[string]string),
+	}
+
+	for _, collectionId := range req.CollectionIds {
+		collectionIDPtr := &collectionId
+		collectionEntry, err := tc.metaDomain.CollectionDb(ctx).GetCollectionEntry(collectionIDPtr, nil)
+		if err != nil {
+			return nil, err
+		}
+		if collectionEntry == nil {
+			return nil, common.ErrCollectionNotFound
+		}
+
+		result.CollectionIdToVersionFilePath[collectionId] = collectionEntry.VersionFileName
+	}
+	return &result, nil
+}
+
 func (tc *Catalog) GetVersionFileNamesForCollection(ctx context.Context, tenantID string, collectionID string) (string, error) {
 	collectionIDPtr := &collectionID
 	collectionEntry, err := tc.metaDomain.CollectionDb(ctx).GetCollectionEntry(collectionIDPtr, nil)

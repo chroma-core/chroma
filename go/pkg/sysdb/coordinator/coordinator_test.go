@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dao"
 	s3metastore "github.com/chroma-core/chroma/go/pkg/sysdb/metastore/s3"
 	"github.com/pingcap/log"
@@ -1482,6 +1483,34 @@ func (suite *APIsTestSuite) TestForkCollection() {
 	collections, err := suite.coordinator.GetCollections(ctx, forkCollectionWithSameName.TargetCollectionID, nil, suite.tenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
 	suite.Empty(collections)
+}
+
+func (suite *APIsTestSuite) TestBatchGetCollectionVersionFilePaths() {
+	ctx := context.Background()
+
+	// Create a new collection
+	newCollection := &model.CreateCollection{
+		ID:           types.NewUniqueID(),
+		Name:         "test_batch_get_collection_version_file_paths",
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	}
+
+	// Create the collection
+	_, _, err := suite.coordinator.CreateCollection(ctx, newCollection)
+	suite.NoError(err)
+
+	// Get the version file paths for the collection
+	versionFilePaths, err := suite.coordinator.BatchGetCollectionVersionFilePaths(ctx, &coordinatorpb.BatchGetCollectionVersionFilePathsRequest{
+		CollectionIds: []string{newCollection.ID.String()},
+	})
+	suite.NoError(err)
+	suite.Len(versionFilePaths, 1)
+
+	// Verify version file exists in S3
+	exists, err := suite.s3MetaStore.HasObjectWithPrefix(ctx, versionFilePaths.CollectionIdToVersionFilePath[newCollection.ID.String()])
+	suite.NoError(err)
+	suite.True(exists, "Version file should exist in S3")
 }
 
 func TestAPIsTestSuite(t *testing.T) {
