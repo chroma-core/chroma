@@ -20,17 +20,17 @@ use tokio::task::JoinHandle;
 pub struct BrowseArgs {
     #[clap(index = 1, help = "The name of the collection to browse")]
     collection_name: String,
-    #[clap(long = "db")]
+    #[clap(long = "db", help = "The Chroma Cloud DB name housing your collection")]
     db_name: Option<String>,
-    #[clap(long, conflicts_with_all = ["host", "config_path"])]
+    #[clap(long, conflicts_with_all = ["host", "config_path"], help = "The data path for your local Chroma server")]
     path: Option<String>,
-    #[clap(long, conflicts_with_all = ["path", "config_path"])]
+    #[clap(long, conflicts_with_all = ["path", "config_path"], help = "The hostname for your local Chroma server")]
     host: Option<String>,
-    #[clap(long = "config", conflicts_with_all = ["host", "path"])]
+    #[clap(long = "config", conflicts_with_all = ["host", "path"], help = "The config path for your local Chroma server")]
     config_path: Option<String>,
-    #[clap(long)]
+    #[clap(long, help = "Find this collection on a local Chroma server")]
     local: bool,
-    #[clap(long)]
+    #[clap(long, help = "Dark or Light theme for the collection browser")]
     theme: Option<Theme>,
 }
 
