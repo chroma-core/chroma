@@ -794,10 +794,11 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
                 tracing::info!("Pulled Logs Up To Offset: {:?}", self.pulled_log_offset);
             }
             None => {
+                tracing::warn!("No logs were pulled from the log service, this can happen due to a recent fork or if the log failed to be updated.");
                 self.terminate_with_result(
-                    Err(CompactionError::InvariantViolation(
-                        "Logs should be present for compaction",
-                    )),
+                    Ok(CompactionResponse {
+                        collection_id: self.collection_id,
+                    }),
                     ctx,
                 )
                 .await;
