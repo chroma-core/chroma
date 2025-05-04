@@ -39,15 +39,15 @@ pub struct CopyArgs {
     collections: Vec<String>,
     #[clap(
         long = "from-local",
-        conflicts_with = "from-cloud",
+        conflicts_with = "from_cloud",
         help = "Copy from a local Chroma server"
     )]
     from_local: bool,
-    #[clap(long = "from-cloud", conflicts_with_all = ["to-cloud", "from-local"], help = "Copy from Chroma Cloud")]
+    #[clap(long = "from-cloud", conflicts_with_all = ["to_cloud", "from_local"], help = "Copy from Chroma Cloud")]
     from_cloud: bool,
     #[clap(
         long = "to-local",
-        conflicts_with = "to-cloud",
+        conflicts_with = "to_cloud",
         help = "Copy to a local Chroma server"
     )]
     to_local: bool,
@@ -55,12 +55,10 @@ pub struct CopyArgs {
     to_cloud: bool,
     #[clap(long = "db", help = "Chroma Cloud DB with the collections to copy")]
     db: Option<String>,
-    #[clap(long = "host", conflicts_with_all = ["path", "config"], help = "Local Chroma server host")]
+    #[clap(long = "host", conflicts_with_all = ["path"], help = "Local Chroma server host")]
     host: Option<String>,
     #[clap(long = "path", help = "Data path for your local Chroma server")]
     path: Option<String>,
-    #[clap(long = "config", help = "Path to local Chroma config file")]
-    config: Option<String>,
 }
 
 fn select_chroma_server_prompt() -> &'static str {
@@ -258,6 +256,8 @@ async fn copy_collections(
                 .map_err(|_| CollectionAPIError::Add(collection.name.clone()))?;
         }
     }
+    
+    println!("Copy Completed!");
 
     Ok(())
 }
