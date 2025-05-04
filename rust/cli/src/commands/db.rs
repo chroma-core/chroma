@@ -242,8 +242,7 @@ fn get_js_connection(url: String, tenant_id: String, db_name: String, api_key: S
     )
 }
 
-fn prompt_db_name(prompt: &str) -> Result<String, CliError> {
-    println!("{}", prompt.blue().bold());
+fn prompt_db_name() -> Result<String, CliError> {
     let input = Input::with_theme(&ColorfulTheme::default())
         .interact_text()
         .map_err(|_| UtilsError::UserInputFailed)?;
@@ -285,7 +284,7 @@ pub fn get_db_name(dbs: &[Database], prompt: &str) -> Result<String, CliError> {
     println!("{}", prompt.blue().bold());
     let name = match dbs.len() {
         0..=SELECTION_LIMIT => select_db(dbs),
-        _ => prompt_db_name(prompt),
+        _ => prompt_db_name(),
     }?;
 
     validate_db_name(name.as_str())
@@ -356,7 +355,10 @@ pub async fn create(args: CreateArgs, current_profile: Profile) -> Result<(), Cl
 
     let mut name = match args.name {
         Some(name) => name,
-        None => prompt_db_name(&create_db_name_prompt())?,
+        None => {
+            println!("{}", create_db_name_prompt());
+            prompt_db_name()?
+        }
     };
     name = validate_db_name(&name)?;
 

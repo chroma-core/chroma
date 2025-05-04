@@ -1,5 +1,6 @@
 use crate::tui::collection_browser::app_ui::ColorPalette;
 use crate::tui::collection_browser::input::{InputBox, ToggleButton, ToggleState};
+use crate::utils::parse_value;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::Text;
@@ -254,7 +255,8 @@ impl QueryEditorState {
         let mut operator_map = Map::new();
         operator_map.insert(
             metadata_operator.for_query(),
-            Value::String(metadata_value_input.trim().to_string()),
+            // Value::String(metadata_value_input.trim().to_string()),
+            parse_value(metadata_value_input.trim()),
         );
 
         let mut map = Map::new();

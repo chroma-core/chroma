@@ -5,8 +5,8 @@ use crate::commands::install::InstallError;
 use crate::tui::collection_browser::CollectionBrowser;
 use crate::ui_utils::Theme;
 use crate::utils::{
-    get_current_profile, parse_config, parse_host, parse_local, parse_path, read_config,
-    write_config, AddressBook, CliError, LocalChromaArgs,
+    get_current_profile, parse_host, parse_local, parse_path, read_config, write_config,
+    AddressBook, CliError, LocalChromaArgs,
 };
 use clap::Parser;
 use crossterm::style::Stylize;
@@ -55,11 +55,9 @@ async fn parse_local_args(
     } else if local_args.path.is_some() {
         let (client, handle) = parse_path(local_args.path.unwrap()).await?;
         (client, Some(handle))
-    } else if local_args.config_path.is_some() {
-        let (client, handle) = parse_config(local_args.config_path.unwrap()).await?;
-        (client, Some(handle))
     } else if args.local {
-        parse_local().await?
+        let client = parse_local().await?;
+        (client, None)
     } else {
         return Err(BrowseError::ServerStart.into());
     };
@@ -104,10 +102,7 @@ pub async fn get_cloud_client(
 
 fn local_setup(args: BrowseArgs) -> bool {
     let local_args = args.local_chroma_args;
-    args.local
-        || local_args.host.is_some()
-        || local_args.path.is_some()
-        || local_args.config_path.is_some()
+    args.local || local_args.host.is_some() || local_args.path.is_some()
 }
 
 pub fn browse(args: BrowseArgs) -> Result<(), CliError> {

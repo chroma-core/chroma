@@ -1,7 +1,9 @@
 use crate::client::admin_client::{AdminClient, AdminClientError};
 use crate::client::chroma_client::ChromaClientError;
+use crate::client::collection::CollectionAPIError;
 use crate::client::dashboard_client::DashboardClientError;
 use crate::commands::browse::BrowseError;
+use crate::commands::copy::CopyError;
 use crate::commands::db::DbError;
 use crate::commands::install::InstallError;
 use crate::commands::login::LoginError;
@@ -15,11 +17,13 @@ use chroma_frontend::frontend_service_entrypoint_with_config;
 use clap::Parser;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::error::Error;
+use std::fmt::Display;
 use std::fs;
 use std::net::TcpListener;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::spawn;
@@ -56,6 +60,10 @@ pub enum CliError {
     AdminClient(#[from] AdminClientError),
     #[error("{0}")]
     Browse(#[from] BrowseError),
+    #[error("{0}")]
+    Copy(#[from] CopyError),
+    #[error("{0}")]
+    Collection(#[from] CollectionAPIError),
 }
 
 #[derive(Debug, Error)]
@@ -92,16 +100,18 @@ pub enum UtilsError {
     InvalidName,
     #[error("Failed to find an available port")]
     PortSearch,
+    #[error("Failed to connect to a local Chroma server")]
+    LocalConnect,
+    #[error("Not a Chroma path")]
+    NotChromaPath,
 }
 
 #[derive(Parser, Debug, Clone)]
 pub struct LocalChromaArgs {
-    #[clap(long, conflicts_with_all = ["host", "config_path"], help = "The data path for your local Chroma server")]
+    #[clap(long, conflicts_with_all = ["host"], help = "The data path for your local Chroma server")]
     pub path: Option<String>,
-    #[clap(long, conflicts_with_all = ["path", "config_path"], help = "The hostname for your local Chroma server")]
+    #[clap(long, conflicts_with_all = ["path"], help = "The hostname for your local Chroma server")]
     pub host: Option<String>,
-    #[clap(long = "config", conflicts_with_all = ["host", "path"], help = "The config path for your local Chroma server")]
-    pub config_path: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -192,6 +202,15 @@ impl Environment {
         match self {
             Environment::Local => AddressBook::local(),
             Environment::Cloud => AddressBook::cloud(),
+        }
+    }
+}
+
+impl Display for Environment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Environment::Local => write!(f, "Local"),
+            Environment::Cloud => write!(f, "Cloud"),
         }
     }
 }
@@ -324,30 +343,42 @@ pub async fn standup_local_chroma(
         frontend_service_entrypoint_with_config(Arc::new(()), Arc::new(()), &config).await;
     });
     let admin_client = AdminClient::local(host);
-    admin_client.healthcheck().await?;
+    admin_client
+        .healthcheck()
+        .await
+        .map_err(|_| UtilsError::LocalConnect)?;
     Ok((admin_client, handle))
 }
 
 pub async fn parse_path(path: String) -> Result<(AdminClient, JoinHandle<()>), CliError> {
+    if !is_chroma_path(&path) {
+        return Err(UtilsError::NotChromaPath.into());
+    }
     let mut config = FrontendServerConfig::single_node_default();
     config.persist_path = path;
     config.port = find_available_port(8000, 9000)?;
     standup_local_chroma(config).await
 }
 
-pub async fn parse_config(config_path: String) -> Result<(AdminClient, JoinHandle<()>), CliError> {
-    let config = FrontendServerConfig::load_from_path(&config_path);
-    standup_local_chroma(config).await
+pub async fn parse_local() -> Result<AdminClient, CliError> {
+    let default_host = AddressBook::local().frontend_url;
+    parse_host(default_host).await
 }
 
-pub async fn parse_local() -> Result<(AdminClient, Option<JoinHandle<()>>), CliError> {
-    let default_host = String::from("http://localhost:8000");
-    match parse_host(default_host).await {
-        Ok(admin_client) => Ok((admin_client, None)),
-        Err(_) => {
-            let default_config = String::from("chroma.config.yml");
-            let (admin_client, handle) = parse_config(default_config).await?;
-            Ok((admin_client, Some(handle)))
-        }
+pub fn is_chroma_path<P: AsRef<Path>>(dir: P) -> bool {
+    let config = FrontendServerConfig::single_node_default();
+    let db_path = dir.as_ref().join(config.sqlite_filename);
+    db_path.is_file()
+}
+
+pub fn parse_value(s: &str) -> Value {
+    if let Ok(n) = s.parse::<i64>() {
+        Value::Number(n.into())
+    } else if let Ok(f) = s.parse::<f64>() {
+        Value::Number(serde_json::Number::from_f64(f).unwrap())
+    } else if let Ok(b) = s.parse::<bool>() {
+        Value::Bool(b)
+    } else {
+        Value::String(s.to_string())
     }
 }

@@ -4,6 +4,8 @@ use crate::client::prelude::CollectionModel;
 use crate::client::utils::send_request;
 use crate::utils::Profile;
 use axum::http::Method;
+use chroma_frontend::server::CreateCollectionPayload;
+use chroma_types::{CollectionConfiguration, Metadata};
 use std::error::Error;
 use std::ops::Deref;
 use thiserror::Error;
@@ -12,6 +14,10 @@ use thiserror::Error;
 pub enum ChromaClientError {
     #[error("Failed to get collection {0}")]
     CollectionGet(String),
+    #[error("Failed to create collection {0}")]
+    CreateCollection(String),
+    #[error("Failed to list collections")]
+    ListCollections,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -71,6 +77,54 @@ impl ChromaClient {
         )
         .await
         .map_err(|_| ChromaClientError::CollectionGet(name))?;
+        Ok(Collection::new(self.clone(), response))
+    }
+
+    pub async fn list_collections(&self) -> Result<Vec<Collection>, Box<dyn Error>> {
+        let route = format!(
+            "/api/v2/tenants/{}/databases/{}/collections",
+            self.tenant_id, self.db
+        );
+        let response = send_request::<(), Vec<CollectionModel>>(
+            &self.host,
+            Method::GET,
+            &route,
+            self.headers()?,
+            None,
+        )
+        .await
+        .map_err(|_| ChromaClientError::ListCollections)?;
+        Ok(response
+            .iter()
+            .map(|c| Collection::new(self.clone(), c.clone()))
+            .collect())
+    }
+
+    pub async fn create_collection(
+        &self,
+        name: String,
+        metadata: Option<Metadata>,
+        configuration: Option<CollectionConfiguration>,
+    ) -> Result<Collection, Box<dyn Error>> {
+        let route = format!(
+            "/api/v2/tenants/{}/databases/{}/collections",
+            self.tenant_id, self.db
+        );
+
+        let payload = CreateCollectionPayload {
+            name,
+            configuration,
+            metadata,
+            get_or_create: false,
+        };
+        let response = send_request::<CreateCollectionPayload, CollectionModel>(
+            &self.host,
+            Method::POST,
+            &route,
+            self.headers()?,
+            Some(&payload),
+        )
+        .await?;
         Ok(Collection::new(self.clone(), response))
     }
 }

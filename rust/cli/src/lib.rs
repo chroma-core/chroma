@@ -5,6 +5,7 @@ mod ui_utils;
 mod utils;
 
 use crate::commands::browse::{browse, BrowseArgs};
+use crate::commands::copy::{copy, CopyArgs};
 use crate::commands::db::{db_command, DbCommand};
 use crate::commands::install::{install, InstallArgs};
 use crate::commands::login::{login, LoginArgs};
@@ -19,15 +20,14 @@ use utils::UtilsError;
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    #[command(hide = true)]
     Browse(BrowseArgs),
-    #[command(subcommand, hide = true)]
+    Copy(CopyArgs),
+    #[command(subcommand)]
     Db(DbCommand),
     Docs,
     Install(InstallArgs),
-    #[command(hide = true)]
     Login(LoginArgs),
-    #[command(subcommand, hide = true)]
+    #[command(subcommand)]
     Profile(ProfileCommand),
     Run(RunArgs),
     Support,
@@ -57,6 +57,7 @@ pub fn chroma_cli(args: Vec<String>) {
 
     let result = match cli.command {
         Command::Browse(args) => browse(args),
+        Command::Copy(args) => copy(args),
         Command::Db(db_subcommand) => db_command(db_subcommand),
         Command::Docs => {
             let url = "https://docs.trychroma.com";
