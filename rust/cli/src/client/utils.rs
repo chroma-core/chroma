@@ -32,7 +32,14 @@ where
         request_builder = request_builder.json(b);
     }
 
-    let response = request_builder.send().await?.error_for_status()?;
-    let parsed_response = response.json::<R>().await?;
+    let response = request_builder.send().await?;
+    let status = response.status();
+    let text = response.text().await?;
+
+    if !status.is_success() {
+        return Err(text.to_string().into());
+    }
+
+    let parsed_response = serde_json::from_str::<R>(&text)?;
     Ok(parsed_response)
 }

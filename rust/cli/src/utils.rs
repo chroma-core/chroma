@@ -104,6 +104,8 @@ pub enum UtilsError {
     LocalConnect,
     #[error("Not a Chroma path")]
     NotChromaPath,
+    #[error("Quota Error: {0}")]
+    Quota(String),
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -112,6 +114,17 @@ pub struct LocalChromaArgs {
     pub path: Option<String>,
     #[clap(long, conflicts_with_all = ["path"], help = "The hostname for your local Chroma server")]
     pub host: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ErrorResponse {
+    pub(crate) message: String,
+}
+
+impl Default for ErrorResponse {
+    fn default() -> Self {
+        Self { message: "".to_owned() }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
