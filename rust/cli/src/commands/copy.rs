@@ -39,7 +39,7 @@ pub struct CopyArgs {
     collections: Vec<String>,
     #[clap(
         long = "from-local",
-        conflicts_with = "from_cloud",
+        conflicts_with_all = ["from_cloud", "to_local"],
         help = "Copy from a local Chroma server"
     )]
     from_local: bool,
@@ -157,10 +157,11 @@ fn get_target_and_destination(args: &CopyArgs) -> Result<(Environment, Environme
                 .default(0)
                 .interact()
                 .map_err(|_| UtilsError::UserInputFailed)?;
-            match selection {
-                0 => (Environment::Cloud, Environment::Local),
-                1 => (Environment::Local, Environment::Cloud),
-                _ => return Err(CopyError::InvalidSourceDestination.into()),
+            let selected_option = &options[selection];
+            println!("{}\n", selected_option);
+            match selected_option {
+                Environment::Cloud => (Environment::Cloud, Environment::Local),
+                Environment::Local => (Environment::Local, Environment::Cloud),
             }
         }
     };
@@ -273,6 +274,10 @@ async fn copy_collections(
 pub fn copy(args: CopyArgs) -> Result<(), CliError> {
     let runtime = tokio::runtime::Runtime::new().map_err(|_| InstallError::RuntimeError)?;
     runtime.block_on(async {
+        if !args.all && args.collections.is_empty() {
+            return Err(CopyError::NoCollections.into());
+        }
+        
         let (_, profile) = get_current_profile()?;
         let (source, target) = get_target_and_destination(&args)?;
         let (source_client, target_client, _handle) =
