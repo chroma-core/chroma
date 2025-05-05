@@ -232,8 +232,47 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-      - name: Move artifacts
-        run: pnpm artifacts
+      - name: Debug artifact structure
+        run: |
+          find artifacts -type f -name "*.node" | sort
+          mkdir -p npm
+        shell: bash
+      - name: Move artifacts to npm packages
+        run: |
+          # Darwin/macOS
+          if [ -f artifacts/bindings-aarch64-apple-darwin/chromadb-js-bindings.darwin-arm64.node ]; then
+            mkdir -p npm/darwin-arm64
+            cp artifacts/bindings-aarch64-apple-darwin/chromadb-js-bindings.darwin-arm64.node npm/darwin-arm64/
+          fi
+          
+          if [ -f artifacts/bindings-x86_64-apple-darwin/chromadb-js-bindings.darwin-x64.node ]; then
+            mkdir -p npm/darwin-x64
+            cp artifacts/bindings-x86_64-apple-darwin/chromadb-js-bindings.darwin-x64.node npm/darwin-x64/
+          fi
+          
+          # Linux
+          if [ -f artifacts/bindings-aarch64-unknown-linux-gnu/chromadb-js-bindings.linux-arm64-gnu.node ]; then
+            mkdir -p npm/linux-arm64-gnu
+            cp artifacts/bindings-aarch64-unknown-linux-gnu/chromadb-js-bindings.linux-arm64-gnu.node npm/linux-arm64-gnu/
+          fi
+          
+          if [ -f artifacts/bindings-x86_64-unknown-linux-gnu/chromadb-js-bindings.linux-x64-gnu.node ]; then
+            mkdir -p npm/linux-x64-gnu
+            cp artifacts/bindings-x86_64-unknown-linux-gnu/chromadb-js-bindings.linux-x64-gnu.node npm/linux-x64-gnu/
+          fi
+          
+          # Windows
+          if [ -f artifacts/bindings-x86_64-pc-windows-msvc/chromadb-js-bindings.win32-x64-msvc.node ]; then
+            mkdir -p npm/win32-x64-msvc
+            cp artifacts/bindings-x86_64-pc-windows-msvc/chromadb-js-bindings.win32-x64-msvc.node npm/win32-x64-msvc/
+          fi
+          
+          # Run napi artifacts to create package.json files
+          pnpm artifacts
+          
+          # Verify .node files are in the right place
+          find npm -type f -name "*.node" | sort
+        shell: bash
       - name: List packages
         run: ls -R ./npm
         shell: bash
