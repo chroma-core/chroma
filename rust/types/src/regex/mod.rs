@@ -27,10 +27,12 @@ pub enum ChromaRegexError {
     BytePattern,
     #[error("Pattern that always matches is not allowed")]
     EmptyPattern,
-    #[error(transparent)]
-    Regex(#[from] regex::Error),
-    #[error(transparent)]
-    RegexSyntax(#[from] regex_syntax::Error),
+    // NOTE: regex::Error is a large type, so we only store its error message here.
+    #[error("Unexpected regex error: {0}")]
+    Regex(String),
+    // NOTE: regex_syntax::Error is a large type, so we only store its error message here.
+    #[error("Regex syntax errror: {0}")]
+    RegexSyntax(String),
 }
 
 impl ChromaRegex {
@@ -42,7 +44,7 @@ impl ChromaRegex {
         // be Ok(_) becasue we validate the pattern during struct construction. Specifically,
         // we verify that the pattern can be properly parsed and is thus a valid pattern supported
         // by the regex crate.
-        Ok(Regex::new(&self.pattern)?)
+        Regex::new(&self.pattern).map_err(|e| ChromaRegexError::Regex(e.to_string()))
     }
 }
 
@@ -50,7 +52,7 @@ impl TryFrom<String> for ChromaRegex {
     type Error = ChromaRegexError;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        let hir = parse(&value)?;
+        let hir = parse(&value).map_err(|e| ChromaRegexError::RegexSyntax(e.to_string()))?;
         if let Some(0) = hir.properties().minimum_len() {
             return Err(ChromaRegexError::EmptyPattern);
         }
