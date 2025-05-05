@@ -10,121 +10,121 @@ permissions:
   workflow_dispatch: {}
   workflow_call: {}
 jobs:
-#  build-macos:
-#    name: Build macOS bindings
-#    runs-on: macos-latest
-#    defaults:
-#      run:
-#        working-directory: rust/js_bindings
-#    steps:
-#      - uses: actions/checkout@v4
-#      - name: Install pnpm
-#        uses: pnpm/action-setup@v4
-#        with:
-#          version: 9
-#          run_install: false
-#      - name: Setup node
-#        uses: useblacksmith/setup-node@v5
-#        with:
-#          node-version: 20
-#          cache: pnpm
-#          cache-dependency-path: rust/js_bindings/pnpm-lock.yaml
-#      - name: Set up Rust toolchain
-#        uses: actions-rs/toolchain@v1
-#        with:
-#          toolchain: stable
-#          override: true
-#      - name: Install Protoc
-#        uses: arduino/setup-protoc@v3
-#        with:
-#          repo-token: ${{ secrets.GITHUB_TOKEN }}
-#      - name: Add targets
-#        run: |
-#          rustup target add x86_64-apple-darwin
-#          rustup target add aarch64-apple-darwin
-#      - name: Cache cargo
-#        uses: actions/cache@v4
-#        with:
-#          path: |
-#            ~/.cargo/registry/index/
-#            ~/.cargo/registry/cache/
-#            ~/.cargo/git/db/
-#            rust/js_bindings/.cargo-cache
-#            rust/js_bindings/target/
-#          key: macos-cargo
-#      - name: Install dependencies
-#        run: pnpm install
-#      - name: Build ARM64
-#        run: pnpm build --target aarch64-apple-darwin
-#        shell: bash
-#      - name: Build x86_64
-#        run: pnpm build --target x86_64-apple-darwin
-#        shell: bash
-#      - name: Upload ARM64 artifact
-#        uses: actions/upload-artifact@v4
-#        with:
-#          name: bindings-aarch64-apple-darwin
-#          path: rust/js_bindings/chromadb-js-bindings.darwin-arm64.node
-#          if-no-files-found: error
-#      - name: Upload x86_64 artifact
-#        uses: actions/upload-artifact@v4
-#        with:
-#          name: bindings-x86_64-apple-darwin
-#          path: rust/js_bindings/chromadb-js-bindings.darwin-x64.node
-#          if-no-files-found: error
+  build-macos:
+    name: Build macOS bindings
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: rust/js_bindings
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+      - name: Setup node
+        uses: useblacksmith/setup-node@v5
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: rust/js_bindings/pnpm-lock.yaml
+      - name: Set up Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Add targets
+        run: |
+          rustup target add x86_64-apple-darwin
+          rustup target add aarch64-apple-darwin
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            rust/js_bindings/.cargo-cache
+            rust/js_bindings/target/
+          key: macos-cargo
+      - name: Install dependencies
+        run: pnpm install
+      - name: Build ARM64
+        run: pnpm build --target aarch64-apple-darwin
+        shell: bash
+      - name: Build x86_64
+        run: pnpm build --target x86_64-apple-darwin
+        shell: bash
+      - name: Upload ARM64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-aarch64-apple-darwin
+          path: rust/js_bindings/chromadb-js-bindings.darwin-arm64.node
+          if-no-files-found: error
+      - name: Upload x86_64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-x86_64-apple-darwin
+          path: rust/js_bindings/chromadb-js-bindings.darwin-x64.node
+          if-no-files-found: error
 
-#  build-windows:
-#    name: Build Windows bindings
-#    runs-on: windows-latest
-#    defaults:
-#      run:
-#        working-directory: rust/js_bindings
-#    steps:
-#      - uses: actions/checkout@v4
-#      - name: Install pnpm
-#        uses: pnpm/action-setup@v4
-#        with:
-#          version: 9
-#          run_install: false
-#      - name: Setup node
-#        uses: useblacksmith/setup-node@v5
-#        with:
-#          node-version: 20
-#          cache: pnpm
-#          cache-dependency-path: rust/js_bindings/pnpm-lock.yaml
-#      - name: Set up Rust toolchain
-#        uses: actions-rs/toolchain@v1
-#        with:
-#          toolchain: stable
-#          override: true
-#      - name: Install Protoc
-#        uses: arduino/setup-protoc@v3
-#        with:
-#          repo-token: ${{ secrets.GITHUB_TOKEN }}
-#      - name: Add target
-#        run: rustup target add x86_64-pc-windows-msvc
-#        shell: bash
-#      - name: Cache cargo
-#        uses: actions/cache@v4
-#        with:
-#          path: |
-#            ~/.cargo/registry/index/
-#            ~/.cargo/registry/cache/
-#            ~/.cargo/git/db/
-#            rust/js_bindings/.cargo-cache
-#            rust/js_bindings/target/
-#          key: windows-cargo
-#      - name: Install dependencies
-#        run: pnpm install
-#      - name: Build x86_64
-#        run: pnpm build --target x86_64-pc-windows-msvc
-#        shell: bash
-#      - name: Upload x86_64 artifact
-#        uses: actions/upload-artifact@v4
-#        with:
-#          name: bindings-x86_64-pc-windows-msvc
-#          path: rust/js_bindings/chromadb-js-bindings.win32-x64-msvc.node
-#          if-no-files-found: error
+  build-windows:
+    name: Build Windows bindings
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: rust/js_bindings
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+      - name: Setup node
+        uses: useblacksmith/setup-node@v5
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: rust/js_bindings/pnpm-lock.yaml
+      - name: Set up Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Add target
+        run: rustup target add x86_64-pc-windows-msvc
+        shell: bash
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            rust/js_bindings/.cargo-cache
+            rust/js_bindings/target/
+          key: windows-cargo
+      - name: Install dependencies
+        run: pnpm install
+      - name: Build x86_64
+        run: pnpm build --target x86_64-pc-windows-msvc
+        shell: bash
+      - name: Upload x86_64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-x86_64-pc-windows-msvc
+          path: rust/js_bindings/chromadb-js-bindings.win32-x64-msvc.node
+          if-no-files-found: error
 
   build-linux:
     name: Build Linux bindings
@@ -188,21 +188,21 @@ jobs:
           # Build with the correct environment
           pnpm build --target aarch64-unknown-linux-gnu
         shell: bash
-#      - name: Build x86_64
-#        run: pnpm build --target x86_64-unknown-linux-gnu
-#        shell: bash
+      - name: Build x86_64
+        run: pnpm build --target x86_64-unknown-linux-gnu
+        shell: bash
       - name: Upload ARM64 artifact
         uses: actions/upload-artifact@v4
         with:
           name: bindings-aarch64-unknown-linux-gnu
           path: rust/js_bindings/chromadb-js-bindings.linux-arm64-gnu.node
           if-no-files-found: error
-#      - name: Upload x86_64 artifact
-#        uses: actions/upload-artifact@v4
-#        with:
-#          name: bindings-x86_64-unknown-linux-gnu
-#          path: rust/js_bindings/chromadb-js-bindings.linux-x64-gnu.node
-#          if-no-files-found: error
+      - name: Upload x86_64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-x86_64-unknown-linux-gnu
+          path: rust/js_bindings/chromadb-js-bindings.linux-x64-gnu.node
+          if-no-files-found: error
   publish:
     name: Publish
     runs-on: ubuntu-latest
@@ -210,8 +210,8 @@ jobs:
       run:
         working-directory: rust/js_bindings
     needs:
-#      - build-macos
-#      - build-windows
+      - build-macos
+      - build-windows
       - build-linux
     steps:
       - uses: actions/checkout@v4
