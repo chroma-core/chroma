@@ -193,10 +193,10 @@ impl EventsHandler {
     pub fn main_events(key: KeyEvent) -> Option<Action> {
         let main_action = match key.code {
             KeyCode::Esc => Some(MainAction::Quit),
-            KeyCode::Down => Some(MainAction::NextRow),
-            KeyCode::Up => Some(MainAction::PreviousRow),
-            KeyCode::Right => Some(MainAction::NextColumn),
-            KeyCode::Left => Some(MainAction::PreviousColumn),
+            KeyCode::Down | KeyCode::Char('j') => Some(MainAction::NextRow),
+            KeyCode::Up | KeyCode::Char('k') => Some(MainAction::PreviousRow),
+            KeyCode::Right | KeyCode::Char('l') => Some(MainAction::NextColumn),
+            KeyCode::Left | KeyCode::Char('h') => Some(MainAction::PreviousColumn),
             KeyCode::Enter => Some(MainAction::Expand),
             KeyCode::Char('s') => Some(MainAction::Search),
             _ => None,
@@ -212,10 +212,10 @@ impl EventsHandler {
     pub fn expand_events(key: KeyEvent) -> Option<Action> {
         let expand_action = match key.code {
             KeyCode::Esc => Some(ExpandAction::Quit),
-            KeyCode::Up => Some(ExpandAction::ScrollUp),
-            KeyCode::Down => Some(ExpandAction::ScrollDown),
-            KeyCode::Right => Some(ExpandAction::NextColumn),
-            KeyCode::Left => Some(ExpandAction::PreviousColumn),
+            KeyCode::Up | KeyCode::Char('k') => Some(ExpandAction::ScrollUp),
+            KeyCode::Down | KeyCode::Char('j') => Some(ExpandAction::ScrollDown),
+            KeyCode::Right | KeyCode::Char('l') => Some(ExpandAction::NextColumn),
+            KeyCode::Left | KeyCode::Char('h') => Some(ExpandAction::PreviousColumn),
             _ => None,
         };
 
@@ -244,10 +244,10 @@ impl EventsHandler {
     pub fn search_results_events(key: KeyEvent) -> Option<Action> {
         let search_result_action = match key.code {
             KeyCode::Esc => Some(SearchResultAction::Quit),
-            KeyCode::Down => Some(SearchResultAction::NextRow),
-            KeyCode::Up => Some(SearchResultAction::PreviousRow),
-            KeyCode::Right => Some(SearchResultAction::NextColumn),
-            KeyCode::Left => Some(SearchResultAction::PreviousColumn),
+            KeyCode::Down | KeyCode::Char('j') => Some(SearchResultAction::NextRow),
+            KeyCode::Up | KeyCode::Char('k') => Some(SearchResultAction::PreviousRow),
+            KeyCode::Right | KeyCode::Char('l') => Some(SearchResultAction::NextColumn),
+            KeyCode::Left | KeyCode::Char('h') => Some(SearchResultAction::PreviousColumn),
             KeyCode::Enter => Some(SearchResultAction::Expand),
             KeyCode::Char('s') => Some(SearchResultAction::Search),
             _ => None,
