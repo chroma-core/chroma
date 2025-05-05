@@ -705,28 +705,62 @@ impl SqliteMetadataReader {
         }
 
         if let Some(whr) = &where_clause {
-            filter_limit_query
-                .left_join(
+            let (references_metadata, references_document) = whr.analyze_where_references();
+            if references_metadata {
+                filter_limit_query.inner_join(
                     EmbeddingMetadata::Table,
                     Expr::col((Embeddings::Table, Embeddings::Id))
                         .equals((EmbeddingMetadata::Table, EmbeddingMetadata::Id)),
-                )
-                .left_join(
+                );
+            } else if metadata {
+                filter_limit_query.left_join(
+                    EmbeddingMetadata::Table,
+                    Expr::col((Embeddings::Table, Embeddings::Id))
+                        .equals((EmbeddingMetadata::Table, EmbeddingMetadata::Id)),
+                );
+            }
+            if references_document {
+                filter_limit_query.inner_join(
                     EmbeddingFulltextSearch::Table,
                     Expr::col((Embeddings::Table, Embeddings::Id)).equals((
                         EmbeddingFulltextSearch::Table,
                         EmbeddingFulltextSearch::Rowid,
                     )),
-                )
-                .distinct()
-                .cond_where(whr.eval());
+                );
+            } else if document {
+                filter_limit_query.left_join(
+                    EmbeddingFulltextSearch::Table,
+                    Expr::col((Embeddings::Table, Embeddings::Id)).equals((
+                        EmbeddingFulltextSearch::Table,
+                        EmbeddingFulltextSearch::Rowid,
+                    )),
+                );
+            }
+            filter_limit_query.distinct().cond_where(whr.eval());
+        } else {
+            if metadata {
+                filter_limit_query.left_join(
+                    EmbeddingMetadata::Table,
+                    Expr::col((Embeddings::Table, Embeddings::Id))
+                        .equals((EmbeddingMetadata::Table, EmbeddingMetadata::Id)),
+                );
+            }
+
+            if document {
+                filter_limit_query.left_join(
+                    EmbeddingFulltextSearch::Table,
+                    Expr::col((Embeddings::Table, Embeddings::Id)).equals((
+                        EmbeddingFulltextSearch::Table,
+                        EmbeddingFulltextSearch::Rowid,
+                    )),
+                );
+            }
         }
 
         filter_limit_query
             .order_by((Embeddings::Table, Embeddings::Id), sea_query::Order::Asc)
             .offset(skip as u64)
             .limit(fetch.unwrap_or(u32::MAX) as u64);
-
         let alias = Alias::new(SUBQ_ALIAS);
         let mut projection_query = Query::select();
         projection_query

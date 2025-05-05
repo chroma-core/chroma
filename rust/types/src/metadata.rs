@@ -560,6 +560,26 @@ impl Where {
             },
         }
     }
+
+    pub fn analyze_where_references(&self) -> (bool, bool) {
+        let mut references_metadata = false;
+        let mut references_document = false;
+
+        match self {
+            Where::Composite(expr) => {
+                // For composite expressions, recursively check all children
+                for child in &expr.children {
+                    let (child_meta, child_doc) = Self::analyze_where_references(&(child.clone()));
+                    references_metadata |= child_meta;
+                    references_document |= child_doc;
+                }
+            }
+            Where::Document(_) => references_document = true,
+            Where::Metadata(_) => references_metadata = true,
+        }
+
+        (references_metadata, references_document)
+    }
 }
 
 impl TryFrom<chroma_proto::Where> for Where {
