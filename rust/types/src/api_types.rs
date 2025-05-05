@@ -923,7 +923,7 @@ impl AddCollectionRecordsRequest {
     }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, ToSchema, Default, Deserialize)]
 pub struct AddCollectionRecordsResponse {}
 
 #[derive(Error, Debug)]

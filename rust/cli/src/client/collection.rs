@@ -1,7 +1,10 @@
 use crate::client::chroma_client::ChromaClient;
 use crate::client::prelude::CollectionModel;
 use crate::client::utils::send_request;
-use chroma_types::{CountResponse, GetResponse, IncludeList};
+use chroma_frontend::server::AddCollectionRecordsPayload;
+use chroma_types::{
+    AddCollectionRecordsResponse, CountResponse, GetResponse, IncludeList, Metadata,
+};
 use reqwest::Method;
 use serde_json::{json, Map, Value};
 use std::error::Error;
@@ -14,6 +17,8 @@ pub enum CollectionAPIError {
     Count(String),
     #[error("Failed to get records from collection {0}")]
     Get(String),
+    #[error("Failed to add records to collection {0}")]
+    Add(String),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -110,5 +115,38 @@ impl Collection {
         .await
         .map_err(|_| CollectionAPIError::Count(self.collection.name.clone()))?;
         Ok(response)
+    }
+
+    pub async fn add(
+        &self,
+        ids: Vec<String>,
+        embeddings: Option<Vec<Vec<f32>>>,
+        documents: Option<Vec<Option<String>>>,
+        uris: Option<Vec<Option<String>>>,
+        metadatas: Option<Vec<Option<Metadata>>>,
+    ) -> Result<(), Box<dyn Error>> {
+        let route = format!(
+            "/api/v2/tenants/{}/databases/{}/collections/{}/add",
+            self.chroma_client.tenant_id, self.chroma_client.db, self.collection_id
+        );
+
+        let payload = AddCollectionRecordsPayload {
+            ids,
+            embeddings,
+            documents,
+            uris,
+            metadatas,
+        };
+
+        let _response = send_request::<AddCollectionRecordsPayload, AddCollectionRecordsResponse>(
+            &self.chroma_client.host,
+            Method::POST,
+            &route,
+            self.chroma_client.headers()?,
+            Some(&payload),
+        )
+        .await?;
+
+        Ok(())
     }
 }

@@ -1,5 +1,6 @@
+use crate::ui_utils::read_secret;
 use crate::utils::UtilsError::UserInputFailed;
-use crate::utils::{read_config, read_secret, write_config, CliConfig, CliError, SELECTION_LIMIT};
+use crate::utils::{read_config, write_config, CliConfig, CliError, SELECTION_LIMIT};
 use clap::Parser;
 use colored::Colorize;
 use dialoguer::theme::ColorfulTheme;

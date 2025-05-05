@@ -1,3 +1,5 @@
+pub mod browse;
+pub mod copy;
 pub mod db;
 pub mod install;
 pub mod login;
