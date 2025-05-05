@@ -168,6 +168,8 @@ const sidebarConfig: AppSection[] = [
           { id: "browse", name: "Browse Collections" },
           { id: "copy", name: "Copy Collections" },
           { id: "db", name: "DB Management" },
+          { id: "login", name: "Login" },
+          { id: "profile", name: "Profile Management" },
           { id: "run", name: "Run a Chroma Server" },
           { id: "update", name: "Update the CLI" },
           { id: "vacuum", name: "Vacuum" },

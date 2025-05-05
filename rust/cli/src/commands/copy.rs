@@ -277,7 +277,7 @@ pub fn copy(args: CopyArgs) -> Result<(), CliError> {
         if !args.all && args.collections.is_empty() {
             return Err(CopyError::NoCollections.into());
         }
-        
+
         let (_, profile) = get_current_profile()?;
         let (source, target) = get_target_and_destination(&args)?;
         let (source_client, target_client, _handle) =
