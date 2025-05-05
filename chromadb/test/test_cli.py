@@ -62,8 +62,8 @@ def test_app() -> None:
     server_process = multiprocessing.Process(target=start_app, args=(args,))
     server_process.start()
 
-    host = os.getenv("CHROMA_SERVER_HOST", kwargs.get("host", "localhost"))
-    port = int(os.getenv("CHROMA_SERVER_HTTP_PORT", kwargs.get("port", 8000)))
+    host = kwargs.get("host", "localhost")
+    port = int(kwargs.get("port", 8001))
 
     client = chromadb.HttpClient(host=host, port=port)
     assert wait_for_server(
