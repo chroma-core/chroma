@@ -1,10 +1,11 @@
+use crate::construct_version_graph_orchestrator::VersionGraph;
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_system::{Operator, OperatorType};
-use chroma_types::chroma_proto::{CollectionVersionFile, VersionListForCollection};
+use chroma_types::CollectionUuid;
 use chrono::{DateTime, Utc};
-use humantime::format_duration;
-use std::time::Duration;
+use petgraph::visit::Topo;
+use std::collections::{HashMap, VecDeque};
 use thiserror::Error;
 
 #[derive(Clone, Debug)]
@@ -12,16 +13,14 @@ pub struct ComputeVersionsToDeleteOperator {}
 
 #[derive(Debug)]
 pub struct ComputeVersionsToDeleteInput {
-    pub version_file: CollectionVersionFile,
+    pub graph: VersionGraph,
     pub cutoff_time: DateTime<Utc>,
     pub min_versions_to_keep: u32,
 }
 
 #[derive(Debug)]
 pub struct ComputeVersionsToDeleteOutput {
-    pub version_file: CollectionVersionFile,
-    pub versions_to_delete: VersionListForCollection,
-    pub oldest_version_to_keep: i64,
+    pub versions_to_delete: HashMap<CollectionUuid, Vec<i64>>,
 }
 
 #[derive(Error, Debug)]
@@ -32,6 +31,8 @@ pub enum ComputeVersionsToDeleteError {
     InvalidTimestamp,
     #[error("Error parsing version file: {0}")]
     ParseError(#[from] prost::DecodeError),
+    #[error("Graph is missing expected node")]
+    MissingVersionGraphNode,
 }
 
 impl ChromaError for ComputeVersionsToDeleteError {
@@ -54,104 +55,60 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
         &self,
         input: &ComputeVersionsToDeleteInput,
     ) -> Result<ComputeVersionsToDeleteOutput, ComputeVersionsToDeleteError> {
-        let mut version_file = input.version_file.clone();
-        let collection_info = version_file
-            .collection_info_immutable
-            .as_ref()
-            .ok_or_else(|| {
-                tracing::error!("Missing collection info in version file");
-                ComputeVersionsToDeleteError::ComputeError("Missing collection info".to_string())
-            })?;
+        let mut visitor = Topo::new(&input.graph);
 
-        tracing::info!(
-            tenant = %collection_info.tenant_id,
-            database = %collection_info.database_id,
-            collection = %collection_info.collection_id,
-            "Processing collection to compute versions to delete"
-        );
+        let mut collection_versions_to_delete: HashMap<
+            CollectionUuid,
+            VecDeque<(i64, DateTime<Utc>)>,
+        > = HashMap::new();
+        while let Some(node_i) = visitor.next(&input.graph) {
+            let node = input
+                .graph
+                .node_weight(node_i)
+                .ok_or(ComputeVersionsToDeleteError::MissingVersionGraphNode)?;
 
-        let mut marked_versions = Vec::new();
-        let mut oldest_version_to_keep = 0;
-
-        if let Some(ref mut version_history) = version_file.version_history {
-            let mut unique_versions_seen = 0;
-            let mut last_version = None;
-
-            // First pass: find the oldest version that must be kept
-            for version in version_history.versions.iter().rev() {
-                if last_version != Some(version.version) {
-                    unique_versions_seen += 1;
-                    oldest_version_to_keep = version.version;
-                    if unique_versions_seen == input.min_versions_to_keep {
-                        break;
-                    }
-                    last_version = Some(version.version);
-                }
-            }
-
-            tracing::info!(
-                "Oldest version to keep: {}, min versions to keep: {}, cutoff time: {}, total versions: {}",
-                oldest_version_to_keep,
-                input.min_versions_to_keep,
-                input.cutoff_time,
-                version_history.versions.len()
-            );
-
-            // Second pass: mark for deletion if older than oldest_version_to_keep AND before cutoff
-            for version in version_history.versions.iter_mut() {
-                if version.version == 0 {
-                    tracing::info!("Skipping version 0");
-                    continue;
-                }
-
-                if version.version >= oldest_version_to_keep {
-                    tracing::info!(
-                        "Keeping version {} (created at {}) because it's greater than or equal to {}",
-                        version.version,
-                        version.created_at_secs,
-                        oldest_version_to_keep
-                    );
-                    continue;
-                }
-
-                if version.created_at_secs >= input.cutoff_time.timestamp() {
-                    tracing::debug!(
-                        "Keeping version {} (created at {}) because it's {} newer than cutoff time ({})",
-                        version.version,
-                        version.created_at_secs,
-                        format_duration(Duration::from_secs(
-                            (input.cutoff_time.timestamp() - version.created_at_secs) as u64,
-                        )),
-                        input.cutoff_time
-                    );
-                    continue;
-                }
-
-                version.marked_for_deletion = true;
-                marked_versions.push(version.version);
-            }
-        } else {
-            tracing::warn!("No version history found in version file");
+            collection_versions_to_delete
+                .entry(node.collection_id)
+                .or_default()
+                .push_back((node.version, node.created_at));
         }
 
-        let versions_to_delete = VersionListForCollection {
-            tenant_id: collection_info.tenant_id.clone(),
-            database_id: collection_info.database_id.clone(),
-            collection_id: collection_info.collection_id.clone(),
-            versions: marked_versions,
-        };
+        for versions in collection_versions_to_delete.values_mut() {
+            if let Some((version, _)) = versions.front() {
+                // Always keep version 0
+                if *version == 0 {
+                    versions.pop_front();
+                }
+            }
 
-        tracing::info!(
-            "For collection: {}, Computed versions to delete: {:?}, oldest version to keep: {}",
-            collection_info.collection_id,
-            versions_to_delete,
-            oldest_version_to_keep
-        );
+            for _ in 0..input.min_versions_to_keep {
+                versions.pop_back();
+            }
+
+            *versions = versions
+                .iter()
+                .filter(|(_, created_at)| *created_at < input.cutoff_time)
+                .map(|(version, created_at)| (*version, *created_at))
+                .collect();
+        }
 
         Ok(ComputeVersionsToDeleteOutput {
-            version_file,
-            versions_to_delete,
-            oldest_version_to_keep,
+            versions_to_delete: collection_versions_to_delete
+                .into_iter()
+                .filter(|(_, versions)| !versions.is_empty())
+                .map(|(collection_id, versions)| {
+                    let versions: Vec<_> =
+                        versions.into_iter().map(|(version, _)| version).collect();
+                    let num_versions = versions.len();
+                    tracing::debug!(
+                        collection_id = %collection_id,
+                        versions_to_delete = ?versions,
+                        "Deleting {num_versions} versions from collection {collection_id}"
+                    );
+
+                    (collection_id, versions)
+                })
+                .collect(),
         })
     }
 }
@@ -159,60 +116,52 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chroma_types::chroma_proto::{
-        CollectionInfoImmutable, CollectionVersionFile, CollectionVersionHistory,
-        CollectionVersionInfo,
-    };
+    use crate::construct_version_graph_orchestrator::VersionGraphNode;
     use chrono::{Duration, Utc};
+    use tracing_test::traced_test;
 
     #[tokio::test]
+    #[traced_test]
     async fn test_compute_versions_to_delete() {
         let now = Utc::now();
 
-        let version_history = CollectionVersionHistory {
-            versions: vec![
-                CollectionVersionInfo {
-                    version: 1,
-                    created_at_secs: (now - Duration::hours(24)).timestamp(),
-                    marked_for_deletion: false,
-                    ..Default::default()
-                },
-                CollectionVersionInfo {
-                    version: 1,
-                    created_at_secs: (now - Duration::hours(24)).timestamp(),
-                    marked_for_deletion: false,
-                    ..Default::default()
-                },
-                CollectionVersionInfo {
-                    version: 2,
-                    created_at_secs: now.timestamp(),
-                    marked_for_deletion: false,
-                    ..Default::default()
-                },
-                CollectionVersionInfo {
-                    version: 3,
-                    created_at_secs: (now - Duration::hours(1)).timestamp(),
-                    marked_for_deletion: false,
-                    ..Default::default()
-                },
-            ],
-        };
+        let collection_id = CollectionUuid::new();
 
-        let version_file = CollectionVersionFile {
-            version_history: Some(version_history),
-            collection_info_immutable: Some(CollectionInfoImmutable {
-                tenant_id: "test_tenant".to_string(),
-                database_id: "test_db".to_string(),
-                collection_id: "test_collection".to_string(),
-                dimension: 0,
-                ..Default::default()
-            }),
-        };
+        let mut graph = VersionGraph::new();
+        let v0 = graph.add_node(VersionGraphNode {
+            collection_id,
+            version: 0,
+            created_at: (now - Duration::hours(48)),
+        });
+        let v1 = graph.add_node(VersionGraphNode {
+            collection_id,
+            version: 1,
+            created_at: (now - Duration::hours(24)),
+        });
+        let v2 = graph.add_node(VersionGraphNode {
+            collection_id,
+            version: 2,
+            created_at: (now - Duration::hours(12)),
+        });
+        let v3 = graph.add_node(VersionGraphNode {
+            collection_id,
+            version: 3,
+            created_at: (now - Duration::hours(1)),
+        });
+        let v4 = graph.add_node(VersionGraphNode {
+            collection_id,
+            version: 4,
+            created_at: now,
+        });
+        graph.add_edge(v0, v1, ());
+        graph.add_edge(v1, v2, ());
+        graph.add_edge(v2, v3, ());
+        graph.add_edge(v3, v4, ());
 
         let input = ComputeVersionsToDeleteInput {
-            version_file,
-            cutoff_time: now - Duration::hours(20),
-            min_versions_to_keep: 2,
+            graph,
+            cutoff_time: now - Duration::hours(6),
+            min_versions_to_keep: 1,
         };
 
         let result = ComputeVersionsToDeleteOperator {}
@@ -220,11 +169,105 @@ mod tests {
             .await
             .unwrap();
 
-        // Verify the results.
-        let versions = &result.version_file.version_history.unwrap().versions;
-        assert!(versions[0].marked_for_deletion);
-        assert!(versions[1].marked_for_deletion);
-        assert!(!versions[2].marked_for_deletion); // Version 2 should be kept.
-        assert!(!versions[3].marked_for_deletion); // Version 3 should be kept.
+        // v0 is always kept, and the most recent version (v4) is kept. v3 is not eligible for deletion because it is after the cutoff time. So v1 and v2 are marked for deletion.
+        assert_eq!(result.versions_to_delete.len(), 1);
+        let versions_to_delete = result.versions_to_delete.get(&collection_id).unwrap();
+        assert_eq!(versions_to_delete.len(), 2);
+        assert!(versions_to_delete.contains(&1));
+        assert!(versions_to_delete.contains(&2));
+    }
+
+    #[tokio::test]
+    #[traced_test]
+    async fn test_compute_versions_to_delete_fork_tree() {
+        let now = Utc::now();
+
+        let a_collection_id = CollectionUuid::new();
+
+        let mut graph = VersionGraph::new();
+        let a_v0 = graph.add_node(VersionGraphNode {
+            collection_id: a_collection_id,
+            version: 0,
+            created_at: (now - Duration::hours(48)),
+        });
+        let a_v1 = graph.add_node(VersionGraphNode {
+            collection_id: a_collection_id,
+            version: 1,
+            created_at: (now - Duration::hours(24)),
+        });
+        let a_v2 = graph.add_node(VersionGraphNode {
+            collection_id: a_collection_id,
+            version: 2,
+            created_at: (now - Duration::hours(12)),
+        });
+        let a_v3 = graph.add_node(VersionGraphNode {
+            collection_id: a_collection_id,
+            version: 3,
+            created_at: (now - Duration::hours(1)),
+        });
+        let a_v4 = graph.add_node(VersionGraphNode {
+            collection_id: a_collection_id,
+            version: 4,
+            created_at: now,
+        });
+        graph.add_edge(a_v0, a_v1, ());
+        graph.add_edge(a_v1, a_v2, ());
+        graph.add_edge(a_v2, a_v3, ());
+        graph.add_edge(a_v3, a_v4, ());
+
+        let b_collection_id = CollectionUuid::new();
+        let b_v0 = graph.add_node(VersionGraphNode {
+            collection_id: b_collection_id,
+            version: 0,
+            created_at: (now - Duration::hours(23)),
+        });
+        let b_v1 = graph.add_node(VersionGraphNode {
+            collection_id: b_collection_id,
+            version: 1,
+            created_at: (now - Duration::hours(12)),
+        });
+        let b_v2 = graph.add_node(VersionGraphNode {
+            collection_id: b_collection_id,
+            version: 2,
+            created_at: (now - Duration::hours(1)),
+        });
+        graph.add_edge(b_v0, b_v1, ());
+        graph.add_edge(b_v1, b_v2, ());
+        // B was forked from A
+        graph.add_edge(a_v1, b_v0, ());
+
+        let c_collection_id = CollectionUuid::new();
+        let c_v0 = graph.add_node(VersionGraphNode {
+            collection_id: c_collection_id,
+            version: 0,
+            created_at: (now - Duration::hours(1)),
+        });
+        // C was forked from B
+        graph.add_edge(b_v2, c_v0, ());
+
+        let input = ComputeVersionsToDeleteInput {
+            graph,
+            cutoff_time: now - Duration::hours(6),
+            min_versions_to_keep: 1,
+        };
+
+        let result = ComputeVersionsToDeleteOperator {}
+            .run(&input)
+            .await
+            .unwrap();
+
+        // Only collections A and B should have versions to delete
+        assert_eq!(result.versions_to_delete.len(), 2);
+
+        // For collection A: v0 is always kept, and the most recent version (v4) is kept. v3 is not eligible for deletion because it is after the cutoff time. So v1 and v2 are marked for deletion.
+        let a_versions_to_delete = result.versions_to_delete.get(&a_collection_id).unwrap();
+        assert_eq!(a_versions_to_delete.len(), 2);
+        assert!(a_versions_to_delete.contains(&1));
+        assert!(a_versions_to_delete.contains(&2));
+
+        // For collection B: v0 is always kept, and the most recent version (v2) is kept. So v1 is marked for deletion.
+        let b_versions_to_delete = result.versions_to_delete.get(&b_collection_id).unwrap();
+        assert_eq!(b_versions_to_delete.len(), 1);
+        assert!(b_versions_to_delete.contains(&1));
     }
 }

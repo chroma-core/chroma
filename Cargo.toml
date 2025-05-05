@@ -1,35 +1,7 @@
 [workspace]
 resolver = "2"
 
-members = [
-    "rust/benchmark",
-    "rust/blockstore",
-    "rust/cache",
-    "rust/chroma",
-    "rust/config",
-    "rust/distance",
-    "rust/error",
-    "rust/frontend",
-    "rust/garbage_collector",
-    "rust/index",
-    "rust/load",
-    "rust/log",
-    "rust/log-service",
-    "rust/memberlist",
-    "rust/storage",
-    "rust/system",
-    "rust/sysdb",
-    "rust/types",
-    "rust/worker",
-    "rust/segment",
-    "rust/python_bindings",
-    "rust/mdac",
-    "rust/tracing",
-    "rust/sqlite",
-    "rust/cli",
-    "rust/wal3",
-    "rust/js_bindings"
-]
+members = ["rust/benchmark", "rust/blockstore", "rust/cache", "rust/chroma", "rust/config", "rust/distance", "rust/error", "rust/frontend", "rust/garbage_collector", "rust/index", "rust/load", "rust/log", "rust/log-service", "rust/memberlist", "rust/storage", "rust/system", "rust/sysdb", "rust/types", "rust/worker", "rust/segment", "rust/python_bindings", "rust/mdac", "rust/tracing", "rust/sqlite", "rust/cli", "rust/wal3", "rust/js_bindings"]
 
 [workspace.dependencies]
 arrow = "52.2.0"
@@ -86,10 +58,12 @@ rayon = "1.10.0"
 validator = { version = "0.19", features = ["derive"] }
 rust-embed = { version = "8.5.0", features = ["include-exclude", "debug-embed"] }
 hnswlib = { version = "0.8.1", git = "https://github.com/chroma-core/hnswlib.git" }
-reqwest = { version = "0.12.9",  features = ["rustls-tls-native-roots", "http2"], default-features = false }
+reqwest = { version = "0.12.9", features = ["rustls-tls-native-roots", "http2"], default-features = false }
 random-port = "0.1.1"
 ndarray = { version = "0.16.1", features = ["approx"] }
 humantime = { version = "2.2.0" }
+petgraph = { version = "0.8.1" }
+base64 = "0.22"
 
 chroma-benchmark = { path = "rust/benchmark" }
 chroma-blockstore = { path = "rust/blockstore" }

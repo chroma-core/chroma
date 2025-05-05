@@ -395,7 +395,10 @@ impl SysDb {
                     .await
             }
             SysDb::Sqlite(_) => todo!(),
-            SysDb::Test(_) => todo!(),
+            SysDb::Test(test) => {
+                test.batch_get_collection_version_file_paths(collection_ids)
+                    .await
+            }
         }
     }
 
@@ -568,6 +571,7 @@ pub struct CollectionToGcInfo {
     pub name: String,
     pub version_file_path: String,
     pub latest_version: i64,
+    pub lineage_file_path: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -602,6 +606,7 @@ impl TryFrom<chroma_proto::CollectionToGcInfo> for CollectionToGcInfo {
             name: value.name,
             version_file_path: value.version_file_path,
             latest_version: value.latest_version,
+            lineage_file_path: value.lineage_file_path,
         })
     }
 }

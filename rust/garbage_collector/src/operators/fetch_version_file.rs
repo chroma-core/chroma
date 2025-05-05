@@ -13,8 +13,10 @@ use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
 use chroma_storage::{GetOptions, Storage, StorageError};
 use chroma_system::{Operator, OperatorType};
 use chroma_types::chroma_proto::CollectionVersionFile;
+use chroma_types::CollectionUuid;
 use prost::Message;
 use std::fmt::{Debug, Formatter};
+use std::str::FromStr;
 use thiserror::Error;
 
 #[derive(Clone, Debug, Default)]
@@ -50,7 +52,10 @@ impl Debug for FetchVersionFileInput {
 
 #[allow(dead_code)]
 #[derive(Debug)]
-pub struct FetchVersionFileOutput(pub CollectionVersionFile);
+pub struct FetchVersionFileOutput {
+    pub file: CollectionVersionFile,
+    pub collection_id: CollectionUuid,
+}
 
 #[derive(Error, Debug)]
 pub enum FetchVersionFileError {
@@ -60,6 +65,10 @@ pub enum FetchVersionFileError {
     ParseError(#[from] prost::DecodeError),
     #[error("Invalid storage configuration: {0}")]
     StorageConfigError(String),
+    #[error("Missing collection ID in version file")]
+    MissingCollectionId,
+    #[error("Invalid UUID: {0}")]
+    InvalidUuid(#[from] uuid::Error),
 }
 
 impl ChromaError for FetchVersionFileError {
@@ -68,6 +77,8 @@ impl ChromaError for FetchVersionFileError {
             FetchVersionFileError::StorageError(e) => e.code(),
             FetchVersionFileError::ParseError(_) => ErrorCodes::Internal,
             FetchVersionFileError::StorageConfigError(_) => ErrorCodes::Internal,
+            FetchVersionFileError::MissingCollectionId => ErrorCodes::Internal,
+            FetchVersionFileError::InvalidUuid(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -107,7 +118,19 @@ impl Operator<FetchVersionFileInput, FetchVersionFileOutput> for FetchVersionFil
         );
 
         let version_file = CollectionVersionFile::decode(content.as_slice())?;
-        Ok(FetchVersionFileOutput(version_file))
+        let collection_id = CollectionUuid::from_str(
+            &version_file
+                .collection_info_immutable
+                .as_ref()
+                .ok_or(FetchVersionFileError::MissingCollectionId)?
+                .collection_id,
+        )
+        .map_err(FetchVersionFileError::InvalidUuid)?;
+
+        Ok(FetchVersionFileOutput {
+            file: version_file,
+            collection_id,
+        })
     }
 }
 
@@ -189,7 +212,7 @@ mod tests {
         let result = operator.run(&input).await.expect("Failed to run operator");
 
         // Verify the content
-        assert_eq!(result.0, test_file);
+        assert_eq!(result.file, test_file);
 
         // Cleanup - Note: object_store doesn't have a delete method,
         // but the test bucket should be cleaned up between test runs

@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use chroma_error::ChromaError;
 use chroma_sysdb::SysDb;
 use chroma_system::{Operator, OperatorType};
 use chroma_types::{BatchGetCollectionVersionFilePathsError, CollectionUuid};
@@ -27,6 +28,14 @@ pub struct GetVersionFilePathsOutput(pub HashMap<CollectionUuid, String>);
 pub enum GetVersionFilePathsError {
     #[error("Error fetching version file paths: {0}")]
     SysDb(#[from] BatchGetCollectionVersionFilePathsError),
+}
+
+impl ChromaError for GetVersionFilePathsError {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        match self {
+            GetVersionFilePathsError::SysDb(err) => err.code(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]

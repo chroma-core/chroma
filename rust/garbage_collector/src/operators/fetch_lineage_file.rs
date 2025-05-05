@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use chroma_error::ChromaError;
 use chroma_storage::{GetOptions, Storage};
 use chroma_system::{Operator, OperatorType};
 use chroma_types::chroma_proto::CollectionLineageFile;
@@ -37,6 +38,15 @@ pub enum FetchLineageFileError {
     Storage(#[from] chroma_storage::StorageError),
     #[error("Error decoding lineage file: {0}")]
     Decode(#[from] prost::DecodeError),
+}
+
+impl ChromaError for FetchLineageFileError {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        match self {
+            FetchLineageFileError::Storage(err) => err.code(),
+            FetchLineageFileError::Decode(_) => chroma_error::ErrorCodes::Internal,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]

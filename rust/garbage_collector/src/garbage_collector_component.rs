@@ -139,7 +139,7 @@ impl GarbageCollector {
             let orchestrator = GarbageCollectorOrchestrator::new(
                 collection.id,
                 collection.version_file_path,
-                None, // todo
+                collection.lineage_file_path,
                 absolute_cutoff_time,
                 self.sysdb_client.clone(),
                 dispatcher.clone(),

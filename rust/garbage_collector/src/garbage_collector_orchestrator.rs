@@ -231,21 +231,17 @@ impl Orchestrator for GarbageCollectorOrchestrator {
         self.dispatcher.clone()
     }
 
-    async fn initial_tasks(&mut self, _: &ComponentContext<Self>) -> Vec<TaskMessage> {
+    async fn initial_tasks(&mut self, ctx: &ComponentContext<Self>) -> Vec<TaskMessage> {
         tracing::info!(
             path = %self.version_file_path,
             "Creating initial fetch version file task"
         );
 
-        // vec![wrap(
-        //     Box::new(FetchVersionFileOperator {}),
-        //     FetchVersionFileInput {
-        //         version_file_path: self.version_file_path.clone(),
-        //         storage: self.storage.clone(),
-        //     },
-        //     ctx.receiver(),
-        // )]
-        vec![]
+        vec![wrap(
+            Box::new(FetchVersionFileOperator {}),
+            FetchVersionFileInput::new(self.version_file_path.clone(), self.storage.clone()),
+            ctx.receiver(),
+        )]
     }
 
     fn set_result_channel(
@@ -261,103 +257,6 @@ impl Orchestrator for GarbageCollectorOrchestrator {
         self.result_channel
             .take()
             .expect("The result channel should be set before take")
-    }
-}
-
-#[async_trait]
-impl Handler<TaskResult<ComputeVersionsToDeleteOutput, ComputeVersionsToDeleteError>>
-    for GarbageCollectorOrchestrator
-{
-    type Result = ();
-
-    async fn handle(
-        &mut self,
-        message: TaskResult<ComputeVersionsToDeleteOutput, ComputeVersionsToDeleteError>,
-        ctx: &ComponentContext<GarbageCollectorOrchestrator>,
-    ) {
-        // Stage 2: Process computed versions and initiate marking in SysDB
-        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
-            Some(output) => output,
-            None => return,
-        };
-
-        // If no versions to delete, terminate early with success
-        if output.versions_to_delete.versions.is_empty() {
-            tracing::info!("No versions to delete, terminating garbage collection early");
-            let response = GarbageCollectorResponse {
-                collection_id: self.collection_id,
-                version_file_path: self.version_file_path.clone(),
-                num_versions_deleted: 0,
-                deletion_list: Vec::new(),
-            };
-            tracing::info!(?response, "Garbage collection completed early");
-            self.terminate_with_result(Ok(response), ctx).await;
-            // Signal the dispatcher to shut down
-            return;
-        }
-
-        self.num_versions_deleted = output.versions_to_delete.versions.len() as u32;
-        self.pending_versions_to_delete = Some(output.versions_to_delete.clone());
-        self.pending_version_file = Some(output.version_file.clone());
-
-        let mark_task = wrap(
-            Box::new(MarkVersionsAtSysDbOperator {}),
-            MarkVersionsAtSysDbInput {
-                version_file: output.version_file,
-                versions_to_delete: output.versions_to_delete,
-                sysdb_client: self.sysdb_client.clone(),
-                epoch_id: 0,
-                oldest_version_to_keep: output.oldest_version_to_keep,
-            },
-            ctx.receiver(),
-        );
-
-        if let Err(e) = self
-            .dispatcher()
-            .send(mark_task, Some(Span::current()))
-            .await
-        {
-            self.terminate_with_result(Err(GarbageCollectorError::Channel(e)), ctx)
-                .await;
-            // Signal the dispatcher to shut down
-            return;
-        }
-    }
-}
-
-#[async_trait]
-impl Handler<TaskResult<MarkVersionsAtSysDbOutput, MarkVersionsAtSysDbError>>
-    for GarbageCollectorOrchestrator
-{
-    type Result = ();
-
-    async fn handle(
-        &mut self,
-        message: TaskResult<MarkVersionsAtSysDbOutput, MarkVersionsAtSysDbError>,
-        ctx: &ComponentContext<GarbageCollectorOrchestrator>,
-    ) {
-        let _ = match self.ok_or_terminate(message.into_inner(), ctx).await {
-            Some(output) => output,
-            None => return,
-        };
-
-        if let Some(lineage_file_path) = self.lineage_file_path.clone() {
-            let fetch_lineage_file_task = wrap(
-                Box::new(FetchLineageFileOperator::new()),
-                FetchLineageFileInput::new(self.storage.clone(), lineage_file_path),
-                ctx.receiver(),
-            );
-
-            if let Err(e) = self
-                .dispatcher()
-                .send(fetch_lineage_file_task, Some(Span::current()))
-                .await
-            {
-                self.terminate_with_result(Err(GarbageCollectorError::Channel(e)), ctx)
-                    .await;
-                return;
-            }
-        }
     }
 }
 
@@ -474,31 +373,169 @@ impl Handler<TaskResult<FetchVersionFileOutput, FetchVersionFileError>>
             }
         };
 
-        let collection_versions = self
-            .collection_versions
-            .get(
-                &CollectionUuid::from_str(
-                    &output
-                        .0
-                        .collection_info_immutable
-                        .as_ref()
-                        .unwrap()
-                        .collection_id,
-                )
-                .unwrap(),
-            )
-            .unwrap(); // todo
+        let collection_id = CollectionUuid::from_str(
+            &output
+                .file
+                .collection_info_immutable
+                .as_ref()
+                .unwrap()
+                .collection_id,
+        )
+        .unwrap(); // todo
 
-        for version in collection_versions.keys() {
-            let list_files_at_versions_task = wrap(
-                Box::new(ListFilesAtVersionsOperator {}),
-                ListFilesAtVersionInput::new(self.root_manager.clone(), output.0.clone(), *version),
+        if collection_id == self.collection_id {
+            // let list_files_at_versions_task = wrap(
+            //     Box::new(ComputeVersionsToDeleteOperator {}),
+            //     ComputeVersionsToDeleteInput {
+            //         version_file: output.file,
+            //         cutoff_time: self.absolute_cutoff_time,
+            //         min_versions_to_keep: 2,
+            //     },
+            //     ctx.receiver(),
+            // );
+
+            // if let Err(e) = self
+            //     .dispatcher()
+            //     .send(list_files_at_versions_task, Some(Span::current()))
+            //     .await
+            // {
+            //     self.terminate_with_result(Err(GarbageCollectorError::Channel(e)), ctx)
+            //         .await;
+            //     return;
+            // }
+        } else {
+            // Must be collection in fork tree
+            let collection_versions = self.collection_versions.get(&collection_id).unwrap(); // todo
+
+            for version in collection_versions.keys() {
+                let list_files_at_versions_task = wrap(
+                    Box::new(ListFilesAtVersionsOperator {}),
+                    ListFilesAtVersionInput::new(
+                        self.root_manager.clone(),
+                        output.file.clone(),
+                        *version,
+                    ),
+                    ctx.receiver(),
+                );
+
+                if let Err(e) = self
+                    .dispatcher()
+                    .send(list_files_at_versions_task, Some(Span::current()))
+                    .await
+                {
+                    self.terminate_with_result(Err(GarbageCollectorError::Channel(e)), ctx)
+                        .await;
+                    return;
+                }
+            }
+        }
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<ComputeVersionsToDeleteOutput, ComputeVersionsToDeleteError>>
+    for GarbageCollectorOrchestrator
+{
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<ComputeVersionsToDeleteOutput, ComputeVersionsToDeleteError>,
+        ctx: &ComponentContext<GarbageCollectorOrchestrator>,
+    ) {
+        // Stage 2: Process computed versions and initiate marking in SysDB
+        // let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
+        //     Some(output) => output,
+        //     None => return,
+        // };
+
+        // // If no versions to delete, terminate early with success
+        // if output.versions_to_delete.versions.is_empty() {
+        //     tracing::info!("No versions to delete, terminating garbage collection early");
+        //     let response = GarbageCollectorResponse {
+        //         collection_id: self.collection_id,
+        //         version_file_path: self.version_file_path.clone(),
+        //         num_versions_deleted: 0,
+        //         deletion_list: Vec::new(),
+        //     };
+        //     tracing::info!(?response, "Garbage collection completed early");
+        //     self.terminate_with_result(Ok(response), ctx).await;
+        //     // Signal the dispatcher to shut down
+        //     return;
+        // }
+
+        // for version in &output.versions_to_delete.versions {
+        //     self.collection_versions
+        //         .entry(self.collection_id)
+        //         .or_default()
+        //         .insert(*version, ProcessMode::EligibleForDeletion);
+        // }
+
+        // self.collection_versions
+        //     .entry(self.collection_id)
+        //     .or_default()
+        //     .insert(output.oldest_version_to_keep, ProcessMode::Keep);
+        // self.collection_versions
+        //     .entry(self.collection_id)
+        //     .or_default()
+        //     .insert(output.oldest_version_to_keep, ProcessMode::Keep);
+
+        // // todo: need?
+        // self.num_versions_deleted = output.versions_to_delete.versions.len() as u32;
+        // self.pending_versions_to_delete = Some(output.versions_to_delete.clone());
+        // self.pending_version_file = Some(output.version_file.clone());
+
+        // let mark_task = wrap(
+        //     Box::new(MarkVersionsAtSysDbOperator {}),
+        //     MarkVersionsAtSysDbInput {
+        //         version_file: output.version_file,
+        //         versions_to_delete: output.versions_to_delete,
+        //         sysdb_client: self.sysdb_client.clone(),
+        //         epoch_id: 0,
+        //         oldest_version_to_keep: output.oldest_version_to_keep,
+        //     },
+        //     ctx.receiver(),
+        // );
+
+        // if let Err(e) = self
+        //     .dispatcher()
+        //     .send(mark_task, Some(Span::current()))
+        //     .await
+        // {
+        //     self.terminate_with_result(Err(GarbageCollectorError::Channel(e)), ctx)
+        //         .await;
+        //     // Signal the dispatcher to shut down
+        //     return;
+        // }
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<MarkVersionsAtSysDbOutput, MarkVersionsAtSysDbError>>
+    for GarbageCollectorOrchestrator
+{
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<MarkVersionsAtSysDbOutput, MarkVersionsAtSysDbError>,
+        ctx: &ComponentContext<GarbageCollectorOrchestrator>,
+    ) {
+        let _ = match self.ok_or_terminate(message.into_inner(), ctx).await {
+            Some(output) => output,
+            None => return,
+        };
+
+        if let Some(lineage_file_path) = self.lineage_file_path.clone() {
+            let fetch_lineage_file_task = wrap(
+                Box::new(FetchLineageFileOperator::new()),
+                FetchLineageFileInput::new(self.storage.clone(), lineage_file_path),
                 ctx.receiver(),
             );
 
             if let Err(e) = self
                 .dispatcher()
-                .send(list_files_at_versions_task, Some(Span::current()))
+                .send(fetch_lineage_file_task, Some(Span::current()))
                 .await
             {
                 self.terminate_with_result(Err(GarbageCollectorError::Channel(e)), ctx)
