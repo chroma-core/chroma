@@ -2,11 +2,14 @@ use super::util::TokenInstance;
 use super::util::TokenInstanceEncodeError;
 use chroma_blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::regex::literal_expr::NgramLiteralProvider;
 use futures::StreamExt;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use roaring::RoaringBitmap;
+use std::collections::HashMap;
 use std::collections::HashSet;
+use std::ops::RangeBounds;
 use std::sync::Arc;
 use tantivy::tokenizer::NgramTokenizer;
 use tantivy::tokenizer::TokenStream;
@@ -20,8 +23,8 @@ pub enum FullTextIndexError {
     EmptyValueInPositionalPostingList,
     #[error("Invariant violation")]
     InvariantViolation,
-    #[error("Blockfile write error: {0}")]
-    BlockfileWriteError(#[from] Box<dyn ChromaError>),
+    #[error("Blockfile error: {0}")]
+    BlockfileError(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for FullTextIndexError {
@@ -268,7 +271,7 @@ impl FullTextIndexFlusher {
         {
             Ok(_) => {}
             Err(e) => {
-                return Err(FullTextIndexError::BlockfileWriteError(e));
+                return Err(FullTextIndexError::BlockfileError(e));
             }
         };
 
@@ -422,6 +425,38 @@ impl<'me> FullTextIndexReader<'me> {
             results.push((*doc_id, positions.to_vec()));
         }
         Ok(results)
+    }
+}
+
+#[async_trait::async_trait]
+impl<'me> NgramLiteralProvider<FullTextIndexError> for FullTextIndexReader<'me> {
+    fn initial_beam_width(&self) -> usize {
+        512
+    }
+
+    async fn lookup_ngram(
+        &self,
+        ngram: &str,
+    ) -> Result<HashMap<u32, RoaringBitmap>, FullTextIndexError> {
+        Ok(self
+            .posting_lists_blockfile_reader
+            .get_range(ngram..=ngram, ..)
+            .await?
+            .into_iter()
+            .map(|(doc, pos)| (doc, pos.iter().collect()))
+            .collect())
+    }
+
+    async fn lookup_ngram_document_range<'fts, NgramRange, DocRange>(
+        &'fts self,
+        ngram_range: NgramRange,
+        doc_range: DocRange,
+    ) -> Result<Vec<(&'fts str, u32, RoaringBitmap)>, FullTextIndexError>
+    where
+        NgramRange: RangeBounds<&'fts str> + Send + Sync,
+        DocRange: RangeBounds<u32> + Send + Sync,
+    {
+        todo!("Implement range lookup")
     }
 }
 

@@ -14,6 +14,10 @@ use chroma_segment::{
 };
 use chroma_system::Operator;
 use chroma_types::{
+    regex::{
+        literal_expr::{LiteralExpr, NgramLiteralProvider},
+        ChromaRegex, ChromaRegexError,
+    },
     BooleanOperator, Chunk, CompositeExpression, DocumentExpression, DocumentOperator, LogRecord,
     MaterializedLogOperation, MetadataComparison, MetadataExpression, MetadataSetValue,
     MetadataValue, PrimitiveOperator, Segment, SetOperator, SignedRoaringBitmap, Where,
@@ -73,7 +77,7 @@ pub enum FilterError {
     #[error("Error creating record segment reader: {0}")]
     RecordReader(#[from] RecordSegmentReaderCreationError),
     #[error("Error parsing regular expression: {0}")]
-    Regex(#[from] regex::Error),
+    Regex(#[from] ChromaRegexError),
     #[error("Error getting record: {0}")]
     GetError(Box<dyn ChromaError>),
 }
@@ -225,12 +229,28 @@ impl<'me> MetadataProvider<'me> {
         &self,
         query: &str,
     ) -> Result<RoaringBitmap, FilterError> {
+        let chroma_regex = ChromaRegex::try_from(query.to_string())?;
         match self {
-            MetadataProvider::CompactData(_metadata_segment_reader) => {
-                todo!("Implement regex search on fts index")
+            MetadataProvider::CompactData(metadata_segment_reader) => {
+                if let Some(reader) = metadata_segment_reader.full_text_index_reader.as_ref() {
+                    let literal_expr = LiteralExpr::from(chroma_regex.hir().clone());
+                    let approximate_matching_docs = match reader
+                        .match_literal_expression(&literal_expr)
+                        .await
+                        .map_err(MetadataIndexError::from)?
+                    {
+                        Some(docs) => docs,
+                        None => return Err(ChromaRegexError::PermissivePattern.into()),
+                    };
+                    let is_exact_match = chroma_regex.properties().look_set().is_empty()
+                        && reader.can_match_exactly(&literal_expr);
+                    todo!("Implement bruteforce logic")
+                } else {
+                    Ok(RoaringBitmap::new())
+                }
             }
             MetadataProvider::Log(metadata_log_reader) => {
-                let regex = Regex::new(query)?;
+                let regex = chroma_regex.regex()?;
                 Ok(metadata_log_reader
                     .document
                     .iter()
