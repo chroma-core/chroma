@@ -6,11 +6,11 @@ import time
 from multiprocessing.synchronize import Event
 
 import chromadb
+from chromadb import ClientAPI
 from chromadb.api.client import Client
 from chromadb.api.models.Collection import Collection
 from chromadb.cli import cli
 from chromadb.cli.cli import build_cli_args
-from chromadb.cli.utils import set_log_file_path
 from chromadb.config import Settings, System
 from chromadb.db.base import get_sql
 from chromadb.db.impl.sqlite import SqliteDB
@@ -18,6 +18,34 @@ from pypika import Table
 import numpy as np
 
 from chromadb.test.property import invariants
+
+
+def wait_for_server(
+    client: ClientAPI, max_retries: int = 5, initial_delay: float = 1.0
+) -> bool:
+    """Wait for server to be ready using exponential backoff.
+    Args:
+        client: ChromaDB client instance
+        max_retries: Maximum number of retry attempts
+        initial_delay: Initial delay in seconds before first retry
+    Returns:
+        bool: True if server is ready, False if max retries exceeded
+    """
+    delay = initial_delay
+    for attempt in range(max_retries):
+        try:
+            heartbeat = client.heartbeat()
+            if heartbeat > 0:
+                return True
+        except Exception:
+            print("Heartbeat failed, trying again...")
+            pass
+
+        if attempt < max_retries - 1:
+            time.sleep(delay)
+            delay *= 2
+
+    return False
 
 def start_app(args: list[str]) -> None:
     sys.argv = args
@@ -34,9 +62,14 @@ def test_app() -> None:
 
     host = os.getenv("CHROMA_SERVER_HOST", kwargs.get("host", "localhost"))
     port = os.getenv("CHROMA_SERVER_HTTP_PORT", kwargs.get("port", 8000))
+    port = int(os.getenv("CHROMA_SERVER_HTTP_PORT", kwargs.get("port", 8000)))
 
     client = chromadb.HttpClient(host=host, port=port)
     heartbeat = client.heartbeat()
+    assert wait_for_server(
+        client
+    ), "Server failed to start within maximum retry attempts"
+
     server_process.terminate()
     server_process.join()
     assert heartbeat > 0
