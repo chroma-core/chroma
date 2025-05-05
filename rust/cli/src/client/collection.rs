@@ -130,13 +130,7 @@ impl Collection {
             self.chroma_client.tenant_id, self.chroma_client.db, self.collection_id
         );
 
-        let payload = AddCollectionRecordsPayload {
-            ids,
-            embeddings,
-            documents,
-            uris,
-            metadatas,
-        };
+        let payload = AddCollectionRecordsPayload::new(ids, embeddings, documents, uris, metadatas);
 
         let _response = send_request::<AddCollectionRecordsPayload, AddCollectionRecordsResponse>(
             &self.chroma_client.host,

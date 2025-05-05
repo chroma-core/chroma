@@ -1252,11 +1252,29 @@ async fn fork_collection(
 
 #[derive(Serialize, Deserialize, ToSchema, Debug, Clone)]
 pub struct AddCollectionRecordsPayload {
-    pub ids: Vec<String>,
-    pub embeddings: Option<Vec<Vec<f32>>>,
-    pub documents: Option<Vec<Option<String>>>,
-    pub uris: Option<Vec<Option<String>>>,
-    pub metadatas: Option<Vec<Option<Metadata>>>,
+    ids: Vec<String>,
+    embeddings: Option<Vec<Vec<f32>>>,
+    documents: Option<Vec<Option<String>>>,
+    uris: Option<Vec<Option<String>>>,
+    metadatas: Option<Vec<Option<Metadata>>>,
+}
+
+impl AddCollectionRecordsPayload {
+    pub fn new(
+        ids: Vec<String>,
+        embeddings: Option<Vec<Vec<f32>>>,
+        documents: Option<Vec<Option<String>>>,
+        uris: Option<Vec<Option<String>>>,
+        metadatas: Option<Vec<Option<Metadata>>>,
+    ) -> Self {
+        Self {
+            ids,
+            embeddings,
+            documents,
+            uris,
+            metadatas,
+        }
+    }
 }
 
 /// Adds records to a collection.

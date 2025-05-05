@@ -50,6 +50,13 @@
     "tsup": "^7.2.0",
     "typescript": "^5.0.4"
   },
+  "optionalDependencies": {
+    "chromadb-js-bindings-darwin-arm64": "^0.0.1",
+    "chromadb-js-bindings-darwin-x64": "^0.0.1",
+    "chromadb-js-bindings-linux-arm64-gnu": "^0.0.1",
+    "chromadb-js-bindings-linux-x64-gnu": "^0.0.1",
+    "chromadb-js-bindings-win32-x64-msvc": "^0.0.1"
+  },
   "engines": {
     "node": ">=14.17.0"
   },
