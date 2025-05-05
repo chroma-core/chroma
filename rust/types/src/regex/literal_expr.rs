@@ -145,10 +145,7 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
             let mut doc_pos = self.lookup_ngram(&ngram_string).await?;
 
             if let Some(whitelist) = mask {
-                doc_pos = doc_pos
-                    .into_iter()
-                    .filter(|(doc, _)| whitelist.contains(*doc))
-                    .collect();
+                doc_pos.retain(|doc, _| whitelist.contains(*doc));
             }
 
             if doc_pos.is_empty() {
@@ -205,10 +202,7 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
                         .await?;
 
                     if let Some(whitelist) = mask {
-                        ngram_doc_pos = ngram_doc_pos
-                            .into_iter()
-                            .filter(|(_, doc, _)| whitelist.contains(*doc))
-                            .collect();
+                        ngram_doc_pos.retain(|(_, doc, _)| whitelist.contains(*doc));
                     }
 
                     for (ngram, doc_id, new_pos) in ngram_doc_pos {
