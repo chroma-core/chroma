@@ -4,7 +4,10 @@ use crate::client::collection::CollectionAPIError;
 use crate::commands::browse::BrowseError;
 use crate::commands::db::get_db_name;
 use crate::commands::install::InstallError;
-use crate::utils::{get_current_profile, parse_host, parse_local, parse_path, AddressBook, CliError, Environment, ErrorResponse, Profile, UtilsError};
+use crate::utils::{
+    get_current_profile, parse_host, parse_local, parse_path, AddressBook, CliError, Environment,
+    ErrorResponse, Profile, UtilsError,
+};
 use chroma_types::{CollectionConfiguration, IncludeList};
 use clap::Parser;
 use crossterm::style::Stylize;
@@ -240,7 +243,7 @@ async fn copy_collections(
                 )
                 .await
                 .map_err(|_| ChromaClientError::CollectionGet(collection.name.clone()))?;
-            
+
             target_collection
                 .add(
                     records.ids,
@@ -252,14 +255,16 @@ async fn copy_collections(
                 .await
                 .map_err(|e| {
                     if e.to_string().contains("Quota") {
-                        let msg = serde_json::from_str::<ErrorResponse>(&e.to_string()).unwrap_or_default().message;
+                        let msg = serde_json::from_str::<ErrorResponse>(&e.to_string())
+                            .unwrap_or_default()
+                            .message;
                         return CliError::Utils(UtilsError::Quota(msg));
                     }
                     CliError::Collection(CollectionAPIError::Add(collection.name.clone()))
                 })?;
         }
     }
-    
+
     println!("Copy Completed!");
 
     Ok(())

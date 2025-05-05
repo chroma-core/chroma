@@ -123,7 +123,9 @@ pub struct ErrorResponse {
 
 impl Default for ErrorResponse {
     fn default() -> Self {
-        Self { message: "".to_owned() }
+        Self {
+            message: "".to_owned(),
+        }
     }
 }
 
