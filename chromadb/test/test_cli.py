@@ -1,12 +1,10 @@
 import multiprocessing
 import multiprocessing.context
-import os
 import sys
 import time
 from multiprocessing.synchronize import Event
 
 import chromadb
-from chromadb import ClientAPI
 from chromadb.api.client import Client
 from chromadb.api.models.Collection import Collection
 from chromadb.cli import cli
@@ -21,7 +19,7 @@ from chromadb.test.property import invariants
 
 
 def wait_for_server(
-    client: ClientAPI, max_retries: int = 5, initial_delay: float = 1.0
+    client, max_retries: int = 5, initial_delay: float = 1.0
 ) -> bool:
     """Wait for server to be ready using exponential backoff.
     Args:
@@ -60,11 +58,7 @@ def test_app() -> None:
     server_process.start()
     time.sleep(5)
 
-    host = os.getenv("CHROMA_SERVER_HOST", kwargs.get("host", "localhost"))
-    port = os.getenv("CHROMA_SERVER_HTTP_PORT", kwargs.get("port", 8000))
-    port = int(os.getenv("CHROMA_SERVER_HTTP_PORT", kwargs.get("port", 8000)))
-
-    client = chromadb.HttpClient(host=host, port=port)
+    client = chromadb.HttpClient(host=kwargs["host"], port=int(kwargs["port"]))
     heartbeat = client.heartbeat()
     assert wait_for_server(
         client
