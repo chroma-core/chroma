@@ -78,12 +78,17 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
         NgramRange: RangeBounds<&'me str>,
         DocRange: RangeBounds<u32>;
 
-    // Return the documents containing the literals and the potential matching positions
+    // Return the documents containing the literals. The search space is restricted to the documents in the mask if specified
     // If all documents could contain the literals, Ok(None) is returned
-    async fn match_literal(
+    async fn match_literal_with_mask(
         &self,
-        mut literals: Vec<Literal>,
-    ) -> Result<Option<HashMap<u32, RoaringBitmap>>, E> {
+        mut literals: &[Literal],
+        mask: Option<&RoaringBitmap>,
+    ) -> Result<Option<RoaringBitmap>, E> {
+        if mask.is_some_and(|m| m.is_empty()) {
+            return Ok(mask.cloned());
+        }
+
         let mut initial_ngrams = Vec::new();
         let mut initial_position = None;
         for (index, initial_literals) in literals.windows(N).enumerate() {
@@ -127,17 +132,24 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
         match initial_position {
             // Drain the initial literals
             Some(pos) => {
-                literals.drain(..pos);
+                literals = &literals[pos..];
             }
             // There is no initial ngrams to explore, by default we assume the all documents could contain these literals
-            None => return Ok(None),
+            None => return Ok(mask.cloned()),
         }
 
         // ngram suffix -> doc_id -> position
         let mut suffix_doc_pos: HashMap<Vec<char>, HashMap<u32, RoaringBitmap>> = HashMap::new();
         for ngram in initial_ngrams {
             let ngram_string = ngram.iter().collect::<String>();
-            let doc_pos = self.lookup_ngram(&ngram_string).await?;
+            let mut doc_pos = self.lookup_ngram(&ngram_string).await?;
+
+            if let Some(whitelist) = mask {
+                doc_pos = doc_pos
+                    .into_iter()
+                    .filter(|(doc, _)| whitelist.contains(*doc))
+                    .collect();
+            }
 
             if doc_pos.is_empty() {
                 continue;
@@ -154,7 +166,10 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
                 .or_insert(doc_pos);
         }
 
-        for literal in &literals {
+        for literal in literals {
+            if suffix_doc_pos.is_empty() {
+                break;
+            }
             let mut new_suffix_doc_pos: HashMap<Vec<char>, HashMap<u32, RoaringBitmap>> =
                 HashMap::new();
             for (mut suffix, doc_pos) in suffix_doc_pos {
@@ -182,13 +197,21 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
                 for (min_ngram, max_ngram) in ngram_ranges {
                     let min_ngram_string = min_ngram.iter().collect::<String>();
                     let max_ngram_string = max_ngram.iter().collect::<String>();
-                    for (ngram, doc_id, new_pos) in self
+                    let mut ngram_doc_pos = self
                         .lookup_ngram_document_range(
                             min_ngram_string.as_str()..=max_ngram_string.as_str(),
                             min_doc_id..=max_doc_id,
                         )
-                        .await?
-                    {
+                        .await?;
+
+                    if let Some(whitelist) = mask {
+                        ngram_doc_pos = ngram_doc_pos
+                            .into_iter()
+                            .filter(|(_, doc, _)| whitelist.contains(*doc))
+                            .collect();
+                    }
+
+                    for (ngram, doc_id, new_pos) in ngram_doc_pos {
                         if let Some(pos) = doc_pos.get(&doc_id) {
                             // SAFETY(Sicheng): The RoaringBitmap iterator should be sorted
                             let valid_pos = RoaringBitmap::from_sorted_iter(
@@ -209,16 +232,65 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
                 }
             }
             suffix_doc_pos = new_suffix_doc_pos;
-            if suffix_doc_pos.is_empty() {
-                break;
-            }
         }
 
-        let mut result = HashMap::new();
-        suffix_doc_pos
+        let result = suffix_doc_pos
             .into_values()
-            .flat_map(|doc_pos| doc_pos.into_iter())
-            .for_each(|(doc, pos)| *result.entry(doc).or_default() |= pos);
+            .flat_map(|doc_pos| doc_pos.into_keys())
+            .collect();
         Ok(Some(result))
+    }
+
+    // Return the documents matching the literal expression. The search space is restricted to the documents in the mask if specified
+    // If all documents could match the literal expression, Ok(None) is returned
+    async fn match_literal_expression_with_mask(
+        &self,
+        literal_expression: &LiteralExpr,
+        mask: Option<&RoaringBitmap>,
+    ) -> Result<Option<RoaringBitmap>, E> {
+        match literal_expression {
+            LiteralExpr::Literal(literals) => self.match_literal_with_mask(literals, mask).await,
+            LiteralExpr::Concat(literal_exprs) => {
+                let mut result = mask.cloned();
+                for expr in literal_exprs {
+                    result = self
+                        .match_literal_expression_with_mask(expr, result.as_ref())
+                        .await?;
+                }
+                Ok(result)
+            }
+            LiteralExpr::Alternation(literal_exprs) => {
+                let mut result = RoaringBitmap::new();
+                for expr in literal_exprs {
+                    if let Some(matching_docs) =
+                        self.match_literal_expression_with_mask(expr, mask).await?
+                    {
+                        result |= matching_docs;
+                    } else {
+                        return Ok(mask.cloned());
+                    }
+                }
+                Ok(Some(result))
+            }
+        }
+    }
+
+    // Return the documents matching the literal expression
+    // If all documents could match the literal expression, Ok(None) is returned
+    async fn match_literal_expression(
+        &self,
+        literal_expression: &LiteralExpr,
+    ) -> Result<Option<RoaringBitmap>, E> {
+        self.match_literal_expression_with_mask(literal_expression, None)
+            .await
+    }
+
+    fn can_match_exactly(&self, literal_expression: &LiteralExpr) -> bool {
+        match literal_expression {
+            LiteralExpr::Literal(literals) => literals.windows(N).next().is_some_and(|head| {
+                head.iter().fold(1, |acc, lit| acc * lit.width()) <= self.initial_beam_width()
+            }),
+            LiteralExpr::Concat(_) | LiteralExpr::Alternation(_) => false,
+        }
     }
 }
