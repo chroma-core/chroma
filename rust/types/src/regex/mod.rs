@@ -3,7 +3,7 @@ pub mod literal_expr;
 
 use hir::Hir;
 use regex::Regex;
-use regex_syntax::parse;
+use regex_syntax::{hir::Properties, parse};
 use thiserror::Error;
 
 /// Chroma custom wrapper for a Regex pattern.
@@ -19,14 +19,15 @@ use thiserror::Error;
 pub struct ChromaRegex {
     hir: Hir,
     pattern: String,
+    properties: Properties,
 }
 
 #[derive(Debug, Error)]
 pub enum ChromaRegexError {
     #[error("Byte pattern is not allowed")]
     BytePattern,
-    #[error("Pattern that always matches is not allowed")]
-    EmptyPattern,
+    #[error("Pattern is too permissive")]
+    PermissivePattern,
     // NOTE: regex::Error is a large type, so we only store its error message here.
     #[error("Unexpected regex error: {0}")]
     Regex(String),
@@ -38,6 +39,9 @@ pub enum ChromaRegexError {
 impl ChromaRegex {
     pub fn hir(&self) -> &Hir {
         &self.hir
+    }
+    pub fn properties(&self) -> &Properties {
+        &self.properties
     }
     pub fn regex(&self) -> Result<Regex, ChromaRegexError> {
         // NOTE: Although this method return a Result<_, _> type, in practice it should always
@@ -53,16 +57,18 @@ impl TryFrom<String> for ChromaRegex {
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         let hir = parse(&value).map_err(|e| ChromaRegexError::RegexSyntax(e.to_string()))?;
-        if let Some(0) = hir.properties().minimum_len() {
-            return Err(ChromaRegexError::EmptyPattern);
+        let properties = hir.properties().clone();
+        if let Some(0) = properties.minimum_len() {
+            return Err(ChromaRegexError::PermissivePattern);
         }
         let chroma_hir = Hir::try_from(hir)?;
         if let Hir::Empty = chroma_hir {
-            return Err(ChromaRegexError::EmptyPattern);
+            return Err(ChromaRegexError::PermissivePattern);
         }
         Ok(Self {
             hir: chroma_hir,
             pattern: value,
+            properties,
         })
     }
 }
