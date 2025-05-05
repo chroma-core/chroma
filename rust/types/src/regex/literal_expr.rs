@@ -75,8 +75,8 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
         doc_range: DocRange,
     ) -> Result<Vec<(&'me str, u32, RoaringBitmap)>, E>
     where
-        NgramRange: RangeBounds<&'me str>,
-        DocRange: RangeBounds<u32>;
+        NgramRange: RangeBounds<&'me str> + Send + Sync,
+        DocRange: RangeBounds<u32> + Send + Sync;
 
     // Return the documents containing the literals. The search space is restricted to the documents in the mask if specified
     // If all documents could contain the literals, Ok(None) is returned
