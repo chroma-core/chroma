@@ -63,6 +63,12 @@ async fn main() {
             }
         }));
     }
+    // await for all the handles to finish
+    for handle in handles {
+        if let Err(e) = handle.await {
+            eprintln!("Error joining thread: {}", e);
+        }
+    }
     println!(
         "Took {} seconds to download 64 files",
         start_time.elapsed().as_secs_f32()
