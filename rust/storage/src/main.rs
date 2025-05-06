@@ -3,6 +3,27 @@ use std::{sync::Arc, time::Duration};
 
 #[tokio::main]
 async fn main() {
+    // parse the command line arguments
+    // -n <number of files>
+    // -size <size of each file in MB>
+    let args: Vec<String> = std::env::args().collect();
+    let num_files = if args.len() > 1 {
+        args[1].parse::<usize>().unwrap_or(64)
+    } else {
+        64
+    };
+    let mb_size = if args.len() > 2 {
+        args[2].parse::<usize>().unwrap_or(8)
+    } else {
+        8
+    };
+
+    println!(
+        "Running benchmark with {} files of size {} MB each",
+        num_files, mb_size
+    );
+
+    // connect
     let config = aws_config::load_from_env().await;
     let timeout_config_builder = TimeoutConfigBuilder::default()
         .connect_timeout(Duration::from_millis(5000))
@@ -15,13 +36,11 @@ async fn main() {
         .build();
     let client = aws_sdk_s3::Client::new(&config);
 
-    // Create 8MB file
-    let mb_size = 8;
     let test_data = vec![0; mb_size * 1024 * 1024];
     let bucket_name = "chroma-serverless-staging";
     let object_prefix = "hammad_test_data";
-    let num_files = 64;
 
+    // Upload the files
     for i in 0..num_files {
         let test_data = test_data.clone();
         let object_key = format!("{}/{:02}.bin", object_prefix, i);
@@ -43,7 +62,7 @@ async fn main() {
     let start_time = std::time::Instant::now();
     let mut handles = vec![];
     let latencies = Arc::new(tokio::sync::Mutex::new(vec![]));
-    for i in 0..64 {
+    for i in 0..num_files {
         let latencies = latencies.clone();
         let client = client.clone();
         let bucket_name = bucket_name.to_string();
