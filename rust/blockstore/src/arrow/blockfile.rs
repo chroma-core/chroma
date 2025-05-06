@@ -496,7 +496,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         &'me self,
         prefix_range: PrefixRange,
         key_range: KeyRange,
-    ) -> impl Stream<Item = Result<(K, V), Box<dyn ChromaError>>> + Send + 'me
+    ) -> impl Stream<Item = Result<(&'me str, K, V), Box<dyn ChromaError>>> + Send + 'me
     where
         PrefixRange: RangeBounds<&'prefix str> + Clone + Send + 'me,
         KeyRange: RangeBounds<K> + Clone + Send + 'me,
@@ -533,7 +533,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         &'me self,
         prefix_range: PrefixRange,
         key_range: KeyRange,
-    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>>
+    ) -> Result<Vec<(&'me str, K, V)>, Box<dyn ChromaError>>
     where
         PrefixRange: RangeBounds<&'prefix str> + Clone,
         KeyRange: RangeBounds<K> + Clone,
@@ -543,7 +543,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             .sparse_index
             .get_block_ids_range(prefix_range.clone(), key_range.clone());
 
-        let mut result: Vec<(K, V)> = vec![];
+        let mut result: Vec<(&str, K, V)> = vec![];
         for block_id in block_ids {
             let block_opt = match self.get_block(block_id, StorageRequestPriority::P0).await {
                 Ok(Some(block)) => Some(block),

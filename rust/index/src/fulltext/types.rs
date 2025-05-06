@@ -338,7 +338,7 @@ impl<'me> FullTextIndexReader<'me> {
                 .enumerate()
                 .map(|(i, posting_list)| {
                     if pointers[i] < posting_list.len() {
-                        Some(posting_list[pointers[i]].0)
+                        Some(posting_list[pointers[i]].1)
                     } else {
                         None
                     }
@@ -358,7 +358,7 @@ impl<'me> FullTextIndexReader<'me> {
                 // All tokens appear in the same document, so check positional alignment.
                 let mut positions_per_posting_list = Vec::with_capacity(num_tokens);
                 for (i, posting_list) in posting_lists.iter().enumerate() {
-                    let (_, positions) = posting_list[pointers[i]];
+                    let (_, _, positions) = posting_list[pointers[i]];
                     positions_per_posting_list.push(positions);
                 }
 
@@ -421,7 +421,7 @@ impl<'me> FullTextIndexReader<'me> {
             .get_range(token..=token, ..)
             .await?;
         let mut results = vec![];
-        for (doc_id, positions) in positional_posting_list.iter() {
+        for (_, doc_id, positions) in positional_posting_list.iter() {
             results.push((*doc_id, positions.to_vec()));
         }
         Ok(results)
@@ -443,7 +443,7 @@ impl<'me> NgramLiteralProvider<FullTextIndexError> for FullTextIndexReader<'me> 
             .get_range(ngram..=ngram, ..)
             .await?
             .into_iter()
-            .map(|(doc, pos)| (doc, pos.iter().collect()))
+            .map(|(_, doc, pos)| (doc, pos.iter().collect()))
             .collect())
     }
 
@@ -453,10 +453,16 @@ impl<'me> NgramLiteralProvider<FullTextIndexError> for FullTextIndexReader<'me> 
         doc_range: DocRange,
     ) -> Result<Vec<(&'fts str, u32, RoaringBitmap)>, FullTextIndexError>
     where
-        NgramRange: RangeBounds<&'fts str> + Send + Sync,
-        DocRange: RangeBounds<u32> + Send + Sync,
+        NgramRange: Clone + RangeBounds<&'fts str> + Send + Sync,
+        DocRange: Clone + RangeBounds<u32> + Send + Sync,
     {
-        todo!("Implement range lookup")
+        Ok(self
+            .posting_lists_blockfile_reader
+            .get_range(ngram_range, doc_range)
+            .await?
+            .into_iter()
+            .map(|(ngram, doc, pos)| (ngram, doc, pos.iter().collect()))
+            .collect())
     }
 }
 

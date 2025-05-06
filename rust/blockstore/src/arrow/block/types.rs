@@ -361,7 +361,7 @@ impl Block {
         &'me self,
         prefix_range: PrefixRange,
         key_range: KeyRange,
-    ) -> impl Iterator<Item = (K, V)> + 'me
+    ) -> impl Iterator<Item = (&'me str, K, V)> + 'me
     where
         PrefixRange: RangeBounds<&'prefix str>,
         KeyRange: RangeBounds<K>,
@@ -410,8 +410,16 @@ impl Block {
             Bound::Unbounded => self.len(),
         };
 
+        let prefix_array = self
+            .data
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+
         (start_index..end_index).map(move |index| {
             (
+                prefix_array.value(index),
                 K::get(self.data.column(1), index),
                 V::get(self.data.column(2), index),
             )
