@@ -395,7 +395,10 @@ impl SysDb {
                     .await
             }
             SysDb::Sqlite(_) => todo!(),
-            SysDb::Test(_) => todo!(),
+            SysDb::Test(test) => {
+                test.batch_get_collection_version_file_paths(collection_ids)
+                    .await
+            }
         }
     }
 

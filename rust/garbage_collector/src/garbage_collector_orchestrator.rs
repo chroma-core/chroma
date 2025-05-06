@@ -79,8 +79,6 @@ use crate::operators::mark_versions_at_sysdb::{
     MarkVersionsAtSysDbOutput,
 };
 
-use prost::Message;
-
 pub struct GarbageCollectorOrchestrator {
     collection_id: CollectionUuid,
     version_file_path: String,
@@ -203,10 +201,7 @@ impl Orchestrator for GarbageCollectorOrchestrator {
 
         vec![wrap(
             Box::new(FetchVersionFileOperator {}),
-            FetchVersionFileInput {
-                version_file_path: self.version_file_path.clone(),
-                storage: self.storage.clone(),
-            },
+            FetchVersionFileInput::new(self.version_file_path.clone(), self.storage.clone()),
             ctx.receiver(),
         )]
     }
@@ -242,34 +237,13 @@ impl Handler<TaskResult<FetchVersionFileOutput, FetchVersionFileError>>
 
         // Stage 1: Process fetched version file and initiate version computation
         let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
-            Some(output) => {
-                tracing::info!(
-                    content_size = output.version_file_content().len(),
-                    "Successfully got version file content"
-                );
-                output
-            }
+            Some(output) => output,
             None => {
                 tracing::error!("Failed to get version file output");
                 return;
             }
         };
-
-        let version_file = match CollectionVersionFile::decode(output.version_file_content()) {
-            Ok(file) => {
-                tracing::info!("Successfully decoded version file");
-                file
-            }
-            Err(e) => {
-                tracing::error!(error = ?e, "Failed to decode version file");
-                let result: Result<FetchVersionFileOutput, GarbageCollectorError> =
-                    Err(GarbageCollectorError::ComputeVersionsToDelete(
-                        ComputeVersionsToDeleteError::ParseError(e),
-                    ));
-                self.ok_or_terminate(result, ctx).await;
-                return;
-            }
-        };
+        let version_file = output.file;
 
         tracing::info!("Creating compute versions task");
         let compute_task = wrap(
