@@ -560,6 +560,24 @@ impl Where {
             },
         }
     }
+
+    // expression_check is a helper function to identify whether a given Where clause contains
+    // a document or metadata predicate. It recursively checks the children of a composite expression.
+    fn expression_check(&self, has_document_expr: &mut bool, has_metadata_expr: &mut bool) {
+        match self {
+            Where::Composite(composite) => {
+                for child in composite.children.iter() {
+                    child.expression_check(has_document_expr, has_metadata_expr);
+
+                    if *has_document_expr && *has_metadata_expr {
+                        return;
+                    }
+                }
+            }
+            Where::Document(_) => *has_document_expr = true,
+            Where::Metadata(_) => *has_metadata_expr = true,
+        }
+    }
 }
 
 impl TryFrom<chroma_proto::Where> for Where {
@@ -609,6 +627,26 @@ impl TryFrom<Where> for chroma_proto::Where {
 pub struct CompositeExpression {
     pub operator: BooleanOperator,
     pub children: Vec<Where>,
+}
+
+impl CompositeExpression {
+    pub fn has_document_and_metadata(&self) -> (bool, bool) {
+        let mut has_document_expr = false;
+        let mut has_metadata_expr = false;
+        self.expression_check(&mut has_document_expr, &mut has_metadata_expr);
+        (has_document_expr, has_metadata_expr)
+    }
+
+    // expression_check is an extension of the Where expression_check function, just for
+    // CompositeExpression
+    fn expression_check(&self, has_document_expr: &mut bool, has_metadata_expr: &mut bool) {
+        for child in self.children.iter() {
+            child.expression_check(has_document_expr, has_metadata_expr);
+            if *has_document_expr && *has_metadata_expr {
+                return;
+            }
+        }
+    }
 }
 
 impl TryFrom<chroma_proto::WhereChildren> for CompositeExpression {

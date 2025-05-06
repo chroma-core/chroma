@@ -482,8 +482,9 @@ impl IntoSqliteExpr for DocumentExpression {
             EmbeddingFulltextSearch::StringValue,
         ));
         let doc_contains = doc_col
+            .clone()
             .like(format!("%{}%", self.pattern.replace("%", "")))
-            .is(true);
+            .and(doc_col.is_not_null());
         match self.operator {
             DocumentOperator::Contains => doc_contains,
             DocumentOperator::NotContains => doc_contains.not(),
@@ -495,9 +496,11 @@ impl IntoSqliteExpr for DocumentExpression {
 
 impl IntoSqliteExpr for MetadataExpression {
     fn eval(&self) -> SimpleExpr {
-        let key_cond = Expr::col((EmbeddingMetadata::Table, EmbeddingMetadata::Key))
+        let key_col = Expr::col((EmbeddingMetadata::Table, EmbeddingMetadata::Key));
+        let key_cond = key_col
+            .clone()
             .eq(self.key.to_string())
-            .is(true);
+            .and(key_col.is_not_null());
         match &self.comparison {
             MetadataComparison::Primitive(op, val) => {
                 let (col, sval) = match val {
@@ -668,21 +671,28 @@ impl SqliteMetadataReader {
         }
 
         if let Some(whr) = &where_clause {
-            filter_limit_query
-                .left_join(
-                    EmbeddingMetadata::Table,
-                    Expr::col((Embeddings::Table, Embeddings::Id))
-                        .equals((EmbeddingMetadata::Table, EmbeddingMetadata::Id)),
-                )
-                .left_join(
+            let (has_document_expr, has_metadata_expr) = match whr {
+                Where::Composite(expr) => expr.has_document_and_metadata(),
+                Where::Document(_) => (true, false),
+                Where::Metadata(_) => (false, true),
+            };
+            if has_document_expr {
+                filter_limit_query.left_join(
                     EmbeddingFulltextSearch::Table,
                     Expr::col((Embeddings::Table, Embeddings::Id)).equals((
                         EmbeddingFulltextSearch::Table,
                         EmbeddingFulltextSearch::Rowid,
                     )),
-                )
-                .distinct()
-                .cond_where(whr.eval());
+                );
+            }
+            if has_metadata_expr {
+                filter_limit_query.left_join(
+                    EmbeddingMetadata::Table,
+                    Expr::col((Embeddings::Table, Embeddings::Id))
+                        .equals((EmbeddingMetadata::Table, EmbeddingMetadata::Id)),
+                );
+            };
+            filter_limit_query.distinct().cond_where(whr.eval());
         }
 
         filter_limit_query
