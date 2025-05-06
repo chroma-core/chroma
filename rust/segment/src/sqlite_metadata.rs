@@ -668,21 +668,28 @@ impl SqliteMetadataReader {
         }
 
         if let Some(whr) = &where_clause {
-            filter_limit_query
-                .left_join(
-                    EmbeddingMetadata::Table,
-                    Expr::col((Embeddings::Table, Embeddings::Id))
-                        .equals((EmbeddingMetadata::Table, EmbeddingMetadata::Id)),
-                )
-                .left_join(
+            let (has_document_expr, has_metadata_expr) = match whr {
+                Where::Composite(expr) => expr.has_document_and_metadata(),
+                Where::Document(_) => (true, false),
+                Where::Metadata(_) => (false, true),
+            };
+            if has_document_expr {
+                filter_limit_query.left_join(
                     EmbeddingFulltextSearch::Table,
                     Expr::col((Embeddings::Table, Embeddings::Id)).equals((
                         EmbeddingFulltextSearch::Table,
                         EmbeddingFulltextSearch::Rowid,
                     )),
-                )
-                .distinct()
-                .cond_where(whr.eval());
+                );
+            }
+            if has_metadata_expr {
+                filter_limit_query.left_join(
+                    EmbeddingMetadata::Table,
+                    Expr::col((Embeddings::Table, Embeddings::Id))
+                        .equals((EmbeddingMetadata::Table, EmbeddingMetadata::Id)),
+                );
+            };
+            filter_limit_query.distinct().cond_where(whr.eval());
         }
 
         filter_limit_query
