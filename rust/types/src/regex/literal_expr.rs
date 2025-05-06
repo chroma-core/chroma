@@ -69,14 +69,13 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
     async fn lookup_ngram(&self, ngram: &str) -> Result<HashMap<u32, RoaringBitmap>, E>;
 
     // Return the (ngram, doc_id, positions) for a range of ngrams and documents
-    async fn lookup_ngram_document_range<'me, NgramRange, DocRange>(
+    async fn lookup_ngram_range_for_document<'me, NgramRange>(
         &'me self,
         ngram_range: NgramRange,
-        doc_range: DocRange,
+        document_id: u32,
     ) -> Result<Vec<(&'me str, u32, RoaringBitmap)>, E>
     where
-        NgramRange: Clone + RangeBounds<&'me str> + Send + Sync,
-        DocRange: Clone + RangeBounds<u32> + Send + Sync;
+        NgramRange: Clone + RangeBounds<&'me str> + Send + Sync;
 
     // Return the documents containing the literals. The search space is restricted to the documents in the mask if specified
     // If all documents could contain the literals, Ok(None) is returned
@@ -184,30 +183,20 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
                         })
                         .collect(),
                 };
-                let (min_doc_id, max_doc_id) = doc_pos
-                    .keys()
-                    .fold((u32::MAX, u32::MIN), |(min, max), doc_id| {
-                        (min.min(*doc_id), max.max(*doc_id))
-                    });
                 for (min_ngram, max_ngram) in ngram_ranges {
                     let min_ngram_string = min_ngram.iter().collect::<String>();
                     let max_ngram_string = max_ngram.iter().collect::<String>();
-                    let mut ngram_doc_pos = self
-                        .lookup_ngram_document_range(
-                            min_ngram_string.as_str()..=max_ngram_string.as_str(),
-                            min_doc_id..=max_doc_id,
-                        )
-                        .await?;
-
-                    if let Some(whitelist) = mask {
-                        ngram_doc_pos.retain(|(_, doc, _)| whitelist.contains(*doc));
-                    }
-
-                    for (ngram, doc_id, new_pos) in ngram_doc_pos {
-                        if let Some(pos) = doc_pos.get(&doc_id) {
+                    for (doc_id, pos) in &doc_pos {
+                        let ngram_pos = self
+                            .lookup_ngram_range_for_document(
+                                min_ngram_string.as_str()..=max_ngram_string.as_str(),
+                                *doc_id,
+                            )
+                            .await?;
+                        for (ngram, _, new_pos) in ngram_pos {
                             // SAFETY(Sicheng): The RoaringBitmap iterator should be sorted
                             let valid_pos = RoaringBitmap::from_sorted_iter(
-                                pos.into_iter()
+                                pos.iter()
                                     .filter_map(|p| new_pos.contains(p + 1).then_some(p + 1)),
                             )
                             .expect("RoaringBitmap iterator should be sorted");
@@ -216,7 +205,7 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
                                 *new_suffix_doc_pos
                                     .entry(new_suffix)
                                     .or_default()
-                                    .entry(doc_id)
+                                    .entry(*doc_id)
                                     .or_default() |= valid_pos;
                             }
                         }
