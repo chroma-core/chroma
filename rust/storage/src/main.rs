@@ -16,22 +16,26 @@ async fn main() {
     let client = aws_sdk_s3::Client::new(&config);
 
     // Create 8MB file
-    let test_data = vec![0; 1024 * 1024];
+    let test_data = vec![0; 8 * 1024 * 1024];
     let bucket_name = "chroma-serverless-staging";
     let object_prefix = "hammad_test_data";
-    let object_key = format!("{}/test_file", object_prefix);
+    let num_files = 64;
 
-    // Upload the file
-    let result = client
-        .put_object()
-        .bucket(bucket_name)
-        .key(&object_key)
-        .body(test_data.into())
-        .send()
-        .await;
-    match result {
-        Ok(_) => println!("File uploaded successfully!"),
-        Err(e) => eprintln!("Error uploading file: {}", e),
+    for i in 0..num_files {
+        let test_data = test_data.clone();
+        let object_key = format!("{}/{:02}.bin", object_prefix, i);
+        // Upload the file
+        let result = client
+            .put_object()
+            .bucket(bucket_name)
+            .key(&object_key)
+            .body(test_data.into())
+            .send()
+            .await;
+        match result {
+            Ok(_) => println!("File uploaded successfully!"),
+            Err(e) => eprintln!("Error uploading file: {}", e),
+        }
     }
 
     // Download the file 64 times concurrently
@@ -40,7 +44,7 @@ async fn main() {
     for i in 0..64 {
         let client = client.clone();
         let bucket_name = bucket_name.to_string();
-        let object_key = object_key.clone();
+        let object_key = format!("{}/{:02}.bin", object_prefix, i);
         handles.push(tokio::spawn(async move {
             let req_start_time = std::time::Instant::now();
             let result = client
