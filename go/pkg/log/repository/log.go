@@ -3,11 +3,13 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	log "github.com/chroma-core/chroma/go/pkg/log/store/db"
 	"github.com/chroma-core/chroma/go/pkg/log/sysdb"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	trace_log "github.com/pingcap/log"
 	"go.uber.org/zap"
@@ -68,6 +70,14 @@ func (r *LogRepository) InsertRecords(ctx context.Context, collectionId string, 
 	}
 	insertCount, err = queriesWithTx.InsertRecord(ctx, params)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		// This is a retryable error and should be retried by upstream. It happens
+		// when two concurrent adds to the same collection happen.
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			trace_log.Error("Duplicate key error while inserting into record_log", zap.String("collectionId", collectionId), zap.String("detail", pgErr.Detail))
+			err = status.Error(codes.AlreadyExists, fmt.Sprintf("Duplicate key error while inserting into record_log: %s", pgErr.Detail))
+			return
+		}
 		trace_log.Error("Error in inserting records to record_log table", zap.Error(err), zap.String("collectionId", collectionId))
 		return
 	}
