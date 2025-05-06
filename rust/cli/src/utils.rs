@@ -28,6 +28,7 @@ use std::sync::Arc;
 use thiserror::Error;
 use tokio::spawn;
 use tokio::task::JoinHandle;
+use crate::commands::webpage::WebPageError;
 
 pub const CHROMA_DIR: &str = ".chroma";
 pub const CREDENTIALS_FILE: &str = "credentials";
@@ -64,6 +65,8 @@ pub enum CliError {
     Copy(#[from] CopyError),
     #[error("{0}")]
     Collection(#[from] CollectionAPIError),
+    #[error("{0}")]
+    WebPage(#[from] WebPageError),
 }
 
 #[derive(Debug, Error)]
@@ -90,8 +93,6 @@ pub enum UtilsError {
     ConfigFileWriteFailed,
     #[error("Failed to get user input")]
     UserInputFailed,
-    #[error("Failed to open browser. {0}")]
-    BrowserOpenFailed(String),
     #[error("Failed to copy to clipboard")]
     CopyToClipboardFailed,
     #[error("Input validation failed")]

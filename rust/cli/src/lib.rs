@@ -15,8 +15,7 @@ use crate::commands::update::update;
 use crate::commands::vacuum::{vacuum, VacuumArgs};
 use clap::{Parser, Subcommand};
 use colored::Colorize;
-use utils::CliError;
-use utils::UtilsError;
+use crate::commands::webpage::{open_browser, WebPageCommand};
 
 #[derive(Subcommand, Debug)]
 enum Command {
@@ -44,12 +43,6 @@ struct Cli {
     command: Command,
 }
 
-fn open_browser(url: &str) -> Result<(), CliError> {
-    let error_message = format!("Visit {}", url);
-    webbrowser::open(url).map_err(|_| UtilsError::BrowserOpenFailed(error_message))?;
-    Ok(())
-}
-
 pub fn chroma_cli(args: Vec<String>) {
     let cli = Cli::parse_from(args);
 
@@ -59,18 +52,12 @@ pub fn chroma_cli(args: Vec<String>) {
         Command::Browse(args) => browse(args),
         Command::Copy(args) => copy(args),
         Command::Db(db_subcommand) => db_command(db_subcommand),
-        Command::Docs => {
-            let url = "https://docs.trychroma.com";
-            open_browser(url)
-        }
+        Command::Docs => open_browser(WebPageCommand::Docs),
         Command::Install(args) => install(args),
         Command::Login(args) => login(args),
         Command::Profile(profile_subcommand) => profile_command(profile_subcommand),
         Command::Run(args) => run(args),
-        Command::Support => {
-            let url = "https://discord.gg/MMeYNTmh3x";
-            open_browser(url)
-        }
+        Command::Support => open_browser(WebPageCommand::Discord),
         Command::Update => update(),
         Command::Vacuum(args) => vacuum(args),
     };
