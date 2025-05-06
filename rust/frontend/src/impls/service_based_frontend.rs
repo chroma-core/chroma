@@ -2,7 +2,7 @@ use crate::{
     config::FrontendConfig, executor::Executor, types::errors::ValidationError,
     CollectionsWithSegmentsProvider,
 };
-use backon::Retryable;
+use backon::{ExponentialBuilder, Retryable};
 use chroma_config::{registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_log::{LocalCompactionManager, LocalCompactionManagerConfig, Log};
@@ -35,10 +35,10 @@ use chroma_types::{
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
-use std::collections::HashSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::{collections::HashSet, time::Duration};
 
 use super::utils::to_records;
 
@@ -49,6 +49,7 @@ struct Metrics {
     count_retries_counter: Counter<u64>,
     query_retries_counter: Counter<u64>,
     get_retries_counter: Counter<u64>,
+    add_retries_counter: Counter<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -61,6 +62,7 @@ pub struct ServiceBasedFrontend {
     max_batch_size: u32,
     metrics: Arc<Metrics>,
     default_knn_index: KnnIndex,
+    retries_builder: ExponentialBuilder,
 }
 
 impl ServiceBasedFrontend {
@@ -78,14 +80,28 @@ impl ServiceBasedFrontend {
         let delete_retries_counter = meter.u64_counter("delete_retries").build();
         let count_retries_counter = meter.u64_counter("count_retries").build();
         let query_retries_counter = meter.u64_counter("query_retries").build();
-        let get_retries_counter = meter.u64_counter("query_retries").build();
+        let get_retries_counter = meter.u64_counter("get_retries").build();
+        let add_retries_counter = meter.u64_counter("add_retries").build();
         let metrics = Arc::new(Metrics {
             fork_retries_counter,
             delete_retries_counter,
             count_retries_counter,
             query_retries_counter,
             get_retries_counter,
+            add_retries_counter,
         });
+        // factor: 2.0,
+        // min_delay_ms: 100,
+        // max_delay_ms: 5000,
+        // max_attempts: 5,
+        // jitter: true,
+        // TODO(Sanket): Ideally config for this.
+        let retries_builder = ExponentialBuilder::default()
+            .with_max_times(5)
+            .with_factor(2.0)
+            .with_max_delay(Duration::from_millis(5000))
+            .with_min_delay(Duration::from_millis(100))
+            .with_jitter();
         ServiceBasedFrontend {
             allow_reset,
             executor,
@@ -95,6 +111,7 @@ impl ServiceBasedFrontend {
             max_batch_size,
             metrics,
             default_knn_index,
+            retries_builder,
         }
     }
 
@@ -630,6 +647,14 @@ impl ServiceBasedFrontend {
         res
     }
 
+    pub async fn retryable_add(
+        &mut self,
+        collection_id: CollectionUuid,
+        records: Vec<OperationRecord>,
+    ) -> Result<(), Box<dyn ChromaError>> {
+        self.log_client.push_logs(collection_id, records).await
+    }
+
     pub async fn add(
         &mut self,
         AddCollectionRecordsRequest {
@@ -656,16 +681,26 @@ impl ServiceBasedFrontend {
             to_records(ids, embeddings, documents, uris, metadatas, Operation::Add)
                 .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
-        self.log_client
-            .push_logs(collection_id, records)
-            .await
-            .map_err(|err| {
-                if err.code() == ErrorCodes::Unavailable {
-                    AddCollectionRecordsError::Backoff
-                } else {
-                    AddCollectionRecordsError::Other(Box::new(err) as _)
+        let retries = Arc::new(AtomicUsize::new(0));
+        let add_to_retry = || {
+            let mut self_clone = self.clone();
+            let records_clone = records.clone();
+            async move { self_clone.retryable_add(collection_id, records_clone).await }
+        };
+        let res = add_to_retry
+            .retry(self.retries_builder)
+            // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
+            .when(|e| matches!(e.code(), ErrorCodes::Unavailable))
+            .notify(|_, _| {
+                let retried = retries.fetch_add(1, Ordering::Relaxed);
+                if retried > 0 {
+                    tracing::info!("Retrying add() request for collection {}", collection_id);
                 }
-            })?;
+            })
+            .await;
+        self.metrics
+            .add_retries_counter
+            .add(retries.load(Ordering::Relaxed) as u64, &[]);
 
         // TODO: Submit event after the response is sent
         MeterEvent::CollectionWrite {
@@ -678,7 +713,16 @@ impl ServiceBasedFrontend {
         .submit()
         .await;
 
-        Ok(AddCollectionRecordsResponse {})
+        match res {
+            Ok(()) => Ok(AddCollectionRecordsResponse {}),
+            Err(e) => {
+                if e.code() == ErrorCodes::Unavailable {
+                    Err(AddCollectionRecordsError::Backoff)
+                } else {
+                    Err(AddCollectionRecordsError::Other(Box::new(e) as _))
+                }
+            }
+        }
     }
 
     pub async fn update(

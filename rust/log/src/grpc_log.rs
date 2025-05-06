@@ -315,7 +315,9 @@ impl GrpcLog {
             .push_logs(request)
             .await
             .map_err(|err| {
-                if err.code() == ErrorCodes::Unavailable.into() {
+                if err.code() == ErrorCodes::Unavailable.into()
+                    || err.code() == ErrorCodes::Unknown.into()
+                {
                     GrpcPushLogsError::Backoff
                 } else {
                     err.into()
