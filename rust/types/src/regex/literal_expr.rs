@@ -101,38 +101,36 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
                 continue;
             }
 
-            initial_ngrams =
-                initial_literals
-                    .iter()
-                    .fold(
-                        Vec::<Vec<char>>::with_capacity(N),
-                        |mut acc, lit| match lit {
-                            Literal::Char(c) => {
-                                acc.iter_mut().for_each(|s| s.push(*c));
-                                acc
-                            }
-                            Literal::Class(class_unicode) => acc
-                                .into_iter()
-                                .flat_map(|s| {
-                                    class_unicode.iter().flat_map(|r| r.start()..=r.end()).map(
-                                        move |c| {
-                                            let mut sc = s.clone();
-                                            sc.push(c);
-                                            sc
-                                        },
-                                    )
-                                })
-                                .collect(),
-                        },
-                    );
+            initial_ngrams = initial_literals.iter().fold(
+                vec![Vec::with_capacity(N)],
+                |mut acc, lit| match lit {
+                    Literal::Char(c) => {
+                        acc.iter_mut().for_each(|s| s.push(*c));
+                        acc
+                    }
+                    Literal::Class(class_unicode) => {
+                        acc.into_iter()
+                            .flat_map(|s| {
+                                class_unicode.iter().flat_map(|r| r.start()..=r.end()).map(
+                                    move |c| {
+                                        let mut sc = s.clone();
+                                        sc.push(c);
+                                        sc
+                                    },
+                                )
+                            })
+                            .collect()
+                    }
+                },
+            );
             initial_position = Some(index);
             break;
         }
 
         match initial_position {
-            // Drain the initial literals
+            // Skip the initial literals
             Some(pos) => {
-                literals = &literals[pos..];
+                literals = &literals[pos + N..];
             }
             // There is no initial ngrams to explore, by default we assume the all documents could contain these literals
             None => return Ok(mask.cloned()),
