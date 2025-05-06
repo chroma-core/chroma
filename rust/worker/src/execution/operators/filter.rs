@@ -22,7 +22,7 @@ use chroma_types::{
     MaterializedLogOperation, MetadataComparison, MetadataExpression, MetadataSetValue,
     MetadataValue, PrimitiveOperator, Segment, SetOperator, SignedRoaringBitmap, Where,
 };
-use regex::Regex;
+use futures::TryStreamExt;
 use roaring::RoaringBitmap;
 use thiserror::Error;
 use tracing::{Instrument, Span};
@@ -74,12 +74,12 @@ pub enum FilterError {
     LogMaterializer(#[from] LogMaterializerError),
     #[error("Error creating metadata segment reader: {0}")]
     MetadataReader(#[from] MetadataSegmentError),
+    #[error("Error getting record: {0}")]
+    Record(#[from] Box<dyn ChromaError>),
     #[error("Error creating record segment reader: {0}")]
     RecordReader(#[from] RecordSegmentReaderCreationError),
     #[error("Error parsing regular expression: {0}")]
     Regex(#[from] ChromaRegexError),
-    #[error("Error getting record: {0}")]
-    GetError(Box<dyn ChromaError>),
 }
 
 impl ChromaError for FilterError {
@@ -88,9 +88,9 @@ impl ChromaError for FilterError {
             FilterError::Index(e) => e.code(),
             FilterError::LogMaterializer(e) => e.code(),
             FilterError::MetadataReader(e) => e.code(),
+            FilterError::Record(e) => e.code(),
             FilterError::RecordReader(e) => e.code(),
             FilterError::Regex(_) => ErrorCodes::InvalidArgument,
-            FilterError::GetError(e) => e.code(),
         }
     }
 }
@@ -189,25 +189,20 @@ impl<'me> MetadataLogReader<'me> {
 }
 
 pub(crate) enum MetadataProvider<'me> {
-    CompactData(&'me MetadataSegmentReader<'me>),
+    CompactData(
+        &'me MetadataSegmentReader<'me>,
+        &'me Option<RecordSegmentReader<'me>>,
+    ),
     Log(&'me MetadataLogReader<'me>),
 }
 
 impl<'me> MetadataProvider<'me> {
-    pub(crate) fn from_metadata_segment_reader(reader: &'me MetadataSegmentReader<'me>) -> Self {
-        Self::CompactData(reader)
-    }
-
-    pub(crate) fn from_metadata_log_reader(reader: &'me MetadataLogReader<'me>) -> Self {
-        Self::Log(reader)
-    }
-
     pub(crate) async fn filter_by_document_contains(
         &self,
         query: &str,
     ) -> Result<RoaringBitmap, FilterError> {
         match self {
-            MetadataProvider::CompactData(metadata_segment_reader) => {
+            MetadataProvider::CompactData(metadata_segment_reader, _) => {
                 if let Some(reader) = metadata_segment_reader.full_text_index_reader.as_ref() {
                     Ok(reader
                         .search(query)
@@ -231,20 +226,40 @@ impl<'me> MetadataProvider<'me> {
     ) -> Result<RoaringBitmap, FilterError> {
         let chroma_regex = ChromaRegex::try_from(query.to_string())?;
         match self {
-            MetadataProvider::CompactData(metadata_segment_reader) => {
-                if let Some(reader) = metadata_segment_reader.full_text_index_reader.as_ref() {
+            MetadataProvider::CompactData(metadata_segment_reader, record_segment_reader) => {
+                if let (Some(fti_reader), Some(rec_reader)) = (
+                    metadata_segment_reader.full_text_index_reader.as_ref(),
+                    record_segment_reader,
+                ) {
                     let literal_expr = LiteralExpr::from(chroma_regex.hir().clone());
-                    let approximate_matching_docs = match reader
+                    let approximate_matching_offset_ids = match fti_reader
                         .match_literal_expression(&literal_expr)
                         .await
                         .map_err(MetadataIndexError::from)?
                     {
-                        Some(docs) => docs,
-                        None => return Err(ChromaRegexError::PermissivePattern.into()),
+                        Some(ids) => ids,
+                        None => rec_reader
+                            .get_offset_stream(..)
+                            .try_collect::<Vec<_>>()
+                            .await
+                            .map(|ids| ids.into_iter().collect())?,
                     };
                     let is_exact_match = chroma_regex.properties().look_set().is_empty()
-                        && reader.can_match_exactly(&literal_expr);
-                    todo!("Implement bruteforce logic")
+                        && fti_reader.can_match_exactly(&literal_expr);
+                    if is_exact_match {
+                        Ok(approximate_matching_offset_ids)
+                    } else {
+                        let regex = chroma_regex.regex()?;
+                        let mut exact_matching_offset_ids = RoaringBitmap::new();
+                        for id in approximate_matching_offset_ids {
+                            if let Some(rec) = rec_reader.get_data_for_offset_id(id).await? {
+                                if rec.document.is_some_and(|doc| regex.is_match(doc)) {
+                                    exact_matching_offset_ids.insert(id);
+                                }
+                            }
+                        }
+                        Ok(exact_matching_offset_ids)
+                    }
                 } else {
                     Ok(RoaringBitmap::new())
                 }
@@ -269,7 +284,7 @@ impl<'me> MetadataProvider<'me> {
         op: &PrimitiveOperator,
     ) -> Result<RoaringBitmap, FilterError> {
         match self {
-            MetadataProvider::CompactData(metadata_segment_reader) => {
+            MetadataProvider::CompactData(metadata_segment_reader, _) => {
                 let (metadata_index_reader, kw) = match val {
                     MetadataValue::Bool(b) => (
                         metadata_segment_reader.bool_metadata_index_reader.as_ref(),
@@ -485,14 +500,13 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
             MetadataLogReader::create(&materialized_logs, &record_segment_reader)
                 .await
                 .map_err(FilterError::LogMaterializer)?;
-        let log_metadata_provider =
-            MetadataProvider::from_metadata_log_reader(&metadata_log_reader);
+        let log_metadata_provider = MetadataProvider::Log(&metadata_log_reader);
 
         let metadata_segement_reader =
             MetadataSegmentReader::from_segment(&input.metadata_segment, &input.blockfile_provider)
                 .await?;
         let compact_metadata_provider =
-            MetadataProvider::from_metadata_segment_reader(&metadata_segement_reader);
+            MetadataProvider::CompactData(&metadata_segement_reader, &record_segment_reader);
 
         // Get offset ids corresponding to user ids
         let (user_allowed_log_offset_ids, user_allowed_compact_offset_ids) =
@@ -518,7 +532,7 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
                                 // document.  Drop it.
                             }
                             Err(e) => {
-                                return Err(FilterError::GetError(e));
+                                return Err(e.into());
                             }
                         };
                     }
