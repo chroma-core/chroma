@@ -1,0 +1,70 @@
+use aws_config::{retry::RetryConfig, timeout::TimeoutConfigBuilder};
+use std::time::Duration;
+
+#[tokio::main]
+async fn main() {
+    let config = aws_config::load_from_env().await;
+    let timeout_config_builder = TimeoutConfigBuilder::default()
+        .connect_timeout(Duration::from_millis(5000))
+        .read_timeout(Duration::from_millis(60000));
+    let retry_config = RetryConfig::standard();
+    let config = config
+        .to_builder()
+        .timeout_config(timeout_config_builder.build())
+        .retry_config(retry_config)
+        .build();
+    let client = aws_sdk_s3::Client::new(&config);
+
+    // Create 8MB file
+    let test_data = vec![0; 8 * 1024 * 1024];
+    let bucket_name = "chroma-serverless-staging";
+    let object_prefix = "hammad_test_data";
+    let object_key = format!("{}/test_file", object_prefix);
+
+    // Upload the file
+    let result = client
+        .put_object()
+        .bucket(bucket_name)
+        .key(&object_key)
+        .body(test_data.into())
+        .send()
+        .await;
+    match result {
+        Ok(_) => println!("File uploaded successfully!"),
+        Err(e) => eprintln!("Error uploading file: {}", e),
+    }
+
+    // Download the file 64 times concurrently
+    let start_time = std::time::Instant::now();
+    let mut handles = vec![];
+    for i in 0..64 {
+        let client = client.clone();
+        let bucket_name = bucket_name.to_string();
+        let object_key = object_key.clone();
+        handles.push(tokio::spawn(async move {
+            let req_start_time = std::time::Instant::now();
+            let result = client
+                .get_object()
+                .bucket(&bucket_name)
+                .key(&object_key)
+                .send()
+                .await;
+            match result {
+                Ok(res) => {
+                    let body = res.body.collect().await.unwrap();
+                    println!(
+                        "Downloaded file {}: {} bytes in {} ms",
+                        i,
+                        body.into_bytes().len(),
+                        req_start_time.elapsed().as_millis()
+                    );
+                }
+                Err(e) => eprintln!("Error downloading file: {}", e),
+            }
+        }));
+    }
+    println!(
+        "Took {} seconds to download 64 files",
+        start_time.elapsed().as_secs_f32()
+    );
+}

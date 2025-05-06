@@ -136,7 +136,11 @@ impl UnorderedBlockDelta {
 #[cfg(test)]
 mod test {
     use crate::arrow::{
-        block::{delta::UnorderedBlockDelta, Block},
+        block::{
+            self,
+            delta::{types::Delta, UnorderedBlockDelta},
+            Block,
+        },
         config::TEST_MAX_BLOCK_SIZE_BYTES,
         provider::BlockManager,
     };
@@ -537,5 +541,115 @@ mod test {
             let read = forked_block.get::<u32, u32>("prefix", key);
             assert_eq!(read, Some(i as u32));
         }
+    }
+
+    #[tokio::test]
+    async fn benchmarking_for_learning() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let cache = new_cache_for_test();
+        let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
+        let delta = block_manager.create::<u32, u32, UnorderedBlockDelta>();
+
+        // benchmark adding items
+        println!("Benchmarking UnorderedBlockDelta");
+        let n = 10_000;
+        #[allow(clippy::needless_range_loop)]
+        let start_time = std::time::Instant::now();
+        for i in 0..n {
+            let prefix = "prefix";
+            let key = i;
+            let value = i;
+            delta.add(prefix, key, value);
+        }
+        let elapsed = start_time.elapsed();
+        println!("Time taken to add {} items: {:?}", n, elapsed);
+        println!("Time per item: {:?}", elapsed / n);
+        let total_bytes_added = n * std::mem::size_of::<u32>() as u32 * 2;
+        let total_mb_added = total_bytes_added as f32 / (1024.0 * 1024.0);
+        println!("Total bytes added: {}", total_bytes_added);
+        println!(
+            "Throughput mb/s: {}",
+            total_mb_added / elapsed.as_secs_f32()
+        );
+
+        // compare with raw btree
+        println!("Benchmarking BTreeMap");
+        let mut btree = std::collections::BTreeMap::new();
+        let start_time = std::time::Instant::now();
+        for i in 0..n {
+            let key = i;
+            let value = i;
+            btree.insert(key, value);
+        }
+        let elapsed = start_time.elapsed();
+        println!("Time taken to add {} items: {:?}", n, elapsed);
+        println!("Time per item: {:?}", elapsed / n);
+        println!(
+            "Throughput mb/s: {}",
+            total_mb_added / elapsed.as_secs_f32()
+        );
+
+        // compare with vec append
+        println!("Benchmarking Vec");
+        let mut vec = Vec::new();
+        let start_time = std::time::Instant::now();
+        for i in 0..n {
+            let key = i;
+            let value = i;
+            vec.push((key, value));
+        }
+        let elapsed = start_time.elapsed();
+        println!("Time taken to add {} items: {:?}", n, elapsed);
+        println!("Time per item: {:?}", elapsed / n);
+        println!(
+            "Throughput mb/s: {}",
+            total_mb_added / elapsed.as_secs_f32()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_delta_conversion_speed() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let path = tmp_dir.path().to_str().unwrap();
+        let storage = Storage::Local(LocalStorage::new(path));
+        let cache = new_cache_for_test();
+        let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
+        let delta = block_manager.create::<u32, &DataRecord, UnorderedBlockDelta>();
+
+        let n = 350;
+        let doc_size = 16_000;
+        let embedding_size = 1536;
+        for i in 0..n {
+            let prefix = "prefix";
+            let key = i as u32;
+            let random_doc = "a".repeat(doc_size);
+            let random_embedding = vec![1.0; embedding_size];
+            let value = DataRecord {
+                id: &format!("key{}", i),
+                embedding: &random_embedding,
+                metadata: None,
+                document: Some(&random_doc),
+            };
+            delta.add(prefix, key, &value);
+        }
+
+        // benchmark conversion to record batch
+        let start_time = std::time::Instant::now();
+        let record_batch = delta.finish::<u32, u32>(None);
+        let elapsed = start_time.elapsed();
+        println!("Time taken to convert {} items: {:?}", n, elapsed);
+
+        let block = Block::from_record_batch(uuid::Uuid::new_v4(), record_batch);
+        let block_size = block.get_size();
+        println!("Block size: {}", block_size);
+        let start_time = std::time::Instant::now();
+        let forked_delta =
+            UnorderedBlockDelta::fork_block::<u32, &DataRecord>(uuid::Uuid::new_v4(), &block);
+        let elapsed = start_time.elapsed();
+        println!(
+            "Time taken to convert {} items into block: {:?}",
+            n, elapsed
+        );
     }
 }
