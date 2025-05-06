@@ -1,5 +1,5 @@
 use aws_config::{retry::RetryConfig, timeout::TimeoutConfigBuilder};
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 #[tokio::main]
 async fn main() {
@@ -41,7 +41,9 @@ async fn main() {
     // Download the file 64 times concurrently
     let start_time = std::time::Instant::now();
     let mut handles = vec![];
+    let latencies = Arc::new(tokio::sync::Mutex::new(vec![]));
     for i in 0..64 {
+        let latencies = latencies.clone();
         let client = client.clone();
         let bucket_name = bucket_name.to_string();
         let object_key = format!("{}/{:02}.bin", object_prefix, i);
@@ -62,6 +64,9 @@ async fn main() {
                         body.into_bytes().len(),
                         req_start_time.elapsed().as_millis()
                     );
+                    // Store the latency
+                    let mut latencies = latencies.lock().await;
+                    latencies.push(req_start_time.elapsed().as_millis());
                 }
                 Err(e) => eprintln!("Error downloading file: {}", e),
             }
@@ -76,5 +81,23 @@ async fn main() {
     println!(
         "Took {} seconds to download 64 files",
         start_time.elapsed().as_secs_f32()
+    );
+    let sorted_latencies = {
+        let latency_guard = latencies.lock().await;
+        let mut sorted_latencies = latency_guard.clone();
+        sorted_latencies.sort();
+        sorted_latencies
+    };
+    let p50 = sorted_latencies[sorted_latencies.len() / 2];
+    let p90 = sorted_latencies[(sorted_latencies.len() * 9) / 10];
+    let p95 = sorted_latencies[(sorted_latencies.len() * 95) / 100];
+    let p99 = sorted_latencies[(sorted_latencies.len() * 99) / 100];
+    println!("P50: {} ms", p50);
+    println!("P90: {} ms", p90);
+    println!("P95: {} ms", p95);
+    println!("P99: {} ms", p99);
+    println!(
+        "Average: {} ms",
+        sorted_latencies.iter().sum::<u128>() / sorted_latencies.len() as u128
     );
 }
