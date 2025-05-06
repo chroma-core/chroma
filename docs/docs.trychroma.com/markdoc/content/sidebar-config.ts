@@ -156,10 +156,7 @@ const sidebarConfig: AppSection[] = [
     name: "CLI",
     default: "install",
     icon: SquareTerminalIcon,
-    pages: [
-      { id: "install", name: "Installing the CLI" },
-      { id: "sample-apps", name: "Sample Apps" },
-    ],
+    pages: [{ id: "install", name: "Installing the CLI" }],
     subsections: [
       {
         id: "commands",
@@ -168,6 +165,7 @@ const sidebarConfig: AppSection[] = [
           { id: "browse", name: "Browse Collections" },
           { id: "copy", name: "Copy Collections" },
           { id: "db", name: "DB Management" },
+          { id: "install", name: "Install Sample Apps" },
           { id: "login", name: "Login" },
           { id: "profile", name: "Profile Management" },
           { id: "run", name: "Run a Chroma Server" },

@@ -53,7 +53,7 @@ chroma browse my-local-collection --path ~/Developer/my-app/chroma
 
 #### Main View
 
-The main view of the Collection Browser shows you a tabular view of your data with record IDs, documents, and metadata. You can navigate the table using arrows, and expand each cell with Return. We only load 100 records initially, and the next batch will load as you scroll down the table.
+The main view of the Collection Browser shows you a tabular view of your data with record IDs, documents, and metadata. You can navigate the table using arrows, and expand each cell with `Return`. Only 100 records are loaded initially, and the next batch will load as you scroll down the table.
 
 {% CenteredContent %}
 ![cli-browse](/cli/cli-browse.png)
@@ -61,7 +61,7 @@ The main view of the Collection Browser shows you a tabular view of your data wi
 
 #### Search
 
-You can enter the query editor by hitting `s` on the main view. This form allows you to submit `.get()` queries on your collection. You can edit the form by hitting `e` to enter edit mode, use `space` to toggle the metadata operator, and `Esc` to quit editing mode. To submit a query use Return.
+You can enter the query editor by hitting `s` on the main view. This form allows you to submit `.get()` queries on your collection. You can edit the form by hitting `e` to enter edit mode, use `space` to toggle the metadata operator, and `Esc` to quit editing mode. To submit a query use `Return`.
 
 The query editor persists your edits after you submit. You can clear it by hitting `c`. When viewing the results you can hit `s` to get back to the query editor, or `Esc` to get back to the main view.
 

@@ -6,7 +6,7 @@ The Chroma CLI lets you interact with your Chroma Cloud databases for your activ
 
 The `connect` command will output a connection code snippet for your Chroma Cloud database in Python or JS/TS. If you don't provide the `name` or `language` the CLI will prompt you to choose your preferences. The `name` argument is always assumed to be the first, so you don't need to include the `--name` flag.
 
-The output code snippet, will already have the API key of your profile set for the client construction.
+The output code snippet will already have the API key of your profile set for the client construction.
 
 ```terminal
 chroma db connect [db_name] [--language python/JS/TS]
