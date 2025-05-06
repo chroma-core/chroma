@@ -152,6 +152,12 @@ func (s *logServer) PurgeDirtyForCollection(ctx context.Context, req *logservice
 	return
 }
 
+func (s *logServer) InspectDirtyLog(ctx context.Context, req *logservicepb.InspectDirtyLogRequest) (res *logservicepb.InspectDirtyLogResponse, err error) {
+	// no-op for now
+	return
+}
+
+
 func NewLogServer(lr *repository.LogRepository) logservicepb.LogServiceServer {
 	return &logServer{
 		lr: lr,

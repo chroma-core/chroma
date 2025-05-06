@@ -13,10 +13,10 @@ use chroma_storage::config::StorageConfig;
 use chroma_storage::Storage;
 use chroma_types::chroma_proto::{
     log_service_server::LogService, CollectionInfo, GetAllCollectionInfoToCompactRequest,
-    GetAllCollectionInfoToCompactResponse, LogRecord, OperationRecord, PullLogsRequest,
-    PullLogsResponse, PurgeDirtyForCollectionRequest, PurgeDirtyForCollectionResponse,
-    PushLogsRequest, PushLogsResponse, ScoutLogsRequest, ScoutLogsResponse,
-    UpdateCollectionLogOffsetRequest, UpdateCollectionLogOffsetResponse,
+    GetAllCollectionInfoToCompactResponse, InspectDirtyLogRequest, InspectDirtyLogResponse,
+    LogRecord, OperationRecord, PullLogsRequest, PullLogsResponse, PurgeDirtyForCollectionRequest,
+    PurgeDirtyForCollectionResponse, PushLogsRequest, PushLogsResponse, ScoutLogsRequest,
+    ScoutLogsResponse, UpdateCollectionLogOffsetRequest, UpdateCollectionLogOffsetResponse,
 };
 use chroma_types::chroma_proto::{ForkLogsRequest, ForkLogsResponse};
 use chroma_types::CollectionUuid;
@@ -1079,6 +1079,65 @@ impl LogService for LogServer {
             .await
             .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
         Ok(Response::new(PurgeDirtyForCollectionResponse {}))
+    }
+
+    #[tracing::instrument(skip(self, request))]
+    async fn inspect_dirty_log(
+        &self,
+        request: Request<InspectDirtyLogRequest>,
+    ) -> Result<Response<InspectDirtyLogResponse>, Status> {
+        let Some(reader) = self.dirty_log.reader(LogReaderOptions::default()) else {
+            return Err(Status::unavailable("Failed to get dirty log reader"));
+        };
+        let Some(cursors) = self.dirty_log.cursors(CursorStoreOptions::default()) else {
+            return Err(Status::unavailable("Failed to get dirty log cursors"));
+        };
+        let witness = match cursors.load(&STABLE_PREFIX).await {
+            Ok(witness) => witness,
+            Err(err) => {
+                return Err(Status::new(err.code().into(), err.to_string()));
+            }
+        };
+        let default = Cursor::default();
+        let cursor = witness.as_ref().map(|w| w.cursor()).unwrap_or(&default);
+        tracing::info!("cursoring from {cursor:?}");
+        let dirty_fragments = reader
+            .scan(
+                cursor.position,
+                Limits {
+                    max_files: Some(1_000_000),
+                    max_bytes: Some(1_000_000_000),
+                },
+            )
+            .await
+            .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
+        let dirty_futures = dirty_fragments
+            .iter()
+            .map(|fragment| reader.read_parquet(fragment))
+            .collect::<Vec<_>>();
+        let dirty_raw = futures::future::try_join_all(dirty_futures)
+            .await
+            .map_err(|err| {
+                Status::new(
+                    err.code().into(),
+                    format!("Failed to fetch dirty parquet: {}", err),
+                )
+            })?;
+        let mut markers = vec![];
+        for (_, records, _) in dirty_raw {
+            let records = records
+                .into_iter()
+                .map(|x| String::from_utf8(x.1))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|err| {
+                    Status::new(
+                        chroma_error::ErrorCodes::DataLoss.into(),
+                        format!("Failed to extract records: {}", err),
+                    )
+                })?;
+            markers.extend(records);
+        }
+        Ok(Response::new(InspectDirtyLogResponse { markers }))
     }
 }
 
