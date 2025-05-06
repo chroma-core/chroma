@@ -20,8 +20,10 @@ use sqlx::Row;
 use std::error::Error;
 use std::path::Path;
 use std::str::FromStr;
+use std::time::Duration;
 use std::{fs, io};
 use thiserror::Error;
+use tokio::time::timeout;
 
 #[derive(Debug, Error)]
 pub enum VacuumError {
@@ -43,6 +45,8 @@ pub struct VacuumArgs {
     path: Option<String>,
     #[clap(long, default_value_t = false, help = "Skip vacuum confirmation")]
     force: bool,
+    #[clap(long, help = "Maximum time (in seconds) to wait for vacuum")]
+    timeout: Option<u64>,
 }
 
 fn sizeof_fmt(num: u64, suffix: Option<&str>) -> String {
@@ -195,10 +199,6 @@ pub async fn vacuum_chroma(config: FrontendConfig) -> Result<(), Box<dyn Error>>
 
     println!("Vacuuming (this may take a while)...\n");
 
-    sqlx::query(&format!("PRAGMA busy_timeout = {}", 5000))
-        .execute(sqlite.get_conn())
-        .await?;
-
     sqlx::query("VACUUM").execute(sqlite.get_conn()).await?;
 
     sqlx::query(
@@ -264,9 +264,19 @@ pub fn vacuum(args: VacuumArgs) -> Result<(), CliError> {
     };
 
     let runtime = tokio::runtime::Runtime::new().expect("Failed to start Chroma");
-    runtime
-        .block_on(vacuum_chroma(config.frontend))
-        .map_err(|_| VacuumError::VacuumFailed)?;
+
+    let res = if let Some(secs) = args.timeout {
+        runtime.block_on(async {
+            timeout(Duration::from_secs(secs), vacuum_chroma(config.frontend))
+                .await
+                .unwrap_or_else(|_elapsed| {
+                    Err(Box::new(VacuumError::VacuumFailed) as Box<dyn std::error::Error>)
+                })
+        })
+    } else {
+        runtime.block_on(vacuum_chroma(config.frontend))
+    };
+    res.map_err(|_| VacuumError::VacuumFailed)?;
 
     let post_vacuum_size =
         get_dir_size(Path::new(&persistent_path)).map_err(|_| VacuumError::DirSizeFailed)?;

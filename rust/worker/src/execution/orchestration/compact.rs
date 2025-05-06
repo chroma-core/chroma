@@ -794,10 +794,14 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
                 tracing::info!("Pulled Logs Up To Offset: {:?}", self.pulled_log_offset);
             }
             None => {
+                tracing::warn!("No logs were pulled from the log service, this can happen when the log compaction offset is behing the sysdb.");
+                // TODO(hammadb): We can repair the log service's understanding of the offset here, as this only happens
+                // when the log service is not up to date on the latest compacted offset, which leads it to schedule an already
+                // compacted collection.
                 self.terminate_with_result(
-                    Err(CompactionError::InvariantViolation(
-                        "Logs should be present for compaction",
-                    )),
+                    Ok(CompactionResponse {
+                        collection_id: self.collection_id,
+                    }),
                     ctx,
                 )
                 .await;
