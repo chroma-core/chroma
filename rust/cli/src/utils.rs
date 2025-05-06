@@ -11,6 +11,7 @@ use crate::commands::profile::ProfileError;
 use crate::commands::run::RunError;
 use crate::commands::update::UpdateError;
 use crate::commands::vacuum::VacuumError;
+use crate::commands::webpage::WebPageError;
 use crate::ui_utils::Theme;
 use chroma_frontend::config::FrontendServerConfig;
 use chroma_frontend::frontend_service_entrypoint_with_config;
@@ -28,7 +29,6 @@ use std::sync::Arc;
 use thiserror::Error;
 use tokio::spawn;
 use tokio::task::JoinHandle;
-use crate::commands::webpage::WebPageError;
 
 pub const CHROMA_DIR: &str = ".chroma";
 pub const CREDENTIALS_FILE: &str = "credentials";

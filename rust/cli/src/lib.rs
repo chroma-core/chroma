@@ -13,9 +13,9 @@ use crate::commands::profile::{profile_command, ProfileCommand};
 use crate::commands::run::{run, RunArgs};
 use crate::commands::update::update;
 use crate::commands::vacuum::{vacuum, VacuumArgs};
+use crate::commands::webpage::{open_browser, WebPageCommand};
 use clap::{Parser, Subcommand};
 use colored::Colorize;
-use crate::commands::webpage::{open_browser, WebPageCommand};
 
 #[derive(Subcommand, Debug)]
 enum Command {

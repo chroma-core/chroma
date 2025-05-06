@@ -1,5 +1,5 @@
-use thiserror::Error;
 use crate::utils::CliError;
+use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum WebPageError {
@@ -9,14 +9,14 @@ pub enum WebPageError {
 
 pub enum WebPageCommand {
     Discord,
-    Docs
+    Docs,
 }
 
 impl WebPageCommand {
     fn url(&self) -> &'static str {
         match self {
             WebPageCommand::Discord => "https://discord.gg/MMeYNTmh3x",
-            WebPageCommand::Docs => "https://docs.trychroma.com"
+            WebPageCommand::Docs => "https://docs.trychroma.com",
         }
     }
 }
