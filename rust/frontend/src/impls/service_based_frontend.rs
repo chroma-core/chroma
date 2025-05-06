@@ -50,6 +50,8 @@ struct Metrics {
     query_retries_counter: Counter<u64>,
     get_retries_counter: Counter<u64>,
     add_retries_counter: Counter<u64>,
+    update_retries_counter: Counter<u64>,
+    upsert_retries_counter: Counter<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -82,6 +84,8 @@ impl ServiceBasedFrontend {
         let query_retries_counter = meter.u64_counter("query_retries").build();
         let get_retries_counter = meter.u64_counter("get_retries").build();
         let add_retries_counter = meter.u64_counter("add_retries").build();
+        let update_retries_counter = meter.u64_counter("update_retries").build();
+        let upsert_retries_counter = meter.u64_counter("upsert_retries").build();
         let metrics = Arc::new(Metrics {
             fork_retries_counter,
             delete_retries_counter,
@@ -89,6 +93,8 @@ impl ServiceBasedFrontend {
             query_retries_counter,
             get_retries_counter,
             add_retries_counter,
+            update_retries_counter,
+            upsert_retries_counter,
         });
         // factor: 2.0,
         // min_delay_ms: 100,
@@ -647,7 +653,7 @@ impl ServiceBasedFrontend {
         res
     }
 
-    pub async fn retryable_add(
+    pub async fn retryable_push_logs(
         &mut self,
         collection_id: CollectionUuid,
         records: Vec<OperationRecord>,
@@ -685,7 +691,11 @@ impl ServiceBasedFrontend {
         let add_to_retry = || {
             let mut self_clone = self.clone();
             let records_clone = records.clone();
-            async move { self_clone.retryable_add(collection_id, records_clone).await }
+            async move {
+                self_clone
+                    .retryable_push_logs(collection_id, records_clone)
+                    .await
+            }
         };
         let res = add_to_retry
             .retry(self.retries_builder)
@@ -754,16 +764,29 @@ impl ServiceBasedFrontend {
         )
         .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
-        self.log_client
-            .push_logs(collection_id, records)
-            .await
-            .map_err(|err| {
-                if err.code() == ErrorCodes::Unavailable {
-                    UpdateCollectionRecordsError::Backoff
-                } else {
-                    UpdateCollectionRecordsError::Other(Box::new(err) as _)
+        let retries = Arc::new(AtomicUsize::new(0));
+        let add_to_retry = || {
+            let mut self_clone = self.clone();
+            let records_clone = records.clone();
+            async move {
+                self_clone
+                    .retryable_push_logs(collection_id, records_clone)
+                    .await
+            }
+        };
+        let res = add_to_retry
+            .retry(self.retries_builder)
+            .when(|e| matches!(e.code(), ErrorCodes::AlreadyExists))
+            .notify(|_, _| {
+                let retried = retries.fetch_add(1, Ordering::Relaxed);
+                if retried > 0 {
+                    tracing::info!("Retrying update() request for collection {}", collection_id);
                 }
-            })?;
+            })
+            .await;
+        self.metrics
+            .update_retries_counter
+            .add(retries.load(Ordering::Relaxed) as u64, &[]);
 
         // TODO: Submit event after the response is sent
         MeterEvent::CollectionWrite {
@@ -776,7 +799,16 @@ impl ServiceBasedFrontend {
         .submit()
         .await;
 
-        Ok(UpdateCollectionRecordsResponse {})
+        match res {
+            Ok(()) => Ok(UpdateCollectionRecordsResponse {}),
+            Err(e) => {
+                if e.code() == ErrorCodes::AlreadyExists {
+                    Err(UpdateCollectionRecordsError::Backoff)
+                } else {
+                    Err(UpdateCollectionRecordsError::Other(Box::new(e) as _))
+                }
+            }
+        }
     }
 
     pub async fn upsert(
@@ -811,16 +843,29 @@ impl ServiceBasedFrontend {
         )
         .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
-        self.log_client
-            .push_logs(collection_id, records)
-            .await
-            .map_err(|err| {
-                if err.code() == ErrorCodes::Unavailable {
-                    UpsertCollectionRecordsError::Backoff
-                } else {
-                    UpsertCollectionRecordsError::Other(Box::new(err) as _)
+        let retries = Arc::new(AtomicUsize::new(0));
+        let add_to_retry = || {
+            let mut self_clone = self.clone();
+            let records_clone = records.clone();
+            async move {
+                self_clone
+                    .retryable_push_logs(collection_id, records_clone)
+                    .await
+            }
+        };
+        let res = add_to_retry
+            .retry(self.retries_builder)
+            .when(|e| matches!(e.code(), ErrorCodes::AlreadyExists))
+            .notify(|_, _| {
+                let retried = retries.fetch_add(1, Ordering::Relaxed);
+                if retried > 0 {
+                    tracing::info!("Retrying upsert() request for collection {}", collection_id);
                 }
-            })?;
+            })
+            .await;
+        self.metrics
+            .upsert_retries_counter
+            .add(retries.load(Ordering::Relaxed) as u64, &[]);
 
         // TODO: Submit event after the response is sent
         MeterEvent::CollectionWrite {
@@ -833,7 +878,16 @@ impl ServiceBasedFrontend {
         .submit()
         .await;
 
-        Ok(UpsertCollectionRecordsResponse {})
+        match res {
+            Ok(()) => Ok(UpsertCollectionRecordsResponse {}),
+            Err(e) => {
+                if e.code() == ErrorCodes::AlreadyExists {
+                    Err(UpsertCollectionRecordsError::Backoff)
+                } else {
+                    Err(UpsertCollectionRecordsError::Other(Box::new(e) as _))
+                }
+            }
+        }
     }
 
     pub async fn retryable_delete(
