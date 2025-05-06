@@ -447,18 +447,17 @@ impl<'me> NgramLiteralProvider<FullTextIndexError> for FullTextIndexReader<'me> 
             .collect())
     }
 
-    async fn lookup_ngram_document_range<'fts, NgramRange, DocRange>(
+    async fn lookup_ngram_range_for_document<'fts, NgramRange>(
         &'fts self,
         ngram_range: NgramRange,
-        doc_range: DocRange,
+        document_id: u32,
     ) -> Result<Vec<(&'fts str, u32, RoaringBitmap)>, FullTextIndexError>
     where
         NgramRange: Clone + RangeBounds<&'fts str> + Send + Sync,
-        DocRange: Clone + RangeBounds<u32> + Send + Sync,
     {
         Ok(self
             .posting_lists_blockfile_reader
-            .get_range(ngram_range, doc_range)
+            .get_range(ngram_range, document_id..=document_id)
             .await?
             .into_iter()
             .map(|(ngram, doc, pos)| (ngram, doc, pos.iter().collect()))
