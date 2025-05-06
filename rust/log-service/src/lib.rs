@@ -1081,10 +1081,10 @@ impl LogService for LogServer {
         Ok(Response::new(PurgeDirtyForCollectionResponse {}))
     }
 
-    #[tracing::instrument(skip(self, request))]
+    #[tracing::instrument(skip(self, _request))]
     async fn inspect_dirty_log(
         &self,
-        request: Request<InspectDirtyLogRequest>,
+        _request: Request<InspectDirtyLogRequest>,
     ) -> Result<Response<InspectDirtyLogResponse>, Status> {
         let Some(reader) = self.dirty_log.reader(LogReaderOptions::default()) else {
             return Err(Status::unavailable("Failed to get dirty log reader"));
