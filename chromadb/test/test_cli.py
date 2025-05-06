@@ -19,7 +19,8 @@ from chromadb.test.property import invariants
 
 
 def wait_for_server(
-    client, max_retries: int = 5, initial_delay: float = 1.0
+        host: str, port: int,
+    max_retries: int = 5, initial_delay: float = 1.0
 ) -> bool:
     """Wait for server to be ready using exponential backoff.
     Args:
@@ -32,6 +33,7 @@ def wait_for_server(
     delay = initial_delay
     for attempt in range(max_retries):
         try:
+            client = chromadb.HttpClient(host=host, port=port)
             heartbeat = client.heartbeat()
             if heartbeat > 0:
                 return True
@@ -58,15 +60,10 @@ def test_app() -> None:
     server_process.start()
     time.sleep(5)
 
-    client = chromadb.HttpClient(host=kwargs["host"], port=int(kwargs["port"]))
-    heartbeat = client.heartbeat()
-    assert wait_for_server(
-        client
-    ), "Server failed to start within maximum retry attempts"
+    assert wait_for_server(host="localhost", port=8001), "Server failed to start within maximum retry attempts"
 
     server_process.terminate()
     server_process.join()
-    assert heartbeat > 0
 
 
 def test_vacuum(sqlite_persistent: System) -> None:
@@ -151,7 +148,7 @@ def test_vacuum_errors_if_locked(sqlite_persistent: System, capfd) -> None:
     ready_event.wait()
 
     try:
-        sys.argv = ["chroma", "vacuum", "--path", sqlite_persistent.settings.persist_directory, "--force"]
+        sys.argv = ["chroma", "vacuum", "--path", sqlite_persistent.settings.persist_directory, "--force", "--timeout", "10"]
         cli.app()
         captured = capfd.readouterr()
         assert "Failed to vacuum Chroma" in captured.err.strip()
