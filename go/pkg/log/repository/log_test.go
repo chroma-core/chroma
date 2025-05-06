@@ -2,13 +2,16 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/log/configuration"
+	log "github.com/chroma-core/chroma/go/pkg/log/store/db"
 	"github.com/chroma-core/chroma/go/pkg/log/sysdb"
 	"github.com/chroma-core/chroma/go/pkg/types"
 	libs2 "github.com/chroma-core/chroma/go/shared/libs"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
@@ -77,6 +80,34 @@ func (suite *LogTestSuite) TestGarbageCollection() {
 	assert.Equal(suite.t, 1, len(records), "Failed to run garbage collection")
 	assert.Equal(suite.t, []byte{4, 5, 6}, records[0].Record, "Failed to run garbage collection")
 	assert.Equal(suite.t, int64(1), records[0].Offset, "Failed to run garbage collection")
+}
+
+func (suite *LogTestSuite) TestUniqueConstraintPushLogs() {
+	ctx := context.Background()
+	collectionId := types.NewUniqueID()
+
+	records := [][]byte{
+		{1, 2, 3},
+		{4, 5, 6},
+	}
+	params := make([]log.InsertRecordParams, 2)
+	for i, record := range records {
+		offset := 1
+		params[i] = log.InsertRecordParams{
+			CollectionID: collectionId.String(),
+			Record:       record,
+			Offset:       int64(offset),
+			Timestamp:    time.Now().UnixNano(),
+		}
+	}
+	_, err := suite.lr.queries.InsertRecord(ctx, params)
+	assert.Error(suite.t, err, "Failed to insert records")
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		assert.Equal(suite.t, "23505", pgErr.Code, "Expected SQLSTATE 23505 for duplicate key")
+	} else {
+		assert.Fail(suite.t, "Expected pgconn.PgError but got different error", err)
+	}
 }
 
 func TestLogTestSuite(t *testing.T) {

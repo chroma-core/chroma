@@ -689,8 +689,7 @@ impl ServiceBasedFrontend {
         };
         let res = add_to_retry
             .retry(self.retries_builder)
-            // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
-            .when(|e| matches!(e.code(), ErrorCodes::Unavailable))
+            .when(|e| matches!(e.code(), ErrorCodes::AlreadyExists))
             .notify(|_, _| {
                 let retried = retries.fetch_add(1, Ordering::Relaxed);
                 if retried > 0 {

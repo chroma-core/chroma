@@ -52,7 +52,7 @@ pub enum GrpcPushLogsError {
 impl ChromaError for GrpcPushLogsError {
     fn code(&self) -> ErrorCodes {
         match self {
-            GrpcPushLogsError::Backoff => ErrorCodes::Unavailable,
+            GrpcPushLogsError::Backoff => ErrorCodes::AlreadyExists,
             GrpcPushLogsError::FailedToPushLogs(_) => ErrorCodes::Internal,
             GrpcPushLogsError::ConversionError(_) => ErrorCodes::Internal,
         }
@@ -316,7 +316,7 @@ impl GrpcLog {
             .await
             .map_err(|err| {
                 if err.code() == ErrorCodes::Unavailable.into()
-                    || err.code() == ErrorCodes::Unknown.into()
+                    || err.code() == ErrorCodes::AlreadyExists.into()
                 {
                     GrpcPushLogsError::Backoff
                 } else {
