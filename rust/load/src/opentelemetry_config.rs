@@ -57,7 +57,7 @@ pub(crate) fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
     // Layer for adding our configured tracer.
     // Export everything at this layer. The backend i.e. honeycomb or jaeger will filter at its end.
     let exporter_layer = tracing_opentelemetry::OpenTelemetryLayer::new(tracer)
-        .with_filter(tracing_subscriber::filter::LevelFilter::ERROR);
+        .with_filter(tracing_subscriber::filter::LevelFilter::INFO);
     // Layer for printing spans to stdout. Only print INFO logs by default.
     let stdout_layer =
         BunyanFormattingLayer::new(service_name.clone().to_string(), std::io::stdout)
