@@ -715,7 +715,7 @@ impl ServiceBasedFrontend {
         match res {
             Ok(()) => Ok(AddCollectionRecordsResponse {}),
             Err(e) => {
-                if e.code() == ErrorCodes::Unavailable {
+                if e.code() == ErrorCodes::AlreadyExists {
                     Err(AddCollectionRecordsError::Backoff)
                 } else {
                     Err(AddCollectionRecordsError::Other(Box::new(e) as _))
