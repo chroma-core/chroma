@@ -16,7 +16,7 @@ async fn main() {
     let client = aws_sdk_s3::Client::new(&config);
 
     // Create 8MB file
-    let test_data = vec![0; 8 * 1024 * 1024];
+    let test_data = vec![0; 1024 * 1024];
     let bucket_name = "chroma-serverless-staging";
     let object_prefix = "hammad_test_data";
     let object_key = format!("{}/test_file", object_prefix);
