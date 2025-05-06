@@ -16,7 +16,7 @@ async fn main() {
     let client = aws_sdk_s3::Client::new(&config);
 
     // Create 8MB file
-    let test_data = vec![0; 1 * 1024 * 1024];
+    let test_data = vec![0; 8 * 1024 * 1024];
     let bucket_name = "chroma-serverless-staging";
     let object_prefix = "hammad_test_data";
     let num_files = 64;
@@ -33,7 +33,7 @@ async fn main() {
             .send()
             .await;
         match result {
-            Ok(_) => println!("File uploaded successfully!"),
+            Ok(_) => print!("Uploaded file {}: ", i),
             Err(e) => eprintln!("Error uploading file: {}", e),
         }
     }
