@@ -253,9 +253,6 @@ jobs:
           CHROMA_RUST_BINDINGS_TEST_ONLY: "1"
 
   test-python-cli:
-    permissions:
-      # for the workflow-telemetry-action
-      pull-requests: write
     strategy:
       fail-fast: false
       matrix:
@@ -269,8 +266,6 @@ jobs:
             env-file: compose-env.windows
     runs-on: ${{ matrix.platform }}
     steps:
-    - name: Collect Workflow Telemetry
-      uses: catchpoint/workflow-telemetry-action@v2
     - name: Checkout
       uses: actions/checkout@v4
     - name: Set up Python (${{ matrix.python }})
