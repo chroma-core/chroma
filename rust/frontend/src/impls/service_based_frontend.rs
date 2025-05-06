@@ -10,6 +10,13 @@ use chroma_segment::local_segment_manager::LocalSegmentManager;
 use chroma_sqlite::db::SqliteDb;
 use chroma_sysdb::SysDb;
 use chroma_system::System;
+use chroma_telemetry::{
+    events::{
+        ClientCreateCollectionEvent, CollectionAddEvent, CollectionDeleteEvent, CollectionGetEvent,
+        CollectionQueryEvent, CollectionUpdateEvent, EventSubmit,
+    },
+    posthog::{PosthogClient, PosthogConfig},
+};
 use chroma_tracing::meter_event::{MeterEvent, ReadAction, WriteAction};
 use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
@@ -21,21 +28,23 @@ use chroma_types::{
     CreateTenantError, CreateTenantRequest, CreateTenantResponse, DeleteCollectionError,
     DeleteCollectionRecordsError, DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse,
     DeleteCollectionRequest, DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse,
-    ForkCollectionError, ForkCollectionRequest, ForkCollectionResponse, GetCollectionError,
-    GetCollectionRequest, GetCollectionResponse, GetCollectionsError, GetDatabaseError,
-    GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantError,
-    GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError, HeartbeatResponse,
-    Include, KnnIndex, ListCollectionsRequest, ListCollectionsResponse, ListDatabasesError,
-    ListDatabasesRequest, ListDatabasesResponse, Operation, OperationRecord, QueryError,
-    QueryRequest, QueryResponse, ResetError, ResetResponse, Segment, SegmentScope, SegmentType,
-    SegmentUuid, UpdateCollectionError, UpdateCollectionRecordsError,
-    UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateCollectionRequest,
-    UpdateCollectionResponse, UpsertCollectionRecordsError, UpsertCollectionRecordsRequest,
-    UpsertCollectionRecordsResponse, VectorIndexConfiguration, Where,
+    EmbeddingFunctionConfiguration, ForkCollectionError, ForkCollectionRequest,
+    ForkCollectionResponse, GetCollectionError, GetCollectionRequest, GetCollectionResponse,
+    GetCollectionsError, GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest,
+    GetResponse, GetTenantError, GetTenantRequest, GetTenantResponse, HealthCheckResponse,
+    HeartbeatError, HeartbeatResponse, Include, KnnIndex, ListCollectionsRequest,
+    ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
+    Operation, OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
+    Segment, SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError,
+    UpdateCollectionRecordsError, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
+    UpdateCollectionRequest, UpdateCollectionResponse, UpsertCollectionRecordsError,
+    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, VectorIndexConfiguration,
+    Where,
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
 use std::collections::HashSet;
+use std::fmt;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -51,7 +60,7 @@ struct Metrics {
     get_retries_counter: Counter<u64>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ServiceBasedFrontend {
     allow_reset: bool,
     executor: Executor,
@@ -61,6 +70,23 @@ pub struct ServiceBasedFrontend {
     max_batch_size: u32,
     metrics: Arc<Metrics>,
     default_knn_index: KnnIndex,
+}
+
+impl fmt::Debug for ServiceBasedFrontend {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ServiceBasedFrontend")
+            .field("allow_reset", &self.allow_reset)
+            .field("executor", &self.executor)
+            .field("log_client", &self.log_client)
+            .field("sysdb_client", &self.sysdb_client)
+            .field(
+                "collections_with_segments_provider",
+                &self.collections_with_segments_provider,
+            )
+            .field("max_batch_size", &self.max_batch_size)
+            .field("metrics", &self.metrics)
+            .finish()
+    }
 }
 
 impl ServiceBasedFrontend {
@@ -357,6 +383,7 @@ impl ServiceBasedFrontend {
         let supported_segment_types: HashSet<SegmentType> =
             self.get_supported_segment_types().into_iter().collect();
 
+        let mut embedding_function: String = "default".to_string();
         if let Some(config) = configuration.as_ref() {
             match &config.vector_index {
                 VectorIndexConfiguration::Spann { .. } => {
@@ -373,6 +400,11 @@ impl ServiceBasedFrontend {
                     }
                 }
             }
+            embedding_function = match &config.embedding_function {
+                Some(EmbeddingFunctionConfiguration::Known(config)) => config.name.clone(),
+                Some(EmbeddingFunctionConfiguration::Legacy) => "legacy".to_string(),
+                _ => "default".to_string(),
+            };
         }
 
         // Check default server configuration's index type
@@ -469,6 +501,11 @@ impl ServiceBasedFrontend {
             .collections_with_segments_cache
             .remove(&collection_id)
             .await;
+
+        // --- Telemetry Capture ---
+        let event = ClientCreateCollectionEvent::new(collection_id.to_string(), embedding_function);
+        event.submit().await;
+        // --- End Telemetry Capture ---
 
         Ok(collection)
     }
@@ -652,6 +689,12 @@ impl ServiceBasedFrontend {
 
         let embeddings = embeddings.map(|embeddings| embeddings.into_iter().map(Some).collect());
 
+        // Capture lengths of ids, embeddings, documents, uris, and metadatas
+        let add_amount = ids.len();
+        let with_documents = documents.as_ref().map_or(0, |_| add_amount);
+        let with_metadata = metadatas.as_ref().map_or(0, |_| add_amount);
+        let with_uris = uris.as_ref().map_or(0, |_| add_amount);
+
         let (records, log_size_bytes) =
             to_records(ids, embeddings, documents, uris, metadatas, Operation::Add)
                 .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
@@ -666,6 +709,18 @@ impl ServiceBasedFrontend {
                     AddCollectionRecordsError::Other(Box::new(err) as _)
                 }
             })?;
+
+        // --- Telemetry Capture ---
+        let event = CollectionAddEvent::new(
+            collection_id.to_string(),
+            add_amount,
+            with_documents,
+            with_metadata,
+            with_uris,
+            add_amount, // batch_size for this event instance
+        );
+        event.submit().await;
+        // --- End Telemetry Capture ---
 
         // TODO: Submit event after the response is sent
         MeterEvent::CollectionWrite {
@@ -701,6 +756,13 @@ impl ServiceBasedFrontend {
         .await
         .map_err(|err| err.boxed())?;
 
+        // Capture lengths of ids, embeddings, documents, uris, and metadatas
+        let update_amount = ids.len();
+        let with_embeddings = embeddings.as_ref().map_or(0, |_| update_amount);
+        let with_documents = documents.as_ref().map_or(0, |_| update_amount);
+        let with_metadata = metadatas.as_ref().map_or(0, |_| update_amount);
+        let with_uris = uris.as_ref().map_or(0, |_| update_amount);
+
         let (records, log_size_bytes) = to_records(
             ids,
             embeddings,
@@ -721,6 +783,18 @@ impl ServiceBasedFrontend {
                     UpdateCollectionRecordsError::Other(Box::new(err) as _)
                 }
             })?;
+
+        // --- Telemetry Capture ---
+        let event = CollectionUpdateEvent::new(
+            collection_id.to_string(),
+            update_amount,
+            with_embeddings,
+            with_metadata,
+            with_documents,
+            with_uris,
+        );
+        event.submit().await;
+        // --- End Telemetry Capture ---
 
         // TODO: Submit event after the response is sent
         MeterEvent::CollectionWrite {
@@ -758,6 +832,11 @@ impl ServiceBasedFrontend {
 
         let embeddings = embeddings.map(|embeddings| embeddings.into_iter().map(Some).collect());
 
+        let add_amount = ids.len();
+        let with_documents = documents.as_ref().map_or(0, |_| add_amount);
+        let with_metadata = metadatas.as_ref().map_or(0, |_| add_amount);
+        let with_uris = uris.as_ref().map_or(0, |_| add_amount);
+
         let (records, log_size_bytes) = to_records(
             ids,
             embeddings,
@@ -778,6 +857,18 @@ impl ServiceBasedFrontend {
                     UpsertCollectionRecordsError::Other(Box::new(err) as _)
                 }
             })?;
+
+        // --- Telemetry Capture ---
+        let event = CollectionAddEvent::new(
+            collection_id.to_string(),
+            add_amount,
+            with_documents,
+            with_metadata,
+            with_uris,
+            add_amount, // batch_size for this event instance
+        );
+        event.submit().await;
+        // --- End Telemetry Capture ---
 
         // TODO: Submit event after the response is sent
         MeterEvent::CollectionWrite {
@@ -886,6 +977,8 @@ impl ServiceBasedFrontend {
             return Ok(DeleteCollectionRecordsResponse {});
         }
 
+        let delete_amount = records.len();
+
         let log_size_bytes = records.iter().map(OperationRecord::size_bytes).sum();
 
         self.log_client
@@ -912,6 +1005,11 @@ impl ServiceBasedFrontend {
         }
         .submit()
         .await;
+
+        // --- Telemetry Capture ---
+        let event = CollectionDeleteEvent::new(collection_id.to_string(), delete_amount);
+        event.submit().await;
+        // --- End Telemetry Capture ---
 
         Ok(DeleteCollectionRecordsResponse {})
     }
@@ -1069,6 +1167,7 @@ impl ServiceBasedFrontend {
             ..
         }: GetRequest,
     ) -> Result<GetResponse, QueryError> {
+        let ids_amount = ids.as_ref().map_or(0, |i| i.len());
         let collection_and_segments = self
             .collections_with_segments_provider
             .get_collection_with_segments(collection_id)
@@ -1124,6 +1223,37 @@ impl ServiceBasedFrontend {
         }
         .submit()
         .await;
+
+        // --- Telemetry Capture ---
+        let collection_uuid_str = collection_id.to_string();
+        let include_metadata = if include.0.contains(&Include::Metadata) {
+            ids_amount
+        } else {
+            0
+        };
+        let include_documents = if include.0.contains(&Include::Document) {
+            ids_amount
+        } else {
+            0
+        };
+        // Handle Uri separately as it implies Metadata in the projection
+        let include_uris = if include.0.contains(&Include::Uri) {
+            ids_amount
+        } else {
+            0
+        };
+
+        let event = CollectionGetEvent::new(
+            collection_uuid_str,
+            ids_amount,
+            limit.map(|l| l as usize), // Use the input limit
+            include_metadata,
+            include_documents,
+            include_uris,
+        );
+        event.submit().await;
+        // --- End Telemetry Capture ---
+
         Ok((get_result, include).into())
     }
 
@@ -1187,6 +1317,8 @@ impl ServiceBasedFrontend {
             ..
         }: QueryRequest,
     ) -> Result<QueryResponse, QueryError> {
+        let query_amount = embeddings.len();
+        let with_metadata_filter = if r#where.is_some() { query_amount } else { 0 };
         let collection_and_segments = self
             .collections_with_segments_provider
             .get_collection_with_segments(collection_id)
@@ -1246,6 +1378,47 @@ impl ServiceBasedFrontend {
         }
         .submit()
         .await;
+
+        // --- Telemetry Capture ---
+        let collection_uuid_str = collection_id.to_string();
+        // where_document is not part of the Rust query signature
+        let with_document_filter = 0;
+        let include_metadatas = if include.0.contains(&Include::Metadata) {
+            query_amount
+        } else {
+            0
+        };
+        let include_documents = if include.0.contains(&Include::Document) {
+            query_amount
+        } else {
+            0
+        };
+        // Handle Uri separately as it implies Metadata in the projection
+        let include_uris = if include.0.contains(&Include::Uri) {
+            query_amount
+        } else {
+            0
+        };
+        let include_distances = if include.0.contains(&Include::Distance) {
+            query_amount
+        } else {
+            0
+        };
+
+        let event = CollectionQueryEvent::new(
+            collection_uuid_str,
+            query_amount,
+            with_metadata_filter,
+            with_document_filter,
+            n_results as usize, // Use the input n_results
+            include_metadatas,
+            include_documents,
+            include_uris,
+            include_distances,
+        );
+        event.submit().await;
+        // --- End Telemetry Capture ---
+
         Ok((query_result, include).into())
     }
 
@@ -1354,6 +1527,26 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
 
         let executor =
             Executor::try_from_config(&(config.executor.clone(), system.clone()), registry).await?;
+
+        if let Some(telemetry_config) = &config.telemetry {
+            let chroma_version = telemetry_config
+                .chroma_version
+                .clone()
+                .unwrap_or_else(|| "unknown".to_string());
+
+            let posthog_config = PosthogConfig {
+                user_id: telemetry_config.user_id.clone(),
+                is_server: telemetry_config.is_server,
+                chroma_version,
+            };
+
+            let posthog_client = PosthogClient::try_from_config(&posthog_config, registry)
+                .await
+                .map_err(|e| e.boxed())?;
+
+            // Starts the background tasks and sets up channels
+            system.start_component(posthog_client);
+        }
 
         Ok(ServiceBasedFrontend::new(
             config.allow_reset,

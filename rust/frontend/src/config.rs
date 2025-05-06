@@ -64,6 +64,18 @@ pub struct FrontendConfig {
     pub executor: ExecutorConfig,
     #[serde(default = "default_default_knn_index")]
     pub default_knn_index: KnnIndex,
+
+    // Telemetry Config (optional)
+    #[serde(default)]
+    pub telemetry: Option<TelemetryConfig>,
+}
+
+// Define TelemetryConfig struct
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct TelemetryConfig {
+    pub user_id: Option<String>,
+    pub is_server: bool,
+    pub chroma_version: Option<String>,
 }
 
 impl FrontendConfig {
@@ -80,6 +92,7 @@ impl FrontendConfig {
             log: default_log_config(),
             executor: default_executor_config(),
             default_knn_index: default_default_knn_index(),
+            telemetry: None,
         }
     }
 }
