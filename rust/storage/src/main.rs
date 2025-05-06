@@ -16,7 +16,8 @@ async fn main() {
     let client = aws_sdk_s3::Client::new(&config);
 
     // Create 8MB file
-    let test_data = vec![0; 8 * 1024 * 1024];
+    let mb_size = 8;
+    let test_data = vec![0; mb_size * 1024 * 1024];
     let bucket_name = "chroma-serverless-staging";
     let object_prefix = "hammad_test_data";
     let num_files = 64;
@@ -33,7 +34,7 @@ async fn main() {
             .send()
             .await;
         match result {
-            Ok(_) => print!("Uploaded file {}: ", i),
+            Ok(_) => println!("Uploaded file {}: ", i),
             Err(e) => eprintln!("Error uploading file: {}", e),
         }
     }
@@ -79,8 +80,11 @@ async fn main() {
         }
     }
     println!(
-        "Took {} seconds to download 64 files",
-        start_time.elapsed().as_secs_f32()
+        "Took {} ms to download {} files of size {} MB each. Total throughput: {} MB/s",
+        num_files,
+        start_time.elapsed().as_millis(),
+        mb_size,
+        (mb_size * num_files) as f64 / (start_time.elapsed().as_secs_f64())
     );
     let sorted_latencies = {
         let latency_guard = latencies.lock().await;
