@@ -506,7 +506,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         futures::stream::iter(
             self.root
                 .sparse_index
-                .get_block_ids_range(prefix_range.clone(), key_range.clone())
+                .get_block_ids_range(prefix_range.clone())
                 .into_iter()
                 .map(Ok),
         )
@@ -541,7 +541,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         let block_ids = self
             .root
             .sparse_index
-            .get_block_ids_range(prefix_range.clone(), key_range.clone());
+            .get_block_ids_range(prefix_range.clone());
 
         let mut result: Vec<(&str, K, V)> = vec![];
         for block_id in block_ids {
@@ -644,10 +644,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         let mut rank = 0;
 
         // This should be sorted by offset id ranges
-        let block_ids = self
-            .root
-            .sparse_index
-            .get_block_ids_range(..=prefix, ..=key.clone());
+        let block_ids = self.root.sparse_index.get_block_ids_range(..=prefix);
 
         // The block that may contain the prefix-key pair
         if let Some(last_id) = block_ids.last() {
