@@ -9,12 +9,12 @@ async fn main() {
     let args: Vec<String> = std::env::args().collect();
     println!("Args: {:?}", args);
     let num_files = if args.len() > 1 {
-        args[1].parse::<usize>().unwrap_or(64)
+        args[2].parse::<usize>().unwrap_or(64)
     } else {
         64
     };
     let mb_size = if args.len() > 2 {
-        args[2].parse::<usize>().unwrap_or(8)
+        args[3].parse::<usize>().unwrap_or(8)
     } else {
         8
     };
