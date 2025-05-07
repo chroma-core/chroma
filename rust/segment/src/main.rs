@@ -111,21 +111,22 @@ async fn main() {
     .await
     .expect("Failed to create Spann provider");
 
+    let dimension = collection_with_segment
+        .collection
+        .dimension
+        .expect("Dimension should exist");
+
     // Read
     let reader = spann_provider
         .read(
             &collection_with_segment.collection,
             &collection_with_segment.vector_segment,
-            1536,
+            dimension as usize,
         )
         .await
         .expect("Failed to read segment");
 
     // TODO: use real data for a realistic query endpoint
-    let dimension = collection_with_segment
-        .collection
-        .dimension
-        .expect("Dimension should exist");
     let mut random_vector = vec![0.0; dimension as usize];
     for i in 0..dimension {
         random_vector[i as usize] = rand::random::<f32>();
