@@ -132,6 +132,7 @@ async fn main() {
     }
 
     // Search
+    println!("Querying with random vector");
     let center_result = reader
         .rng_query(&random_vector)
         .await
@@ -146,6 +147,7 @@ async fn main() {
     }
 
     // Execute all futures in parallel
+    println!("Fetching posting lists in parallel");
     let time_start = std::time::Instant::now();
     let fetch_pl_results = futures::future::join_all(fetch_pl_futures).await;
     println!(
