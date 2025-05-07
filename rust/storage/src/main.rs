@@ -60,14 +60,14 @@ async fn main() {
     }
 
     // Download the file times concurrently
-    let start_time = std::time::Instant::now();
-    let mut handles = vec![];
     let latencies = Arc::new(tokio::sync::Mutex::new(vec![]));
     let throughputs = Arc::new(tokio::sync::Mutex::new(vec![]));
+    let start_time = std::time::Instant::now();
 
     // run the experiment N times, warming the connections
     let runs = 10;
     for _ in 0..runs {
+        let mut handles = vec![];
         for i in 0..num_files {
             let latencies = latencies.clone();
             let client = client.clone();
@@ -98,6 +98,14 @@ async fn main() {
                 }
             }));
         }
+
+        // await for all the handles to finish
+        for handle in handles {
+            if let Err(e) = handle.await {
+                eprintln!("Error joining thread: {}", e);
+            }
+        }
+
         println!(
             "Took {} ms to download {} files of size {} MB each. Total throughput: {} MB/s",
             start_time.elapsed().as_millis(),
@@ -129,12 +137,6 @@ async fn main() {
         sorted_throughputs.iter().sum::<f64>() / sorted_throughputs.len() as f64
     );
 
-    // await for all the handles to finish
-    for handle in handles {
-        if let Err(e) = handle.await {
-            eprintln!("Error joining thread: {}", e);
-        }
-    }
     let sorted_latencies = {
         let latency_guard = latencies.lock().await;
         let mut sorted_latencies = latency_guard.clone();
