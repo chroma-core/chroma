@@ -3048,9 +3048,9 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-version = "0.15.3"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb3b4e79fe76576b3970ada6437b30bee8cefe28685535290c3188d9b79b981e"
+checksum = "25b39eac8bbda09ae8bf9b65c9f81a3644cff845cab79953332fc382295a3dac"
 dependencies = [
  "ahash",
  "anyhow",
@@ -3069,11 +3069,12 @@ dependencies = [
 
 [[package]]
 name = "foyer-common"
-version = "0.15.3"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e71666dc1f66539cc9a21668fa59d11dbf9e1fd7cb9048d3e2293e28080f5d0"
+checksum = "58bc1526450debd8e2189622b443c891d80e679d8088a673111f68ba26fdba6d"
 dependencies = [
  "ahash",
+ "bincode",
  "bytes",
  "cfg-if",
  "fastrace",
@@ -3083,6 +3084,7 @@ dependencies = [
  "parking_lot",
  "pin-project",
  "serde",
+ "thiserror 2.0.4",
  "tokio",
 ]
 
@@ -3097,9 +3099,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-memory"
-version = "0.15.3"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e9332460864db122775ef95b0603562288674daad7a8df0add81adaca7e5e09"
+checksum = "f9bb1c500379344e82472b8576767a71a58650bb669b31491c7b7f4e91eb9efc"
 dependencies = [
  "ahash",
  "arc-swap",
@@ -3123,16 +3125,15 @@ dependencies = [
 
 [[package]]
 name = "foyer-storage"
-version = "0.15.3"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cfae1b6d15d65c014e72047939fcf937f964582c6561942e736fc5dec1fc8c3c"
+checksum = "fc512db7757a9b2162d43a0708608e0deec1768acf622ed1b0a3024c1351d268"
 dependencies = [
  "ahash",
  "allocator-api2",
  "anyhow",
  "array-util",
  "auto_enums",
- "bincode",
  "bytes",
  "clap",
  "equivalent",
@@ -4854,9 +4855,9 @@ dependencies = [
 
 [[package]]
 name = "mixtrics"
-version = "0.0.4"
+version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "285f6f175bfc4a068c0aa66d1fc48b6f4af0193d9577f8a86fa3a80014be9321"
+checksum = "749ed12bab176c8a42c13a679dd2de12876d5ad4abe7525548e31ae001a9ebbf"
 dependencies = [
  "itertools 0.14.0",
  "opentelemetry",
