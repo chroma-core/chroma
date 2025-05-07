@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::Duration;
 
 use chroma_benchmark::benchmark::{bench_run, tokio_multi_thread};
 use chroma_benchmark::datasets::types::RecordDataset;
@@ -16,16 +17,24 @@ use futures::{StreamExt, TryStreamExt};
 use indicatif::ProgressIterator;
 use regex::Regex;
 use roaring::RoaringBitmap;
+use tokio::time::Instant;
 use worker::execution::operators::filter::{FilterInput, FilterOperator};
 
 const LOG_CHUNK_SIZE: usize = 1000;
 const DOCUMENT_SIZE: usize = 10000;
-const REGEX_PATTERNS: &[&str] = &["Hello"];
+const REGEX_PATTERNS: &[&str] = &[
+    r"wikipedia",
+    r"(?i)wikipedia",
+    r"20\d\d",
+    r".*wiki.*",
+    r"May|June",
+    r"(March|April) 19\d\d",
+];
 
 fn bench_regex(criterion: &mut Criterion) {
     let runtime = tokio_multi_thread();
 
-    let (test_segment, expected_results, doc_count) = runtime.block_on(async {
+    let (test_segment, expected_results, bruteforce_time, doc_count) = runtime.block_on(async {
         let wikipedia = WikipediaDataset::init()
             .await
             .expect("Wikipedia dataset should exist");
@@ -39,6 +48,7 @@ fn bench_regex(criterion: &mut Criterion) {
             .expect("Wikipedia dataset should have valid records");
 
         let mut expected_results = HashMap::new();
+        let mut bruteforce_time = HashMap::<_, Duration>::new();
         let regexes = REGEX_PATTERNS
             .iter()
             .map(|pattern_str| {
@@ -56,11 +66,14 @@ fn bench_regex(criterion: &mut Criterion) {
             .enumerate()
             .map(|(offset, record)| {
                 for (pattern_str, pattern) in &regexes {
+                    let now = Instant::now();
                     if pattern.is_match(&record.document) {
+                        let elapsed = now.elapsed();
                         expected_results
                             .entry(pattern_str.to_string())
                             .or_insert(RoaringBitmap::new())
                             .insert(offset as u32);
+                        *bruteforce_time.entry(pattern_str.to_string()).or_default() += elapsed;
                     }
                 }
                 LogRecord {
@@ -78,17 +91,12 @@ fn bench_regex(criterion: &mut Criterion) {
             .collect::<Vec<_>>();
         let log_count = logs.len();
         let mut segment = TestDistributedSegment::default();
-        for (idx, batch) in logs
-            .chunks(LOG_CHUNK_SIZE)
-            .enumerate()
-            .progress()
-            .with_message("Applying log chunk")
-        {
+        for (idx, batch) in logs.chunks(LOG_CHUNK_SIZE).enumerate() {
             segment
                 .compact_log(Chunk::new(batch.into()), idx * LOG_CHUNK_SIZE)
                 .await;
         }
-        (segment, expected_results, log_count)
+        (segment, expected_results, bruteforce_time, log_count)
     });
 
     let filter_input = FilterInput {
@@ -135,7 +143,20 @@ fn bench_regex(criterion: &mut Criterion) {
             )
         };
 
-        bench_run(pattern, criterion, &runtime, setup, routine);
+        bench_run(
+            format!(
+                "Pattern: [{pattern}], Reference duration: [{}µs]",
+                bruteforce_time
+                    .get(*pattern)
+                    .expect("Reference bruteforce time should be present")
+                    .as_micros()
+            )
+            .as_str(),
+            criterion,
+            &runtime,
+            setup,
+            routine,
+        );
     }
 }
 
