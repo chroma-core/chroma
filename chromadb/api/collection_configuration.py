@@ -10,6 +10,9 @@ from chromadb.utils.embedding_functions import (
     known_embedding_functions,
     register_embedding_function,
 )
+from chromadb.utils.embedding_functions.malformed_embedding_function import (
+    MalformedEmbeddingFunction,
+)
 from multiprocessing import cpu_count
 import warnings
 
@@ -83,10 +86,22 @@ def load_collection_configuration_from_json(
         else:
             try:
                 ef = known_embedding_functions[ef_config["name"]]
-                ef = ef.build_from_config(ef_config["config"])  # type: ignore
             except KeyError:
                 raise ValueError(
                     f"Embedding function {ef_config['name']} not found. Add @register_embedding_function decorator to the class definition."
+                )
+            try:
+                ef = ef.build_from_config(ef_config["config"])  # type: ignore
+            except Exception as e:
+                warnings.warn(
+                    f"Could not build embedding function {ef_config['name']} from config {ef_config['config']}: {e} \
+                        Returning a MalformedEmbeddingFunction",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                ef = MalformedEmbeddingFunction(  # type: ignore
+                    malformed_ef_name=ef_config["name"],
+                    config=ef_config["config"],
                 )
     else:
         ef = None
@@ -649,7 +664,10 @@ def overwrite_embedding_function(
         return existing_embedding_function
 
     # Validate function compatibility
-    if existing_embedding_function.name() != update_embedding_function.name():
+    if (
+        existing_embedding_function.name() != update_embedding_function.name()
+        and not isinstance(existing_embedding_function, MalformedEmbeddingFunction)
+    ):
         raise ValueError(
             f"Cannot update embedding function: incompatible types "
             f"({existing_embedding_function.name()} vs {update_embedding_function.name()})"

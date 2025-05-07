@@ -13,6 +13,7 @@ from chromadb.utils.embedding_functions.schemas import validate_config_schema
 import base64
 import io
 import importlib
+import warnings
 
 
 class CohereEmbeddingFunction(EmbeddingFunction[Embeddable]):
@@ -36,6 +37,12 @@ class CohereEmbeddingFunction(EmbeddingFunction[Embeddable]):
                 "The PIL python package is not installed. Please install it with `pip install pillow`"
             )
 
+        if api_key is not None:
+            warnings.warn(
+                "Direct api_key configuration will not be persisted. "
+                "Please use environment variables via api_key_env_var for persistent storage.",
+                DeprecationWarning,
+            )
         self.api_key_env_var = api_key_env_var
         self.api_key = api_key or os.getenv(api_key_env_var)
         if not self.api_key:
