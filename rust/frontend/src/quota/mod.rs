@@ -240,6 +240,7 @@ pub enum UsageType {
     NumCollections,        // Total number of collections for a tenant
     NumDatabases,          // Total number of databases for a tenant
     NumQueryIDs,           // Number of IDs to filter by in a query
+    NumRegexPredicates,    // Number of regex predicates in the where_document
 }
 
 impl fmt::Display for UsageType {
@@ -269,6 +270,7 @@ impl fmt::Display for UsageType {
             UsageType::NumCollections => write!(f, "Number of collections"),
             UsageType::NumDatabases => write!(f, "Number of databases"),
             UsageType::NumQueryIDs => write!(f, "Number of IDs to filter by in a query"),
+            UsageType::NumRegexPredicates => write!(f, "Number of regex predicates"),
         }
     }
 }
@@ -298,6 +300,7 @@ impl TryFrom<&str> for UsageType {
             "num_collections" => Ok(UsageType::NumCollections),
             "num_databases" => Ok(UsageType::NumDatabases),
             "num_query_ids" => Ok(UsageType::NumQueryIDs),
+            "num_regex_predicates" => Ok(UsageType::NumRegexPredicates),
             _ => Err(format!("Invalid UsageType: {}", value)),
         }
     }
@@ -326,6 +329,7 @@ lazy_static::lazy_static! {
         m.insert(UsageType::NumCollections, 1_000_000);
         m.insert(UsageType::NumDatabases, 10);
         m.insert(UsageType::NumQueryIDs, 1000);
+        m.insert(UsageType::NumRegexPredicates, 0);
         m
     };
 }
