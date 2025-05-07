@@ -390,7 +390,7 @@ async fn get_app(
         Version::parse(&app.cli_version).map_err(|_| InstallError::ListingFailed)?;
     let cli_version =
         Version::parse(env!("CARGO_PKG_VERSION")).map_err(|_| InstallError::ListingFailed)?;
-    if app_cli_version < cli_version {
+    if app_cli_version > cli_version {
         return Err(
             InstallError::VersionMismatch(app_name.clone(), app_cli_version.to_string()).into(),
         );
