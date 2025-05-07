@@ -8,7 +8,6 @@ from typing_extensions import TypedDict, TypeVar
 from uuid import UUID
 from enum import Enum
 from pydantic import BaseModel
-import warnings
 
 from chromadb.api.configuration import (
     ConfigurationInternal,
@@ -16,8 +15,6 @@ from chromadb.api.configuration import (
 from chromadb.serde import BaseModelJSONSerializable
 from chromadb.api.collection_configuration import (
     CollectionConfiguration,
-    HNSWConfiguration,
-    SpannConfiguration,
     collection_configuration_to_json,
     load_collection_configuration_from_json,
 )
@@ -149,15 +146,8 @@ class Collection(
         try:
             return load_collection_configuration_from_json(self.configuration_json)
         except Exception as e:
-            warnings.warn(
-                f"Server does not respond with configuration_json. Please update server: {e}",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            return CollectionConfiguration(
-                hnsw=HNSWConfiguration(),
-                spann=SpannConfiguration(),
-                embedding_function=None,
+            raise ValueError(
+                f"Could not deserialize configuration_json: {e}",
             )
 
     def set_configuration(self, configuration: CollectionConfiguration) -> None:
@@ -175,19 +165,12 @@ class Collection(
     @override
     def from_json(cls, json_map: Dict[str, Any]) -> Self:
         """Deserializes a Collection object from JSON"""
-        configuration: CollectionConfiguration = {
-            "hnsw": {},
-            "spann": {},
-            "embedding_function": None,
-        }
         try:
             configuration_json = json_map.get("configuration_json", None)
             configuration = load_collection_configuration_from_json(configuration_json)
         except Exception as e:
-            warnings.warn(
-                f"Server does not respond with configuration_json. Please update server: {e}",
-                DeprecationWarning,
-                stacklevel=2,
+            raise ValueError(
+                f"Could not deserialize configuration_json: {e}",
             )
         return cls(
             id=json_map["id"],
