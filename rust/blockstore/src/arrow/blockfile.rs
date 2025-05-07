@@ -894,7 +894,7 @@ mod tests {
                 Ok(c) => {
                     let mut kv_map = HashMap::new();
                     for entry in c {
-                        kv_map.insert(format!("{}/{}", prefix_query, entry.0), entry.1);
+                        kv_map.insert(format!("{}/{}", prefix_query, entry.1), entry.2);
                     }
                     for j in 1..=5 {
                         let prefix = format!("{}/{}", "prefix", j);
@@ -1016,7 +1016,7 @@ mod tests {
 
             let mut kv_map = HashMap::new();
             for entry in materialized_range {
-                kv_map.insert(entry.0, entry.1);
+                kv_map.insert(entry.1, entry.2);
             }
             for i in 1..num_keys {
                 let key = format!("{}/{}", "key", i);
