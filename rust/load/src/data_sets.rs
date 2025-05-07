@@ -986,6 +986,11 @@ impl DataSet for VerifyingDataSet {
         &self,
         client: &ChromaClient,
     ) -> Result<(), Box<dyn std::error::Error + Send>> {
+        // Reset the cardinality and cardinality heap.
+        self.cardinality
+            .store(0, std::sync::atomic::Ordering::Relaxed);
+        self.cardinality_heap.lock().await.clear();
+
         // Attempt to delete the collection. If it doesn't exist, ignore the error.
         match client.delete_collection(&self.test_data_set).await {
             Ok(_) => (),
@@ -1255,13 +1260,33 @@ impl DataSet for VerifyingDataSet {
             } else {
                 return Err(Box::new(Error::InvalidRequest("No documents".into())));
             }
-            let entries = CollectionEntries {
-                ids: keys,
-                metadatas: res.metadatas,
-                documents: Some(documents),
-                embeddings: Some(embeddings),
-            };
-            collection.upsert(entries, None).await?;
+
+            loop {
+                let entries = CollectionEntries {
+                    ids: keys.clone(),
+                    metadatas: res.metadatas.clone(),
+                    documents: Some(documents.clone()),
+                    embeddings: Some(embeddings.clone()),
+                };
+                let result = collection.upsert(entries, None).await;
+                if let Err(err) = result {
+                    if format!("{err:?}").contains("429") {
+                        tracing::warn!(
+                            "UPSERT for {} failed: RATE LIMITED {err:?}",
+                            key_start_index
+                        );
+                        // sleep for 0.01 seconds, retry
+                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                        continue;
+                    } else {
+                        return Err(Box::new(Error::InvalidRequest(format!(
+                            "UPSERT failed: {err:?}"
+                        ))));
+                    }
+                } else {
+                    break;
+                }
+            }
             self.record_load(key_start_index, uq.batch_size).await;
         } else {
             return Err(Box::new(Error::InvalidRequest("No results".into())));
