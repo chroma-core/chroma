@@ -333,11 +333,34 @@ impl Block {
             .downcast_ref::<StringArray>()
             .unwrap();
 
+        let prefix_key_val_getter = |index| {
+            (
+                prefix_array.value(index),
+                K::get(self.data.column(1), index),
+                V::get(self.data.column(2), index),
+            )
+        };
+
         let mut cursor_prefix_index = match prefix_range.start_bound() {
             Bound::Included(prefix) => self.find_smallest_index_of_prefix::<K>(prefix),
             Bound::Excluded(prefix) => self.find_smallest_index_of_next_prefix::<K>(prefix),
             Bound::Unbounded => 0,
         };
+
+        if let (Bound::Unbounded, Bound::Unbounded) =
+            (key_range.start_bound(), key_range.end_bound())
+        {
+            let final_prefix_index = match prefix_range.end_bound() {
+                Bound::Included(prefix) => self.find_smallest_index_of_next_prefix::<K>(prefix),
+                Bound::Excluded(prefix) => self.find_smallest_index_of_prefix::<K>(prefix),
+                Bound::Unbounded => self.len(),
+            };
+            index_ranges.push(cursor_prefix_index..final_prefix_index);
+            return index_ranges
+                .into_iter()
+                .flatten()
+                .map(prefix_key_val_getter);
+        }
 
         while cursor_prefix_index < self.len() {
             let cursor_prefix = prefix_array.value(cursor_prefix_index);
@@ -378,13 +401,10 @@ impl Block {
             cursor_prefix_index = next_cursor_prefix_index;
         }
 
-        index_ranges.into_iter().flatten().map(|index| {
-            (
-                prefix_array.value(index),
-                K::get(self.data.column(1), index),
-                V::get(self.data.column(2), index),
-            )
-        })
+        index_ranges
+            .into_iter()
+            .flatten()
+            .map(prefix_key_val_getter)
     }
 
     /*
