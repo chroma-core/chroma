@@ -171,13 +171,13 @@ impl ManifestManager {
     /// Recover from a fault in writing.  It is possible that fragments have been written that are
     /// not referenced by the manifest.  Scout ahead until an empty slot is observed.  Then write
     /// the manifest that includes the new fragments.
-    pub async fn recover(&mut self, mark_dirty: &dyn MarkDirty) -> Result<(), Error> {
-        let mut next_seq_no_to_apply = {
-            // SAFETY(rescrv):  Mutex poisoning.
-            let staging = self.staging.lock().unwrap();
-            staging.next_seq_no_to_apply
-        };
+    pub async fn recover(&self, mark_dirty: &dyn MarkDirty) -> Result<(), Error> {
         loop {
+            let next_seq_no_to_apply = {
+                // SAFETY(rescrv):  Mutex poisoning.
+                let staging = self.staging.lock().unwrap();
+                staging.next_seq_no_to_apply
+            };
             let next_fragment = read_fragment(
                 &self.storage,
                 &self.prefix,
@@ -189,15 +189,9 @@ impl ManifestManager {
                     .mark_dirty(fragment.start, (fragment.limit - fragment.start) as usize)
                     .await?;
                 self.publish_fragment(fragment).await?;
-                next_seq_no_to_apply += 1;
             } else {
                 break;
             }
-        }
-        {
-            // SAFETY(rescrv):  Mutex poisoning.
-            let mut staging = self.staging.lock().unwrap();
-            staging.next_seq_no_to_apply = next_seq_no_to_apply;
         }
         Ok(())
     }
